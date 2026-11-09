@@ -57,6 +57,20 @@ try {
             $record[$parts[0]] = $parts[1]
         }
         $ProcessId = [uint32]$record['pid']
+        # A headless instance (WORK-349) has no window: a shot is the app's own whole-window capture,
+        # and every other action needs the Win32 build, so its journey belongs to the native lane.
+        if ($record['executable'] -like '*\aiodev-headless.exe') {
+            if ($action -ne 'Shot' -or $WindowHandle -ne 0) {
+                throw "-$action needs the Win32 build; run this journey in the native lane (tests/live/lanes.json)"
+            }
+            $reply = & (Join-Path $repo 'build/aioctl.exe') --name $Name capture
+            if ($LASTEXITCODE -ne 0 -or "$reply" -notmatch '^ok; capture (.+) \d+x\d+$') { throw "capture failed: $reply" }
+            $directory = Split-Path -Parent $Shot
+            if ($directory) { New-Item -ItemType Directory -Force $directory | Out-Null }
+            Copy-Item -LiteralPath $Matches[1] -Destination $Shot -Force
+            Write-Output $Shot
+            exit 0
+        }
     }
     if ($ProcessId -eq 0) { throw 'supply a positive PID or run aioctl launch first' }
     $process = [Diagnostics.Process]::GetProcessById($ProcessId)

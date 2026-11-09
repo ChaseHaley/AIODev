@@ -46,37 +46,6 @@ function Check([bool] $Condition, [string] $Label) {
 function Shot([string] $Label) {
     Invoke-Aio wait idle | Out-Null
     if ($Capture) {
-        if (-not ('Workspace134Capture' -as [type])) {
-            Add-Type @'
-using System;
-using System.Runtime.InteropServices;
-public static class Workspace134Capture {
-    public delegate bool Callback(IntPtr h, IntPtr p);
-    [StructLayout(LayoutKind.Sequential)] public struct Point { public int X, Y; }
-    [DllImport("user32.dll")] static extern bool EnumWindows(Callback callback, IntPtr p);
-    [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr h, out uint processId);
-    [DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr h);
-    [DllImport("user32.dll")] static extern bool ClientToScreen(IntPtr h, ref Point point);
-    [DllImport("user32.dll")] static extern IntPtr SetThreadDpiAwarenessContext(IntPtr context);
-    public static long Find(uint processId, int x, int y) {
-        IntPtr previous = SetThreadDpiAwarenessContext(new IntPtr(-4));
-        if (previous == IntPtr.Zero) throw new Exception("Cannot inspect physical client origins.");
-        IntPtr found = IntPtr.Zero;
-        try {
-            EnumWindows((h,p) => {
-                uint owner; GetWindowThreadProcessId(h,out owner);
-                Point origin = new Point();
-                if (owner == processId && IsWindowVisible(h) && ClientToScreen(h,ref origin) &&
-                    origin.X == x && origin.Y == y) { found = h; return false; }
-                return true;
-            },IntPtr.Zero);
-        } finally { SetThreadDpiAwarenessContext(previous); }
-        if (found == IntPtr.Zero) throw new Exception("No owned window matches the selected client origin.");
-        return found.ToInt64();
-    }
-}
-'@
-        }
         $deadline = [DateTime]::UtcNow.AddSeconds(10)
         do {
             $s = Read-State
@@ -86,12 +55,9 @@ public static class Workspace134Capture {
             Start-Sleep -Milliseconds 100
         } while ($true)
         Start-Sleep -Milliseconds 250
-        $s = Read-State
-        $origin = $s['window.origin'] -split ','
-        $handle = [Workspace134Capture]::Find([uint32]$s['app.pid'], [int]$origin[0], [int]$origin[1])
         Invoke-Aio state | Set-Content -LiteralPath "$data/$Label-state.txt" -Encoding utf8
-        & (Join-Path $repo 'tools/win32.ps1') -Name $Name -WindowHandle $handle -Shot "$data/$Label.png" -Frame
-        if ($LASTEXITCODE -ne 0) { throw "Capture failed: $Label" }
+        # The selected window may be a secondary one; aioctl capture shoots it on either build.
+        Invoke-Aio capture --out "$data/$Label.png" | Out-Null
     } else {
         Invoke-Aio state | Set-Content -LiteralPath "$data/$Label-state.txt" -Encoding utf8
     }

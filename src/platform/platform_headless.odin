@@ -444,6 +444,15 @@ when AIO_HEADLESS {
 		return window_set_position(p, id, x, y)
 	}
 
+	// The window's display: virtual displays have no taskbar, so the work area is all of it.
+	@(require_results)
+	window_work_area :: proc(p: ^Platform, id: input.Window_Id) -> (left, top, right, bottom: i32, err: Error) {
+		window := find_window(p, id)
+		if window == nil {return 0, 0, 0, 0, .Invalid_Window}
+		r := display_at(p, window.rect).rect
+		return r.left, r.top, r.right, r.bottom, .None
+	}
+
 	// A drag thumbnail has nothing to draw headless; placing one is only counted.
 	Thumbnail :: struct {
 		id:    u32,

@@ -1,0 +1,307 @@
+{
+  "policy": "Every live journey runs in one lane. headless: build\\headless\\aiodev-headless.exe through AIOCTL_HEADLESS=1, nothing on the owner's desktop. native: the Win32 build, for journeys that prove a Windows behaviour; each states which. helper: not a journey. Flip a journey by editing its line. A journey that needs arguments lists them in args; {build} is the revision build.ps1 embeds.",
+  "journeys": {
+    "activity_views": {
+      "lane": "headless"
+    },
+    "arrange": {
+      "lane": "headless"
+    },
+    "build_info": {
+      "lane": "headless",
+      "args": [
+        "-ExpectedBuild",
+        "{build}"
+      ]
+    },
+    "claude_fullscreen": {
+      "lane": "native",
+      "reason": "Uses the real clipboard and runs Claude Code, whose fullscreen copy path is the subject."
+    },
+    "close_confirm": {
+      "lane": "headless"
+    },
+    "compatibility_common": {
+      "lane": "helper",
+      "reason": "Shared functions the program compatibility journeys load."
+    },
+    "confirmation_lifecycle": {
+      "lane": "headless"
+    },
+    "dock_defaults": {
+      "lane": "headless"
+    },
+    "dock_resize": {
+      "lane": "headless"
+    },
+    "docking": {
+      "lane": "headless"
+    },
+    "feedback_controls": {
+      "lane": "headless"
+    },
+    "find_navigation": {
+      "lane": "headless"
+    },
+    "font_pickers": {
+      "lane": "headless"
+    },
+    "fullscreen_edges": {
+      "lane": "native",
+      "reason": "Reads monitor and window edges from the desktop (ClientToScreen and window rectangles)."
+    },
+    "header_mouse_fixture": {
+      "lane": "helper",
+      "reason": "A program a journey runs inside its shell."
+    },
+    "horizontal_tabs": {
+      "lane": "headless"
+    },
+    "hover_rim": {
+      "lane": "headless"
+    },
+    "kitty_graphics": {
+      "lane": "headless"
+    },
+    "kitty_graphics_output": {
+      "lane": "helper",
+      "reason": "A program kitty_graphics runs inside its shell."
+    },
+    "leader_status": {
+      "lane": "headless"
+    },
+    "linked_window": {
+      "lane": "headless"
+    },
+    "markdown": {
+      "lane": "headless"
+    },
+    "markdown_find": {
+      "lane": "headless"
+    },
+    "motion": {
+      "lane": "native",
+      "reason": "Changes Windows' own client-animation setting (SystemParametersInfo) and checks the app follows it."
+    },
+    "notice_dismiss": {
+      "lane": "headless"
+    },
+    "notice_windows": {
+      "lane": "headless"
+    },
+    "notices": {
+      "lane": "native",
+      "reason": "Sends real input through SendInput and needs the foreground (unless -ControlOnly)."
+    },
+    "notices_call_sites": {
+      "lane": "headless"
+    },
+    "palette_controls": {
+      "lane": "headless"
+    },
+    "palette_headers": {
+      "lane": "headless"
+    },
+    "palette_modes": {
+      "lane": "headless"
+    },
+    "palette_shortcuts": {
+      "lane": "headless"
+    },
+    "palette_viewport_fit": {
+      "lane": "headless"
+    },
+    "palette_workspace_search": {
+      "lane": "headless"
+    },
+    "pane_actions": {
+      "lane": "headless"
+    },
+    "pane_close_latency": {
+      "lane": "headless"
+    },
+    "pane_focus": {
+      "lane": "headless"
+    },
+    "pane_headers": {
+      "lane": "native",
+      "reason": "Uses the real clipboard, a native resize and Windows' animation setting."
+    },
+    "pane_motion": {
+      "lane": "native",
+      "reason": "Measures frames against the real display's vblanks through the swap chain; it times presentation itself."
+    },
+    "pane_tabs": {
+      "lane": "native",
+      "reason": "Drives the pointer through SendInput."
+    },
+    "pane_windows": {
+      "lane": "headless"
+    },
+    "pane_workspace_drag": {
+      "lane": "headless"
+    },
+    "pointer_shapes": {
+      "lane": "headless"
+    },
+    "process_groups": {
+      "lane": "headless"
+    },
+    "process_padding": {
+      "lane": "headless"
+    },
+    "profiles": {
+      "lane": "headless"
+    },
+    "program_icons": {
+      "lane": "headless"
+    },
+    "rail_resize": {
+      "lane": "headless"
+    },
+    "reopen_closed": {
+      "lane": "headless"
+    },
+    "scrollback_capacity": {
+      "lane": "headless"
+    },
+    "session_restart": {
+      "lane": "headless"
+    },
+    "settings": {
+      "lane": "headless"
+    },
+    "settings_outline": {
+      "lane": "native",
+      "reason": "Resizes the real window through win32.ps1 -Resize."
+    },
+    "settings_publication": {
+      "lane": "headless"
+    },
+    "settings_workspace": {
+      "lane": "headless"
+    },
+    "shell_colors": {
+      "lane": "headless"
+    },
+    "shell_exit": {
+      "lane": "headless"
+    },
+    "shell_metadata": {
+      "lane": "headless"
+    },
+    "shortcuts": {
+      "lane": "headless"
+    },
+    "status_notifications": {
+      "lane": "native",
+      "reason": "Calls the Windows toast API from the script to prove native notifications."
+    },
+    "tab_across_windows": {
+      "lane": "headless"
+    },
+    "tab_controls": {
+      "lane": "headless"
+    },
+    "tab_groups": {
+      "lane": "headless"
+    },
+    "tab_interaction": {
+      "lane": "headless"
+    },
+    "tab_parity": {
+      "lane": "headless"
+    },
+    "tab_reorder_motion": {
+      "lane": "headless"
+    },
+    "tab_tear_off": {
+      "lane": "headless"
+    },
+    "tabs_splits": {
+      "lane": "native",
+      "reason": "Reads and writes the real clipboard."
+    },
+    "tear_off": {
+      "lane": "headless"
+    },
+    "termbench": {
+      "lane": "native",
+      "reason": "Performance needs the interactive desktop, foreground and real presentation."
+    },
+    "termbench_common": {
+      "lane": "helper",
+      "reason": "Shared functions the TermBench journey loads."
+    },
+    "theme_files": {
+      "lane": "headless"
+    },
+    "themes": {
+      "lane": "headless"
+    },
+    "title_actions": {
+      "lane": "headless"
+    },
+    "title_bar": {
+      "lane": "headless"
+    },
+    "unicode_claude": {
+      "lane": "headless"
+    },
+    "unicode_codex": {
+      "lane": "headless"
+    },
+    "unicode_neovim": {
+      "lane": "headless"
+    },
+    "unicode_pager": {
+      "lane": "headless"
+    },
+    "unicode_powershell": {
+      "lane": "headless"
+    },
+    "window_lifecycle": {
+      "lane": "headless"
+    },
+    "window_targeting": {
+      "lane": "headless"
+    },
+    "work136_trim_tab_menu": {
+      "lane": "headless"
+    },
+    "workspace_delete": {
+      "lane": "headless"
+    },
+    "workspace_dropdown": {
+      "lane": "native",
+      "reason": "Sends Ctrl+N, Ctrl+P and emoji text as real input through win32.ps1 -Chord -Activate and -Text."
+    },
+    "workspace_icon_colors": {
+      "lane": "headless"
+    },
+    "workspace_icon_grid": {
+      "lane": "headless"
+    },
+    "workspace_last_tab": {
+      "lane": "headless"
+    },
+    "workspace_names": {
+      "lane": "headless"
+    },
+    "workspace_numbers": {
+      "lane": "headless"
+    },
+    "workspace_open_window": {
+      "lane": "headless"
+    },
+    "workspace_order": {
+      "lane": "headless"
+    },
+    "workspace_row_management": {
+      "lane": "headless"
+    },
+    "workspace_transfer_cleanup": {
+      "lane": "headless"
+    }
+  }
+}

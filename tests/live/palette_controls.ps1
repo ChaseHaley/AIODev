@@ -90,10 +90,12 @@ try {
     Invoke-Aio expect state 'palette.open=true'
     Write-Output 'PASS Escape closes only the list'
     Invoke-Aio key Ctrl+Enter
-    Invoke-Aio type 'consol'
+    # A headless instance sees only the bundled fonts (WORK-351).
+    $font = if ($env:AIOCTL_HEADLESS -eq '1') { 'Cascadia Code' } else { 'Consolas' }
+    Invoke-Aio type $font.Substring(0, $font.Length - 2).ToLowerInvariant()
     Shot 'font-filter'
     Invoke-Aio key Enter
-    Invoke-Aio expect state 'palette.value=Consolas'
+    Invoke-Aio expect state "palette.value=$font"
     Write-Output 'PASS typing filters the font list'
 
     Search 'ignore status from' 'status.ignore_apps'

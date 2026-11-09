@@ -36,11 +36,7 @@ function Request-Row([string] $WorkspaceName) {
 }
 function Shot([string] $Label) {
     if ((Read-State).ContainsKey('session.id')) { Invoke-Aio wait frame | Out-Null }
-    $state = Read-State
-    $origin = $state['window.origin'] -split ','
-    $handle = [DeleteForeground]::Find([uint32]$state['app.pid'], [int]$origin[0], [int]$origin[1])
-    & "$repo/tools/win32.ps1" -Name $name -WindowHandle $handle -Shot "$directory/$Label.png" -Frame | Out-Null
-    if ($LASTEXITCODE -ne 0) { throw 'Screenshot failed.' }
+    Invoke-Aio capture --out "$directory/$Label.png" | Out-Null
     & $ctl --name $name state | Set-Content -LiteralPath "$directory/$Label-state.txt"
 }
 function Shell-Process([string] $Label) {
@@ -89,39 +85,19 @@ function Row-Menu-Delete([string] $Query) {
     Invoke-Aio key End Enter
     Invoke-Aio expect state confirm.open=true
 }
-Add-Type -TypeDefinition @"
+# Only -NativeInput reads the real desktop; the default path stays inside the app so it also runs headless.
+if ($NativeInput) {
+    Add-Type -TypeDefinition @"
 using System;
 using System.Runtime.InteropServices;
 using System.Text;
 public static class DeleteForeground {
-    [StructLayout(LayoutKind.Sequential)] public struct POINT { public int x, y; }
-    public delegate bool EnumProc(IntPtr h, IntPtr p);
-    [DllImport("user32.dll", SetLastError=true)] static extern bool EnumWindows(EnumProc cb, IntPtr p);
-    [DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr h);
-    [DllImport("user32.dll", SetLastError=true)] static extern bool ClientToScreen(IntPtr h, ref POINT p);
-    public static long Find(uint pid, int x, int y) {
-        long result = 0;
-        bool ambiguous = false;
-        bool enumerated = EnumWindows((h, p) => {
-            uint owner;
-            if (GetWindowThreadProcessId(h, out owner) == 0 || owner != pid || !IsWindowVisible(h)) return true;
-            POINT origin = new POINT();
-            if (!ClientToScreen(h, ref origin)) throw new System.ComponentModel.Win32Exception();
-            if (origin.x == x && origin.y == y) {
-                if (result != 0) ambiguous = true;
-                result = h.ToInt64();
-            }
-            return true;
-        }, IntPtr.Zero);
-        if (!enumerated) throw new System.ComponentModel.Win32Exception();
-        if (result == 0 || ambiguous) throw new Exception("cannot uniquely match selected window client origin");
-        return result;
-    }
     [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
     [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr h, out uint p);
     [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern int GetWindowTextW(IntPtr h, StringBuilder s, int n);
 }
 "@
+}
 function Foreground([string] $Label) {
     $h = [DeleteForeground]::GetForegroundWindow(); [uint32]$owner = 0
     if (-not [DeleteForeground]::GetWindowThreadProcessId($h,[ref]$owner)) { throw 'Cannot read foreground owner' }
@@ -160,7 +136,7 @@ try {
         } else { Invoke-Aio command workspace.delete }
         Invoke-Aio expect state confirm.open=true
         Invoke-Aio expect state confirm.workspace=1
-        Invoke-Aio expect state 'confirm.title=Delete #1 “Disposable tabs and panes”?'
+        Invoke-Aio expect state 'confirm.title=Delete “Disposable tabs and panes”?'
         Invoke-Aio expect state 'confirm.body=Close 3 tabs (4 panes); stop 3 sessions.'
         if ($cancel -eq 'native-escape') { Shot 'multiple-tabs-last-confirm' }
         switch ($cancel) {

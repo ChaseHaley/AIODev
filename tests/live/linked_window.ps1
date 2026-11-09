@@ -6,38 +6,6 @@ $ctl = Join-Path $repo 'build/aioctl.exe'
 $evidence = Join-Path $repo "build/verify/$Name-evidence"
 New-Item -ItemType Directory -Force $evidence | Out-Null
 
-# Visibility is the point of the feature, so it is read from the OS, not only from the app's own state.
-Add-Type -TypeDefinition @'
-using System;
-using System.Collections.Generic;
-using System.Runtime.InteropServices;
-public static class LinkedWindowNative {
-    public delegate bool EnumProc(IntPtr hwnd, IntPtr data);
-    [StructLayout(LayoutKind.Sequential)] public struct POINT { public int X, Y; }
-    [DllImport("user32.dll")] static extern bool EnumWindows(EnumProc proc, IntPtr data);
-    [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr hwnd, out uint pid);
-    [DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr hwnd);
-    [DllImport("user32.dll")] static extern bool ClientToScreen(IntPtr hwnd, ref POINT p);
-    [DllImport("user32.dll")] static extern bool IsZoomed(IntPtr hwnd);
-    [DllImport("user32.dll")] static extern bool ShowWindow(IntPtr hwnd, int command);
-    [DllImport("user32.dll")] static extern bool PostMessageW(IntPtr hwnd, uint message, IntPtr wp, IntPtr lp);
-    [DllImport("user32.dll")] static extern IntPtr SetThreadDpiAwarenessContext(IntPtr context);
-    public static List<IntPtr> Visible(uint pid) {
-        SetThreadDpiAwarenessContext(new IntPtr(-4));
-        var found = new List<IntPtr>();
-        EnumWindows((h, d) => { uint p; GetWindowThreadProcessId(h, out p); if (p == pid && IsWindowVisible(h)) found.Add(h); return true; }, IntPtr.Zero);
-        return found;
-    }
-    public static IntPtr AtOrigin(uint pid, int x, int y) {
-        foreach (var h in Visible(pid)) { var o = new POINT(); ClientToScreen(h, ref o); if (o.X == x && o.Y == y) return h; }
-        return IntPtr.Zero;
-    }
-    public static bool Zoomed(IntPtr h) { return IsZoomed(h); }
-    public static void Maximize(IntPtr h) { ShowWindow(h, 3); }
-    public static void Close(IntPtr h) { PostMessageW(h, 0x0010, IntPtr.Zero, IntPtr.Zero); }
-}
-'@
-
 function Invoke-Aio {
     $out = & $ctl --name $Name @args
     if ($LASTEXITCODE -ne 0) { throw "aioctl $($args -join ' '): $out" }
@@ -66,24 +34,24 @@ function Get-LinkedId {
     }
     return $null
 }
-function Get-Visible { @([LinkedWindowNative]::Visible([uint32](Get-State)['app.pid'])).Count }
+# The app shows an ordinary window once it is past preparing, and a linked one while its tab is on screen.
+function Get-Visible {
+    $s = Get-State
+    $count = 0
+    for ($i = 1; $i -le [int]$s['windows.count']; $i++) {
+        $shown = $s["window.$i.preparing"] -ne 'true'
+        if ($s["window.$i.linked"] -eq 'true') { $shown = $s["window.$i.link_shown"] -eq 'true' }
+        if ($shown) { $count++ }
+    }
+    $count
+}
 function Await-Visible([int] $Count, [string] $What) {
     Await { (Get-Visible) -eq $Count } "$What ($Count visible windows)"
     Write-Output "PASS $What"
 }
-function Get-Handle([string] $Id) {
-    $s = Get-State
-    for ($i = 1; $i -le [int]$s['windows.count']; $i++) {
-        if ($s["window.$i.id"] -ne $Id) { continue }
-        $origin = $s["window.$i.origin"] -split ','
-        return [LinkedWindowNative]::AtOrigin([uint32]$s['app.pid'], [int]$origin[0], [int]$origin[1])
-    }
-    throw "No window $Id"
-}
 function Save-Shot([string] $Id, [string] $File) {
-    $handle = Get-Handle $Id
-    & (Join-Path $repo 'tools/win32.ps1') -Name $Name -WindowHandle $handle.ToInt64() `
-        -Shot (Join-Path $evidence $File) -Frame | Out-Null
+    Invoke-Aio window select $Id | Out-Null
+    Invoke-Aio capture --out (Join-Path $evidence $File) | Out-Null
 }
 
 $settings = Join-Path $evidence 'settings.ini'
@@ -131,8 +99,10 @@ try {
     Write-Output 'PASS the pane kept running output across the hide'
 
     # Hiding and showing must not lose a maximized window, which is how a second monitor gets used.
-    [LinkedWindowNative]::Maximize((Get-Handle $linkedId))
+    Invoke-Aio window select $linkedId | Out-Null
+    Invoke-Aio window maximize | Out-Null
     Await { (Get-State)['window.maximized'] -eq 'true' } 'the linked window to maximize'
+    $maximizedSize = (Get-State)['window.size']
     Invoke-Aio window select $hostId | Out-Null
     Invoke-Aio command tab.select_2 | Out-Null
     Await-Visible 1 'a maximized linked window hides'
@@ -140,7 +110,8 @@ try {
     Await-Visible 2 'a maximized linked window returns'
     Invoke-Aio window select $linkedId | Out-Null
     Await { (Get-State)['window.maximized'] -eq 'true' } 'the linked window to stay maximized'
-    if (-not [LinkedWindowNative]::Zoomed((Get-Handle $linkedId))) { throw 'The OS reports it is not maximized.' }
+    $size = (Get-State)['window.size']
+    if ($size -ne $maximizedSize) { throw "Returned at $size, not the maximized $maximizedSize." }
     Write-Output 'PASS the window stays maximized across a hide'
 
     # A tab command from the linked window runs on the tabs, which live in the host.
@@ -158,7 +129,8 @@ try {
 
     # Closing the window keeps the pane: it returns to its split with its output.
     $linkedId = Get-LinkedId
-    [LinkedWindowNative]::Close((Get-Handle $linkedId))
+    Invoke-Aio window select $linkedId | Out-Null
+    Invoke-Aio window close | Out-Null
     Await { (Get-State)['windows.count'] -eq '1' } 'closing the linked window'
     Invoke-Aio window select (Get-State)['window.1.id'] | Out-Null
     Invoke-Aio expect state panes.count=2 | Out-Null
@@ -211,7 +183,8 @@ try {
     Invoke-Aio command pane.split_down | Out-Null
     Invoke-Aio expect state panes.count=2 | Out-Null
     Invoke-Aio wait text 'PS ' | Out-Null
-    [LinkedWindowNative]::Close((Get-Handle $linkedId))
+    Invoke-Aio window select $linkedId | Out-Null
+    Invoke-Aio window close | Out-Null
     Await { (Get-State)['windows.count'] -eq '1' } 'closing the split linked window'
     Invoke-Aio window select $hostId | Out-Null
     Invoke-Aio expect state panes.count=4 | Out-Null

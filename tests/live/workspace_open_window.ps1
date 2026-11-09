@@ -52,34 +52,9 @@ function Shot([string]$label){
     }
     Start-Sleep -Milliseconds 300
     Aio state | Set-Content "$data/$label-state.txt" -Encoding utf8
-    if($Capture){
-        $s=State;$origin=$s['window.origin'] -split ','
-        $handle=[Workspace133Capture]::Find([uint32]$s['app.pid'],[int]$origin[0],[int]$origin[1])
-        & "$repo/tools/win32.ps1" -Name $Name -WindowHandle $handle -Frame -Shot "$data/$label.png" | Out-Null
-        if($LASTEXITCODE -ne 0){throw "Capture failed: $label"}
-    }
+    # The selected window may be a secondary one; aioctl capture shoots it on either build.
+    if($Capture){Aio capture --out "$data/$label.png" | Out-Null}
 }
-if($Capture){Add-Type @'
-using System;
-using System.Runtime.InteropServices;
-public static class Workspace133Capture {
- public delegate bool Callback(IntPtr h,IntPtr p);
- [StructLayout(LayoutKind.Sequential)] public struct Point {public int X,Y;}
- [DllImport("user32.dll")] static extern bool EnumWindows(Callback c,IntPtr p);
- [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr h,out uint p);
- [DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr h);
- [DllImport("user32.dll")] static extern bool ClientToScreen(IntPtr h,ref Point p);
- [DllImport("user32.dll")] static extern IntPtr SetThreadDpiAwarenessContext(IntPtr c);
- public static long Find(uint pid,int x,int y) {
-  IntPtr old=SetThreadDpiAwarenessContext(new IntPtr(-4)),found=IntPtr.Zero;
-  if(old==IntPtr.Zero)throw new Exception("Cannot inspect client origins");
-  try {EnumWindows((h,p)=>{uint id;GetWindowThreadProcessId(h,out id);Point o=new Point();
-   if(id==pid&&IsWindowVisible(h)&&ClientToScreen(h,ref o)&&o.X==x&&o.Y==y){found=h;return false;}return true;},IntPtr.Zero);
-  }finally{SetThreadDpiAwarenessContext(old);}
-  if(found==IntPtr.Zero)throw new Exception("No exact owned window");return found.ToInt64();
- }
-}
-'@}
 Aio launch --fresh | Out-Null
     Aio command workspace.rename | Out-Null
     Aio type 'Workspace 1' | Out-Null

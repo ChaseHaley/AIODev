@@ -17,29 +17,6 @@ $name = 'settings-publication'
 $directory = Join-Path $repo "build/verify/$name"
 $path = Join-Path $directory 'settings.ini'
 
-Add-Type @'
-using System;
-using System.Runtime.InteropServices;
-public static class SettingsPublicationWindow {
-    public delegate bool EnumProc(IntPtr hwnd, IntPtr data);
-    [StructLayout(LayoutKind.Sequential)] public struct Point { public int X, Y; }
-    [DllImport("user32.dll")] static extern bool EnumWindows(EnumProc proc, IntPtr data);
-    [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr hwnd, out uint pid);
-    [DllImport("user32.dll")] static extern bool ClientToScreen(IntPtr hwnd, ref Point point);
-    public static long Find(uint pid, int x, int y) {
-        IntPtr found = IntPtr.Zero;
-        EnumWindows((h, d) => {
-            uint owner; GetWindowThreadProcessId(h, out owner);
-            var p = new Point();
-            if (owner == pid && ClientToScreen(h, ref p) && p.X == x && p.Y == y) { found = h; return false; }
-            return true;
-        }, IntPtr.Zero);
-        if (found == IntPtr.Zero) throw new Exception("Cannot find the selected window.");
-        return found.ToInt64();
-    }
-}
-'@
-
 function Invoke-Aio {
     $out = & $ctl --name $name @args
     if ($LASTEXITCODE -ne 0) { throw "aioctl $($args -join ' '): $out" }
@@ -65,11 +42,8 @@ function Save-Value([string] $Value) {
 }
 function Shot([string] $Label) {
     & $ctl --name $name state | Set-Content (Join-Path $directory "$Label-state.txt")
-    $state = Read-State
-    $origin = $state['window.origin'] -split ','
-    $handle = [SettingsPublicationWindow]::Find([uint32]$state['app.pid'], [int]$origin[0], [int]$origin[1])
-    & (Join-Path $repo 'tools/win32.ps1') -Name $name -WindowHandle $handle -Frame -Shot (Join-Path $directory "$Label.png") | Out-Null
-    if ($LASTEXITCODE -ne 0) { throw 'Screenshot failed.' }
+    # Two windows are open; aioctl capture shoots the selected one on either build.
+    Invoke-Aio capture --out (Join-Path $directory "$Label.png")
 }
 
 Invoke-Aio launch --fresh

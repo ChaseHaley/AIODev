@@ -185,7 +185,8 @@ when AIO_CONTROL {
 		     verify_protocol.Diff,
 		     verify_protocol.Draws,
 		     verify_protocol.Perf,
-		     verify_protocol.Vt:
+		     verify_protocol.Vt,
+		     verify_protocol.Window_At:
 			action = .Read
 		case verify_protocol.Wait:
 			action = .Wait
@@ -359,7 +360,11 @@ when AIO_CONTROL {
 
 	verify_needs_window :: proc(request: verify_protocol.Request) -> bool {
 		#partial switch r in request {
-		case verify_protocol.Ping, verify_protocol.Help, verify_protocol.State, verify_protocol.Perf:
+		case verify_protocol.Ping,
+		     verify_protocol.Help,
+		     verify_protocol.State,
+		     verify_protocol.Perf,
+		     verify_protocol.Window_At:
 			return false
 		case verify_protocol.Tray:
 			return r.action == .Hide
@@ -552,8 +557,11 @@ when AIO_CONTROL {
 	verify_window_report :: proc(r: ^State_Report, app: ^App, w: ^Window, entry: ^Session_Entry) {
 		x, y, err := platform.window_to_screen(&app.platform, w.id, 0, 0)
 		if err != .None {state_fail(r, .System); return}
+		left, top, right, bottom, area_error := platform.window_work_area(&app.platform, w.id)
+		if area_error != .None {state_fail(r, .System); return}
 		state_value(r, "window.id", w.id)
 		state_valuef(r, "window.origin", "%d,%d", x, y)
+		state_valuef(r, "window.work_area", "%d,%d,%d,%d", left, top, right, bottom)
 		state_valuef(r, "window.pointer", "%g,%g", w.pointer.x, w.pointer.y)
 		state_valuef(r, "theme.hover_lift", "%g", app.theme.hover_lift)
 		state_valuef(r, "theme.hover_gloss", "%g", app.theme.hover_gloss)
@@ -1162,6 +1170,11 @@ when AIO_CONTROL {
 			err = perf_read(app, &out, r)
 		case verify_protocol.Vt:
 			err = vt_record(app, &out, r)
+		case verify_protocol.Window_At:
+			x, y := i32(r.position.x), i32(r.position.y)
+			id, _, _, hit_error := platform.window_at_point(&app.platform, x, y)
+			if hit_error != .None {err = .System; break}
+			fmt.sbprintf(&out, "window=%d", u64(id))
 		case:
 			err = .Invalid_Argument
 		}

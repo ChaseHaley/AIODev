@@ -93,6 +93,10 @@ Window_Select :: struct {
 Window_Move :: struct {
 	position: Position,
 }
+// Which of the app's windows the operating system's hit test finds at a screen point.
+Window_At :: struct {
+	position: Position,
+}
 // What `window maximize|restore|close` asks of the selected window, through the caption's own
 // platform actions rather than OS messages, so headless windows take them too.
 Window_Show_Action :: enum {
@@ -186,6 +190,7 @@ Request :: union {
 	Command,
 	Window_Select,
 	Window_Move,
+	Window_At,
 	Window_Show,
 	Help,
 	Capture,
@@ -564,9 +569,10 @@ parse :: proc(args: []string, allocator := context.allocator) -> (Request, Parse
 			id, ok := strconv.parse_uint(args[2])
 			if !ok || id == 0 {return {}, {args[2], "use a nonzero window id from state"}}
 			return Window_Select{u64(id)}, {}
-		case "move":
+		case "move", "at":
 			position, ok := pair(args[2], ',', true)
 			if !ok {return {}, {args[2], "use signed 32-bit screen x,y"}}
+			if args[1] == "at" {return Window_At{position}, {}}
 			return Window_Move{position}, {}
 		}
 		return {}, bad

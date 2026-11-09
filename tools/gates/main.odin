@@ -1,6 +1,7 @@
 package gates
 
 import "base:runtime"
+import "core:encoding/json"
 import "core:fmt"
 import "core:os"
 import "core:strings"
@@ -63,6 +64,10 @@ Plan :: struct {
 	// App tests run headless (WORK-349); a native boundary also owes the desktop tests lanes.json lists.
 	desktop:   bool,
 	tooling:   bool,
+	// Journeys whose own scripts changed, and finalize's split of them by tests/live/lanes.json.
+	journeys:  [dynamic]string,
+	headless:  [dynamic]string,
+	native:    [dynamic]string,
 }
 
 // classify maps changed paths to tier obligations. It does not inspect the filesystem; finalize adds
@@ -75,6 +80,9 @@ classify :: proc(paths: []string, allocator := context.allocator) -> Plan {
 		paths     = make([]string, len(paths), allocator),
 		tests     = make([dynamic]string, allocator),
 		reasons   = make([dynamic]string, allocator),
+		journeys  = make([dynamic]string, allocator),
+		headless  = make([dynamic]string, allocator),
+		native    = make([dynamic]string, allocator),
 	}
 	for raw, i in paths {
 		plan.paths[i], _ = strings.replace_all(raw, "\\", "/", context.temp_allocator)
@@ -87,6 +95,9 @@ plan_destroy :: proc(plan: ^Plan) {
 	delete(plan.paths, plan.allocator)
 	delete(plan.tests)
 	delete(plan.reasons)
+	delete(plan.journeys)
+	delete(plan.headless)
+	delete(plan.native)
 	plan^ = {}
 }
 
@@ -175,6 +186,10 @@ classify_test :: proc(plan: ^Plan, path: string) {
 	if strings.has_prefix(rest, "live/") {
 		plan.live = true
 		add_reason(plan, "live script")
+		file := rest[len("live/"):]
+		if strings.has_suffix(file, ".ps1") && file != "run.ps1" && !strings.contains(file, "/") {
+			append(&plan.journeys, file[:len(file) - len(".ps1")])
+		}
 		return
 	}
 	if separator := strings.index_byte(rest, '/'); separator >= 0 {
@@ -217,8 +232,10 @@ add_reason :: proc(plan: ^Plan, reason: string) {
 	append(&plan.reasons, reason)
 }
 
-// finalize drops test packages that do not exist and fails open when a source package has none.
+// finalize drops test packages that do not exist and fails open when a source package has none. It
+// also splits changed journeys by lane.
 finalize :: proc(plan: ^Plan) {
+	journeys_split(plan)
 	for path in plan.paths {
 		if !strings.has_prefix(path, "src/") {continue}
 		rest := path[len("src/"):]
@@ -239,6 +256,35 @@ finalize :: proc(plan: ^Plan) {
 	}
 	delete(plan.tests)
 	plan.tests = kept
+}
+
+// Splits the changed journeys by their lane in tests/live/lanes.json; helpers belong to no lane. A
+// journey the manifest does not list, or an unreadable manifest, owes both lanes.
+@(private)
+journeys_split :: proc(plan: ^Plan) {
+	if len(plan.journeys) == 0 {return}
+	data, read_error := os.read_entire_file("tests/live/lanes.json", context.temp_allocator)
+	value: json.Value
+	parse_error := json.Error.None
+	if read_error == nil {value, parse_error = json.parse(data, allocator = context.temp_allocator)}
+	lanes: json.Object
+	if read_error == nil && parse_error == .None {
+		if root, ok := value.(json.Object); ok {lanes, _ = root["journeys"].(json.Object)}
+	}
+	for name in plan.journeys {
+		lane := "unknown"
+		if entry, ok := lanes[name].(json.Object); ok {lane, _ = entry["lane"].(json.String)}
+		switch lane {
+		case "helper":
+		case "headless":
+			append(&plan.headless, name)
+		case "native":
+			append(&plan.native, name)
+		case:
+			append(&plan.headless, name)
+			append(&plan.native, name)
+		}
+	}
 }
 
 @(private)
@@ -269,6 +315,12 @@ format_plan :: proc(out: ^strings.Builder, plan: Plan) {
 	}
 	fmt.sbprintf(out, "tier0.fallback: %s\n", plan.fallback ? "full" : "no")
 	fmt.sbprintf(out, "tier1.live: %s\n", plan.live ? "required" : "no")
+	if len(plan.headless) > 0 {
+		fmt.sbprintf(out, "tier1.live.headless: %s\n", strings.join(plan.headless[:], " ", context.temp_allocator))
+	}
+	if len(plan.native) > 0 {
+		fmt.sbprintf(out, "tier1.live.native: %s\n", strings.join(plan.native[:], " ", context.temp_allocator))
+	}
 	fmt.sbprintf(
 		out,
 		"tier1.reason: %s\n",
@@ -293,6 +345,11 @@ format_plan :: proc(out: ^strings.Builder, plan: Plan) {
 		for script in ([]string{"test_budget", "test_capture", "test_lanes"}) {
 			fmt.sbprintf(out, "run: pwsh -NoProfile -File tests/tools/%s.ps1\n", script)
 		}
+	}
+	for journeys in ([2][]string{plan.headless[:], plan.native[:]}) {
+		if len(journeys) == 0 {continue}
+		list := strings.join(journeys, ",", context.temp_allocator)
+		fmt.sbprintf(out, "run: pwsh -NoProfile -File tests/live/run.ps1 -Journeys %s\n", list)
 	}
 }
 
