@@ -257,6 +257,10 @@ invalid_values :: proc(t: ^testing.T) {
 		"cursor.style = unknown", "cursor.blink = 1", "terminal.copy_on_select = False",
 		"colors.foreground = #gg1234", "colors.background = 0f1115",
 		"colors.selection_foreground = #12345678", "cursor.blink = true # comment",
+		"cursor.animation = Smear", "cursor.animation = fade", "cursor.animation_duration = 19",
+		"cursor.animation_duration = 501", "cursor.animation_duration = 100ms",
+		"cursor.animation_strength = -1", "cursor.animation_strength = 101",
+		"cursor.animation_strength = 65.5", "cursor.animation_movement = no",
 	}
 	baseline, baseline_error := settings.defaults()
 	defer settings.destroy(&baseline)
@@ -470,4 +474,37 @@ dock_size_settings_default_to_the_previous_sizes_and_clamp :: proc(t: ^testing.T
 	testing.expect_value(t, bad.tabs.rail_width, 208)
 	testing.expect_value(t, bad.status.panel_width, 300)
 	testing.expect_value(t, bad.status.panel_height, 45)
+}
+
+@(test)
+cursor_animation_starts_off_and_accepts_its_bounds :: proc(t: ^testing.T) {
+	defaults, default_error := settings.defaults()
+	if !testing.expect_value(t, default_error, nil) {return}
+	defer settings.destroy(&defaults)
+	testing.expect_value(t, defaults.cursor.animation, settings.Cursor_Animation.Off)
+	cases := [?]struct {
+		source:             string,
+		animation:          settings.Cursor_Animation,
+		duration, strength: int,
+		movement:           bool,
+	} {
+		{"cursor.animation = smooth\ncursor.animation_duration = 20\ncursor.animation_strength = 0\n",
+			.Smooth, 20, 0, true},
+		{"cursor.animation = smear\ncursor.animation_duration = 500\ncursor.animation_strength = 100\n" +
+			"cursor.animation_movement = false\n", .Smear, 500, 100, false},
+		{"cursor.animation = trail\ncursor.animation_movement = false\ncursor.animation_strength = 0\n",
+			.Trail, defaults.cursor.animation_duration, 0, false},
+	}
+	for c in cases {
+		s, d, err := settings.parse(c.source)
+		defer settings.destroy(&s)
+		defer settings.diagnostics_destroy(&d)
+		testing.expect_value(t, err, nil)
+		testing.expect_value(t, len(d), 0)
+		testing.expect_value(t, s.cursor.animation, c.animation)
+		testing.expect_value(t, s.cursor.animation_duration, c.duration)
+		testing.expect_value(t, s.cursor.animation_strength, c.strength)
+		testing.expect_value(t, s.cursor.animation_movement, c.movement)
+		testing.expect_value(t, s.cursor.style, defaults.cursor.style)
+	}
 }

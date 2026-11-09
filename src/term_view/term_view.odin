@@ -29,6 +29,8 @@ Style :: struct {
 	cursor_phase_visible:                                             bool,
 	// The link under the pointer is view state, not cell style: it only adds an underline overlay.
 	hover:                                                            Maybe(term.Link_Range),
+	// The zero value draws the cursor only where the terminal puts it.
+	cursor_effects:                                                   Cursor_Effects,
 }
 
 Frame :: struct {
@@ -54,6 +56,8 @@ View :: struct {
 	shaped:     [dynamic]font.Shaped_Glyph,
 	contrast:   Contrast_Cache,
 	images:     term.Image_Capture,
+	cursor:     Cursor_Motion,
+	cursor_rows: [dynamic]ghostty.Render_State_Row_Id,
 }
 
 @(require_results)
@@ -65,6 +69,7 @@ create :: proc(v: ^View, allocator := context.allocator) -> bool {
 	v.runes = make([dynamic]rune, allocator)
 	v.columns = make([dynamic]int, allocator)
 	v.shaped = make([dynamic]font.Shaped_Glyph, allocator)
+	v.cursor_rows = make([dynamic]ghostty.Render_State_Row_Id, allocator)
 	ok := ghostty.render_state_new(nil, &v.state) == .Success
 	ok &&= ghostty.render_state_row_iterator_new(nil, &v.rows) == .Success
 	ok &&= ghostty.render_state_row_cells_new(nil, &v.cells) == .Success
@@ -87,6 +92,7 @@ destroy :: proc(v: ^View) {
 	delete(v.runes)
 	delete(v.columns)
 	delete(v.shaped)
+	delete(v.cursor_rows)
 	v^ = {}
 }
 
@@ -158,7 +164,7 @@ Builder :: struct {
 	cursor:            ghostty.Render_State_Cursor,
 	origin:            [2]f32,
 	columns:           int,
-	// Only read when a frame has images, which clip to the grid.
+	// Images clip to the grid, and a cursor motion does not survive a change to it.
 	rows:              int,
 	// The cursor sits on a wide cluster, so it covers two cells.
 	cursor_wide:       bool,
@@ -167,6 +173,13 @@ Builder :: struct {
 	cursor_color:      render.Color,
 	// Below-text images took a pass of their own for the backgrounds that go under them.
 	backgrounds_drawn: bool,
+	frame_time:        render.Frame_Time,
+	// The cursor is between cells at progress `cursor_t`; its head covers rows `cursor_row` and the
+	// one below, whose text glyphs `cursor_text` holds.
+	cursor_moving:     bool,
+	cursor_t:          f32,
+	cursor_row:        int,
+	cursor_text:       [2]Glyph_Span,
 }
 
 @(private)
@@ -191,6 +204,8 @@ place :: proc(b: ^Builder, entry: glyphs.Entry, pen: [2]f32, c: render.Color) {
 
 // Renders the session's current screen into the draw list's current layer, origin at the top-left cell.
 // The result only short-circuits atlas resets. Draw-list failures stay on the list for frame completion.
+// `frame_time` is when the frame will be on screen, which a moving cursor (Style.cursor_effects) is
+// drawn for; without it the cursor sits where the terminal puts it.
 build :: proc(
 	v: ^View,
 	session: ^term.Session,
@@ -200,6 +215,7 @@ build :: proc(
 	origin: [2]f32,
 	metrics: Metrics,
 	style: Style,
+	frame_time := render.Frame_Time{},
 ) -> (
 	Frame,
 	render.Build_Status,
@@ -207,17 +223,19 @@ build :: proc(
 	if list.error != .None {return {}, .Ok}
 	capture := term.capture(session, v.state, &v.highlights, &v.images)
 	b := Builder {
-		list    = list,
-		cache   = cache,
-		fonts   = fonts,
-		metrics = metrics,
-		style   = style,
-		colors  = ghostty.sized(ghostty.Render_State_Colors),
-		cursor  = ghostty.sized(ghostty.Render_State_Cursor),
-		origin  = origin,
+		list       = list,
+		cache      = cache,
+		fonts      = fonts,
+		metrics    = metrics,
+		style      = style,
+		colors     = ghostty.sized(ghostty.Render_State_Colors),
+		cursor     = ghostty.sized(ghostty.Render_State_Cursor),
+		origin     = origin,
+		frame_time = frame_time,
 	}
-	columns: u16
+	columns, rows: u16
 	ok := ghostty.render_state_get(v.state, .Cols, &columns) == .Success
+	ok &&= ghostty.render_state_get(v.state, .Rows, &rows) == .Success
 	ok &&= ghostty.render_state_get(v.state, .Colors, &b.colors) == .Success
 	ok &&= ghostty.render_state_get(v.state, .Cursor, &b.cursor) == .Success
 	ok &&= ghostty.render_state_get(v.state, .Row_Iterator, &v.rows) == .Success
@@ -225,7 +243,7 @@ build :: proc(
 		list.error = .Construction_Failed
 		return {}, .Ok
 	}
-	b.columns = int(columns)
+	b.columns, b.rows = int(columns), int(rows)
 	b.cursor_column = int(b.cursor.viewport_x) - (b.cursor.wide_tail ? 1 : 0)
 	b.cursor_color =
 		b.colors.cursor_has_value ? color(b.colors.cursor) : color(b.colors.foreground)
@@ -234,14 +252,10 @@ build :: proc(
 		cursor_blinking = b.cursor.visible && b.cursor.blinking,
 		capture         = capture,
 	}
+	if !cursor_viewport_capture(v, &b) {return frame, .Ok}
+	cursor_begin(v, &b)
 	has_images := len(v.images.placements) > 0
 	if has_images {
-		rows: u16
-		if ghostty.render_state_get(v.state, .Rows, &rows) != .Success {
-			list.error = .Construction_Failed
-			return {}, .Ok
-		}
-		b.rows = int(rows)
 		images_upload(v, session, cache.device)
 		if images_present(v, .Below_Background) {
 			images_draw(v, &b, .Below_Background)
@@ -259,9 +273,11 @@ build :: proc(
 		if list.error != .None {return frame, .Ok}
 	}
 	if list.error != .None {return frame, .Ok}
-	build_cursor(&b)
+	// A moving block clips its text to its head. Above-text images still use the whole pane.
+	cell_layer := list.layers[len(list.layers) - 1]
+	build_cursor(v, &b)
 	if has_images && images_present(v, .Above_Text) {
-		images_next_layer(&b)
+		if render.push_layer(list, cell_layer.clip, cell_layer.radius) != .None {return frame, .Ok}
 		images_draw(v, &b, .Above_Text)
 	}
 	if result := ghostty.render_state_clean(v.state); result != .Success {
@@ -359,6 +375,8 @@ paint_cell :: proc(
 	return p
 }
 
+// The block cursor rests on cell (x, y): its rect goes under that cell's text, which takes the cursor
+// text colour. A moving block draws its own text instead (cursor_draw_moving).
 @(private)
 block_cursor_at :: proc(b: ^Builder, x, y: int) -> bool {
 	c := b.cursor
@@ -368,6 +386,7 @@ block_cursor_at :: proc(b: ^Builder, x, y: int) -> bool {
 		b.style.focused &&
 		b.style.cursor_phase_visible &&
 		c.visual_style == .Block &&
+		!b.cursor_moving &&
 		b.cursor_column == x &&
 		int(c.viewport_y) == y \
 	)
@@ -488,6 +507,7 @@ build_row :: proc(v: ^View, b: ^Builder, y: int) -> render.Build_Status {
 	clear(&v.columns)
 	face: font.Style
 	previous := -2
+	text_start := len(b.list.glyphs)
 	cursor := b.cursor
 	cursor_x := -1
 	if cursor.visible && cursor.viewport_has_value && int(cursor.viewport_y) == y {
@@ -535,7 +555,9 @@ build_row :: proc(v: ^View, b: ^Builder, y: int) -> render.Build_Status {
 		}
 		face, previous = next_face, x
 	}
-	return draw_run(v, b, face, top)
+	result := draw_run(v, b, face, top)
+	cursor_note_row(b, y, text_start)
+	return result
 }
 
 @(private)
@@ -668,38 +690,38 @@ decorate :: proc(b: ^Builder, p: Cell_Paint, left, top: f32) -> render.Build_Sta
 }
 
 @(private)
-build_cursor :: proc(b: ^Builder) {
+build_cursor :: proc(v: ^View, b: ^Builder) {
 	if b.list.error != .None {return}
 	c := b.cursor
 	if !c.visible || !c.viewport_has_value || !b.style.cursor_phase_visible {
 		return
 	}
 	m := b.metrics
-	cursor_color := b.cursor_color
-	column := b.cursor_column
 	cell := render.Rect {
-		b.origin.x + f32(column) * m.cell_width,
+		b.origin.x + f32(b.cursor_column) * m.cell_width,
 		b.origin.y + f32(c.viewport_y) * m.cell_height,
 		m.cell_width * (b.cursor_wide ? 2 : 1),
 		m.cell_height,
 	}
+	if v.cursor.present {
+		v.cursor.target = cell
+		cursor_place(&v.cursor, b.cursor_t)
+	}
+	defer {
+		if v.cursor.present && b.list.error == .None {
+			v.cursor.drawn_head, v.cursor.drawn_tail = v.cursor.head, v.cursor.tail
+		}
+	}
+	if b.cursor_moving {
+		cursor_draw_moving(v, b)
+		return
+	}
 	// A block cursor sits between the cell background and the glyph: rects in a layer draw before its glyphs.
-	if block_cursor_at(b, int(c.viewport_x), int(c.viewport_y)) {
-		rect(b, cell, cursor_color)
+	if block_cursor_at(b, b.cursor_column, int(c.viewport_y)) {
+		rect(b, cell, b.cursor_color)
 		return
 	}
 	clip := b.list.layers[len(b.list.layers) - 1].clip
 	if render.push_layer(b.list, clip) != .None {return}
-	stroke := max(1, m.underline_thickness)
-	switch {
-	case !b.style.focused || c.visual_style == .Block_Hollow:
-		rect(b, {cell.x, cell.y, cell.width, stroke}, cursor_color)
-		rect(b, {cell.x, cell.y + cell.height - stroke, cell.width, stroke}, cursor_color)
-		rect(b, {cell.x, cell.y, stroke, cell.height}, cursor_color)
-		rect(b, {cell.x + cell.width - stroke, cell.y, stroke, cell.height}, cursor_color)
-	case c.visual_style == .Bar:
-		rect(b, {cell.x, cell.y, stroke * 2, cell.height}, cursor_color)
-	case c.visual_style == .Underline:
-		rect(b, {cell.x, cell.y + cell.height - stroke * 2, cell.width, stroke * 2}, cursor_color)
-	}
+	cursor_outline(b, cell, b.cursor_color)
 }

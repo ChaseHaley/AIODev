@@ -11,7 +11,7 @@ import "core:testing"
 import test_fonts "../fixtures/fonts"
 
 // A fixture with no shell behind it, so a test decides exactly what the terminal receives.
-headless_create :: proc(t: ^testing.T) -> (f: Fixture, ok: bool) {
+headless_create :: proc(t: ^testing.T, rows := u16(ROWS)) -> (f: Fixture, ok: bool) {
 	font_error: font.Error
 	f.fonts, font_error = font.system_create_private(test_fonts.files())
 	if !testing.expect_value(t, font_error, font.Error.None) {return}
@@ -23,7 +23,7 @@ headless_create :: proc(t: ^testing.T) -> (f: Fixture, ok: bool) {
 		return
 	}
 	f.metrics = term_view.compute_metrics(f.fonts, f.family, SIZE_PX, 1)
-	width, height := i32(f.metrics.cell_width * COLUMNS), i32(f.metrics.cell_height * ROWS)
+	width, height := i32(f.metrics.cell_width * COLUMNS), i32(f.metrics.cell_height * f32(rows))
 	f.surface, render_error = render.surface_create_offscreen(f.device, width, height)
 	if !testing.expect_value(t, render_error, render.Error.None) || !term_view.create(&f.view) {return}
 	glyphs.init(&f.cache, f.fonts, f.device)
@@ -33,7 +33,7 @@ headless_create :: proc(t: ^testing.T) -> (f: Fixture, ok: bool) {
 	f.session, session_error = term.create_headless(
 		{
 			columns = COLUMNS,
-			rows = ROWS,
+			rows = rows,
 			cell_width = u32(f.metrics.cell_width),
 			cell_height = u32(f.metrics.cell_height),
 			surface_width = u32(width),

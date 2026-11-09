@@ -19,6 +19,7 @@ Window_Motion :: enum u8 {
 	Pane_Headers,
 	Float_Header,
 	Find,
+	Cursor,
 	Confirmation,
 }
 
@@ -47,6 +48,8 @@ window_motion_advance :: proc(app: ^App, w: ^Window, part: Window_Motion, frame:
 		return floating_header_animate(app, w, frame)
 	case .Find:
 		return ui.find_is_open(&w.find) && ui.find_animate(&w.find, app.animations, frame)
+	case .Cursor:
+		return cursor_motion_animate(app, w, frame)
 	case .Confirmation:
 		confirmation_advance(app, w, frame)
 	}
@@ -76,6 +79,8 @@ window_motion_running :: proc(w: ^Window, part: Window_Motion) -> bool {
 		return floating_header_animating(w)
 	case .Find:
 		return ui.find_is_open(&w.find) && ui.find_animating(&w.find)
+	case .Cursor:
+		return cursor_motion_animating(w)
 	case .Confirmation:
 		return confirmation_active(w)
 	}

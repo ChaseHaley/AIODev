@@ -819,11 +819,13 @@ terminal_pane_draw :: proc(
 		minimum_contrast = minimum_contrast,
 		focused = content_focused,
 		cursor_phase_visible = !content_focused || cursor_visible(w),
+		cursor_effects = cursor_effects(app),
 		hover = link_hover_range(w, pane.content),
 	}
 	box := pane_box(w.metrics, pane.rect, pane_insets(app, w, entry, pane))
 	frame, result := build_pane(app, w, pane, entry, view, box.origin, style)
 	if result != .Ok {return frame, result}
+	if term_view.cursor_animating(view) && !w.frame.resuming {w.frame_moved = true}
 	if held, ok := frame.capture.(term.Capture_Held); ok {capture_hold_note(w, held.until)}
 	return frame, .Ok
 }
@@ -857,6 +859,7 @@ build_pane :: proc(
 				origin,
 				w.metrics,
 				style,
+				w.frame,
 			)
 		}
 		atlas := render.atlas_generation(app.device)
@@ -877,6 +880,7 @@ build_pane :: proc(
 				origin,
 				w.metrics,
 				style,
+				w.frame,
 			)
 			if result != .Ok {return frame, result}
 			if cached.cache.error == .None {

@@ -24,6 +24,40 @@ CURSOR_STYLE_NAMES :: []string {
 	CURSOR_STYLE_NAME[Cursor_Style(1)],
 	CURSOR_STYLE_NAME[Cursor_Style(2)],
 }
+// How the cursor moves between cells. Off keeps the plain cursor and turns every other cursor
+// animation setting off.
+Cursor_Animation :: enum int {
+	Off,
+	Smooth,
+	Smear,
+	Trail,
+}
+CURSOR_ANIMATION_NAME :: [Cursor_Animation]string {
+	.Off    = "off",
+	.Smooth = "smooth",
+	.Smear  = "smear",
+	.Trail  = "trail",
+}
+// What Settings shows for each animation.
+CURSOR_ANIMATION_LABEL :: [Cursor_Animation]string {
+	.Off    = "Off",
+	.Smooth = "Smooth",
+	.Smear  = "Smear",
+	.Trail  = "Trail",
+}
+#assert(len(Cursor_Animation) == 4)
+CURSOR_ANIMATION_NAMES :: []string {
+	CURSOR_ANIMATION_NAME[Cursor_Animation(0)],
+	CURSOR_ANIMATION_NAME[Cursor_Animation(1)],
+	CURSOR_ANIMATION_NAME[Cursor_Animation(2)],
+	CURSOR_ANIMATION_NAME[Cursor_Animation(3)],
+}
+CURSOR_ANIMATION_LABELS :: []string {
+	CURSOR_ANIMATION_LABEL[Cursor_Animation(0)],
+	CURSOR_ANIMATION_LABEL[Cursor_Animation(1)],
+	CURSOR_ANIMATION_LABEL[Cursor_Animation(2)],
+	CURSOR_ANIMATION_LABEL[Cursor_Animation(3)],
+}
 Font_Settings :: struct {
 	family:            string,
 	show_all:          bool,
@@ -202,8 +236,15 @@ Terminal_Settings :: struct {
 	scrollbar:                               bool,
 }
 Cursor_Settings :: struct {
-	style: Cursor_Style,
-	blink: bool,
+	style:              Cursor_Style,
+	blink:              bool,
+	animation:          Cursor_Animation,
+	// Milliseconds one animation lasts.
+	animation_duration: int,
+	// Percent strength of the smear or trail.
+	animation_strength: int,
+	// Glide the cursor to its new cell; off moves it at once.
+	animation_movement: bool,
 }
 Color_Settings :: struct {
 	foreground, background, cursor, cursor_text, selection_background: Color,
@@ -1032,6 +1073,46 @@ SCHEMA :: [?]Schema_Entry {
 		offset = offset_of(Settings, cursor) + offset_of(Cursor_Settings, blink),
 		default_value = "false",
 		description = "Blink the cursor.",
+	},
+	{
+		key = "cursor.animation",
+		title = "Cursor Animation",
+		kind = .Enum,
+		offset = offset_of(Settings, cursor) + offset_of(Cursor_Settings, animation),
+		default_value = "off",
+		names = CURSOR_ANIMATION_NAMES,
+		labels = CURSOR_ANIMATION_LABELS,
+		description = "Cursor animation preset: off, smooth, smear, or trail. Off draws the cursor in place " +
+			"and turns every other cursor animation setting off. Smooth glides the cursor without a trail; " +
+			"smear stretches it toward its new cell; trail leaves a fading trail behind it.",
+	},
+	{
+		key = "cursor.animation_duration",
+		title = "Cursor Animation Duration (ms)",
+		kind = .Int,
+		offset = offset_of(Settings, cursor) + offset_of(Cursor_Settings, animation_duration),
+		default_value = "100",
+		valid = {20, 500},
+		description = "How long one cursor animation lasts, in milliseconds.",
+	},
+	{
+		key = "cursor.animation_strength",
+		title = "Cursor Smear and Trail Strength (%)",
+		kind = .Int,
+		offset = offset_of(Settings, cursor) + offset_of(Cursor_Settings, animation_strength),
+		default_value = "65",
+		valid = {0, 100},
+		description = "How strong the smear or trail is, in percent, independent of cursor movement. Zero " +
+			"removes the smear or trail; smooth has none.",
+	},
+	{
+		key = "cursor.animation_movement",
+		title = "Animate Cursor Movement",
+		kind = .Bool,
+		offset = offset_of(Settings, cursor) + offset_of(Cursor_Settings, animation_movement),
+		default_value = "true",
+		description = "Glide the cursor to its new cell. Off moves it there at once, while smear and trail " +
+			"still draw at their own strength.",
 	},
 	{
 		key = "control.enabled",
