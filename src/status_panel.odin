@@ -442,7 +442,7 @@ status_panel_comfy_draw :: proc(
 	if result := status_panel_end_draw(app, w, r, middle, right, item, mark, highlighted); result != .Ok {
 		return result
 	}
-	age := status_age(item.record.updated_at)
+	age := status_age(item.record.updated_at, clock_wall(&app.clock))
 	age_width := ui.text_width(&small, age)
 	if result := ui.draw_text(&small, &w.list, age, right - age_width, line_two, app.theme.faint);
 	   result != .Ok {return result}
@@ -482,7 +482,7 @@ status_panel_dense_draw :: proc(
 		return result
 	}
 	buffer: [8]u8
-	progress_or_age := status_age(item.record.updated_at)
+	progress_or_age := status_age(item.record.updated_at, clock_wall(&app.clock))
 	if mark.progress >= 0 {progress_or_age = status_progress_text(mark.progress, buffer[:])}
 	age_x := right - (ui.ICON_INDICATOR + ui.SPACE_2) * s - ui.text_width(&small, progress_or_age)
 	if result := ui.draw_text(&small, &w.list, progress_or_age, age_x, baseline, app.theme.faint);

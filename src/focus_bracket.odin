@@ -64,7 +64,7 @@ focus_enter :: proc(app: ^App, w: ^Window) {
 			term.send_focus(entry.session, w.focused)
 		}
 	}
-	cursor_blink_reset(w)
+	cursor_blink_reset(w, clock_now(&app.clock))
 	status_focus_enter(app, w)
 	w.dirty = true
 	window_update_title(app, w)

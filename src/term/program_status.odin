@@ -153,7 +153,7 @@ on_program_status :: proc "c" (
 		state      = Program_Status_State(report.state),
 		kind       = Program_Status_Kind(report.kind),
 		progress   = report.progress,
-		updated_at = time.now(),
+		updated_at = wall_now(s),
 	}
 	fields := [?]^string{&p.id, &p.app, &p.title, &p.message}
 	offset := 0
@@ -170,6 +170,12 @@ on_program_status :: proc "c" (
 	s.program_statuses[s.program_status_count] = {p, text}
 	s.program_status_count += 1
 	sync.atomic_store(&s.program_status_changed, true)
+}
+
+@(private = "file")
+wall_now :: proc(s: ^Session) -> time.Time {
+	clock := s.wall_clock
+	return clock.procedure != nil ? clock.procedure(clock.user) : time.now()
 }
 
 @(private)

@@ -219,7 +219,7 @@ when AIO_CONTROL {
 				"Could not start the control channel; check the log and restart this instance.",
 			)
 		}
-		app.verify.changed = time.tick_now()
+		app.verify.changed = clock_now(&app.clock)
 	}
 
 	verify_destroy :: proc(app: ^App) {
@@ -282,7 +282,7 @@ when AIO_CONTROL {
 
 	verify_deadline :: proc(app: ^App) -> (time.Tick, bool) {
 		v := &app.verify
-		now := time.tick_now()
+		now := clock_now(&app.clock)
 		started: time.Tick
 		timeout_ms, idle_ms := 0, -1
 		switch s in v.request {
@@ -691,7 +691,7 @@ when AIO_CONTROL {
 		for n in ui.notices_live(&app.notices) {
 			left := "sticky"
 			if expires, timed := ui.notice_expiry(n).?; timed {
-				remaining := max(i64(0), i64(time.tick_diff(time.tick_now(), expires) / time.Millisecond))
+				remaining := max(i64(0), i64(time.tick_diff(clock_now(&app.clock), expires) / time.Millisecond))
 				left = fmt.tprintf("%dms", remaining)
 			}
 			key, identity := verify_notice_entry(n)
@@ -862,7 +862,7 @@ when AIO_CONTROL {
 			end, ok = verify_position(app, w, m.end, m.pixels, m.screen)
 			if !ok {return .Invalid_Argument}
 		}
-		now := i64(time.tick_diff({}, time.tick_now()))
+		now := i64(time.tick_diff({}, clock_now(&app.clock)))
 		if m.kind == .Wheel {
 			handle_event(
 				app,
@@ -1276,7 +1276,7 @@ when AIO_CONTROL {
 		if v.server == nil {return}
 		presented := v.presented
 		v.presented = false
-		now := time.tick_now()
+		now := clock_now(&app.clock)
 		if quitting, ok := v.request.(Verify_Quitting); ok {
 			if control.delivery_finished(v.server, quitting.id) ||
 			   time.tick_diff(quitting.started, now) >= QUIT_DRAIN {

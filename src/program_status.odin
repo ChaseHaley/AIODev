@@ -193,7 +193,7 @@ status_notify_wanted :: proc(app: ^App, record: term.Program_Status) -> bool {
 status_notify_changes :: proc(app: ^App, entry: ^Session_Entry, previous: []term.Program_Status) {
 	if !app.settings.status.enabled {return}
 	if !app.settings.status.notify_focused && status_watched(app, entry) {return}
-	now := time.tick_now()
+	now := clock_now(&app.clock)
 	if entry.status_notified != {} && time.tick_diff(entry.status_notified, now) < STATUS_NOTICE_INTERVAL {
 		return
 	}

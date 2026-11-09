@@ -203,7 +203,7 @@ workspace_order_hover :: proc(app: ^App, w: ^Window, e: input.Mouse_Move_Event) 
 	lifted := workspace_order_lift(p) != nil
 	if lifted {
 		workspace_order_move(w, x, y)
-		_ = workspace_order_animate(w, app.animations, window_frame_time(w))
+		_ = workspace_order_animate(w, app.animations, window_frame_time(app, w))
 	}
 	w.dirty = true
 	pointer_set(app, w, lifted ? .Resize_All : .Hand)
@@ -230,7 +230,7 @@ workspace_order_release :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Eve
 			_ = workspace_reorder(app, d.id, p.rows[d.to].id)
 			workspace_row_reveal(w, d.id)
 		}
-		_ = workspace_order_animate(w, app.animations, window_frame_time(w))
+		_ = workspace_order_animate(w, app.animations, window_frame_time(app, w))
 	} else if hit := workspace_picker_hit(w, f32(e.x), f32(e.y)); hit >= 0 && hit < len(p.rows) &&
 	          p.rows[hit].id == id {
 		p.selected = hit
