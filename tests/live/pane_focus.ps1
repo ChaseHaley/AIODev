@@ -94,6 +94,10 @@ function Assert-Appearance([string] $Id, [bool] $Focused, [string] $Color, [stri
 }
 
 Invoke-Aio launch --fresh | Out-Null
+# A headless instance has no HWNDs to activate, so its focus can only arrive as translated events.
+if (Select-String -LiteralPath (Join-Path $data 'instance.ini') -Pattern '^executable=.*\\aiodev-headless\.exe$' -Quiet) {
+    $Translated = [switch]::Present
+}
 try {
     Invoke-Aio doctor
     Invoke-Aio wait text 'PS ' | Out-Null
