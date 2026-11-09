@@ -29,6 +29,8 @@ Session_Entry :: struct {
 	header:              Pane_Header_Metadata,
 	name:                string,
 	profile_id:          string,
+	// The pane's lasting identity through reopen and restart; see agent_resume.odin.
+	key:                 string,
 	// The program status records last copied from the session, and the last notice they raised.
 	statuses:            []term.Program_Status,
 	status_notified:     time.Tick,
@@ -43,6 +45,7 @@ session_entry_destroy :: proc(entry: ^Session_Entry) {
 	pane_header_destroy(&entry.header)
 	delete(entry.name)
 	delete(entry.profile_id)
+	delete(entry.key)
 	status_release(entry)
 	program_forget(entry)
 	term.destroy(entry.session)
@@ -83,12 +86,13 @@ PANE_VARIABLE :: "AIODEV_PANE"
 @(private)
 INSTANCE_VARIABLE :: "AIODEV_INSTANCE"
 
-// `pane` is the session id the launch serves. The shell learns it from AIODEV_PANE, so the aio command
-// line acts on "here" by default, and finds aio itself on PATH.
+// `pane` is the session id the launch serves and `key` the pane's lasting key. The shell learns the id
+// from AIODEV_PANE, so the aio command line acts on "here" by default, and finds aio itself on PATH.
 @(private)
 session_config :: proc(
 	app: ^App,
 	pane: u32,
+	key: string,
 	geometry: term.Geometry,
 	profile: ^settings.Profile,
 	command_override: string = "",
@@ -104,9 +108,10 @@ session_config :: proc(
 		log.errorf("expanding the shell directory failed: %v", err)
 		directory = directory_text
 	}
-	environment := make([dynamic]pty.Env_Var, 0, 2, context.temp_allocator)
+	environment := make([dynamic]pty.Env_Var, 0, 4, context.temp_allocator)
 	append(&environment, pty.Env_Var{PANE_VARIABLE, fmt.tprintf("%d", pane)})
 	if app.options.name != "" {append(&environment, pty.Env_Var{INSTANCE_VARIABLE, app.options.name})}
+	agent_environment(app, key, &environment)
 	return {
 		command_line = settings.shell_command_line(command, app.settings.shell.integration),
 		title = title,
@@ -122,7 +127,8 @@ session_config :: proc(
 }
 
 // Opens a session and returns the id it was registered under. The session may hold a shell that
-// failed to start; only a session that could not be created or registered fails.
+// failed to start; only a session that could not be created or registered fails. `key` keeps a reopened
+// or restored pane's key when it is still free.
 @(private, require_results)
 session_open :: proc(
 	app: ^App,
@@ -130,13 +136,16 @@ session_open :: proc(
 	directory: string = "",
 	profile_id: string = "",
 	last_command: string = "",
+	key: string = "",
 ) -> (
 	id: u32,
 	ok: bool,
 ) {
 	profile, _ := settings.profile_resolve(&app.settings, profile_id)
 	geometry := initial_geometry(app)
-	config := session_config(app, app.next_session_id + 1, geometry, profile, command)
+	owned_key, claimed := pane_key_claim(app, key)
+	if !claimed {return 0, false}
+	config := session_config(app, app.next_session_id + 1, owned_key, geometry, profile, command)
 	// A reopened pane notes what it was running above the fresh shell's first prompt.
 	if shown := printable_command(last_command, context.temp_allocator); shown != "" {
 		config.preface = fmt.tprintf("\x1b[2mLast running: %s\x1b[0m\r\n", shown)
@@ -155,12 +164,14 @@ session_open :: proc(
 	session, err := term.create(config, {wake_platform, &app.platform})
 	if err != .None {
 		log.errorf("creating the terminal session failed: %v", err)
+		delete(owned_key)
 		return 0, false
 	}
 	resolved_id := profile_id
 	if resolved_id == "" && profile != nil {resolved_id = profile.id}
 	owned_id, id_error := strings.clone(resolved_id)
 	if id_error != nil {
+		delete(owned_key)
 		term.destroy(session)
 		return 0, false
 	}
@@ -172,9 +183,11 @@ session_open :: proc(
 			id = id,
 			session = session,
 			profile_id = owned_id,
+			key = owned_key,
 		},
 	); allocation_error != nil {
 		delete(owned_id)
+		delete(owned_key)
 		term.destroy(session)
 		return 0, false
 	}
@@ -230,7 +243,7 @@ session_status_sync :: proc(entry: ^Session_Entry) -> (status: term.Status, chan
 session_restart :: proc(app: ^App, entry: ^Session_Entry) {
 	geometry := term.geometry(entry.session)
 	profile, requested := settings.profile_resolve(&app.settings, entry.profile_id)
-	config := session_config(app, entry.id, geometry, profile)
+	config := session_config(app, entry.id, entry.key, geometry, profile)
 	// A removed or unusable profile restarts from the exact line it last launched, without
 	// applying the directory-reporting wrapper a second time.
 	if !requested && entry.profile_id != "" && entry.header.command != "" {

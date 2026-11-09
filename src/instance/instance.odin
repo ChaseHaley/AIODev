@@ -27,6 +27,7 @@ NAME_RULE ::
 SETTINGS_FILE :: "settings.ini"
 LOGS_DIRECTORY :: "logs"
 CAPTURES_DIRECTORY :: "captures"
+AGENTS_DIRECTORY :: "agent-sessions"
 
 Options :: struct {
 	name:     string,
@@ -117,6 +118,8 @@ Paths :: struct {
 	logs:     string,
 	log:      string,
 	layout:   string,
+	// The record each pane's agent session hook writes, one file per pane key.
+	agents:   string,
 	// <--data-dir>\settings.ini, else the roaming AIODev\settings.ini, which named instances share
 	// with the default instance.
 	settings: string,
@@ -161,6 +164,9 @@ paths_resolve :: proc(
 	layout_name := strings.concatenate({"layout", suffix, options.name, ".json"}, allocator) or_return
 	defer delete(layout_name, allocator)
 	p.layout = filepath.join({p.local, layout_name}, allocator) or_return
+	agents_name := strings.concatenate({AGENTS_DIRECTORY, suffix, options.name}, allocator) or_return
+	defer delete(agents_name, allocator)
+	p.agents = filepath.join({p.local, agents_name}, allocator) or_return
 	return p, nil
 }
 
@@ -169,6 +175,7 @@ paths_destroy :: proc(p: ^Paths, allocator := context.allocator) {
 	delete(p.logs, allocator)
 	delete(p.log, allocator)
 	delete(p.layout, allocator)
+	delete(p.agents, allocator)
 	delete(p.settings, allocator)
 	delete(p.captures, allocator)
 	p^ = {}
