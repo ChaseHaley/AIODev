@@ -3,6 +3,7 @@ package term
 import "aio:ghostty"
 import "base:runtime"
 import "core:log"
+import "core:strings"
 import "core:sync"
 
 // A cell's column footprint: a wide glyph's leading half, its trailing spacer, and the spacer
@@ -308,6 +309,56 @@ screen_rows :: proc(s: ^Session, allocator := context.allocator) -> ([]string, E
 	}
 	for line in rows[used:] {delete(line, allocator)}
 	return rows[:used], .None
+}
+
+// Which rows screen_text reads and how it lays them out.
+Text_Options :: struct {
+	// Reads the retained history above the screen too, up to the last max_rows rows.
+	scrollback: bool,
+	// Joins rows the terminal soft-wrapped into one line, as copying does; hard line breaks stay.
+	unwrap:     bool,
+	max_rows:   int,
+}
+
+// The session's visible rows as plain text, or with scrollback its history and screen. libghostty
+// formats them, trimming trailing blanks; trailing blank lines are dropped. Unlike screen_rows it reads
+// the terminal under the session lock, since the history is out of the render state's reach.
+@(require_results)
+screen_text :: proc(s: ^Session, options: Text_Options, allocator := context.allocator) -> (string, Error) {
+	sync.mutex_lock(&s.mutex)
+	defer sync.mutex_unlock(&s.mutex)
+	bar: ghostty.Terminal_Scrollbar
+	if result := ghostty.terminal_get(s.terminal, .Scrollbar, &bar); result != .Success {
+		log.errorf("term: reading the screen size for text failed: %v", result)
+		return "", .Terminal_Failed
+	}
+	first, end := bar.offset, bar.offset + bar.len
+	if options.scrollback {
+		first, end = bar.total - min(bar.total, u64(options.max_rows)), bar.total
+	}
+	if first == end || s.geometry.columns == 0 {return "", .None}
+	start_ref, start_ok := screen_row_ref(s.terminal, int(first))
+	end_ref, end_ok := screen_row_ref(s.terminal, int(end - 1))
+	if !start_ok || !end_ok {
+		log.error("term: locating the rows to read failed")
+		return "", .Terminal_Failed
+	}
+	end_ref.x = s.geometry.columns - 1
+	selection := ghostty.sized(ghostty.Selection)
+	selection.start, selection.end = start_ref, end_ref
+	format := ghostty.sized(ghostty.Terminal_Selection_Format_Options)
+	format.emit, format.unwrap, format.trim, format.selection = .Plain, options.unwrap, true, &selection
+	text: [^]u8
+	length: uint
+	if result := ghostty.terminal_selection_format_alloc(s.terminal, nil, format, &text, &length);
+	   result != .Success {
+		log.errorf("term: formatting the screen text failed: %v", result)
+		return "", result == .Out_Of_Memory ? .Out_Of_Memory : .Terminal_Failed
+	}
+	defer ghostty.free(nil, text, length)
+	copied, err := strings.clone(strings.trim_right_space(string(text[:length])), allocator)
+	if err != nil {return "", .Out_Of_Memory}
+	return copied, .None
 }
 
 // Copies the session's current screen through its own render state, for live and headless sessions.

@@ -59,6 +59,24 @@ native_change_is_solo_and_names_the_native_boundary :: proc(t: ^testing.T) {
 	testing.expect(t, plan.solo)
 	testing.expect(t, !plan.perf)
 	testing.expect(t, has_reason(plan, "native boundary"))
+	// Both backends live in the platform package: the headless suite and the desktop app tests.
+	testing.expect(t, has_test(plan, "headless"))
+	testing.expect(t, plan.desktop)
+}
+
+@(test)
+app_sources_owe_the_headless_suite_but_not_the_desktop_lane :: proc(t: ^testing.T) {
+	plan := gates.classify([]string{"src/window.odin"})
+	defer gates.plan_destroy(&plan)
+	testing.expect(t, has_test(plan, "headless"))
+	testing.expect(t, !plan.desktop)
+	leaf := gates.classify([]string{"src/control/requests.odin"})
+	defer gates.plan_destroy(&leaf)
+	testing.expect(t, !has_test(leaf, "headless"))
+	out := strings.builder_make()
+	defer strings.builder_destroy(&out)
+	gates.format_plan(&out, plan)
+	testing.expect(t, strings.contains(strings.to_string(out), "tier0.app.desktop: no\n"))
 }
 
 @(test)

@@ -60,6 +60,8 @@ Plan :: struct {
 	solo:      bool,
 	perf:      bool,
 	app_all:   bool,
+	// App tests run headless (WORK-349); a native boundary also owes the desktop tests lanes.json lists.
+	desktop:   bool,
 	tooling:   bool,
 }
 
@@ -139,9 +141,12 @@ classify_source :: proc(plan: ^Plan, path: string) {
 	} else {
 		plan.app_all = true
 	}
+	// The app and its platform backends also have a whole-app headless suite.
+	if !strings.contains(rest, "/") || strings.has_prefix(path, "src/platform/") {add_test(plan, "headless")}
 	if in_list(path, NATIVE_FILES) || has_prefix_any(path, NATIVE_PREFIXES) {
 		plan.live = true
 		plan.solo = true
+		plan.desktop = true
 		add_reason(plan, "native boundary")
 	}
 	if strings.has_prefix(path, "src/settings/") {
@@ -258,6 +263,7 @@ format_plan :: proc(out: ^strings.Builder, plan: Plan) {
 	for name in plan.tests {
 		if name == "app" {
 			fmt.sbprintf(out, "tier0.app: %s\n", plan.app_all || plan.fallback ? "all" : "fast")
+			fmt.sbprintf(out, "tier0.app.desktop: %s\n", plan.desktop || plan.fallback ? "required" : "no")
 			break
 		}
 	}
