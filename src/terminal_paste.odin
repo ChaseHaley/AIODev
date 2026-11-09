@@ -37,7 +37,7 @@ paste_clipboard :: proc(app: ^App, w: ^Window, entry: ^Session_Entry) {
 		notify(app, .Error, "Could not paste: the shell is not running.")
 		return
 	}
-	now := time.tick_now()
+	now := clock_now(&app.clock)
 	armed, is_armed := w.paste_confirm.(Paste_Armed)
 	confirmed :=
 		!app.settings.terminal.confirm_multiline_paste ||

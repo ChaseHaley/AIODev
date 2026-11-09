@@ -20,7 +20,7 @@ copy_selection :: proc(app: ^App, entry: ^Session_Entry, explicit: bool) {
 		"Copied to clipboard",
 		COPY_NOTICE_DURATION,
 		app.animations,
-		time.tick_now(),
+		clock_now(&app.clock),
 	)
 	mark_all_dirty(app)
 	if explicit {term.clear_selection(entry.session)}
@@ -75,9 +75,9 @@ selection_begin :: proc(w: ^Window, entry: ^Session_Entry, x, y: f32, time_ns: i
 
 // The pointer moved during the drag: the selection follows, and passing an edge starts autoscroll.
 @(private)
-selection_move :: proc(w: ^Window, entry: ^Session_Entry, x, y: f32) {
+selection_move :: proc(w: ^Window, entry: ^Session_Entry, x, y: f32, now: time.Tick) {
 	term.selection_drag(entry.session, x, y)
-	selection_follow(w, entry, time.tick_now())
+	selection_follow(w, entry, now)
 	w.dirty = true
 }
 

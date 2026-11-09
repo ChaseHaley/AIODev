@@ -535,7 +535,7 @@ workspace_picker_tooltip :: proc(_: ^App, w: ^Window, x, y: f32) -> string {
 workspace_picker_pointer_cancel :: proc(app: ^App, w: ^Window) {
 	ui.field_release(&w.workspace_picker.query)
 	workspace_order_end(w)
-	_ = workspace_order_animate(w, app.animations, window_frame_time(w))
+	_ = workspace_order_animate(w, app.animations, window_frame_time(app, w))
 }
 
 @(private)

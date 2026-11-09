@@ -581,7 +581,7 @@ window_render :: proc(app: ^App, w: ^Window, wait := true) {
 		log.error("waiting for the swap chain failed")
 	}
 	if !ready {return}
-	frame := render.frame_predict(surface, time.tick_now())
+	frame := render.frame_predict(surface, clock_now(&app.clock))
 	_ = window_motion_update(app, w, frame)
 	// A motion waiting on a resuming frame still needs that frame on screen so the next one is back to
 	// back; it shows the window unchanged.
@@ -673,7 +673,7 @@ build_frame :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 	// Floats shrinking into their capsules draw above the others.
 	pane_ghosts_draw_alone(app, w, false)
 	if result := floating_capsules_draw(app, w); result != .Ok {return result}
-	cursor_blink_observe(w, blinking)
+	cursor_blink_observe(w, blinking, clock_now(&app.clock))
 	if result := pane_drag_draw(app, w); result != .Ok {return result}
 	if result := tab_drag_draw(app, w); result != .Ok {return result}
 	if result := window_leader_draw(app, w); result != .Ok {return result}

@@ -30,13 +30,13 @@ cursor_blink_deadline :: proc(w: ^Window) -> (time.Tick, bool) {
 
 // The frame just built found whether the focused cursor blinks; a change starts or stops the cycle.
 // Drawing reports the fact because only the captured render state knows it.
-cursor_blink_observe :: proc(w: ^Window, blinking: bool) {
+cursor_blink_observe :: proc(w: ^Window, blinking: bool, now: time.Tick) {
 	if blinking == (w.cursor_blink != nil) {return}
 	if !blinking {
 		w.cursor_blink = nil
 		return
 	}
-	w.cursor_blink = Cursor_Blink_On{true, time.tick_add(time.tick_now(), CURSOR_BLINK_INTERVAL)}
+	w.cursor_blink = Cursor_Blink_On{true, time.tick_add(now, CURSOR_BLINK_INTERVAL)}
 }
 
 cursor_blink_tick :: proc(w: ^Window, now: time.Tick) {
@@ -48,9 +48,9 @@ cursor_blink_tick :: proc(w: ^Window, now: time.Tick) {
 }
 
 // Restarts the cycle with the cursor shown, so typing never hides the cursor.
-cursor_blink_reset :: proc(w: ^Window) {
+cursor_blink_reset :: proc(w: ^Window, now: time.Tick) {
 	if on, blinking := &w.cursor_blink.(Cursor_Blink_On); blinking {
-		on^ = {true, time.tick_add(time.tick_now(), CURSOR_BLINK_INTERVAL)}
+		on^ = {true, time.tick_add(now, CURSOR_BLINK_INTERVAL)}
 	}
 }
 

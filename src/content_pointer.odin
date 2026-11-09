@@ -121,7 +121,7 @@ content_move :: proc(app: ^App, w: ^Window, e: input.Mouse_Move_Event) {
 	pointer_set(app, w, shape)
 	if swallowed {return}
 	if selection_active(w) {
-		if entry != nil {selection_move(w, entry, x, y)}
+		if entry != nil {selection_move(w, entry, x, y, clock_now(&app.clock))}
 		return
 	}
 	if reported := e.buttons & gesture_buttons(w, Gesture_Reported); reported != {} {
