@@ -51,6 +51,8 @@ function Invoke-TestSuite {
             [string[]] $testDefines = @()
             if ($name -eq 'app') { $testDefines = @('-define:AIO_CONTROL=true', '-define:AIO_TEST_COSTS=true') }
             if ($name -eq 'pure') { $testDefines += '-all-packages' }
+            # The headless suite compiles the app and platform with the headless backend (WORK-349).
+            if ($name -eq 'headless') { $testDefines += '-define:AIO_HEADLESS=true' }
             if ($selectedNames) { $testDefines += "-define:ODIN_TEST_NAMES=$selectedNames" }
             $testArgs = @('test', "tests/$name", "-out:build/test/$name.exe", '-debug', '-keep-executable',
                 '-thread-count:2', '-define:ODIN_TEST_THREADS=1', '-define:ODIN_TEST_FANCY=false',
