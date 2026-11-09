@@ -115,13 +115,16 @@ pane_status_parse :: proc(word: string) -> (Pane_Status, bool) {
 	return {}, false
 }
 
-// One terminal pane as the CLI reports it. Strings are temporary.
+// One terminal pane as the CLI reports it. Strings are temporary. A JSON reply leaves out empty
+// strings and absent values.
 Pane_Report :: struct {
 	id:             u32,
-	name, title:    string,
-	process:        string,
+	name:           string `json:"name,omitempty"`,
+	title:          string `json:"title,omitempty"`,
+	// The running program the pane's icon names, else the shell itself at its prompt.
+	process:        string `json:"process,omitempty"`,
 	workspace:      u32,
-	workspace_name: string,
+	workspace_name: string `json:"workspace_name,omitempty"`,
 	// The tab's position in its workspace, from 1.
 	tab:            int,
 	// Whether a window shows this pane focused and that window has keyboard focus.
@@ -129,20 +132,70 @@ Pane_Report :: struct {
 	// A PANE_STATUS_WORDS word.
 	status:         string,
 	exit_code:      u32,
-	directory:      string,
+	directory:      string `json:"directory,omitempty"`,
+	// The process `process` names.
+	pid:            Maybe(u32) `json:"pid,omitempty"`,
+	// What the tab strip calls the pane's tab.
+	tab_name:       string `json:"tab_name,omitempty"`,
+	// Where the tab's split arrangement puts the pane; absent while no window shows its workspace or
+	// the pane is in a linked window.
+	rect:           Maybe(Rect) `json:"rect,omitempty"`,
+	// The terminal's size in cells; absent once the pane has closed.
+	grid:           Maybe(Grid) `json:"grid,omitempty"`,
+}
+
+// A pane's place in DIPs from the top left of its window's pane area, as the split view lays out its
+// tab; zoom and fill do not change it, and a floating pane keeps its own place.
+Rect :: struct {
+	x, y, width, height: int,
+}
+
+Grid :: struct {
+	columns, rows: u16,
+}
+
+// One tab as the CLI reports it. Strings are temporary.
+Tab_Report :: struct {
+	workspace:      u32,
+	workspace_name: string `json:"workspace_name,omitempty"`,
+	// The tab's position in its workspace, from 1, as Pane_Report.tab counts.
+	tab:            int,
+	// What the tab strip calls it.
+	name:           string `json:"name,omitempty"`,
+	// Every pane in the tab, Markdown and settings panes included.
+	panes:          int,
+	// Whether it is the tab its workspace shows.
+	selected:       bool,
+	// Whether it is selected in a window that has keyboard focus.
+	focused:        bool,
+}
+
+// One workspace as the CLI reports it. Strings are temporary.
+Workspace_Report :: struct {
+	id:      u32,
+	name:    string `json:"name,omitempty"`,
+	// Whether a window shows the workspace, and whether that window is on screen and not minimized.
+	window:  bool,
+	visible: bool,
+	tabs:    int,
+	// Whether its window has keyboard focus.
+	focused: bool,
 }
 
 Command_Report :: struct {
 	name, title, usage: string,
 }
 
-// The reply document of a json-format request. aio reads the same shape back.
+// The reply document of a json-format request. aio reads the same shape back. Every reply carries
+// ok and status; the other fields appear only when the command filled them.
 Reply_Json :: struct {
-	ok:       bool,
-	status:   u8,
-	error:    string,
-	pane:     u32,
-	text:     string,
-	panes:    []Pane_Report,
-	commands: []Command_Report,
+	ok:         bool,
+	status:     u8,
+	error:      string `json:"error,omitempty"`,
+	pane:       Maybe(u32) `json:"pane,omitempty"`,
+	text:       string `json:"text,omitempty"`,
+	panes:      []Pane_Report `json:"panes,omitempty"`,
+	commands:   []Command_Report `json:"commands,omitempty"`,
+	tabs:       []Tab_Report `json:"tabs,omitempty"`,
+	workspaces: []Workspace_Report `json:"workspaces,omitempty"`,
 }

@@ -114,7 +114,9 @@ control_cli_answer :: proc(app: ^App, args: []string) -> control.Response {
 	return control_cli_reply(command_execute(app, Control_Request{caller}, invocation), json_output)
 }
 
-// The payload kind selects the reply shape; status and message report failures independently.
+// The payload kind selects the reply shape; status and message report failures independently. Plain
+// lists start with a row naming their tab-separated columns, which `ConvertFrom-Csv -Delimiter "`t"`
+// reads, and show an empty field as "-".
 @(private)
 control_cli_reply :: proc(outcome: Outcome, json_output: bool) -> control.Response {
 	response := cli_protocol.response(outcome.status, "")
@@ -125,6 +127,7 @@ control_cli_reply :: proc(outcome: Outcome, json_output: bool) -> control.Respon
 			status   = u8(outcome.status),
 			error    = outcome.message,
 		}
+		status_pane: [1]cli_protocol.Pane_Report
 		switch payload in outcome.payload {
 		case Outcome_Created:
 			document.pane = payload.pane
@@ -132,6 +135,13 @@ control_cli_reply :: proc(outcome: Outcome, json_output: bool) -> control.Respon
 			document.text = string(payload)
 		case Outcome_Panes:
 			document.panes = ([]cli_protocol.Pane_Report)(payload)
+		case Outcome_Pane_Status:
+			status_pane[0] = cli_protocol.Pane_Report(payload)
+			document.panes = status_pane[:]
+		case Outcome_Tabs:
+			document.tabs = ([]cli_protocol.Tab_Report)(payload)
+		case Outcome_Workspaces:
+			document.workspaces = ([]cli_protocol.Workspace_Report)(payload)
 		case Outcome_Catalogue:
 			document.commands = ([]cli_protocol.Command_Report)(payload)
 		case Outcome_Usage:
@@ -162,12 +172,25 @@ control_cli_reply :: proc(outcome: Outcome, json_output: bool) -> control.Respon
 				fmt.sbprintf(&b, "%-30s %s", command.name, command.title)
 			}
 		case Outcome_Panes:
-			// Tab-separated id, focus, workspace, tab, status, process, title and directory.
-			for pane, i in payload {
-				if i > 0 {strings.write_byte(&b, '\n')}
-				title := pane.name != "" ? pane.name : pane.title
-				fmt.sbprintf(&b, "%d\t%s\t%s\t%d\t%s\t%s\t%s\t%s", pane.id, pane.focused ? "*" : "",
-					pane.workspace_name, pane.tab, pane.status, pane.process, title, pane.directory)
+			strings.write_string(&b, PANE_COLUMNS)
+			for pane in payload {
+				strings.write_byte(&b, '\n')
+				plain_pane_row(&b, pane)
+			}
+		case Outcome_Pane_Status:
+			plain_pane_row(&b, cli_protocol.Pane_Report(payload))
+		case Outcome_Tabs:
+			strings.write_string(&b, "workspace\ttab\tfocused\tselected\tpanes\tname")
+			for tab in payload {
+				fmt.sbprintf(&b, "\n%s\t%d\t%s\t%s\t%d\t%s", plain_text(tab.workspace_name), tab.tab,
+					plain_flag(tab.focused), plain_flag(tab.selected), tab.panes, plain_text(tab.name))
+			}
+		case Outcome_Workspaces:
+			strings.write_string(&b, "id\tfocused\twindow\ttabs\tname")
+			for workspace in payload {
+				window := workspace.visible ? "visible" : workspace.window ? "hidden" : "-"
+				fmt.sbprintf(&b, "\n%d\t%s\t%s\t%d\t%s", workspace.id, plain_flag(workspace.focused), window,
+					workspace.tabs, plain_text(workspace.name))
 			}
 		case Outcome_Text:
 			strings.write_string(&b, string(payload))
@@ -175,4 +198,33 @@ control_cli_reply :: proc(outcome: Outcome, json_output: bool) -> control.Respon
 	}
 	response.text = strings.to_string(b)
 	return response
+}
+
+// The columns of a plain pane row; a pane's name stands in for its title. New columns go last, so
+// scripts that read columns by position keep working.
+@(private = "file")
+PANE_COLUMNS :: "id\tfocused\tworkspace\ttab\tstatus\tprocess\ttitle\tdirectory\tpid\ttab_name\tgrid"
+
+@(private = "file")
+plain_pane_row :: proc(b: ^strings.Builder, pane: cli_protocol.Pane_Report) {
+	title := pane.name != "" ? pane.name : pane.title
+	tab := pane.tab > 0 ? fmt.tprintf("%d", pane.tab) : ""
+	pid := ""
+	if id, found := pane.pid.?; found {pid = fmt.tprintf("%d", id)}
+	grid := ""
+	if size, found := pane.grid.?; found {grid = fmt.tprintf("%dx%d", size.columns, size.rows)}
+	fmt.sbprintf(b, "%d\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s", pane.id, plain_flag(pane.focused),
+		plain_text(pane.workspace_name), plain_text(tab), pane.status, plain_text(pane.process),
+		plain_text(title), plain_text(pane.directory), plain_text(pid), plain_text(pane.tab_name),
+		plain_text(grid))
+}
+
+@(private = "file")
+plain_text :: proc(text: string) -> string {
+	return text != "" ? text : "-"
+}
+
+@(private = "file")
+plain_flag :: proc(set: bool) -> string {
+	return set ? "*" : "-"
 }
