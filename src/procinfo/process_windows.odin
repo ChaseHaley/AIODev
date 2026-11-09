@@ -94,7 +94,8 @@ process_arguments :: proc(id, root: u32, allocator := context.allocator) -> ([]s
 	if status != STATUS_INFO_LENGTH_MISMATCH || size < size_of(w.UNICODE_STRING) || size > 1 << 17 {
 		return nil, false
 	}
-	buffer := make([]u8, size, context.temp_allocator)
+	// The query refuses a misaligned buffer, and temporary memory hands out bytes at any address.
+	buffer := make([]u64, (size + 7) / 8, context.temp_allocator)
 	if w.NtQueryInformationProcess(process, COMMAND_LINE_CLASS, raw_data(buffer), size, &size) != 0 {
 		return nil, false
 	}
