@@ -106,6 +106,7 @@ Window :: struct {
 	workspace_picker: Workspace_Picker,
 	maximized: bool,
 	pane_fill: layout.Pane_Fill,
+	shown_tab: Shown_Tab,
 	paste_confirm: Paste_Confirm,
 	wheel_remainder: f32,
 	cursor_blink: Cursor_Blink,
