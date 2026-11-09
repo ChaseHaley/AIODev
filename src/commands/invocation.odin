@@ -28,8 +28,10 @@ Argument :: enum u8 {
 	Workspace,
 	Command_File,
 	Text_File,
+	Scrollback,
+	Unwrap,
 }
-Arguments :: bit_set[Argument;u16]
+Arguments :: bit_set[Argument;u32]
 
 // One request to run a command. Text fields borrow from the arguments they were parsed from.
 Invocation :: struct {
@@ -47,6 +49,7 @@ Invocation :: struct {
 	// The name a new tab takes, and a workspace id or name for commands that act on a workspace.
 	tab_name, workspace:                     string,
 	lines:                                   int,
+	scrollback, unwrap:                      bool,
 }
 
 Parse_Error :: struct {
@@ -138,7 +141,7 @@ argument_grammar := [Argument]struct {
 	.Enter     = {"--enter", "", {"presses Enter after the text", "off", "--enter"}},
 	.Lines     = {
 		"--lines", " <rows>",
-		{"prints only the screen's last rows, 1 to 10000", "every visible row", "--lines 20"},
+		{"keeps only the last rows (joined lines with --unwrap), 1 to 10000", "every row read", "--lines 20"},
 	},
 	.Program   = {
 		"", "-- <program> [arguments]",
@@ -178,6 +181,19 @@ argument_grammar := [Argument]struct {
 			"none (give <text> or --file)",
 			"--file prompt.txt",
 		},
+	},
+	.Scrollback = {
+		"--scrollback", "",
+		{
+			"adds the history above the screen, up to the last 10000 rows; a read over about 1 MiB keeps " +
+			"its last whole lines",
+			"off (the visible screen only)",
+			"--scrollback --lines 200",
+		},
+	},
+	.Unwrap    = {
+		"--unwrap", "",
+		{"joins rows the terminal soft-wrapped into one line", "off (one line per row)", "--unwrap"},
 	},
 }
 #assert(layout.SPLIT_SHARE_MIN == 0.05 && layout.SPLIT_SHARE_MAX == 0.95)
@@ -336,6 +352,10 @@ parse_invocation :: proc(
 		result.given += {argument}
 		if argument == .Focus || argument == .Enter {
 			if argument == .Focus {result.focus = true} else {result.enter = true}
+			continue
+		}
+		if argument == .Scrollback || argument == .Unwrap {
+			if argument == .Scrollback {result.scrollback = true} else {result.unwrap = true}
 			continue
 		}
 		if i + 1 == len(args) {return {}, {option, "supply a value after this option"}}

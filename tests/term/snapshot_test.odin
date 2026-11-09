@@ -295,3 +295,42 @@ scrollbar_tracks_history :: proc(t: ^testing.T) {
 	_, zero_ok := term.scrollbar(&zero)
 	testing.expect(t, !zero_ok)
 }
+
+// Rows the terminal wrapped join into one line; a line that exactly fills its row before a line break
+// stays separate, as does every hard line break. History is read only when asked for.
+@(test)
+screen_text_joins_soft_wraps_and_reaches_history :: proc(t: ^testing.T) {
+	s, err := term.create_headless(replay_geometry(10, 4), 100)
+	if !testing.expect_value(t, err, term.Error.None) {return}
+	defer term.destroy(s)
+	output := "one\r\n0123456789\r\nalpha bravo charlie\r\nlast"
+	term.replay_write(s, transmute([]u8)output)
+	Case :: struct {
+		options:  term.Text_Options,
+		expected: string,
+	}
+	cases := [?]Case{
+		{{}, "0123456789\nalpha brav\no charlie\nlast"},
+		{{unwrap = true}, "0123456789\nalpha bravo charlie\nlast"},
+		{{scrollback = true, max_rows = 100}, "one\n0123456789\nalpha brav\no charlie\nlast"},
+		{{scrollback = true, unwrap = true, max_rows = 100}, "one\n0123456789\nalpha bravo charlie\nlast"},
+		{{scrollback = true, max_rows = 3}, "alpha brav\no charlie\nlast"},
+		{{scrollback = true, unwrap = true, max_rows = 2}, "o charlie\nlast"},
+	}
+	for item in cases {
+		text, text_err := term.screen_text(s, item.options, context.temp_allocator)
+		testing.expect_value(t, text_err, term.Error.None)
+		testing.expectf(t, text == item.expected, "%v read %q", item.options, text)
+	}
+	// The screen is what the viewport shows; history still reaches the newest row.
+	term.scroll_viewport(s, -1)
+	shown, _ := term.screen_text(s, {unwrap = true}, context.temp_allocator)
+	testing.expect_value(t, shown, "one\n0123456789\nalpha bravo charlie")
+	all, _ := term.screen_text(s, {scrollback = true, max_rows = 100}, context.temp_allocator)
+	testing.expect_value(t, all, "one\n0123456789\nalpha brav\no charlie\nlast")
+	empty, empty_err := term.create_headless(replay_geometry(10, 4), 100)
+	if !testing.expect_value(t, empty_err, term.Error.None) {return}
+	defer term.destroy(empty)
+	blank, _ := term.screen_text(empty, {scrollback = true, unwrap = true, max_rows = 100}, context.temp_allocator)
+	testing.expect_value(t, blank, "")
+}

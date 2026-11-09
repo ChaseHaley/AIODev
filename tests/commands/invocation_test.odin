@@ -23,7 +23,13 @@ invocation_registry :: proc(t: ^testing.T) -> commands.Registry {
 			required = {.Text},
 			hidden = true,
 		},
-		{id = 4, name = "pane.read", title = "Read Pane", arguments = {.Lines}, hidden = true},
+		{
+			id = 4,
+			name = "pane.read",
+			title = "Read Pane",
+			arguments = {.Lines, .Scrollback, .Unwrap},
+			hidden = true,
+		},
 		{id = 5, name = "pane.open_markdown", title = "Open Markdown", arguments = {.File, .Direction, .Focus}},
 		{id = 6, name = "workspace.rename", title = "Rename Workspace", arguments = {.Text, .Workspace}},
 		{id = 7, name = "tab.new", title = "New Tab", arguments = {.Focus, .Name, .Program, .Tab_Name}},
@@ -76,6 +82,14 @@ invocation_parses_every_argument :: proc(t: ^testing.T) {
 	testing.expect_value(t, next_error, commands.Parse_Error{})
 	testing.expect_value(t, next.given, commands.Arguments{})
 	testing.expect_value(t, next.pane, "")
+	read := [?]string{"pane.read", "--unwrap", "--lines", "5", "--scrollback"}
+	reading, read_error := commands.parse_invocation(&registry, read[:], context.temp_allocator)
+	testing.expect_value(t, read_error, commands.Parse_Error{})
+	testing.expect(t, reading.scrollback && reading.unwrap)
+	testing.expect_value(t, reading.lines, 5)
+	visible, visible_error := commands.parse_invocation(&registry, {"pane.read"}, context.temp_allocator)
+	testing.expect_value(t, visible_error, commands.Parse_Error{})
+	testing.expect(t, !visible.scrollback && !visible.unwrap)
 }
 
 @(test)
@@ -127,6 +141,9 @@ invocation_rejects_bad_command_lines :: proc(t: ^testing.T) {
 		{{"pane.send", "hello", "--enter", "--file", "prompt.txt"}, "--file"},
 		{{"pane.read", "--command-file", "a.json"}, "--command-file"},
 		{{"tab.next", "--file", "prompt.txt"}, "--file"},
+		{{"pane.read", "--unwrap", "--unwrap"}, "--unwrap"},
+		{{"pane.read", "--scrollback", "--scrollback"}, "--scrollback"},
+		{{"pane.split", "--scrollback"}, "--scrollback"},
 	}
 	for item in cases {
 		_, err := commands.parse_invocation(&registry, item.args, context.temp_allocator)
@@ -216,7 +233,7 @@ invocation_usage_names_accepted_arguments :: proc(t: ^testing.T) {
 	testing.expect_value(
 		t,
 		commands.usage(commands.find(&registry, "pane.read"), context.temp_allocator),
-		"pane.read [--pane <pane>] [--lines <rows>]",
+		"pane.read [--pane <pane>] [--lines <rows>] [--scrollback] [--unwrap]",
 	)
 	testing.expect_value(
 		t,

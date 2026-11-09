@@ -537,7 +537,7 @@ ACTIONS :: [Action]Command_Descriptor {
 	},
 	.Pane_Read = {
 		cli_protocol.PANE_READ_COMMAND, "Read Pane Screen", nil, .Host,
-		{accepted = {.Lines}, hidden = true, control = .Pane},
+		{accepted = {.Lines, .Scrollback, .Unwrap}, hidden = true, control = .Pane},
 	},
 	.Pane_Send = {
 		"pane.send", "Send Text to Pane", nil, .Host,
@@ -640,7 +640,11 @@ COMMAND_HELP :: #partial [Action]Command_Help {
 		"Types text into the pane's program as a person at the keyboard would.",
 		{{.Text, {description = "the text to type", example = `"git status"`}}},
 	},
-	.Pane_Read = {"Prints the pane's visible text.", nil},
+	.Pane_Read = {
+		"Prints the pane's visible text; --scrollback adds the history above it and --unwrap joins rows the " +
+		"terminal wrapped.",
+		nil,
+	},
 	.Pane_List = {
 		"Prints a header row, then a tab-separated line per pane: id, focused, workspace, tab, status, " +
 		"process, title, directory, pid, tab name and grid; empty fields print as -; --json adds each " +
@@ -884,7 +888,7 @@ command_execute :: proc(app: ^App, ctx: Command_Context, invocation: commands.In
 		return control_pane_status(app, ctx.(Control_Request), invocation)
 	case .Pane_Read:
 		named := target.?
-		return pane_read(named.pane.session, invocation.lines)
+		return pane_read(named.pane.session, invocation)
 	case .Pane_Send:
 		named := target.?
 		return pane_send(named.pane.session, invocation.text, invocation.enter)
