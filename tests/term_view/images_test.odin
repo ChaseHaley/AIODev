@@ -17,7 +17,7 @@ headless_create :: proc(t: ^testing.T) -> (f: Fixture, ok: bool) {
 	if !testing.expect_value(t, font_error, font.Error.None) {return}
 	f.family, font_error = font.family_load(f.fonts, "Consolas")
 	render_error: render.Error
-	f.device, render_error = render.device_create()
+	f.device, render_error = render.device_create(.Warp)
 	if font_error != .None || render_error != .None {
 		testing.fail(t)
 		return

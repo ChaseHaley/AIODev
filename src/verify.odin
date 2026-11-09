@@ -500,6 +500,10 @@ when AIO_CONTROL {
 		state_text(r, "terminal.font_family", app.settings.font.family)
 		state_value(r, "shell.icon.loaded", shell_icon_find(app, settings.PROFILE_DEFAULT_ID) != nil)
 		state_value(r, "ui.animating", motion_active(app))
+		if app.device != nil {
+			state_word(r, "render.driver", render.device_driver(app.device))
+			state_text(r, "render.adapter", render.device_adapter(app.device))
+		}
 		state_value(r, "leader.enabled", app.leader != nil)
 		state_value(r, "workspaces.count", len(app.workspaces))
 		for window, i in app.windows {

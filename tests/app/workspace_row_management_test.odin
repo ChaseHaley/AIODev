@@ -382,7 +382,7 @@ workspace134_header_name_never_paints_into_indicator :: proc(t: ^testing.T) {
 	fonts, font_error := font.system_create()
 	if !testing.expect_value(t, font_error, font.Error.None) { return }
 	defer font.system_destroy(fonts)
-	device, device_error := render.device_create()
+	device, device_error := render.device_create(.Warp)
 	if !testing.expect_value(t, device_error, render.Error.None) { return }
 	defer render.device_destroy(device)
 	surface, surface_error := render.surface_create_offscreen(device, 512, 96)
@@ -440,7 +440,7 @@ workspace134_offscreen_menu_inline_field_and_drawn_indicator :: proc(t: ^testing
 	fonts, font_error := font.system_create()
 	if !testing.expect_value(t, font_error, font.Error.None) { return }
 	defer font.system_destroy(fonts)
-	device, device_error := render.device_create()
+	device, device_error := render.device_create(.Warp)
 	if !testing.expect_value(t, device_error, render.Error.None) { return }
 	defer render.device_destroy(device)
 	surface, surface_error := render.surface_create_offscreen(device, 1200, 800)

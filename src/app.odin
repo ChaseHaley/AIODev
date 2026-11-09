@@ -61,6 +61,8 @@ App :: struct {
 	family:                font.Family,
 	font_points:           f32,
 	device:                ^render.Device,
+	// Auto in the app; tests that read the app's pixels back set Warp before app_init.
+	render_driver:         render.Driver,
 	cache:                 glyphs.Cache,
 	shell_icons:           [dynamic]Shell_Icon,
 	processes:             Process_Worker,
@@ -147,7 +149,7 @@ app_init :: proc(app: ^App) -> bool {
 		return false
 	}
 	render_error: render.Error
-	app.device, render_error = render.device_create()
+	app.device, render_error = render.device_create(app.render_driver)
 	if render_error != .None {
 		log.errorf("graphics device creation failed: %v", render_error)
 		return false

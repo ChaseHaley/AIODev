@@ -15,6 +15,19 @@ ATLAS_MAX_SIZE :: 4096
 @(private)
 COLOR_ATLAS_INITIAL_SIZE :: 1024
 
+// Which rasterizer a device draws with. Auto prefers the GPU and falls back to WARP, Microsoft's
+// software rasterizer. Tests that read pixels back ask for Warp, so their results do not depend on
+// the machine's GPU.
+Driver :: enum {
+	Auto,
+	Hardware,
+	Warp,
+}
+
+// DXGI's adapter description is at most 128 UTF-16 units, each at most three UTF-8 bytes.
+@(private)
+ADAPTER_NAME_BYTES :: 128 * 3
+
 Device :: struct {
 	allocator:          runtime.Allocator,
 	native:             ^d3d.IDevice,
@@ -37,6 +50,10 @@ Device :: struct {
 	atlas, color_atlas: Atlas,
 	generation:         u64,
 	gamma:              Text_Gamma,
+	// The driver the device was made with, never Auto, and the adapter's description.
+	driver:             Driver,
+	adapter_name:       [ADAPTER_NAME_BYTES]u8,
+	adapter_length:     int,
 	// The driver reported the device removed or reset. Nothing new can be made on it, so creation
 	// refuses at once instead of calling, and logging, into a device that cannot recover.
 	lost:               bool,
@@ -207,10 +224,20 @@ pixel_shader :: proc(d: ^Device, entry: cstring) -> (^d3d.IPixelShader, Error) {
 }
 
 @(private)
-create_native_device :: proc(d: ^Device) -> win.HRESULT {
+create_native_device :: proc(d: ^Device, choice: Driver) -> win.HRESULT {
 	levels := [?]d3d.FEATURE_LEVEL{._11_0}
+	order := [?]Driver{.Hardware, .Warp}
+	tried := order[:]
+	switch choice {
+	case .Auto:
+	case .Hardware:
+		tried = order[:1]
+	case .Warp:
+		tried = order[1:]
+	}
 	hr: win.HRESULT
-	for driver in ([?]d3d.DRIVER_TYPE{.HARDWARE, .WARP}) {
+	for driver in tried {
+		native: d3d.DRIVER_TYPE = driver == .Warp ? .WARP : .HARDWARE
 		flags: d3d.CREATE_DEVICE_FLAGS = {.BGRA_SUPPORT}
 		when ODIN_DEBUG {
 			flags += {.DEBUG}
@@ -218,7 +245,7 @@ create_native_device :: proc(d: ^Device) -> win.HRESULT {
 		for {
 			hr = d3d.CreateDevice(
 				nil,
-				driver,
+				native,
 				nil,
 				flags,
 				raw_data(levels[:]),
@@ -235,6 +262,7 @@ create_native_device :: proc(d: ^Device) -> win.HRESULT {
 			flags -= {.DEBUG}
 		}
 		if hr >= 0 {
+			d.driver = driver
 			return hr
 		}
 		log.warnf("D3D11CreateDevice (%v) failed: HRESULT 0x%08x", driver, u32(hr))
@@ -243,7 +271,7 @@ create_native_device :: proc(d: ^Device) -> win.HRESULT {
 }
 
 @(require_results)
-device_create :: proc(allocator := context.allocator) -> (^Device, Error) {
+device_create :: proc(driver: Driver, allocator := context.allocator) -> (^Device, Error) {
 	d, allocation_error := new(Device, allocator)
 	if allocation_error != nil {
 		return nil, .Out_Of_Memory
@@ -257,7 +285,7 @@ device_create :: proc(allocator := context.allocator) -> (^Device, Error) {
 	defer if !ok {
 		device_destroy(d)
 	}
-	if err := checked(d, create_native_device(d), "D3D11CreateDevice"); err != .None {
+	if err := checked(d, create_native_device(d, driver), "D3D11CreateDevice"); err != .None {
 		return nil, err
 	}
 	dxgi_device: ^dxgi.IDevice
@@ -271,6 +299,19 @@ device_create :: proc(allocator := context.allocator) -> (^Device, Error) {
 		return nil, err
 	}
 	defer release(adapter)
+	description: dxgi.ADAPTER_DESC
+	if err := checked(d, adapter->GetDesc(&description), "GetDesc IDXGIAdapter"); err != .None {
+		return nil, err
+	}
+	name := description.Description[:]
+	for unit, i in name {
+		if unit == 0 {
+			name = name[:i]
+			break
+		}
+	}
+	d.adapter_length = len(win.utf16_to_utf8_buf(d.adapter_name[:], name))
+	log.infof("graphics device: %v driver on %s", d.driver, device_adapter(d))
 	hr = adapter->GetParent(dxgi.IFactory2_UUID, (^rawptr)(&d.factory))
 	if err := checked(d, hr, "GetParent IDXGIFactory2"); err != .None {
 		return nil, err
@@ -373,6 +414,16 @@ device_destroy :: proc(d: ^Device) {
 	release(d.ctx)
 	release(d.native)
 	free(d, d.allocator)
+}
+
+// The driver the device was made with: Hardware or Warp, never Auto.
+device_driver :: proc(d: ^Device) -> Driver {
+	return d.driver
+}
+
+// The adapter's description, such as "Microsoft Basic Render Driver" for WARP.
+device_adapter :: proc(d: ^Device) -> string {
+	return string(d.adapter_name[:d.adapter_length])
 }
 
 set_text_gamma :: proc(d: ^Device, gamma: Text_Gamma) {

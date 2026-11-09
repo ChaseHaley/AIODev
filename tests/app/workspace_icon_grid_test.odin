@@ -171,7 +171,7 @@ workspace_icon_grid_offscreen_draw_retains_selection_and_theme_feedback :: proc(
 	fonts, font_error := font.system_create()
 	if !testing.expect_value(t, font_error, font.Error.None) { return }
 	defer font.system_destroy(fonts)
-	device, device_error := render.device_create()
+	device, device_error := render.device_create(.Warp)
 	if !testing.expect_value(t, device_error, render.Error.None) { return }
 	defer render.device_destroy(device)
 	surface, surface_error := render.surface_create_offscreen(device, 1200, 800)
