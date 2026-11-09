@@ -42,6 +42,7 @@ parse_commands :: proc(t: ^testing.T) {
 		{"mouse", "drag", "-100,20", "30,-40", "--screen", "--mods", "Ctrl"},
 		{"mouse", "wheel", "-100,-20", "-3", "--screen"},
 		{"window", "select", "18446744073709551615"}, {"window", "move", "-2147483648,2147483647"},
+		{"window", "at", "-2147483648,2147483647"},
 		{"capture"}, {"capture", "--out", "before.png"}, {"capture", "--cell", "0,0"},
 		{"capture", "--cell", "0,0,10,2", "--out", "region.png"},
 		{"capture", "--region", "0,0,120,32"},
@@ -121,6 +122,8 @@ parse_errors :: proc(t: ^testing.T) {
 		{"window", "select", "18446744073709551616"}, {"window", "bad", "1"},
 		{"window", "move", "1"}, {"window", "move", "1,2,3"}, {"window", "move", "2147483648,0"},
 		{"window", "move", "0,-2147483649"}, {"window", "move", "--1,2"},
+		{"window", "at"}, {"window", "at", "1"}, {"window", "at", "1,2,3"}, {"window", "at", "1,2", "3"},
+		{"window", "at", "2147483648,0"},
 		{"mouse", "move", "-1,0"}, {"mouse", "move", "-1,0", "--px"},
 		{"mouse", "drag", "0,0", "-1,0"}, {"mouse", "move", "2147483648,0", "--screen"},
 		{"mouse", "move", "0,-2147483649", "--screen"},
@@ -178,6 +181,9 @@ window_requests_preserve_screen_coordinates_and_target_ids :: proc(t: ^testing.T
 	r, err = verify_protocol.parse({"window", "move", "-1920,-240"})
 	testing.expect_value(t, err.advice, "")
 	testing.expect_value(t, r.(verify_protocol.Window_Move).position, verify_protocol.Position{-1920, -240})
+	r, err = verify_protocol.parse({"window", "at", "-1920,-240"})
+	testing.expect_value(t, err.advice, "")
+	testing.expect_value(t, r.(verify_protocol.Window_At).position, verify_protocol.Position{-1920, -240})
 	r, err = verify_protocol.parse({"mouse", "drag", "-1920,-240", "200,-300", "--screen"})
 	testing.expect_value(t, err.advice, "")
 	m := r.(verify_protocol.Mouse)

@@ -32,13 +32,13 @@ defaults_and_options :: proc(t: ^testing.T) {
 
 @(test)
 signed_screen_positions_remain_one_shell_argument :: proc(t: ^testing.T) {
-	for args in ([][]string{{"window", "move", "-100,200"},
+	for args in ([][]string{{"window", "move", "-100,200"}, {"window", "at", "-100,200"},
 		{"mouse", "move", "-100,200", "--screen"},
 		{"mouse", "drag", "-100,200", "300,-400", "--screen"}}) {
 		_, err := ctl.parse_options(args)
 		testing.expect_value(t, err, "")
 	}
-	for args in ([][]string{{"window", "move", "-100", "200"},
+	for args in ([][]string{{"window", "move", "-100", "200"}, {"window", "at", "-100", "200"},
 		{"mouse", "move", "-100", "200", "--screen"},
 		{"mouse", "drag", "-100,200", "300", "-400", "--screen"}}) {
 		_, err := ctl.parse_options(args)
