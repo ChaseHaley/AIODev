@@ -198,6 +198,11 @@ function Invoke-StyleCheck {
 switch ($Task) {
     'verify' {
         Build-App @('-debug', '-subsystem:console', '-define:AIO_CONTROL=true') 'build/aiodev-verify.exe'
+        # The same harness with the headless backend (WORK-349), in its own directory so its aio.exe
+        # names it as the server.
+        New-Item -ItemType Directory -Force build/headless | Out-Null
+        Build-App @('-debug', '-subsystem:console', '-define:AIO_CONTROL=true', '-define:AIO_HEADLESS=true') `
+            'build/headless/aiodev-headless.exe'
         foreach ($name in $toolPackages) {
             Invoke-Odin build "tools/$name" "-out:build/$name.exe" -debug '-subsystem:console' @flags
         }
