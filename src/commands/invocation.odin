@@ -21,6 +21,8 @@ Argument :: enum u8 {
 	Enter,
 	Lines,
 	Program,
+	Tab_Name,
+	Workspace,
 }
 Arguments :: bit_set[Argument;u16]
 
@@ -37,6 +39,8 @@ Invocation :: struct {
 	directory, name, profile, text, program: string,
 	file:                                    string,
 	enter:                                   bool,
+	// The name a new tab takes, and a workspace id or name for commands that act on a workspace.
+	tab_name, workspace:                     string,
 	lines:                                   int,
 }
 
@@ -76,6 +80,8 @@ argument_grammar := [Argument]struct {
 	.Enter     = {"--enter", ""},
 	.Lines     = {"--lines", " <rows>"},
 	.Program   = {"", "-- <program> [arguments]"},
+	.Tab_Name  = {"--tab-name", " <name>"},
+	.Workspace = {"--workspace", " <workspace>"},
 }
 #assert(layout.SPLIT_SHARE_MIN == 0.05 && layout.SPLIT_SHARE_MAX == 0.95)
 
@@ -223,15 +229,19 @@ parse_invocation :: proc(
 				return {}, {value, fmt.tprintf("use a row count from 1 to %d", MAX_LINES)}
 			}
 			result.lines = lines
-		case .Directory, .Name, .Profile:
+		case .Directory, .Name, .Profile, .Tab_Name, .Workspace:
 			if value == "" {return {}, {option, "supply a nonempty value"}}
 			#partial switch argument {
 			case .Directory:
 				result.directory = value
 			case .Name:
 				result.name = value
-			case:
+			case .Profile:
 				result.profile = value
+			case .Tab_Name:
+				result.tab_name = value
+			case:
+				result.workspace = value
 			}
 		}
 	}
