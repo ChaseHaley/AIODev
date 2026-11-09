@@ -143,11 +143,10 @@ workspace_new :: proc(app: ^App, w: ^Window, new_window: bool, name_it := true) 
 	if target := window_for_workspace(app, workspace); target != nil {workspace_name_begin(app, target)}
 }
 
-// The chip starts after the inbox button when it shows, else after the title actions, with the same
-// margin either way.
+// The chip starts right after the inbox button when it shows, else right after the title buttons.
 workspace_button_left :: proc(app: ^App, w: ^Window) -> f32 {
 	pill := status_pill_rect(app, w)
-	return pill.width > 0 ? pill.x + pill.width + ui.SPACE_1 * w.scale : title_actions_end(w)
+	return pill.width > 0 ? pill.x + pill.width : title_actions_end(w)
 }
 
 // The chip hugs its content: icon, name and the chevron's slot, so the tabs start right after the
@@ -162,7 +161,7 @@ workspace_button_width :: proc(app: ^App, w: ^Window) -> f32 {
 	// One spare pixel keeps rounding in the chip's layout from fading a name that fits.
 	content :=
 		ui.text_width(&w.ui_text, label) + 1 +
-		(2 * ui.CONTROL_INSET + ui.ICON_BUTTON + 2 * ui.SPACE_2 + ui.ICON_INDICATOR + 2 * ui.SPACE_1) * w.scale
+		(2 * ui.CONTROL_INSET + ui.ICON_BUTTON + 2 * ui.SPACE_2 + ui.ICON_INDICATOR + ui.SPACE_1) * w.scale
 	return left + min(limit, content)
 }
 
@@ -173,7 +172,7 @@ workspace_button_rect :: proc(app: ^App, w: ^Window) -> render.Rect {
 	left := workspace_button_left(app, w)
 	height := ui.HEIGHT_TOOLBAR * w.scale
 	top := (ui.TITLE_BAR_HEIGHT * w.scale - height) / 2
-	return {left + ui.SPACE_1 * w.scale, top, max(0, width - left - 2 * ui.SPACE_1 * w.scale), height}
+	return {left, top, max(0, width - left - ui.SPACE_1 * w.scale), height}
 }
 
 workspace_button_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
