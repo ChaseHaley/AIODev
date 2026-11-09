@@ -293,38 +293,8 @@ markdown_tick :: proc(app: ^App) {
 	if changed {mark_all_dirty(app)}
 }
 
-@(private, require_results)
-markdown_new_tab :: proc(
-	app: ^App,
-	w: ^Window,
-	workspace: ^Workspace,
-	content: layout.Content,
-	focus: bool,
-) -> bool {
-	tab, reserved := tab_record_reserve(workspace)
-	if !reserved {return false}
-	if layout.init(&tab.tree, content) != nil {
-		tab_record_free(tab)
-		return false
-	}
-	tab_record_commit(app, workspace, tab)
-	if focus && w != nil {tab_select(app, w, len(workspace.tabs) - 1)}
-	return true
-}
-
-// Where a file opens beside the pane that asked for it.
-Markdown_Placement :: enum u8 {
-	// A split beside the pane, or a new tab when the pane is too small to split.
-	Split,
-	// A floating pane above the tab.
-	Float,
-	Tab,
-	// A split that moves straight into a linked window of its own.
-	Linked_Window,
-}
-
-// Shows a verified file beside `node`: the pane already showing it, or else a new pane at the placement
-// `floating` picks. `w` is the window showing the workspace, or nil.
+// Shows a verified file beside `node`: the pane already showing it, or else a new split toward `direction`,
+// or a float with `floating`. `w` is the window showing the workspace, or nil.
 @(require_results)
 markdown_open_at :: proc(
 	app: ^App,
@@ -351,84 +321,28 @@ markdown_open_at :: proc(
 	}
 	pane := markdown_pane_create(app, path, true)
 	if pane == nil {return false}
-	placement: Markdown_Placement = floating ? .Float : .Split
+	placement: Pane_Placement = floating ? .Float : .Split_Right
 	content := layout.Content{.Markdown, pane.id}
-	return markdown_place(app, w, workspace, tab_index, node, content, placement, direction, ratio, focus)
+	return pane_place(app, w, workspace, tab_index, node, content, placement, focus, ratio, direction)
 }
 
 // Opens a verified file at the placement chosen on a link in the pane at `node` of w, even when a pane
-// already shows it: a split stays in w, linked or not; anything else belongs to the window showing the tab.
+// already shows it.
 @(require_results)
 markdown_open_placed :: proc(
 	app: ^App,
 	w: ^Window,
 	node: layout.Node_Id,
 	path: string,
-	placement: Markdown_Placement,
+	placement: Pane_Placement,
 ) -> bool {
-	acting, beside := w, node
-	if window_linked(w) && placement != .Split {
-		acting = pane_link_acting_window(app, w)
-		if window_linked(acting) {return false}
-		beside = window_tree(acting).focus
-	}
+	acting, beside, found := pane_placement_window(app, w, node, placement)
+	if !found {return false}
 	pane := markdown_pane_create(app, path, true)
 	if pane == nil {return false}
 	content := layout.Content{.Markdown, pane.id}
-	return markdown_place(
-		app, acting, acting.workspace, acting.workspace.selected, beside, content, placement,
-		commands.SPLIT_DEFAULT.direction, commands.SPLIT_DEFAULT.ratio, true,
-	)
-}
-
-// Shows `content`, which no pane shows yet, beside `node` of the workspace's tab at `tab_index`. w is the
-// window showing the workspace, or nil; a linked window placement needs w showing that tab.
-@(private = "file", require_results)
-markdown_place :: proc(
-	app: ^App,
-	w: ^Window,
-	workspace: ^Workspace,
-	tab_index: int,
-	node: layout.Node_Id,
-	content: layout.Content,
-	placement: Markdown_Placement,
-	direction: layout.Direction,
-	ratio: f32,
-	focus: bool,
-) -> bool {
-	tree := &workspace.tabs[tab_index].tree
-	// A floating pane does not split, so the file opens beside the tiled pane below it.
-	anchor := node
-	if layout.is_floating(tree, anchor) {anchor = layout.focus_tiled(tree)}
-	opened := false
-	switch placement {
-	case .Split:
-		failure := pane_split_insert(
-			app, w, workspace, tab_index, anchor, direction, ratio, focus, content, false,
-		)
-		#partial switch failure {
-		case .None:
-			opened = true
-		case .Minimum:
-			opened = markdown_new_tab(app, w, workspace, content, focus)
-		}
-	case .Float:
-		opened = floating_attach(app, w, workspace, tab_index, content, focus)
-	case .Tab:
-		opened = markdown_new_tab(app, w, workspace, content, focus)
-	case .Linked_Window:
-		if w == nil || window_linked(w) || w.workspace != workspace || workspace.selected != tab_index {break}
-		// The new pane leaves for its own window at once, so it needs no room in this one.
-		failure := pane_split_insert(
-			app, nil, workspace, tab_index, anchor, direction, ratio, false, content, false,
-		)
-		if failure != .None {break}
-		// A refused link leaves the file showing in the split, which the notice explains.
-		opened = true
-		if !pane_link_open(app, w, layout.find_content(tree, content)) {window_relayout(app, w)}
-	}
-	if opened {layout_state_touch(app)}
-	return opened
+	tab := acting.workspace.selected
+	return pane_place(app, acting, acting.workspace, tab, beside, content, placement, true)
 }
 
 // Shows a file the focused pane asked for. The caller has verified the path.

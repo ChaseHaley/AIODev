@@ -473,12 +473,34 @@ ctrl_right_click_on_a_terminal_link_offers_to_open_or_pin_it :: proc(t: ^testing
 }
 
 @(private = "file")
-placement_row :: proc(w: ^app.Window, placement: app.Markdown_Placement) -> int {
+placement_row :: proc(w: ^app.Window, placement: app.Pane_Placement) -> int {
 	menu := &w.document_menu
 	for i in 0 ..< menu.count {
 		if menu.entries[i].action == .Open_In && menu.entries[i].placement == placement {return i}
 	}
 	return -1
+}
+
+// Reopens the menu on the link printed at the top of the terminal pane, wherever the last choice moved focus.
+@(private = "file")
+menu_on_path :: proc(t: ^testing.T, f: ^Palette_Fixture, terminal: layout.Content, modifiers: input.Modifiers) -> bool {
+	s, w := &f.state, f.state.windows[0]
+	if w.workspace.selected != 0 {app.tab_select(s, w, 0)}
+	app.pane_focus(s, w, layout.find_content(app.window_tree(w), terminal))
+	point, ok := link_point(t, f, 4, 0)
+	if !ok {return false}
+	press(s, w, f32(point.x), f32(point.y), .Right, modifiers)
+	return testing.expect(t, shown_in(w, app.Document_Menu_Link))
+}
+
+// The axis of the split holding the focused pane: Horizontal side by side, Vertical stacked.
+@(private = "file")
+focus_axis :: proc(tree: ^layout.Layout) -> layout.Axis {
+	for node in tree.nodes {
+		split, is_split := node.(layout.Split)
+		if is_split && (split.first == tree.focus || split.second == tree.focus) {return split.axis}
+	}
+	return {}
 }
 
 @(test)
@@ -501,31 +523,26 @@ link_menu_opens_a_markdown_file_in_each_place_copies_it_and_shows_its_folder :: 
 	defer {s.opener.file = nil; s.opener.url = nil}
 	terminal := w.panes[0].content
 	link_feed(t, &f, fmt.tprintf("\x1b[2J\x1b[3J\x1b[H%s", path))
-	// Reopens the menu on the printed path from the terminal pane, wherever the last choice moved focus.
-	menu_on_path :: proc(t: ^testing.T, f: ^Palette_Fixture, terminal: layout.Content, modifiers: input.Modifiers) -> bool {
-		s, w := &f.state, f.state.windows[0]
-		if s.windows[0].workspace.selected != 0 {app.tab_select(s, w, 0)}
-		app.pane_focus(s, w, layout.find_content(app.window_tree(w), terminal))
-		point, ok := link_point(t, f, 4, 0)
-		if !ok {return false}
-		press(s, w, f32(point.x), f32(point.y), .Right, modifiers)
-		return testing.expect(t, shown_in(w, app.Document_Menu_Link))
-	}
-
 	// Shift+right-click shows the menu Ctrl+right-click shows, with every place a Markdown file can open.
 	if !menu_on_path(t, &f, terminal, {.Shift}) {return}
-	for placement in app.Markdown_Placement {testing.expect(t, placement_row(w, placement) >= 0)}
+	for placement in app.Pane_Placement {testing.expect(t, placement_row(w, placement) >= 0)}
 	testing.expect(t, row_of(w, .Open_External) >= 0 && row_of(w, .Copy_Target) >= 0 && row_of(w, .Open_Folder) >= 0)
 	held := strings.clone(held_target(w))
 	defer delete(held)
 
 	// Every choice opens its own pane, though the file already shows in another.
-	click_row(s, w, placement_row(w, .Split))
+	click_row(s, w, placement_row(w, .Split_Right))
 	tree := app.window_tree(w)
 	testing.expect_value(t, layout.pane_count(tree), 2)
 	focused, _ := layout.focused_content(tree)
 	testing.expect_value(t, focused.kind, layout.Content_Kind.Markdown)
 	testing.expect(t, !layout.is_floating(tree, tree.focus))
+	testing.expect_value(t, focus_axis(tree), layout.Axis.Horizontal)
+
+	if !menu_on_path(t, &f, terminal, {.Control}) {return}
+	click_row(s, w, placement_row(w, .Split_Down))
+	testing.expect_value(t, layout.pane_count(tree), 3)
+	testing.expect_value(t, focus_axis(tree), layout.Axis.Vertical)
 
 	if !menu_on_path(t, &f, terminal, {.Control}) {return}
 	click_row(s, w, placement_row(w, .Float))
@@ -547,7 +564,7 @@ link_menu_opens_a_markdown_file_in_each_place_copies_it_and_shows_its_folder :: 
 		testing.expect_value(t, shown.kind, layout.Content_Kind.Markdown)
 		testing.expect_value(t, app.pane_link_window_of(s, shown), linked)
 	}
-	testing.expect_value(t, len(s.markdown_panes), 4)
+	testing.expect_value(t, len(s.markdown_panes), 5)
 
 	// The system's handler, the copy and the folder each act on the file the menu holds.
 	if !menu_on_path(t, &f, terminal, {.Control}) {return}
@@ -572,13 +589,13 @@ link_menu_opens_a_markdown_file_in_each_place_copies_it_and_shows_its_folder :: 
 	// A web address can only open in the browser, so it offers no pane or folder.
 	link_feed(t, &f, "\x1b[2J\x1b[3J\x1b[Hhttps://example.com/two")
 	if !menu_on_path(t, &f, terminal, {.Shift}) {return}
-	for placement in app.Markdown_Placement {testing.expect(t, placement_row(w, placement) < 0)}
-	testing.expect(t, row_of(w, .Open_External) < 0 && row_of(w, .Open_Folder) < 0 && row_of(w, .Open_Shell) < 0)
+	for placement in app.Pane_Placement {testing.expect(t, placement_row(w, placement) < 0)}
+	testing.expect(t, row_of(w, .Open_External) < 0 && row_of(w, .Open_Folder) < 0)
 	testing.expect(t, row_of(w, .Copy_Target) >= 0)
 }
 
 @(test)
-link_menu_opens_a_folder_in_a_new_shell_with_the_pane_profile :: proc(t: ^testing.T) {
+link_menu_opens_a_shell_in_a_folder_in_each_place_with_the_pane_profile :: proc(t: ^testing.T) {
 	sync.mutex_lock(&Link_Test_Lock)
 	defer sync.mutex_unlock(&Link_Test_Lock)
 	f: Palette_Fixture
@@ -590,23 +607,41 @@ link_menu_opens_a_folder_in_a_new_shell_with_the_pane_profile :: proc(t: ^testin
 	s, w := &f.state, f.state.windows[0]
 	source := app.focused_session(s, w)
 	if !testing.expect(t, source != nil) {return}
+	terminal := w.panes[0].content
 	// The source pane runs another profile than the default; the id need not resolve to be carried over.
 	delete(source.profile_id)
 	source.profile_id = strings.clone("alternate")
 	link_feed(t, &f, fmt.tprintf("\x1b[2J\x1b[3J\x1b[H%s", root))
-	point, ok := link_point(t, &f, 4, 0)
-	if !ok {return}
-	press(s, w, f32(point.x), f32(point.y), .Right, {.Shift})
-	if !testing.expect(t, shown_in(w, app.Document_Menu_Link)) {return}
-	testing.expect(t, row_of(w, .Open_In) < 0 && row_of(w, .Open_Folder) < 0)
-	click_row(s, w, row_of(w, .Open_Shell))
-	testing.expect(t, !app.document_menu_shown(w))
-	tree := app.window_tree(w)
-	testing.expect_value(t, layout.pane_count(tree), 2)
-	opened := app.focused_session(s, w)
-	if !testing.expect(t, opened != nil && opened != source) {return}
-	testing.expect_value(t, opened.profile_id, "alternate")
-	testing.expect(t, strings.equal_fold(opened.header.launch_directory, root), opened.header.launch_directory)
+
+	for placement in app.Pane_Placement {
+		if !menu_on_path(t, &f, terminal, {.Shift}) {return}
+		testing.expect(t, row_of(w, .Open_External) < 0 && row_of(w, .Open_Folder) < 0)
+		before := len(s.sessions)
+		click_row(s, w, placement_row(w, placement))
+		testing.expect(t, !app.document_menu_shown(w))
+		if !testing.expect_value(t, len(s.sessions), before + 1) {return}
+		opened := s.sessions[len(s.sessions) - 1]
+		testing.expect_value(t, opened.profile_id, "alternate")
+		testing.expect(t, strings.equal_fold(opened.header.launch_directory, root), opened.header.launch_directory)
+		content := layout.Content{.Terminal, opened.id}
+		switch placement {
+		case .Split_Right, .Split_Down:
+			tree := app.window_tree(w)
+			focused, _ := layout.focused_content(tree)
+			testing.expect_value(t, focused, content)
+			testing.expect_value(t, focus_axis(tree), placement == .Split_Down ? layout.Axis.Vertical : .Horizontal)
+		case .Float:
+			tree := app.window_tree(w)
+			testing.expect(t, layout.is_floating(tree, layout.find_content(tree, content)))
+		case .Tab:
+			testing.expect_value(t, w.workspace.selected, 1)
+			focused, _ := layout.focused_content(app.window_tree(w))
+			testing.expect_value(t, focused, content)
+		case .Linked_Window:
+			linked := app.pane_link_window_of(s, content)
+			testing.expect(t, linked != nil && app.window_linked(linked))
+		}
+	}
 }
 
 @(test)

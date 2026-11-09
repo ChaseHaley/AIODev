@@ -1,6 +1,5 @@
 package main
 
-import "aio:commands"
 import "aio:input"
 import "aio:layout"
 import "aio:links"
@@ -67,14 +66,13 @@ Document_Menu_Action :: enum {
 	Open_In,
 	Open_External,
 	Open_Folder,
-	Open_Shell,
 	Copy_Target,
 }
 
 Document_Menu_Entry :: struct {
 	action:    Document_Menu_Action,
 	level:     Document_Level,
-	placement: Markdown_Placement,
+	placement: Pane_Placement,
 	target:    string,
 	folder:    bool,
 }
@@ -321,18 +319,19 @@ document_menu_build_levels :: proc(
 }
 
 @(private = "file", rodata)
-DOCUMENT_PLACEMENT_ROWS := [Markdown_Placement]struct {
+DOCUMENT_PLACEMENT_ROWS := [Pane_Placement]struct {
 	label: string,
 	glyph: ui.Icon,
 } {
-	.Split         = {"Open in Split", .Split_Right},
+	.Split_Right   = {"Open in Right Split", .Split_Right},
+	.Split_Down    = {"Open in Down Split", .Split_Down},
 	.Float         = {"Open in Float", .Float_Pane},
 	.Tab           = {"Open in New Tab", .Layout_Top},
 	.Linked_Window = {"Open in Linked Window", .Window_Out},
 }
 
-// A link's rows: open it, open a Markdown file in a chosen place or the system's handler, copy it, show
-// a file's folder, or pin it.
+// A link's rows: open it; place a Markdown file, or a new shell in a folder, beside the pane; hand a
+// Markdown file to the system's handler; copy it; show a file's folder; or pin it.
 @(private = "file")
 document_menu_build_link :: proc(
 	app: ^App,
@@ -345,14 +344,14 @@ document_menu_build_link :: proc(
 	}
 	web := document_is_web(document.target)
 	file := !web && !document.folder
+	markdown := file && markdown_is_path(document.target)
 	add(menu, "Open", document_icon(document), {action = .Open_Link})
-	if file && markdown_is_path(document.target) {
+	if markdown || document.folder {
 		for row, placement in DOCUMENT_PLACEMENT_ROWS {
 			add(menu, row.label, row.glyph, {action = .Open_In, placement = placement})
 		}
-		add(menu, "Open with Default App", .Document, {action = .Open_External})
 	}
-	if document.folder {add(menu, "Open in New Shell", .Terminal, {action = .Open_Shell})}
+	if markdown {add(menu, "Open with Default App", .Document, {action = .Open_External})}
 	document_menu_push(menu, {separator = true})
 	add(menu, web ? "Copy Link" : "Copy Path", .Copy, {action = .Copy_Target})
 	if file {add(menu, "Open Containing Folder", .Folder, {action = .Open_Folder})}
@@ -360,26 +359,37 @@ document_menu_build_link :: proc(
 	document_menu_build_levels(app, menu, content, DOCUMENT_PIN_LABELS)
 }
 
-// Shows a Markdown file from a link at `placement`, beside the pane showing `content` or, once that pane has
-// gone, the focused one.
+// Places a link's Markdown file, or a new shell in its folder, beside the pane showing `content` or, once
+// that pane has gone, the focused one. The shell takes that pane's profile; a pane with no shell, such as
+// a Markdown pane, gives the default profile.
 @(private = "file")
 document_link_open_in :: proc(
 	app: ^App,
 	w: ^Window,
 	content: layout.Content,
-	path: string,
-	placement: Markdown_Placement,
+	document: Document,
+	placement: Pane_Placement,
 ) {
 	tree := window_tree(w)
 	if tree == nil {return}
-	file, ok := localpath.prepare_open(path)
+	node := layout.find_content(tree, content)
+	if node == layout.INVALID_NODE {node = tree.focus}
+	if document.folder {
+		if !os.is_dir(document.target) {
+			target_unavailable(app)
+			return
+		}
+		launch := Pane_Launch{directory = document.target}
+		if entry := workspace_session_for_content(app, content); entry != nil {launch.profile = entry.profile_id}
+		if !shell_open_placed(app, w, node, launch, placement) {notify(app, .Error, "Could not open a shell.")}
+		return
+	}
+	file, ok := localpath.prepare_open(document.target)
 	if !ok {
 		target_unavailable(app)
 		return
 	}
 	defer localpath.open_file_destroy(&file)
-	node := layout.find_content(tree, content)
-	if node == layout.INVALID_NODE {node = tree.focus}
 	if !markdown_open_placed(app, w, node, file.target, placement) {
 		notify(app, .Error, "Could not open the file.")
 	}
@@ -401,28 +411,6 @@ document_link_open_external :: proc(app: ^App, w: ^Window, path: string) {
 	}
 	defer localpath.open_file_destroy(&file)
 	if !target_open_approved(app, file.path, "") {notify(app, .Error, "Could not open the file.")}
-}
-
-// Starts a shell in `directory`, split beside the pane showing `content` or, once that pane has gone, the
-// focused one. It takes that pane's profile; a pane with no shell, such as a Markdown pane, gives the
-// default profile.
-@(private = "file")
-document_link_open_shell :: proc(app: ^App, w: ^Window, content: layout.Content, directory: string) {
-	tree := window_tree(w)
-	if tree == nil {return}
-	if !os.is_dir(directory) {
-		target_unavailable(app)
-		return
-	}
-	node := layout.find_content(tree, content)
-	if node == layout.INVALID_NODE {node = tree.focus}
-	launch := Pane_Launch{directory = directory}
-	if entry := workspace_session_for_content(app, content); entry != nil {launch.profile = entry.profile_id}
-	_, err := pane_split_at(
-		app, w, w.workspace, w.workspace.selected, node, commands.SPLIT_DEFAULT.direction,
-		commands.SPLIT_DEFAULT.ratio, true, launch, true,
-	)
-	pane_split_report(app, err)
 }
 
 // Rebuilds the rows for the current mode, keeping the selection near where it was. It leaves the mode as
@@ -631,10 +619,10 @@ document_menu_activate :: proc(app: ^App, w: ^Window, index: int) {
 		target_open(app, w, target_from_document(target))
 	case .Open_In:
 		link, _ := state.mode.(Document_Menu_Link)
-		path := strings.clone(link.document.target, context.temp_allocator)
+		document := Document{strings.clone(link.document.target, context.temp_allocator), link.document.folder}
 		content := state.content
 		overlay_close(app, w)
-		document_link_open_in(app, w, content, path, entry.placement)
+		document_link_open_in(app, w, content, document, entry.placement)
 	case .Open_External:
 		link, _ := state.mode.(Document_Menu_Link)
 		path := strings.clone(link.document.target, context.temp_allocator)
@@ -645,12 +633,6 @@ document_menu_activate :: proc(app: ^App, w: ^Window, index: int) {
 		folder := strings.clone(filepath.dir(link.document.target), context.temp_allocator)
 		overlay_close(app, w)
 		target_open(app, w, File_Target{folder})
-	case .Open_Shell:
-		link, _ := state.mode.(Document_Menu_Link)
-		directory := strings.clone(link.document.target, context.temp_allocator)
-		content := state.content
-		overlay_close(app, w)
-		document_link_open_shell(app, w, content, directory)
 	case .Copy_Target:
 		link, _ := state.mode.(Document_Menu_Link)
 		_ = clipboard_copy(app, link.document.target)
