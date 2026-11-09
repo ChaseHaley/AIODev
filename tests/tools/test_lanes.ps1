@@ -20,9 +20,15 @@ Assert-Throws { Select-AppTests $all @('cheap') Fast 'native' } 'Wrong-lane sele
 Assert-Throws { Select-AppTests $all @('cheap') All 'missing' } 'Missing selectors must fail'
 Assert-Throws { Select-AppTests $all @() Fast '' } 'Empty lanes must fail'
 Assert-True ((@(Select-AppTests $all @('cheap') Fast 'app_test.cheap'))[0] -eq 'cheap') 'Qualified names work'
+$desktop = @(Select-AppTests $all @('cheap') Desktop '' @('native'))
+Assert-True ($desktop.Count -eq 1 -and $desktop[0] -eq 'native') 'Desktop selects only its listed tests'
+Assert-Throws { Select-AppTests $all @('cheap') All '' @('gone') } 'Stale desktop lists must fail'
+Assert-Throws { Select-AppTests $all @('cheap') All '' @('cheap') } 'A test cannot be fast and desktop'
+Assert-Throws { Get-AppDesktopTests ('{"desktop": {"native": " "}}' | ConvertFrom-Json) } 'Desktop tests need a reason'
 $inventory = @(Get-AppTestInventory $root)
 $manifest = Get-Content -LiteralPath "$root/tests/app/lanes.json" -Raw | ConvertFrom-Json
 $fast = @(Select-AppTests $inventory $manifest.fast Fast '')
 $native = @(Select-AppTests $inventory $manifest.fast Native '')
 Assert-True (($fast.Count + $native.Count) -eq $inventory.Count) 'Repository partition is complete'
-"PASS app lane selection: $($fast.Count) fast + $($native.Count) native = $($inventory.Count) tests"
+$onDesktop = @(Select-AppTests $inventory $manifest.fast Desktop '' @(Get-AppDesktopTests $manifest))
+"PASS app lane selection: $($fast.Count) fast + $($native.Count) native = $($inventory.Count) tests; $($onDesktop.Count) on the desktop"

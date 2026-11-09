@@ -78,5 +78,10 @@
     "workspace143_targeted_pointer_keyboard_cancel_and_saved_filter",
     "workspace143_tint_validation_reset_and_icon_changes_preserve_identity",
     "workspace167_eligibility_subsets_match_their_callers"
-  ]
+  ],
+  "desktop_policy": "App tests run on the headless backend. A test listed here proves a Win32 effect rather than app behaviour; it compiles out of the headless build (when !platform.AIO_HEADLESS) and runs with the Win32 backend, which opens real windows.",
+  "desktop": {
+    "gestures_native_capture_loss_cancels_armed_header_before_late_release": "Sends WM_LBUTTONDOWN, WM_CANCELMODE and WM_LBUTTONUP to the real window, proving Windows' capture-loss message path.",
+    "empty_icon_on_a_pwsh_profile_resolves_to_the_pwsh_executables_icon": "Reads pwsh.exe's real icon resource; the headless backend returns a flat square for every executable."
+  }
 }
