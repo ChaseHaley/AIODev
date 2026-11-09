@@ -74,3 +74,23 @@ requests_carry_caller_format_and_directory :: proc(t: ^testing.T) {
 	listing, _ := cli.parse_options({"commands"}, "")
 	testing.expect_value(t, cli.request(listing, "", "", context.temp_allocator)[3], "app.commands")
 }
+
+// wait, commands and help run in aio, so aio answers their help; AIODev answers the rest.
+@(test)
+help_for_client_commands_is_answered_locally :: proc(t: ^testing.T) {
+	wait, _ := cli.parse_options({"help", "wait"}, "")
+	report, local := cli.local_help(wait)
+	testing.expect(t, local)
+	testing.expect_value(t, report.name, "wait")
+	testing.expect_value(t, len(report.options), 4)
+	for name in ([]string{"commands", "help"}) {
+		o, _ := cli.parse_options({"help", name}, "")
+		_, answered := cli.local_help(o)
+		testing.expectf(t, answered, "help %s should be answered by aio", name)
+	}
+	for args in ([][]string{{"help", "pane.split"}, {"help"}, {"wait", "--exit"}, {"help", "wait", "x"}}) {
+		o, _ := cli.parse_options(args, "")
+		_, answered := cli.local_help(o)
+		testing.expectf(t, !answered, "%v should not be answered by aio", args)
+	}
+}

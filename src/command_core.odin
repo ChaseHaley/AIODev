@@ -412,16 +412,67 @@ control_created :: proc(app: ^App, w: ^Window, id: u32, name: string) -> Outcome
 	return result
 }
 
-// Every command with its usage, or one command's when `name` is given.
+// Every command with its usage, or one command's help when `name` is given.
 @(private)
 command_catalogue :: proc(app: ^App, name: string) -> Outcome {
+	if name != "" {
+		command := commands.find(&app.registry, name)
+		if command == nil {return outcome_failure(.Usage, "unknown command; use aio commands")}
+		return {payload = Outcome_Usage(command_help(app, command))}
+	}
 	reports := make([dynamic]cli_protocol.Command_Report, context.temp_allocator)
 	for &command in app.registry.items {
-		if name != "" && command.name != name {continue}
 		usage := commands.usage(&command, context.temp_allocator)
-		append(&reports, cli_protocol.Command_Report{command.name, command.title, usage})
+		report := cli_protocol.Command_Report {
+			name    = command.name,
+			title   = command.title,
+			usage   = usage,
+			summary = command.summary,
+		}
+		append(&reports, report)
 	}
-	if name != "" && len(reports) == 0 {return outcome_failure(.Usage, "unknown command; use aio commands")}
-	if name != "" {return {payload = Outcome_Usage(reports[0])}}
 	return {payload = Outcome_Catalogue(reports[:])}
+}
+
+// A command's help: --pane, then a line for each argument it takes. --profile lists the profile ids
+// that can launch, which only the running app knows.
+@(private)
+command_help :: proc(app: ^App, command: ^commands.Command) -> cli_protocol.Command_Report {
+	options := make([dynamic]cli_protocol.Option_Report, 0, 1 + card(command.arguments), context.temp_allocator)
+	append(&options, cli_protocol.PANE_OPTION)
+	for argument in commands.Argument {
+		if argument not_in command.arguments {continue}
+		help := commands.argument_help(command, argument)
+		form := strings.builder_make(context.temp_allocator)
+		commands.argument_write(&form, argument)
+		option := cli_protocol.Option_Report {
+			option      = strings.to_string(form),
+			description = help.description,
+			default     = help.default,
+			example     = help.example,
+			required    = argument in command.required,
+		}
+		if option.required {option.default = ""}
+		if argument == .Profile {profile_help(&app.settings.profiles, &option)}
+		append(&options, option)
+	}
+	usage := commands.usage(command, context.temp_allocator)
+	return {command.name, command.title, usage, command.summary, options[:]}
+}
+
+// Adds the ids of the profiles that can launch, in settings order, and the default one.
+@(private)
+profile_help :: proc(profiles: ^settings.Profiles, option: ^cli_protocol.Option_Report) {
+	order := make([]int, len(profiles.items), context.temp_allocator)
+	ids := strings.builder_make(context.temp_allocator)
+	for index in order[:settings.profiles_in_order(profiles, order)] {
+		profile := &profiles.items[index]
+		if profile.command == "" {continue}
+		strings.write_string(&ids, strings.builder_len(ids) == 0 ? ": " : ", ")
+		strings.write_string(&ids, profile.id)
+	}
+	option.description = fmt.tprintf("%s%s", option.description, strings.to_string(ids))
+	if fallback := settings.profile_default(profiles); fallback != nil {
+		option.default = fmt.tprintf("%s, now %s", option.default, fallback.id)
+	}
 }

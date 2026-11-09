@@ -155,7 +155,7 @@ control_cli_reply :: proc(outcome: Outcome, json_output: bool) -> control.Respon
 		case Outcome_Created:
 			fmt.sbprintf(&b, "%d", payload.pane)
 		case Outcome_Usage:
-			fmt.sbprintf(&b, "%s\n%s", payload.usage, payload.title)
+			cli_protocol.command_report_write(&b, cli_protocol.Command_Report(payload))
 		case Outcome_Catalogue:
 			for command, i in payload {
 				if i > 0 {strings.write_byte(&b, '\n')}

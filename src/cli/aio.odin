@@ -19,7 +19,8 @@ USAGE_FORMAT :: `Usage: aio [--instance <name>] [--json] <command> [options] [--
        aio help [<command>]
 
 Runs AIODev commands from scripts and coding agents. Every palette command runs by
-name, such as aio tab.next; aio commands lists them all.
+name, such as aio tab.next; aio commands lists them all, and aio help <command>
+explains one's options, their defaults and an example of each.
 
 Panes   --pane takes a pane id, a pane name, here or focused. Inside an AIODev pane the
         default is here, the pane aio runs in; elsewhere it is the focused pane.
@@ -42,6 +43,72 @@ Turn on Command Line Control in AIODev's Settings (control.enabled) first.
 `
 
 WAIT_DEFAULT_TIMEOUT_MS :: 30000
+
+// The commands aio runs itself, which AIODev's catalogue does not know, so aio answers their help.
+// wait's timeout default is spelled literally, held in step by the #assert.
+#assert(WAIT_DEFAULT_TIMEOUT_MS == 30000)
+@(private, rodata)
+local_commands := [?]cli_protocol.Command_Report {
+	{
+		name = "wait",
+		title = "Wait for Text or Exit",
+		usage = "wait [--pane <pane>] (--text <text> | --exit) [--timeout <ms>]",
+		summary = "Polls the pane until its screen shows the text or its program exits; on timeout aio " +
+		"exits with status 1.",
+		options = {
+			cli_protocol.PANE_OPTION,
+			{
+				option = "--text <text>",
+				description = "waits until the pane's visible screen contains this text, case-sensitive",
+				default = "none (give --text or --exit)",
+				example = "--text 'PS '",
+			},
+			{
+				option = "--exit",
+				description = "waits until the pane's program exits, then prints its exit code, or closed " +
+				"for a pane closed while its program ran",
+				default = "off (give --text or --exit)",
+				example = "--exit",
+			},
+			{
+				option = "--timeout <ms>",
+				description = "gives up after this many milliseconds (0 waits without limit)",
+				default = "30000",
+				example = "--timeout 5000",
+			},
+		},
+	},
+	{
+		name = "commands",
+		title = "List Commands",
+		usage = "commands",
+		summary = "Prints every command AIODev runs by name, with its title; --json adds usage and summary.",
+	},
+	{
+		name = "help",
+		title = "Show Help",
+		usage = "help [<command>]",
+		summary = "Prints aio's usage, or one command's usage, title, summary and options.",
+		options = {
+			{
+				option = "<command>",
+				description = "the command to explain: any name aio commands lists, or wait, commands or help",
+				default = "none (prints aio's usage)",
+				example = "pane.split",
+			},
+		},
+	},
+}
+
+// The help aio gives itself for `help <command>` naming a command it runs; false for any other.
+@(require_results)
+local_help :: proc(o: Options) -> (cli_protocol.Command_Report, bool) {
+	if len(o.args) != 2 || o.args[0] != "help" {return {}, false}
+	for report in local_commands {
+		if report.name == o.args[1] {return report, true}
+	}
+	return {}, false
+}
 
 print_usage :: proc() {
 	fmt.printf(

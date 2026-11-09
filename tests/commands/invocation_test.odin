@@ -142,6 +142,33 @@ invocation_usage_names_accepted_arguments :: proc(t: ^testing.T) {
 	)
 }
 
+// A new argument cannot reach help without its description, default and example.
+@(test)
+every_argument_has_help :: proc(t: ^testing.T) {
+	plain: commands.Command
+	for argument in commands.Argument {
+		help := commands.argument_help(&plain, argument)
+		testing.expectf(t, help.description != "", "%v has no description", argument)
+		testing.expectf(t, help.default != "", "%v has no default", argument)
+		testing.expectf(t, help.example != "", "%v has no example", argument)
+	}
+}
+
+@(test)
+a_command_note_replaces_only_the_fields_it_gives :: proc(t: ^testing.T) {
+	plain: commands.Command
+	shared := commands.argument_help(&plain, .Text)
+	notes := [?]commands.Argument_Note{{.Text, {description = "the text to type"}}}
+	send := commands.Command {
+		notes = notes[:],
+	}
+	help := commands.argument_help(&send, .Text)
+	testing.expect_value(t, help.description, "the text to type")
+	testing.expect_value(t, help.default, shared.default)
+	testing.expect_value(t, help.example, shared.example)
+	testing.expect_value(t, commands.argument_help(&send, .Enter), commands.argument_help(&plain, .Enter))
+}
+
 // Path-ness follows the argument kind: --cwd and a command's file resolve against the sender's
 // directory wherever they appear, while text and other values stay as given.
 @(test)
