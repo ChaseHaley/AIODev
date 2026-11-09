@@ -146,6 +146,7 @@ Action :: enum u32 {
 	Minimize_All_Floating,
 	Tab_Context_Menu,
 	Restart_Pane,
+	App_Version,
 }
 
 // Everything one command is: its name and title, default shortcuts, what it does when a linked window
@@ -552,6 +553,9 @@ ACTIONS :: [Action]Command_Descriptor {
 	.Restart_Pane = {
 		"pane.restart", "Restart Stopped Pane", {{.Enter, {}}, {.Numpad_Enter, {}}}, .Local, {},
 	},
+	.App_Version = {
+		cli_protocol.VERSION_COMMAND, "Show AIODev's Build", nil, .Host, {hidden = true, control = .Unnamed},
+	},
 }
 
 @(require_results)
@@ -711,6 +715,8 @@ command_execute :: proc(app: ^App, ctx: Command_Context, invocation: commands.In
 	switch action {
 	case .App_Commands:
 		return command_catalogue(app, invocation.text)
+	case .App_Version:
+		return version_outcome()
 	case .Pane_List:
 		return {payload = Outcome_Panes(pane_reports(app, nil))}
 	case .Pane_Status:

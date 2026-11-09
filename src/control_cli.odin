@@ -21,11 +21,12 @@ Cli_Pipe :: union {
 }
 Cli_Pipe_Failed :: struct {}
 
-@(private = "file")
+@(private)
 CLI_EXECUTABLE :: "aio.exe"
 
 // The aio command line as App embeds it: the pipe it reaches the app through, and the directory holding
-// aio.exe beside this executable, which each shell's PATH gets; empty when aio.exe is missing.
+// aio.exe beside this executable, which each shell's PATH and AIODEV_CLI get; empty when aio.exe is
+// missing.
 Cli_State :: struct {
 	cli:           Cli_Pipe,
 	cli_directory: string,

@@ -82,9 +82,12 @@ closed_session_find :: proc(history: ^Closed_Sessions, id: u32) -> (Closed_Sessi
 PANE_VARIABLE :: "AIODEV_PANE"
 @(private)
 INSTANCE_VARIABLE :: "AIODEV_INSTANCE"
+@(private)
+CLI_VARIABLE :: "AIODEV_CLI"
 
 // `pane` is the session id the launch serves. The shell learns it from AIODEV_PANE, so the aio command
-// line acts on "here" by default, and finds aio itself on PATH.
+// line acts on "here" by default, and finds aio itself on PATH and in AIODEV_CLI, which names the aio
+// that matches this AIODev even when another aio comes first on PATH.
 @(private)
 session_config :: proc(
 	app: ^App,
@@ -104,9 +107,13 @@ session_config :: proc(
 		log.errorf("expanding the shell directory failed: %v", err)
 		directory = directory_text
 	}
-	environment := make([dynamic]pty.Env_Var, 0, 2, context.temp_allocator)
+	environment := make([dynamic]pty.Env_Var, 0, 3, context.temp_allocator)
 	append(&environment, pty.Env_Var{PANE_VARIABLE, fmt.tprintf("%d", pane)})
 	if app.options.name != "" {append(&environment, pty.Env_Var{INSTANCE_VARIABLE, app.options.name})}
+	if app.cli_directory != "" {
+		cli := fmt.tprintf(`%s\%s`, app.cli_directory, CLI_EXECUTABLE)
+		append(&environment, pty.Env_Var{CLI_VARIABLE, cli})
+	}
 	return {
 		command_line = settings.shell_command_line(command, app.settings.shell.integration),
 		title = title,

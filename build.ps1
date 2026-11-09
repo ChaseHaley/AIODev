@@ -107,8 +107,11 @@ function Build-App([string[]] $Mode, [string] $Output = 'build/aiodev.exe') {
     $buildId = Get-BuildId
     $kind = if ($Mode -contains '-define:AIO_CONTROL=true') { 'verify' }
         elseif ($Mode -contains '-o:speed') { 'release' } else { 'debug' }
-    # Literal single quotes keep a numeric Git hash a string in Odin.
-    $identity = @("-define:AIO_BUILD_ID='$buildId'", "-define:AIO_BUILD_KIND='$kind'")
+    $version = (Get-ReleaseTag $buildId) -replace '^v', ''
+    # Literal single quotes keep a numeric Git hash a string in Odin. aio.exe gets the same identity,
+    # so aio can tell when it talks to an AIODev from another build.
+    $identity = @("-define:AIO_BUILD_ID='$buildId'", "-define:AIO_BUILD_KIND='$kind'",
+        "-define:AIO_BUILD_VERSION='$version'")
     # With -print-linker-flags, Odin compiles and keeps the object but leaves the resource and link steps to us.
     $printed = @(& odin build src "-out:$Output" @Mode @identity @flags @resource -keep-temp-files -print-linker-flags)
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
@@ -152,7 +155,7 @@ function Build-App([string[]] $Mode, [string] $Output = 'build/aiodev.exe') {
     [string[]] $cliMode = if ($Mode -contains '-o:speed') { '-o:speed' } else { '-debug' }
     $serverName = Split-Path $Output -Leaf
     Invoke-Odin build src/cli "-out:$(Join-Path (Split-Path $Output) 'aio.exe')" @cliMode `
-        '-subsystem:console' "-define:AIO_SERVER_NAME='$serverName'" @flags
+        '-subsystem:console' "-define:AIO_SERVER_NAME='$serverName'" @identity @flags
 }
 
 function Build-Release([string] $Destination = 'build/release/aiodev.exe') {
@@ -175,6 +178,14 @@ function Get-BuildId {
     } catch {
         return 'unknown'
     }
+}
+
+# The release tag, such as v0.10.0, of a clean checkout of exactly that tag; '' for any other build.
+function Get-ReleaseTag([string] $BuildId) {
+    if ($BuildId -match '\+dirty$|^unknown$') { return '' }
+    $tag = & git describe --tags --exact-match HEAD 2>$null
+    if ($LASTEXITCODE -ne 0 -or -not $tag) { return '' }
+    return $tag.Trim()
 }
 
 # Library packages expose API that tests and later features use, so only application code
@@ -229,11 +240,8 @@ switch ($Task) {
             Where-Object { $_ -ne 'install.ps1' } | Sort-Object)
         [IO.File]::WriteAllText((Join-Path $stageRoot 'files.txt'), (($manifest | ForEach-Object { "$_`r`n" }) -join ''))
         # A clean checkout of a release tag names the archive after the tag; anything else uses the revision.
-        $label = $buildId
-        if ($buildId -notmatch '\+dirty$|^unknown$') {
-            $tag = & git describe --tags --exact-match HEAD 2>$null
-            if ($LASTEXITCODE -eq 0 -and $tag) { $label = $tag.Trim() }
-        }
+        $label = Get-ReleaseTag $buildId
+        if (-not $label) { $label = $buildId }
         $archive = "build/AIODev-$label-windows-x64.zip"
         Compress-Archive -LiteralPath $stage -DestinationPath $archive -Force
         $hash = (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant()

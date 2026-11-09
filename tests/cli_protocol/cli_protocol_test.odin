@@ -47,3 +47,11 @@ pane_status_words :: proc(t: ^testing.T) {
 	_, ok := cli_protocol.pane_status_parse("stopped")
 	testing.expect(t, !ok)
 }
+
+@(test)
+build_text_names_release_or_dev :: proc(t: ^testing.T) {
+	release := cli_protocol.build_text("0.10.0", "4dc71c8", "release", context.temp_allocator)
+	testing.expect_value(t, release, "0.10.0 (4dc71c8, release)")
+	development := cli_protocol.build_text("", "510462e+dirty", "verify", context.temp_allocator)
+	testing.expect_value(t, development, "dev (510462e+dirty, verify)")
+}
