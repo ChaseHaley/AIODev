@@ -120,7 +120,7 @@ split_position :: proc(args: []string) -> bool {
 		case "move", "down", "up", "click", "wheel": positions = []int{2}
 		case "drag": positions = []int{2, 3}
 		}
-	} else if args[0] == "window" && args[1] == "move" {
+	} else if args[0] == "window" && (args[1] == "move" || args[1] == "at") {
 		positions = []int{2}
 	}
 	for i in positions {

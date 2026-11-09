@@ -5,36 +5,30 @@ $repo = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
 $ctl = Join-Path $repo 'build/aioctl.exe'
 $directory = Join-Path $repo "build/verify/$Name"
 
-# The drop target comes from the OS hit test under the pointer, so the journey keeps its windows above other
-# applications and proves each point lands on the window it claims. Screen capture shows what a person sees.
-Add-Type -AssemblyName System.Drawing
-Add-Type -ReferencedAssemblies System.Drawing -TypeDefinition @'
+# The drop target comes from the hit test under the pointer, so the journey proves each point lands on the
+# window it claims with aioctl window at. On the Win32 build other applications share the desktop, so the
+# journey also keeps its windows above them; a headless instance has the virtual desktop to itself.
+# Evidence is the app's own capture of the destination.
+function Raise([uint32] $AppPid, [double[]] $Origin) {
+    if ($script:headless) { return }
+    if (-not ('TabAcrossNative' -as [type])) {
+        Add-Type -TypeDefinition @'
 using System;
 using System.Collections.Generic;
-using System.Drawing;
-using System.Drawing.Imaging;
 using System.Runtime.InteropServices;
 public static class TabAcrossNative {
     public delegate bool EnumProc(IntPtr hwnd, IntPtr data);
     [StructLayout(LayoutKind.Sequential)] public struct POINT { public int X, Y; }
-    [StructLayout(LayoutKind.Sequential)] public struct RECT { public int Left, Top, Right, Bottom; }
-    [DllImport("user32.dll")] static extern bool SetProcessDpiAwarenessContext(IntPtr context);
-    [DllImport("user32.dll")] static extern bool SystemParametersInfoW(uint action, uint param, ref RECT rect, uint ini);
+    [DllImport("user32.dll")] static extern IntPtr SetThreadDpiAwarenessContext(IntPtr context);
     [DllImport("user32.dll")] static extern bool EnumWindows(EnumProc proc, IntPtr data);
     [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr hwnd, out uint pid);
     [DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr hwnd);
     [DllImport("user32.dll")] static extern bool SetWindowPos(IntPtr hwnd, IntPtr after, int x, int y, int cx, int cy, uint flags);
     [DllImport("user32.dll")] static extern bool ClientToScreen(IntPtr hwnd, ref POINT p);
-    [DllImport("user32.dll")] static extern IntPtr WindowFromPoint(POINT p);
-    [DllImport("user32.dll")] static extern IntPtr GetAncestor(IntPtr hwnd, uint flags);
-    public static void Aware() { SetProcessDpiAwarenessContext(new IntPtr(-4)); }
-    public static int[] WorkArea() {
-        var r = new RECT();
-        SystemParametersInfoW(0x0030, 0, ref r, 0);
-        return new[] { r.Left, r.Top, r.Right, r.Bottom };
-    }
     // Puts the app's window with this client origin above every other window, without activating it.
     public static bool Raise(uint pid, int x, int y) {
+        // Per-monitor v2, so client origins match the app's physical screen pixels.
+        SetThreadDpiAwarenessContext(new IntPtr(-4));
         var found = new List<IntPtr>();
         EnumWindows((h, d) => { uint p; GetWindowThreadProcessId(h, out p); if (p == pid && IsWindowVisible(h)) found.Add(h); return true; }, IntPtr.Zero);
         foreach (var h in found) {
@@ -44,23 +38,13 @@ public static class TabAcrossNative {
         }
         return false;
     }
-    // The client origin of the top-level window under a screen point.
-    public static string HitAt(int x, int y) {
-        IntPtr h = GetAncestor(WindowFromPoint(new POINT { X = x, Y = y }), 2);
-        var o = new POINT();
-        ClientToScreen(h, ref o);
-        return o.X + "," + o.Y;
-    }
-    public static void Screen(int x, int y, int width, int height, string path) {
-        using (var bitmap = new Bitmap(width, height))
-        using (var g = Graphics.FromImage(bitmap)) {
-            g.CopyFromScreen(x, y, 0, 0, new Size(width, height));
-            bitmap.Save(path, ImageFormat.Png);
-        }
-    }
 }
 '@
-[TabAcrossNative]::Aware()
+    }
+    if (-not [TabAcrossNative]::Raise($AppPid, [int]$Origin[0], [int]$Origin[1])) {
+        throw "No window of the app has client origin $($Origin -join ',')."
+    }
+}
 
 function Aio {
     $out = & $ctl --name $Name @args
@@ -77,7 +61,10 @@ function Assert-Equal($Actual, $Expected, [string] $Label) {
     Write-Output "PASS $Label"
 }
 function Numbers([string] $Value) { return @($Value -split ',' | ForEach-Object { [double]$_ }) }
-function Select-Window([string] $Id) { Aio window select $Id | Out-Null }
+function Select-Window([string] $Id) {
+    Aio window select $Id | Out-Null
+    $script:selected = $Id
+}
 # Presses a tab of the selected window and passes the drag threshold, leaving the pointer held.
 function Begin-Drag([int] $Index, [string] $Rect) {
     $r = Numbers (State)["tab.$Index.$Rect"]
@@ -91,8 +78,8 @@ function Target([string] $Rectangle, [double] $FractionX, [double] $FractionY) {
     $d = $script:destinationState
     $r, $o = (Numbers $Rectangle), (Numbers $d['window.origin'])
     $x, $y = [int]($o[0]+$r[0]+$r[2]*$FractionX), [int]($o[1]+$r[1]+$r[3]*$FractionY)
-    $hit = [TabAcrossNative]::HitAt($x, $y)
-    if ($hit -ne $d['window.origin']) { throw "Point $x,$y hits origin $hit, not $($d['window.origin'])" }
+    $hit = "$(Aio window at "$x,$y")" -replace '^window=', ''
+    if ($hit -ne $d['window.id']) { throw "Point $x,$y hits window $hit, not $($d['window.id'])" }
     return "$x,$y"
 }
 function Destination-Incoming([string] $Source, [int] $Count, [int] $Slot, [string] $Label) {
@@ -117,13 +104,16 @@ function Row-Point([int] $Index) {
     if ($Index -ge $rows -and $selected -lt $rows) { $top += 8*$scale }
     return "$([int]($row[0]+$row[2]/2)),$([int]($top+17*$scale))"
 }
+# Captures the destination, then gives the selection back to the window driving if it is still open.
 function Capture([string] $Label) {
     Start-Sleep -Milliseconds 300
-    $o, $size = (Numbers $script:destinationState['window.origin']), ($script:destinationState['window.size'] -split 'x')
-    $work = [TabAcrossNative]::WorkArea()
-    $width = [Math]::Min([int]$size[0], $work[2]-[int]$o[0])
-    $height = [Math]::Min([int]$size[1], $work[3]-[int]$o[1])
-    [TabAcrossNative]::Screen([int]$o[0], [int]$o[1], $width, $height, (Join-Path $directory "$Label.png"))
+    $driving = $script:selected
+    Select-Window $script:destination
+    Aio capture --out (Join-Path $directory "$Label.png") | Out-Null
+    $s = State
+    if (@(1..[int]$s['windows.count'] | ForEach-Object { $s["window.$_.id"] }) -contains $driving) {
+        Select-Window $driving
+    }
     Write-Output "SHOT $Label"
 }
 
@@ -131,6 +121,8 @@ Aio launch --fresh | Out-Null
 try {
     $s = State
     $appPid = [uint32]$s['app.pid']
+    # Only a headless instance reports what it asked of the operating system.
+    $headless = $s.ContainsKey('os.thumbnail_places')
     $source = $s['window.id']
     $sourceWorkspace = $s['workspace.id']
     Aio wait text 'PS ' | Out-Null
@@ -145,8 +137,9 @@ try {
     Aio wait text 'PS ' | Out-Null
     Aio command tab.select_1 | Out-Null
 
-    # The destination overlaps the source, leaving the source's tabs in view and sitting above it.
-    $work = [TabAcrossNative]::WorkArea()
+    # The destination overlaps the source, leaving the source's tabs in view and sitting above it. The
+    # destination opened last, so it is already above the source on the virtual desktop.
+    $work = @((State)['window.work_area'] -split ',' | ForEach-Object { [int]$_ })
     $scale = [double](State)['window.scale']
     Select-Window $source
     Aio window move "$($work[0]+20),$($work[1]+20)" | Out-Null
@@ -154,9 +147,8 @@ try {
     Select-Window $destination
     Aio window move "$($work[0]+20+[int](760*$scale)),$($work[1]+20+[int](140*$scale))" | Out-Null
     $destinationState = State
-    $destinationOrigin = Numbers $destinationState['window.origin']
-    Assert-Equal ([TabAcrossNative]::Raise($appPid, $sourceOrigin[0], $sourceOrigin[1])) $true 'source raised'
-    Assert-Equal ([TabAcrossNative]::Raise($appPid, $destinationOrigin[0], $destinationOrigin[1])) $true 'destination raised'
+    Raise $appPid $sourceOrigin
+    Raise $appPid (Numbers $destinationState['window.origin'])
 
     # The source's first tab has two panes, with output to follow; its second keeps the window open.
     Select-Window $source

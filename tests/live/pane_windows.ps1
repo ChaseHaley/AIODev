@@ -6,92 +6,35 @@ $ctl = Join-Path $repo 'build/aioctl.exe'
 $directory = Join-Path $repo "build/verify/$name"
 $path = Join-Path $directory 'settings.ini'
 
-# Cross-window steps rely on the OS hit test under the pointer, so the journey keeps its windows
-# above other applications and proves each target point really lands where it claims. Evidence
-# captures the window identified by its client origin, not the process's first visible window.
-$assemblies = @('System.Drawing')
-if ($PSVersionTable.PSEdition -eq 'Core') {
-    $assemblies += 'Microsoft.Win32.Primitives', 'System.Drawing.Primitives', 'System.Drawing.Common', 'System.Collections'
-    foreach ($assemblyName in @('System.Private.Windows.GdiPlus.dll', 'System.Private.Windows.Core.dll')) {
-        $assemblyPath = Join-Path $PSHOME $assemblyName
-        if (Test-Path -LiteralPath $assemblyPath) { $assemblies += $assemblyPath }
-    }
-}
-Add-Type -ReferencedAssemblies $assemblies -TypeDefinition @'
+# Cross-window steps rely on the hit test under the pointer, so the journey proves each target point
+# lands on the window it claims with aioctl window at. On the Win32 build other applications share the
+# desktop, so the journey also keeps its windows above them; a headless instance has the virtual
+# desktop to itself. Evidence is the app's own capture of the window concerned.
+function Raise {
+    if ($script:headless) { return }
+    if (-not ('PaneWindowsNative' -as [type])) {
+        Add-Type -TypeDefinition @'
 using System;
 using System.Collections.Generic;
-using System.Drawing;
-using System.Drawing.Imaging;
 using System.Runtime.InteropServices;
 public static class PaneWindowsNative {
     public delegate bool EnumProc(IntPtr hwnd, IntPtr data);
-    [StructLayout(LayoutKind.Sequential)] public struct POINT { public int X, Y; }
-    [StructLayout(LayoutKind.Sequential)] public struct RECT { public int Left, Top, Right, Bottom; }
     [DllImport("user32.dll")] static extern bool EnumWindows(EnumProc proc, IntPtr data);
     [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr hwnd, out uint pid);
     [DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr hwnd);
     [DllImport("user32.dll")] static extern bool SetWindowPos(IntPtr hwnd, IntPtr after, int x, int y, int cx, int cy, uint flags);
-    [DllImport("user32.dll")] static extern IntPtr WindowFromPoint(POINT p);
-    [DllImport("user32.dll")] static extern IntPtr GetAncestor(IntPtr hwnd, uint flags);
-    [DllImport("user32.dll")] static extern bool ClientToScreen(IntPtr hwnd, ref POINT p);
-    [DllImport("user32.dll")] static extern bool GetWindowRect(IntPtr hwnd, out RECT r);
-    [DllImport("user32.dll")] static extern bool PrintWindow(IntPtr hwnd, IntPtr dc, uint flags);
-    [DllImport("user32.dll")] static extern bool SystemParametersInfoW(uint action, uint param, ref RECT rect, uint ini);
-    [DllImport("user32.dll")] static extern IntPtr SetThreadDpiAwarenessContext(IntPtr context);
-    // Per-monitor v2, so coordinates match the app's physical screen pixels.
-    static void Aware() { SetThreadDpiAwarenessContext(new IntPtr(-4)); }
-    static List<IntPtr> Windows(uint pid) {
+    public static int RaiseProcess(uint pid) {
         var found = new List<IntPtr>();
         EnumWindows((h, d) => { uint p; GetWindowThreadProcessId(h, out p); if (p == pid && IsWindowVisible(h)) found.Add(h); return true; }, IntPtr.Zero);
-        return found;
-    }
-    static POINT Origin(IntPtr h) { var o = new POINT(); ClientToScreen(h, ref o); return o; }
-    public static int RaiseProcess(uint pid) {
-        Aware();
-        var found = Windows(pid);
         // HWND_TOPMOST without moving, sizing or activating.
         foreach (var h in found) SetWindowPos(h, new IntPtr(-1), 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0010);
         return found.Count;
     }
-    // Returns "pid,clientX,clientY" for the top-level window under a screen point.
-    public static string HitAt(int x, int y) {
-        Aware();
-        IntPtr h = WindowFromPoint(new POINT { X = x, Y = y });
-        if (h == IntPtr.Zero) return "0,0,0";
-        h = GetAncestor(h, 2);
-        uint pid; GetWindowThreadProcessId(h, out pid);
-        var o = Origin(h);
-        return pid + "," + o.X + "," + o.Y;
-    }
-    public static int[] WorkArea() {
-        Aware();
-        var r = new RECT();
-        SystemParametersInfoW(0x0030, 0, ref r, 0);
-        return new[] { r.Left, r.Top, r.Right, r.Bottom };
-    }
-    // Captures the frame of the visible window whose client origin is (x, y).
-    public static string Shot(uint pid, int x, int y, string path) {
-        Aware();
-        foreach (var h in Windows(pid)) {
-            var o = Origin(h);
-            if (o.X != x || o.Y != y) continue;
-            RECT r;
-            if (!GetWindowRect(h, out r)) throw new Exception("GetWindowRect failed");
-            int width = r.Right-r.Left, height = r.Bottom-r.Top;
-            using (var bitmap = new Bitmap(width, height))
-            using (var g = Graphics.FromImage(bitmap)) {
-                IntPtr dc = g.GetHdc();
-                bool ok;
-                try { ok = PrintWindow(h, dc, 2); } finally { g.ReleaseHdc(dc); }
-                if (!ok) throw new Exception("PrintWindow failed");
-                bitmap.Save(path, ImageFormat.Png);
-            }
-            return width + "x" + height + " " + path;
-        }
-        throw new Exception("no visible window of pid " + pid + " has client origin " + x + "," + y);
-    }
 }
 '@
+    }
+    [void][PaneWindowsNative]::RaiseProcess([uint32]$script:appPid)
+}
 
 function Invoke-Aio {
     $out = & $ctl --name $name @args
@@ -125,12 +68,18 @@ function Assert-True([bool] $Condition, [string] $Label) {
     if (-not $Condition) { throw "$Label failed" }
     Write-Output "PASS $Label"
 }
+# Captures the window whose state is supplied, then gives the selection back to the window driving.
 function Shot($State, [string] $Label) {
-    $o = Origin $State
-    [void][PaneWindowsNative]::Shot([uint32]$script:appPid, $o[0], $o[1], (Join-Path $directory "$Label.png"))
+    $driving = $script:selected
+    Select-Window $State['window.id']
+    Invoke-Aio capture --out (Join-Path $directory "$Label.png") | Out-Null
+    Select-Window $driving
     Write-Output "SHOT $Label window=$($State['window.id'])"
 }
-function Select-Window([string] $Id) { Invoke-Aio window select $Id | Out-Null }
+function Select-Window([string] $Id) {
+    Invoke-Aio window select $Id | Out-Null
+    $script:selected = $Id
+}
 # A new workspace opens with its suggested name in an editable chip; Enter accepts it.
 function Accept-Name([string] $Id) {
     Select-Window $Id
@@ -174,18 +123,14 @@ function Grab($State) {
     $scale = [double]$State['window.scale']
     return "$([int]($r[0]+[math]::Min(80*$scale,$r[2]/3))),$([int]($r[1]+14*$scale))"
 }
-function Raise { [void][PaneWindowsNative]::RaiseProcess([uint32]$script:appPid) }
-# Proves a screen point hits the AIODev window with the given client origin (or no AIODev window).
+# Proves a screen point hits the AIODev window whose state is supplied (or no AIODev window).
 function Assert-Hit([string] $Point, $State, [string] $Label) {
-    $xy = $Point -split ','
-    $hit = ([PaneWindowsNative]::HitAt([int]$xy[0], [int]$xy[1])) -split ','
+    $hit = "$(Invoke-Aio window at $Point)" -replace '^window=', ''
     if ($null -eq $State) {
-        if ($hit[0] -eq "$script:appPid") { throw "$Label point $Point is covered by an AIODev window" }
+        if ($hit -ne '0') { throw "$Label point $Point is covered by AIODev window $hit" }
         return
     }
-    if ($hit[0] -ne "$script:appPid" -or "$($hit[1]),$($hit[2])" -ne $State['window.origin']) {
-        throw "$Label point $Point hits pid $($hit[0]) origin $($hit[1]),$($hit[2]), not $($State['window.origin'])"
-    }
+    if ($hit -ne $State['window.id']) { throw "$Label point $Point hits window $hit, not $($State['window.id'])" }
 }
 function Shell-Pid {
     Invoke-Aio run 'Write-Output ("SHELL" + "PID_" + $PID)' | Out-Null
@@ -217,6 +162,8 @@ try {
     Invoke-Aio wait text 'PS '
     $s = Read-State
     $script:appPid = $s['app.pid']
+    # Only a headless instance reports what it asked of the operating system.
+    $script:headless = $s.ContainsKey('os.thumbnail_places')
     $source = $s['window.id']
     $sourceWorkspace = $s['workspace.id']
     Assert-True ($sourceWorkspace -ne '' -and $s['workspace.name'] -ne '') 'root workspace has a stable ID and name'
@@ -248,11 +195,22 @@ try {
     Assert-Equal $s['windows.count'] 2 'owner activation opens no window'
     Assert-Equal (Window-State $destination)['workspace.id'] $destinationWorkspace 'owner keeps the selected workspace'
 
-    # Place both windows side by side with room for a desktop point below them.
-    $work = [PaneWindowsNative]::WorkArea()
-    foreach ($id in @($source, $destination)) { Select-Window $id; Invoke-Aio resize 72x16 | Out-Null }
-    $size = @((Window-State $source)['window.size'] -split 'x' | ForEach-Object { [int]$_ })
-    if (2*$size[0]+120 -gt $work[2]-$work[0] -or $size[1]+200 -gt $work[3]-$work[1]) {
+    # Place both windows side by side with room for a desktop point below them. Two 72-column windows
+    # do not fit the 1920-pixel virtual desktop, and fewer columns leave too little to split four ways,
+    # so there both windows take 72 DPI instead: the drags this journey proves do not depend on scale.
+    $work = @((Read-State)['window.work_area'] -split ',' | ForEach-Object { [int]$_ })
+    foreach ($dpi in @(0, 72)) {
+        foreach ($id in @($source, $destination)) {
+            Select-Window $id
+            if ($dpi) { Invoke-Aio dpi $dpi | Out-Null }
+            Invoke-Aio resize 72x16 | Out-Null
+        }
+        $size = @((Window-State $source)['window.size'] -split 'x' | ForEach-Object { [int]$_ })
+        # The destination's right edge: a 40-pixel margin, the source, a 60-pixel gap and the destination.
+        $width = 100+$size[0]+[int]((Window-State $destination)['window.size'] -split 'x')[0]
+        if ($width -le $work[2]-$work[0]) { break }
+    }
+    if ($width -gt $work[2]-$work[0] -or $size[1]+200 -gt $work[3]-$work[1]) {
         throw "Work area $($work -join ',') cannot hold two $($size -join 'x') windows and a desktop point."
     }
     Select-Window $source

@@ -85,7 +85,8 @@ focus_moves_with_events :: proc(t: ^testing.T) {
 	testing.expect_value(t, hit, a)
 }
 
-// Moving a window onto a display of another DPI reports the new DPI, as WM_DPICHANGED does.
+// Moving a window onto a display of another DPI reports the new DPI, as WM_DPICHANGED does, and its
+// work area becomes that display.
 @(test)
 moving_between_displays_reports_dpi :: proc(t: ^testing.T) {
 	p: platform.Platform
@@ -104,6 +105,11 @@ moving_between_displays_reports_dpi :: proc(t: ^testing.T) {
 	testing.expect_value(t, platform.window_set_position(&p, id, 2500, 100), platform.Error.None)
 	testing.expect_value(t, len(drain(&p)), 0)
 	testing.expect_value(t, platform.primary_dpi(&p), u32(96))
+	left, top, right, bottom, err := platform.window_work_area(&p, id)
+	testing.expect_value(t, err, platform.Error.None)
+	testing.expect_value(t, [4]i32{left, top, right, bottom}, [4]i32{1920, 0, 3840, 2160})
+	_, _, _, _, err = platform.window_work_area(&p, input.Window_Id(9999))
+	testing.expect_value(t, err, platform.Error.Invalid_Window)
 }
 
 // The in-memory clipboard round-trips text with CRLF line breaks, as the Windows one stores them,

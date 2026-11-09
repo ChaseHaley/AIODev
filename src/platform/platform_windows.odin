@@ -787,6 +787,19 @@ when !AIO_HEADLESS {
 		return window_set_position(p, id, x, y)
 	}
 
+	// The work area of the monitor that holds most of the window: the screen less the taskbar.
+	@(require_results)
+	window_work_area :: proc(p: ^Platform, id: input.Window_Id) -> (left, top, right, bottom: i32, err: Error) {
+		window := find_window(p, id)
+		if window == nil {return 0, 0, 0, 0, .Invalid_Window}
+		info := w.MONITORINFO{cbSize = size_of(w.MONITORINFO)}
+		// MONITOR_DEFAULTTONEAREST, as window_set_screen chooses the monitor.
+		monitor := w.MonitorFromWindow(window.hwnd, w.Monitor_From_Flags(2))
+		if !os_ok(w.GetMonitorInfoW(monitor, &info), "GetMonitorInfoW") {return 0, 0, 0, 0, .Os}
+		area := info.rcWork
+		return area.left, area.top, area.right, area.bottom, .None
+	}
+
 	// A small always-on-top copy of part of a window, composed by the desktop window manager. It stays
 	// live without the app drawing anything, and the pointer passes through it.
 	Thumbnail :: struct {

@@ -5,61 +5,40 @@ $repo = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
 $ctl = Join-Path $repo 'build/aioctl.exe'
 $directory = Join-Path $repo "build/verify/$Name"
 
-# The thumbnail is composed by the desktop window manager, so only a capture of the screen shows it.
-Add-Type -AssemblyName System.Drawing
-Add-Type -ReferencedAssemblies System.Drawing -TypeDefinition @'
+# The thumbnail is composed by the desktop window manager, so only a capture of the screen shows it, and only on
+# the Win32 build: a headless instance draws none and counts each placement in os.thumbnail_places instead.
+# Window evidence is the app's own capture.
+function Screen-Shot([int] $X, [int] $Y, [int] $Width, [int] $Height, [string] $Path) {
+    if (-not ('TearOffNative' -as [type])) {
+        $assemblies = @('System.Drawing')
+        if ($PSVersionTable.PSEdition -eq 'Core') {
+            $assemblies += 'System.Drawing.Primitives', 'System.Drawing.Common'
+            foreach ($assemblyName in @('System.Private.Windows.GdiPlus.dll', 'System.Private.Windows.Core.dll')) {
+                $assemblyPath = Join-Path $PSHOME $assemblyName
+                if (Test-Path -LiteralPath $assemblyPath) { $assemblies += $assemblyPath }
+            }
+        }
+        Add-Type -ReferencedAssemblies $assemblies -TypeDefinition @'
 using System;
 using System.Drawing;
 using System.Drawing.Imaging;
 using System.Runtime.InteropServices;
 public static class TearOffNative {
-    public delegate bool EnumProc(IntPtr hwnd, IntPtr data);
-    [StructLayout(LayoutKind.Sequential)] public struct POINT { public int X, Y; }
-    [StructLayout(LayoutKind.Sequential)] public struct RECT { public int Left, Top, Right, Bottom; }
-    [DllImport("user32.dll")] static extern bool SetProcessDpiAwarenessContext(IntPtr context);
-    [DllImport("user32.dll")] static extern bool EnumWindows(EnumProc proc, IntPtr data);
-    [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr hwnd, out uint pid);
-    [DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr hwnd);
-    [DllImport("user32.dll")] static extern bool ClientToScreen(IntPtr hwnd, ref POINT p);
-    [DllImport("user32.dll")] static extern bool GetWindowRect(IntPtr hwnd, out RECT r);
-    [DllImport("user32.dll")] static extern bool PrintWindow(IntPtr hwnd, IntPtr dc, uint flags);
-    [DllImport("user32.dll")] static extern bool SystemParametersInfoW(uint action, uint param, ref RECT rect, uint ini);
-    public static void Aware() { SetProcessDpiAwarenessContext(new IntPtr(-4)); }
-    public static int[] WorkArea() {
-        var r = new RECT();
-        SystemParametersInfoW(0x0030, 0, ref r, 0);
-        return new[] { r.Left, r.Top, r.Right, r.Bottom };
-    }
+    [DllImport("user32.dll")] static extern IntPtr SetThreadDpiAwarenessContext(IntPtr context);
     public static void Screen(int x, int y, int width, int height, string path) {
+        // Per-monitor v2, so the rectangle is in the app's physical screen pixels.
+        SetThreadDpiAwarenessContext(new IntPtr(-4));
         using (var bitmap = new Bitmap(width, height))
         using (var g = Graphics.FromImage(bitmap)) {
             g.CopyFromScreen(x, y, 0, 0, new Size(width, height));
             bitmap.Save(path, ImageFormat.Png);
         }
     }
-    // Captures the app window whose client origin is (x, y), whatever covers it.
-    public static void Window(uint pid, int x, int y, string path) {
-        IntPtr found = IntPtr.Zero;
-        EnumWindows((h, d) => {
-            uint owner; GetWindowThreadProcessId(h, out owner);
-            if (owner != pid || !IsWindowVisible(h)) return true;
-            var o = new POINT(); ClientToScreen(h, ref o);
-            if (o.X == x && o.Y == y) { found = h; return false; }
-            return true;
-        }, IntPtr.Zero);
-        if (found == IntPtr.Zero) throw new Exception("no window has client origin " + x + "," + y);
-        RECT r;
-        GetWindowRect(found, out r);
-        using (var bitmap = new Bitmap(r.Right-r.Left, r.Bottom-r.Top))
-        using (var g = Graphics.FromImage(bitmap)) {
-            IntPtr dc = g.GetHdc();
-            try { PrintWindow(found, dc, 2); } finally { g.ReleaseHdc(dc); }
-            bitmap.Save(path, ImageFormat.Png);
-        }
-    }
 }
 '@
-[TearOffNative]::Aware()
+    }
+    [TearOffNative]::Screen($X, $Y, $Width, $Height, $Path)
+}
 
 function Aio {
     $out = & $ctl --name $Name @args
@@ -95,23 +74,30 @@ function Other-Window($Source) {
 
 Aio launch --fresh | Out-Null
 try {
-    $defaultSize = (State)['window.size']
+    $s = State
+    $defaultSize = $s['window.size']
+    # Only a headless instance reports what it asked of the operating system.
+    $headless = $s.ContainsKey('os.thumbnail_places')
+    $work = Numbers $s['window.work_area']
+    Aio window move "$($work[0]+20),$($work[1]+20)" | Out-Null
+    # The source grows taller than the default size, keeping its width, so the drop point to its right stays
+    # on the desktop even on the 1920x1080 virtual one. It grows before it splits: resize sizes the window for
+    # the focused pane's grid as if it filled the window.
+    $grid = Numbers $s['grid.size'] 'x'
+    Aio resize "$($grid[0])x$($grid[1]+4)" | Out-Null
     Aio command pane.split_right | Out-Null
     Aio wait text 'PS ' | Out-Null
     Aio run 'Write-Output TORN$(6*7)' | Out-Null
     Aio wait text TORN42 | Out-Null
-    $work = [TearOffNative]::WorkArea()
-    Aio window move "$($work[0]+20),$($work[1]+20)" | Out-Null
-    # Resizing a split reports a timeout on its grid; the window size is what this journey needs.
-    & $ctl --name $Name resize 150x45 | Out-Null
     $s = State
     $source = $s['window.id']
     $size = Numbers $s['window.size'] 'x'
     if ("$($size[0])x$($size[1])" -eq $defaultSize) { throw 'The source window did not grow past the default size.' }
     $session = $s['session.id']
     $sessions = $s['sessions.count']
-    $origin = Numbers $s['window.origin']
     $desktop = "$([int]($work[2]-420)),$([int]($work[3]-280))"
+    Assert-Equal (Aio window at $desktop) 'window=0' 'the drop point is on the desktop'
+    $places = $s['os.thumbnail_places']
 
     # Over the desktop: a small live thumbnail, a hidden destination, and no source pane text covered.
     Begin-Drag
@@ -124,11 +110,16 @@ try {
         throw "Thumbnail is too large: $($s['panes.drop.thumbnail_size'])"
     }
     Write-Output "PASS thumbnail is $($s['panes.drop.thumbnail_size'])"
-    Start-Sleep -Milliseconds 400
-    $point = Numbers $desktop
-    [TearOffNative]::Screen([int]$point[0]-20, [int]$point[1]-20, [int]$thumbnail[0]+80, [int]$thumbnail[1]+80,
-        (Join-Path $directory 'thumbnail.png'))
-    [TearOffNative]::Window([uint32]$s['app.pid'], [int]$origin[0], [int]$origin[1], (Join-Path $directory 'source-during-drag.png'))
+    if ($headless) {
+        Assert-Equal ([int]$s['os.thumbnail_places'] -gt [int]$places) $true 'the thumbnail is placed on the desktop'
+    } else {
+        Start-Sleep -Milliseconds 400
+        $point = Numbers $desktop
+        Screen-Shot ([int]$point[0]-20) ([int]$point[1]-20) ([int]$thumbnail[0]+80) ([int]$thumbnail[1]+80) `
+            (Join-Path $directory 'thumbnail.png')
+        Write-Output 'SHOT thumbnail'
+    }
+    Aio capture --out (Join-Path $directory 'source-during-drag.png') | Out-Null
 
     # Escape cancels everything.
     Aio key Esc | Out-Null
@@ -163,7 +154,7 @@ try {
     }
     Write-Output 'PASS the new window stays on the monitor'
     Start-Sleep -Milliseconds 300
-    [TearOffNative]::Window([uint32]$n['app.pid'], [int]$landed[0], [int]$landed[1], (Join-Path $directory 'naming.png'))
+    Aio capture --out (Join-Path $directory 'naming.png') | Out-Null
 
     # Typing replaces the selection, Enter hands the keyboard to the shell.
     Aio type 'Torn pane' | Out-Null

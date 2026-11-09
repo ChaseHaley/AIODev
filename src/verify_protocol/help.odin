@@ -171,6 +171,7 @@ Tabs: tabs.count/selected, tab.N.id/focus/panes, tab.N.pane.ID.session/grid.
 Windows: windows.count, window.id/workspace_index, window.N.id/origin/size/workspace_index.
 Window inventory and workspace indexes are one-based; zero means no selected window/workspace.
 Origins are client pixel origins in signed screen coordinates; sizes are client pixels.
+window.work_area=left,top,right,bottom is the selected window's monitor less the taskbar.
 State and commands use the selected verification window, otherwise the focused window.
 Visible panes: panes.count/focused, pane.ID.rect=x,y,width,height in client pixels.
 Focused session: session.id/status/exit/message/title; session.ID.builds counts glyph builds.
@@ -367,15 +368,19 @@ Feed it to tools\vtreplay to reproduce screen and cell state without a shell.
 			&w,
 			`window select <id>
 window move <signed-x>,<signed-y>
+window at <signed-x>,<signed-y>
 window maximize|restore|close
 Select a persistent verification target from state's window.N.id, without changing OS focus.
 Reads and subsequent commands use this window until another is selected or it is destroyed.
 On destruction, clear the target and fall back to the focused or first remaining window.
 Move positions the selected window's outer top-left in screen pixels without activating it.
+At reads the same screen-point hit test that a drag uses (WindowFromPoint, or the virtual desktop
+headless). Output: window=<id> for the topmost app window there, or window=0 for the desktop or
+another application. It changes nothing and needs no selected window.
 Coordinates are signed 32-bit integers; quote x,y in PowerShell. Unknown window IDs fail.
 Maximize, restore and close act on the selected window as its caption buttons do: restore leaves
 maximized, and close asks the window to close, which may confirm first.
-Output is one line: ok; <changes>. No defaults.
+Output is one line: ok; <changes>, except for at. No defaults.
 `,
 		)
 	case .Focus:

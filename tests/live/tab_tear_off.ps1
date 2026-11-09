@@ -5,24 +5,28 @@ $repo = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
 $ctl = Join-Path $repo 'build/aioctl.exe'
 $directory = Join-Path $repo "build/verify/$Name"
 
-# The thumbnail is composed by the desktop window manager, so only a capture of the screen shows it.
-Add-Type -AssemblyName System.Drawing
-Add-Type -ReferencedAssemblies System.Drawing -TypeDefinition @'
+# The thumbnail is composed by the desktop window manager, so only a capture of the screen shows it, and only on
+# the Win32 build: a headless instance draws none and counts each placement in os.thumbnail_places instead.
+function Screen-Shot([int] $X, [int] $Y, [int] $Width, [int] $Height, [string] $Path) {
+    if (-not ('TabTearOffNative' -as [type])) {
+        $assemblies = @('System.Drawing')
+        if ($PSVersionTable.PSEdition -eq 'Core') {
+            $assemblies += 'System.Drawing.Primitives', 'System.Drawing.Common'
+            foreach ($assemblyName in @('System.Private.Windows.GdiPlus.dll', 'System.Private.Windows.Core.dll')) {
+                $assemblyPath = Join-Path $PSHOME $assemblyName
+                if (Test-Path -LiteralPath $assemblyPath) { $assemblies += $assemblyPath }
+            }
+        }
+        Add-Type -ReferencedAssemblies $assemblies -TypeDefinition @'
 using System;
 using System.Drawing;
 using System.Drawing.Imaging;
 using System.Runtime.InteropServices;
 public static class TabTearOffNative {
-    [StructLayout(LayoutKind.Sequential)] public struct RECT { public int Left, Top, Right, Bottom; }
-    [DllImport("user32.dll")] static extern bool SetProcessDpiAwarenessContext(IntPtr context);
-    [DllImport("user32.dll")] static extern bool SystemParametersInfoW(uint action, uint param, ref RECT rect, uint ini);
-    public static void Aware() { SetProcessDpiAwarenessContext(new IntPtr(-4)); }
-    public static int[] WorkArea() {
-        var r = new RECT();
-        SystemParametersInfoW(0x0030, 0, ref r, 0);
-        return new[] { r.Left, r.Top, r.Right, r.Bottom };
-    }
+    [DllImport("user32.dll")] static extern IntPtr SetThreadDpiAwarenessContext(IntPtr context);
     public static void Screen(int x, int y, int width, int height, string path) {
+        // Per-monitor v2, so the rectangle is in the app's physical screen pixels.
+        SetThreadDpiAwarenessContext(new IntPtr(-4));
         using (var bitmap = new Bitmap(width, height))
         using (var g = Graphics.FromImage(bitmap)) {
             g.CopyFromScreen(x, y, 0, 0, new Size(width, height));
@@ -31,7 +35,9 @@ public static class TabTearOffNative {
     }
 }
 '@
-[TabTearOffNative]::Aware()
+    }
+    [TabTearOffNative]::Screen($X, $Y, $Width, $Height, $Path)
+}
 
 function Aio {
     $out = & $ctl --name $Name @args
@@ -65,7 +71,10 @@ function Other-Window($Source) {
 
 Aio launch --fresh | Out-Null
 try {
-    $defaultSize = (State)['window.size']
+    $s = State
+    $defaultSize = $s['window.size']
+    # Only a headless instance reports what it asked of the operating system.
+    $headless = $s.ContainsKey('os.thumbnail_places')
     # The first tab has three panes and an output line to follow; the second stays behind.
     Aio command pane.split_right | Out-Null
     Aio wait text 'PS ' | Out-Null
@@ -76,7 +85,7 @@ try {
     Aio command tab.new | Out-Null
     Aio wait text 'PS ' | Out-Null
     Aio command tab.select_1 | Out-Null
-    $work = [TabTearOffNative]::WorkArea()
+    $work = Numbers (State)['window.work_area']
     Aio window move "$($work[0]+20),$($work[1]+20)" | Out-Null
     $s = State
     $source = $s['window.id']
@@ -86,6 +95,8 @@ try {
     $sessions = $s['sessions.count']
     $tabId = $s['tab.1.id']
     $desktop = "$([int]($work[2]-420)),$([int]($work[3]-280))"
+    Assert-Equal (Aio window at $desktop) 'window=0' 'the drop point is on the desktop'
+    $places = $s['os.thumbnail_places']
 
     # Over the desktop: a small live thumbnail of the whole tab and a hidden destination.
     Begin-Drag 1
@@ -99,10 +110,16 @@ try {
         throw "Thumbnail is too large: $($s['tabs.drop.thumbnail_size'])"
     }
     Write-Output "PASS thumbnail is $($s['tabs.drop.thumbnail_size'])"
-    Start-Sleep -Milliseconds 400
-    $point = Numbers $desktop
-    [TabTearOffNative]::Screen([int]$point[0]-20, [int]$point[1]-20, [int]$thumbnail[0]+80, [int]$thumbnail[1]+80,
-        (Join-Path $directory 'thumbnail.png'))
+    if ($headless) {
+        Assert-Equal ([int]$s['os.thumbnail_places'] -gt [int]$places) $true 'the thumbnail is placed on the desktop'
+    } else {
+        Start-Sleep -Milliseconds 400
+        $point = Numbers $desktop
+        Screen-Shot ([int]$point[0]-20) ([int]$point[1]-20) ([int]$thumbnail[0]+80) ([int]$thumbnail[1]+80) `
+            (Join-Path $directory 'thumbnail.png')
+        Write-Output 'SHOT thumbnail'
+    }
+    Aio capture --out (Join-Path $directory 'source-during-drag.png') | Out-Null
 
     # Escape cancels everything.
     Aio key Esc | Out-Null
