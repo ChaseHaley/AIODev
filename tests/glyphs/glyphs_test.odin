@@ -20,7 +20,7 @@ fixture_create :: proc(t: ^testing.T) -> (f: Fixture, ok: bool) {
 	}
 	f.family, err = font.family_load(f.fonts, "Consolas")
 	device_error: render.Error
-	f.device, device_error = render.device_create()
+	f.device, device_error = render.device_create(.Warp)
 	font_ok := testing.expect_value(t, err, font.Error.None)
 	if !testing.expect_value(t, device_error, render.Error.None) || !font_ok {
 		fixture_destroy(&f)

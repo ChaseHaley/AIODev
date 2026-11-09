@@ -3,7 +3,6 @@ package main
 import "aio:platform"
 import "aio:render"
 import "aio:ui"
-import "core:time"
 
 // Every animated part of a window, once. Each feature advances its own animation and says whether it
 // still moves; window_motion_update and window_animating only compose them. A part added here must be
@@ -86,10 +85,11 @@ window_motion_running :: proc(w: ^Window, part: Window_Motion) -> bool {
 // When the window's next frame will be on screen. Motion is sampled there, by the frame itself and by
 // any event handler that settles a motion early, so both see the same instant. A window that cannot
 // present has no next frame; its motion runs on the assumed refresh so it still settles.
-window_frame_time :: proc(w: ^Window) -> ui.Frame_Time {
+window_frame_time :: proc(app: ^App, w: ^Window) -> ui.Frame_Time {
+	now := clock_now(&app.clock)
 	surface := window_surface(w)
-	if surface == nil || !window_drawable(w) {return render.frame_time_now()}
-	return render.frame_predict(surface, time.tick_now())
+	if surface == nil || !window_drawable(w) {return render.frame_time_at(now)}
+	return render.frame_predict(surface, now)
 }
 
 // Advances everything that moves in w to `frame`, the palette and the notices too when w draws them;
@@ -138,10 +138,11 @@ motion_active :: proc(app: ^App) -> bool {
 // retarget motion without drawing, and windows that cannot present still finish theirs and release what
 // they hold. A window that then draws samples the same instant again, so this changes nothing it shows.
 update_motion :: proc(app: ^App) {
-	if notices_unshown(app) && ui.notices_animate(&app.notices, app.animations, render.frame_time_now()) {
+	frame := render.frame_time_at(clock_now(&app.clock))
+	if notices_unshown(app) && ui.notices_animate(&app.notices, app.animations, frame) {
 		mark_all_dirty(app)
 	}
-	for w in app.windows {_ = window_motion_update(app, w, window_frame_time(w))}
+	for w in app.windows {_ = window_motion_update(app, w, window_frame_time(app, w))}
 }
 
 refresh_animations :: proc(app: ^App) {
@@ -149,6 +150,6 @@ refresh_animations :: proc(app: ^App) {
 	if app.animations == enabled {return}
 	app.animations = enabled
 	// Without animations every notice snaps to the end of its motion at once.
-	if !enabled {_ = ui.notices_animate(&app.notices, false, render.frame_time_now())}
+	if !enabled {_ = ui.notices_animate(&app.notices, false, render.frame_time_at(clock_now(&app.clock)))}
 	mark_all_dirty(app)
 }

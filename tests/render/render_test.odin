@@ -1,9 +1,11 @@
 package render_test
 
 import "base:runtime"
+import "core:log"
 import "core:math"
 import "core:testing"
 import "aio:render"
+import d3d "vendor:directx/d3d11"
 
 Fixture :: struct {
 	device: ^render.Device,
@@ -13,7 +15,7 @@ Fixture :: struct {
 
 fixture_create :: proc(t: ^testing.T, width, height: i32) -> (f: Fixture, ok: bool) {
 	err: render.Error
-	f.device, err = render.device_create()
+	f.device, err = render.device_create(.Warp)
 	if !testing.expect_value(t, err, render.Error.None) {
 		return
 	}
@@ -127,10 +129,36 @@ draw_list_copy_keeps_only_its_range :: proc(t: ^testing.T) {
 	testing.expect_value(t, copy.rects[0].rect.x, f32(1))
 }
 
+// Warp draws on Microsoft's software rasterizer whatever GPU the machine has, so pixel tests agree
+// across machines; Auto, the app's choice, prefers the GPU when there is one.
+@(test)
+driver_choice_selects_the_rasterizer :: proc(t: ^testing.T) {
+	warp, warp_error := render.device_create(.Warp)
+	if !testing.expect_value(t, warp_error, render.Error.None) {return}
+	defer render.device_destroy(warp)
+	testing.expect_value(t, render.device_driver(warp), render.Driver.Warp)
+	testing.expect_value(t, render.device_adapter(warp), "Microsoft Basic Render Driver")
+
+	// Without output pointers, D3D11CreateDevice only reports whether that driver could be made.
+	levels := [?]d3d.FEATURE_LEVEL{._11_0}
+	probe := d3d.CreateDevice(
+		nil, .HARDWARE, nil, {.BGRA_SUPPORT}, raw_data(levels[:]), len(levels), d3d.SDK_VERSION, nil, nil, nil,
+	)
+	if probe < 0 {
+		log.infof("skipping the Auto half: no hardware D3D11 adapter (HRESULT 0x%08x)", u32(probe))
+		return
+	}
+	auto, auto_error := render.device_create(.Auto)
+	if !testing.expect_value(t, auto_error, render.Error.None) {return}
+	defer render.device_destroy(auto)
+	testing.expect_value(t, render.device_driver(auto), render.Driver.Hardware)
+	testing.expect(t, render.device_adapter(auto) != render.device_adapter(warp), "Auto drew on WARP")
+}
+
 @(test)
 allocation_errors :: proc(t: ^testing.T) {
 	failing := runtime.Allocator{procedure = failing_allocator}
-	d, err := render.device_create(failing)
+	d, err := render.device_create(.Warp, failing)
 	testing.expect_value(t, err, render.Error.Out_Of_Memory)
 	testing.expect_value(t, d, nil)
 	list := render.draw_list_init(failing)

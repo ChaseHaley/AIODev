@@ -93,7 +93,7 @@ window_surface_present :: proc(app: ^App, w: ^Window, background: render.Color) 
 recover_device :: proc(app: ^App) {
 	log.warn("the graphics device was lost; recreating it")
 	for w in app.windows {window_surface_release(w)}
-	device, err := render.device_create()
+	device, err := render.device_create(app.render_driver)
 	if err != .None {
 		log.errorf("recreating the graphics device failed: %v", err)
 		app_device_failed(app)

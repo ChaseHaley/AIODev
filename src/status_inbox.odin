@@ -71,8 +71,8 @@ status_items :: proc(app: ^App, w: ^Window) -> []Status_Item {
 }
 
 @(private)
-status_age :: proc(at: time.Time) -> string {
-	seconds := int(time.duration_seconds(time.since(at)))
+status_age :: proc(at, now: time.Time) -> string {
+	seconds := int(time.duration_seconds(time.diff(at, now)))
 	switch {
 	case seconds < 60:
 		return fmt.tprintf("%ds", max(0, seconds))
@@ -125,7 +125,7 @@ status_row_draw :: proc(
 	text_x := left + icon + ui.SPACE_2 * s
 	show_dismiss := highlighted && term.program_status_finished(item.record.state)
 	right := r.x + r.width - (show_dismiss ? ui.SPACE_1 + ui.HEIGHT_COMPACT + ui.SPACE_1 : ui.CONTROL_INSET) * s
-	age := status_age(item.record.updated_at)
+	age := status_age(item.record.updated_at, clock_wall(&app.clock))
 	age_width := ui.text_width(&small, age)
 	if !show_dismiss {
 		if result := ui.draw_text(&small, &w.list, age, right - age_width, line_one, app.theme.faint);

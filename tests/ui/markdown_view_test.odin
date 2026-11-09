@@ -205,7 +205,7 @@ matches_draw_in_find_colours_with_the_selected_one_distinct :: proc(t: ^testing.
 	f: Fixture
 	defer fixture_destroy(&f)
 	if !fixture_init(t, &f, "needle and needle, on a line\n") {return}
-	device, device_error := render.device_create()
+	device, device_error := render.device_create(.Warp)
 	if !testing.expect_value(t, device_error, render.Error.None) {return}
 	defer render.device_destroy(device)
 	cache: glyphs.Cache
@@ -251,7 +251,7 @@ only_the_hovered_link_is_underlined :: proc(t: ^testing.T) {
 	f: Fixture
 	defer fixture_destroy(&f)
 	if !fixture_init(t, &f, "[first](https://a.example) and [second](https://b.example)\n") {return}
-	device, device_error := render.device_create()
+	device, device_error := render.device_create(.Warp)
 	if !testing.expect_value(t, device_error, render.Error.None) {return}
 	defer render.device_destroy(device)
 	cache: glyphs.Cache

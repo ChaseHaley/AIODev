@@ -26,7 +26,7 @@ Frame_Time :: struct {
 // a new swap chain has shown anything.
 FRAME_PERIOD_DEFAULT :: time.Second / 60
 
-// A frame shown now at the assumed refresh, for drawing that has no display clock.
-frame_time_now :: proc() -> Frame_Time {
-	return {display = time.tick_now(), period = FRAME_PERIOD_DEFAULT}
+// A frame shown at `display` at the assumed refresh, for drawing that has no display clock.
+frame_time_at :: proc(display: time.Tick) -> Frame_Time {
+	return {display = display, period = FRAME_PERIOD_DEFAULT}
 }

@@ -251,7 +251,7 @@ pane_drag_target_move :: proc(
 	if !window_linked(w) && pane_workspace_drag_move(app, source_window, w, x, y, swap) {return true}
 	title_height := window_title_height(w)
 	destination := selected_tab(w.workspace)
-	now := time.tick_now()
+	now := clock_now(&app.clock)
 	on_tab := -1
 	over_rail, rail_new_tab := false, false
 	if w.tabs_horizontal {

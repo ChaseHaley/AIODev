@@ -166,12 +166,12 @@ layout_state_deadline :: proc(app: ^App) -> (time.Tick, bool) {
 layout_state_touch :: proc(app: ^App) {
 	idle, ok := app.layout_save.(Layout_Save_Idle)
 	if !ok {return}
-	app.layout_save = Layout_Save_Scheduled{idle.path, time.tick_add(time.tick_now(), LAYOUT_SAVE_DELAY)}
+	app.layout_save = Layout_Save_Scheduled{idle.path, time.tick_add(clock_now(&app.clock), LAYOUT_SAVE_DELAY)}
 }
 
 layout_state_tick :: proc(app: ^App) {
 	scheduled, ok := app.layout_save.(Layout_Save_Scheduled)
-	if !ok || time.tick_diff(time.tick_now(), scheduled.deadline) > 0 || motion_active(app) {return}
+	if !ok || time.tick_diff(clock_now(&app.clock), scheduled.deadline) > 0 || motion_active(app) {return}
 	app.layout_save = Layout_Save_Idle{scheduled.path}
 	layout_state_save(app)
 }

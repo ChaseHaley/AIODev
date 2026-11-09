@@ -204,7 +204,7 @@ pane_rearrange :: proc(app: ^App, w: ^Window, op: Pane_Operation) -> bool {
 	pane_motion_arm(w)
 	window_relayout(app, w)
 	window_update_title(app, w)
-	cursor_blink_reset(w)
+	cursor_blink_reset(w, clock_now(&app.clock))
 	return true
 }
 

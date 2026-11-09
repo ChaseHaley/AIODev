@@ -45,6 +45,7 @@ App :: struct {
 	perf:                  perf.Stats,
 	options:               instance.Options,
 	paths:                 instance.Paths,
+	clock:                 Clock,
 	app_id:                string,
 	platform:              platform_api.Platform,
 	platform_ready:        bool,
@@ -61,6 +62,8 @@ App :: struct {
 	family:                font.Family,
 	font_points:           f32,
 	device:                ^render.Device,
+	// Auto in the app; tests that read the app's pixels back set Warp before app_init.
+	render_driver:         render.Driver,
 	cache:                 glyphs.Cache,
 	shell_icons:           [dynamic]Shell_Icon,
 	processes:             Process_Worker,
@@ -147,7 +150,7 @@ app_init :: proc(app: ^App) -> bool {
 		return false
 	}
 	render_error: render.Error
-	app.device, render_error = render.device_create()
+	app.device, render_error = render.device_create(app.render_driver)
 	if render_error != .None {
 		log.errorf("graphics device creation failed: %v", render_error)
 		return false
@@ -319,7 +322,7 @@ tick :: proc(app: ^App, wait_frames := true) {
 	pane_links_sync(app)
 	window_notices_sync(app)
 	for window in app.windows {
-		now := time.tick_now()
+		now := clock_now(&app.clock)
 		for timer in Window_Timer {window_timer_advance(app, window, timer, now)}
 		status_spin_tick(window)
 		status_taskbar_follow(app, window)
@@ -383,9 +386,9 @@ app_timers_advance :: proc(app: ^App, phase: Timer_Phase) {
 		case .Processes:
 			update_processes(app)
 		case .Notices:
-			if ui.notices_expire(&app.notices, app.animations, time.tick_now()) {mark_all_dirty(app)}
+			if ui.notices_expire(&app.notices, app.animations, clock_now(&app.clock)) {mark_all_dirty(app)}
 		case .Drag_Hover:
-			for i := 0; i < len(app.windows); i += 1 {pane_drag_tick(app, app.windows[i], time.tick_now())}
+			for i := 0; i < len(app.windows); i += 1 {pane_drag_tick(app, app.windows[i], clock_now(&app.clock))}
 		case .Verify:
 			when AIO_CONTROL {verify_tick(app)}
 		case .Layout_Save:
@@ -501,7 +504,7 @@ wait_timeout :: proc(app: ^App, waits: Frame_Waits) -> u32 {
 	if !found {
 		return INFINITE
 	}
-	remaining := time.tick_diff(time.tick_now(), deadline)
+	remaining := time.tick_diff(clock_now(&app.clock), deadline)
 	return u32(clamp(time.duration_milliseconds(remaining) + 1, 0, 60_000))
 }
 
@@ -542,7 +545,7 @@ initial_geometry :: proc(app: ^App) -> term.Geometry {
 notify :: proc(app: ^App, kind: ui.Notice_Kind, text: string) {
 	duration := kind == .Error || kind == .Warning ? ERROR_NOTICE_DURATION : NOTICE_DURATION
 	key := u32(Notice_Key.Transient)
-	ui.notices_put(&app.notices, key, kind, text, duration, app.animations, time.tick_now())
+	ui.notices_put(&app.notices, key, kind, text, duration, app.animations, clock_now(&app.clock))
 	mark_all_dirty(app)
 }
 
@@ -564,7 +567,7 @@ apply_fonts :: proc(app: ^App) {
 			)
 			ui.notices_put(
 				&app.notices, u32(Notice_Key.Font), .Error, text, ERROR_NOTICE_DURATION, app.animations,
-				time.tick_now(),
+				clock_now(&app.clock),
 			)
 			return
 		}
