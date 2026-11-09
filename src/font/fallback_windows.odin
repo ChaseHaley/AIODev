@@ -13,7 +13,7 @@ SHAPING_LOCALE :: "en-us"
 Fallback_Base :: enum u8 {
 	// The run's own family, so text stays in the family that drew the rest of the line.
 	Family,
-	// The system emoji family, so a run that asks for emoji presentation cannot be drawn as
+	// System.emoji_family, so a run that asks for emoji presentation cannot be drawn as
 	// text by a family that covers its base character.
 	Emoji,
 }
@@ -47,12 +47,7 @@ fallback_resolve :: proc(
 	source_ready := dw.analysis_source_init(&source, units, windows.L(SHAPING_LOCALE))
 	assert(source_ready)
 	weight, slant := style_values(style)
-	base_family: windows.wstring
-	if base == .Emoji {
-		base_family = windows.L("Segoe UI Emoji")
-	} else {
-		base_family = family_name(s, family)
-	}
+	base_family := base == .Emoji ? s.emoji_family : family_name(s, family)
 	mapped: u32
 	font: ^dw.IFont
 	scale: f32 = 1

@@ -869,7 +869,33 @@ Measuring_Mode :: enum i32 {
 
 IFontFallbackBuilder :: struct #raw_union {
 	#subtype iunknown: windows.IUnknown,
-	using vtable: ^windows.IUnknown_VTable,
+	using vtable: ^IFontFallbackBuilder_VTable,
+}
+IFontFallbackBuilder_VTable :: struct {
+	using iunknown_vtable: windows.IUnknown_VTable,
+	AddMapping:            proc "system" (
+		this: ^IFontFallbackBuilder,
+		ranges: [^]Unicode_Range,
+		rangesCount: u32,
+		targetFamilyNames: [^]windows.wstring,
+		targetFamilyNamesCount: u32,
+		fontCollection: ^IFontCollection,
+		localeName: windows.wstring,
+		baseFamilyName: windows.wstring,
+		scale: f32,
+	) -> windows.HRESULT,
+	AddMappings:           proc "system" (
+		this: ^IFontFallbackBuilder,
+		fontFallback: ^IFontFallback,
+	) -> windows.HRESULT,
+	CreateFontFallback:    proc "system" (
+		this: ^IFontFallbackBuilder,
+		fontFallback: ^^IFontFallback,
+	) -> windows.HRESULT,
+}
+
+Unicode_Range :: struct {
+	first, last: u32,
 }
 
 Glyph_Run_Description :: struct {
@@ -1025,4 +1051,79 @@ IFont1_VTable :: struct {
 	GetPanose: proc "system" (this: ^IFont1, panose: ^[10]u8),
 	GetUnicodeRanges: proc "system" (this: ^IFont1, count: u32, ranges: rawptr, actual: ^u32) -> windows.HRESULT,
 	IsMonospacedFont: proc "system" (this: ^IFont1) -> windows.BOOL,
+}
+
+// IDWriteFactory3 to IDWriteFactory5, declared up to the in-memory font loader. Slots this package
+// never calls are rawptr; their count keeps the later slots in place. C++ overloads only reorder
+// among themselves, so the count is all that matters for them.
+IFactory5_UUID := &IID{0x958db99a, 0xbe2a, 0x4f09, {0xaf, 0x7d, 0x65, 0x18, 0x98, 0x03, 0xd1, 0xd3}}
+IFactory5 :: struct #raw_union {
+	#subtype ifactory2: IFactory2,
+	using vtable: ^IFactory5_VTable,
+}
+IFactory5_VTable :: struct {
+	using ifactory2_vtable:          IFactory2_VTable,
+	// IDWriteFactory3
+	CreateGlyphRunAnalysis_3:        rawptr,
+	CreateCustomRenderingParams_3:   rawptr,
+	CreateFontFaceReference_a:       rawptr,
+	CreateFontFaceReference_b:       rawptr,
+	GetSystemFontSet:                rawptr,
+	CreateFontSetBuilder:            rawptr,
+	CreateFontCollectionFromFontSet: proc "system" (
+		this: ^IFactory5,
+		fontSet: ^IFontSet,
+		fontCollection: ^^IFontCollection,
+	) -> windows.HRESULT,
+	GetSystemFontCollection_3:       rawptr,
+	GetFontDownloadQueue:            rawptr,
+	// IDWriteFactory4
+	TranslateColorGlyphRun_4:        rawptr,
+	ComputeGlyphOrigins_a:           rawptr,
+	ComputeGlyphOrigins_b:           rawptr,
+	// IDWriteFactory5
+	CreateFontSetBuilder_5:          proc "system" (
+		this: ^IFactory5,
+		fontSetBuilder: ^^IFontSetBuilder1,
+	) -> windows.HRESULT,
+	CreateInMemoryFontFileLoader:    proc "system" (
+		this: ^IFactory5,
+		newLoader: ^^IInMemoryFontFileLoader,
+	) -> windows.HRESULT,
+}
+
+IFontSet :: struct #raw_union {
+	#subtype iunknown: windows.IUnknown,
+	using vtable: ^windows.IUnknown_VTable,
+}
+
+IFontSetBuilder1 :: struct #raw_union {
+	#subtype iunknown: windows.IUnknown,
+	using vtable: ^IFontSetBuilder1_VTable,
+}
+IFontSetBuilder1_VTable :: struct {
+	using iunknown_vtable:  windows.IUnknown_VTable,
+	AddFontFaceReference_a: rawptr,
+	AddFontFaceReference_b: rawptr,
+	AddFontSet:             rawptr,
+	CreateFontSet:          proc "system" (this: ^IFontSetBuilder1, fontSet: ^^IFontSet) -> windows.HRESULT,
+	AddFontFile:            proc "system" (this: ^IFontSetBuilder1, fontFile: ^IFontFile) -> windows.HRESULT,
+}
+
+IInMemoryFontFileLoader :: struct #raw_union {
+	#subtype ifontfileloader: IFontFileLoader,
+	using vtable: ^IInMemoryFontFileLoader_VTable,
+}
+IInMemoryFontFileLoader_VTable :: struct {
+	using ifontfileloader_vtable:     IFontFileLoader_VTable,
+	// With no owner the loader copies the data, so the caller's bytes need not outlive the file.
+	CreateInMemoryFontFileReference: proc "system" (
+		this: ^IInMemoryFontFileLoader,
+		factory: ^IFactory,
+		fontData: rawptr,
+		fontDataSize: u32,
+		ownerObject: ^windows.IUnknown,
+		fontFile: ^^IFontFile,
+	) -> windows.HRESULT,
+	GetFileCount:                    proc "system" (this: ^IInMemoryFontFileLoader) -> u32,
 }

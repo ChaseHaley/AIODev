@@ -4,3 +4,4 @@
 *.png binary
 *.dll binary
 *.exe binary
+*.ttf binary
