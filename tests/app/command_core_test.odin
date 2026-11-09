@@ -43,6 +43,9 @@ control_commands_target_panes_without_moving_focus :: proc(t: ^testing.T) {
 	state.platform_ready = true
 	if !testing.expect(t, app.app_init(&state)) { return }
 	testing.expect(t, state.cli == nil, "the CLI pipe stays closed until control.enabled is on")
+	// Panes opened from here name the aio beside AIODev in AIODEV_CLI.
+	delete(state.cli_directory)
+	state.cli_directory = strings.clone(`C:\aio-cli-test`)
 	w := state.windows[0]
 	workspace := w.workspace
 	first := state.sessions[0].id
@@ -72,12 +75,13 @@ control_commands_target_panes_without_moving_focus :: proc(t: ^testing.T) {
 	testing.expect_value(t, workspace.selected, 0)
 	testing.expect(t, app.window_tree(w) == &workspace.tabs[0].tree)
 
-	// Text reaches the pane's shell, which learns its own id from AIODEV_PANE.
+	// Text reaches the pane's shell, which learns its own id from AIODEV_PANE and its aio from AIODEV_CLI.
 	id := strings.clone(fmt.tprintf("%d", split_pane))
 	defer delete(id)
-	expected := strings.clone(fmt.tprintf("pane=%d", split_pane))
+	expected := strings.clone(fmt.tprintf(`pane=%d cli=C:\aio-cli-test\aio.exe`, split_pane))
 	defer delete(expected)
-	sent := invoke(&state, first, "pane.send", "--pane", id, "--enter", `Write-Output "pane=$env:AIODEV_PANE"`)
+	echo :: `Write-Output "pane=$env:AIODEV_PANE cli=$env:AIODEV_CLI"`
+	sent := invoke(&state, first, "pane.send", "--pane", id, "--enter", echo)
 	testing.expectf(t, sent.status == .Ok, "pane.send: %v %s", sent.status, sent.message)
 	seen := false
 	for deadline := time.tick_now(); !seen && time.tick_since(deadline) < 15 * time.Second; {
@@ -86,7 +90,7 @@ control_commands_target_panes_without_moving_focus :: proc(t: ^testing.T) {
 		seen = read.status == .Ok && strings.contains(string(read.payload.(app.Outcome_Text)), expected)
 		if !seen { time.sleep(50 * time.Millisecond) }
 	}
-	testing.expect(t, seen, "the split pane printed its AIODEV_PANE")
+	testing.expect(t, seen, "the split pane printed its AIODEV_PANE and AIODEV_CLI")
 	last := invoke(&state, 0, "pane.read", "--pane", id, "--lines", "1")
 	testing.expect(t, !strings.contains(string(last.payload.(app.Outcome_Text)), "\n"))
 
@@ -163,6 +167,10 @@ control_commands_target_panes_without_moving_focus :: proc(t: ^testing.T) {
 	remote := app.control_cli_answer(&state, {"", "text", `\\server\share`, "tab.new"})
 	testing.expectf(t, remote.ok, "tab.new from a share: %s", remote.text)
 	testing.expect_value(t, state.sessions[len(state.sessions) - 1].header.launch_directory, profile_directory)
+	// aio compares this line with its own build to warn when the two differ.
+	version := app.control_cli_answer(&state, {"", "text", "", "app.version"})
+	testing.expectf(t, version.ok && strings.has_prefix(version.text, "AIODev dev (" + cli_protocol.BUILD_ID + ", "),
+		"app.version: %s", version.text)
 	// A relative --cwd names a directory in aio's working directory, not in AIODev's.
 	root, has_root := os.lookup_env("SystemRoot", context.temp_allocator)
 	if testing.expect(t, has_root) {

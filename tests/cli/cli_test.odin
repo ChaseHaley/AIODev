@@ -1,5 +1,6 @@
 package cli_test
 
+import "core:strings"
 import "core:testing"
 import "aio:cli"
 
@@ -73,4 +74,44 @@ requests_carry_caller_format_and_directory :: proc(t: ^testing.T) {
 	testing.expect_value(t, asked[4], "pane.split")
 	listing, _ := cli.parse_options({"commands"}, "")
 	testing.expect_value(t, cli.request(listing, "", "", context.temp_allocator)[3], "app.commands")
+}
+
+@(test)
+version_asks_the_app_build_as_text :: proc(t: ^testing.T) {
+	for args in ([][]string{{"version"}, {"--version"}, {"--json", "--instance", "w1", "--version"}}) {
+		o, problem := cli.parse_options(args, "")
+		testing.expect_value(t, problem, "")
+		testing.expect(t, o.version && !o.waiting)
+		// aio prints its own build beside AIODev's, so even a --json version asks for text.
+		request := cli.request(o, "3", "", context.temp_allocator)
+		testing.expect_value(t, len(request), 4)
+		testing.expect_value(t, request[1], "text")
+		testing.expect_value(t, request[3], "app.version")
+	}
+	other, _ := cli.parse_options({"pane.list", "version"}, "")
+	testing.expect(t, !other.version)
+	// AIODev fails the version command only when it is too old to know it, so aio keeps it bare.
+	_, extra := cli.parse_options({"version", "--json"}, "")
+	testing.expect(t, extra != "")
+}
+
+@(test)
+build_warning_only_when_builds_differ :: proc(t: ^testing.T) {
+	own := "0.10.0 (4dc71c8, release)"
+	testing.expect_value(t, cli.build_warning(own, "AIODev 0.10.0 (4dc71c8, release)", context.temp_allocator), "")
+	unknown :: "dev (unknown, development)"
+	testing.expect_value(t, cli.build_warning(unknown, "AIODev " + unknown, context.temp_allocator), "")
+	for app in ([]string{
+		"AIODev dev (510462e+dirty, verify)",
+		"AIODev 0.10.0 (4dc71c8+dirty, release)",
+		"AIODev 0.10.0 (4dc71c8, debug)",
+		"aio 0.10.0 (4dc71c8, release)",
+	}) {
+		warning := cli.build_warning(own, app, context.temp_allocator)
+		testing.expectf(t, strings.contains(warning, own) && strings.contains(warning, app), "%q: %q", app, warning)
+		testing.expect(t, !strings.contains(warning, "\n"))
+	}
+	// An AIODev too old to answer the version command differs too, but cannot name its build.
+	old := cli.build_warning(own, "", context.temp_allocator)
+	testing.expectf(t, strings.contains(old, own) && strings.contains(old, "does not report its build"), "%q", old)
 }

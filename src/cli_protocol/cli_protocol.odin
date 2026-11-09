@@ -1,6 +1,7 @@
 package cli_protocol
 
 import "aio:control"
+import "core:fmt"
 
 // The aio command line's wire contract with AIODev, shared by the aio client and the app's CLI pipe
 // server (D-046). A request is a JSON string array: the caller pane id or "", the reply format word,
@@ -38,6 +39,26 @@ CATALOGUE_COMMAND :: "app.commands"
 // The commands `aio wait` polls: a pane's status when waiting for its exit, its screen otherwise.
 PANE_STATUS_COMMAND :: "pane.status"
 PANE_READ_COMMAND :: "pane.read"
+// The command whose reply is AIODev's build line; aio's `version` asks it, and aio asks it before
+// each command to warn when the two builds differ.
+VERSION_COMMAND :: "app.version"
+APP_NAME :: "AIODev"
+
+// The build every executable embeds. build.ps1 passes the same values to the app and to aio in one
+// build run, so the two report the same build exactly when they came from it. A direct odin build,
+// such as a test run, is an unknown development build.
+BUILD_ID :: #config(AIO_BUILD_ID, "unknown")
+BUILD_KIND :: #config(AIO_BUILD_KIND, "development")
+// The release version, such as 0.10.0, of a build made from a clean checkout of its release tag; ""
+// for any other build.
+BUILD_VERSION :: #config(AIO_BUILD_VERSION, "")
+
+// A build as `aio version` names it: `0.10.0 (4dc71c8, release)`, or `dev (510462e+dirty, verify)`
+// for a build without a release version.
+@(require_results)
+build_text :: proc(version, id, kind: string, allocator := context.allocator) -> string {
+	return fmt.aprintf("%s (%s, %s)", version != "" ? version : "dev", id, kind, allocator = allocator)
+}
 
 Request :: struct {
 	// The pane aio runs in, or "" outside AIODev.
