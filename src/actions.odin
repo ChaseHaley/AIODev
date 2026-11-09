@@ -150,6 +150,7 @@ Action :: enum u32 {
 	Tab_List,
 	Workspace_List,
 	App_Version,
+	Install_Agent_Hooks,
 }
 
 // Everything one command is: its name and title, default shortcuts, what it does when a linked window
@@ -580,6 +581,7 @@ ACTIONS :: [Action]Command_Descriptor {
 	.App_Version = {
 		cli_protocol.VERSION_COMMAND, "Show AIODev's Build", nil, .Host, {hidden = true, control = .Unnamed},
 	},
+	.Install_Agent_Hooks = {"app.install_agent_hooks", "Install Agent Session Hooks", nil, .Local, {}},
 }
 
 @(require_results)
@@ -832,6 +834,8 @@ command_execute :: proc(app: ^App, ctx: Command_Context, invocation: commands.In
 		document_menu_open_focused(app, w)
 	case .Show_Build_Info:
 		show_build_info(app)
+	case .Install_Agent_Hooks:
+		agent_hooks_install(app)
 	case .Command_Palette:
 		if palette_active(app, w) {
 			palette_close(app, w)

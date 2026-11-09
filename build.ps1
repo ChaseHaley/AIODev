@@ -103,7 +103,7 @@ function Split-Arguments([string] $Line) {
 # libghostty-vt's Zig core is one large non-COMDAT section that the linker would place after
 # AIODev's code, so any source change moved the VT parser's alignment and TermBench by 2 to 3
 # percent. Linking that object first gives the parser the same address in every build.
-function Build-App([string[]] $Mode, [string] $Output = 'build/aiodev.exe') {
+function Build-App([string[]] $Mode, [string] $Output = 'build/aiodev.exe', [string] $AlternateServer = '') {
     $buildId = Get-BuildId
     $kind = if ($Mode -contains '-define:AIO_CONTROL=true') { 'verify' }
         elseif ($Mode -contains '-o:speed') { 'release' } else { 'debug' }
@@ -154,8 +154,9 @@ function Build-App([string[]] $Mode, [string] $Output = 'build/aiodev.exe') {
     # The aio command line ships beside every app build; the app adds its directory to each shell's PATH.
     [string[]] $cliMode = if ($Mode -contains '-o:speed') { '-o:speed' } else { '-debug' }
     $serverName = Split-Path $Output -Leaf
+    [string[]] $alternate = if ($AlternateServer) { @("-define:AIO_SERVER_ALTERNATE='$AlternateServer'") } else { @() }
     Invoke-Odin build src/cli "-out:$(Join-Path (Split-Path $Output) 'aio.exe')" @cliMode `
-        '-subsystem:console' "-define:AIO_SERVER_NAME='$serverName'" @identity @flags
+        '-subsystem:console' "-define:AIO_SERVER_NAME='$serverName'" @identity @alternate @flags
 }
 
 function Build-Release([string] $Destination = 'build/release/aiodev.exe') {
@@ -208,7 +209,14 @@ function Invoke-StyleCheck {
 
 switch ($Task) {
     'verify' {
-        Build-App @('-debug', '-subsystem:console', '-define:AIO_CONTROL=true') 'build/aiodev-verify.exe'
+        # Its aio.exe also trusts the headless build, so scripts that call build\aio.exe work with both.
+        Build-App @('-debug', '-subsystem:console', '-define:AIO_CONTROL=true') 'build/aiodev-verify.exe' `
+            'headless/aiodev-headless.exe'
+        # The same harness with the headless backend (WORK-349), in its own directory so its aio.exe
+        # names it as the server.
+        New-Item -ItemType Directory -Force build/headless | Out-Null
+        Build-App @('-debug', '-subsystem:console', '-define:AIO_CONTROL=true', '-define:AIO_HEADLESS=true') `
+            'build/headless/aiodev-headless.exe'
         foreach ($name in $toolPackages) {
             Invoke-Odin build "tools/$name" "-out:build/$name.exe" -debug '-subsystem:console' @flags
         }
@@ -263,6 +271,8 @@ switch ($Task) {
             Invoke-Odin check src @flags
             Invoke-Odin check src @appFlags
             Invoke-Odin check src '-define:AIO_CONTROL=true' @appFlags
+            Invoke-Odin check src '-define:AIO_HEADLESS=true' @appFlags
+            Invoke-Odin check src '-define:AIO_HEADLESS=true' '-define:AIO_CONTROL=true' @appFlags
         }
         foreach ($name in $toolPackages) {
             Invoke-Odin check "tools/$name" @flags

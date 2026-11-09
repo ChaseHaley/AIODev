@@ -93,6 +93,16 @@ Window_Select :: struct {
 Window_Move :: struct {
 	position: Position,
 }
+// What `window maximize|restore|close` asks of the selected window, through the caption's own
+// platform actions rather than OS messages, so headless windows take them too.
+Window_Show_Action :: enum {
+	Maximize,
+	Restore,
+	Close,
+}
+Window_Show :: struct {
+	action: Window_Show_Action,
+}
 Focus :: struct {
 	focused: bool,
 }
@@ -176,6 +186,7 @@ Request :: union {
 	Command,
 	Window_Select,
 	Window_Move,
+	Window_Show,
 	Help,
 	Capture,
 	Pixels,
@@ -535,6 +546,17 @@ parse :: proc(args: []string, allocator := context.allocator) -> (Request, Parse
 		if len(args) > 2 {return {}, {args[2], "use help [command]"}}
 		return Help{len(args) == 2 ? args[1] : ""}, {}
 	case .Window:
+		if len(args) == 2 {
+			switch args[1] {
+			case "maximize":
+				return Window_Show{.Maximize}, {}
+			case "restore":
+				return Window_Show{.Restore}, {}
+			case "close":
+				return Window_Show{.Close}, {}
+			}
+			return {}, bad
+		}
 		if len(args) != 3 {return {}, bad}
 		switch args[1] {
 		case "select":

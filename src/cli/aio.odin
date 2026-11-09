@@ -19,6 +19,7 @@ USAGE_FORMAT :: `Usage: aio [--instance <name>] [--json] <command> [options] [--
        aio commands
        aio help [<command>]
        aio version
+       aio agent-session (claude | codex)
 
 Runs AIODev commands from scripts and coding agents. Every palette command runs by
 name, such as aio tab.next; aio commands lists them all. aio version prints aio's build
@@ -52,6 +53,8 @@ Common  aio tab.new [--cwd <dir>] [--name <name>] [--tab-name <name>] [--focus] 
 Wait    aio wait polls until the pane shows the text or its program exits; the default
         timeout is %d ms, and 0 waits without limit. --exit prints the exit code, even
         after the pane closed with its program, or closed when it was closed while running.
+Hooks   aio agent-session runs from a Claude Code or Codex SessionStart hook and records the
+        session the hook names, so the pane can resume it; Install Agent Session Hooks sets it up.
 Exit    %d ok, %d failed, %d bad command line, %d pane missing or ambiguous,
         %d AIODev unreachable, %d control pipe server unverified, %d interrupted.
 

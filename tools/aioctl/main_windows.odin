@@ -12,10 +12,11 @@ import "aio:instance"
 import "aio:platform"
 import "aio:verify_protocol"
 
-// repo and executable are this repository's verify build outputs; files holds the instance's own
-// storage under data, as the app resolves it.
+// repo and executable are this repository's verify build outputs: executable is the one this
+// instance runs, the windowed verify build until a headless launch or record names the headless
+// one. files holds the instance's own storage under data, as the app resolves it.
 @(private)
-Paths :: struct { repo, data, executable, pipe, app_id, record: string, files: instance.Paths }
+Paths :: struct { repo, data, executable, headless, pipe, app_id, record: string, files: instance.Paths }
 
 main :: proc() {
 	context.logger = log.Logger{procedure = diagnostic, lowest_level = .Warning}
@@ -62,6 +63,7 @@ make_paths :: proc(name: string) -> (Paths, bool) {
 	p := Paths{repo = repo}
 	p.data = fmt.tprintf("%s\\build\\verify\\%s", repo, name)
 	p.executable = fmt.tprintf("%s\\build\\aiodev-verify.exe", repo)
+	p.headless = fmt.tprintf("%s\\build\\headless\\aiodev-headless.exe", repo)
 	app_id, id_error := instance.app_id({name = name}, context.temp_allocator)
 	if id_error != nil { return {}, false }
 	p.app_id = app_id
@@ -91,8 +93,15 @@ start :: proc() -> int {
 	if o.args[0] == "help" { return show_help(o.args) }
 	p, ok := make_paths(o.name)
 	if !ok { return fail("cannot locate build.ps1; run this repository's build\\aioctl.exe") }
-	if o.args[0] == "launch" { return launch(o, p) }
+	if o.args[0] == "launch" {
+		// The variable runs existing journeys headless without editing them.
+		if o.headless || os.get_env("AIOCTL_HEADLESS", context.temp_allocator) == "1" {
+			p.executable = p.headless
+		}
+		return launch(o, p)
+	}
 	r, record_ok := read_record(p)
+	if record_ok { p.executable = r.executable }
 	if !record_ok {
 		if o.args[0] == "doctor" { fmt.println("fail recorded instance: missing or invalid instance.ini") }
 		return fail(fmt.tprintf("no recorded instance %s; run aioctl --name %s launch", o.name, o.name))
@@ -138,6 +147,10 @@ show_help :: proc(args: []string) -> int {
 			`launch [--fresh] [--settings <file>] [--shell <command>] [--size <cols>x<rows>] [--keep-env]
        [--keep-layout]
 Starts build\aiodev-verify.exe without activation; refuses an existing named instance.
+--headless starts build\headless\aiodev-headless.exe instead: the same harness with no window on the
+desktop, bundled fonts on WARP and an in-memory clipboard, tray and notifications (state os.*).
+AIOCTL_HEADLESS=1 in the environment does the same for every launch, so existing scripts run headless.
+Later commands use whichever executable the instance was launched with.
 Data and evidence: <repo>\build\verify\<name>\; --fresh deletes only that directory.
 Defaults: pwsh -NoLogo -NoProfile -NoExit with isolated PSReadLine history and predictions off;
 repository directory, Cascadia Mono, blink off, 120x32.
@@ -186,7 +199,7 @@ read_record :: proc(p: Paths) -> (Record, bool) {
 	data, err := os.read_entire_file(p.record, context.temp_allocator)
 	if err != nil { return {}, false }
 	r, ok := parse_record(string(data))
-	return r, ok && strings.equal_fold(r.executable, p.executable)
+	return r, ok && (strings.equal_fold(r.executable, p.executable) || strings.equal_fold(r.executable, p.headless))
 }
 
 @(private, require_results)
@@ -599,6 +612,7 @@ check_line :: proc(ok: bool, description: string) -> bool {
 @(private, require_results)
 doctor :: proc(o: Options, p: Paths, r: Record, verified: bool) -> int {
 	failed := !check_line(verified, "recorded PID alive, creation time and repository image match")
+	fmt.printfln("ok executable %s", p.executable)
 	c, err := verified_connect(p, r, 500)
 	defer control.close(&c)
 	pipe_ok := err == .None && verified

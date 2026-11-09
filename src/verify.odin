@@ -200,7 +200,8 @@ when AIO_CONTROL {
 		     verify_protocol.Dpi,
 		     verify_protocol.Command,
 		     verify_protocol.Window_Select,
-		     verify_protocol.Window_Move:
+		     verify_protocol.Window_Move,
+		     verify_protocol.Window_Show:
 			action = .Drive
 		}
 		return
@@ -517,6 +518,33 @@ when AIO_CONTROL {
 			state_value(r, state_key("window.%d.preparing", n), window.phase == .Preparing)
 			state_value(r, state_key("window.%d.linked", n), window_linked(window))
 			state_value(r, state_key("window.%d.link_shown", n), window_linked(window) && window.phase == .Shown)
+		}
+		when platform.AIO_HEADLESS {verify_os_report(r, app)}
+	}
+
+	when platform.AIO_HEADLESS {
+		// What a headless instance asked of the operating system's services, which it only records:
+		// journeys read these keys where they would read the desktop.
+		verify_os_report :: proc(r: ^State_Report, app: ^App) {
+			p := &app.platform
+			state_text(r, "os.clipboard", p.clipboard)
+			urls, paths := platform.opened_urls(), platform.opened_paths()
+			state_value(r, "os.opened_urls", len(urls))
+			for url, i in urls {state_text(r, state_key("os.opened_url.%d", i + 1), url)}
+			state_value(r, "os.opened_paths", len(paths))
+			for path, i in paths {state_text(r, state_key("os.opened_path.%d", i + 1), path)}
+			state_value(r, "os.notifications", len(p.record.notifications))
+			for n, i in p.record.notifications {
+				state_text(r, state_key("os.notification.%d.kind", i + 1), n.balloon ? "balloon" : "toast")
+				state_text(r, state_key("os.notification.%d.title", i + 1), n.title)
+				state_text(r, state_key("os.notification.%d.text", i + 1), n.text)
+				state_value(r, state_key("os.notification.%d.token", i + 1), u32(n.token))
+			}
+			state_value(r, "os.sounds", platform.notification_sounds())
+			state_value(r, "os.flashes", p.record.flashes)
+			state_value(r, "os.thumbnail_places", p.record.thumbnail_places)
+			state_value(r, "os.tray.shown", p.record.tray_shown)
+			state_text(r, "os.tray.tooltip", p.record.tray_tooltip)
 		}
 	}
 
@@ -961,6 +989,17 @@ when AIO_CONTROL {
 				   i32(r.position.y),
 			   ) !=
 			   .None {return .System}
+		case verify_protocol.Window_Show:
+			switch r.action {
+			case .Maximize:
+				platform.window_maximize(&app.platform, w.id)
+			case .Restore:
+				if platform.window_maximized(&app.platform, w.id) {
+					platform.window_caption_action(&app.platform, w.id, .Maximize)
+				}
+			case .Close:
+				platform.window_caption_action(&app.platform, w.id, .Close)
+			}
 		case verify_protocol.Focus:
 			handle_event(app, platform.Focus_Event{w.id, r.focused})
 		case verify_protocol.Dpi:
