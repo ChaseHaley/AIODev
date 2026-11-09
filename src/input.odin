@@ -40,7 +40,7 @@ handle_event :: proc(app: ^App, event: platform.Event) {
 			x, y := f32(e.x), f32(e.y)
 			if w.pointer != ([2]f32{x, y}) && w.gloss_hovered {w.dirty = true}
 			w.pointer = {x, y}
-			workspace_button_track(w, x, y)
+			workspace_button_track(app, w, x, y)
 			gesture_move(app, w, e)
 		}
 	case platform.Mouse_Leave_Event:

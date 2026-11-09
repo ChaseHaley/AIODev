@@ -844,7 +844,7 @@ dragging_a_linked_pane_to_another_workspace_moves_its_content :: proc(t: ^testin
 	source := w.panes[0]
 	app.pane_drag_press(f.state, w, source.node, source.rect.x + 40, source.rect.y + 8)
 	seed_pane_drag(w, app.selected_tab(w.workspace), source.node)
-	chip := app.workspace_button_rect(f.host)
+	chip := app.workspace_button_rect(f.state, f.host)
 	if !testing.expect(
 		t,
 		app.pane_workspace_drag_move(

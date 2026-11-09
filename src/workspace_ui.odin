@@ -143,26 +143,42 @@ workspace_new :: proc(app: ^App, w: ^Window, new_window: bool, name_it := true) 
 	if target := window_for_workspace(app, workspace); target != nil {workspace_name_begin(app, target)}
 }
 
-workspace_button_width :: proc(w: ^Window) -> f32 {
-	left := title_actions_end(w)
+// The chip starts right after the inbox button when it shows, else right after the title buttons.
+workspace_button_left :: proc(app: ^App, w: ^Window) -> f32 {
+	pill := status_pill_rect(app, w)
+	return pill.width > 0 ? pill.x + pill.width : title_actions_end(w)
+}
+
+// The chip hugs its content: icon, name and the chevron's slot, so the tabs start right after the
+// name. While the chip holds the name field it fits the typed text instead.
+workspace_button_width :: proc(app: ^App, w: ^Window) -> f32 {
+	left := workspace_button_left(app, w)
 	available := max(0, f32(w.width) - window_caption_reserve(w) - left)
-	return left + min(184 * w.scale, available, max(40 * w.scale, available * 0.35))
+	limit := min(184 * w.scale, available, max(40 * w.scale, available * 0.35))
+	if w.workspace == nil || w.ui_text.fonts == nil {return left + limit}
+	label := chip_name_shown(w) ? ui.field_string(&w.rename) : w.workspace.name
+	if label == "" {label = "Workspace name"}
+	// One spare pixel keeps rounding in the chip's layout from fading a name that fits.
+	content :=
+		ui.text_width(&w.ui_text, label) + 1 +
+		(2 * ui.CONTROL_INSET + ui.ICON_BUTTON + 2 * ui.SPACE_2 + ui.ICON_INDICATOR + ui.SPACE_1) * w.scale
+	return left + min(limit, content)
 }
 
 // The chip's visual and hit rectangle. Hit testing keeps this rectangle even while the
 // control is drawn lifted, so the hover never changes where the click target is.
-workspace_button_rect :: proc(w: ^Window) -> render.Rect {
-	width := workspace_button_width(w)
-	left := title_actions_end(w)
+workspace_button_rect :: proc(app: ^App, w: ^Window) -> render.Rect {
+	width := workspace_button_width(app, w)
+	left := workspace_button_left(app, w)
 	height := ui.HEIGHT_TOOLBAR * w.scale
 	top := (ui.TITLE_BAR_HEIGHT * w.scale - height) / 2
-	return {left + ui.SPACE_1 * w.scale, top, max(0, width - left - 2 * ui.SPACE_1 * w.scale), height}
+	return {left, top, max(0, width - left - ui.SPACE_1 * w.scale), height}
 }
 
 workspace_button_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
-	width := workspace_button_width(w)
+	width := workspace_button_width(app, w)
 	if width <= 12 * w.scale {return .Ok}
-	r := workspace_button_rect(w)
+	r := workspace_button_rect(app, w)
 	// While the chip holds the name field it stays flat, so nothing shows around the field.
 	hover := chip_name_shown(w) ? 0 : w.workspace_motion.hover.value
 	lift := ui.hover_lift_at(app.theme, hover, w.scale)
@@ -173,36 +189,44 @@ workspace_button_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 		if result := ui.hover_shadow_draw(&w.list, app.theme, r, radius, hover, w.scale);
 		   result != .None {return .Ok}
 	}
+	// At rest the chip is only its icon and name on the chrome; an open picker tints it.
 	active := workspace_picker_active(&w.workspace_picker)
-	fill := active ? app.theme.selection : app.theme.pane
-	if render.push_rect(&w.list, {rect = r, color = fill, radius = radius}) != .None { return .Ok }
+	if active {
+		if render.push_rect(&w.list, {rect = r, color = app.theme.selection, radius = radius}) != .None {
+			return .Ok
+		}
+	}
 	// An open picker already tints the chip; an opaque paper fill would paint over it, while a
 	// translucent dark fill can pass over without hiding it.
 	skip_fill := ui.hover_fill_opaque(app.theme) && active
 	if hover > 0 && !skip_fill {
-		fill = app.theme.hover
+		fill := app.theme.hover
 		fill.a *= hover
 		if render.push_rect(&w.list, {rect = r, color = fill, radius = radius}) != .None {
 			return .Ok
 		}
 	}
-	if width >= 72 * w.scale {
+	if r.width >= (2 * ui.CONTROL_INSET + ui.ICON_BUTTON) * w.scale {
 		size := ui.ICON_BUTTON * w.scale
 		icon := render.Rect{r.x + ui.CONTROL_INSET * w.scale, r.y + (r.height - size) / 2, size, size}
 		if result := workspace_icon_draw(w, w.workspace.icon, icon, app.theme.text);
 		   result != .Ok { return result }
 	}
-	indicator := workspace_button_indicator_rect(w)
+	indicator := workspace_button_indicator_rect(app, w)
 	indicator.y -= lift
 	label_x := r.x + (ui.CONTROL_INSET + ui.ICON_BUTTON + ui.SPACE_2) * w.scale
 	label_width := indicator.x - label_x - ui.SPACE_2 * w.scale
-	if label_width >= 24 * w.scale {
+	if label_width > 0 {
 		if result := ui.draw_fading_text(&w.ui_text, &w.list, w.workspace.name, label_x,
 			r.y + (r.height - w.ui_text.line_height) / 2 + w.ui_text.ascent,
 			app.theme.text, label_width); result != .Ok { return result }
 	}
-	chevron_ink := hover > 0 ? app.theme.text : app.theme.muted
-	ui.icon_draw(&w.list, .Chevron_Down, indicator, chevron_ink, ui.ICON_INDICATOR, w.scale)
+	// The chevron shows only while the chip is hovered or its picker is open.
+	if chevron := active ? 1 : hover; chevron > 0 {
+		ink := app.theme.text
+		ink.a *= chevron
+		ui.icon_draw(&w.list, .Chevron_Down, indicator, ink, ui.ICON_INDICATOR, w.scale)
+	}
 	if hover > 0 {
 		if result := ui.hover_rim_draw(
 			&w.list,
@@ -679,8 +703,8 @@ workspace_picker_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 
 @(private)
 workspace_button_claims :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {
-	return y >= 0 && y < window_title_height(w) && x >= title_actions_end(w) &&
-		x < workspace_button_width(w)
+	return y >= 0 && y < window_title_height(w) && x >= workspace_button_left(app, w) &&
+		x < workspace_button_width(app, w)
 }
 
 @(private)
@@ -708,8 +732,8 @@ workspace_button_leave :: proc(_: ^App, w: ^Window) {
 
 // Every move that reaches the window updates the button's hover, which drives its motion; a drag or a
 // modal surface does not hide it.
-workspace_button_track :: proc(w: ^Window, x, y: f32) {
-	if hovered := render.rect_contains(workspace_button_rect(w), x, y); hovered != w.workspace_hovered {
+workspace_button_track :: proc(app: ^App, w: ^Window, x, y: f32) {
+	if hovered := render.rect_contains(workspace_button_rect(app, w), x, y); hovered != w.workspace_hovered {
 		w.workspace_hovered, w.dirty = hovered, true
 	}
 }
