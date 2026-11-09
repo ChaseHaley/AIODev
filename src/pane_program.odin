@@ -178,8 +178,27 @@ program_reporters :: proc(entry: ^Session_Entry) -> []string {
 // launcher runs, then the remaining arguments. Control characters are dropped so the text is safe
 // to write to a terminal. Empty when the arguments are unreadable.
 program_command :: proc(arguments: []string, stem: string, allocator := context.allocator) -> string {
-	if len(arguments) == 0 || stem == "" {return ""}
+	name, rest := program_invocation(arguments, stem)
+	if name == "" {return ""}
 	b := strings.builder_make(context.temp_allocator)
+	strings.write_string(&b, name)
+	for argument in rest {
+		strings.write_byte(&b, ' ')
+		quoted := argument == "" || strings.index_any(argument, " \t") >= 0
+		if quoted {strings.write_byte(&b, '"')}
+		strings.write_string(&b, argument)
+		if quoted {strings.write_byte(&b, '"')}
+	}
+	return printable_command(strings.to_string(b), allocator)
+}
+
+// The program's name as someone would type it, and the arguments that follow it, in temporary
+// memory: the executable's stem, or the script a launcher runs and the arguments after the script.
+// Empty when the arguments are unreadable.
+program_invocation :: proc(arguments: []string, stem: string) -> (name: string, rest: []string) {
+	if len(arguments) == 0 || stem == "" {return "", nil}
+	name = stem
+	tokens := make([dynamic]string, 0, len(arguments), context.temp_allocator)
 	first := 1
 	if program_listed(program_launchers[:], stem) {
 		if script := procinfo.process_script(arguments); script != "" {
@@ -190,26 +209,39 @@ program_command :: proc(arguments: []string, stem: string, allocator := context.
 				lower := strings.to_lower(text, context.temp_allocator)
 				at := strings.index(lower, strings.to_lower(script, context.temp_allocator))
 				if at < 0 || argument == "" || argument[0] == '-' {continue}
-				strings.write_string(&b, script)
-				rest := text[at + len(script):]
-				if space := strings.index_byte(rest, ' '); space >= 0 {
-					rest = strings.trim_left(rest[space:], "\" ")
-					if rest != "" {strings.write_byte(&b, ' '); strings.write_string(&b, rest)}
+				name = script
+				after := text[at + len(script):]
+				if space := strings.index_byte(after, ' '); space >= 0 {
+					command_line_split(strings.trim_left(after[space:], "\" "), &tokens)
 				}
 				first = i + 2
 				break
 			}
 		}
 	}
-	if strings.builder_len(b) == 0 {strings.write_string(&b, stem)}
-	for argument in arguments[min(first, len(arguments)):] {
-		strings.write_byte(&b, ' ')
-		quoted := argument == "" || strings.index_any(argument, " \t") >= 0
-		if quoted {strings.write_byte(&b, '"')}
-		strings.write_string(&b, argument)
-		if quoted {strings.write_byte(&b, '"')}
+	append(&tokens, ..arguments[min(first, len(arguments)):])
+	return name, tokens[:]
+}
+
+// Splits text the way a typed command line reads: on spaces and tabs, with double quotes grouping.
+@(private)
+command_line_split :: proc(text: string, tokens: ^[dynamic]string) {
+	b := strings.builder_make(context.temp_allocator)
+	quoted, started := false, false
+	for c in text {
+		switch {
+		case c == '"':
+			quoted, started = !quoted, true
+		case (c == ' ' || c == '\t') && !quoted:
+			if started {append(tokens, strings.clone(strings.to_string(b), context.temp_allocator))}
+			strings.builder_reset(&b)
+			started = false
+		case:
+			strings.write_rune(&b, c)
+			started = true
+		}
 	}
-	return printable_command(strings.to_string(b), allocator)
+	if started {append(tokens, strings.clone(strings.to_string(b), context.temp_allocator))}
 }
 
 // The text without control characters, cut to PROGRAM_COMMAND_LIMIT bytes, so it can be written
