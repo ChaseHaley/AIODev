@@ -582,10 +582,131 @@ ACTIONS :: [Action]Command_Descriptor {
 	},
 }
 
+// What help says about a command beyond its usage and title: a summary, and the command's own help for
+// arguments whose shared wording does not fit it.
+@(private)
+Command_Help :: struct {
+	summary: string,
+	notes:   []commands.Argument_Note,
+}
+
+@(private)
+COMMAND_HELP :: #partial [Action]Command_Help {
+	.New_Tab = {
+		"Opens a tab in the pane's workspace running the profile's shell or a program and prints the new " +
+		"pane's id; focus stays where it is unless --focus.",
+		nil,
+	},
+	.Split = {
+		"Splits the pane, runs the profile's shell or a program in the new pane and prints its id; focus " +
+		"stays where it is unless --focus.",
+		nil,
+	},
+	.New_Floating = {
+		"Opens a shell or program floating above the pane's tab and prints its id; focus stays where it " +
+		"is unless --focus.",
+		nil,
+	},
+	.New_Workspace = {
+		"Creates a workspace in the background whose tab runs the profile's shell or a program and prints " +
+		"the new pane's id; --focus shows it in the pane's window.",
+		{
+			{.Name, {"names the new workspace", "a generated name", "--name Agents"}},
+			{.Focus, {"shows the new workspace in the pane's window", "off (it stays in the background)", ""}},
+		},
+	},
+	.Layout_Apply = {
+		"Opens a tab of named panes from a JSON layout file in the pane's workspace and prints their ids " +
+		"column by column, top to bottom; nothing opens when the file is wrong.",
+		{
+			{
+				.File,
+				{
+					"the JSON layout: tab, cwd and columns of panes with name, command (an argument " +
+					"array), cwd and profile; at most 1 MiB and 16 panes; a relative path is from aio's " +
+					"working directory",
+					"none (required)",
+					"review.json",
+				},
+			},
+			{.Focus, {description = "shows the new tab and focuses its first pane"}},
+		},
+	},
+	.Open_Markdown = {
+		"Shows a Markdown file beside the pane and updates it when the file changes.",
+		{{.Direction, {default = "right, or a float when pane.markdown_floating is on"}}},
+	},
+	.Pane_Send = {
+		"Types text into the pane's program as a person at the keyboard would.",
+		{{.Text, {description = "the text to type", example = `"git status"`}}},
+	},
+	.Pane_Read = {"Prints the pane's visible text.", nil},
+	.Pane_List = {
+		"Prints a header row, then a tab-separated line per pane: id, focused, workspace, tab, status, " +
+		"process, title, directory, pid, tab name and grid; empty fields print as -; --json adds each " +
+		"pane's rect.",
+		nil,
+	},
+	.Pane_Status = {
+		"Prints the pane's line as pane.list does, without the header; a recently closed pane reports how " +
+		"it ended.",
+		nil,
+	},
+	.Tab_List = {"Prints a header row, then a line per tab in every workspace.", nil},
+	.Workspace_List = {
+		"Prints a header row, then a line per workspace with its window state, tab count and focus.",
+		nil,
+	},
+	.App_Version = {"Prints AIODev's build; aio version shows it beside aio's own.", nil},
+	.Pane_Focus = {"Focuses the pane and brings its window forward.", nil},
+	.Rename_Pane = {
+		"Names the pane; without text it opens the rename box on the pane.",
+		{
+			{
+				.Text,
+				{
+					"the pane's new name (an empty name returns it to its program's title)",
+					"none (opens the rename box)",
+					"build",
+				},
+			},
+		},
+	},
+	.Rename_Tab = {
+		"Names the pane's tab; without text it opens the rename box.",
+		{
+			{
+				.Text,
+				{
+					"the tab's new name (an empty name returns it to its pane's title)",
+					"none (opens the rename box)",
+					"Build",
+				},
+			},
+		},
+	},
+	.Rename_Workspace = {
+		"Renames the pane's workspace, or the one --workspace names; without a name it opens the name field.",
+		{
+			{.Text, {"the workspace's new name", "none (opens the name field)", "Agents"}},
+			{.Workspace, {default = "the pane's workspace"}},
+		},
+	},
+	.Change_Workspace = {"Shows the workspace --workspace names in the pane's window.", nil},
+	.Move_Pane_Workspace = {"Moves the pane to the workspace --workspace names.", nil},
+	.Move_Tab_Workspace = {"Moves the pane's tab to the workspace --workspace names.", nil},
+	.App_Commands = {
+		"Lists every command, or describes one; aio commands and aio help ask it.",
+		{{.Text, {"a command to describe", "none (lists every command)", "pane.split"}}},
+	},
+}
+
 @(require_results)
 register_actions :: proc(registry: ^commands.Registry) -> commands.Error {
 	@(static, rodata)
 	descriptors := ACTIONS
+	@(static, rodata)
+	help := COMMAND_HELP
 	for descriptor, action in descriptors {
 		command := commands.Command {
 			id        = commands.Command_Id(action),
@@ -595,6 +716,8 @@ register_actions :: proc(registry: ^commands.Registry) -> commands.Error {
 			arguments = descriptor.spec.accepted,
 			required  = descriptor.spec.required,
 			hidden    = descriptor.spec.hidden,
+			summary   = help[action].summary,
+			notes     = help[action].notes,
 		}
 		if err := commands.register(registry, command); err != .None {return err}
 	}

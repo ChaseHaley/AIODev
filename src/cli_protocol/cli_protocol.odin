@@ -2,6 +2,7 @@ package cli_protocol
 
 import "aio:control"
 import "core:fmt"
+import "core:strings"
 
 // The aio command line's wire contract with AIODev, shared by the aio client and the app's CLI pipe
 // server (D-046). A request is a JSON string array: the caller pane id or "", the reply format word,
@@ -203,8 +204,56 @@ Workspace_Report :: struct {
 	focused: bool,
 }
 
+// One option of a command as help reports it.
+Option_Report :: struct {
+	// How usage writes the option, such as `--ratio 0.05-0.95` or `<text>`.
+	option, description: string,
+	// What the command does without the option; empty for a required one.
+	default, example:    string,
+	required:            bool,
+}
+
+// Every command takes --pane; aio wait reads the same targets.
+PANE_OPTION :: Option_Report {
+	option      = "--pane <pane>",
+	description = "the pane to act on: a pane id, a pane name, here or focused",
+	default     = "here (the pane aio runs in), or the focused pane outside AIODev",
+	example     = "--pane 3",
+}
+
 Command_Report :: struct {
 	name, title, usage: string,
+	// What help says beyond the title; often empty.
+	summary:            string,
+	// The command's options with their help; filled only by help for one command.
+	options:            []Option_Report,
+}
+
+// Writes a command's help as aio help prints it: usage, title and summary, then one line per option
+// with what it does, its default and an example.
+command_report_write :: proc(b: ^strings.Builder, report: Command_Report) {
+	strings.write_string(b, report.usage)
+	strings.write_byte(b, '\n')
+	strings.write_string(b, report.title)
+	if report.summary != "" {
+		strings.write_byte(b, '\n')
+		strings.write_string(b, report.summary)
+	}
+	if len(report.options) == 0 {return}
+	strings.write_byte(b, '\n')
+	width := 0
+	for option in report.options {width = max(width, len(option.option))}
+	for option in report.options {
+		fmt.sbprintf(b, "\n  %s", option.option)
+		for _ in len(option.option) ..< width {strings.write_byte(b, ' ')}
+		fmt.sbprintf(b, "  %s; ", option.description)
+		if option.required {
+			strings.write_string(b, "required")
+		} else {
+			fmt.sbprintf(b, "default: %s", option.default)
+		}
+		fmt.sbprintf(b, "; example: %s", option.example)
+	}
 }
 
 // The reply document of a json-format request. aio reads the same shape back. Every reply carries

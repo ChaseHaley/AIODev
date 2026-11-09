@@ -39,7 +39,7 @@ start :: proc() -> cli_protocol.Status {
 		return .Usage
 	}
 	defer instance.command_line_destroy(args, context.allocator)
-	if len(args) == 0 || len(args) == 1 && (args[0] == "help" || args[0] == "--help" || args[0] == "-h") {
+	if len(args) == 0 || len(args) == 1 && (args[0] == "--help" || args[0] == "-h") {
 		print_usage()
 		return len(args) == 0 ? .Usage : .Ok
 	}
@@ -53,6 +53,11 @@ start :: proc() -> cli_protocol.Status {
 		fmt.eprintfln("aio: %s; use aio help", problem)
 		return .Usage
 	}
+	if len(o.args) == 1 && o.args[0] == "help" {
+		print_usage()
+		return .Ok
+	}
+	if report, local := local_help(o); local {return help_print(report, o.json)}
 	app_id, id_error := instance.app_id({name = o.instance}, context.allocator)
 	if id_error != nil {return .Failed}
 	defer delete(app_id)
@@ -173,6 +178,28 @@ send :: proc(pipe: string, request: []string, check_build: bool) -> (control.Res
 		return {}, .Unreachable
 	}
 	return response, cli_protocol.response_status(response)
+}
+
+// Prints help aio answers itself, in the shape AIODev's help replies take.
+@(private, require_results)
+help_print :: proc(report: cli_protocol.Command_Report, json_output: bool) -> cli_protocol.Status {
+	if !json_output {
+		b := strings.builder_make(context.temp_allocator)
+		cli_protocol.command_report_write(&b, report)
+		fmt.println(strings.to_string(b))
+		return .Ok
+	}
+	data, err := json.marshal(
+		cli_protocol.Reply_Json{ok = true, commands = {report}},
+		{},
+		context.temp_allocator,
+	)
+	if err != nil {
+		fmt.eprintln("aio: not enough memory for the help")
+		return .Failed
+	}
+	fmt.println(string(data))
+	return .Ok
 }
 
 // Polls until the pane shows the text or its program exits, so no request holds the pipe.

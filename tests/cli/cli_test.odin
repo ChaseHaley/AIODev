@@ -115,3 +115,23 @@ build_warning_only_when_builds_differ :: proc(t: ^testing.T) {
 	old := cli.build_warning(own, "", context.temp_allocator)
 	testing.expectf(t, strings.contains(old, own) && strings.contains(old, "does not report its build"), "%q", old)
 }
+
+// wait, commands and help run in aio, so aio answers their help; AIODev answers the rest.
+@(test)
+help_for_client_commands_is_answered_locally :: proc(t: ^testing.T) {
+	wait, _ := cli.parse_options({"help", "wait"}, "")
+	report, local := cli.local_help(wait)
+	testing.expect(t, local)
+	testing.expect_value(t, report.name, "wait")
+	testing.expect_value(t, len(report.options), 4)
+	for name in ([]string{"commands", "help"}) {
+		o, _ := cli.parse_options({"help", name}, "")
+		_, answered := cli.local_help(o)
+		testing.expectf(t, answered, "help %s should be answered by aio", name)
+	}
+	for args in ([][]string{{"help", "pane.split"}, {"help"}, {"wait", "--exit"}, {"help", "wait", "x"}}) {
+		o, _ := cli.parse_options(args, "")
+		_, answered := cli.local_help(o)
+		testing.expectf(t, !answered, "%v should not be answered by aio", args)
+	}
+}
