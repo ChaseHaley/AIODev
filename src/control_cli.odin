@@ -132,6 +132,8 @@ control_cli_reply :: proc(outcome: Outcome, json_output: bool) -> control.Respon
 			document.text = string(payload)
 		case Outcome_Panes:
 			document.panes = ([]cli_protocol.Pane_Report)(payload)
+		case Outcome_Layout:
+			document.panes = ([]cli_protocol.Pane_Report)(payload)
 		case Outcome_Catalogue:
 			document.commands = ([]cli_protocol.Command_Report)(payload)
 		case Outcome_Usage:
@@ -168,6 +170,11 @@ control_cli_reply :: proc(outcome: Outcome, json_output: bool) -> control.Respon
 				title := pane.name != "" ? pane.name : pane.title
 				fmt.sbprintf(&b, "%d\t%s\t%s\t%d\t%s\t%s\t%s\t%s", pane.id, pane.focused ? "*" : "",
 					pane.workspace_name, pane.tab, pane.status, pane.process, title, pane.directory)
+			}
+		case Outcome_Layout:
+			for pane, i in payload {
+				if i > 0 {strings.write_byte(&b, '\n')}
+				fmt.sbprintf(&b, "%d", pane.id)
 			}
 		case Outcome_Text:
 			strings.write_string(&b, string(payload))

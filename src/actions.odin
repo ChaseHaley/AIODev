@@ -146,6 +146,7 @@ Action :: enum u32 {
 	Minimize_All_Floating,
 	Tab_Context_Menu,
 	Restart_Pane,
+	Layout_Apply,
 }
 
 // Everything one command is: its name and title, default shortcuts, what it does when a linked window
@@ -552,6 +553,10 @@ ACTIONS :: [Action]Command_Descriptor {
 	.Restart_Pane = {
 		"pane.restart", "Restart Stopped Pane", {{.Enter, {}}, {.Numpad_Enter, {}}}, .Local, {},
 	},
+	.Layout_Apply = {
+		"layout.apply", "Apply Layout File", nil, .Host,
+		{accepted = {.File, .Focus}, required = {.File}, hidden = true, control = .Pane},
+	},
 }
 
 @(require_results)
@@ -749,6 +754,9 @@ command_execute :: proc(app: ^App, ctx: Command_Context, invocation: commands.In
 			return control_floating_new(app, window_for_workspace(app, t.workspace), t, invocation)
 		}
 		floating_new(app, w)
+	case .Layout_Apply:
+		t := target.?
+		return control_layout_apply(app, window_for_workspace(app, t.workspace), t.workspace, invocation)
 	case .Rename_Pane:
 		if t, named := target.?; named {
 			if .Text in invocation.given {return control_rename(app, t, invocation.text)}

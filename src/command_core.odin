@@ -19,13 +19,22 @@ import "core:strings"
 Outcome :: struct {
 	status:  cli_protocol.Status,
 	message: string,
-	payload: union {Outcome_Created, Outcome_Text, Outcome_Panes, Outcome_Catalogue, Outcome_Usage},
+	payload: union {
+		Outcome_Created,
+		Outcome_Text,
+		Outcome_Panes,
+		Outcome_Catalogue,
+		Outcome_Usage,
+		Outcome_Layout,
+	},
 }
 Outcome_Created :: struct {pane: u32}
 Outcome_Text :: distinct string
 Outcome_Panes :: distinct []cli_protocol.Pane_Report
 Outcome_Catalogue :: distinct []cli_protocol.Command_Report
 Outcome_Usage :: distinct cli_protocol.Command_Report
+// The panes a layout opened, in the file's order.
+Outcome_Layout :: distinct []cli_protocol.Pane_Report
 
 // A pane a control invocation acts on, with the identity mutation needs.
 Pane_Target :: struct {

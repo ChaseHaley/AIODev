@@ -25,6 +25,8 @@ Panes   --pane takes a pane id, a pane name, here or focused. Inside an AIODev p
         default is here, the pane aio runs in; elsewhere it is the focused pane.
 Files   aio pane.open_markdown [--direction right|down|left|up] [--focus] <file>
             Shows a Markdown file beside the pane and updates it when the file changes.
+        aio layout.apply [--focus] <file>
+            Opens a tab of named panes from a JSON layout; prints their ids in order.
 Common  aio tab.new [--cwd <dir>] [--name <name>] [--focus] [-- <program> [arguments]]
         aio pane.split [--direction right|down|left|up] [--ratio <0.05-0.95>] [-- <program>]
             Both print the new pane's id and leave focus where it is unless --focus.
