@@ -1,5 +1,6 @@
 package main
 
+import "aio:commands"
 import "aio:input"
 import "aio:layout"
 import "aio:links"
@@ -66,6 +67,7 @@ Document_Menu_Action :: enum {
 	Open_In,
 	Open_External,
 	Open_Folder,
+	Open_Shell,
 	Copy_Target,
 }
 
@@ -350,6 +352,7 @@ document_menu_build_link :: proc(
 		}
 		add(menu, "Open with Default App", .Document, {action = .Open_External})
 	}
+	if document.folder {add(menu, "Open in New Shell", .Terminal, {action = .Open_Shell})}
 	document_menu_push(menu, {separator = true})
 	add(menu, web ? "Copy Link" : "Copy Path", .Copy, {action = .Copy_Target})
 	if file {add(menu, "Open Containing Folder", .Folder, {action = .Open_Folder})}
@@ -398,6 +401,28 @@ document_link_open_external :: proc(app: ^App, w: ^Window, path: string) {
 	}
 	defer localpath.open_file_destroy(&file)
 	if !target_open_approved(app, file.path, "") {notify(app, .Error, "Could not open the file.")}
+}
+
+// Starts a shell in `directory`, split beside the pane showing `content` or, once that pane has gone, the
+// focused one. It takes that pane's profile; a pane with no shell, such as a Markdown pane, gives the
+// default profile.
+@(private = "file")
+document_link_open_shell :: proc(app: ^App, w: ^Window, content: layout.Content, directory: string) {
+	tree := window_tree(w)
+	if tree == nil {return}
+	if !os.is_dir(directory) {
+		target_unavailable(app)
+		return
+	}
+	node := layout.find_content(tree, content)
+	if node == layout.INVALID_NODE {node = tree.focus}
+	launch := Pane_Launch{directory = directory}
+	if entry := workspace_session_for_content(app, content); entry != nil {launch.profile = entry.profile_id}
+	_, err := pane_split_at(
+		app, w, w.workspace, w.workspace.selected, node, commands.SPLIT_DEFAULT.direction,
+		commands.SPLIT_DEFAULT.ratio, true, launch, true,
+	)
+	pane_split_report(app, err)
 }
 
 // Rebuilds the rows for the current mode, keeping the selection near where it was. It leaves the mode as
@@ -620,6 +645,12 @@ document_menu_activate :: proc(app: ^App, w: ^Window, index: int) {
 		folder := strings.clone(filepath.dir(link.document.target), context.temp_allocator)
 		overlay_close(app, w)
 		target_open(app, w, File_Target{folder})
+	case .Open_Shell:
+		link, _ := state.mode.(Document_Menu_Link)
+		directory := strings.clone(link.document.target, context.temp_allocator)
+		content := state.content
+		overlay_close(app, w)
+		document_link_open_shell(app, w, content, directory)
 	case .Copy_Target:
 		link, _ := state.mode.(Document_Menu_Link)
 		_ = clipboard_copy(app, link.document.target)

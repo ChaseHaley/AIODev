@@ -21,9 +21,15 @@ pane_split :: proc(
 		launch.directory, refused = pane_directory(app, entry)
 		if refused {notify_directory_refused(app)}
 	}
-	switch _, err := pane_split_at(
+	_, err := pane_split_at(
 		app, w, w.workspace, tab, window_tree(w).focus, direction, ratio, focus, launch, true,
-	); err {
+	)
+	pane_split_report(app, err)
+}
+
+// Explains a failed split. Minimum says nothing here: pane_split_at reports it when asked to.
+pane_split_report :: proc(app: ^App, err: Pane_Split_Error) {
+	switch err {
 	case .None:
 	case .Minimum:
 	case .Check:

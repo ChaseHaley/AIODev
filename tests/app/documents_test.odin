@@ -573,8 +573,40 @@ link_menu_opens_a_markdown_file_in_each_place_copies_it_and_shows_its_folder :: 
 	link_feed(t, &f, "\x1b[2J\x1b[3J\x1b[Hhttps://example.com/two")
 	if !menu_on_path(t, &f, terminal, {.Shift}) {return}
 	for placement in app.Markdown_Placement {testing.expect(t, placement_row(w, placement) < 0)}
-	testing.expect(t, row_of(w, .Open_External) < 0 && row_of(w, .Open_Folder) < 0)
+	testing.expect(t, row_of(w, .Open_External) < 0 && row_of(w, .Open_Folder) < 0 && row_of(w, .Open_Shell) < 0)
 	testing.expect(t, row_of(w, .Copy_Target) >= 0)
+}
+
+@(test)
+link_menu_opens_a_folder_in_a_new_shell_with_the_pane_profile :: proc(t: ^testing.T) {
+	sync.mutex_lock(&Link_Test_Lock)
+	defer sync.mutex_unlock(&Link_Test_Lock)
+	f: Palette_Fixture
+	defer palette_fixture_destroy(t, &f)
+	if !palette_fixture_create(t, &f, "documents-link-shell", false) {return}
+	root, root_error := os.make_directory_temp("", "aio-link-shell-*", context.allocator)
+	if !testing.expect_value(t, root_error, nil) {return}
+	defer {testing.expect_value(t, os.remove_all(root), nil); delete(root)}
+	s, w := &f.state, f.state.windows[0]
+	source := app.focused_session(s, w)
+	if !testing.expect(t, source != nil) {return}
+	// The source pane runs another profile than the default; the id need not resolve to be carried over.
+	delete(source.profile_id)
+	source.profile_id = strings.clone("alternate")
+	link_feed(t, &f, fmt.tprintf("\x1b[2J\x1b[3J\x1b[H%s", root))
+	point, ok := link_point(t, &f, 4, 0)
+	if !ok {return}
+	press(s, w, f32(point.x), f32(point.y), .Right, {.Shift})
+	if !testing.expect(t, shown_in(w, app.Document_Menu_Link)) {return}
+	testing.expect(t, row_of(w, .Open_In) < 0 && row_of(w, .Open_Folder) < 0)
+	click_row(s, w, row_of(w, .Open_Shell))
+	testing.expect(t, !app.document_menu_shown(w))
+	tree := app.window_tree(w)
+	testing.expect_value(t, layout.pane_count(tree), 2)
+	opened := app.focused_session(s, w)
+	if !testing.expect(t, opened != nil && opened != source) {return}
+	testing.expect_value(t, opened.profile_id, "alternate")
+	testing.expect(t, strings.equal_fold(opened.header.launch_directory, root), opened.header.launch_directory)
 }
 
 @(test)
