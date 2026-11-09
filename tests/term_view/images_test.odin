@@ -8,14 +8,14 @@ import "aio:term_view"
 import "core:encoding/base64"
 import "core:fmt"
 import "core:testing"
+import test_fonts "../fixtures/fonts"
 
 // A fixture with no shell behind it, so a test decides exactly what the terminal receives.
-@(private = "file")
 headless_create :: proc(t: ^testing.T) -> (f: Fixture, ok: bool) {
 	font_error: font.Error
-	f.fonts, font_error = font.system_create()
+	f.fonts, font_error = font.system_create_private(test_fonts.files())
 	if !testing.expect_value(t, font_error, font.Error.None) {return}
-	f.family, font_error = font.family_load(f.fonts, "Consolas")
+	f.family, font_error = font.family_load(f.fonts, test_fonts.MONO)
 	render_error: render.Error
 	f.device, render_error = render.device_create(.Warp)
 	if font_error != .None || render_error != .None {
@@ -56,7 +56,6 @@ place :: proc(f: ^Fixture, id: int, color: [3]u8, cols, rows: int, z := 0) {
 	term.replay_write(f.session, transmute([]u8)sequence)
 }
 
-@(private = "file")
 write :: proc(f: ^Fixture, text: string) {
 	term.replay_write(f.session, transmute([]u8)text)
 }
