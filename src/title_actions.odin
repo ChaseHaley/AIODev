@@ -22,12 +22,10 @@ TITLE_CONTROLS := #partial [Title_Action]Title_Control {
 	.Palette = {.Command, "Command palette", .Command_Palette},
 }
 
-// Every title control is one toggle wide: the orientation toggle, then each action after None.
-@(private = "file")
-TITLE_SLOTS :: 1 + len(Title_Action) - 1
-
+// The right edge of the last title button. Controls after them start here with no gap.
 title_actions_end :: proc(w: ^Window) -> f32 {
-	return (TITLE_SLOTS * ui.TITLE_BUTTON_WIDTH + 8) * w.scale
+	palette := title_action_rect(w, .Palette)
+	return palette.x + palette.width
 }
 
 // Empty title bar kept beside the caption buttons since the title-bar tabs arrived (e2d9708).

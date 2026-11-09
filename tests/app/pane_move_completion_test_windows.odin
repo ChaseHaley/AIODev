@@ -299,7 +299,7 @@ pane_drag_dropdown_cancel_gap_scroll_and_last_pane_guard :: proc(t: ^testing.T) 
 	w.height = 260
 	for _ in 0 ..< 12 {if !testing.expect(t, app.workspace_create_empty(state) != nil) {return}}
 	seed_pane_drag(w, app.selected_tab(w.workspace), f.node)
-	chip := app.workspace_button_rect(w)
+	chip := app.workspace_button_rect(state, w)
 	testing.expect(t, app.pane_workspace_drag_move(state, w, w, chip.x + 4, chip.y + 4, false))
 	testing.expect(t, app.pane_workspace_drag_move(state, w, w, chip.x + 4, 37, false))
 	held, _ := app.pane_drag_destination(w).(app.Drop_Workspace_Dropdown)
@@ -311,7 +311,7 @@ pane_drag_dropdown_cancel_gap_scroll_and_last_pane_guard :: proc(t: ^testing.T) 
 	testing.expect_value(t, app.tab_pane_count(app.selected_tab(w.workspace)), 2)
 	other := f.destination
 	seed_pane_drag(other, app.selected_tab(other.workspace), app.window_tree(other).root)
-	chip = app.workspace_button_rect(other)
+	chip = app.workspace_button_rect(state, other)
 	testing.expect(t, app.pane_workspace_drag_move(state, other, other, chip.x + 4, chip.y + 4, false))
 	row := app.workspace_picker_row_rect(other, len(other.workspace_picker.rows) + 1)
 	other.workspace_picker.scroll = len(other.workspace_picker.rows)

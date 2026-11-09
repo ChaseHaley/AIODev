@@ -58,7 +58,7 @@ workspace_picker_drag_hover :: proc(
 	bool,
 ) {
 	p := &w.workspace_picker
-	button := workspace_button_rect(w)
+	button := workspace_button_rect(app, w)
 	on_button := render.rect_contains(button, x, y)
 	panel, _ := workspace_picker_rect(w)
 	previous, holding := drag_held_dropdown(a)

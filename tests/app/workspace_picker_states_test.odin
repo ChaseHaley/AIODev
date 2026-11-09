@@ -65,7 +65,7 @@ workspace_chip_double_click_needs_the_press_that_opened_the_list :: proc(t: ^tes
 	w: app.Window
 	defer picker_destroy(&state, &w)
 	if !picker_fixture(t, &state, &w) {return}
-	chip := app.workspace_button_rect(&w)
+	chip := app.workspace_button_rect(&state, &w)
 	x, y := i32(chip.x + chip.width / 2), i32(chip.y + chip.height / 2)
 	press :: proc(state: ^app.App, w: ^app.Window, x, y: i32, time_ns: i64) {
 		app.handle_event(state, input.Mouse_Button_Event{window = w.id, button = .Left, pressed = true,
