@@ -350,9 +350,9 @@ workspace134_short_dpi_layout_animation_and_hit_targets :: proc(t: ^testing.T) {
 		ui.motion_update(motion, frame_at(time.tick_add(start, 140*time.Millisecond)))
 		testing.expect_value(t, motion.value, f32(1))
 		app.workspace_row_rename_finish(s, w, false)
-		indicator := app.workspace_button_indicator_rect(w)
+		indicator := app.workspace_button_indicator_rect(s, w)
 		testing.expect_value(t, indicator.width, ui.ICON_INDICATOR*scale)
-		testing.expect(t, indicator.x+indicator.width <= app.workspace_button_width(w))
+		testing.expect(t, indicator.x+indicator.width <= app.workspace_button_width(s, w))
 	}
 }
 
@@ -382,7 +382,7 @@ workspace134_header_name_never_paints_into_indicator :: proc(t: ^testing.T) {
 	fonts, font_error := font.system_create()
 	if !testing.expect_value(t, font_error, font.Error.None) { return }
 	defer font.system_destroy(fonts)
-	device, device_error := render.device_create()
+	device, device_error := render.device_create(.Warp)
 	if !testing.expect_value(t, device_error, render.Error.None) { return }
 	defer render.device_destroy(device)
 	surface, surface_error := render.surface_create_offscreen(device, 512, 96)
@@ -404,7 +404,8 @@ workspace134_header_name_never_paints_into_indicator :: proc(t: ^testing.T) {
 			s.theme = ui.theme_from(fixtures.shipped_theme(id), fixtures.default_interface())
 			for width in ([?]i32{360, 460, 600, 900}) {
 				w.width = i32(f32(width)*scale)
-				f.current.name = ""
+				// Blank but long enough to fill the chip, so the chip has the same width in both frames.
+				f.current.name = "                                                                "
 				render.draw_list_reset(&w.list)
 				testing.expect_value(t, app.workspace_button_draw(s, w), render.Build_Status.Ok)
 				testing.expect_value(t, render.frame_render(device, surface, &w.list, s.theme.window), render.Error.None)
@@ -418,7 +419,7 @@ workspace134_header_name_never_paints_into_indicator :: proc(t: ^testing.T) {
 				pixels, pixel_error := render.surface_read_pixels(device, surface, context.allocator)
 				if !testing.expect_value(t, pixel_error, render.Error.None) { return }
 				defer delete(pixels)
-				indicator := app.workspace_button_indicator_rect(w)
+				indicator := app.workspace_button_indicator_rect(s, w)
 				clear := true
 				for y in int(indicator.y)..<int(indicator.y+indicator.height) {
 					for x in int(indicator.x-4*scale)..<int(indicator.x+indicator.width) {
@@ -440,7 +441,7 @@ workspace134_offscreen_menu_inline_field_and_drawn_indicator :: proc(t: ^testing
 	fonts, font_error := font.system_create()
 	if !testing.expect_value(t, font_error, font.Error.None) { return }
 	defer font.system_destroy(fonts)
-	device, device_error := render.device_create()
+	device, device_error := render.device_create(.Warp)
 	if !testing.expect_value(t, device_error, render.Error.None) { return }
 	defer render.device_destroy(device)
 	surface, surface_error := render.surface_create_offscreen(device, 1200, 800)

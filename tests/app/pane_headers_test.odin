@@ -1,5 +1,6 @@
 package app_test
 
+import "core:fmt"
 import "core:slice"
 import "core:testing"
 import app "../../src"
@@ -21,6 +22,102 @@ pane_headers_in_a_float_keep_split_and_close_only :: proc(t: ^testing.T) {
 		kept := button == .Documents || button == .Split_Right || button == .Split_Down || button == .Close
 		testing.expectf(t, (in_float.buttons[button].width > 0) == kept, "a floating header and %v", button)
 	}
+}
+
+// A header button's picture is the window as pressing the button leaves it: every pane where it ends up,
+// and the chosen one where the button's pane, or the pane a split adds, lands. The pane is not focused yet,
+// as pressing its header focuses it first.
+@(test)
+pane_header_previews_show_what_the_buttons_do :: proc(t: ^testing.T) {
+	Case :: struct {
+		button: app.Pane_Header_Button,
+		action: app.Action,
+	}
+	cases := [?]Case {
+		{.Split_Right, .Split_Right},
+		{.Split_Down, .Split_Down},
+		{.Zoom, .Zoom_Pane},
+		{.Fill_Window, .Fill_Window_Pane},
+		{.Dock, .Float_Pane},
+		{.Linked_Window, .Linked_Window},
+	}
+	for c in cases {
+		f: Palette_Fixture
+		defer palette_fixture_destroy(t, &f)
+		if !palette_fixture_create(t, &f, fmt.tprintf("header-preview-%v", c.button), second_window = false) {
+			return
+		}
+		s, w := &f.state, f.state.windows[0]
+		s.animations = false
+		app.pane_split(s, w, .Right)
+		if !testing.expect_value(t, len(w.panes), 2) {return}
+		pane, other := w.panes[0], w.panes[1]
+		card := app.pane_header_card(s, w, pane, c.button)
+		preview, pictured := card.preview.?
+		if !testing.expectf(t, pictured && card.description != "", "%v shows a picture", c.button) {continue}
+		app.pane_focus(s, w, pane.node)
+		app.run_action(s, w, c.action)
+		if !testing.expectf(t, len(preview.panes) == len(w.panes), "%v: %d panes pictured, %d shown",
+			c.button, len(preview.panes), len(w.panes)) {continue}
+		for shown, i in w.panes {
+			r := shown.rect
+			testing.expectf(t, preview.panes[i] == render.Rect{r.x, r.y, r.width, r.height},
+				"%v: pane %d pictured at %v, shown at %v", c.button, i, preview.panes[i], r)
+		}
+		switch c.button {
+		case .Split_Right, .Split_Down:
+			added := w.panes[preview.pane].content
+			fresh := added != pane.content && added != other.content
+			testing.expectf(t, fresh, "%v picks the new pane", c.button)
+		case .Linked_Window:
+			testing.expect_value(t, preview.pane, -1)
+			testing.expect_value(t, preview.away, [2]f32{pane.rect.width, pane.rect.height})
+		case .Documents, .Zoom, .Fill_Window, .Dock, .Close:
+			testing.expectf(t, w.panes[preview.pane].content == pane.content, "%v picks its pane", c.button)
+		}
+	}
+}
+
+// A button the window would refuse draws disabled, takes no press and says why in its tooltip card; it comes
+// back once the refusal no longer holds.
+@(test)
+refused_header_buttons_are_disabled_and_say_why :: proc(t: ^testing.T) {
+	f: Palette_Fixture
+	defer palette_fixture_destroy(t, &f)
+	if !palette_fixture_create(t, &f, "header-refused", second_window = false) {return}
+	s, w := &f.state, f.state.windows[0]
+	s.animations = false
+	if !testing.expect_value(t, len(w.panes), 1) {return}
+	pane := w.panes[0]
+	testing.expect_value(t, app.pane_header_refused(w, pane, .Dock), app.Pane_Header_Refusal.Last_Tiled)
+	testing.expect_value(t, app.pane_header_refused(w, pane, .Linked_Window), app.Pane_Header_Refusal.Keeps_One)
+	testing.expect_value(t, app.pane_header_refused(w, pane, .Split_Right), app.Pane_Header_Refusal.None)
+	card := app.pane_header_card(s, w, pane, .Dock)
+	testing.expect_value(t, card.description, app.PANE_HEADER_REFUSAL_TEXT[.Last_Tiled])
+	testing.expect(t, card.preview == nil, "a refused button pictures nothing")
+	notices := len(s.notices.items)
+	gesture_click_header(s, w, .Dock, app.pane_header_layout(w, pane))
+	gesture_click_header(s, w, .Linked_Window, app.pane_header_layout(w, pane))
+	testing.expect_value(t, len(w.panes), 1)
+	testing.expect(t, !w.panes[0].floating, "the disabled Float button floats nothing")
+	testing.expect_value(t, len(s.windows), 1)
+	testing.expect_value(t, len(s.notices.items), notices)
+
+	// Too small to split: both split buttons are refused until the minimum allows them again.
+	s.settings.pane.minimum_columns = 10_000
+	app.window_relayout(s, w)
+	testing.expect_value(t, app.pane_header_refused(w, pane, .Split_Right), app.Pane_Header_Refusal.Minimum)
+	testing.expect_value(t, app.pane_header_refused(w, pane, .Split_Down), app.Pane_Header_Refusal.Minimum)
+	gesture_click_header(s, w, .Split_Right, app.pane_header_layout(w, pane))
+	testing.expect_value(t, len(w.panes), 1)
+	s.settings.pane.minimum_columns = 0
+	app.window_relayout(s, w)
+	testing.expect_value(t, app.pane_header_refused(w, pane, .Split_Right), app.Pane_Header_Refusal.None)
+	gesture_click_header(s, w, .Split_Right, app.pane_header_layout(w, pane))
+	if !testing.expect_value(t, len(w.panes), 2) {return}
+	// With a second tiled pane the first can float, and linking it leaves the other here.
+	testing.expect_value(t, app.pane_header_refused(w, w.panes[0], .Dock), app.Pane_Header_Refusal.None)
+	testing.expect_value(t, app.pane_header_refused(w, w.panes[0], .Linked_Window), app.Pane_Header_Refusal.None)
 }
 
 // The Settings pane's header shows the Settings icon the tab strip, rail and float capsules show,

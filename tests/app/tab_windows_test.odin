@@ -234,7 +234,7 @@ tabs_dragged_to_another_window_join_its_workspace :: proc(t: ^testing.T) {
 tab_drag_to_row :: proc(state: ^app.App, source, w: ^app.Window, index, row: int) -> bool {
 	app.tab_press(state, source, index, 80, 20, false)
 	_ = app.tab_drag_move(state, source, -30_000, -30_000)
-	chip := app.workspace_button_rect(w)
+	chip := app.workspace_button_rect(state, w)
 	if !app.tab_workspace_drag_move(state, source, w, chip.x + 4, chip.y + 4) {return false}
 	r := app.workspace_picker_row_rect(w, row)
 	return app.tab_workspace_drag_move(state, source, w, r.x + 4, r.y + r.height / 2)

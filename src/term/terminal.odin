@@ -53,6 +53,15 @@ Config :: struct {
 	colors:                          Colors,
 	// Text written to the screen before the shell starts, which then draws below it.
 	preface:                         string,
+	// Stamps program status reports. create keeps it for the session's life, so restart ignores it;
+	// the zero value reads the system clock.
+	wall_clock:                      Wall_Clock,
+}
+
+// A time-of-day source the reader thread can call.
+Wall_Clock :: struct {
+	procedure: proc(user: rawptr) -> time.Time,
+	user:      rawptr,
 }
 
 // Everything about a session a running app can change. create, restart and configure all install
@@ -152,6 +161,7 @@ Session :: struct {
 	allocator:                                                runtime.Allocator,
 	callback_context:                                         runtime.Context,
 	wake:                                                     Wake,
+	wall_clock:                                               Wall_Clock,
 	// Guards the libghostty objects below, the process phase and the render hold.
 	mutex:                                                    sync.Mutex,
 	terminal:                                                 ghostty.Terminal,
@@ -242,7 +252,7 @@ create :: proc(config: Config, wake: Wake, allocator := context.allocator) -> (^
 	if s == nil {
 		return nil, .Out_Of_Memory
 	}
-	s.wake = wake
+	s.wake, s.wall_clock = wake, config.wall_clock
 	ok := false
 	defer if !ok {
 		destroy(s)

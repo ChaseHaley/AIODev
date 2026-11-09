@@ -122,6 +122,7 @@ session_config :: proc(
 		geometry = geometry,
 		options = session_options(app),
 		colors = terminal_colors(app.settings.colors),
+		wall_clock = clock_wall_source(&app.clock),
 	}
 }
 

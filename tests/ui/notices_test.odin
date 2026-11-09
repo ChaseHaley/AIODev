@@ -146,7 +146,7 @@ notices_render_all_severities_with_bounded_reused_storage_at_multiple_scales :: 
 	fonts, font_error := font.system_create(allocator)
 	if !testing.expect_value(t, font_error, font.Error.None) { return }
 	defer font.system_destroy(fonts)
-	device, device_error := render.device_create()
+	device, device_error := render.device_create(.Warp)
 	if !testing.expect_value(t, device_error, render.Error.None) { return }
 	defer render.device_destroy(device)
 	cache: glyphs.Cache

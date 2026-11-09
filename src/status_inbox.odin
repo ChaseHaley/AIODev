@@ -14,8 +14,6 @@ import "core:time"
 // panel (status_panel.odin) groups the same reports by location.
 
 @(private)
-STATUS_PILL_WIDTH :: f32(52)
-@(private)
 STATUS_ROW_HEIGHT :: f32(48)
 @(private)
 STATUS_INBOX_WIDTH :: f32(420)
@@ -73,8 +71,8 @@ status_items :: proc(app: ^App, w: ^Window) -> []Status_Item {
 }
 
 @(private)
-status_age :: proc(at: time.Time) -> string {
-	seconds := int(time.duration_seconds(time.since(at)))
+status_age :: proc(at, now: time.Time) -> string {
+	seconds := int(time.duration_seconds(time.diff(at, now)))
 	switch {
 	case seconds < 60:
 		return fmt.tprintf("%ds", max(0, seconds))
@@ -127,7 +125,7 @@ status_row_draw :: proc(
 	text_x := left + icon + ui.SPACE_2 * s
 	show_dismiss := highlighted && term.program_status_finished(item.record.state)
 	right := r.x + r.width - (show_dismiss ? ui.SPACE_1 + ui.HEIGHT_COMPACT + ui.SPACE_1 : ui.CONTROL_INSET) * s
-	age := status_age(item.record.updated_at)
+	age := status_age(item.record.updated_at, clock_wall(&app.clock))
 	age_width := ui.text_width(&small, age)
 	if !show_dismiss {
 		if result := ui.draw_text(&small, &w.list, age, right - age_width, line_one, app.theme.faint);
@@ -197,15 +195,15 @@ status_open_item :: proc(app: ^App, w: ^Window, item: Status_Item) {
 
 status_pill_width :: proc(app: ^App, w: ^Window) -> f32 {
 	s := &app.settings.status
-	return s.enabled && s.inbox ? STATUS_PILL_WIDTH * w.scale : 0
+	return s.enabled && s.inbox ? ui.TITLE_BUTTON_WIDTH * w.scale : 0
 }
 
+// The inbox button is one more title button: the palette button's size, right after it.
 status_pill_rect :: proc(app: ^App, w: ^Window) -> render.Rect {
 	width := status_pill_width(app, w)
 	if width == 0 {return {}}
-	height := ui.HEIGHT_TOOLBAR * w.scale
-	top := (ui.TITLE_BAR_HEIGHT * w.scale - height) / 2
-	return {workspace_button_width(w), top, width - ui.SPACE_1 * w.scale, height}
+	palette := title_action_rect(w, .Palette)
+	return {palette.x + palette.width, palette.y, width, palette.height}
 }
 
 status_pill_hover_set :: proc(w: ^Window, hovered: bool) {
@@ -213,47 +211,58 @@ status_pill_hover_set :: proc(w: ^Window, hovered: bool) {
 	w.status.pill_hover, w.dirty = hovered, true
 }
 
+// The donut's ring, in DIPs. Idle draws the whole ring at the same width.
+@(private)
+STATUS_DONUT_RADIUS :: f32(6)
+@(private)
+STATUS_DONUT_WIDTH :: f32(2.5)
+// The gap between two arcs, in radians.
+@(private)
+STATUS_DONUT_GAP :: f32(0.24)
+
+// One arc of the donut: a pane's most urgent unseen report.
+@(private)
+Status_Donut_Arc :: struct {
+	rank:  Status_Rank,
+	glyph: ui.Status_Glyph,
+}
+
+// The inbox button draws a donut: one arc per pane with live status in its state's colour, most
+// urgent first from the top, or a whole faint ring when nothing is going on.
 status_pill_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 	r := status_pill_rect(app, w)
 	if r.width <= 0 {return .Ok}
 	s := w.scale
 	if render.push_layer(&w.list, {0, 0, f32(w.width), ui.TITLE_BAR_HEIGHT * s}) != .None {return .Ok}
-	if status_inbox_shown(w) {
-		ui.draw_rect(&w.list, {rect = r, color = app.theme.selection, radius = ui.RADIUS_CONTROL * s})
-	} else if w.status.pill_hover {
-		ui.draw_rect(&w.list, {rect = r, color = app.theme.hover, radius = ui.RADIUS_CONTROL * s})
+	button := ui.Button {
+		rect     = r,
+		hover    = w.status.pill_hover ? 1 : 0,
+		selected = status_inbox_shown(w),
 	}
-	summary: Status_Summary
+	face, _, err := ui.button_draw(&w.list, app.theme, button, s, w.pointer)
+	if err != .None {return .Ok}
+	arcs := make([dynamic]Status_Donut_Arc, context.temp_allocator)
 	walk := status_scope_walk(app, w, eligible_only = true)
 	for pane, _, ok := status_scope_next(&walk); ok; pane, _, ok = status_scope_next(&walk) {
+		summary: Status_Summary
 		status_summary_add(app, &summary, pane.session)
+		mark, shown := status_indicator(summary)
+		if !shown || mark.glyph == .Idle {continue}
+		append(&arcs, Status_Donut_Arc{status_presentation(summary.top).rank, mark.glyph})
 	}
-	mark, shown := status_indicator(summary)
-	if !shown {mark = {glyph = .Idle, progress = -1}}
-	count := summary.needs
-	if count == 0 {count = summary.counts[.Working]}
-	icon := ui.ICON_BUTTON * s
-	glyph_x := count > 0 ? r.x + ui.CONTROL_INSET * s : r.x + (r.width - icon) / 2
-	glyph := render.Rect{glyph_x, r.y + (r.height - icon) / 2, icon, icon}
-	if result := status_mark_draw(app, w, glyph, mark); result != .Ok {
-		return result
+	slice.sort_by(arcs[:], proc(a, b: Status_Donut_Arc) -> bool {return a.rank < b.rank})
+	center := [2]f32{face.x + face.width / 2, face.y + face.height / 2}
+	radius, width := STATUS_DONUT_RADIUS * s, STATUS_DONUT_WIDTH * s
+	if len(arcs) == 0 {
+		_ = render.push_arc(&w.list, center, radius, 0, 2 * math.PI, width, app.theme.faint)
+		return .Ok
 	}
-	if count > 0 {
-		label := fmt.tprintf("%d", count)
-		strong := ui.text_styled(&w.ui_text, .Strong)
-		ink := summary.needs > 0 ? ui.status_color(app.theme, mark.glyph) : app.theme.muted
-		if result := ui.draw_text(
-			&strong,
-			&w.list,
-			label,
-			r.x + 28 * s,
-			r.y + (r.height - strong.line_height) / 2 + strong.ascent,
-			ink,
-		); result != .Ok {return result}
-	}
-	if w.status.pill_hover && !status_inbox_shown(w) {
-		radius := ui.RADIUS_CONTROL * s
-		if ui.hover_rim_draw(&w.list, app.theme, r, radius, 1, s, w.pointer, compact = true) != .None {return .Ok}
+	step := 2 * math.PI / f32(len(arcs))
+	gap := len(arcs) > 1 ? min(STATUS_DONUT_GAP, step / 2) : 0
+	for arc, i in arcs {
+		start := -math.PI / 2 + f32(i) * step + gap / 2
+		ink := ui.status_color(app.theme, arc.glyph)
+		if render.push_arc(&w.list, center, radius, start, step - gap, width, ink) != .None {return .Ok}
 	}
 	return .Ok
 }
@@ -297,7 +306,7 @@ status_inbox_layout :: proc(
 	s := w.scale
 	width := min(STATUS_INBOX_WIDTH * s, f32(w.width) - 16 * s)
 	anchor := status_pill_rect(app, w)
-	if anchor.width == 0 {anchor = workspace_button_rect(w)}
+	if anchor.width == 0 {anchor = workspace_button_rect(app, w)}
 	x := clamp(anchor.x, 8 * s, max(8 * s, f32(w.width) - width - 8 * s))
 	y := (ui.TITLE_BAR_HEIGHT + ui.SPACE_1) * s
 	content := f32(max(1, len(items))) * STATUS_ROW_HEIGHT * s

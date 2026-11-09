@@ -249,6 +249,8 @@ switch ($Task) {
         foreach ($name in $sourcePackages) {
             Invoke-Odin check "src/$name" -no-entry-point @flags
         }
+        # The headless backend (WORK-349) must keep compiling beside the Win32 one.
+        Invoke-Odin check src/platform -no-entry-point '-define:AIO_HEADLESS=true' @flags
         if (Get-ChildItem src -Filter *.odin -File) {
             Invoke-Odin check src @flags
             Invoke-Odin check src @appFlags

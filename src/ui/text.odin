@@ -77,8 +77,9 @@ theme_from :: proc(t: settings.Theme, interface: settings.Interface_Settings) ->
 	}
 }
 
+// Selawik is Microsoft's open substitute for Segoe UI, for a font system without the installed fonts.
 @(private)
-UI_FAMILIES :: [?]string{"Segoe UI Variable Text", "Segoe UI"}
+UI_FAMILIES :: [?]string{"Segoe UI Variable Text", "Segoe UI", "Selawik"}
 @(private)
 ICON_FAMILIES :: [?]string{"Segoe Fluent Icons", "Segoe MDL2 Assets"}
 @(private)
@@ -97,7 +98,7 @@ text_init :: proc(
 	t: ^Text, fonts: ^font.System, cache: ^glyphs.Cache, size_px: f32, preferred: string = "",
 ) -> bool {
 	t.fonts, t.cache = fonts, cache
-	for name in ([3]string{preferred, UI_FAMILIES[0], UI_FAMILIES[1]}) {
+	for name in ([4]string{preferred, UI_FAMILIES[0], UI_FAMILIES[1], UI_FAMILIES[2]}) {
 		if name == "" {continue}
 		family, err := font.family_load(fonts, name)
 		if err == .None {

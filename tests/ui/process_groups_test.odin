@@ -84,7 +84,7 @@ process_groups_rows_below_a_focused_field_stay_visible :: proc(t: ^testing.T) {
 	fonts, err := font.system_create()
 	if !testing.expect_value(t, err, font.Error.None) {return}
 	defer font.system_destroy(fonts)
-	device, device_error := render.device_create()
+	device, device_error := render.device_create(.Warp)
 	if !testing.expect_value(t, device_error, render.Error.None) {return}
 	defer render.device_destroy(device)
 	cache: glyphs.Cache

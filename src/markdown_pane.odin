@@ -156,7 +156,7 @@ markdown_pane_create :: proc(app: ^App, path: string, verified: bool) -> ^Markdo
 	app.next_markdown_id += 1
 	pane.id = app.next_markdown_id
 	if verified {markdown_pane_verified(pane)}
-	if app.markdown_deadline == {} {app.markdown_deadline = time.tick_add(time.tick_now(), MARKDOWN_POLL)}
+	if app.markdown_deadline == {} {app.markdown_deadline = time.tick_add(clock_now(&app.clock), MARKDOWN_POLL)}
 	return pane
 }
 
@@ -277,7 +277,7 @@ markdown_referenced :: proc(app: ^App, id: u32) -> bool {
 // exists, and the file attributes it reads do not download a cloud placeholder.
 markdown_tick :: proc(app: ^App) {
 	if app.markdown_deadline == {} {return}
-	now := time.tick_now()
+	now := clock_now(&app.clock)
 	if time.tick_diff(now, app.markdown_deadline) > 0 {return}
 	changed := false
 	for i := len(app.markdown_panes) - 1; i >= 0; i -= 1 {

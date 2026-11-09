@@ -407,7 +407,7 @@ tab_menu_draw_matches_labels_separators_and_disabled_rows :: proc(t: ^testing.T)
 	fonts, font_error := font.system_create()
 	if !testing.expect_value(t, font_error, font.Error.None) { return }
 	defer font.system_destroy(fonts)
-	device, device_error := render.device_create()
+	device, device_error := render.device_create(.Warp)
 	if !testing.expect_value(t, device_error, render.Error.None) { return }
 	defer render.device_destroy(device)
 	cache: glyphs.Cache

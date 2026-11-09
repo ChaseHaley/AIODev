@@ -24,12 +24,23 @@ name, such as aio tab.next; aio commands lists them all.
 
 Panes   --pane takes a pane id, a pane name, here or focused. Inside an AIODev pane the
         default is here, the pane aio runs in; elsewhere it is the focused pane.
+        --workspace takes a workspace id or name; workspace.change, pane.move_workspace
+        and tab.move_workspace open their dialog without it.
 Files   aio pane.open_markdown [--direction right|down|left|up] [--focus] <file>
             Shows a Markdown file beside the pane and updates it when the file changes.
-Common  aio tab.new [--cwd <dir>] [--name <name>] [--focus] [-- <program> [arguments]]
+Common  aio tab.new [--cwd <dir>] [--name <name>] [--tab-name <name>] [--focus] [-- <program>]
+        aio workspace.new [--cwd <dir>] [--name <name>] [--focus] [-- <program>]
         aio pane.split [--direction right|down|left|up] [--ratio <0.05-0.95>] [-- <program>]
-            Both print the new pane's id and leave focus where it is unless --focus.
+            Each prints the new pane's id, starts in aio's working directory unless --cwd
+            names another, and leaves focus where it is unless --focus.
+            tab.new --name names the pane; workspace.new --name names the workspace.
+            --command-file <file> takes the program and arguments from a JSON array of
+            strings instead, so no shell quotes them.
+        aio tab.rename <name>             names the pane's tab
+        aio workspace.rename [--workspace <workspace>] <name>
+            Without a name, both open their dialog.
         aio pane.send [--enter] <text>    types text into the pane, then presses Enter
+        aio pane.send --file <file>       types a UTF-8 file's text exactly
         aio pane.read [--lines <rows>]    prints the pane's visible text
         aio pane.list                     one line per pane; --json for details
         aio pane.close

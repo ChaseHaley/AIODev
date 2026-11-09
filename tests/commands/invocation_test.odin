@@ -13,18 +13,20 @@ invocation_registry :: proc(t: ^testing.T) -> commands.Registry {
 			id = 2,
 			name = "pane.split",
 			title = "Split Pane",
-			arguments = {.Direction, .Ratio, .Focus, .Directory, .Name, .Profile, .Program},
+			arguments = {.Direction, .Ratio, .Focus, .Directory, .Name, .Profile, .Program, .Command_File},
 		},
 		{
 			id = 3,
 			name = "pane.send",
 			title = "Send Text",
-			arguments = {.Text, .Enter},
+			arguments = {.Text, .Enter, .Text_File},
 			required = {.Text},
 			hidden = true,
 		},
 		{id = 4, name = "pane.read", title = "Read Pane", arguments = {.Lines}, hidden = true},
 		{id = 5, name = "pane.open_markdown", title = "Open Markdown", arguments = {.File, .Direction, .Focus}},
+		{id = 6, name = "workspace.rename", title = "Rename Workspace", arguments = {.Text, .Workspace}},
+		{id = 7, name = "tab.new", title = "New Tab", arguments = {.Focus, .Name, .Program, .Tab_Name}},
 	}
 	for item in items {testing.expect_value(t, commands.register(&registry, item), commands.Error.None)}
 	return registry
@@ -109,10 +111,91 @@ invocation_rejects_bad_command_lines :: proc(t: ^testing.T) {
 		{{"pane.read", "--lines", "0"}, "0"},
 		{{"pane.read", "--lines", "10001"}, "10001"},
 		{{"pane.read", "--lines", "-3"}, "-3"},
+		{{"workspace.rename", "--workspace"}, "--workspace"},
+		{{"workspace.rename", "--workspace", ""}, "--workspace"},
+		{{"workspace.rename", "--workspace", "a", "--workspace", "b"}, "--workspace"},
+		{{"workspace.rename", "--tab-name", "Build"}, "--tab-name"},
+		{{"tab.new", "--tab-name", ""}, "--tab-name"},
+		{{"tab.new", "--tab-name", "a", "--tab-name", "b"}, "--tab-name"},
+		{{"tab.new", "--workspace", "Tools"}, "--workspace"},
+		{{"pane.split", "--command-file"}, "--command-file"},
+		{{"pane.split", "--command-file", ""}, "--command-file"},
+		{{"pane.split", "--command-file", "a.json", "--command-file", "b.json"}, "--command-file"},
+		{{"pane.split", "--command-file", "a.json", "--", "claude"}, "--command-file"},
+		{{"pane.send", "--file"}, "--file"},
+		{{"pane.send", "--file", "prompt.txt", "hello"}, "--file"},
+		{{"pane.send", "hello", "--enter", "--file", "prompt.txt"}, "--file"},
+		{{"pane.read", "--command-file", "a.json"}, "--command-file"},
+		{{"tab.next", "--file", "prompt.txt"}, "--file"},
 	}
 	for item in cases {
 		_, err := commands.parse_invocation(&registry, item.args, context.temp_allocator)
 		testing.expectf(t, err.argument == item.argument && err.advice != "", "%v gave %v", item.args, err)
+	}
+}
+
+// A file option stands in for the argument it reads, so pane.send needs no text beside --file; after
+// --, both spellings belong to the program.
+@(test)
+invocation_takes_program_and_text_from_files :: proc(t: ^testing.T) {
+	registry := invocation_registry(t)
+	defer commands.destroy(&registry)
+	split := [?]string{"pane.split", "--command-file", "fork.json", "--direction", "down"}
+	program, program_error := commands.parse_invocation(&registry, split[:], context.temp_allocator)
+	testing.expect_value(t, program_error, commands.Parse_Error{})
+	testing.expect_value(t, program.command_file, "fork.json")
+	testing.expect_value(t, program.program, "")
+	testing.expect_value(t, program.given, commands.Arguments{.Direction, .Command_File})
+	send := [?]string{"pane.send", "--file", "prompt.txt", "--enter"}
+	text, text_error := commands.parse_invocation(&registry, send[:], context.temp_allocator)
+	testing.expect_value(t, text_error, commands.Parse_Error{})
+	testing.expect_value(t, text.text_file, "prompt.txt")
+	testing.expect_value(t, text.text, "")
+	testing.expect(t, text.enter)
+	passed := [?]string{"pane.split", "--", "tool", "--command-file", "x.json", "--file", "y"}
+	tool, tool_error := commands.parse_invocation(&registry, passed[:], context.temp_allocator)
+	testing.expect_value(t, tool_error, commands.Parse_Error{})
+	testing.expect_value(t, tool.program, "tool --command-file x.json --file y")
+	testing.expect_value(t, tool.given, commands.Arguments{.Program})
+}
+
+@(test)
+command_file_parse_joins_a_json_array_of_strings :: proc(t: ^testing.T) {
+	// Quotes, backslashes before a quote and at the end, a newline, a tab and non-ASCII text.
+	text := "\uFEFF[\"claude.exe\", \"--resume\", \"1e79\", \"it's \\\"done\\\" C:\\\\dir with space\\\\ " +
+		"a\\\\\\\"b\\nzweite Zeile\\t\\u00e9 \u65e5\u672c\\\\\"]\n"
+	args := [?]string{
+		"claude.exe", "--resume", "1e79",
+		"it's \"done\" C:\\dir with space\\ a\\\"b\nzweite Zeile\t\u00e9 \u65e5\u672c\\",
+	}
+	expected, join_error := commands.command_line_join(args[:], context.temp_allocator)
+	testing.expect_value(t, join_error, nil)
+	line, advice := commands.command_file_parse(text)
+	defer delete(line)
+	testing.expect_value(t, advice, "")
+	testing.expect_value(t, line, expected)
+	Case :: struct {
+		text, advice: string,
+	}
+	cases := [?]Case{
+		{"", `not a JSON array of strings, such as ["program.exe", "argument"]`},
+		{`"claude.exe"`, `not a JSON array of strings, such as ["program.exe", "argument"]`},
+		{`{"program": "claude.exe"}`, `not a JSON array of strings, such as ["program.exe", "argument"]`},
+		{`["claude.exe"`, `not a JSON array of strings, such as ["program.exe", "argument"]`},
+		{`["claude.exe"] ["more"]`, `not a JSON array of strings, such as ["program.exe", "argument"]`},
+		{`['claude.exe']`, `not a JSON array of strings, such as ["program.exe", "argument"]`},
+		{"[]", "the array is empty; name a program first"},
+		{`["claude.exe", 3]`, "element 2 is not a string"},
+		{`["claude.exe", ["nested"]]`, "element 2 is not a string"},
+		{`["claude.exe", null]`, "element 2 is not a string"},
+		{`[""]`, "the program, the first element, is empty"},
+		{`["claude.exe", "a\u0000b"]`, "element 2 holds a NUL character"},
+		{"[\"claude.exe\", \"\xff\"]", "not UTF-8 text"},
+	}
+	// The tracked allocator catches what a rejected file leaves allocated or frees twice.
+	for item in cases {
+		parsed, problem := commands.command_file_parse(item.text)
+		testing.expectf(t, parsed == "" && problem == item.advice, "%q gave %q, %q", item.text, parsed, problem)
 	}
 }
 
@@ -123,7 +206,7 @@ invocation_usage_names_accepted_arguments :: proc(t: ^testing.T) {
 	testing.expect_value(
 		t,
 		commands.usage(commands.find(&registry, "pane.send"), context.temp_allocator),
-		"pane.send [--pane <pane>] <text> [--enter]",
+		"pane.send [--pane <pane>] (<text> | --file <file>) [--enter]",
 	)
 	testing.expect_value(
 		t,
@@ -137,13 +220,52 @@ invocation_usage_names_accepted_arguments :: proc(t: ^testing.T) {
 	)
 	testing.expect_value(
 		t,
+		commands.usage(commands.find(&registry, "pane.split"), context.temp_allocator),
+		"pane.split [--pane <pane>] [--direction left|right|up|down] [--ratio 0.05-0.95] [--focus] " +
+		"[--cwd <directory>] [--name <name>] [--profile <id>] " +
+		"[-- <program> [arguments] | --command-file <file>]",
+	)
+	testing.expect_value(
+		t,
 		commands.usage(commands.find(&registry, "pane.open_markdown"), context.temp_allocator),
 		"pane.open_markdown [--pane <pane>] [--direction left|right|up|down] [--focus] [<file>]",
 	)
+	testing.expect_value(
+		t,
+		commands.usage(commands.find(&registry, "workspace.rename"), context.temp_allocator),
+		"workspace.rename [--pane <pane>] [<text>] [--workspace <workspace>]",
+	)
 }
 
-// Path-ness follows the argument kind: --cwd and a command's file resolve against the sender's
-// directory wherever they appear, while text and other values stay as given.
+// --tab-name names the new tab beside --name for its pane; --workspace takes any nonempty word, digits
+// included, which the app resolves as an id or a name.
+@(test)
+invocation_parses_tab_names_and_workspace_targets :: proc(t: ^testing.T) {
+	registry := invocation_registry(t)
+	defer commands.destroy(&registry)
+	open := [?]string{"tab.new", "--name", "agent", "--tab-name", "Build", "--", "pwsh.exe"}
+	opened, open_error := commands.parse_invocation(&registry, open[:], context.temp_allocator)
+	testing.expect_value(t, open_error, commands.Parse_Error{})
+	testing.expect_value(t, opened.name, "agent")
+	testing.expect_value(t, opened.tab_name, "Build")
+	testing.expect_value(t, opened.program, "pwsh.exe")
+	testing.expect_value(t, opened.given, commands.Arguments{.Name, .Program, .Tab_Name})
+	rename := [?]string{"workspace.rename", "--workspace", "Tools", "Agents"}
+	renamed, rename_error := commands.parse_invocation(&registry, rename[:], context.temp_allocator)
+	testing.expect_value(t, rename_error, commands.Parse_Error{})
+	testing.expect_value(t, renamed.workspace, "Tools")
+	testing.expect_value(t, renamed.text, "Agents")
+	testing.expect_value(t, renamed.given, commands.Arguments{.Text, .Workspace})
+	numbered := [?]string{"workspace.rename", "--pane", "here", "--workspace", "2"}
+	by_id, id_error := commands.parse_invocation(&registry, numbered[:], context.temp_allocator)
+	testing.expect_value(t, id_error, commands.Parse_Error{})
+	testing.expect_value(t, by_id.workspace, "2")
+	testing.expect_value(t, by_id.pane, "here")
+	testing.expect_value(t, by_id.given, commands.Arguments{.Workspace})
+}
+
+// Path-ness follows the argument kind: --cwd, a command's file and the file options resolve against
+// the sender's directory wherever they appear, while text and other values stay as given.
 @(test)
 invocation_paths_resolve_against_the_senders_directory :: proc(t: ^testing.T) {
 	registry := invocation_registry(t)
@@ -174,6 +296,14 @@ invocation_paths_resolve_against_the_senders_directory :: proc(t: ^testing.T) {
 	unresolved, _ := commands.parse_invocation(&registry, unknown[:], context.temp_allocator)
 	testing.expect_value(t, commands.invocation_paths_resolve(&unresolved, "", context.temp_allocator), nil)
 	testing.expect_value(t, unresolved.directory, "work")
+	files := [?]string{"pane.split", "--command-file", `fork\a1.json`}
+	program, _ := commands.parse_invocation(&registry, files[:], context.temp_allocator)
+	testing.expect_value(t, commands.invocation_paths_resolve(&program, `C:\work`, context.temp_allocator), nil)
+	testing.expect_value(t, program.command_file, `C:\work\fork\a1.json`)
+	typed := [?]string{"pane.send", "--file", `D:\prompt.txt`, "--enter"}
+	prompt, _ := commands.parse_invocation(&registry, typed[:], context.temp_allocator)
+	testing.expect_value(t, commands.invocation_paths_resolve(&prompt, `C:\work`, context.temp_allocator), nil)
+	testing.expect_value(t, prompt.text_file, `D:\prompt.txt`)
 }
 
 @(test)

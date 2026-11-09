@@ -69,16 +69,18 @@ pane_header_title :: proc(header: ^Pane_Header_Metadata) -> string {
 	return header.title != "" ? header.title : header.executable
 }
 
-// The pane header's buttons, left to right. A pane in a float keeps its split controls; minimizing, docking
-// and moving belong to the float header. Tiled panes add their view controls and Float.
+// The pane header's buttons, left to right, in groups by what they do: Documents; the splits; the views that
+// make the pane bigger; the moves that take it out of the tiling; Close. A pane in a float keeps its split
+// controls; minimizing, docking and moving belong to the float header. Tiled panes add their view controls,
+// Float and Linked window.
 Pane_Header_Button :: enum u8 {
 	Documents,
 	Split_Right,
 	Split_Down,
 	Zoom,
 	Fill_Window,
-	Linked_Window,
 	Dock,
+	Linked_Window,
 	Close,
 }
 
@@ -96,6 +98,9 @@ PANE_HEADER_TILED :: bit_set[Pane_Header_Button] {
 PANE_HEADER_FLOATING :: bit_set[Pane_Header_Button]{.Documents, .Split_Right, .Split_Down, .Close}
 @(private = "file")
 PANE_HEADER_OVERLAY :: bit_set[Pane_Header_Button]{.Documents, .Split_Right, .Split_Down}
+// The last button of each group, which a divider sets apart from the next group.
+@(private = "file")
+PANE_HEADER_GROUP_ENDS :: bit_set[Pane_Header_Button]{.Documents, .Split_Down, .Fill_Window, .Linked_Window}
 
 // The order buttons give way in a narrow header: the Documents button first, then the tiled view
 // controls, so splitting, floating and closing stay longest.
@@ -124,14 +129,8 @@ pane_header_layout :: proc(w: ^Window, pane: layout.Pane_Rect) -> Pane_Header_La
 		shown = PANE_HEADER_FLOATING
 	}
 	if !CONTENT_POLICY[pane.content.kind].documents {shown -= {.Documents}}
-	if !row {return ui.split_overlay_layout(area, w.scale, shown, Pane_Header_Button.Documents)}
-	return ui.header_layout(
-		area,
-		w.scale,
-		shown,
-		Pane_Header_Button.Documents,
-		PANE_HEADER_DROP_ORDER[:],
-	)
+	if !row {return ui.split_overlay_layout(area, w.scale, shown, PANE_HEADER_GROUP_ENDS)}
+	return ui.header_layout(area, w.scale, shown, PANE_HEADER_GROUP_ENDS, PANE_HEADER_DROP_ORDER[:])
 }
 
 // The icon a header button shows, which can follow the window's state.
@@ -219,7 +218,9 @@ pane_header_draw :: proc(
 	view := pane_view(w, pane.content)
 	for &face, button in buttons {
 		face.icon = pane_header_icon(w, button)
-		if view != nil {face.motion = view.header_controls[button]}
+		if view == nil {continue}
+		face.motion = view.header_controls[button]
+		face.disabled = view.header_refused[button] != .None
 	}
 	buttons[.Documents].selected = open
 	buttons[.Close].danger = true
@@ -227,7 +228,7 @@ pane_header_draw :: proc(
 		if !w.split_overlay && !open {return .Ok}
 		return ui.split_overlay_draw(&w.list, app.theme, l, buttons, w.scale, w.pointer)
 	}
-	if !pane_header_buttons_shown(w, pane, open) {l.buttons, l.divider = {}, {}}
+	if !pane_header_buttons_shown(w, pane, open) {l.buttons, l.dividers = {}, {}}
 	// Only a directory the shell reported (OSC 7) is shown; the launch directory may be stale.
 	title := content_pane_title(app, entry, pane.content)
 	directory := entry != nil ? entry.header.directory : content_directory(app, pane.content)
@@ -388,6 +389,9 @@ pane_header_press :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) {
 		document_menu_open_pane(app, w, pane)
 		return
 	}
+	// A refused button takes the press and does nothing; its tooltip says why.
+	if button, is_button := target.(Pane_Header_Button);
+	   is_button && pane_header_refused(w, pane, button) != .None {return}
 	if view := pane_view(w, pane.content); view != nil {ui.armed_press(&view.header_armed, target)}
 	// Every pane header rearranges panes; a float moves by its own float header.
 	if target == nil {pane_drag_press(app, w, pane.node, f32(e.x), f32(e.y))}
@@ -419,8 +423,11 @@ pane_header_release :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) 
 	if action, runs := pane_header_command(button); runs {run_action(app, w, action)}
 }
 
+// Follows the hovered header button; a refused button takes no hover, so it stays flat under the arrow.
 pane_header_pointer :: proc(w: ^Window, x, y: f32, enabled: bool) -> (bool, Pane_Header_Target) {
 	pane, target, hit := pane_header_hit(w, x, y)
+	if button, is_button := target.(Pane_Header_Button);
+	   is_button && hit && pane_header_refused(w, pane, button) != .None {target = nil}
 	for &view in w.views {
 		hover: Pane_Header_Target
 		if enabled && hit && view.content == pane.content {hover = target}
@@ -469,6 +476,14 @@ header_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: input.Mous
 header_tooltip :: proc(_: ^App, w: ^Window, x, y: f32) -> string {
 	_, target, _ := pane_header_hit(w, x, y)
 	return pane_header_tooltip(w, target)
+}
+
+@(private)
+header_tooltip_card :: proc(app: ^App, w: ^Window, x, y: f32) -> Tooltip_Card {
+	pane, target, hit := pane_header_hit(w, x, y)
+	button, is_button := target.(Pane_Header_Button)
+	if !hit || !is_button {return {}}
+	return pane_header_card(app, w, pane, button)
 }
 
 // The header swallows its presses, so it also finishes a release that lands anywhere.

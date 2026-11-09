@@ -80,7 +80,7 @@ try {
     Assert-Value (Read-State)['panes.split_overlay'] 'false' 'persistent header supplies split controls'
     Assert-Value $s['panes.header_height'] (28*$scale) 'header reserves terminal rows'
     Shot 'single-pane-split-controls'
-    Invoke-Aio mouse click (Px ($r[0]+$r[2]-136*$scale) ($r[1]+14*$scale)) --px
+    Invoke-Aio mouse click (Px ($r[0]+$r[2]-187*$scale) ($r[1]+14*$scale)) --px
     Assert-Value (Read-State)['panes.count'] 2 'single-pane split right button'
     $rects = Pane-Rects | Sort-Object X
     Assert-True ($rects[0].Y -eq $rects[1].Y -and $rects[1].X -gt $rects[0].X) 'split right places panes side by side'
@@ -88,7 +88,7 @@ try {
     Invoke-Aio command tab.new
     $r = Focused-Rect
     Invoke-Aio mouse move (Px ($r[0]+$r[2]-30*$scale) ($r[1]+12*$scale)) --px
-    Invoke-Aio mouse click (Px ($r[0]+$r[2]-112*$scale) ($r[1]+14*$scale)) --px
+    Invoke-Aio mouse click (Px ($r[0]+$r[2]-163*$scale) ($r[1]+14*$scale)) --px
     Assert-Value (Read-State)['panes.count'] 2 'single-pane split down button'
     $rects = Pane-Rects | Sort-Object Y
     Assert-True ($rects[0].X -eq $rects[1].X -and $rects[1].Y -gt $rects[0].Y) 'split down stacks panes'

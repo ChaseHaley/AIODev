@@ -271,7 +271,10 @@ ACTIONS :: [Action]Command_Descriptor {
 	.Quit = {"app.quit", "Quit AIODev", {{.Q, {.Control, .Shift}}}, .Local, {}},
 	.New_Tab = {
 		"tab.new", "New Tab", {{.T, {.Control, .Shift}}}, .Host,
-		{accepted = {.Focus, .Directory, .Name, .Profile, .Program}, control = .Pane},
+		{
+			accepted = {.Focus, .Directory, .Name, .Profile, .Program, .Command_File, .Tab_Name},
+			control = .Pane,
+		},
 	},
 	.Close_Pane = {"pane.close", "Close Pane", nil, .Local, {control = .Pane}},
 	.Next_Tab = {"tab.next", "Next Tab", {{.Tab, {.Control}}}, .Host, {}},
@@ -336,7 +339,10 @@ ACTIONS :: [Action]Command_Descriptor {
 	.Settings_UI = {"settings.open", "Settings", {{.Comma, {.Control}}}, .Host, {}},
 	.Split = {
 		"pane.split", "Split Pane", nil, .Local,
-		{accepted = {.Direction, .Ratio, .Focus, .Directory, .Name, .Profile, .Program}, control = .Pane},
+		{
+			accepted = {.Direction, .Ratio, .Focus, .Directory, .Name, .Profile, .Program, .Command_File},
+			control = .Pane,
+		},
 	},
 	.Split_Left = {
 		"pane.split_left", "Split Left", nil, .Local, {param = {family = .Toward, direction = .Left}},
@@ -378,7 +384,7 @@ ACTIONS :: [Action]Command_Descriptor {
 	.Keep_Pane_Open = {"pane.keep_open", "Toggle Keep Pane Open After Exit", nil, .Local, {}},
 	.Change_Shortcut = {"settings.change_shortcut", "Change Shortcut…", nil, .Host, {}},
 	.Customize_Colors = {"settings.customize_colors", "Customize Colors…", nil, .Host, {}},
-	.Rename_Tab = {"tab.rename", "Rename Tab", nil, .Host, {}},
+	.Rename_Tab = {"tab.rename", "Rename Tab", nil, .Host, {accepted = {.Text}, control = .Pane}},
 	.Rename_Pane = {"pane.rename", "Rename Pane", nil, .Local, {accepted = {.Text}, control = .Pane}},
 	.Change_Pane_Shell = {"pane.change_shell", "Change Pane Shell…", nil, .Local, {}},
 	.Open_Markdown = {
@@ -393,11 +399,16 @@ ACTIONS :: [Action]Command_Descriptor {
 	.Close_Other_Tabs = {"tab.close_others", "Close Other Tabs", nil, .Host, {}},
 	.Close_Right_Tabs = {"tab.close_right", "Close Tabs to the Right", nil, .Host, {}},
 	.Tab_Settings = {"tab.settings", "Tab Settings", nil, .Host, {}},
-	.New_Workspace = {"workspace.new", "New Workspace", nil, .Host, {}},
-	.Change_Workspace = {"workspace.change", "Change Workspace…", nil, .Host, {}},
+	.New_Workspace = {
+		"workspace.new", "New Workspace", nil, .Host,
+		{accepted = {.Focus, .Directory, .Name, .Profile, .Program, .Command_File}, control = .Pane},
+	},
+	.Change_Workspace = {"workspace.change", "Change Workspace…", nil, .Host, {accepted = {.Workspace}}},
 	.Next_Workspace = {"workspace.next", "Next Workspace", nil, .Host, {}},
 	.Previous_Workspace = {"workspace.previous", "Previous Workspace", nil, .Host, {}},
-	.Rename_Workspace = {"workspace.rename", "Rename Workspace…", nil, .Host, {}},
+	.Rename_Workspace = {
+		"workspace.rename", "Rename Workspace…", nil, .Host, {accepted = {.Text, .Workspace}, control = .Pane},
+	},
 	.New_Window = {"window.new", "New Window", {{.N, {.Control, .Shift}}}, .Host, {}},
 	.Delete_Workspace = {"workspace.delete", "Delete Workspace…", nil, .Host, {}},
 	.Change_Workspace_Icon = {"workspace.change_icon", "Change Workspace Icon…", nil, .Host, {}},
@@ -507,11 +518,15 @@ ACTIONS :: [Action]Command_Descriptor {
 	.Status_Dismiss_Finished = {
 		"status.dismiss_finished", "Dismiss Finished Program Status", nil, .Host, {},
 	},
-	.Move_Pane_Workspace = {"pane.move_workspace", "Move Pane to Workspace…", nil, .Refuse, {}},
+	.Move_Pane_Workspace = {
+		"pane.move_workspace", "Move Pane to Workspace…", nil, .Refuse, {accepted = {.Workspace}},
+	},
 	.Move_Pane_New_Workspace = {
 		"pane.move_new_workspace", "Move Pane to New Workspace", nil, .Refuse, {},
 	},
-	.Move_Tab_Workspace = {"tab.move_workspace", "Move Tab to Workspace…", nil, .Host, {}},
+	.Move_Tab_Workspace = {
+		"tab.move_workspace", "Move Tab to Workspace…", nil, .Host, {accepted = {.Workspace}},
+	},
 	.Move_Tab_New_Workspace = {"tab.move_new_workspace", "Move Tab to New Workspace", nil, .Host, {}},
 	.Pane_List = {"pane.list", "List Panes", nil, .Host, {hidden = true, control = .Unnamed}},
 	.Pane_Status = {
@@ -523,7 +538,7 @@ ACTIONS :: [Action]Command_Descriptor {
 	},
 	.Pane_Send = {
 		"pane.send", "Send Text to Pane", nil, .Host,
-		{accepted = {.Text, .Enter}, required = {.Text}, hidden = true, control = .Pane},
+		{accepted = {.Text, .Enter, .Text_File}, required = {.Text}, hidden = true, control = .Pane},
 	},
 	.Pane_Focus = {"pane.focus", "Focus Pane", nil, .Host, {hidden = true, control = .Pane}},
 	.App_Commands = {
@@ -537,7 +552,7 @@ ACTIONS :: [Action]Command_Descriptor {
 	.Show_Documents = {"pane.documents", "Show Documents", nil, .Local, {}},
 	.New_Floating = {
 		"pane.new_floating", "New Shell Float", {{.Backquote, {.Control, .Shift}}}, .Host,
-		{accepted = {.Focus, .Directory, .Name, .Profile, .Program}, control = .Pane},
+		{accepted = {.Focus, .Directory, .Name, .Profile, .Program, .Command_File}, control = .Pane},
 	},
 	.Float_Pane = {"pane.float", "Float or Dock Pane", {{.Enter, {.Control, .Alt}}}, .Refuse, {}},
 	.Minimize_Floating = {
@@ -676,11 +691,14 @@ action_available :: proc(app: ^App, w: ^Window, action: Action) -> bool {
 command_execute :: proc(app: ^App, ctx: Command_Context, invocation: commands.Invocation) -> Outcome {
 	@(static, rodata)
 	descriptors := ACTIONS
+	invocation := invocation
 	action := Action(invocation.id)
 	w: ^Window
 	tab: Maybe(int)
 	// The pane a control request names, for commands that act on it where it is.
 	target: Maybe(Pane_Target)
+	// The workspace a control request names with --workspace.
+	named_workspace: ^Workspace
 	switch c in ctx {
 	case Window_Context:
 		w = command_window(app, c.window, action)
@@ -689,6 +707,12 @@ command_execute :: proc(app: ^App, ctx: Command_Context, invocation: commands.In
 	case Control_Request:
 		if commands.find(&app.registry, invocation.id) == nil {
 			return outcome_failure(.Usage, "unknown command; use aio commands")
+		}
+		// Resolved before any pane takes focus, so a missing or ambiguous workspace changes nothing.
+		if .Workspace in invocation.given {
+			failure: Outcome
+			named_workspace, failure = workspace_target_resolve(app, invocation.workspace)
+			if named_workspace == nil {return failure}
 		}
 		switch descriptors[action].spec.control {
 		case .Focus:
@@ -703,6 +727,7 @@ command_execute :: proc(app: ^App, ctx: Command_Context, invocation: commands.In
 		case .Unnamed:
 		}
 	}
+	if failure := invocation_files_read(&invocation); failure.status != .Ok {return failure}
 	param := descriptors[action].spec.param
 	entry: ^Session_Entry
 	tab_index := -1
@@ -867,6 +892,18 @@ command_execute :: proc(app: ^App, ctx: Command_Context, invocation: commands.In
 	case .Customize_Colors:
 		settings_reveal(app, w, {section = .Colors})
 	case .Rename_Tab:
+		if t, named := target.?; named {
+			if .Text in invocation.given {
+				if !tab_name_set(app, t.workspace, t.workspace.tabs[t.pane.tab], invocation.text) {
+					return outcome_failure(.Failed, "could not rename the tab")
+				}
+				return {}
+			}
+			failure: Outcome
+			w, failure = control_focus(app, t, action)
+			if w == nil {return failure}
+			tab_index = w.workspace.selected
+		}
 		if tab_index >= 0 && tab_index < len(w.workspace.tabs) {
 			rename_open(app, w, Rename_Tab_Target{w.workspace.id, w.workspace.tabs[tab_index].id})
 		}
@@ -880,7 +917,11 @@ command_execute :: proc(app: ^App, ctx: Command_Context, invocation: commands.In
 	case .Duplicate_Tab:
 		tab_duplicate(app, w, tab_index)
 	case .Move_Pane_Workspace, .Move_Tab_Workspace:
-		workspace_move_open(app, w, action == .Move_Tab_Workspace, tab_index)
+		whole_tab := action == .Move_Tab_Workspace
+		if named_workspace != nil {
+			return control_workspace_move(app, w, whole_tab, tab_index, named_workspace)
+		}
+		workspace_move_open(app, w, whole_tab, tab_index)
 	case .Move_Pane_New_Workspace, .Move_Tab_New_Workspace:
 		workspace_move_new(app, w, action == .Move_Tab_New_Workspace, tab_index)
 	case .Move_Tab_Left:
@@ -911,14 +952,31 @@ command_execute :: proc(app: ^App, ctx: Command_Context, invocation: commands.In
 	     .Profile_9:
 		tab_new_profile(app, w, param.index)
 	case .New_Workspace:
+		if t, named := target.?; named {
+			return control_workspace_new(app, window_for_workspace(app, t.workspace), invocation)
+		}
 		workspace_new(app, w, false)
 	case .Change_Workspace:
+		if named_workspace != nil {
+			if workspace_select(app, w, named_workspace) {return {}}
+			return outcome_failure(.Failed, "could not show the workspace")
+		}
 		workspace_picker_open(app, w)
 	case .Next_Workspace:
 		workspace_select_step(app, w, 1)
 	case .Previous_Workspace:
 		workspace_select_step(app, w, -1)
 	case .Rename_Workspace:
+		if t, named := target.?; named {
+			if .Text in invocation.given {
+				subject := named_workspace != nil ? named_workspace : t.workspace
+				return control_workspace_rename(app, subject, invocation.text)
+			}
+			if named_workspace != nil {return outcome_failure(.Usage, "supply the workspace's new name")}
+			failure: Outcome
+			w, failure = control_focus(app, t, action)
+			if w == nil {return failure}
+		}
 		workspace_name_begin(app, w)
 	case .Delete_Workspace:
 		workspace_delete_request(app, w, w.workspace)

@@ -400,7 +400,7 @@ workspace_picker_button :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Eve
 	r, _ := workspace_picker_rect(w)
 	if list, listing := p.state.(Workspace_Picker_List); listing && e.button == .Left {
 		if chip, pressed := list.sub.(Workspace_Chip_Pressed); pressed &&
-		   render.rect_contains(workspace_button_rect(w), x, y) &&
+		   render.rect_contains(workspace_button_rect(app, w), x, y) &&
 		   e.time_ns - chip.time_ns <= DOUBLE_CLICK_NS {
 			workspace_name_begin(app, w)
 			return
@@ -475,7 +475,7 @@ when AIO_CONTROL {
 		menu_target := workspace_picker_menu_id(p)
 		state_value(r, "workspace.id", w.workspace.id)
 		state_text(r, "workspace.name", w.workspace.name)
-		state_rect(r, "workspace.button", workspace_button_rect(w))
+		state_rect(r, "workspace.button", workspace_button_rect(app, w))
 		state_value(r, "workspace.button.hover", w.workspace_hovered)
 		state_value(r, "workspace.picker", workspace_picker_active(p))
 		state_value(r, "workspace.icon.preset", w.workspace.icon.preset)
@@ -535,7 +535,7 @@ workspace_picker_tooltip :: proc(_: ^App, w: ^Window, x, y: f32) -> string {
 workspace_picker_pointer_cancel :: proc(app: ^App, w: ^Window) {
 	ui.field_release(&w.workspace_picker.query)
 	workspace_order_end(w)
-	_ = workspace_order_animate(w, app.animations, window_frame_time(w))
+	_ = workspace_order_animate(w, app.animations, window_frame_time(app, w))
 }
 
 @(private)

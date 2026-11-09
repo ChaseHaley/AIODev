@@ -11,19 +11,208 @@ import "core:unicode/utf16"
 import "core:unicode/utf8"
 
 System :: struct {
-	allocator:  runtime.Allocator,
-	catalogue:  [dynamic]Family_Info,
-	factory:    ^dw.IFactory2,
-	collection: ^dw.IFontCollection,
-	fallback:   ^dw.IFontFallback,
-	faces:      [dynamic]Face,
-	families:   [dynamic]Loaded_Family,
-	cache:      map[Lookup_Key]Lookup_Result,
-	gamma:      render.Text_Gamma,
-	shaping:    Shaping,
+	allocator:     runtime.Allocator,
+	catalogue:     [dynamic]Family_Info,
+	factory:       ^dw.IFactory2,
+	collection:    ^dw.IFontCollection,
+	fallback:      ^dw.IFontFallback,
+	// Registered with the factory while the system lives; nil for the installed fonts.
+	memory_loader: ^dw.IInMemoryFontFileLoader,
+	// The base family for emoji presentation fallback.
+	emoji_family:  windows.wstring,
+	faces:         [dynamic]Face,
+	families:      [dynamic]Loaded_Family,
+	cache:         map[Lookup_Key]Lookup_Result,
+	gamma:         render.Text_Gamma,
+	shaping:       Shaping,
 	// Real DirectWrite shaping runs since startup. The render thread owns the counter, so it
 	// needs no lock and perf_read sees it from that same thread.
-	shape_calls: u64,
+	shape_calls:   u64,
+}
+
+// Font files a system reads from memory instead of the installed fonts, so text draws the same on
+// any machine. Lookup and fallback stay inside these files.
+Font_Files :: struct {
+	// Whole font files; the system keeps its own copy.
+	files:        [][]u8,
+	// One of the files' families, which draws text that asks for emoji presentation.
+	emoji_family: string,
+}
+
+// The installed fonts, with the system's fallback and text gamma.
+@(require_results)
+system_create :: proc(allocator := context.allocator) -> (^System, Error) {
+	s, err := system_new(.Shared, allocator)
+	if err != .None {return nil, err}
+	ok := false
+	defer if !ok {system_destroy(s)}
+	if s.emoji_family = windows.utf8_to_wstring("Segoe UI Emoji", allocator); s.emoji_family == nil {
+		return nil, .Out_Of_Memory
+	}
+	if !checked(
+		   s.factory->GetSystemFontCollection(&s.collection, false),
+		   "GetSystemFontCollection",
+	   ) ||
+	   !checked(s.factory->GetSystemFontFallback(&s.fallback), "GetSystemFontFallback") {
+		return nil, .DirectWrite
+	}
+	params: ^dw.IRenderingParams
+	if !checked(s.factory->CreateRenderingParams(&params), "CreateRenderingParams") {
+		return nil, .DirectWrite
+	}
+	defer release(params)
+	grayscale: ^dw.IRenderingParams1
+	if !checked(
+		params->QueryInterface(dw.IRenderingParams1_UUID, cast(^rawptr)&grayscale),
+		"QueryInterface(RenderingParams1)",
+	) {
+		return nil, .DirectWrite
+	}
+	defer release(grayscale)
+	s.gamma = {params->GetGamma(), grayscale->GetGrayscaleEnhancedContrast()}
+	ok = true
+	return s, .None
+}
+
+// Only the given font files, with fallback among them alone and a fixed text gamma, so nothing
+// depends on what the machine has installed or how its text is tuned.
+@(require_results)
+system_create_private :: proc(fonts: Font_Files, allocator := context.allocator) -> (^System, Error) {
+	if len(fonts.files) == 0 || fonts.emoji_family == "" {return nil, .Invalid_Argument}
+	// An isolated factory shares no caches or registered loaders with the installed fonts' one.
+	s, err := system_new(.Isolated, allocator)
+	if err != .None {return nil, err}
+	ok := false
+	defer if !ok {system_destroy(s)}
+	if s.emoji_family = windows.utf8_to_wstring(fonts.emoji_family, allocator); s.emoji_family == nil {
+		return nil, .Out_Of_Memory
+	}
+	s.gamma = render.DEFAULT_TEXT_GAMMA
+	if err = private_collection(s, fonts.files); err != .None {return nil, err}
+	if err = private_fallback(s); err != .None {return nil, err}
+	ok = true
+	return s, .None
+}
+
+// The state both constructors share; system_destroy is valid on it.
+@(private, require_results)
+system_new :: proc(factory_type: dw.Factory_Type, allocator: runtime.Allocator) -> (^System, Error) {
+	s, alloc_err := new(System, allocator)
+	if alloc_err != nil || s == nil {
+		return nil, .Out_Of_Memory
+	}
+	s.allocator = allocator
+	s.faces = make([dynamic]Face, allocator)
+	s.families = make([dynamic]Loaded_Family, allocator)
+	s.cache = make(map[Lookup_Key]Lookup_Result, allocator)
+	ok := false
+	defer if !ok {
+		system_destroy(s)
+	}
+	if !shaping_init(&s.shaping, allocator) {
+		return nil, .Out_Of_Memory
+	}
+	if !checked(
+		dw.create_factory(factory_type, dw.IFactory2_UUID, cast(^^windows.IUnknown)&s.factory),
+		"DWriteCreateFactory",
+	) {
+		return nil, .DirectWrite
+	}
+	if reserve(&s.cache, 256) != nil {
+		return nil, .Out_Of_Memory
+	}
+	ok = true
+	return s, .None
+}
+
+@(private, require_results)
+private_collection :: proc(s: ^System, files: [][]u8) -> Error {
+	factory: ^dw.IFactory5
+	if !checked(
+		s.factory->QueryInterface(dw.IFactory5_UUID, cast(^rawptr)&factory),
+		"QueryInterface(Factory5)",
+	) {
+		return .DirectWrite
+	}
+	defer release(factory)
+	if !checked(factory->CreateInMemoryFontFileLoader(&s.memory_loader), "CreateInMemoryFontFileLoader") {
+		return .DirectWrite
+	}
+	if !checked(s.factory->RegisterFontFileLoader(&s.memory_loader.ifontfileloader), "RegisterFontFileLoader") {
+		release(s.memory_loader)
+		s.memory_loader = nil
+		return .DirectWrite
+	}
+	builder: ^dw.IFontSetBuilder1
+	if !checked(factory->CreateFontSetBuilder_5(&builder), "CreateFontSetBuilder") {return .DirectWrite}
+	defer release(builder)
+	for data in files {
+		if len(data) == 0 || len(data) > int(max(u32)) {return .Invalid_Argument}
+		file: ^dw.IFontFile
+		hr := s.memory_loader->CreateInMemoryFontFileReference(
+			&s.factory.ifactory1.ifactory,
+			raw_data(data),
+			u32(len(data)),
+			nil,
+			&file,
+		)
+		if !checked(hr, "CreateInMemoryFontFileReference") {return .DirectWrite}
+		defer release(file)
+		// Data that is not a font is the caller's mistake, not a system failure. Asking first keeps
+		// AddFontFile from meeting it.
+		supported: windows.BOOL
+		file_type: dw.Font_File_Type
+		face_type: dw.Font_Face_Type
+		faces: u32
+		if !checked(file->Analyze(&supported, &file_type, &face_type, &faces), "Analyze") {return .DirectWrite}
+		if !supported || faces == 0 {return .Invalid_Argument}
+		if !checked(builder->AddFontFile(file), "AddFontFile") {return .DirectWrite}
+	}
+	set: ^dw.IFontSet
+	if !checked(builder->CreateFontSet(&set), "CreateFontSet") {return .DirectWrite}
+	defer release(set)
+	if !checked(
+		factory->CreateFontCollectionFromFontSet(set, &s.collection),
+		"CreateFontCollectionFromFontSet",
+	) {
+		return .DirectWrite
+	}
+	return .None
+}
+
+// Every character may fall back to every family in the collection, in collection order, and to
+// nothing else.
+@(private, require_results)
+private_fallback :: proc(s: ^System) -> Error {
+	families, err := installed_families(s)
+	if err != .None {return err}
+	names := make([]windows.wstring, len(families), context.temp_allocator)
+	for family, i in families {
+		if names[i] = windows.utf8_to_wstring(family.name, context.temp_allocator); names[i] == nil {
+			return .Out_Of_Memory
+		}
+	}
+	builder: ^dw.IFontFallbackBuilder
+	if !checked(s.factory->CreateFontFallbackBuilder(&builder), "CreateFontFallbackBuilder") {
+		return .DirectWrite
+	}
+	defer release(builder)
+	everything := dw.Unicode_Range{0, 0x10ffff}
+	hr := builder->AddMapping(
+		&everything,
+		1,
+		raw_data(names),
+		u32(len(names)),
+		s.collection,
+		nil,
+		nil,
+		1,
+	)
+	if !checked(hr, "AddMapping") ||
+	   !checked(builder->CreateFontFallback(&s.fallback), "CreateFontFallback") {
+		return .DirectWrite
+	}
+	return .None
 }
 
 @(private)
@@ -84,57 +273,6 @@ release :: proc(object: rawptr) {
 	}
 }
 
-@(require_results)
-system_create :: proc(allocator := context.allocator) -> (^System, Error) {
-	s, alloc_err := new(System, allocator)
-	if alloc_err != nil || s == nil {
-		return nil, .Out_Of_Memory
-	}
-	s.allocator = allocator
-	s.faces = make([dynamic]Face, allocator)
-	s.families = make([dynamic]Loaded_Family, allocator)
-	s.cache = make(map[Lookup_Key]Lookup_Result, allocator)
-	ok := false
-	defer if !ok {
-		system_destroy(s)
-	}
-	if !shaping_init(&s.shaping, allocator) {
-		return nil, .Out_Of_Memory
-	}
-	if !checked(
-		dw.create_factory(.Shared, dw.IFactory2_UUID, cast(^^windows.IUnknown)&s.factory),
-		"DWriteCreateFactory",
-	) {
-		return nil, .DirectWrite
-	}
-	if !checked(
-		   s.factory->GetSystemFontCollection(&s.collection, false),
-		   "GetSystemFontCollection",
-	   ) ||
-	   !checked(s.factory->GetSystemFontFallback(&s.fallback), "GetSystemFontFallback") {
-		return nil, .DirectWrite
-	}
-	params: ^dw.IRenderingParams
-	if !checked(s.factory->CreateRenderingParams(&params), "CreateRenderingParams") {
-		return nil, .DirectWrite
-	}
-	defer release(params)
-	grayscale: ^dw.IRenderingParams1
-	if !checked(
-		params->QueryInterface(dw.IRenderingParams1_UUID, cast(^rawptr)&grayscale),
-		"QueryInterface(RenderingParams1)",
-	) {
-		return nil, .DirectWrite
-	}
-	defer release(grayscale)
-	s.gamma = {params->GetGamma(), grayscale->GetGrayscaleEnhancedContrast()}
-	if reserve(&s.cache, 256) != nil {
-		return nil, .Out_Of_Memory
-	}
-	ok = true
-	return s, .None
-}
-
 system_destroy :: proc(s: ^System) {
 	if s == nil {
 		return
@@ -153,6 +291,11 @@ system_destroy :: proc(s: ^System) {
 	delete(s.cache)
 	release(s.fallback)
 	release(s.collection)
+	if s.memory_loader != nil {
+		_ = s.factory->UnregisterFontFileLoader(&s.memory_loader.ifontfileloader)
+		release(s.memory_loader)
+	}
+	delete(s.emoji_family, s.allocator)
 	release(s.factory)
 	free(s, s.allocator)
 }
