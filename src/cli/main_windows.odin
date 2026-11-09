@@ -21,6 +21,10 @@ WAIT_INTERVAL :: 100 * time.Millisecond
 // The app executable built beside this CLI. build.ps1 supplies the exact name for verify builds.
 @(private)
 SERVER_NAME :: #config(AIO_SERVER_NAME, "aiodev.exe")
+// A second server this build trusts, relative to its own directory: the verify build's aio.exe also
+// reaches the headless verify build (WORK-349). Empty in release builds.
+@(private)
+SERVER_ALTERNATE :: #config(AIO_SERVER_ALTERNATE, "")
 
 @(private)
 interrupted: bool
@@ -70,13 +74,13 @@ start :: proc() -> cli_protocol.Status {
 	return status
 }
 
-// The process image this build expects behind the control pipe.
+// The process image this build expects behind the control pipe, `name` beside this executable.
 @(private, require_results)
-server_identity :: proc(allocator := context.allocator) -> (control.Server_Identity, bool) {
+server_identity :: proc(name: string, allocator := context.allocator) -> (control.Server_Identity, bool) {
 	executable, err := os.get_executable_path(allocator)
 	if err != nil {return {}, false}
 	defer delete(executable, allocator)
-	image, join_error := filepath.join({filepath.dir(executable), SERVER_NAME}, allocator)
+	image, join_error := filepath.join({filepath.dir(executable), name}, allocator)
 	if join_error != nil {return {}, false}
 	return {image = image}, true
 }
@@ -93,12 +97,18 @@ send :: proc(pipe: string, request: []string) -> (control.Response, cli_protocol
 		return {}, .Unreachable
 	}
 	defer control.close(&client)
-	identity, identity_ok := server_identity(context.temp_allocator)
+	identity, identity_ok := server_identity(SERVER_NAME, context.temp_allocator)
 	if !identity_ok {
 		fmt.eprintln("aio: could not locate the AIODev executable to verify the control pipe.")
 		return {}, .Unreachable
 	}
-	if verify_error := control.verify_server(&client, identity); verify_error != .None {
+	verify_error := control.verify_server(&client, identity)
+	if verify_error == .Impostor && SERVER_ALTERNATE != "" {
+		if alternate, ok := server_identity(SERVER_ALTERNATE, context.temp_allocator); ok {
+			verify_error = control.verify_server(&client, alternate)
+		}
+	}
+	if verify_error != .None {
 		if verify_error == .Impostor {
 			fmt.eprintfln(
 				"aio: the control pipe is served by an unverified process (PID %d); refusing to send.",
