@@ -58,8 +58,7 @@
       "lane": "headless"
     },
     "hover_rim": {
-      "lane": "native",
-      "reason": "Finds windows with EnumWindows and reads their screen rectangles."
+      "lane": "headless"
     },
     "kitty_graphics": {
       "lane": "headless"
@@ -72,8 +71,7 @@
       "lane": "headless"
     },
     "linked_window": {
-      "lane": "native",
-      "reason": "Maximizes and closes through ShowWindow and WM_CLOSE and finds windows with EnumWindows."
+      "lane": "headless"
     },
     "markdown": {
       "lane": "headless"
@@ -123,8 +121,7 @@
       "lane": "headless"
     },
     "pane_focus": {
-      "lane": "native",
-      "reason": "Native path drives focus through real activation and EnumWindows."
+      "lane": "headless"
     },
     "pane_headers": {
       "lane": "native",
@@ -139,8 +136,7 @@
       "reason": "Drives the pointer through SendInput."
     },
     "pane_windows": {
-      "lane": "native",
-      "reason": "Hit-tests and composes windows on the real desktop (WindowFromPoint, PrintWindow) and changes animation settings."
+      "lane": "headless"
     },
     "pane_workspace_drag": {
       "lane": "headless"
@@ -180,8 +176,7 @@
       "reason": "Resizes the real window through win32.ps1 -Resize."
     },
     "settings_publication": {
-      "lane": "native",
-      "reason": "Finds windows with EnumWindows and reads their screen rectangles."
+      "lane": "headless"
     },
     "settings_workspace": {
       "lane": "headless"
@@ -203,8 +198,7 @@
       "reason": "Calls the Windows toast API from the script to prove native notifications."
     },
     "tab_across_windows": {
-      "lane": "native",
-      "reason": "Hit-tests the real desktop with WindowFromPoint and copies the screen."
+      "lane": "headless"
     },
     "tab_controls": {
       "lane": "headless"
@@ -222,16 +216,14 @@
       "lane": "headless"
     },
     "tab_tear_off": {
-      "lane": "native",
-      "reason": "Copies the screen (CopyFromScreen) to see the OS drag thumbnail and torn-off windows."
+      "lane": "headless"
     },
     "tabs_splits": {
       "lane": "native",
       "reason": "Reads and writes the real clipboard."
     },
     "tear_off": {
-      "lane": "native",
-      "reason": "Copies the screen and uses PrintWindow on torn-off windows."
+      "lane": "headless"
     },
     "termbench": {
       "lane": "native",
@@ -278,8 +270,7 @@
       "lane": "headless"
     },
     "workspace_delete": {
-      "lane": "native",
-      "reason": "Finds the window with EnumWindows and reads the foreground window."
+      "lane": "headless"
     },
     "workspace_dropdown": {
       "lane": "headless"
@@ -300,15 +291,13 @@
       "lane": "headless"
     },
     "workspace_open_window": {
-      "lane": "native",
-      "reason": "Finds new windows with EnumWindows."
+      "lane": "headless"
     },
     "workspace_order": {
       "lane": "headless"
     },
     "workspace_row_management": {
-      "lane": "native",
-      "reason": "Finds windows with EnumWindows for its shots."
+      "lane": "headless"
     },
     "workspace_transfer_cleanup": {
       "lane": "headless"

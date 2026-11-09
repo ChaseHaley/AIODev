@@ -136,7 +136,7 @@ try {
         } else { Invoke-Aio command workspace.delete }
         Invoke-Aio expect state confirm.open=true
         Invoke-Aio expect state confirm.workspace=1
-        Invoke-Aio expect state 'confirm.title=Delete #1 “Disposable tabs and panes”?'
+        Invoke-Aio expect state 'confirm.title=Delete “Disposable tabs and panes”?'
         Invoke-Aio expect state 'confirm.body=Close 3 tabs (4 panes); stop 3 sessions.'
         if ($cancel -eq 'native-escape') { Shot 'multiple-tabs-last-confirm' }
         switch ($cancel) {
