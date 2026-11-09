@@ -3,7 +3,8 @@ package app_test
 import "core:os"
 import "core:strings"
 import "core:testing"
-import "core:time"
+// Only the desktop-lane test reads the clock; the headless build compiles it out.
+@(require) import "core:time"
 import app "../../src"
 import "aio:platform"
 import "aio:render"
@@ -157,35 +158,39 @@ pane_draws_the_icon_of_the_profile_it_was_launched_with :: proc(t: ^testing.T) {
 	testing.expect_value(t, atlas.width, 0)
 }
 
-@(test)
-empty_icon_on_a_pwsh_profile_resolves_to_the_pwsh_executables_icon :: proc(t: ^testing.T) {
-	f: Palette_Fixture
-	defer palette_fixture_destroy(t, &f)
-	if !palette_fixture_create(t, &f, "pwsh-icon", second_window = false) {return}
-	s := &f.state
-	base := settings.profile_base(&s.settings.profiles)
-	testing.expect_value(t, base.icon, "")
-	delete(base.command)
-	base.command = strings.clone("pwsh.exe -NoLogo -NoProfile")
-	id, created := app.tab_create(s, s.windows[0].workspace, profile_id = base.id)
-	if !testing.expect(t, created) {return}
-	entry := app.session_find(s, id)
-	image, executable := app.pane_badge_source(s, entry)
-	testing.expect(t, image == nil)
-	// The Store's pwsh.exe is an alias; the icon is read from the executable it started.
-	testing.expect(t, strings.has_suffix(strings.to_lower(executable, context.temp_allocator), `\pwsh.exe`),
-		"an empty Icon stands for the launched pwsh.exe")
-	pixels: [16 * 16 * 4]u8
-	testing.expect(t, platform.executable_icon(executable, 16, pixels[:]), "pwsh.exe carries its own icon")
-	_, atlas, result := app.pane_icon(s, entry, 16)
-	for deadline := time.tick_now(); atlas.width == 0 && result == .Ok; {
-		if time.tick_since(deadline) > 5 * time.Second {break}
-		time.sleep(10 * time.Millisecond)
-		_, _ = app.program_icons_adopt(s)
-		_, atlas, result = app.pane_icon(s, entry, 16)
+// Desktop lane (tests/app/lanes.json): reads pwsh.exe's real icon resource, which the headless
+// build replaces with a flat square.
+when !platform.AIO_HEADLESS {
+	@(test)
+	empty_icon_on_a_pwsh_profile_resolves_to_the_pwsh_executables_icon :: proc(t: ^testing.T) {
+		f: Palette_Fixture
+		defer palette_fixture_destroy(t, &f)
+		if !palette_fixture_create(t, &f, "pwsh-icon", second_window = false) {return}
+		s := &f.state
+		base := settings.profile_base(&s.settings.profiles)
+		testing.expect_value(t, base.icon, "")
+		delete(base.command)
+		base.command = strings.clone("pwsh.exe -NoLogo -NoProfile")
+		id, created := app.tab_create(s, s.windows[0].workspace, profile_id = base.id)
+		if !testing.expect(t, created) {return}
+		entry := app.session_find(s, id)
+		image, executable := app.pane_badge_source(s, entry)
+		testing.expect(t, image == nil)
+		// The Store's pwsh.exe is an alias; the icon is read from the executable it started.
+		testing.expect(t, strings.has_suffix(strings.to_lower(executable, context.temp_allocator), `\pwsh.exe`),
+			"an empty Icon stands for the launched pwsh.exe")
+		pixels: [16 * 16 * 4]u8
+		testing.expect(t, platform.executable_icon(executable, 16, pixels[:]), "pwsh.exe carries its own icon")
+		_, atlas, result := app.pane_icon(s, entry, 16)
+		for deadline := time.tick_now(); atlas.width == 0 && result == .Ok; {
+			if time.tick_since(deadline) > 5 * time.Second {break}
+			time.sleep(10 * time.Millisecond)
+			_, _ = app.program_icons_adopt(s)
+			_, atlas, result = app.pane_icon(s, entry, 16)
+		}
+		testing.expect_value(t, result, render.Build_Status.Ok)
+		testing.expect(t, atlas.width > 0, "the pane draws pwsh's own icon")
 	}
-	testing.expect_value(t, result, render.Build_Status.Ok)
-	testing.expect(t, atlas.width > 0, "the pane draws pwsh's own icon")
 }
 
 @(test)
