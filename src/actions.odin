@@ -146,6 +146,10 @@ Action :: enum u32 {
 	Minimize_All_Floating,
 	Tab_Context_Menu,
 	Restart_Pane,
+	Layout_Apply,
+	Tab_List,
+	Workspace_List,
+	App_Version,
 	Install_Agent_Hooks,
 }
 
@@ -568,6 +572,15 @@ ACTIONS :: [Action]Command_Descriptor {
 	.Restart_Pane = {
 		"pane.restart", "Restart Stopped Pane", {{.Enter, {}}, {.Numpad_Enter, {}}}, .Local, {},
 	},
+	.Layout_Apply = {
+		"layout.apply", "Apply Layout File", nil, .Host,
+		{accepted = {.File, .Focus}, required = {.File}, hidden = true, control = .Pane},
+	},
+	.Tab_List = {"tab.list", "List Tabs", nil, .Host, {hidden = true, control = .Unnamed}},
+	.Workspace_List = {"workspace.list", "List Workspaces", nil, .Host, {hidden = true, control = .Unnamed}},
+	.App_Version = {
+		cli_protocol.VERSION_COMMAND, "Show AIODev's Build", nil, .Host, {hidden = true, control = .Unnamed},
+	},
 	.Install_Agent_Hooks = {"app.install_agent_hooks", "Install Agent Session Hooks", nil, .Local, {}},
 }
 
@@ -738,8 +751,14 @@ command_execute :: proc(app: ^App, ctx: Command_Context, invocation: commands.In
 	switch action {
 	case .App_Commands:
 		return command_catalogue(app, invocation.text)
+	case .App_Version:
+		return version_outcome()
 	case .Pane_List:
 		return {payload = Outcome_Panes(pane_reports(app, nil))}
+	case .Tab_List:
+		return {payload = Outcome_Tabs(tab_reports(app))}
+	case .Workspace_List:
+		return {payload = Outcome_Workspaces(workspace_reports(app))}
 	case .Pane_Status:
 		return control_pane_status(app, ctx.(Control_Request), invocation)
 	case .Pane_Read:
@@ -776,6 +795,9 @@ command_execute :: proc(app: ^App, ctx: Command_Context, invocation: commands.In
 			return control_floating_new(app, window_for_workspace(app, t.workspace), t, invocation)
 		}
 		floating_new(app, w)
+	case .Layout_Apply:
+		t := target.?
+		return control_layout_apply(app, window_for_workspace(app, t.workspace), t.workspace, invocation)
 	case .Rename_Pane:
 		if t, named := target.?; named {
 			if .Text in invocation.given {return control_rename(app, t, invocation.text)}

@@ -14,6 +14,7 @@ import "aio:cli_protocol"
 import "aio:commands"
 import "aio:layout"
 import "aio:platform"
+import "aio:term"
 
 @(private = "file")
 invoke :: proc(state: ^app.App, caller: u32, args: ..string) -> app.Outcome {
@@ -42,6 +43,13 @@ control_commands_target_panes_without_moving_focus :: proc(t: ^testing.T) {
 	state.platform_ready = true
 	if !testing.expect(t, app.app_init(&state)) { return }
 	testing.expect(t, state.cli == nil, "the CLI pipe stays closed until control.enabled is on")
+	// Panes opened from here name the aio beside AIODev in AIODEV_CLI. With an instance name and an agent
+	// record directory as well, each new pane's shell gets every host variable the app supplies.
+	delete(state.cli_directory)
+	state.cli_directory = strings.clone(`C:\aio-cli-test`)
+	state.options.name = "core-test"
+	delete(state.paths.agents)
+	state.paths.agents = strings.clone(directory)
 	w := state.windows[0]
 	workspace := w.workspace
 	first := state.sessions[0].id
@@ -71,12 +79,13 @@ control_commands_target_panes_without_moving_focus :: proc(t: ^testing.T) {
 	testing.expect_value(t, workspace.selected, 0)
 	testing.expect(t, app.window_tree(w) == &workspace.tabs[0].tree)
 
-	// Text reaches the pane's shell, which learns its own id from AIODEV_PANE.
+	// Text reaches the pane's shell, which learns its own id from AIODEV_PANE and its aio from AIODEV_CLI.
 	id := strings.clone(fmt.tprintf("%d", split_pane))
 	defer delete(id)
-	expected := strings.clone(fmt.tprintf("pane=%d", split_pane))
+	expected := strings.clone(fmt.tprintf(`pane=%d cli=C:\aio-cli-test\aio.exe`, split_pane))
 	defer delete(expected)
-	sent := invoke(&state, first, "pane.send", "--pane", id, "--enter", `Write-Output "pane=$env:AIODEV_PANE"`)
+	echo :: `Write-Output "pane=$env:AIODEV_PANE cli=$env:AIODEV_CLI"`
+	sent := invoke(&state, first, "pane.send", "--pane", id, "--enter", echo)
 	testing.expectf(t, sent.status == .Ok, "pane.send: %v %s", sent.status, sent.message)
 	seen := false
 	for deadline := time.tick_now(); !seen && time.tick_since(deadline) < 15 * time.Second; {
@@ -85,14 +94,14 @@ control_commands_target_panes_without_moving_focus :: proc(t: ^testing.T) {
 		seen = read.status == .Ok && strings.contains(string(read.payload.(app.Outcome_Text)), expected)
 		if !seen { time.sleep(50 * time.Millisecond) }
 	}
-	testing.expect(t, seen, "the split pane printed its AIODEV_PANE")
+	testing.expect(t, seen, "the split pane printed its AIODEV_PANE and AIODEV_CLI")
 	last := invoke(&state, 0, "pane.read", "--pane", id, "--lines", "1")
 	testing.expect(t, !strings.contains(string(last.payload.(app.Outcome_Text)), "\n"))
 
 	// Targets: the caller, a missing id, and a name two panes share.
 	testing.expect_value(t, invoke(&state, 0, "pane.status", "--pane", "here").status, cli_protocol.Status.Target)
 	here := invoke(&state, first, "pane.status")
-	if testing.expect_value(t, len(here.payload.(app.Outcome_Panes)), 1) { testing.expect_value(t, here.payload.(app.Outcome_Panes)[0].id, first) }
+	testing.expect_value(t, here.payload.(app.Outcome_Pane_Status).id, first)
 	testing.expect_value(t, invoke(&state, first, "pane.status", "--pane", "4000000").status, cli_protocol.Status.Target)
 	testing.expect_value(t, invoke(&state, first, "pane.rename", "--pane", id, "agent").status, cli_protocol.Status.Ok)
 	ambiguous := invoke(&state, first, "pane.status", "--pane", "agent")
@@ -141,7 +150,7 @@ control_commands_target_panes_without_moving_focus :: proc(t: ^testing.T) {
 	// A closed pane still reports how it ended; only pane.status looks past the open panes.
 	ended := invoke(&state, first, "pane.status", "--pane", id)
 	testing.expect_value(t, ended.status, cli_protocol.Status.Ok)
-	if testing.expect_value(t, len(ended.payload.(app.Outcome_Panes)), 1) { testing.expect_value(t, ended.payload.(app.Outcome_Panes)[0].status, "closed") }
+	testing.expect_value(t, ended.payload.(app.Outcome_Pane_Status).status, "closed")
 	testing.expect_value(t, invoke(&state, first, "pane.read", "--pane", id).status, cli_protocol.Status.Target)
 
 	// The pipe's answers: malformed requests and grammar errors are usage errors.
@@ -162,6 +171,10 @@ control_commands_target_panes_without_moving_focus :: proc(t: ^testing.T) {
 	remote := app.control_cli_answer(&state, {"", "text", `\\server\share`, "tab.new"})
 	testing.expectf(t, remote.ok, "tab.new from a share: %s", remote.text)
 	testing.expect_value(t, state.sessions[len(state.sessions) - 1].header.launch_directory, profile_directory)
+	// aio compares this line with its own build to warn when the two differ.
+	version := app.control_cli_answer(&state, {"", "text", "", "app.version"})
+	testing.expectf(t, version.ok && strings.has_prefix(version.text, "AIODev dev (" + cli_protocol.BUILD_ID + ", "),
+		"app.version: %s", version.text)
 	// A relative --cwd names a directory in aio's working directory, not in AIODev's.
 	root, has_root := os.lookup_env("SystemRoot", context.temp_allocator)
 	if testing.expect(t, has_root) {
@@ -403,4 +416,116 @@ control_dialog_commands_take_names_and_workspace_targets :: proc(t: ^testing.T) 
 	testing.expect_value(t, shown.status, cli_protocol.Status.Ok)
 	testing.expect_value(t, w.workspace.name, "Shown")
 	testing.expect(t, !app.rename_shown(w))
+}
+
+@(test)
+control_lists_report_programs_geometry_tabs_and_workspaces :: proc(t: ^testing.T) {
+	directory, directory_error := os.make_directory_temp("", "aio-lists-*", context.allocator)
+	if !testing.expect_value(t, directory_error, nil) { return }
+	defer delete(directory)
+	defer testing.expect_value(t, os.remove(directory), nil)
+	path := strings.concatenate({directory, "/settings.ini"})
+	defer delete(path)
+	defer os.remove(path)
+	settings :: "shell.command = pwsh.exe -NoLogo -NoProfile\ninterface.font_size = 12\ncursor.blink = false\n"
+	if !testing.expect_value(t, os.write_entire_file(path, settings), nil) { return }
+	state := app.App{options = {data_dir = directory, inactive = true}}
+	state.app_id = fmt.aprintf("AIODev.Test.CommandLists.%d", os.get_pid())
+	defer app.app_destroy(&state)
+	if !testing.expect_value(t, platform.init(&state.platform, state.app_id), platform.Init_Result.Primary) {
+		return
+	}
+	state.platform_ready = true
+	if !testing.expect(t, app.app_init(&state)) { return }
+	w := state.windows[0]
+	workspace := w.workspace
+	first := state.sessions[0].id
+	split := invoke(&state, first, "pane.split", "--direction", "right")
+	if !testing.expect_value(t, split.status, cli_protocol.Status.Ok) { return }
+	second := split.payload.(app.Outcome_Created).pane
+	second_id := strings.clone(fmt.tprintf("%d", second))
+	defer delete(second_id)
+	testing.expect_value(t, invoke(&state, first, "tab.new").status, cli_protocol.Status.Ok)
+
+	// The second shell runs ping; the first stays at its prompt, so it names itself.
+	sent := invoke(&state, first, "pane.send", "--pane", second_id, "--enter", "ping.exe -n 60 127.0.0.1")
+	testing.expectf(t, sent.status == .Ok, "pane.send: %v %s", sent.status, sent.message)
+	panes: app.Outcome_Panes
+	for deadline := time.tick_now(); time.tick_since(deadline) < 15 * time.Second; {
+		app.tick(&state)
+		panes = invoke(&state, 0, "pane.list").payload.(app.Outcome_Panes)
+		if len(panes) == 3 && strings.equal_fold(panes[1].process, "ping.exe") { break }
+		time.sleep(50 * time.Millisecond)
+	}
+	if !testing.expect_value(t, len(panes), 3) { return }
+	left, right := panes[0], panes[1]
+	testing.expect_value(t, right.id, second)
+	testing.expectf(t, strings.equal_fold(right.process, "ping.exe"), "running program %q", right.process)
+	testing.expectf(t, strings.equal_fold(left.process, "pwsh.exe"), "idle shell %q", left.process)
+	left_pid, left_has_pid := left.pid.?
+	right_pid, right_has_pid := right.pid.?
+	testing.expect(t, left_has_pid && left_pid == term.process_id(state.sessions[0].session))
+	testing.expect(t, right_has_pid && right_pid != left_pid)
+	testing.expect_value(t, left.tab_name, app.tab_display_title(workspace.tabs[0], 1))
+	testing.expect_value(t, panes[2].tab, 2)
+
+	// Side by side across the window's pane area, one gap apart, in DIPs.
+	area := app.window_content_area_in(&state, w, .None)
+	width, height := int(area.width / w.scale), int(area.height / w.scale)
+	gap := int(app.window_gap(&state, w) / w.scale)
+	left_rect, left_placed := left.rect.?
+	right_rect, right_placed := right.rect.?
+	if !testing.expect(t, left_placed && right_placed) { return }
+	testing.expect_value(t, left_rect.x, 0)
+	testing.expect_value(t, left_rect.y, 0)
+	testing.expect_value(t, right_rect.y, 0)
+	testing.expectf(t, abs(right_rect.x - (left_rect.width + gap)) <= 1, "%v then %v", left_rect, right_rect)
+	testing.expectf(t, abs(right_rect.x + right_rect.width - width) <= 1, "%v ends at %d", right_rect, width)
+	testing.expectf(t, abs(left_rect.height - height) <= 1 && left_rect.height == right_rect.height,
+		"%v and %v in %d", left_rect, right_rect, height)
+	left_grid, left_sized := left.grid.?
+	right_grid, right_sized := right.grid.?
+	testing.expect(t, left_sized && right_sized && left_grid.columns > 0 && left_grid.rows == right_grid.rows)
+
+	tabs := invoke(&state, 0, "tab.list").payload.(app.Outcome_Tabs)
+	if testing.expect_value(t, len(tabs), 2) {
+		testing.expect_value(t, tabs[0], cli_protocol.Tab_Report{
+			workspace = workspace.id, workspace_name = workspace.name, tab = 1, name = left.tab_name,
+			panes = 2, selected = true, focused = w.focused,
+		})
+		testing.expect_value(t, tabs[1].tab, 2)
+		testing.expect_value(t, tabs[1].panes, 1)
+		testing.expect(t, !tabs[1].selected && !tabs[1].focused)
+	}
+	workspaces := invoke(&state, 0, "workspace.list").payload.(app.Outcome_Workspaces)
+	if testing.expect_value(t, len(workspaces), 1) {
+		testing.expect_value(t, workspaces[0], cli_protocol.Workspace_Report{
+			id = workspace.id, name = workspace.name, window = true, visible = app.window_drawable(w),
+			tabs = 2, focused = w.focused,
+		})
+	}
+
+	// Plain lists name their columns first and mark empty fields.
+	plain := app.control_cli_answer(&state, {"", "text", "", "pane.list"}).text
+	lines := strings.split_lines(plain, context.temp_allocator)
+	if testing.expect_value(t, len(lines), 4) {
+		testing.expect(t, strings.has_prefix(lines[0], "id\tfocused\tworkspace\ttab\tstatus\tprocess"))
+		testing.expect_value(t, strings.count(lines[1], "\t"), strings.count(lines[0], "\t"))
+	}
+	testing.expectf(t, !strings.contains(plain, "\t\t") && !strings.has_suffix(plain, "\t"), "%q", plain)
+	tab_lines := app.control_cli_answer(&state, {"", "text", "", "tab.list"}).text
+	testing.expect(t, strings.has_prefix(tab_lines, "workspace\ttab\tfocused\tselected\tpanes\tname\n"))
+
+	// A failure carries only ok, status and the error; aio reads a pane's status back from JSON.
+	missing := app.control_cli_answer(&state, {"", "json", "", "pane.read", "--pane", "4000000"})
+	testing.expect_value(t, missing.text, `{"ok":false,"status":3,"error":"no pane has that id; use aio pane.list"}`)
+	status := app.control_cli_answer(&state, {"", "json", "", "pane.status", "--pane", second_id})
+	reply: cli_protocol.Reply_Json
+	unmarshal_error := json.unmarshal_string(status.text, &reply, allocator = context.temp_allocator)
+	if testing.expect_value(t, unmarshal_error, nil) && testing.expect_value(t, len(reply.panes), 1) {
+		read_rect, read_placed := reply.panes[0].rect.?
+		read_pid, _ := reply.panes[0].pid.?
+		testing.expect(t, read_placed && read_rect == right_rect && read_pid == right_pid)
+		testing.expect(t, reply.ok && reply.commands == nil && reply.pane == nil)
+	}
 }

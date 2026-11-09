@@ -5,6 +5,7 @@ import "aio:instance"
 import "aio:layout"
 import "core:fmt"
 import "core:strconv"
+import "core:strings"
 
 // aio: the AIODev command line. Every command runs inside AIODev through the shared command core;
 // this program only carries the request, prints the reply and exits with its status (D-046).
@@ -17,10 +18,12 @@ USAGE_FORMAT :: `Usage: aio [--instance <name>] [--json] <command> [options] [--
        aio wait [--pane <pane>] (--text <text> | --exit) [--timeout <ms>]
        aio commands
        aio help [<command>]
+       aio version
        aio agent-session (claude | codex)
 
 Runs AIODev commands from scripts and coding agents. Every palette command runs by
-name, such as aio tab.next; aio commands lists them all.
+name, such as aio tab.next; aio commands lists them all. aio version prints aio's build
+and the running AIODev's, and aio warns on stderr when the two differ.
 
 Panes   --pane takes a pane id, a pane name, here or focused. Inside an AIODev pane the
         default is here, the pane aio runs in; elsewhere it is the focused pane.
@@ -28,6 +31,8 @@ Panes   --pane takes a pane id, a pane name, here or focused. Inside an AIODev p
         and tab.move_workspace open their dialog without it.
 Files   aio pane.open_markdown [--direction right|down|left|up] [--focus] <file>
             Shows a Markdown file beside the pane and updates it when the file changes.
+        aio layout.apply [--focus] <file>
+            Opens a tab of named panes from a JSON layout; prints their ids in order.
 Common  aio tab.new [--cwd <dir>] [--name <name>] [--tab-name <name>] [--focus] [-- <program>]
         aio workspace.new [--cwd <dir>] [--name <name>] [--focus] [-- <program>]
         aio pane.split [--direction right|down|left|up] [--ratio <0.05-0.95>] [-- <program>]
@@ -43,6 +48,7 @@ Common  aio tab.new [--cwd <dir>] [--name <name>] [--tab-name <name>] [--focus] 
         aio pane.send --file <file>       types a UTF-8 file's text exactly
         aio pane.read [--lines <rows>]    prints the pane's visible text
         aio pane.list                     one line per pane; --json for details
+        aio tab.list, aio workspace.list  one line per tab or workspace
         aio pane.close
 Wait    aio wait polls until the pane shows the text or its program exits; the default
         timeout is %d ms, and 0 waits without limit. --exit prints the exit code, even
@@ -85,6 +91,8 @@ Options :: struct {
 	args:     []string,
 	// Set when the command is wait.
 	waiting:  bool,
+	// Set when the command is version or --version.
+	version:  bool,
 	wait:     Wait,
 }
 
@@ -116,6 +124,9 @@ parse_options :: proc(args: []string, environment: string) -> (Options, string) 
 	}
 	if i == len(args) {return {}, "name a command"}
 	o.args = args[i:]
+	o.version = o.args[0] == "version" || o.args[0] == "--version"
+	// Only an AIODev too old to know the version command fails it, which build_warning reports.
+	if o.version && len(o.args) > 1 {return {}, "version takes no arguments"}
 	if o.args[0] != "wait" {return o, ""}
 	o.waiting = true
 	o.wait.timeout_ms = WAIT_DEFAULT_TIMEOUT_MS
@@ -150,19 +161,45 @@ parse_options :: proc(args: []string, environment: string) -> (Options, string) 
 }
 
 // The pipe request for a command: the caller pane, the reply format, aio's working directory, then
-// the command line. `commands` and `help <command>` ask AIODev's catalogue.
+// the command line. `commands` and `help <command>` ask AIODev's catalogue; `version` asks its build
+// as text, since aio prints its own build beside it and composes any JSON itself.
 @(require_results)
 request :: proc(o: Options, caller, directory: string, allocator := context.allocator) -> []string {
+	format := o.json ? cli_protocol.Format.Json : cli_protocol.Format.Text
+	name := o.args[0]
+	switch {
+	case name == "commands" || name == "help":
+		name = cli_protocol.CATALOGUE_COMMAND
+	case o.version:
+		name, format = cli_protocol.VERSION_COMMAND, .Text
+	}
 	command := o.args
-	switch o.args[0] {
-	case "commands", "help":
+	if name != o.args[0] {
 		command = make([]string, len(o.args), allocator)
-		command[0] = cli_protocol.CATALOGUE_COMMAND
+		command[0] = name
 		copy(command[1:], o.args[1:])
 	}
-	format := o.json ? cli_protocol.Format.Json : cli_protocol.Format.Text
 	return cli_protocol.request_encode(
 		{caller = caller, format = format, directory = directory, command = command},
 		allocator,
+	)
+}
+
+// The warning aio prints when the running AIODev comes from another build, or "" when both report
+// the same one. `own` is aio's build_text; `app` is AIODev's reply to the version command, or "" from
+// an AIODev too old to answer it.
+@(require_results)
+build_warning :: proc(own, app: string, allocator := context.allocator) -> string {
+	prefix :: cli_protocol.APP_NAME + " "
+	if strings.has_prefix(app, prefix) && app[len(prefix):] == own {return ""}
+	advice :: "use aio and AIODev from one build"
+	if app == "" {
+		return fmt.aprintf(
+			"aio: warning: aio %s does not match the running AIODev, which does not report its build; %s",
+			own, advice, allocator = allocator,
+		)
+	}
+	return fmt.aprintf(
+		"aio: warning: aio %s does not match the running %s; %s", own, app, advice, allocator = allocator,
 	)
 }

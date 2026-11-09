@@ -74,8 +74,9 @@ Options :: struct {
 }
 
 // Host variables a session accepts on top of the three terminal ones, on the stack of spawn. The
-// app supplies at most two (pane id and instance name); the rest is headroom for a new one.
-MAX_HOST_ENVIRONMENT :: 4
+// app supplies at most five (pane id, instance name, aio path, terminal session key and agent record
+// path); the rest is headroom for a new one.
+MAX_HOST_ENVIRONMENT :: 6
 
 Wake :: struct {
 	procedure: proc(user: rawptr),
