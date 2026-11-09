@@ -188,6 +188,7 @@ app_init :: proc(app: ^App) -> bool {
 		if _, created := tab_create(app, workspace); !created {return false}
 		if !window_open(app, workspace) {return false}
 	}
+	agent_records_prune(app)
 	when AIO_CONTROL {verify_start(app)}
 	control_cli_sync(app)
 	return true

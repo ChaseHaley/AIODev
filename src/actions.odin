@@ -146,6 +146,7 @@ Action :: enum u32 {
 	Minimize_All_Floating,
 	Tab_Context_Menu,
 	Restart_Pane,
+	Install_Agent_Hooks,
 }
 
 // Everything one command is: its name and title, default shortcuts, what it does when a linked window
@@ -567,6 +568,7 @@ ACTIONS :: [Action]Command_Descriptor {
 	.Restart_Pane = {
 		"pane.restart", "Restart Stopped Pane", {{.Enter, {}}, {.Numpad_Enter, {}}}, .Local, {},
 	},
+	.Install_Agent_Hooks = {"app.install_agent_hooks", "Install Agent Session Hooks", nil, .Local, {}},
 }
 
 @(require_results)
@@ -810,6 +812,8 @@ command_execute :: proc(app: ^App, ctx: Command_Context, invocation: commands.In
 		document_menu_open_focused(app, w)
 	case .Show_Build_Info:
 		show_build_info(app)
+	case .Install_Agent_Hooks:
+		agent_hooks_install(app)
 	case .Command_Palette:
 		if palette_active(app, w) {
 			palette_close(app, w)
