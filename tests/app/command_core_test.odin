@@ -43,9 +43,13 @@ control_commands_target_panes_without_moving_focus :: proc(t: ^testing.T) {
 	state.platform_ready = true
 	if !testing.expect(t, app.app_init(&state)) { return }
 	testing.expect(t, state.cli == nil, "the CLI pipe stays closed until control.enabled is on")
-	// Panes opened from here name the aio beside AIODev in AIODEV_CLI.
+	// Panes opened from here name the aio beside AIODev in AIODEV_CLI. With an instance name and an agent
+	// record directory as well, each new pane's shell gets every host variable the app supplies.
 	delete(state.cli_directory)
 	state.cli_directory = strings.clone(`C:\aio-cli-test`)
+	state.options.name = "core-test"
+	delete(state.paths.agents)
+	state.paths.agents = strings.clone(directory)
 	w := state.windows[0]
 	workspace := w.workspace
 	first := state.sessions[0].id
