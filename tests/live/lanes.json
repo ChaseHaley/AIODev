@@ -1,5 +1,5 @@
 {
-  "policy": "Every live journey runs in one lane. headless: build\\headless\\aiodev-headless.exe through AIOCTL_HEADLESS=1, nothing on the owner's desktop. native: the Win32 build, for journeys that prove a Windows behaviour; each states which. helper: not a journey. Flip a journey by editing its line.",
+  "policy": "Every live journey runs in one lane. headless: build\\headless\\aiodev-headless.exe through AIOCTL_HEADLESS=1, nothing on the owner's desktop. native: the Win32 build, for journeys that prove a Windows behaviour; each states which. helper: not a journey. Flip a journey by editing its line. A journey that needs arguments lists them in args; {build} is the revision build.ps1 embeds.",
   "journeys": {
     "activity_views": {
       "lane": "headless"
@@ -8,7 +8,11 @@
       "lane": "headless"
     },
     "build_info": {
-      "lane": "headless"
+      "lane": "headless",
+      "args": [
+        "-ExpectedBuild",
+        "{build}"
+      ]
     },
     "claude_fullscreen": {
       "lane": "native",

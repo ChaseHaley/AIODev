@@ -15,7 +15,9 @@ $ErrorActionPreference = 'Stop'
 $repo = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
 $manifest = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'lanes.json') -Raw | ConvertFrom-Json
 $lanes = @{}
+$arguments = @{}
 foreach ($entry in $manifest.journeys.PSObject.Properties) {
+    $arguments[$entry.Name] = @($entry.Value.args | Where-Object { $null -ne $_ })
     if ($entry.Value.lane -notin @('headless', 'native', 'helper')) { throw "$($entry.Name): unknown lane $($entry.Value.lane)" }
     if ($entry.Value.lane -ne 'headless' -and -not "$($entry.Value.reason)".Trim()) { throw "$($entry.Name) gives no reason" }
     $lanes[$entry.Name] = $entry.Value.lane
@@ -37,6 +39,9 @@ $selected = if ($requested) {
 } else {
     @($files | Where-Object { $lanes[$_] -ne 'helper' -and ($Lane -eq 'all' -or $lanes[$_] -eq $Lane) } | Sort-Object)
 }
+# The revision build.ps1 embeds, for journeys that check it.
+$build = & git -C $repo rev-parse --short HEAD
+if (& git -C $repo status --porcelain) { $build = "$build+dirty" }
 $logs = Join-Path $repo 'build/journeys'
 New-Item -ItemType Directory -Force $logs | Out-Null
 $failed = @()
@@ -44,7 +49,8 @@ foreach ($name in $selected) {
     $env:AIOCTL_HEADLESS = if ($lanes[$name] -eq 'headless') { '1' } else { '' }
     $log = Join-Path $logs "$name.log"
     $started = Get-Date
-    $process = Start-Process pwsh -ArgumentList @('-NoProfile', '-File', (Join-Path $PSScriptRoot "$name.ps1")) `
+    $extra = @($arguments[$name] | ForEach-Object { $_ -replace '\{build\}', $build })
+    $process = Start-Process pwsh -ArgumentList (@('-NoProfile', '-File', (Join-Path $PSScriptRoot "$name.ps1")) + $extra) `
         -NoNewWindow -PassThru -RedirectStandardOutput $log -RedirectStandardError "$log.err"
     $seconds = { [int]((Get-Date) - $started).TotalSeconds }
     if (-not $process.WaitForExit($TimeoutSeconds * 1000)) {
