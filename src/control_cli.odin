@@ -107,10 +107,13 @@ control_cli_answer :: proc(app: ^App, args: []string) -> control.Response {
 		message := fmt.tprintf("%q: %s", parse_error.argument, parse_error.advice)
 		return control_cli_reply(outcome_failure(.Usage, message), json_output)
 	}
-	// AIODev has its own working directory, so a relative path means one in aio's.
+	// AIODev has its own working directory, so a relative path means one in aio's, and a pane the
+	// request opens starts in aio's unless --cwd names another, as a terminal's split starts where
+	// its user is (WORK-367). An empty directory leaves each command's own default.
 	if commands.invocation_paths_resolve(&invocation, request.directory, context.temp_allocator) != nil {
 		return control_cli_reply(outcome_failure(.Failed, "not enough memory for the paths"), json_output)
 	}
+	if .Directory not_in invocation.given {invocation.directory = request.directory}
 	return control_cli_reply(command_execute(app, Control_Request{caller}, invocation), json_output)
 }
 

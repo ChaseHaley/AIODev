@@ -9,7 +9,9 @@ import "aio:procinfo"
 import "aio:settings"
 import "aio:term"
 import "core:fmt"
+import "core:os"
 import "core:strings"
+import "core:unicode/utf8"
 
 // The control side of the command core (WORK-038): what a CLI request names and gets back. Every
 // interface runs commands through command_execute; a control request passes Control_Request.
@@ -169,6 +171,32 @@ pane_target_resolve :: proc(app: ^App, text: string, caller: u32) -> (Pane_Targe
 	return {}, outcome_failure(.Target, fmt.tprintf("panes %v share that name; pass an id", ids[:]))
 }
 
+// Resolves a workspace target: digits name a workspace id, anything else a workspace name. An
+// ambiguous name changes nothing and lists its matches, as a pane target does.
+@(require_results)
+workspace_target_resolve :: proc(app: ^App, text: string) -> (^Workspace, Outcome) {
+	if id, numeric := pane_id_parse(text); numeric {
+		if workspace := workspace_find(app, id); workspace != nil && workspace_eligible(app, workspace) {
+			return workspace, {}
+		}
+		return nil, outcome_failure(.Target, "no workspace has that id; aio --json pane.list shows their ids")
+	}
+	match: ^Workspace
+	ids := make([dynamic]u32, context.temp_allocator)
+	for workspace in app.workspaces {
+		if !workspace_eligible(app, workspace) || workspace.name != text {continue}
+		match = workspace
+		append(&ids, workspace.id)
+	}
+	switch len(ids) {
+	case 0:
+		return nil, outcome_failure(.Target, "no workspace has that name; aio pane.list shows their names")
+	case 1:
+		return match, {}
+	}
+	return nil, outcome_failure(.Target, fmt.tprintf("workspaces %v share that name; pass an id", ids[:]))
+}
+
 // Plain decimal digits that fit a pane id; anything else is a pane name.
 @(private, require_results)
 pane_id_parse :: proc(text: string) -> (u32, bool) {
@@ -315,6 +343,8 @@ control_tab_new :: proc(
 	if !created {
 		return outcome_failure(.Failed, "could not create a tab")
 	}
+	tab_named := invocation.tab_name == "" ||
+		tab_name_set(app, workspace, workspace.tabs[len(workspace.tabs) - 1], invocation.tab_name)
 	if w != nil {
 		if invocation.focus {
 			tab_show(app, w, len(workspace.tabs) - 1)
@@ -322,7 +352,71 @@ control_tab_new :: proc(
 			window_relayout(app, w)
 		}
 	}
-	return control_created(app, w, id, invocation.name)
+	result := control_created(app, w, id, invocation.name)
+	if !tab_named && result.status == .Ok {
+		result.status, result.message = .Failed, "the tab opened but could not be named"
+	}
+	return result
+}
+
+// A workspace holding one new tab. It stays in the background unless --focus shows it in w, the
+// target pane's window, as New Workspace does from a key.
+@(private)
+control_workspace_new :: proc(app: ^App, w: ^Window, invocation: commands.Invocation) -> Outcome {
+	if failure, ok := control_profile_check(app, invocation.profile); !ok {return failure}
+	workspace := workspace_create_empty(app)
+	if workspace == nil {return outcome_failure(.Failed, "could not create a workspace")}
+	if invocation.name != "" {
+		if named := control_workspace_rename(app, workspace, invocation.name); named.status != .Ok {
+			_ = workspace_discard_empty(app, workspace)
+			return named
+		}
+	}
+	id, created := tab_create(app, workspace, invocation.program, invocation.directory, invocation.profile)
+	if !created {
+		_ = workspace_discard_empty(app, workspace)
+		return outcome_failure(.Failed, "could not create the workspace's tab")
+	}
+	if invocation.focus {
+		owner := w != nil ? w : window_primary(app)
+		if owner == nil || !workspace_select(app, owner, workspace) {
+			return {.Failed, "the workspace opened but could not be shown", Outcome_Created{id}}
+		}
+	}
+	return control_created(app, window_for_workspace(app, workspace), id, "")
+}
+
+// Renames a workspace as the picker's row editor does: an empty name is refused.
+@(private)
+control_workspace_rename :: proc(app: ^App, workspace: ^Workspace, name: string) -> Outcome {
+	switch rename_target_commit(app, Rename_Workspace_Target{workspace.id}, name, .Workspace_Row) {
+	case .Saved:
+		return {}
+	case .Empty:
+		return outcome_failure(.Usage, "a workspace name cannot be empty")
+	case .Missing, .Failed:
+	}
+	return outcome_failure(.Failed, "could not rename the workspace")
+}
+
+// Moves w's tab `index`, or its focused pane, into `destination`, as choosing it in the workspace picker
+// does; the destination then shows the moved content.
+@(private)
+control_workspace_move :: proc(
+	app: ^App,
+	w: ^Window,
+	whole_tab: bool,
+	index: int,
+	destination: ^Workspace,
+) -> Outcome {
+	moved := whole_tab ? "tab" : "pane"
+	if destination == w.workspace {
+		return outcome_failure(.Failed, fmt.tprintf("the %s is already in that workspace", moved))
+	}
+	if !workspace_move_content(app, w, workspace_move_request(w, whole_tab, index), destination) {
+		return outcome_failure(.Failed, fmt.tprintf("could not move the %s to that workspace", moved))
+	}
+	return {}
 }
 
 @(private)
@@ -389,6 +483,59 @@ control_profile_check :: proc(app: ^App, profile: string) -> (Outcome, bool) {
 	if profile == "" {return {}, true}
 	if _, found := settings.profile_resolve(&app.settings, profile); found {return {}, true}
 	return outcome_failure(.Failed, "no shell profile has that id"), false
+}
+
+// The largest command file and text file a command line may name. A Windows command line holds
+// 32767 UTF-16 units, so a larger command file could not start its program anyway.
+@(private)
+COMMAND_FILE_LIMIT :: 64 * 1024
+@(private)
+TEXT_FILE_LIMIT :: 1024 * 1024
+
+// Replaces a command file with the program line it holds and a text file with its text (WORK-366).
+// AIODev reads them rather than aio, so no shell's quoting touches what they hold.
+@(private, require_results)
+invocation_files_read :: proc(invocation: ^commands.Invocation) -> Outcome {
+	if .Command_File in invocation.given {
+		path := invocation.command_file
+		data, failure := argument_file_read(path, COMMAND_FILE_LIMIT)
+		if failure.status != .Ok {return failure}
+		line, advice := commands.command_file_parse(string(data), context.temp_allocator)
+		if advice != "" {return outcome_failure(.Usage, fmt.tprintf("%s: %s", path, advice))}
+		invocation.program = line
+	}
+	if .Text_File in invocation.given {
+		path := invocation.text_file
+		data, failure := argument_file_read(path, TEXT_FILE_LIMIT)
+		if failure.status != .Ok {return failure}
+		text := strings.trim_prefix(string(data), "\uFEFF")
+		if !utf8.valid_string(text) {
+			return outcome_failure(.Usage, fmt.tprintf("%s: not UTF-8 text", path))
+		}
+		invocation.text = text
+	}
+	return {}
+}
+
+// A local file's bytes, read into temporary memory when it is a nonempty regular file of at most
+// `limit` bytes.
+@(private, require_results)
+argument_file_read :: proc(path: string, limit: i64) -> ([]u8, Outcome) {
+	if !platform.local_file_within_limit(path, limit) {
+		// The existence check follows the local-path check, so a share is never touched.
+		if platform.open_path_allowed(path) && !os.exists(path) {
+			return nil, outcome_failure(.Failed, fmt.tprintf("%s: no such file", path))
+		}
+		return nil, outcome_failure(
+			.Failed,
+			fmt.tprintf("%s: use a nonempty local file of at most %d KiB", path, limit / 1024),
+		)
+	}
+	data, err := os.read_entire_file(path, context.temp_allocator)
+	if err != nil || i64(len(data)) > limit {
+		return nil, outcome_failure(.Failed, fmt.tprintf("%s: could not read the file", path))
+	}
+	return data, {}
 }
 
 // Names a new pane and reports it, failing when its program could not start; the pane stays open
