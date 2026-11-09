@@ -199,3 +199,24 @@ test_runner_scripts_require_the_full_gate :: proc(t: ^testing.T) {
 		testing.expect(t, strings.contains(text, "run: pwsh -NoProfile -File tests/tools/test_lanes.ps1\n"))
 	}
 }
+
+// A changed journey owes a run in its own lane from tests/live/lanes.json; a helper owes none by
+// name, and a journey the manifest does not list owes both.
+@(test)
+live_journeys_are_owed_in_their_lanes :: proc(t: ^testing.T) {
+	plan := gates.classify([]string{
+		"tests/live/arrange.ps1", "tests/live/termbench.ps1", "tests/live/compatibility_common.ps1",
+		"tests/live/not_a_journey.ps1", "tests/live/run.ps1",
+	})
+	defer gates.plan_destroy(&plan)
+	gates.finalize(&plan)
+	testing.expect(t, plan.live)
+	out := strings.builder_make()
+	defer strings.builder_destroy(&out)
+	gates.format_plan(&out, plan)
+	text := strings.to_string(out)
+	testing.expect(t, strings.contains(text, "tier1.live.headless: arrange not_a_journey\n"), text)
+	testing.expect(t, strings.contains(text, "tier1.live.native: termbench not_a_journey\n"), text)
+	testing.expect(t, strings.contains(text, "run: pwsh -NoProfile -File tests/live/run.ps1 -Journeys arrange,not_a_journey\n"))
+	testing.expect(t, !strings.contains(text, "compatibility_common"))
+}
