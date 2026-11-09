@@ -130,33 +130,45 @@ pane_view_leaving_fullscreen_by_any_toggle_lands_where_the_table_says :: proc(t:
 	}
 }
 
+// Every view, fullscreen included, ends on the tab the window leaves and is not carried to the next.
 @(test)
-pane_view_fill_follows_the_window_across_tabs_and_leaves_their_zoom_alone :: proc(t: ^testing.T) {
+pane_view_changing_tabs_ends_every_view_on_both_tabs :: proc(t: ^testing.T) {
 	f: Palette_Fixture
 	defer palette_fixture_destroy(t, &f)
 	s, w, ok := view_fixture(t, &f, "view-tabs")
 	if !ok {return}
 	first := app.window_tree(w)
-	app.run_action(s, w, .Zoom_Pane)
 	app.tab_new(s, w)
 	app.pane_split(s, w, .Right)
 	second := app.window_tree(w)
 	testing.expect(t, first != second)
+
+	for view in layout.Pane_View {
+		for to in ([?]int{0, 1}) {
+			from := app.window_tree(w)
+			w.pane_fill, from.zoomed = layout.pane_view_parts(view)
+			app.window_relayout(s, w)
+			app.tab_select(s, w, to)
+			testing.expect_value(t, app.pane_view_current(w), layout.Pane_View.Split)
+			testing.expect_value(t, len(w.panes), 2)
+			testing.expect(t, !first.zoomed && !second.zoomed)
+			view_expect_coherent(t, s, w)
+		}
+	}
+}
+
+@(test)
+pane_view_closing_the_shown_tab_ends_the_view :: proc(t: ^testing.T) {
+	f: Palette_Fixture
+	defer palette_fixture_destroy(t, &f)
+	s, w, ok := view_fixture(t, &f, "view-tab-close")
+	if !ok {return}
+	app.tab_new(s, w)
+	app.run_action(s, w, .Fill_Window_Pane)
+	app.tab_close(s, w, w.workspace.selected)
+	testing.expect_value(t, len(w.workspace.tabs), 1)
 	testing.expect_value(t, app.pane_view_current(w), layout.Pane_View.Split)
-
-	app.run_action(s, w, .Fill_Window_Pane)
-	view_expect_coherent(t, s, w)
-	app.tab_select(s, w, 0)
-	testing.expect_value(t, app.pane_view_current(w), layout.Pane_View.Fill_Over_Zoom)
-	view_expect_coherent(t, s, w)
-	app.tab_select(s, w, 1)
-	testing.expect_value(t, app.pane_view_current(w), layout.Pane_View.Fill)
-	view_expect_coherent(t, s, w)
-
-	app.run_action(s, w, .Fill_Window_Pane)
 	testing.expect_value(t, len(w.panes), 2)
-	testing.expect(t, first.zoomed)
-	testing.expect(t, !second.zoomed)
 }
 
 @(test)
@@ -189,23 +201,6 @@ pane_view_moving_focus_keeps_the_view_and_shows_the_new_pane :: proc(t: ^testing
 	testing.expect(t, app.window_tree(w).focus != before)
 	testing.expect_value(t, w.pane_fill, layout.Pane_Fill.Content)
 	view_expect_coherent(t, s, w)
-}
-
-@(test)
-pane_view_a_split_on_a_hidden_tab_ends_the_view_when_that_tab_is_shown :: proc(t: ^testing.T) {
-	f: Palette_Fixture
-	defer palette_fixture_destroy(t, &f)
-	s, w, ok := view_fixture(t, &f, "view-hidden")
-	if !ok {return}
-	app.tab_new(s, w)
-	app.run_action(s, w, .Fill_Window_Pane)
-	hidden := &w.workspace.tabs[0].tree
-	_, err := app.pane_split_at(s, w, w.workspace, 0, hidden.focus, .Down, 0.5, false, {}, false)
-	testing.expect_value(t, err, app.Pane_Split_Error.None)
-	testing.expect_value(t, w.pane_fill, layout.Pane_Fill.Content)
-	app.tab_select(s, w, 0)
-	testing.expect_value(t, app.pane_view_current(w), layout.Pane_View.Split)
-	testing.expect_value(t, len(w.panes), 3)
 }
 
 @(test)
