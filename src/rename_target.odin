@@ -85,6 +85,13 @@ rename_target_commit :: proc(
 	return .Saved
 }
 
+// Names a workspace's tab as its rename field does; an empty name restores the automatic title.
+@(require_results)
+tab_name_set :: proc(app: ^App, workspace: ^Workspace, tab: ^Tab, name: string) -> bool {
+	target := Rename_Tab_Target{workspace.id, tab.id}
+	return rename_target_commit(app, target, name, .Automatic_Title) == .Saved
+}
+
 // The name a target stores, or nil when it no longer exists.
 @(private)
 rename_target_destination :: proc(app: ^App, target: Rename_Target) -> ^string {
