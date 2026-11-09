@@ -1,6 +1,7 @@
 package term_view
 
 import "aio:ghostty"
+import "aio:colour"
 import "aio:render"
 import "core:math"
 import "core:time"
@@ -23,6 +24,116 @@ Cursor_Effects :: struct {
 	duration: time.Duration,
 	strength: f32,
 	movement: bool,
+}
+
+// Cell geometry, not just the filled bar/underline. Head and tail describe the last healthy draw;
+// target is the terminal's current logical destination, including a wide character's full width.
+Cursor_Paint :: struct {
+	head, tail, target:    render.Rect,
+	shape:                 ghostty.Render_State_Cursor_Visual_Style,
+	color, text_color:    render.Color,
+	stroke, minimum_contrast: f32,
+}
+
+@(private)
+Cursor_Transition_Pose :: struct {
+	head, tail: render.Rect,
+}
+
+// Fixed, resource-free motion owned by the window. It uses exactly the local cursor's engine.
+Cursor_Transition :: struct {
+	motion: Cursor_Motion,
+	paint: Cursor_Paint,
+	text_color: render.Color,
+	staged: Maybe(Cursor_Transition_Pose),
+}
+
+// Start from the pose actually drawn, never a scheduler sample. Starting does not read a clock.
+cursor_transition_start :: proc(t: ^Cursor_Transition, from, to: Cursor_Paint, effects: Cursor_Effects) {
+	t^ = {
+		paint = to,
+		text_color = to.text_color,
+		motion = {
+			key = {effects = effects},
+			target = to.target,
+			head_from = from.head, tail_from = from.tail,
+			head = from.head, tail = from.tail,
+			drawn_head = from.head, drawn_tail = from.tail,
+			active = cursor_effects_active(effects) && (from.head != to.target || from.tail != to.target),
+			present = true,
+		},
+	}
+	if !t.motion.active {cursor_place(&t.motion, 1)}
+	if to.minimum_contrast > 1 {
+		t.text_color = colour.minimum_contrast(to.text_color, to.color, to.minimum_contrast)
+	}
+}
+
+cursor_transition_animate :: proc(t: ^Cursor_Transition, frame: render.Frame_Time, enabled: bool) -> bool {
+	return cursor_motion_animate(&t.motion, frame, enabled)
+}
+
+cursor_transition_active :: proc(t: ^Cursor_Transition) -> bool {
+	return t.motion.active
+}
+
+cursor_transition_paint :: proc(t: ^Cursor_Transition) -> Cursor_Paint {
+	p := t.paint
+	p.head, p.tail = t.motion.drawn_head, t.motion.drawn_tail
+	return p
+}
+
+// The enclosing frame owns acceptance: later overlay construction can still reject this draw.
+cursor_transition_commit :: proc(t: ^Cursor_Transition) {
+	if pose, ok := t.staged.?; ok {
+		t.motion.drawn_head, t.motion.drawn_tail = pose.head, pose.tail
+		t.staged = nil
+	}
+}
+
+// The window's content clip, deliberately not the destination pane's clip.
+cursor_transition_draw :: proc(t: ^Cursor_Transition, list: ^render.Draw_List, clip: render.Rect) {
+	if render.push_layer(list, clip) != .None {return}
+	p := t.paint
+	p.head, p.tail = t.motion.head, t.motion.tail
+	cursor_draw_body(list, p, t.motion.key.effects, t.motion.progress)
+	if p.shape == .Block {
+		_ = render.push_rect(list, {rect = p.head, color = p.color})
+	} else {
+		cursor_outline(list, p)
+	}
+	if list.error == .None {
+		t.staged = Cursor_Transition_Pose{p.head, p.tail}
+	}
+}
+
+// Every pane masks lower cursor-text replay, including nonterminal floats. A terminal supplies its
+// cached glyphs; nil is an opaque pane without terminal text. Keep the original rounded pane mask
+// and crop glyph geometry/UVs to the sampled head and source clip.
+cursor_transition_pane :: proc(
+	t: ^Cursor_Transition, list, source: ^render.Draw_List, offset: [2]f32,
+	clip: render.Rect, radius: f32,
+) {
+	p := t.paint
+	p.head, p.tail = t.motion.head, t.motion.tail
+	if p.shape != .Block || list.error != .None {return}
+	if source != nil && source.error != .None {return}
+	bounds, _, visible := quad_clipped(p.head, p.head, clip)
+	if !visible {return}
+	if render.push_layer(list, clip, radius) != .None {return}
+	_ = render.push_rect(list, {rect = bounds, color = p.color})
+	if source == nil {return}
+	for layer in source.layers {
+		source_clip := layer.clip
+		source_clip.x += offset.x
+		source_clip.y += offset.y
+		glyph_bounds, _, intersects := quad_clipped(bounds, bounds, source_clip)
+		if !intersects {continue}
+		for i in layer.glyph_start ..< layer.glyph_start + layer.glyph_count {
+			cursor_replay_glyph(list, source.glyphs[i], offset, glyph_bounds, t.text_color)
+			if list.error != .None {return}
+		}
+	}
 }
 
 // A smear's body and a trail where it meets the cursor show the cursor colour at these opacities.
@@ -65,6 +176,7 @@ Cursor_Motion :: struct {
 	// A focused cursor was drawn by the last build, so the next move can start from it.
 	present:                                 bool,
 	active:                                  bool,
+	progress:                                f32,
 }
 
 // Glyphs a row drew for its text, which a moving block cursor draws again over itself.
@@ -77,7 +189,11 @@ Glyph_Span :: struct {
 // drawing of the view is stale. Without `enabled` a motion lands at once. Settling reports a change
 // once, and a cursor at rest reports none.
 cursor_animate :: proc(v: ^View, frame: render.Frame_Time, enabled: bool) -> bool {
-	c := &v.cursor
+	return cursor_motion_animate(&v.cursor, frame, enabled)
+}
+
+@(private)
+cursor_motion_animate :: proc(c: ^Cursor_Motion, frame: render.Frame_Time, enabled: bool) -> bool {
 	if !c.active {return false}
 	if !enabled || frame.display == {} {
 		c.active = false
@@ -103,7 +219,7 @@ cursor_reset :: proc(v: ^View) {
 
 @(private, require_results)
 cursor_viewport_capture :: proc(v: ^View, b: ^Builder) -> bool {
-	if !cursor_effects_move(b.style.cursor_effects) || !b.style.focused ||
+	if !cursor_effects_active(b.style.cursor_effects) || !b.style.focused || b.style.cursor_suppressed ||
 	   !b.style.cursor_phase_visible || !b.cursor.visible ||
 	   !b.cursor.viewport_has_value || b.frame_time.display == {} {return true}
 	if len(v.cursor_rows) != b.rows {cursor_reset(v)}
@@ -128,8 +244,7 @@ cursor_viewport_capture :: proc(v: ^View, b: ^Builder) -> bool {
 	return true
 }
 
-@(private)
-cursor_effects_move :: proc(e: Cursor_Effects) -> bool {
+cursor_effects_active :: proc(e: Cursor_Effects) -> bool {
 	if e.duration <= 0 {return false}
 	switch e.preset {
 	case .Off:
@@ -184,6 +299,7 @@ cursor_lerp :: proc(a, b: render.Rect, t: f32) -> render.Rect {
 // whole pixels, like the cells it passes, so its text clip and its rect agree.
 @(private)
 cursor_place :: proc(c: ^Cursor_Motion, t: f32) {
+	c.progress = t
 	if !c.active {
 		c.head, c.tail = c.target, c.target
 		return
@@ -205,6 +321,7 @@ cursor_begin :: proc(v: ^View, b: ^Builder) {
 	   !cursor.viewport_has_value ||
 	   !b.style.focused ||
 	   !b.style.cursor_phase_visible ||
+	   b.style.cursor_suppressed ||
 	   b.style.cursor_effects.preset == .Off {
 		cursor_reset(v)
 		return
@@ -219,7 +336,7 @@ cursor_begin :: proc(v: ^View, b: ^Builder) {
 		m.cell_width * (cursor.wide_tail ? 2 : 1),
 		m.cell_height,
 	}
-	if !c.present || c.key != key || !cursor_effects_move(e) || b.frame_time.display == {} {
+	if !c.present || c.key != key || !cursor_effects_active(e) || b.frame_time.display == {} {
 		c^ = {key = key, cell = cell, target = target, head = target, tail = target, present = true}
 		return
 	}
@@ -249,9 +366,9 @@ cursor_note_row :: proc(b: ^Builder, y, start: int) {
 
 // What of a cursor cell the cursor's shape fills, which is what a smear or trail stretches.
 @(private)
-cursor_box :: proc(b: ^Builder, cell: render.Rect) -> render.Rect {
-	stroke := max(1, b.metrics.underline_thickness)
-	#partial switch b.cursor.visual_style {
+cursor_box :: proc(p: Cursor_Paint, cell: render.Rect) -> render.Rect {
+	stroke := p.stroke
+	#partial switch p.shape {
 	case .Bar:
 		return {cell.x, cell.y, stroke * 2, cell.height}
 	case .Underline:
@@ -261,19 +378,19 @@ cursor_box :: proc(b: ^Builder, cell: render.Rect) -> render.Rect {
 }
 
 @(private)
-cursor_outline :: proc(b: ^Builder, cell: render.Rect, fill: render.Color) {
-	stroke := max(1, b.metrics.underline_thickness)
-	style := b.cursor.visual_style
+cursor_outline :: proc(list: ^render.Draw_List, p: Cursor_Paint, hollow := false) {
+	cell, stroke, fill := p.head, p.stroke, p.color
+	b := Builder{list = list}
 	switch {
-	case !b.style.focused || style == .Block_Hollow:
-		rect(b, {cell.x, cell.y, cell.width, stroke}, fill)
-		rect(b, {cell.x, cell.y + cell.height - stroke, cell.width, stroke}, fill)
-		rect(b, {cell.x, cell.y, stroke, cell.height}, fill)
-		rect(b, {cell.x + cell.width - stroke, cell.y, stroke, cell.height}, fill)
-	case style == .Bar:
-		rect(b, {cell.x, cell.y, stroke * 2, cell.height}, fill)
-	case style == .Underline:
-		rect(b, {cell.x, cell.y + cell.height - stroke * 2, cell.width, stroke * 2}, fill)
+	case hollow || p.shape == .Block_Hollow:
+		rect(&b, {cell.x, cell.y, cell.width, stroke}, fill)
+		rect(&b, {cell.x, cell.y + cell.height - stroke, cell.width, stroke}, fill)
+		rect(&b, {cell.x, cell.y, stroke, cell.height}, fill)
+		rect(&b, {cell.x + cell.width - stroke, cell.y, stroke, cell.height}, fill)
+	case p.shape == .Bar:
+		rect(&b, {cell.x, cell.y, stroke * 2, cell.height}, fill)
+	case p.shape == .Underline:
+		rect(&b, {cell.x, cell.y + cell.height - stroke * 2, cell.width, stroke * 2}, fill)
 	}
 }
 
@@ -281,57 +398,66 @@ cursor_outline :: proc(b: ^Builder, cell: render.Rect, fill: render.Color) {
 // it. A block head draws the text it covers again in the cursor text colour, clipped to itself, so the
 // text stays legible wherever the head is.
 @(private)
-cursor_draw_moving :: proc(v: ^View, b: ^Builder) {
-	c := &v.cursor
-	e := b.style.cursor_effects
-	fill := b.cursor_color
-	if e.strength > 0 && (e.preset == .Smear || e.preset == .Trail) && c.tail != c.head {
-		tail := cursor_box(b, c.tail)
-		if e.preset == .Trail {
-			shrink_x := tail.width * (1 - CURSOR_TRAIL_TAIL_SCALE) / 2
-			shrink_y := tail.height * (1 - CURSOR_TRAIL_TAIL_SCALE) / 2
-			tail = {
-				tail.x + shrink_x, tail.y + shrink_y,
-				tail.width - 2 * shrink_x, tail.height - 2 * shrink_y,
-			}
-		}
-		cursor_body(b, tail, cursor_box(b, c.head), e.preset == .Trail, fill)
-	}
+cursor_draw_moving :: proc(v: ^View, b: ^Builder, paint: Cursor_Paint) {
+	cursor_draw_body(b.list, paint, b.style.cursor_effects, b.cursor_t)
 	layer := b.list.layers[len(b.list.layers) - 1]
-	clip := layer.clip
-	head := c.head
-	if b.cursor.visual_style != .Block {
-		if render.push_layer(b.list, clip, layer.radius) != .None {return}
-		cursor_outline(b, head, fill)
+	if render.push_layer(b.list, layer.clip, layer.radius) != .None {return}
+	if paint.shape != .Block {
+		cursor_outline(b.list, paint)
 		return
 	}
-	left, top := max(head.x, clip.x), max(head.y, clip.y)
-	right := min(head.x + head.width, clip.x + clip.width)
-	bottom := min(head.y + head.height, clip.y + clip.height)
-	if right <= left || bottom <= top {return}
-	if render.push_layer(b.list, clip, layer.radius) != .None {return}
-	bounds := render.Rect{left, top, right - left, bottom - top}
-	rect(b, head, fill)
-	text := b.style.cursor_text
-	if b.style.minimum_contrast > 1 {
-		text = minimum_contrast_cached(&v.contrast, text, fill, b.style.minimum_contrast)
+	rect(b, paint.head, paint.color)
+	text := paint.text_color
+	if paint.minimum_contrast > 1 {
+		text = minimum_contrast_cached(&v.contrast, text, paint.color, paint.minimum_contrast)
 	}
 	for span in b.cursor_text {
 		for i in span.start ..< span.end {
-			g := b.list.glyphs[i]
-			placed, atlas, visible := quad_clipped(g.rect, g.atlas, bounds)
-			if !visible {continue}
-			g.rect, g.atlas = placed, atlas
-			g.color = text
-			if render.push_glyph(b.list, g) != .None {return}
+			cursor_replay_glyph(b.list, b.list.glyphs[i], {}, paint.head, text)
+			if b.list.error != .None {return}
 		}
 	}
+}
+
+@(private)
+cursor_draw_body :: proc(list: ^render.Draw_List, p: Cursor_Paint, e: Cursor_Effects, progress: f32) {
+	if e.strength <= 0 || (e.preset != .Smear && e.preset != .Trail) || p.tail == p.head {return}
+	tail := cursor_box(p, p.tail)
+	if e.preset == .Trail {
+		shrink_x := tail.width * (1 - CURSOR_TRAIL_TAIL_SCALE) / 2
+		shrink_y := tail.height * (1 - CURSOR_TRAIL_TAIL_SCALE) / 2
+		tail = {
+			tail.x + shrink_x, tail.y + shrink_y,
+			tail.width - 2 * shrink_x, tail.height - 2 * shrink_y,
+		}
+	}
+	cursor_body(list, tail, cursor_box(p, p.head), e.preset == .Trail, p.color, progress)
+}
+
+@(private)
+cursor_replay_glyph :: proc(
+	list: ^render.Draw_List, glyph: render.Glyph_Instance, offset: [2]f32,
+	bounds: render.Rect, text: render.Color,
+) {
+	g := glyph
+	g.rect.x += offset.x
+	g.rect.y += offset.y
+	if g.flags & render.GLYPH_FADE != 0 {
+		g.fade_start += offset.x
+		g.fade_end += offset.x
+	}
+	placed, atlas, visible := quad_clipped(g.rect, g.atlas, bounds)
+	if !visible {return}
+	g.rect, g.atlas, g.color = placed, atlas, text
+	_ = render.push_glyph(list, g)
 }
 
 // Fills the convex hull of `tail` and `head` with slices across the direction of the move, each
 // covering the hull where it lies. A trail fades from the head to nothing at the tail.
 @(private)
-cursor_body :: proc(b: ^Builder, tail, head: render.Rect, trail: bool, fill: render.Color) {
+cursor_body :: proc(
+	list: ^render.Draw_List, tail, head: render.Rect, trail: bool, fill: render.Color, progress: f32,
+) {
 	// The hull is the union of the boxes between the two at every s in 0..1. Each slice keeps the s
 	// whose box reaches into it, and covers what those boxes cover across it.
 	moved := [2]f32 {
@@ -369,14 +495,14 @@ cursor_body :: proc(b: ^Builder, tail, head: render.Rect, trail: bool, fill: ren
 				if to_center != from_center {
 					q = clamp(((near + far) / 2 - from_center) / (to_center - from_center), 0, 1)
 				}
-				alpha = CURSOR_TRAIL_OPACITY * q * (1 - b.cursor_t)
+				alpha = CURSOR_TRAIL_OPACITY * q * (1 - progress)
 			}
 			if end > start && alpha > 0 {
 				tinted := fill
 				tinted.a *= alpha
 				piece := render.Rect{near, start, far - near, end - start}
 				if axis == 1 {piece = {start, near, end - start, far - near}}
-				rect(b, piece, tinted)
+				_ = render.push_rect(list, {rect = piece, color = tinted})
 			}
 		}
 		near = far

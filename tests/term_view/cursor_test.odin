@@ -8,7 +8,7 @@ import "core:testing"
 import "core:time"
 
 // Frames on a 50 Hz grid, so a five-refresh motion lands on an exact frame.
-@(private = "file")
+@(private)
 PERIOD :: 20 * time.Millisecond
 
 @(private)

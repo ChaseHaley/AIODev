@@ -36,6 +36,8 @@ Pane_View :: struct {
 	image_epoch: u64,
 	style: term_view.Style,
 	frame: term_view.Frame,
+	// Window-space cursor captured after the same translation as this pane's content.
+	cursor: Maybe(term_view.Cursor_Paint),
 	header_controls: [Pane_Header_Button]ui.Control_Motion,
 	header_hover:   Pane_Header_Target,
 	header_armed:   ui.Armed(Pane_Header_Target),
@@ -107,6 +109,7 @@ Window :: struct {
 	paste_confirm: Paste_Confirm,
 	wheel_remainder: f32,
 	cursor_blink: Cursor_Blink,
+	cursor_crossing: Cursor_Crossing,
 	using frame_wakes: Frame_Wakes,
 	taskbar: Status_Taskbar,
 	status: Status_Overview,
@@ -626,7 +629,9 @@ window_build_frame :: proc(app: ^App, w: ^Window) -> bool {
 	for {
 		build_frame(app, w)
 		switch render.frame_build_finish(&build) {
-		case .Ready: return true
+		case .Ready:
+			cursor_crossing_commit(app, w)
+			return true
 		case .Retry:
 		case .Failed: return false
 		}
@@ -640,6 +645,7 @@ build_frame :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 	blinking := false
 	w.frame_wakes = {}
 	pane_motion_drawn_reset(w)
+	cursor_crossing_prepare(app, w)
 	// Floating panes draw after the chrome, whose shared pane borders would otherwise cross them.
 	raised: Maybe(layout.Pane_Rect)
 	for pane in w.panes {
@@ -673,6 +679,7 @@ build_frame :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 	// Floats shrinking into their capsules draw above the others.
 	pane_ghosts_draw_alone(app, w, false)
 	if result := floating_capsules_draw(app, w); result != .Ok {return result}
+	cursor_crossing_draw(app, w)
 	cursor_blink_observe(w, blinking, clock_now(&app.clock))
 	if result := pane_drag_draw(app, w); result != .Ok {return result}
 	if result := tab_drag_draw(app, w); result != .Ok {return result}
@@ -759,6 +766,10 @@ pane_draw :: proc(app: ^App, w: ^Window, pane: layout.Pane_Rect, blinking: ^bool
 		if result != .Ok {return result}
 		background = frame.background
 		blinking^ ||= frame.cursor_blinking && pane_has_keyboard(app, w, pane)
+		state.cursor = nil
+		if paint, shown := frame.cursor.?; shown {
+			state.cursor = cursor_paint_translate(paint, f.offset)
+		}
 	case .Settings:
 		if result := settings_pane_draw(app, w, pane); result != .Ok {return result}
 		scrollbar = false
@@ -819,6 +830,7 @@ terminal_pane_draw :: proc(
 		minimum_contrast = minimum_contrast,
 		focused = content_focused,
 		cursor_phase_visible = !content_focused || cursor_visible(w),
+		cursor_suppressed = cursor_crossing_suppresses(w, pane.content),
 		cursor_effects = cursor_effects(app),
 		hover = link_hover_range(w, pane.content),
 	}

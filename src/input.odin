@@ -438,6 +438,7 @@ on_focus :: proc(app: ^App, w: ^Window, focused: bool) {
 	}
 	window_notices_sync(app)
 	if !focused {
+		cursor_crossing_forget(w)
 		if !gesture_cancel(app, w) {return}
 		window_overlays_cancel(app, w, true)
 	}

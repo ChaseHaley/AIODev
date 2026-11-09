@@ -5,7 +5,7 @@ import "core:testing"
 import "aio:render"
 import "aio:term_view"
 
-@(private="file")
+@(private)
 construction_fail_allocation :: proc(data: rawptr, mode: runtime.Allocator_Mode, size, alignment: int,
 	old_memory: rawptr, old_size: int, location := #caller_location) -> ([]u8, runtime.Allocator_Error) {
 	return nil, .Out_Of_Memory

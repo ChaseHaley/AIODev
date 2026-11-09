@@ -27,6 +27,8 @@ Style :: struct {
 	minimum_contrast:                                                 f32,
 	focused:                                                          bool,
 	cursor_phase_visible:                                             bool,
+	// Capture the cursor for a window-level transition without painting or animating it locally.
+	cursor_suppressed:                                                bool,
 	// The link under the pointer is view state, not cell style: it only adds an underline overlay.
 	hover:                                                            Maybe(term.Link_Range),
 	// The zero value draws the cursor only where the terminal puts it.
@@ -36,6 +38,7 @@ Style :: struct {
 Frame :: struct {
 	background:      render.Color,
 	cursor_blinking: bool,
+	cursor:          Maybe(Cursor_Paint),
 	// What reading the session did for this build. Anything but Updated drew the previously
 	// captured screen (a synchronized-output hold or a failed read), so the frame must not be
 	// cached as any generation; a hold also says when to draw again.
@@ -275,7 +278,7 @@ build :: proc(
 	if list.error != .None {return frame, .Ok}
 	// A moving block clips its text to its head. Above-text images still use the whole pane.
 	cell_layer := list.layers[len(list.layers) - 1]
-	build_cursor(v, &b)
+	frame.cursor = build_cursor(v, &b)
 	if has_images && images_present(v, .Above_Text) {
 		if render.push_layer(list, cell_layer.clip, cell_layer.radius) != .None {return frame, .Ok}
 		images_draw(v, &b, .Above_Text)
@@ -386,6 +389,7 @@ block_cursor_at :: proc(b: ^Builder, x, y: int) -> bool {
 		b.style.focused &&
 		b.style.cursor_phase_visible &&
 		c.visual_style == .Block &&
+		!b.style.cursor_suppressed &&
 		!b.cursor_moving &&
 		b.cursor_column == x &&
 		int(c.viewport_y) == y \
@@ -690,11 +694,11 @@ decorate :: proc(b: ^Builder, p: Cell_Paint, left, top: f32) -> render.Build_Sta
 }
 
 @(private)
-build_cursor :: proc(v: ^View, b: ^Builder) {
-	if b.list.error != .None {return}
+build_cursor :: proc(v: ^View, b: ^Builder) -> Maybe(Cursor_Paint) {
+	if b.list.error != .None {return nil}
 	c := b.cursor
 	if !c.visible || !c.viewport_has_value || !b.style.cursor_phase_visible {
-		return
+		return nil
 	}
 	m := b.metrics
 	cell := render.Rect {
@@ -703,9 +707,16 @@ build_cursor :: proc(v: ^View, b: ^Builder) {
 		m.cell_width * (b.cursor_wide ? 2 : 1),
 		m.cell_height,
 	}
+	paint := Cursor_Paint {
+		head = cell, tail = cell, target = cell,
+		shape = c.visual_style, color = b.cursor_color, text_color = b.style.cursor_text,
+		stroke = max(1, m.underline_thickness), minimum_contrast = b.style.minimum_contrast,
+	}
+	if b.style.cursor_suppressed {return paint}
 	if v.cursor.present {
 		v.cursor.target = cell
 		cursor_place(&v.cursor, b.cursor_t)
+		paint.head, paint.tail = v.cursor.head, v.cursor.tail
 	}
 	defer {
 		if v.cursor.present && b.list.error == .None {
@@ -713,15 +724,16 @@ build_cursor :: proc(v: ^View, b: ^Builder) {
 		}
 	}
 	if b.cursor_moving {
-		cursor_draw_moving(v, b)
-		return
+		cursor_draw_moving(v, b, paint)
+		return paint
 	}
 	// A block cursor sits between the cell background and the glyph: rects in a layer draw before its glyphs.
 	if block_cursor_at(b, b.cursor_column, int(c.viewport_y)) {
 		rect(b, cell, b.cursor_color)
-		return
+		return paint
 	}
-	clip := b.list.layers[len(b.list.layers) - 1].clip
-	if render.push_layer(b.list, clip) != .None {return}
-	cursor_outline(b, cell, b.cursor_color)
+	layer := b.list.layers[len(b.list.layers) - 1]
+	if render.push_layer(b.list, layer.clip, layer.radius) != .None {return nil}
+	cursor_outline(b.list, paint, !b.style.focused)
+	return paint
 }

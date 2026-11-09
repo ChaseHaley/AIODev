@@ -245,6 +245,7 @@ Cursor_Settings :: struct {
 	animation_strength: int,
 	// Glide the cursor to its new cell; off moves it at once.
 	animation_movement: bool,
+	animation_across_panes: bool,
 }
 Color_Settings :: struct {
 	foreground, background, cursor, cursor_text, selection_background: Color,
@@ -1113,6 +1114,15 @@ SCHEMA :: [?]Schema_Entry {
 		default_value = "true",
 		description = "Glide the cursor to its new cell. Off moves it there at once, while smear and trail " +
 			"still draw at their own strength.",
+	},
+	{
+		key = "cursor.animation_across_panes",
+		title = "Animate Cursor Across Panes",
+		kind = .Bool,
+		offset = offset_of(Settings, cursor) + offset_of(Cursor_Settings, animation_across_panes),
+		default_value = "true",
+		description = "Use the selected cursor animation when switching between panes. " +
+			"Has no effect when Cursor Animation is Off.",
 	},
 	{
 		key = "control.enabled",
