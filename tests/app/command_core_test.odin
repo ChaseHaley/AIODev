@@ -1,8 +1,11 @@
 package app_test
 
+import "core:encoding/base64"
+import "core:encoding/json"
 import "core:fmt"
 import "core:os"
 import "core:path/filepath"
+import "core:strconv"
 import "core:strings"
 import "core:testing"
 import "core:time"
@@ -161,5 +164,97 @@ control_commands_target_panes_without_moving_focus :: proc(t: ^testing.T) {
 		testing.expect_value(t, state.sessions[len(state.sessions) - 1].header.launch_directory, system)
 	}
 	usage := app.control_cli_answer(&state, {"", "text", "", "app.commands", "pane.send"})
-	testing.expect(t, usage.ok && strings.has_prefix(usage.text, "pane.send [--pane <pane>] <text> [--enter]"))
+	testing.expect(
+		t,
+		usage.ok && strings.has_prefix(usage.text, "pane.send [--pane <pane>] (<text> | --file <file>) [--enter]"),
+	)
+}
+
+// A program's arguments and a pane's input come from files AIODev reads, so quotes, backslashes, a
+// newline and non-ASCII text arrive byte for byte (WORK-366). The child reports what it received as
+// base64, which pane.read shows as plain ASCII.
+@(test)
+control_commands_read_program_and_text_from_files :: proc(t: ^testing.T) {
+	directory, directory_error := os.make_directory_temp("", "aio-files-*", context.allocator)
+	if !testing.expect_value(t, directory_error, nil) { return }
+	defer delete(directory)
+	defer testing.expect_value(t, os.remove_all(directory), nil)
+	write :: proc(t: ^testing.T, directory, name, text: string) -> string {
+		path, _ := filepath.join({directory, name}, context.temp_allocator)
+		testing.expect_value(t, os.write_entire_file(path, text), nil)
+		return path
+	}
+	write(t, directory, "settings.ini", idle_shell_settings(t, "cursor.blink = false\n"))
+	script := write(
+		t,
+		directory,
+		"argv.ps1",
+		"$argument = [Environment]::GetCommandLineArgs()[-1]\n" +
+		"Write-Output ('argv=' + [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($argument)))\n" +
+		"$line = $Host.UI.ReadLine()\n" +
+		"Write-Output ('line=' + [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($line)))\n" +
+		"$null = $Host.UI.ReadLine()\n",
+	)
+	argument :: "she said \"it's done\" \\\\server\\share C:\\dir with space\\ a\\\"b\nzweite Zeile \u00e9 \u65e5\u672c\\"
+	command := []string{"pwsh.exe", "-NoLogo", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", script, argument}
+	command_json, marshal_error := json.marshal(command, allocator = context.temp_allocator)
+	if !testing.expect_value(t, marshal_error, nil) { return }
+	// Windows PowerShell's Set-Content -Encoding UTF8 starts a file with a byte order mark.
+	write(t, directory, "argv.json", strings.concatenate({"\uFEFF", string(command_json)}, context.temp_allocator))
+	prompt :: "it's \"quoted\" C:\\dir with space\\ \u00e9 \u65e5\u672c \\"
+	write(t, directory, "prompt.txt", "\uFEFF" + prompt)
+	write(t, directory, "bad.json", `["pwsh.exe", 3]`)
+
+	state := app.App{options = {data_dir = directory, inactive = true}}
+	state.app_id = fmt.aprintf("AIODev.Test.CommandFiles.%d", os.get_pid())
+	defer app.app_destroy(&state)
+	if !testing.expect_value(t, platform.init(&state.platform, state.app_id), platform.Init_Result.Primary) {
+		return
+	}
+	state.platform_ready = true
+	if !testing.expect(t, app.app_init(&state)) { return }
+
+	// Relative file names resolve against aio's working directory, as --cwd does.
+	created := app.control_cli_answer(&state, {"", "text", directory, "tab.new", "--command-file", "argv.json"})
+	if !testing.expectf(t, created.ok, "tab.new --command-file: %s", created.text) { return }
+	pane, parsed := strconv.parse_uint(created.text, 10)
+	if !testing.expect(t, parsed) { return }
+	// Ticks free temporary memory, so what outlives one is owned.
+	id := fmt.aprintf("%d", pane)
+	defer delete(id)
+	shown :: proc(state: ^app.App, id, label, text: string) -> bool {
+		encoded := base64.encode(transmute([]u8)text, allocator = context.temp_allocator)
+		marker := strings.concatenate({label, encoded})
+		defer delete(marker)
+		for deadline := time.tick_now(); time.tick_since(deadline) < 20 * time.Second; {
+			app.tick(state)
+			read := invoke(state, 0, "pane.read", "--pane", id)
+			if read.status == .Ok {
+				// A long marker wraps; the rows join with newlines.
+				rows := string(read.payload.(app.Outcome_Text))
+				screen, _ := strings.remove_all(rows, "\n", context.temp_allocator)
+				if strings.contains(screen, marker) {return true}
+			}
+			time.sleep(50 * time.Millisecond)
+		}
+		return false
+	}
+	testing.expect(t, shown(&state, id, "argv=", argument), "the program's last argument arrived unchanged")
+
+	sent := app.control_cli_answer(
+		&state,
+		{"", "text", directory, "pane.send", "--pane", id, "--enter", "--file", "prompt.txt"},
+	)
+	testing.expectf(t, sent.ok, "pane.send --file: %s", sent.text)
+	testing.expect(t, shown(&state, id, "line=", prompt), "the text arrived unchanged, without its byte order mark")
+
+	// Errors name the file; a bad file's content is a usage error, a missing file a failure.
+	missing := app.control_cli_answer(&state, {"", "text", directory, "pane.send", "--pane", id, "--file", "gone.txt"})
+	testing.expect_value(t, missing.status, u8(cli_protocol.Status.Failed))
+	testing.expectf(t, strings.contains(missing.text, "gone.txt: no such file"), "missing: %s", missing.text)
+	bad := app.control_cli_answer(&state, {"", "text", directory, "tab.new", "--command-file", "bad.json"})
+	testing.expect_value(t, bad.status, u8(cli_protocol.Status.Usage))
+	testing.expectf(t, strings.contains(bad.text, "bad.json: element 2 is not a string"), "bad: %s", bad.text)
+	both := app.control_cli_answer(&state, {"", "text", directory, "tab.new", "--command-file", "argv.json", "--", "pwsh"})
+	testing.expect_value(t, both.status, u8(cli_protocol.Status.Usage))
 }

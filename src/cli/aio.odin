@@ -28,7 +28,10 @@ Files   aio pane.open_markdown [--direction right|down|left|up] [--focus] <file>
 Common  aio tab.new [--cwd <dir>] [--name <name>] [--focus] [-- <program> [arguments]]
         aio pane.split [--direction right|down|left|up] [--ratio <0.05-0.95>] [-- <program>]
             Both print the new pane's id and leave focus where it is unless --focus.
+            --command-file <file> takes the program and arguments from a JSON array of
+            strings instead, so no shell quotes them.
         aio pane.send [--enter] <text>    types text into the pane, then presses Enter
+        aio pane.send --file <file>       types a UTF-8 file's text exactly
         aio pane.read [--lines <rows>]    prints the pane's visible text
         aio pane.list                     one line per pane; --json for details
         aio pane.close
