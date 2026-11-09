@@ -179,6 +179,7 @@ tab_orientation_toggle_switches_the_setting_without_a_settings_file :: proc(t: ^
 
 @(test)
 tab_orientation_button_stays_left_of_workspace_in_both_modes :: proc(t: ^testing.T) {
+	state: app.App
 	for scale in ([?]f32{1, 1.5, 2}) {
 		w := app.Window{width = 1000, height = 700, scale = scale}
 		expected := app.tab_orientation_button_rect(&w)
@@ -190,7 +191,7 @@ tab_orientation_button_stays_left_of_workspace_in_both_modes :: proc(t: ^testing
 				testing.expect_value(t, r, expected)
 				testing.expect(t, r.width >= 24 * scale)
 				testing.expect(t, app.tab_orientation_button_hit(&w, r.x + r.width / 2, r.y + r.height / 2))
-				testing.expect(t, r.x + r.width < app.workspace_button_rect(&w).x)
+				testing.expect(t, r.x + r.width < app.workspace_button_rect(&state, &w).x)
 			}
 		}
 	}

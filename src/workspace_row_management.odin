@@ -347,8 +347,8 @@ workspace_row_hover :: proc(app: ^App, w: ^Window, e: input.Mouse_Move_Event) ->
 	return false
 }
 
-workspace_button_indicator_rect :: proc(w: ^Window) -> render.Rect {
-	chip := workspace_button_rect(w)
+workspace_button_indicator_rect :: proc(app: ^App, w: ^Window) -> render.Rect {
+	chip := workspace_button_rect(app, w)
 	size := ui.ICON_INDICATOR * w.scale
 	return {chip.x + chip.width - (ui.CONTROL_INSET * w.scale) - size, chip.y, size, chip.height}
 }

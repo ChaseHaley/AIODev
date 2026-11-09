@@ -82,9 +82,9 @@ rename_metrics :: proc(w: ^Window) -> (heading, hint: ui.Text) {
 	return ui.text_styled(&w.ui_text, .Title), ui.text_styled(&w.ui_text, .Detail)
 }
 
-rename_rect :: proc(w: ^Window) -> render.Rect {
+rename_rect :: proc(app: ^App, w: ^Window) -> render.Rect {
 	s := w.scale
-	if chip_name_shown(w) {return workspace_button_rect(w)}
+	if chip_name_shown(w) {return workspace_button_rect(app, w)}
 	heading, hint := rename_metrics(w)
 	height :=
 		2 * ui.DIALOG_PADDING * s +
@@ -101,8 +101,8 @@ rename_rect :: proc(w: ^Window) -> render.Rect {
 	}
 }
 
-rename_field_rect :: proc(w: ^Window) -> render.Rect {
-	r, s := rename_rect(w), w.scale
+rename_field_rect :: proc(app: ^App, w: ^Window) -> render.Rect {
+	r, s := rename_rect(app, w), w.scale
 	if chip_name_shown(w) {
 		// The field's inset puts the text exactly where the chip draws its label.
 		lead := (ui.CONTROL_INSET + ui.ICON_BUTTON) * s
@@ -118,12 +118,12 @@ rename_field_rect :: proc(w: ^Window) -> render.Rect {
 	}
 }
 
-rename_field_box :: proc(w: ^Window) -> ui.Field_Box {
-	return ui.field_box_standard(&w.rename, &w.ui_text, rename_field_rect(w), w.scale)
+rename_field_box :: proc(app: ^App, w: ^Window) -> ui.Field_Box {
+	return ui.field_box_standard(&w.rename, &w.ui_text, rename_field_rect(app, w), w.scale)
 }
 
-rename_pointer :: proc(w: ^Window, x: f32, pressed, extend: bool) {
-	box := rename_field_box(w)
+rename_pointer :: proc(app: ^App, w: ^Window, x: f32, pressed, extend: bool) {
+	box := rename_field_box(app, w)
 	ui.field_pointer(&w.rename, ui.field_box_offset(box, x), pressed, extend)
 	w.dirty = true
 }
@@ -132,14 +132,14 @@ rename_pointer :: proc(w: ^Window, x: f32, pressed, extend: bool) {
 @(private = "file")
 workspace_name_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 	s := w.scale
-	r := rename_rect(w)
+	r := rename_rect(app, w)
 	radius := ui.RADIUS_CONTROL * s
 	if render.push_layer(&w.list, {0, 0, f32(w.width), f32(w.height)}) != .None {return .Ok}
 	if render.push_rect(&w.list, {rect = r, color = app.theme.pane, radius = radius}) != .None {return .Ok}
 	size := ui.ICON_BUTTON * s
 	icon := render.Rect{r.x + ui.CONTROL_INSET * s, r.y + (r.height - size) / 2, size, size}
 	if result := workspace_icon_draw(w, w.workspace.icon, icon, app.theme.text); result != .Ok {return result}
-	box := rename_field_box(w)
+	box := rename_field_box(app, w)
 	if result := ui.field_box_draw(box, &w.list, app.theme, ui.field_box_baseline(box), true, "Workspace name");
 	   result != .Ok {return result}
 	if chip, _ := w.overlay.(Overlay_Chip_Name); !chip.error {return .Ok}
@@ -162,7 +162,7 @@ rename_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 	dialog, shown := w.overlay.(Overlay_Rename)
 	if !shown {return workspace_name_draw(app, w)}
 	s := w.scale
-	r := rename_rect(w)
+	r := rename_rect(app, w)
 	pad := ui.DIALOG_PADDING * s
 	heading, hint := rename_metrics(w)
 	if render.push_layer(&w.list, {0, 0, f32(w.width), f32(w.height)}) != .None {return .Ok}
@@ -180,12 +180,12 @@ rename_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 		r.y + pad + heading.ascent,
 		app.theme.text,
 	); result != .Ok {return result}
-	field := rename_field_rect(w)
+	field := rename_field_rect(app, w)
 	radius := ui.RADIUS_CONTROL * s
 	if render.push_rect(&w.list, {rect = field, color = app.theme.pane, radius = radius}) != .None {return .Ok}
 	if render.push_rect(&w.list, {rect = field, color = app.theme.accent, radius = radius, stroke = s}) !=
 	   .None {return .Ok}
-	box := rename_field_box(w)
+	box := rename_field_box(app, w)
 	if result := ui.field_box_draw(
 		box,
 		&w.list,
@@ -224,8 +224,8 @@ rename_claims :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {return rename_s
 rename_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: input.Mouse_Move_Event) {
 	if owner != .Rename {return}
 	x, y := f32(e.x), f32(e.y)
-	if w.rename.dragging && .Left in e.buttons {rename_pointer(w, x, false, true)}
-	pointer_set(app, w, render.rect_contains(rename_field_rect(w), x, y) ? .Text : .Arrow)
+	if w.rename.dragging && .Left in e.buttons {rename_pointer(app, w, x, false, true)}
+	pointer_set(app, w, render.rect_contains(rename_field_rect(app, w), x, y) ? .Text : .Arrow)
 }
 
 // A press outside the dialog finishes the rename and is swallowed with its release. The workspace chip
@@ -235,18 +235,18 @@ rename_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: input.Mous
 rename_button :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) {
 	if !e.pressed {ui.field_release(&w.rename); return}
 	x, y := f32(e.x), f32(e.y)
-	if chip_name_shown(w) && !render.rect_contains(rename_rect(w), x, y) {
+	if chip_name_shown(w) && !render.rect_contains(rename_rect(app, w), x, y) {
 		overlay_close(app, w, .Leave)
 		target := pointer_target(app, w, x, y)
 		gesture_hand_off(w, e.button, target)
 		pointer_press(app, w, target, e)
 		return
 	}
-	if !render.rect_contains(rename_rect(w), x, y) {
+	if !render.rect_contains(rename_rect(app, w), x, y) {
 		rename_finish(app, w, false)
 		gesture_swallow(w, e.button, .Rename)
-	} else if e.button == .Left && render.rect_contains(rename_field_rect(w), x, y) {
-		rename_pointer(w, x, true, .Shift in e.modifiers)
+	} else if e.button == .Left && render.rect_contains(rename_field_rect(app, w), x, y) {
+		rename_pointer(app, w, x, true, .Shift in e.modifiers)
 	}
 }
 

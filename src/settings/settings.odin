@@ -571,8 +571,9 @@ SCHEMA :: [?]Schema_Entry {
 		title = "Status Inbox",
 		kind = .Bool,
 		offset = offset_of(Settings, status) + offset_of(Status_Settings, inbox),
-		default_value = "false",
-		description = "Show a title-bar summary that opens a list of programs ordered by what needs you first.",
+		default_value = "true",
+		description = "Show a title-bar button whose ring shows each program's status and opens a list of " +
+			"programs ordered by what needs you first.",
 	},
 	{
 		key = "status.panel",

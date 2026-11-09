@@ -13,7 +13,7 @@ _ :: settings
 // layout. Vertical mode uses the rail instead.
 window_tab_bar :: proc(app: ^App, w: ^Window) -> ui.Tab_Bar {
 	if w.workspace == nil {return {}}
-	left := workspace_button_width(w) + status_pill_width(app, w)
+	left := workspace_button_width(app, w)
 	return ui.tab_bar_layout(
 		left,
 		max(0, f32(w.width) - window_caption_reserve(w) - left),
@@ -98,7 +98,7 @@ strip_tab_interaction_hit :: proc(
 // The rightmost point the title chrome claims before the native caption buttons start.
 window_title_controls_end :: proc(app: ^App, w: ^Window) -> f32 {
 	if window_linked(w) {return 0}
-	left := workspace_button_width(w) + status_pill_width(app, w)
+	left := workspace_button_width(app, w)
 	if !w.tabs_horizontal {
 		toggle := tab_orientation_button_rect(w)
 		return max(left, toggle.x + toggle.width)
