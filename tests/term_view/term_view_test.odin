@@ -11,6 +11,7 @@ import "aio:glyphs"
 import "aio:render"
 import "aio:term"
 import "aio:term_view"
+import test_fonts "../fixtures/fonts"
 
 COLUMNS :: 20
 ROWS :: 4
@@ -61,10 +62,22 @@ palette :: proc() -> (p: [16]term.Color) {
 	return
 }
 
-fixture_create :: proc(t: ^testing.T, command: string, family := "Consolas") -> (f: Fixture, ok: bool) {
+// Which fonts a fixture draws with: the bundled ones, the same on every machine, or the installed
+// ones, for tests of fallback to whatever Windows provides.
+Fixture_Fonts :: enum {
+	Bundled,
+	Installed,
+}
+
+fixture_create :: proc(
+	t: ^testing.T, command: string, family := test_fonts.MONO, fonts := Fixture_Fonts.Bundled,
+) -> (f: Fixture, ok: bool) {
 	testing.set_fail_timeout(t, 60 * time.Second)
 	font_error: font.Error
-	f.fonts, font_error = font.system_create()
+	switch fonts {
+	case .Bundled: f.fonts, font_error = font.system_create_private(test_fonts.files())
+	case .Installed: f.fonts, font_error = font.system_create()
+	}
 	if !testing.expect_value(t, font_error, font.Error.None) {
 		return
 	}
@@ -319,7 +332,7 @@ style_run_faces :: proc(t: ^testing.T) {
 @(test)
 consolas_grid_and_combining_cluster :: proc(t: ^testing.T) {
 	command := text_command("'AB' + [char]0x6f22 + [char]::ConvertFromUtf32(0x1f600) + 'e' + [char]0x301")
-	f, ok := fixture_create(t, command)
+	f, ok := fixture_create(t, command, "Consolas", .Installed)
 	defer fixture_destroy(&f)
 	if !ok || !await_text(t, f.session, "AB") { return }
 	_, actual := render_frame(t, &f, {family = f.family})
@@ -430,7 +443,7 @@ cursor_covers_wide_cell :: proc(t: ^testing.T) {
 // fit instead of covering its neighbor (D-042).
 @(test)
 wide_glyphs_shrink_to_fit :: proc(t: ^testing.T) {
-	f, ok := fixture_create(t, text_command("[char]0x2e3b + 'x'"))
+	f, ok := fixture_create(t, text_command("[char]0x2e3b + 'x'"), "Consolas", .Installed)
 	defer fixture_destroy(&f)
 	if !ok || !await_text(t, f.session, "x") { return }
 	render_frame(t, &f, {family = f.family})
