@@ -293,28 +293,8 @@ markdown_tick :: proc(app: ^App) {
 	if changed {mark_all_dirty(app)}
 }
 
-@(private, require_results)
-markdown_new_tab :: proc(
-	app: ^App,
-	w: ^Window,
-	workspace: ^Workspace,
-	content: layout.Content,
-	focus: bool,
-) -> bool {
-	tab, reserved := tab_record_reserve(workspace)
-	if !reserved {return false}
-	if layout.init(&tab.tree, content) != nil {
-		tab_record_free(tab)
-		return false
-	}
-	tab_record_commit(app, workspace, tab)
-	if focus && w != nil {tab_select(app, w, len(workspace.tabs) - 1)}
-	return true
-}
-
-// Shows a verified file beside `node`: the pane already showing it, a new split, or a new tab when
-// the pane is too small to split; with `floating`, a floating pane above the tab instead of a split.
-// `w` is the window showing the workspace, or nil.
+// Shows a verified file beside `node`: the pane already showing it, or else a new split toward `direction`,
+// or a float with `floating`. `w` is the window showing the workspace, or nil.
 @(require_results)
 markdown_open_at :: proc(
 	app: ^App,
@@ -341,30 +321,28 @@ markdown_open_at :: proc(
 	}
 	pane := markdown_pane_create(app, path, true)
 	if pane == nil {return false}
+	placement: Pane_Placement = floating ? .Float : .Split_Right
 	content := layout.Content{.Markdown, pane.id}
-	// A linked window holds one pane's slot, and only linkable content belongs there.
-	opened := false
-	if w != nil && window_linked(w) {
-		opened = markdown_new_tab(app, nil, workspace, content, false)
-	} else if floating {
-		opened = floating_attach(app, w, workspace, tab_index, content, focus)
-	} else {
-		// A floating pane does not split, so the file opens beside the tiled pane below it.
-		anchor := node
-		tree := &workspace.tabs[tab_index].tree
-		if layout.is_floating(tree, anchor) {anchor = layout.focus_tiled(tree)}
-		failure := pane_split_insert(
-			app, w, workspace, tab_index, anchor, direction, ratio, focus, content, false,
-		)
-		#partial switch failure {
-		case .None:
-			opened = true
-		case .Minimum:
-			opened = markdown_new_tab(app, w, workspace, content, focus)
-		}
-	}
-	if opened {layout_state_touch(app)}
-	return opened
+	return pane_place(app, w, workspace, tab_index, node, content, placement, focus, ratio, direction)
+}
+
+// Opens a verified file at the placement chosen on a link in the pane at `node` of w, even when a pane
+// already shows it.
+@(require_results)
+markdown_open_placed :: proc(
+	app: ^App,
+	w: ^Window,
+	node: layout.Node_Id,
+	path: string,
+	placement: Pane_Placement,
+) -> bool {
+	acting, beside, found := pane_placement_window(app, w, node, placement)
+	if !found {return false}
+	pane := markdown_pane_create(app, path, true)
+	if pane == nil {return false}
+	content := layout.Content{.Markdown, pane.id}
+	tab := acting.workspace.selected
+	return pane_place(app, acting, acting.workspace, tab, beside, content, placement, true)
 }
 
 // Shows a file the focused pane asked for. The caller has verified the path.
@@ -629,6 +607,26 @@ markdown_link_open :: proc(app: ^App, w: ^Window, pane: ^Markdown_Pane, link: in
 	target_open(app, w, target_from_href(markdown_document(pane).links[link], pane.path, buffer[:]))
 }
 
+// Ctrl+ or Shift+right-click on a link shows the link menu a terminal link shows. False when the point is on
+// no link.
+@(private = "file", require_results)
+markdown_link_menu :: proc(
+	app: ^App,
+	w: ^Window,
+	pane: ^Markdown_Pane,
+	shown: layout.Pane_Rect,
+	x, y: f32,
+) -> bool {
+	document := markdown_document(pane)
+	if document == nil {return false}
+	link := ui.markdown_link_at(&pane.view, markdown_geometry_of(w, shown), x, y)
+	if link < 0 {return false}
+	buffer: [links.TARGET_BYTES]u8 = ---
+	target := target_from_href(document.links[link], pane.path, buffer[:])
+	document_menu_open_target(app, w, shown.content, target, x, y)
+	return true
+}
+
 // Pointer surface
 
 markdown_claims :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {
@@ -707,7 +705,12 @@ markdown_press :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) {
 	pane, shown := markdown_under_pointer(app, w, x, y)
 	if shown.content.kind != .Markdown {return}
 	pane_focus(app, w, shown.node)
-	if pane == nil || e.button != .Left {return}
+	if pane == nil {return}
+	if e.button == .Right && (.Control in e.modifiers || .Shift in e.modifiers) {
+		if markdown_link_menu(app, w, pane, shown, x, y) {gesture_swallow(w, .Right, .Markdown_Page)}
+		return
+	}
+	if e.button != .Left {return}
 	document := markdown_document(pane)
 	if document == nil {return}
 	w.dirty = true

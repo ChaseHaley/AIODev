@@ -307,7 +307,7 @@ links_menu_opens_a_markdown_link_in_a_linked_window :: proc(t: ^testing.T) {
 		if menu.entries[i].action == .Open {ui.menu_select(&menu.menu, i)}
 	}
 	app.handle_event(f.state, input.Key_Event{window = f.host.id, key = .Enter, modifiers = {.Control}, pressed = true})
-	for _ in 0 ..< int(app.Document_Row_Action.Linked_Window) {press_key(&f, f.host, .Arrow_Down)}
+	for _ in 0 ..< int(app.Link_Action.Linked_Window) {press_key(&f, f.host, .Arrow_Down)}
 	press_key(&f, f.host, .Enter)
 	testing.expect(t, !app.document_menu_shown(f.host))
 	tab := app.selected_tab(f.host.workspace)

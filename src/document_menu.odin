@@ -1,6 +1,5 @@
 package main
 
-import "aio:commands"
 import "aio:input"
 import "aio:layout"
 import "aio:links"
@@ -47,14 +46,15 @@ Document_Popout :: struct {
 }
 
 // Row `row`'s right-click menu: what else it can do beyond its click. Its rows are Document_Menu.actions,
-// each with a Document_Row_Action as its payload.
+// each with a Link_Action as its payload.
 Document_Actions :: struct {
 	row: int,
 }
 
-// A pinned document's actions. Opening in a split, float, tab or linked window, or with the default app, is
-// for a Markdown file, the one kind AIODev shows itself; moving names the level it moves to.
-Document_Row_Action :: enum u8 {
+// What a link can do (D-085). Open through Open_Folder are offered the same way by the right-click menu of a
+// terminal or Markdown link and of a pinned link: link_actions lists which a link offers. Moving and removing
+// are a pinned link's own.
+Link_Action :: enum u8 {
 	Open,
 	Split_Right,
 	Split_Down,
@@ -75,7 +75,8 @@ Document_Menu_Pin :: struct {
 	document: Document,
 }
 
-// Ctrl+right-click on a terminal link: open it, or choose a level for it. The menu owns document.target.
+// Ctrl+ or Shift+right-click on a terminal or Markdown link: open it here or elsewhere, copy it, or choose a
+// level for it. The menu owns document.target.
 Document_Menu_Link :: struct {
 	document: Document,
 }
@@ -89,13 +90,15 @@ Document_Menu_Action :: enum {
 	Url_Field,
 	Search_Field,
 	Pin,
-	Open_Link,
+	// A row of the link menu running `link`.
+	Link,
 	Focus_Window,
 }
 
 Document_Menu_Entry :: struct {
 	action: Document_Menu_Action,
 	level:  Document_Level,
+	link:   Link_Action,
 	target: string,
 	folder: bool,
 	// The window a Focus_Window row brings forward.
@@ -117,7 +120,7 @@ Document_Menu :: struct {
 }
 
 @(private = "file", rodata)
-DOCUMENT_ROW_ACTIONS := [Document_Row_Action]struct {
+LINK_ACTIONS := [Link_Action]struct {
 	label: string,
 	glyph: ui.Icon,
 } {
@@ -127,13 +130,76 @@ DOCUMENT_ROW_ACTIONS := [Document_Row_Action]struct {
 	.Float          = {"Open in Float", .Float_Pane},
 	.Tab            = {"Open in New Tab", .Layout_Top},
 	.Linked_Window  = {"Open in Linked Window", .Window_Out},
-	.Open_External  = {"Open with Default App", .None},
+	.Open_External  = {"Open with Default App", .Document},
 	.Copy           = {"Copy Path", .Copy},
 	.Open_Folder    = {"Open Containing Folder", .Folder},
 	.Move_Pane      = {"Move to This Pane", .Split_Right},
 	.Move_Tab       = {"Move to This Tab", .Layout_Top},
 	.Move_Workspace = {"Move to This Workspace", .Workspace},
 	.Remove         = {"Remove", .Close},
+}
+
+// The shared actions `document` offers, in menu order, with nil for a divider. A Markdown file opens in a
+// pane and a folder in a new shell there, so both have the places; only a Markdown file also has the
+// system's handler, which is what Open already does for any other file.
+@(private = "file")
+link_actions :: proc(document: Document) -> []Maybe(Link_Action) {
+	rows := make([dynamic]Maybe(Link_Action), 0, len(Link_Action), context.temp_allocator)
+	web := document_is_web(document.target)
+	file := !web && !document.folder
+	markdown := file && markdown_is_path(document.target)
+	append(&rows, Link_Action.Open)
+	if markdown || document.folder {
+		for action in Link_Action.Split_Right ..= Link_Action.Linked_Window {append(&rows, action)}
+	}
+	if markdown {append(&rows, Link_Action.Open_External)}
+	append(&rows, nil, Link_Action.Copy)
+	if file {append(&rows, Link_Action.Open_Folder)}
+	return rows[:]
+}
+
+// A link action's row: Open shows the link's own icon, and copying a web address copies a link.
+@(private = "file")
+link_action_item :: proc(action: Link_Action, document: Document) -> ui.Menu_Item {
+	row := LINK_ACTIONS[action]
+	item := ui.Menu_Item{label = row.label, glyph = row.glyph, enabled = true}
+	if action == .Open {item.glyph = document_icon(document)}
+	if action == .Copy && document_is_web(document.target) {item.label = "Copy Link"}
+	return item
+}
+
+// Runs one of the shared actions on `document`, a link shown in or pinned to the pane showing `content` in
+// w. The menu has closed, so `document` must not borrow from it.
+@(private = "file")
+link_action_run :: proc(
+	app: ^App,
+	w: ^Window,
+	content: layout.Content,
+	document: Document,
+	action: Link_Action,
+) {
+	switch action {
+	case .Open:
+		target_open(app, w, target_from_document(document.target))
+	case .Split_Right:
+		document_link_open_in(app, w, content, document, .Split_Right)
+	case .Split_Down:
+		document_link_open_in(app, w, content, document, .Split_Down)
+	case .Float:
+		document_link_open_in(app, w, content, document, .Float)
+	case .Tab:
+		document_link_open_in(app, w, content, document, .Tab)
+	case .Linked_Window:
+		document_link_open_in(app, w, content, document, .Linked_Window)
+	case .Open_External:
+		document_link_open_external(app, w, document.target)
+	case .Copy:
+		_ = clipboard_copy(app, document.target)
+	case .Open_Folder:
+		target_open(app, w, File_Target{filepath.dir(document.target)})
+	case .Move_Pane, .Move_Tab, .Move_Workspace, .Remove:
+		log.errorf("%v is not a shared link action", action)
+	}
 }
 
 @(private = "file")
@@ -436,6 +502,80 @@ document_menu_build_levels :: proc(
 	}
 }
 
+// A link's rows: the shared actions, then pinning it.
+@(private = "file")
+document_menu_build_link :: proc(
+	app: ^App,
+	menu: ^Document_Menu,
+	content: layout.Content,
+	document: Document,
+) {
+	for row in link_actions(document) {
+		action, is_action := row.?
+		if !is_action {
+			document_menu_push(menu, {separator = true})
+			continue
+		}
+		document_menu_push(menu, link_action_item(action, document), {action = .Link, link = action})
+	}
+	document_menu_push(menu, {separator = true})
+	document_menu_build_levels(app, menu, content, DOCUMENT_PIN_LABELS)
+}
+
+// Places a link's Markdown file, or a new shell in its folder, beside the pane showing `content` or, once
+// that pane has gone, the focused one. The shell takes that pane's profile; a pane with no shell, such as
+// a Markdown pane, gives the default profile.
+@(private = "file")
+document_link_open_in :: proc(
+	app: ^App,
+	w: ^Window,
+	content: layout.Content,
+	document: Document,
+	placement: Pane_Placement,
+) {
+	tree := window_tree(w)
+	if tree == nil {return}
+	node := layout.find_content(tree, content)
+	if node == layout.INVALID_NODE {node = tree.focus}
+	if document.folder {
+		if !os.is_dir(document.target) {
+			target_unavailable(app)
+			return
+		}
+		launch := Pane_Launch{directory = document.target}
+		if entry := workspace_session_for_content(app, content); entry != nil {launch.profile = entry.profile_id}
+		if !shell_open_placed(app, w, node, launch, placement) {notify(app, .Error, "Could not open a shell.")}
+		return
+	}
+	file, ok := localpath.prepare_open(document.target)
+	if !ok {
+		target_unavailable(app)
+		return
+	}
+	defer localpath.open_file_destroy(&file)
+	if !markdown_open_placed(app, w, node, file.target, placement) {
+		notify(app, .Error, "Could not open the file.")
+	}
+}
+
+// Hands a Markdown file to the system instead of a pane. A type that needs confirming takes the usual
+// confirmation.
+@(private = "file")
+document_link_open_external :: proc(app: ^App, w: ^Window, path: string) {
+	file, ok := localpath.prepare_open(path)
+	if !ok {
+		target_unavailable(app)
+		return
+	}
+	if file.confirm {
+		localpath.open_file_destroy(&file)
+		target_open(app, w, File_Target{path})
+		return
+	}
+	defer localpath.open_file_destroy(&file)
+	if !target_open_approved(app, file.path, "") {notify(app, .Error, "Could not open the file.")}
+}
+
 // Rebuilds the rows for the current mode, keeping the selection near where it was. It leaves the mode as
 // it is: a popout names a row, so the transitions that rebuild leave the popout first.
 @(private = "file")
@@ -457,9 +597,7 @@ document_menu_build :: proc(app: ^App, w: ^Window, select_first := false) {
 		document_menu_push(menu, {label = document_menu_own(menu, label)})
 		document_menu_build_levels(app, menu, state.content, DOCUMENT_LEVEL_LABELS)
 	case Document_Menu_Link:
-		document_menu_push(menu, {label = "Open", enabled = true}, {action = .Open_Link})
-		document_menu_push(menu, {separator = true})
-		document_menu_build_levels(app, menu, state.content, DOCUMENT_PIN_LABELS)
+		document_menu_build_link(app, menu, state.content, mode.document)
 	}
 	if select_first {
 		ui.menu_select_edge(&menu.menu, false)
@@ -517,28 +655,36 @@ document_menu_open_focused :: proc(app: ^App, w: ^Window) {
 	}
 }
 
-// Ctrl+right-click on a terminal link. False leaves the press to the terminal.
+// Ctrl+ or Shift+right-click on a terminal link. False leaves the press to the terminal.
 @(require_results)
 document_menu_open_link :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {
 	buffer: [links.TARGET_BYTES]u8 = ---
+	target := link_resolve(app, w, x, y, buffer[:])
+	if target == nil {return false}
+	pane, found := layout.hit_test(w.panes[:], x, y)
+	if !found {return false}
+	document_menu_open_target(app, w, pane.content, target, x, y)
+	return true
+}
+
+// The link menu at the point for `target`, a link shown in the pane showing `content`; a file that is not
+// there is reported instead.
+document_menu_open_target :: proc(app: ^App, w: ^Window, content: layout.Content, target: Target, x, y: f32) {
 	spelling, folder := "", false
-	switch t in link_resolve(app, w, x, y, buffer[:]) {
+	switch t in target {
 	case nil:
-		return false
+		return
 	case Missing_Target:
 		target_unavailable(app)
-		return true
+		return
 	case Web_Target:
 		spelling = t.uri
 	case File_Target:
 		spelling, folder = t.path, os.is_dir(t.path)
 	}
-	pane, found := layout.hit_test(w.panes[:], x, y)
-	if !found {return false}
 	owned, err := strings.clone(spelling)
-	if err != nil {return false}
-	document_menu_show(app, w, pane.content, Document_Menu_Link{{owned, folder}}, x, y)
-	return true
+	if err != nil {return}
+	document_menu_show(app, w, content, Document_Menu_Link{{owned, folder}}, x, y)
 }
 
 // Back from the file dialog, with the menu it closed, to choose a level.
@@ -630,11 +776,12 @@ document_menu_activate :: proc(app: ^App, w: ^Window, index: int) {
 		target := strings.clone(entry.target, context.temp_allocator)
 		overlay_close(app, w)
 		target_open(app, w, target_from_document(target))
-	case .Open_Link:
+	case .Link:
 		link, _ := state.mode.(Document_Menu_Link)
-		target := strings.clone(link.document.target, context.temp_allocator)
+		document := Document{strings.clone(link.document.target, context.temp_allocator), link.document.folder}
+		content := state.content
 		overlay_close(app, w)
-		target_open(app, w, target_from_document(target))
+		link_action_run(app, w, content, document, entry.link)
 	case .Focus_Window:
 		overlay_close(app, w)
 		if other := window_find(app, entry.window); other != nil {_ = window_activate(app, other)}
@@ -710,29 +857,27 @@ document_actions_open :: proc(app: ^App, w: ^Window, index: int, x, y: f32) {
 	}
 	actions := &menu.actions
 	ui.menu_clear(actions)
-	add :: proc(actions: ^ui.Menu, action: Document_Row_Action, label := "") {
-		row := DOCUMENT_ROW_ACTIONS[action]
-		text := label != "" ? label : row.label
-		item := ui.Menu_Item{label = text, glyph = row.glyph, enabled = true, payload = u32(action)}
-		if _, err := ui.menu_add(actions, item); err != nil {log.errorf("adding a link action failed: %v", err)}
+	add :: proc(actions: ^ui.Menu, item: ui.Menu_Item, action: Link_Action) {
+		row := item
+		row.payload = u32(action)
+		if _, err := ui.menu_add(actions, row); err != nil {log.errorf("adding a link action failed: %v", err)}
 	}
-	web := document_is_web(entry.target)
-	file := !entry.folder && !web
-	add(actions, .Open)
-	// Only a Markdown file opens inside AIODev, so only it has a choice of where.
-	if file && markdown_is_path(entry.target) {
-		for action in Document_Row_Action.Split_Right ..= Document_Row_Action.Open_External {add(actions, action)}
+	document := Document{entry.target, entry.folder}
+	for row in link_actions(document) {
+		if action, is_action := row.?; is_action {
+			add(actions, link_action_item(action, document), action)
+		} else {
+			_, _ = ui.menu_add(actions, {separator = true})
+		}
 	}
-	_, _ = ui.menu_add(actions, {separator = true})
-	add(actions, .Copy, web ? "Copy Link" : "")
-	if file {add(actions, .Open_Folder)}
 	_, _ = ui.menu_add(actions, {separator = true})
 	scopes, found := document_scopes(app, state.content)
 	for level in Document_Level {
 		if level == entry.level || !found || document_scope_list(scopes, level) == nil {continue}
-		add(actions, Document_Row_Action(int(Document_Row_Action.Move_Pane) + int(level)))
+		move := Link_Action(int(Link_Action.Move_Pane) + int(level))
+		add(actions, link_action_item(move, document), move)
 	}
-	add(actions, .Remove)
+	add(actions, link_action_item(.Remove, document), .Remove)
 	ui.menu_anchor(actions, x, y)
 	ui.menu_select_edge(actions, false)
 	ui.menu_select(&menu.menu, index)
@@ -752,114 +897,23 @@ document_actions_open_selected :: proc(app: ^App, w: ^Window) {
 // Runs a right-click menu row on the row it was opened for. Opening closes the menu; moving and removing
 // keep it open on the list.
 @(private = "file")
-document_actions_choose :: proc(app: ^App, w: ^Window, action: Document_Row_Action) {
+document_actions_choose :: proc(app: ^App, w: ^Window, action: Link_Action) {
 	state := document_menu_state(w)
 	actions, shown := document_menu_actions(w)
 	if state == nil || !shown {return}
 	entry, _ := document_menu_entry(&w.document_menu, actions.row)
-	target := strings.clone(entry.target, context.temp_allocator)
-	content := state.content
 	switch action {
-	case .Open:
+	case .Open, .Split_Right, .Split_Down, .Float, .Tab, .Linked_Window, .Open_External, .Copy, .Open_Folder:
+		document := Document{strings.clone(entry.target, context.temp_allocator), entry.folder}
+		content := state.content
 		overlay_close(app, w)
-		target_open(app, w, target_from_document(target))
-	case .Split_Right, .Split_Down, .Float, .Tab, .Linked_Window:
-		overlay_close(app, w)
-		document_open_placed(app, w, content, target, action)
-	case .Open_External:
-		overlay_close(app, w)
-		document_open_external(app, w, target)
-	case .Copy:
-		overlay_close(app, w)
-		_ = clipboard_copy(app, target)
-	case .Open_Folder:
-		overlay_close(app, w)
-		target_open(app, w, File_Target{filepath.dir(target)})
+		link_action_run(app, w, content, document, action)
 	case .Move_Pane, .Move_Tab, .Move_Workspace:
 		document_popout_close(app, w)
-		document_menu_move(app, w, actions.row, Document_Level(int(action) - int(Document_Row_Action.Move_Pane)))
+		document_menu_move(app, w, actions.row, Document_Level(int(action) - int(Link_Action.Move_Pane)))
 	case .Remove:
 		document_popout_close(app, w)
 		document_menu_remove(app, w, actions.row)
-	}
-}
-
-// Hands a Markdown file to the system instead of a pane. A type that needs confirming takes the usual
-// confirmation.
-@(private = "file")
-document_open_external :: proc(app: ^App, w: ^Window, path: string) {
-	file, ok := localpath.prepare_open(path)
-	if !ok {
-		target_unavailable(app)
-		return
-	}
-	if file.confirm {
-		localpath.open_file_destroy(&file)
-		target_open(app, w, File_Target{path})
-		return
-	}
-	defer localpath.open_file_destroy(&file)
-	if !target_open_approved(app, file.path, "") {notify(app, .Error, "Could not open the file.")}
-}
-
-// Opens a Markdown file in a new pane beside the pane showing `content` in w. A split joins w, linked or
-// not; a float, tab or linked window belongs to the window showing the tab, beside its focused pane.
-@(private = "file")
-document_open_placed :: proc(
-	app: ^App,
-	w: ^Window,
-	content: layout.Content,
-	path: string,
-	placement: Document_Row_Action,
-) {
-	file, ok := localpath.prepare_open(path)
-	if !ok {
-		target_unavailable(app)
-		return
-	}
-	defer localpath.open_file_destroy(&file)
-	acting := w
-	if placement != .Split_Right && placement != .Split_Down {acting = pane_link_acting_window(app, w)}
-	tree := window_tree(acting)
-	if tree == nil || window_linked(acting) {
-		notify(app, .Error, "Could not open the file.")
-		return
-	}
-	beside := acting == w ? layout.find_content(tree, content) : tree.focus
-	if beside == layout.INVALID_NODE {beside = tree.focus}
-	pane := markdown_pane_create(app, file.target, true)
-	if pane == nil {
-		notify(app, .Error, "Could not open the file.")
-		return
-	}
-	added := layout.Content{.Markdown, pane.id}
-	workspace, tab_index := acting.workspace, acting.workspace.selected
-	ratio := commands.SPLIT_DEFAULT.ratio
-	failure := Pane_Split_Error.None
-	#partial switch placement {
-	case .Split_Right, .Split_Down:
-		direction: layout.Direction = placement == .Split_Right ? .Right : .Down
-		failure = pane_split_insert(app, acting, workspace, tab_index, beside, direction, ratio, true, added, true)
-	case .Float:
-		if !floating_attach(app, acting, workspace, tab_index, added, true) {failure = .Layout}
-	case .Tab:
-		if !markdown_new_tab(app, acting, workspace, added, true) {failure = .Layout}
-	case .Linked_Window:
-		// The new pane leaves for its own window at once, so it needs no room here; it splits a tiled pane.
-		if layout.is_floating(tree, beside) {beside = layout.focus_tiled(tree)}
-		failure = pane_split_insert(app, nil, workspace, tab_index, beside, .Right, ratio, false, added, false)
-		// A refused link leaves the file showing in the split, which the refusal's notice explains.
-		if failure == .None && !pane_link_open(app, acting, layout.find_content(tree, added)) {
-			window_relayout(app, acting)
-		}
-	}
-	#partial switch failure {
-	case .None:
-		layout_state_touch(app)
-	case .Minimum:
-	// The split has said why already.
-	case:
-		notify(app, .Error, "Could not open the file.")
 	}
 }
 
@@ -965,7 +1019,7 @@ document_menu_key :: proc(app: ^App, w: ^Window, raw, logical: input.Key_Event) 
 		case .Changed:
 		case .Chosen:
 			row := menu.actions.items[ui.menu_selected(&menu.actions)]
-			document_actions_choose(app, w, Document_Row_Action(row.payload))
+			document_actions_choose(app, w, Link_Action(row.payload))
 		case .Closed:
 			document_popout_close(app, w)
 		}
@@ -1151,7 +1205,7 @@ document_menu_button :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event)
 	if _, actions := document_menu_actions(w); actions {
 		hit := ui.menu_hit(&menu.actions, x, y, f32(w.width), f32(w.height), w.scale)
 		if hit >= 0 && e.button == .Left && menu.actions.items[hit].enabled {
-			document_actions_choose(app, w, Document_Row_Action(menu.actions.items[hit].payload))
+			document_actions_choose(app, w, Link_Action(menu.actions.items[hit].payload))
 		} else if hit < 0 {
 			document_popout_close(app, w)
 		}
