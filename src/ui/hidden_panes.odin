@@ -58,10 +58,12 @@ hidden_panes_glyph_draw :: proc(
 	}
 }
 
-// The map under the glyph `box`, kept inside a `width` by `height` window.
+// The map under the glyph `box`, its right edge just past the glyph's, kept inside a `width` by `height`
+// window.
 hidden_panes_map_rect :: proc(box: render.Rect, width, height, scale: f32) -> render.Rect {
 	size := HIDDEN_PANES_MAP * scale
-	x := clamp(box.x - SPACE_1 * scale, SPACE_1 * scale, max(SPACE_1 * scale, width - size.x - SPACE_1 * scale))
+	inset := SPACE_1 * scale
+	x := clamp(box.x + box.width + inset - size.x, inset, max(inset, width - size.x - inset))
 	y := box.y + box.height + SPACE_1 * scale
 	return {x, y, size.x, min(size.y, max(0, height - y - SPACE_1 * scale))}
 }

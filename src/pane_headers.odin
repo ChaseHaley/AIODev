@@ -291,7 +291,7 @@ pane_header_buttons_shown :: proc(w: ^Window, pane: layout.Pane_Rect, menu_open:
 // The surfaces that lie on a pane's card, so the pointer over one is over that pane.
 @(private = "file")
 PANE_HOVER_SURFACES :: bit_set[Pointer_Target] {
-	.Find, .Pane_Header, .Scrollbar, .Settings_Page, .Markdown_Page, .Content,
+	.Find, .Hidden_Panes, .Pane_Header, .Scrollbar, .Settings_Page, .Markdown_Page, .Content,
 }
 
 // Follows the pane under the pointer, whose header shows its buttons.

@@ -138,7 +138,10 @@ hidden_panes_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: inpu
 	mine := owner == .Hidden_Panes && on
 	on_glyph := mine && render.rect_contains(h.glyph, point.x, point.y)
 	reveal := &w.hidden_panes.reveal
-	changed := ui.hover_reveal_move(reveal, point, on_glyph, mine && !on_glyph, h.surface, clock_now(&app.clock))
+	on_map := mine && !on_glyph
+	slack := ui.HOVER_AIM_SLACK * w.scale
+	now := clock_now(&app.clock)
+	changed := ui.hover_reveal_move(reveal, point, on_glyph, on_map, h.glyph, h.surface, slack, now)
 	hovered: Maybe(int)
 	if reveal.open && mine && cell >= 0 && !h.panes[cell].shown {hovered = cell}
 	if changed || hovered != w.hidden_panes.hovered {w.hidden_panes.hovered, w.dirty = hovered, true}

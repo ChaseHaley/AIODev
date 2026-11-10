@@ -42,7 +42,9 @@ hidden_panes_glyph_shows_while_a_view_hides_panes :: proc(t: ^testing.T) {
 		g := glyph(w)
 		if !testing.expectf(t, g.width > 0 && g.height > 0, "%v shows the glyph", action) {continue}
 		header := app.pane_header_layout(w, w.panes[0])
-		testing.expectf(t, header.title.x >= g.x + g.width, "%v: the title follows the glyph", action)
+		testing.expectf(t, header.title.x + header.title.width <= g.x, "%v: the title ends before the glyph", action)
+		links := header.buttons[.Links]
+		testing.expectf(t, links.width > 0 && g.x + g.width <= links.x, "%v: the glyph sits before Links", action)
 		move(s, w, g.x + g.width / 2, g.y + g.height / 2)
 		testing.expectf(t, w.hidden_panes.reveal.open, "%v: hovering the glyph opens the map", action)
 		move(s, w, f32(w.width) / 2, f32(w.height) - 40)
@@ -75,10 +77,10 @@ hidden_panes_map_switches_the_shown_pane_and_keeps_the_view :: proc(t: ^testing.
 	move(s, w, g.x + g.width / 2, (g.y + g.height + surface.y) / 2)
 	testing.expect(t, w.hidden_panes.reveal.open, "the gap under the glyph keeps the map")
 	move(s, w, g.x + g.width / 2, g.y + g.height / 2)
-	// A tenth of the way from the glyph to the right card: past the glyph, over the header, above the map.
+	// A tenth of the way from the glyph to the far left card: past the glyph, over the header, above the map.
 	apex := [2]f32{g.x + g.width / 2, g.y + g.height / 2}
-	aim := apex + ([2]f32{surface.x + surface.width * 0.9, surface.y + surface.height / 2} - apex) * 0.1
-	testing.expect(t, aim.x > g.x + g.width && aim.y < surface.y, "the aim leaves the glyph short of the map")
+	aim := apex + ([2]f32{surface.x + surface.width * 0.1, surface.y + surface.height / 2} - apex) * 0.1
+	testing.expect(t, aim.x < g.x && aim.y < surface.y, "the aim leaves the glyph short of the map")
 	move(s, w, aim.x, aim.y)
 	testing.expect(t, w.hidden_panes.reveal.open && w.hidden_panes.reveal.aiming, "heading for the map keeps it")
 
@@ -97,6 +99,6 @@ hidden_panes_map_switches_the_shown_pane_and_keeps_the_view :: proc(t: ^testing.
 	g = glyph(w)
 	move(s, w, g.x + g.width / 2, g.y + g.height / 2)
 	testing.expect(t, w.hidden_panes.reveal.open)
-	move(s, w, g.x + g.width + 60, g.y + g.height / 2 - 6)
-	testing.expect(t, !w.hidden_panes.reveal.open, "turning away along the header closes the map")
+	move(s, w, g.x - 60, g.y - 30)
+	testing.expect(t, !w.hidden_panes.reveal.open, "turning up and away from the map closes it")
 }
