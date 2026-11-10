@@ -477,6 +477,7 @@ when AIO_CONTROL {
 		if w != nil {
 			verify_panes_report(&r, app, w)
 			floating_state_report(&r, w)
+			hidden_panes_state_report(&r, app, w)
 			drag_state_report(&r, w)
 		}
 		if entry != nil {verify_session_report(&r, app, w, entry)}

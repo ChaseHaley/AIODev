@@ -68,11 +68,11 @@ try {
     Invoke-Aio key Space
     Invoke-Aio expect state "settings.choice_query=$proportional"
     if ([int](Read-State)['settings.choice_matches'] -lt 1) {throw 'Toggle did not refilter the current search'}
-    Invoke-Aio key Tab Ctrl+A Backspace End
+    Invoke-Aio key Tab Ctrl+A Backspace Ctrl+End
     Shot all-fonts-end
     Invoke-Aio key Esc
     if ((Read-State)['terminal.font_family'] -ne $shell) {throw 'Cancel changed shell font'}
-    Write-Output "PASS Show All Fonts expands to $allCount families; End scrolls; Escape cancels"
+    Write-Output "PASS Show All Fonts expands to $allCount families; Ctrl+End scrolls; Escape cancels"
     Open-Field interface.font_family
     # The default interface family (Segoe UI Variable) is not bundled, so headless the picker also keeps
     # the current value as a choice, as it does for any family that is not installed.

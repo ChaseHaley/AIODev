@@ -23,6 +23,9 @@ Pointer_Target :: enum u8 {
 	Palette,
 	Tab_Orientation,
 	Title_Action,
+	// The hidden panes glyph in the header of a pane a view shows alone, and its map while open, which
+	// hangs over the panes, the find bar and floats.
+	Hidden_Panes,
 	// The find bar floats over panes, headers and the Activity panel.
 	Find,
 	Workspace_Button,
@@ -151,6 +154,10 @@ pointer_surfaces := [Pointer_Target]Pointer_Surface {
 		claims = title_action_claims, hover = title_action_pointer_hover, press = title_action_press,
 		release = title_action_release, tooltip = title_action_tooltip, cancel = title_action_cancel,
 		leave = title_action_leave, holds = true,
+	},
+	.Hidden_Panes     = {
+		claims = hidden_panes_claims, hover = hidden_panes_hover, press = hidden_panes_press,
+		cancel = hidden_panes_leave, leave = hidden_panes_leave, holds = true, blurs_find = true,
 	},
 	.Find             = {
 		claims = find_claims, hover = find_pointer_hover, press = find_press, release = find_release,

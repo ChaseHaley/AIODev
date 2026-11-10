@@ -12,6 +12,9 @@ Header_Layout :: struct($E: typeid) {
 	// Where the badge takes hover and clicks: a little past its glyph and over the chevron its hover shows,
 	// never outside the panel.
 	badge_target:        render.Rect,
+	// The owner's own control just before the buttons, which it draws and hit tests; empty when the owner
+	// asks for none or the header is too narrow for it.
+	widget:              render.Rect,
 	buttons:             [E]render.Rect,
 	// Hairlines set each separated button apart from the buttons after it; empty where none follows.
 	dividers:            [E]render.Rect,
@@ -59,12 +62,14 @@ header_buttons_width :: proc(shown, separated: bit_set[$E], button, gap: f32) ->
 
 // A header row across the top of `area`: the badge and title at the start and the `shown` buttons at the
 // end, each `separated` button set apart from those after it. Buttons never cover the badge or the start
-// of the title, which focus and drag the pane, so in a narrow header they give way in `drop_order`.
+// of the title, which focus and drag the pane, so in a narrow header they give way in `drop_order`. A
+// `widget` of that size in DIPs sits just before the first button; it is the first to give way.
 header_layout :: proc(
 	area: render.Rect,
 	scale: f32,
 	shown, separated: bit_set[$E],
 	drop_order: []E,
+	widget: [2]f32 = {},
 ) -> Header_Layout(E) {
 	l := Header_Layout(E) {
 		panel = {area.x, area.y, area.width, min(area.height, HEADER_HEIGHT * scale)},
@@ -103,6 +108,15 @@ header_layout :: proc(
 		end -= button
 	}
 	title_x := l.badge.x + l.badge.width + SPACE_2 * scale
+	if widget.x > 0 {
+		size := widget * scale
+		widget_x := end - SPACE_1 * scale - size.x
+		if widget_x - SPACE_2 * scale - title_x >= HEADER_TITLE_MINIMUM * scale {
+			y := area.y + max(0, (l.panel.height - size.y) / 2)
+			l.widget = {widget_x, y, size.x, min(size.y, l.panel.height)}
+			end = widget_x
+		}
+	}
 	l.title = {title_x, area.y, max(0, end - SPACE_2 * scale - title_x), l.panel.height}
 	return l
 }

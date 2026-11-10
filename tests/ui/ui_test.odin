@@ -60,12 +60,40 @@ palette_filters_navigates_and_runs :: proc(t: ^testing.T) {
 	testing.expect_value(t, p.selected, 1)
 	outcome, _ = ui.palette_key(&p, &registry, key({key = .Backspace}))
 	testing.expect_value(t, ui.palette_query(&p), "r")
-	ui.palette_key(&p, &registry, key({key = .Home}))
+	ui.palette_key(&p, &registry, key({key = .Home, modifiers = {.Control}}))
 	expected := p.results[0].command.id
 	ran, id := ui.palette_key(&p, &registry, key({key = .Enter}))
 	testing.expect_value(t, ran, ui.Outcome.Run)
 	testing.expect_value(t, id, expected)
 	testing.expect(t, !ui.presence_is_open(p.presence))
+}
+
+// Home and End belong to the query's caret, as in every text field; Ctrl+Home and Ctrl+End jump the
+// list to either end.
+@(test)
+palette_home_and_end_move_the_caret_and_ctrl_jumps_the_list :: proc(t: ^testing.T) {
+	registry := registry_create(t)
+	defer commands.destroy(&registry)
+	p: ui.Palette
+	testing.expect_value(t, ui.palette_init(&p, nil), nil)
+	defer ui.palette_destroy(&p)
+	ui.palette_open(&p, &registry)
+	ui.palette_text(&p, &registry, "r")
+	if !testing.expect(t, len(p.results) > 1) {return}
+	ui.palette_key(&p, &registry, key({key = .Home}))
+	testing.expect_value(t, p.query.cursor, 0)
+	testing.expect_value(t, p.selected, 0)
+	ui.palette_key(&p, &registry, key({key = .End, modifiers = {.Shift}}))
+	testing.expect_value(t, ui.field_selected_text(&p.query), "r")
+	ui.palette_key(&p, &registry, key({key = .End}))
+	testing.expect_value(t, p.query.cursor, 1)
+	testing.expect_value(t, p.selected, 0)
+	ui.palette_key(&p, &registry, key({key = .End, modifiers = {.Control}}))
+	testing.expect_value(t, p.selected, len(p.results) - 1)
+	testing.expect_value(t, p.query.cursor, 1)
+	ui.palette_key(&p, &registry, key({key = .Home, modifiers = {.Control}}))
+	testing.expect_value(t, p.selected, 0)
+	testing.expect_value(t, ui.palette_query(&p), "r")
 }
 
 @(test)
@@ -313,7 +341,7 @@ palette_matches_settings_groups_and_navigates_with_control_keys :: proc(t: ^test
 	testing.expect_value(t, p.selected, 1)
 	ui.palette_key(&p, &registry, key({key = .P, modifiers = {.Control}}))
 	testing.expect_value(t, p.selected, 0)
-	ui.palette_key(&p, &registry, key({key = .End}))
+	ui.palette_key(&p, &registry, key({key = .End, modifiers = {.Control}}))
 	testing.expect_value(t, ui.palette_query(&p), "panes")
 	outcome, _ := ui.palette_key(&p, &registry, key({key = .Enter}))
 	testing.expect_value(t, outcome, ui.Outcome.Open_Setting)
@@ -322,7 +350,7 @@ palette_matches_settings_groups_and_navigates_with_control_keys :: proc(t: ^test
 
 	ui.palette_open(&p, &registry)
 	ui.palette_text(&p, &registry, "panes")
-	ui.palette_key(&p, &registry, key({key = .End}))
+	ui.palette_key(&p, &registry, key({key = .End, modifiers = {.Control}}))
 	ui.palette_key(&p, &registry, key({key = .P, modifiers = {.Control}}))
 	outcome, _ = ui.palette_key(&p, &registry, key({key = .Enter}))
 	testing.expect_value(t, outcome, ui.Outcome.Run)

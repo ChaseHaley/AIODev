@@ -243,7 +243,7 @@ Cursor_Settings :: struct {
 	animation_duration: int,
 	// Percent strength of the smear or trail.
 	animation_strength: int,
-	// Glide the cursor to its new cell; off moves it at once.
+	// Glide the cursor to its new place; off moves it at once.
 	animation_movement: bool,
 	animation_across_panes: bool,
 }
@@ -1197,9 +1197,10 @@ SCHEMA :: [?]Schema_Entry {
 		default_value = "off",
 		names = CURSOR_ANIMATION_NAMES,
 		labels = CURSOR_ANIMATION_LABELS,
-		description = "Cursor animation preset: off, smooth, smear, or trail. Off draws the cursor in place " +
-			"and turns every other cursor animation setting off. Smooth glides the cursor without a trail; " +
-			"smear stretches it toward its new cell; trail leaves a fading trail behind it.",
+		description = "Cursor animation preset for the terminal cursor and the caret of every text field: " +
+			"off, smooth, smear, or trail. Off draws the cursor in place and turns every other cursor " +
+			"animation setting off. Smooth glides the cursor without a trail; smear stretches it toward " +
+			"its new place; trail leaves a fading trail behind it.",
 	},
 	{
 		key = "cursor.animation_duration",
@@ -1226,7 +1227,7 @@ SCHEMA :: [?]Schema_Entry {
 		kind = .Bool,
 		offset = offset_of(Settings, cursor) + offset_of(Cursor_Settings, animation_movement),
 		default_value = "true",
-		description = "Glide the cursor to its new cell. Off moves it there at once, while smear and trail " +
+		description = "Glide the cursor to its new place. Off moves it there at once, while smear and trail " +
 			"still draw at their own strength.",
 	},
 	{

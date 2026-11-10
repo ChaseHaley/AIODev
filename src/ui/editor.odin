@@ -1771,7 +1771,9 @@ activate :: proc(p: ^Editor, row: ^Editor_Row) -> Editor_Outcome {
 @(private)
 popup_key :: proc(p: ^Editor, row: ^Editor_Row, e: input.Key_Event) -> (Editor_Outcome, bool) {
 	popup := editor_popup(p)
-	if choice, open := p.mode.(Editor_Choice_Popup); open && choice_searchable(row) {
+	choice, open := p.mode.(Editor_Choice_Popup)
+	searchable := open && choice_searchable(row)
+	if searchable {
 		if row.font_filter && e.key == .Tab {
 			choice.toggle_focus = !choice.toggle_focus
 			editor_mode_set(p, choice)
@@ -1784,23 +1786,25 @@ popup_key :: proc(p: ^Editor, row: ^Editor_Row, e: input.Key_Event) -> (Editor_O
 			choice.toggle_focus = false
 			editor_mode_set(p, choice)
 		}
-		#partial switch e.key {
-		case .Backspace, .Delete, .Arrow_Left, .Arrow_Right, .A, .Space:
-			if field_key(&p.choice_search, e) == .Edited {choice_filter(p, row)}
-			return .Changed, true
-		}
-		if e.text != "" && e.text[0] >= ' ' && e.text[0] != 0x7f {
-			if field_key(&p.choice_search, e) == .Edited {choice_filter(p, row)}
-			return .Changed, true
-		}
 	}
 	if popup == .Choice {
 		count := editor_choice_count(p, row)
 		visible := choice_popup_rows(p, row, p.fit_layout)
 		if choice_list_key(&p.choice_list, e, count, visible) {return .Changed, true}
-		if e.key == .Home || e.key == .End {
+		// Without a search field the list has no caret to give Home and End to.
+		if !searchable && (e.key == .Home || e.key == .End) {
 			choice_list_move(&p.choice_list, e.key == .Home ? -count : count, count, visible)
 			return .Changed, true
+		}
+	}
+	if searchable {
+		// Every key the list did not take, but Escape and Enter, edits the search as in any field.
+		#partial switch e.key {
+		case .Escape, .Enter, .Numpad_Enter:
+		case:
+			change := field_key(&p.choice_search, e)
+			if change == .Edited {choice_filter(p, row)}
+			return change == .None ? .None : .Changed, true
 		}
 	}
 	#partial switch e.key {

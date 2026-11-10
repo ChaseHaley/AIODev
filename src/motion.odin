@@ -20,6 +20,7 @@ Window_Motion :: enum u8 {
 	Float_Header,
 	Find,
 	Cursor,
+	Field_Carets,
 	Confirmation,
 }
 
@@ -50,6 +51,10 @@ window_motion_advance :: proc(app: ^App, w: ^Window, part: Window_Motion, frame:
 		return ui.find_is_open(&w.find) && ui.find_animate(&w.find, app.animations, frame)
 	case .Cursor:
 		return cursor_motion_animate(app, w, frame)
+	case .Field_Carets:
+		// Carets move as their fields draw; a window that cannot draw lets them land.
+		if _, failed := w.surface.(Surface_Failed); failed || !window_drawable(w) {w.carets.moving = false}
+		return w.carets.moving
 	case .Confirmation:
 		confirmation_advance(app, w, frame)
 	}
@@ -81,6 +86,8 @@ window_motion_running :: proc(w: ^Window, part: Window_Motion) -> bool {
 		return ui.find_is_open(&w.find) && ui.find_animating(&w.find)
 	case .Cursor:
 		return cursor_motion_animating(w)
+	case .Field_Carets:
+		return w.carets.moving
 	case .Confirmation:
 		return confirmation_active(w)
 	}

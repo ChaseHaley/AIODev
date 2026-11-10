@@ -479,3 +479,42 @@ blink_hidden_cursor_animates_in_cached_panes_and_across_focus :: proc(t: ^testin
 	if !cursor_restore_frame(t, s, w) {return}
 	testing.expect(t, !app.cursor_visible(w) && !app.cursor_motion_animating(w))
 }
+
+// Text fields follow the terminal's cursor animation: the palette's caret glides as the query
+// grows, and the window keeps drawing until it lands.
+@(test)
+palette_caret_animates_with_the_cursor_setting :: proc(t: ^testing.T) {
+	f: Palette_Fixture
+	defer palette_fixture_destroy(t, &f)
+	if !palette_fixture_create(t, &f, "field-caret", second_window = false) {return}
+	s := &f.state
+	w := s.windows[0]
+	app.handle_event(s, platform.Focus_Event{w.id, true})
+	// The palette appears at once, so only its caret moves.
+	s.animations = false
+	app.palette_open(s, w)
+	app.update_motion(s)
+	s.animations = true
+	s.settings.cursor.animation = .Smooth
+	s.settings.cursor.animation_duration = 100
+	s.settings.cursor.animation_movement = true
+	start := render.frame_time_at(time.tick_add({}, time.Second))
+	w.frame = start
+	if !testing.expect(t, app.window_build_frame(s, w)) {return}
+	testing.expect(t, !w.carets.moving)
+	app.handle_event(s, input.Text_Event{w.id, "split"})
+	w.frame = render.frame_time_at(time.tick_add(start.display, 20 * time.Millisecond))
+	if !testing.expect(t, app.window_build_frame(s, w)) {return}
+	testing.expect(t, w.carets.moving && app.window_animating(s, w), "a moving caret keeps the window drawing")
+	last := render.frame_time_at(time.tick_add(start.display, 150 * time.Millisecond))
+	app.window_motion_update(s, w, last)
+	w.frame = last
+	if !testing.expect(t, app.window_build_frame(s, w)) {return}
+	testing.expect(t, !w.carets.moving && !app.window_animating(s, w))
+
+	// Off draws the caret where it is.
+	s.settings.cursor.animation = .Off
+	app.handle_event(s, input.Text_Event{w.id, " right"})
+	if !testing.expect(t, app.window_build_frame(s, w)) {return}
+	testing.expect(t, !w.carets.moving)
+}

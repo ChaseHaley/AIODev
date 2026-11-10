@@ -98,14 +98,14 @@ try {
         if ($Size -eq '46x20' -and $Dpi -in @(144, 192)) {
             Assert-Equal ([int](Read-State)['palette.rows']) 8 "$query keeps eight rows in the repro viewport"
         }
-        Invoke-Aio key End
-        Assert-Equal ([int](Read-State)['palette.selected']) ($count-1) "$query End reaches final result"
-        Assert-Fit "$query End"
+        Invoke-Aio key Ctrl+End
+        Assert-Equal ([int](Read-State)['palette.selected']) ($count-1) "$query Ctrl+End reaches final result"
+        Assert-Fit "$query Ctrl+End"
         Shot "end-$query"
         Invoke-Aio key Up Down
         Assert-Equal ([int](Read-State)['palette.selected']) ($count-1) "$query arrows retain final visibility"
         Assert-Fit "$query arrows at final result"
-        Invoke-Aio key Home PageDown
+        Invoke-Aio key Ctrl+Home PageDown
         Assert-Equal (Read-State)['palette.selected'] (Read-State)['palette.rows'] "$query PageDown uses visible capacity"
         Assert-Fit "$query PageDown"
         Invoke-Aio key PageUp
@@ -139,9 +139,9 @@ try {
     Invoke-Aio command tab.select_1
     Invoke-Aio expect state settings.active=false
     Search 'setting'
-    Invoke-Aio key End Ctrl+A
+    Invoke-Aio key Ctrl+End Ctrl+A
     $last = [int](Read-State)['palette.items']-1
-    Assert-Equal ([int](Read-State)['palette.selected']) $last 'End selects final result before resize'
+    Assert-Equal ([int](Read-State)['palette.selected']) $last 'Ctrl+End selects final result before resize'
     Invoke-Aio resize 46x12
     Assert-Equal ([int](Read-State)['palette.selected']) $last 'shrink retains final result index'
     Assert-Fit 'resize retains final selection'
@@ -159,7 +159,7 @@ try {
     Invoke-Aio expect state palette.items=3
     Invoke-Aio expect state palette.selected=0
     Assert-Fit 'replacement query resets scroll'
-    Invoke-Aio key End Enter
+    Invoke-Aio key Ctrl+End Enter
     Invoke-Aio expect state settings.key=terminal.minimum_contrast
     Invoke-Aio expect state settings.editing=true
     Search 'terminal settings contrast'
