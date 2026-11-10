@@ -4,15 +4,17 @@ import "aio:input"
 import "aio:layout"
 import "aio:render"
 import "aio:ui"
+import "core:time"
 
 // While Zoom, Fill window or Fullscreen shows one tiled pane of a tab that has others, that pane's header
 // carries a glyph of the tab's tiled layout. Hovering the glyph shows a map of every tiled pane, named with
 // its program status; clicking one shows it in the same view (D-087). The glyph only answers "here are your
-// other panes": it looks the same in every view and does not leave it.
+// other panes": it looks the same in every view and does not leave it. The map stays while the pointer
+// heads from the glyph to it (ui.Hover_Reveal).
 
-// Whether the map shows, and the map cell under the pointer.
+// The map's reveal from the glyph, and the map cell under the pointer.
 Hidden_Panes_State :: struct {
-	open:    bool,
+	reveal:  ui.Hover_Reveal,
 	hovered: Maybe(int),
 }
 
@@ -71,12 +73,12 @@ hidden_panes_of :: proc(app: ^App, w: ^Window) -> (h: Hidden_Panes, ok: bool) {
 hidden_panes_glyph_draw :: proc(app: ^App, w: ^Window, box: render.Rect) {
 	h, ok := hidden_panes_of(app, w)
 	if !ok {return}
-	ui.hidden_panes_glyph_draw(&w.list, app.theme, box, h.panes, w.hidden_panes.open, w.scale)
+	ui.hidden_panes_glyph_draw(&w.list, app.theme, box, h.panes, w.hidden_panes.reveal.open, w.scale)
 }
 
 // Draws the map above the panes while it shows.
 hidden_panes_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
-	if !w.hidden_panes.open {return .Ok}
+	if !w.hidden_panes.reveal.open {return .Ok}
 	h, ok := hidden_panes_of(app, w)
 	if !ok {return .Ok}
 	hovered := w.hidden_panes.hovered.? or_else -1
@@ -85,19 +87,14 @@ hidden_panes_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 	)
 }
 
-// Whether the point is on the glyph, or on the open map or the gap above it, and the map cell under it,
-// or -1.
+// Whether the point is on the glyph, or on the open map, and the map cell under it, or -1.
 @(private = "file")
 hidden_panes_hit :: proc(app: ^App, w: ^Window, x, y: f32) -> (h: Hidden_Panes, cell: int, on: bool) {
 	cell = -1
 	ok: bool
 	if h, ok = hidden_panes_of(app, w); !ok {return}
 	if render.rect_contains(h.glyph, x, y) {return h, cell, true}
-	if !w.hidden_panes.open {return}
-	below := h.glyph.y + h.glyph.height
-	gap := render.Rect{h.glyph.x, below, h.glyph.width, h.surface.y - below}
-	if render.rect_contains(gap, x, y) {return h, cell, true}
-	if !render.rect_contains(h.surface, x, y) {return}
+	if !w.hidden_panes.reveal.open || !render.rect_contains(h.surface, x, y) {return}
 	for r, i in h.cells {
 		if render.rect_contains(r, x, y) {cell = i; break}
 	}
@@ -105,14 +102,23 @@ hidden_panes_hit :: proc(app: ^App, w: ^Window, x, y: f32) -> (h: Hidden_Panes, 
 }
 
 @(private = "file")
-hidden_panes_set :: proc(w: ^Window, open: bool, hovered: Maybe(int)) {
-	next := Hidden_Panes_State{open, open ? hovered : nil}
-	if next == w.hidden_panes {return}
-	w.hidden_panes, w.dirty = next, true
+hidden_panes_close :: proc(w: ^Window) {
+	if !w.hidden_panes.reveal.open && w.hidden_panes.hovered == nil {return}
+	ui.hover_reveal_close(&w.hidden_panes.reveal)
+	w.hidden_panes.hovered, w.dirty = nil, true
 }
 
-// Hidden panes pointer surface: the glyph opens the map while the pointer is on either, and a pane on the
-// map shows on press.
+// An aim at the map that stopped short of it hides the map.
+hidden_panes_tick :: proc(w: ^Window, now: time.Tick) {
+	if ui.hover_reveal_tick(&w.hidden_panes.reveal, now) {w.hidden_panes.hovered, w.dirty = nil, true}
+}
+
+hidden_panes_deadline :: proc(w: ^Window) -> (time.Tick, bool) {
+	return ui.hover_reveal_deadline(w.hidden_panes.reveal)
+}
+
+// Hidden panes pointer surface: the glyph opens the map, which stays while the pointer is on it or heading
+// to it, and a pane on the map shows on press.
 
 @(private)
 hidden_panes_claims :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {
@@ -120,16 +126,23 @@ hidden_panes_claims :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {
 	return on
 }
 
+// Every move reaches the reveal, whichever surface owns it, so an aim crossing a pane can keep the map.
 @(private)
 hidden_panes_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: input.Mouse_Move_Event) {
-	if owner != .Hidden_Panes {
-		hidden_panes_set(w, false, nil)
+	point := [2]f32{f32(e.x), f32(e.y)}
+	h, cell, on := hidden_panes_hit(app, w, point.x, point.y)
+	if h.glyph.width <= 0 {
+		hidden_panes_close(w)
 		return
 	}
-	h, cell, on := hidden_panes_hit(app, w, f32(e.x), f32(e.y))
-	choosable := cell >= 0 && !h.panes[cell].shown
-	hidden_panes_set(w, on, choosable ? cell : nil)
-	pointer_set(app, w, choosable ? .Hand : .Arrow)
+	mine := owner == .Hidden_Panes && on
+	on_glyph := mine && render.rect_contains(h.glyph, point.x, point.y)
+	reveal := &w.hidden_panes.reveal
+	changed := ui.hover_reveal_move(reveal, point, on_glyph, mine && !on_glyph, h.surface, clock_now(&app.clock))
+	hovered: Maybe(int)
+	if reveal.open && mine && cell >= 0 && !h.panes[cell].shown {hovered = cell}
+	if changed || hovered != w.hidden_panes.hovered {w.hidden_panes.hovered, w.dirty = hovered, true}
+	if owner == .Hidden_Panes {pointer_set(app, w, hovered != nil ? .Hand : .Arrow)}
 }
 
 // The map takes both halves of a click; a press on another pane shows it in the same view.
@@ -139,20 +152,21 @@ hidden_panes_press :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) {
 	if e.button != .Left {return}
 	h, cell, _ := hidden_panes_hit(app, w, f32(e.x), f32(e.y))
 	if cell < 0 || h.panes[cell].shown {return}
-	hidden_panes_set(w, false, nil)
+	hidden_panes_close(w)
 	pane_focus(app, w, h.nodes[cell])
 }
 
 @(private)
 hidden_panes_leave :: proc(_: ^App, w: ^Window) {
-	hidden_panes_set(w, false, nil)
+	hidden_panes_close(w)
 }
 
 when AIO_CONTROL {
 	hidden_panes_state_report :: proc(r: ^State_Report, app: ^App, w: ^Window) {
 		h, ok := hidden_panes_of(app, w)
 		state_rect(r, "panes.hidden_glyph", ok ? h.glyph : {})
-		state_rect(r, "panes.hidden_map", ok && w.hidden_panes.open ? h.surface : {})
+		state_rect(r, "panes.hidden_map", ok && w.hidden_panes.reveal.open ? h.surface : {})
 		state_value(r, "panes.hidden_map_hover", w.hidden_panes.hovered.? or_else -1)
+		state_value(r, "panes.hidden_map_aiming", w.hidden_panes.reveal.aiming)
 	}
 }

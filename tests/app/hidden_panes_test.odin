@@ -44,15 +44,16 @@ hidden_panes_glyph_shows_while_a_view_hides_panes :: proc(t: ^testing.T) {
 		header := app.pane_header_layout(w, w.panes[0])
 		testing.expectf(t, header.title.x >= g.x + g.width, "%v: the title follows the glyph", action)
 		move(s, w, g.x + g.width / 2, g.y + g.height / 2)
-		testing.expectf(t, w.hidden_panes.open, "%v: hovering the glyph opens the map", action)
+		testing.expectf(t, w.hidden_panes.reveal.open, "%v: hovering the glyph opens the map", action)
 		move(s, w, f32(w.width) / 2, f32(w.height) - 40)
 		app.run_action(s, w, action)
 		testing.expectf(t, glyph(w) == {}, "leaving %v drops the glyph", action)
 	}
 }
 
-// Hovering the glyph opens the map, which stays open across the gap and over its cells; a press on another
-// pane shows that pane in the same view, and leaving both closes the map.
+// Hovering the glyph opens the map, which stays open across the gap, while the pointer heads diagonally for
+// a far card over the header, and over its cells; a press on another pane shows that pane in the same view.
+// Turning away from the map closes it.
 @(test)
 hidden_panes_map_switches_the_shown_pane_and_keeps_the_view :: proc(t: ^testing.T) {
 	f: Palette_Fixture
@@ -69,10 +70,17 @@ hidden_panes_map_switches_the_shown_pane_and_keeps_the_view :: proc(t: ^testing.
 	if !testing.expect(t, g.width > 0) {return}
 
 	move(s, w, g.x + g.width / 2, g.y + g.height / 2)
-	testing.expect(t, w.hidden_panes.open, "hovering the glyph opens the map")
+	testing.expect(t, w.hidden_panes.reveal.open, "hovering the glyph opens the map")
 	surface := ui.hidden_panes_map_rect(g, f32(w.width), f32(w.height), w.scale)
 	move(s, w, g.x + g.width / 2, (g.y + g.height + surface.y) / 2)
-	testing.expect(t, w.hidden_panes.open, "the gap under the glyph keeps the map")
+	testing.expect(t, w.hidden_panes.reveal.open, "the gap under the glyph keeps the map")
+	move(s, w, g.x + g.width / 2, g.y + g.height / 2)
+	// A tenth of the way from the glyph to the right card: past the glyph, over the header, above the map.
+	apex := [2]f32{g.x + g.width / 2, g.y + g.height / 2}
+	aim := apex + ([2]f32{surface.x + surface.width * 0.9, surface.y + surface.height / 2} - apex) * 0.1
+	testing.expect(t, aim.x > g.x + g.width && aim.y < surface.y, "the aim leaves the glyph short of the map")
+	move(s, w, aim.x, aim.y)
+	testing.expect(t, w.hidden_panes.reveal.open && w.hidden_panes.reveal.aiming, "heading for the map keeps it")
 
 	// The right pane fills the right half of the map, inside its padding.
 	x, y := surface.x + surface.width * 0.75, surface.y + surface.height / 2
@@ -84,11 +92,11 @@ hidden_panes_map_switches_the_shown_pane_and_keeps_the_view :: proc(t: ^testing.
 	testing.expect_value(t, app.pane_view_current(w), layout.Pane_View.Zoom)
 	if !testing.expect_value(t, len(app.window_tiled_rects(w)), 1) {return}
 	testing.expect_value(t, app.window_tiled_rects(w)[0].content, right.content)
-	testing.expect(t, !w.hidden_panes.open, "choosing a pane closes the map")
+	testing.expect(t, !w.hidden_panes.reveal.open, "choosing a pane closes the map")
 
 	g = glyph(w)
 	move(s, w, g.x + g.width / 2, g.y + g.height / 2)
-	testing.expect(t, w.hidden_panes.open)
-	move(s, w, f32(w.width) / 2, f32(w.height) - 40)
-	testing.expect(t, !w.hidden_panes.open, "leaving the glyph and map closes it")
+	testing.expect(t, w.hidden_panes.reveal.open)
+	move(s, w, g.x + g.width + 60, g.y + g.height / 2 - 6)
+	testing.expect(t, !w.hidden_panes.reveal.open, "turning away along the header closes the map")
 }
