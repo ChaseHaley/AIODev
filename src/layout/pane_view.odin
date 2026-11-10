@@ -26,11 +26,13 @@ Pane_View_Event :: enum u8 {
 	Toggle_Screen,
 	// The tab gained a pane, or lost its focused one: its panes must be seen, so every view ends.
 	Panes_Changed,
+	// The window shows another tab, chosen, closed into or brought by a workspace switch: every view ends.
+	Tab_Changed,
 }
 
 // The only definition of how views change. The enumerated arrays make it a compile error to leave a
-// state or an event without an answer. Switching tabs, workspaces or focused panes is not an event:
-// the view stays, and shows whatever pane is now focused.
+// state or an event without an answer. Switching focused panes is not an event: the view stays, and
+// shows whatever pane is now focused.
 @(rodata)
 PANE_VIEW_TRANSITIONS := [Pane_View][Pane_View_Event]Pane_View {
 	.Split = {
@@ -38,36 +40,42 @@ PANE_VIEW_TRANSITIONS := [Pane_View][Pane_View_Event]Pane_View {
 		.Toggle_Fill = .Fill,
 		.Toggle_Screen = .Screen,
 		.Panes_Changed = .Split,
+		.Tab_Changed = .Split,
 	},
 	.Zoom = {
 		.Toggle_Zoom = .Split,
 		.Toggle_Fill = .Fill_Over_Zoom,
 		.Toggle_Screen = .Screen_Over_Zoom,
 		.Panes_Changed = .Split,
+		.Tab_Changed = .Split,
 	},
 	.Fill = {
 		.Toggle_Zoom = .Zoom,
 		.Toggle_Fill = .Split,
 		.Toggle_Screen = .Screen,
 		.Panes_Changed = .Split,
+		.Tab_Changed = .Split,
 	},
 	.Fill_Over_Zoom = {
 		.Toggle_Zoom = .Zoom,
 		.Toggle_Fill = .Split,
 		.Toggle_Screen = .Screen_Over_Zoom,
 		.Panes_Changed = .Split,
+		.Tab_Changed = .Split,
 	},
 	.Screen = {
 		.Toggle_Zoom = .Zoom,
 		.Toggle_Fill = .Fill,
 		.Toggle_Screen = .Split,
 		.Panes_Changed = .Split,
+		.Tab_Changed = .Split,
 	},
 	.Screen_Over_Zoom = {
 		.Toggle_Zoom = .Zoom,
 		.Toggle_Fill = .Fill_Over_Zoom,
 		.Toggle_Screen = .Split,
 		.Panes_Changed = .Split,
+		.Tab_Changed = .Split,
 	},
 }
 

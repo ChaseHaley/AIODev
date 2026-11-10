@@ -139,7 +139,7 @@ Action :: enum u32 {
 	App_Commands,
 	Reopen_Closed,
 	Linked_Window,
-	Show_Documents,
+	Show_Links,
 	New_Floating,
 	Float_Pane,
 	Minimize_Floating,
@@ -553,7 +553,7 @@ ACTIONS :: [Action]Command_Descriptor {
 		"pane.reopen_closed", "Reopen Closed Pane or Tab", {{.R, {.Control, .Shift}}}, .Host, {},
 	},
 	.Linked_Window = {"pane.linked_window", "Toggle Pane in Linked Window", nil, .Local, {}},
-	.Show_Documents = {"pane.documents", "Show Documents", nil, .Local, {}},
+	.Show_Links = {"pane.links", "Show Links", nil, .Local, {}},
 	.New_Floating = {
 		"pane.new_floating", "New Shell Float", {{.Backquote, {.Control, .Shift}}}, .Host,
 		{accepted = {.Focus, .Directory, .Name, .Profile, .Program, .Command_File}, control = .Pane},
@@ -957,7 +957,7 @@ command_execute :: proc(app: ^App, ctx: Command_Context, invocation: commands.In
 		floating_toggle(app, w)
 	case .Minimize_All_Floating:
 		floating_minimize_all_toggle(app, w)
-	case .Show_Documents:
+	case .Show_Links:
 		document_menu_open_focused(app, w)
 	case .Show_Build_Info:
 		show_build_info(app)

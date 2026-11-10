@@ -14,7 +14,7 @@ Content_Policy :: struct {
 	one_per_workspace: bool,
 	// May have a linked window.
 	linkable:          bool,
-	// Has a Documents button and its own pinned documents.
+	// Has a Links button and its own pinned links.
 	documents:         bool,
 	// The badge a tab, float capsule or pane header shows for the content; terminals show their shell's
 	// instead.
@@ -103,10 +103,10 @@ content_documents :: proc(app: ^App, content: layout.Content) -> ^Document_List 
 	return nil
 }
 
-// Why a kind offers no documents, or empty for one that does.
+// Why a kind offers no links, or empty for one that does.
 @(require_results)
 content_documents_notice :: proc(kind: layout.Content_Kind) -> string {
 	policy := CONTENT_POLICY[kind]
 	if policy.documents {return ""}
-	return fmt.tprintf("%s has no documents of its own.", policy.display_name)
+	return fmt.tprintf("%s has no links of its own.", policy.display_name)
 }

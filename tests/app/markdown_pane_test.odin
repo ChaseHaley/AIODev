@@ -577,7 +577,7 @@ a_markdown_link_offers_the_link_menu_and_opens_its_file_in_a_linked_window :: pr
 	menu := &w.document_menu
 	row := -1
 	for i in 0 ..< menu.count {
-		if menu.entries[i].action == .Open_In && menu.entries[i].placement == .Linked_Window {row = i}
+		if menu.entries[i].action == .Link && menu.entries[i].link == .Linked_Window {row = i}
 	}
 	if !testing.expect(t, row >= 0) {return}
 	rect := ui.menu_row_rect(&menu.menu, row, f32(w.width), f32(w.height), w.scale)

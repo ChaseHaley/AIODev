@@ -13,7 +13,8 @@ import "core:os"
 import "core:path/filepath"
 import "core:strings"
 
-// What the document menu shows; it is held by Overlay_Document_Menu while the menu shows.
+// What the Links menu shows; it is held by Overlay_Document_Menu while the menu shows. The list is a search
+// field, the other windows showing part of this tab, then pinned documents: files, folders and web addresses.
 Document_Menu_Mode :: union #no_nil {
 	Document_Menu_List,
 	Document_Menu_Pin,
@@ -25,10 +26,11 @@ Document_Menu_List :: struct {
 	step: Document_Menu_Step,
 }
 
-// A step taken inside the list; nil is browsing it. Either one closes before the other opens.
+// A step taken inside the list; nil is browsing it. Only one is open at a time.
 Document_Menu_Step :: union {
 	Document_Url_Entry,
 	Document_Popout,
+	Document_Actions,
 }
 
 // An address field in place of the Add URL row.
@@ -41,6 +43,31 @@ Document_Url_Entry :: struct {
 Document_Popout :: struct {
 	row:  int,
 	pick: Document_Level,
+}
+
+// Row `row`'s right-click menu: what else it can do beyond its click. Its rows are Document_Menu.actions,
+// each with a Link_Action as its payload.
+Document_Actions :: struct {
+	row: int,
+}
+
+// What a link can do (D-085). Open through Open_Folder are offered the same way by the right-click menu of a
+// terminal or Markdown link and of a pinned link: link_actions lists which a link offers. Moving and removing
+// are a pinned link's own.
+Link_Action :: enum u8 {
+	Open,
+	Split_Right,
+	Split_Down,
+	Float,
+	Tab,
+	Linked_Window,
+	Open_External,
+	Copy,
+	Open_Folder,
+	Move_Pane,
+	Move_Tab,
+	Move_Workspace,
+	Remove,
 }
 
 // Choosing the level for the document just added. The menu owns document.target.
@@ -61,20 +88,21 @@ Document_Menu_Action :: enum {
 	Add_Folder,
 	Add_Url,
 	Url_Field,
+	Search_Field,
 	Pin,
-	Open_Link,
-	Open_In,
-	Open_External,
-	Open_Folder,
-	Copy_Target,
+	// A row of the link menu running `link`.
+	Link,
+	Focus_Window,
 }
 
 Document_Menu_Entry :: struct {
-	action:    Document_Menu_Action,
-	level:     Document_Level,
-	placement: Pane_Placement,
-	target:    string,
-	folder:    bool,
+	action: Document_Menu_Action,
+	level:  Document_Level,
+	link:   Link_Action,
+	target: string,
+	folder: bool,
+	// The window a Focus_Window row brings forward.
+	window: input.Window_Id,
 }
 
 // Rows hold their own copies of what they show, so a pane closing behind an open menu leaves nothing
@@ -86,7 +114,96 @@ Document_Menu :: struct {
 	count:       int,
 	text:        [dynamic]string,
 	url:         ui.Text_Field,
+	// What the list is filtered by. It has the keyboard while the list shows and no address is typed.
+	search:      ui.Text_Field,
+	actions:     ui.Menu,
 }
+
+@(private = "file", rodata)
+LINK_ACTIONS := [Link_Action]struct {
+	label: string,
+	glyph: ui.Icon,
+} {
+	.Open           = {"Open", .None},
+	.Split_Right    = {"Open in Right Split", .Split_Right},
+	.Split_Down     = {"Open in Down Split", .Split_Down},
+	.Float          = {"Open in Float", .Float_Pane},
+	.Tab            = {"Open in New Tab", .Layout_Top},
+	.Linked_Window  = {"Open in Linked Window", .Window_Out},
+	.Open_External  = {"Open with Default App", .Document},
+	.Copy           = {"Copy Path", .Copy},
+	.Open_Folder    = {"Open Containing Folder", .Folder},
+	.Move_Pane      = {"Move to This Pane", .Split_Right},
+	.Move_Tab       = {"Move to This Tab", .Layout_Top},
+	.Move_Workspace = {"Move to This Workspace", .Workspace},
+	.Remove         = {"Remove", .Close},
+}
+
+// The shared actions `document` offers, in menu order, with nil for a divider. A Markdown file opens in a
+// pane and a folder in a new shell there, so both have the places; only a Markdown file also has the
+// system's handler, which is what Open already does for any other file.
+@(private = "file")
+link_actions :: proc(document: Document) -> []Maybe(Link_Action) {
+	rows := make([dynamic]Maybe(Link_Action), 0, len(Link_Action), context.temp_allocator)
+	web := document_is_web(document.target)
+	file := !web && !document.folder
+	markdown := file && markdown_is_path(document.target)
+	append(&rows, Link_Action.Open)
+	if markdown || document.folder {
+		for action in Link_Action.Split_Right ..= Link_Action.Linked_Window {append(&rows, action)}
+	}
+	if markdown {append(&rows, Link_Action.Open_External)}
+	append(&rows, nil, Link_Action.Copy)
+	if file {append(&rows, Link_Action.Open_Folder)}
+	return rows[:]
+}
+
+// A link action's row: Open shows the link's own icon, and copying a web address copies a link.
+@(private = "file")
+link_action_item :: proc(action: Link_Action, document: Document) -> ui.Menu_Item {
+	row := LINK_ACTIONS[action]
+	item := ui.Menu_Item{label = row.label, glyph = row.glyph, enabled = true}
+	if action == .Open {item.glyph = document_icon(document)}
+	if action == .Copy && document_is_web(document.target) {item.label = "Copy Link"}
+	return item
+}
+
+// Runs one of the shared actions on `document`, a link shown in or pinned to the pane showing `content` in
+// w. The menu has closed, so `document` must not borrow from it.
+@(private = "file")
+link_action_run :: proc(
+	app: ^App,
+	w: ^Window,
+	content: layout.Content,
+	document: Document,
+	action: Link_Action,
+) {
+	switch action {
+	case .Open:
+		target_open(app, w, target_from_document(document.target))
+	case .Split_Right:
+		document_link_open_in(app, w, content, document, .Split_Right)
+	case .Split_Down:
+		document_link_open_in(app, w, content, document, .Split_Down)
+	case .Float:
+		document_link_open_in(app, w, content, document, .Float)
+	case .Tab:
+		document_link_open_in(app, w, content, document, .Tab)
+	case .Linked_Window:
+		document_link_open_in(app, w, content, document, .Linked_Window)
+	case .Open_External:
+		document_link_open_external(app, w, document.target)
+	case .Copy:
+		_ = clipboard_copy(app, document.target)
+	case .Open_Folder:
+		target_open(app, w, File_Target{filepath.dir(document.target)})
+	case .Move_Pane, .Move_Tab, .Move_Workspace, .Remove:
+		log.errorf("%v is not a shared link action", action)
+	}
+}
+
+@(private = "file")
+DOCUMENT_ACTIONS_WIDTH :: f32(224)
 
 @(private = "file", rodata)
 DOCUMENT_LEVEL_LABELS := [Document_Level]string {
@@ -124,6 +241,8 @@ document_level_icon :: proc(level: Document_Level) -> ui.Icon {
 
 document_menu_init :: proc(menu: ^Document_Menu) {
 	ui.menu_init(&menu.menu)
+	ui.menu_init(&menu.actions)
+	menu.actions.width = DOCUMENT_ACTIONS_WIDTH
 }
 
 @(private = "file")
@@ -143,10 +262,11 @@ document_menu_mode_release :: proc(mode: Document_Menu_Mode) {
 	}
 }
 
-// The menu's surface ends: the document its mode holds, the URL being typed and the hover go with it.
+// The menu's surface ends: the document its mode holds, the text being typed and the hover go with it.
 document_menu_close :: proc(menu: ^Document_Menu, mode: Document_Menu_Mode) {
 	document_menu_mode_release(mode)
 	ui.field_release(&menu.url)
+	ui.field_release(&menu.search)
 	menu.menu.hover_part = .Row
 }
 
@@ -157,7 +277,9 @@ document_menu_destroy :: proc(w: ^Window) {
 	document_menu_text_clear(menu)
 	delete(menu.text)
 	delete(menu.url.bytes)
+	delete(menu.search.bytes)
 	ui.menu_destroy(&menu.menu)
+	ui.menu_destroy(&menu.actions)
 }
 
 document_menu_shown :: proc(w: ^Window) -> bool {
@@ -197,6 +319,26 @@ document_menu_popout :: proc(w: ^Window) -> (Document_Popout, bool) {
 document_menu_url_entry :: proc(w: ^Window) -> (Document_Url_Entry, bool) {
 	entry, shown := document_list_step(w).(Document_Url_Entry)
 	return entry, shown
+}
+
+document_menu_actions :: proc(w: ^Window) -> (Document_Actions, bool) {
+	actions, shown := document_list_step(w).(Document_Actions)
+	return actions, shown
+}
+
+// Whether every word of `query` is in one of `texts`, ignoring case.
+@(private = "file")
+document_menu_matches :: proc(query: string, texts: ..string) -> bool {
+	words := query
+	for word in strings.fields_iterator(&words) {
+		needle := strings.to_lower(word, context.temp_allocator)
+		found := false
+		for text in texts {
+			if strings.contains(strings.to_lower(text, context.temp_allocator), needle) {found = true; break}
+		}
+		if !found {return false}
+	}
+	return true
 }
 
 // How the rows follow a mode change.
@@ -256,19 +398,60 @@ document_menu_entry :: proc(menu: ^Document_Menu, row: int) -> (Document_Menu_En
 	return menu.entries[key], true
 }
 
+// The other windows showing part of w's tab that match `query`: the window showing the tab first, then its
+// linked windows. A row brings its window forward.
+@(private = "file")
+document_menu_build_windows :: proc(app: ^App, menu: ^Document_Menu, w: ^Window, query: string) {
+	tab, host := selected_tab(w.workspace), w
+	if window_linked(w) {
+		home, found := pane_link_locate(app, w)
+		if !found {return}
+		tab, host = home.tab, nil
+		if selected_tab(home.workspace) == home.tab {host = window_for_workspace(app, home.workspace)}
+	}
+	if tab == nil {return}
+	add :: proc(menu: ^Document_Menu, other: ^Window, glyph: ui.Icon, detail, query: string) {
+		shown := selected_tab(other.workspace)
+		title := shown != nil && shown.title != "" ? shown.title : "Untitled"
+		if !document_menu_matches(query, title, detail) {return}
+		document_menu_push(
+			menu,
+			{label = document_menu_own(menu, title), detail = detail, glyph = glyph, enabled = true},
+			{action = .Focus_Window, window = other.id},
+		)
+	}
+	if host != nil && host != w {add(menu, host, .Window_In, "Main window", query)}
+	for other in app.windows {
+		if other == w || !window_linked(other) || other.phase != .Shown {continue}
+		if home, found := pane_link_locate(app, other); found && home.tab == tab {
+			add(menu, other, .Window_Out, "Linked window", query)
+		}
+	}
+}
+
 @(private = "file")
 document_menu_build_list :: proc(
 	app: ^App,
+	w: ^Window,
 	menu: ^Document_Menu,
 	content: layout.Content,
 	list: Document_Menu_List,
 ) {
 	scopes, found := document_scopes(app, content)
 	if !found {return}
-	rows := documents_visible(scopes)
-	for row, i in rows {
-		if i > 0 && rows[i - 1].level != row.level {document_menu_push(menu, {separator = true})}
+	document_menu_push(menu, {}, {action = .Search_Field})
+	query := ui.field_string(&menu.search)
+	document_menu_build_windows(app, menu, w, query)
+	windows := menu.count - 1
+	pinned := documents_visible(scopes)
+	shown := 0
+	for row in pinned {
 		name, detail := document_label(row.document, context.temp_allocator)
+		if !document_menu_matches(query, name, row.document.target) {continue}
+		if shown == 0 && windows > 0 || shown > 0 && menu.entries[menu.count - 1].level != row.level {
+			document_menu_push(menu, {separator = true})
+		}
+		shown += 1
 		target := document_menu_own(menu, row.document.target)
 		document_menu_push(
 			menu,
@@ -283,7 +466,8 @@ document_menu_build_list :: proc(
 			{action = .Open, level = row.level, target = target, folder = row.document.folder},
 		)
 	}
-	if len(rows) > 0 {document_menu_push(menu, {separator = true})}
+	if query != "" && windows + shown == 0 {document_menu_push(menu, {label = "No links match"})}
+	document_menu_push(menu, {separator = true})
 	add :: proc(menu: ^Document_Menu, label: string, glyph: ui.Icon, action: Document_Menu_Action) {
 		document_menu_push(menu, {label = label, glyph = glyph, enabled = true}, {action = action})
 	}
@@ -297,7 +481,7 @@ document_menu_build_list :: proc(
 	} else {
 		add(menu, "Add URL…", .Globe, .Add_Url)
 	}
-	if len(rows) == 0 {document_menu_push(menu, {label = "Or Ctrl+right-click a link"})}
+	if len(pinned) == 0 {document_menu_push(menu, {label = "Or Ctrl+right-click a link"})}
 }
 
 @(private = "file")
@@ -318,20 +502,7 @@ document_menu_build_levels :: proc(
 	}
 }
 
-@(private = "file", rodata)
-DOCUMENT_PLACEMENT_ROWS := [Pane_Placement]struct {
-	label: string,
-	glyph: ui.Icon,
-} {
-	.Split_Right   = {"Open in Right Split", .Split_Right},
-	.Split_Down    = {"Open in Down Split", .Split_Down},
-	.Float         = {"Open in Float", .Float_Pane},
-	.Tab           = {"Open in New Tab", .Layout_Top},
-	.Linked_Window = {"Open in Linked Window", .Window_Out},
-}
-
-// A link's rows: open it; place a Markdown file, or a new shell in a folder, beside the pane; hand a
-// Markdown file to the system's handler; copy it; show a file's folder; or pin it.
+// A link's rows: the shared actions, then pinning it.
 @(private = "file")
 document_menu_build_link :: proc(
 	app: ^App,
@@ -339,22 +510,14 @@ document_menu_build_link :: proc(
 	content: layout.Content,
 	document: Document,
 ) {
-	add :: proc(menu: ^Document_Menu, label: string, glyph: ui.Icon, entry: Document_Menu_Entry) {
-		document_menu_push(menu, {label = label, glyph = glyph, enabled = true}, entry)
-	}
-	web := document_is_web(document.target)
-	file := !web && !document.folder
-	markdown := file && markdown_is_path(document.target)
-	add(menu, "Open", document_icon(document), {action = .Open_Link})
-	if markdown || document.folder {
-		for row, placement in DOCUMENT_PLACEMENT_ROWS {
-			add(menu, row.label, row.glyph, {action = .Open_In, placement = placement})
+	for row in link_actions(document) {
+		action, is_action := row.?
+		if !is_action {
+			document_menu_push(menu, {separator = true})
+			continue
 		}
+		document_menu_push(menu, link_action_item(action, document), {action = .Link, link = action})
 	}
-	if markdown {add(menu, "Open with Default App", .Document, {action = .Open_External})}
-	document_menu_push(menu, {separator = true})
-	add(menu, web ? "Copy Link" : "Copy Path", .Copy, {action = .Copy_Target})
-	if file {add(menu, "Open Containing Folder", .Folder, {action = .Open_Folder})}
 	document_menu_push(menu, {separator = true})
 	document_menu_build_levels(app, menu, content, DOCUMENT_PIN_LABELS)
 }
@@ -427,7 +590,7 @@ document_menu_build :: proc(app: ^App, w: ^Window, select_first := false) {
 	menu.entries = {}
 	switch mode in state.mode {
 	case Document_Menu_List:
-		document_menu_build_list(app, menu, state.content, mode)
+		document_menu_build_list(app, w, menu, state.content, mode)
 	case Document_Menu_Pin:
 		name, _ := document_label(mode.document, context.temp_allocator)
 		label := fmt.tprintf("Pin %s to", name)
@@ -465,6 +628,7 @@ document_menu_show :: proc(
 	x, y: f32,
 ) {
 	overlay_open(app, w, Overlay_Document_Menu{content, mode})
+	ui.field_set(&w.document_menu.search, "")
 	ui.menu_anchor(&w.document_menu.menu, x, y)
 	document_menu_build(app, w, true)
 }
@@ -475,7 +639,7 @@ document_menu_open_pane :: proc(app: ^App, w: ^Window, pane: layout.Pane_Rect) {
 	document_menu_show(app, w, pane.content, Document_Menu_List{}, anchor.x, anchor.y)
 }
 
-// The Show Documents command: the only way to the menu for a split pane with headers off.
+// The Show Links command: the only way to the menu for a split pane with headers off.
 document_menu_open_focused :: proc(app: ^App, w: ^Window) {
 	tree := window_tree(w)
 	if tree == nil {return}
@@ -580,10 +744,10 @@ document_menu_pin :: proc(app: ^App, w: ^Window, level: Document_Level, document
 	case .Pinned:
 		documents_changed(app)
 	case .Level_Full:
-		message := fmt.tprintf("%s already has %d documents.", DOCUMENT_LEVEL_LABELS[level], DOCUMENT_LEVEL_LIMIT)
+		message := fmt.tprintf("%s already has %d links.", DOCUMENT_LEVEL_LABELS[level], DOCUMENT_LEVEL_LIMIT)
 		notify(app, .Warning, message)
 	case .Failed:
-		notify(app, .Error, "Could not pin the document.")
+		notify(app, .Error, "Could not pin the link.")
 	}
 }
 
@@ -607,36 +771,20 @@ document_menu_activate :: proc(app: ^App, w: ^Window, index: int) {
 	entry, listed := document_menu_entry(menu, index)
 	if !listed {return}
 	switch entry.action {
-	case .None, .Url_Field:
+	case .None, .Url_Field, .Search_Field:
 	case .Open:
 		target := strings.clone(entry.target, context.temp_allocator)
 		overlay_close(app, w)
 		target_open(app, w, target_from_document(target))
-	case .Open_Link:
-		link, _ := state.mode.(Document_Menu_Link)
-		target := strings.clone(link.document.target, context.temp_allocator)
-		overlay_close(app, w)
-		target_open(app, w, target_from_document(target))
-	case .Open_In:
+	case .Link:
 		link, _ := state.mode.(Document_Menu_Link)
 		document := Document{strings.clone(link.document.target, context.temp_allocator), link.document.folder}
 		content := state.content
 		overlay_close(app, w)
-		document_link_open_in(app, w, content, document, entry.placement)
-	case .Open_External:
-		link, _ := state.mode.(Document_Menu_Link)
-		path := strings.clone(link.document.target, context.temp_allocator)
+		link_action_run(app, w, content, document, entry.link)
+	case .Focus_Window:
 		overlay_close(app, w)
-		document_link_open_external(app, w, path)
-	case .Open_Folder:
-		link, _ := state.mode.(Document_Menu_Link)
-		folder := strings.clone(filepath.dir(link.document.target), context.temp_allocator)
-		overlay_close(app, w)
-		target_open(app, w, File_Target{folder})
-	case .Copy_Target:
-		link, _ := state.mode.(Document_Menu_Link)
-		_ = clipboard_copy(app, link.document.target)
-		overlay_close(app, w)
+		if other := window_find(app, entry.window); other != nil {_ = window_activate(app, other)}
 	case .Add_File:
 		document_pick_start(app, w, false)
 	case .Add_Folder:
@@ -696,6 +844,79 @@ document_popout_close :: proc(app: ^App, w: ^Window) {
 	document_menu_set(app, w, Document_Menu_List{}, .Keep)
 }
 
+// Opens row `index`'s right-click menu at x, y, ending any address being typed as the popout does. Only a
+// pinned document has one; a window row has only its click.
+@(private = "file")
+document_actions_open :: proc(app: ^App, w: ^Window, index: int, x, y: f32) {
+	state := document_menu_state(w)
+	menu := &w.document_menu
+	entry, _ := document_menu_entry(menu, index)
+	if state == nil || entry.action != .Open {return}
+	if _, entering := document_menu_url_entry(w); entering {
+		document_menu_set(app, w, Document_Menu_List{}, .Rebuild)
+	}
+	actions := &menu.actions
+	ui.menu_clear(actions)
+	add :: proc(actions: ^ui.Menu, item: ui.Menu_Item, action: Link_Action) {
+		row := item
+		row.payload = u32(action)
+		if _, err := ui.menu_add(actions, row); err != nil {log.errorf("adding a link action failed: %v", err)}
+	}
+	document := Document{entry.target, entry.folder}
+	for row in link_actions(document) {
+		if action, is_action := row.?; is_action {
+			add(actions, link_action_item(action, document), action)
+		} else {
+			_, _ = ui.menu_add(actions, {separator = true})
+		}
+	}
+	_, _ = ui.menu_add(actions, {separator = true})
+	scopes, found := document_scopes(app, state.content)
+	for level in Document_Level {
+		if level == entry.level || !found || document_scope_list(scopes, level) == nil {continue}
+		move := Link_Action(int(Link_Action.Move_Pane) + int(level))
+		add(actions, link_action_item(move, document), move)
+	}
+	add(actions, link_action_item(.Remove, document), .Remove)
+	ui.menu_anchor(actions, x, y)
+	ui.menu_select_edge(actions, false)
+	ui.menu_select(&menu.menu, index)
+	document_menu_set(app, w, Document_Menu_List{Document_Actions{index}}, .Keep)
+}
+
+// The right-click menu for the selected row, hung below it, for Ctrl+Enter and the Menu key.
+@(private = "file")
+document_actions_open_selected :: proc(app: ^App, w: ^Window) {
+	menu := &w.document_menu
+	index := ui.menu_selected(&menu.menu)
+	if index < 0 {return}
+	row := ui.menu_row_rect(&menu.menu, index, f32(w.width), f32(w.height), w.scale)
+	document_actions_open(app, w, index, row.x + ui.SPACE_6 * w.scale, row.y + row.height)
+}
+
+// Runs a right-click menu row on the row it was opened for. Opening closes the menu; moving and removing
+// keep it open on the list.
+@(private = "file")
+document_actions_choose :: proc(app: ^App, w: ^Window, action: Link_Action) {
+	state := document_menu_state(w)
+	actions, shown := document_menu_actions(w)
+	if state == nil || !shown {return}
+	entry, _ := document_menu_entry(&w.document_menu, actions.row)
+	switch action {
+	case .Open, .Split_Right, .Split_Down, .Float, .Tab, .Linked_Window, .Open_External, .Copy, .Open_Folder:
+		document := Document{strings.clone(entry.target, context.temp_allocator), entry.folder}
+		content := state.content
+		overlay_close(app, w)
+		link_action_run(app, w, content, document, action)
+	case .Move_Pane, .Move_Tab, .Move_Workspace:
+		document_popout_close(app, w)
+		document_menu_move(app, w, actions.row, Document_Level(int(action) - int(Link_Action.Move_Pane)))
+	case .Remove:
+		document_popout_close(app, w)
+		document_menu_remove(app, w, actions.row)
+	}
+}
+
 @(private = "file")
 document_popout_pick :: proc(app: ^App, w: ^Window, level: Document_Level) {
 	popout, shown := document_menu_popout(w)
@@ -708,17 +929,23 @@ document_popout_pick :: proc(app: ^App, w: ^Window, level: Document_Level) {
 document_popout_choose :: proc(app: ^App, w: ^Window, level: Document_Level) {
 	popout, shown := document_menu_popout(w)
 	if !shown {return}
-	menu := &w.document_menu
-	entry, _ := document_menu_entry(menu, popout.row)
 	document_popout_close(app, w)
-	if entry.level == level {return}
+	document_menu_move(app, w, popout.row, level)
+}
+
+// Moves row `row`'s document to `level`, keeping the selection on it.
+@(private = "file")
+document_menu_move :: proc(app: ^App, w: ^Window, row: int, level: Document_Level) {
+	menu := &w.document_menu
+	entry, _ := document_menu_entry(menu, row)
+	if entry.action != .Open || entry.level == level {return}
 	// Rebuilding replaces the text the entry borrows.
 	target := strings.clone(entry.target, context.temp_allocator)
 	document_menu_pin(app, w, level, {target, entry.folder})
 	document_menu_build(app, w)
 	// The row moved with its level, so the selection follows it there.
 	for i in 0 ..< len(menu.menu.items) {
-		if row, _ := document_menu_entry(menu, i); row.action == .Open && row.target == target {
+		if moved, _ := document_menu_entry(menu, i); moved.action == .Open && moved.target == target {
 			ui.menu_select(&menu.menu, i)
 		}
 	}
@@ -754,6 +981,8 @@ document_popout_hit :: proc(w: ^Window, x, y: f32) -> (Document_Level, bool) {
 	return {}, false
 }
 
+// In the list the search field has the keyboard: Up, Down, Ctrl+N and Ctrl+P move the selection, Enter
+// runs the selected row's click, and Ctrl+Enter, the Menu key or Shift+F10 opens its right-click menu.
 document_menu_key :: proc(app: ^App, w: ^Window, raw, logical: input.Key_Event) {
 	state := document_menu_state(w)
 	if state == nil || !logical.pressed {return}
@@ -783,55 +1012,107 @@ document_menu_key :: proc(app: ^App, w: ^Window, raw, logical: input.Key_Event) 
 		}
 		w.dirty = true
 		return
+	case Document_Actions:
+		switch ui.menu_key(&menu.actions, logical) {
+		case .None:
+			if logical.key == .Arrow_Left {document_popout_close(app, w)}
+		case .Changed:
+		case .Chosen:
+			row := menu.actions.items[ui.menu_selected(&menu.actions)]
+			document_actions_choose(app, w, Link_Action(row.payload))
+		case .Closed:
+			document_popout_close(app, w)
+		}
+		w.dirty = true
+		return
 	}
+	_, listing := state.mode.(Document_Menu_List)
 	#partial switch logical.key {
-	case .Delete:
-		document_menu_remove(app, w, ui.menu_selected(&menu.menu))
+	case .Enter, .Numpad_Enter:
+		if .Control in logical.modifiers {
+			document_actions_open_selected(app, w)
+		} else {
+			document_menu_activate(app, w, ui.menu_selected(&menu.menu))
+		}
 		return
-	case .Arrow_Right:
-		document_popout_open(app, w, ui.menu_selected(&menu.menu))
+	case .Context_Menu:
+		document_actions_open_selected(app, w)
 		return
+	case .F10:
+		if logical.modifiers == {.Shift} {
+			document_actions_open_selected(app, w)
+			return
+		}
 	case .Escape:
+		// Escape clears a search before it closes the menu.
+		if listing && ui.field_string(&menu.search) != "" {
+			ui.field_set(&menu.search, "")
+			document_menu_build(app, w, true)
+			return
+		}
 		if _, pinning := state.mode.(Document_Menu_Pin); pinning {
 			document_menu_set(app, w, Document_Menu_List{}, .Rebuild_Select_First)
 			return
 		}
+		overlay_close(app, w)
+		return
+	}
+	if step := ui.list_step(logical); step != 0 {
+		ui.menu_step(&menu.menu, step)
+		ui.menu_reveal(&menu.menu, f32(w.width), f32(w.height), w.scale)
+		w.dirty = true
+		return
+	}
+	if listing {
+		if field_edit_key(app, &menu.search, raw).change != .None {document_menu_build(app, w, true)}
+		w.dirty = true
+		return
 	}
 	switch ui.menu_key(&menu.menu, logical) {
-	case .None:
+	case .None, .Closed:
 	case .Changed:
 		ui.menu_reveal(&menu.menu, f32(w.width), f32(w.height), w.scale)
 		w.dirty = true
 	case .Chosen:
 		document_menu_activate(app, w, ui.menu_selected(&menu.menu))
-	case .Closed:
-		overlay_close(app, w)
 	}
 }
 
-// The wheel moves the selection, which leaves a popout behind.
+// The wheel moves the selection, which leaves a popout or right-click menu behind.
 document_menu_wheel :: proc(app: ^App, w: ^Window, rows: int) {
-	if _, shown := document_menu_popout(w); shown {document_popout_close(app, w)}
+	if document_list_step(w) != nil {
+		if _, entering := document_menu_url_entry(w); !entering {document_popout_close(app, w)}
+	}
 	menu := &w.document_menu
 	ui.menu_wheel(&menu.menu, rows)
 	ui.menu_reveal(&menu.menu, f32(w.width), f32(w.height), w.scale)
 	w.dirty = true
 }
 
+// Typing goes to the address being entered, or else to the list's search, which filters the rows.
 document_menu_text_input :: proc(app: ^App, w: ^Window, text: string) {
-	if _, entering := document_menu_url_entry(w); !entering {return}
-	if ui.field_text(&w.document_menu.url, text) != .None {document_menu_url_edited(app, w)}
+	menu := &w.document_menu
+	if _, entering := document_menu_url_entry(w); entering {
+		if ui.field_text(&menu.url, text) != .None {document_menu_url_edited(app, w)}
+		return
+	}
+	state := document_menu_state(w)
+	if state == nil || document_list_step(w) != nil {return}
+	if _, listing := state.mode.(Document_Menu_List); !listing {return}
+	if ui.field_text(&menu.search, text) != .None {document_menu_build(app, w, true)}
 }
 
+// The box of the field row `action` names, Url_Field or Search_Field, with the field it edits.
 @(private = "file")
-document_url_box :: proc(w: ^Window) -> (ui.Field_Box, bool) {
+document_field_box :: proc(w: ^Window, action: Document_Menu_Action) -> (ui.Field_Box, ^ui.Text_Field, bool) {
 	menu := &w.document_menu
+	field := action == .Url_Field ? &menu.url : &menu.search
 	for i in 0 ..< len(menu.menu.items) {
-		if entry, _ := document_menu_entry(menu, i); entry.action != .Url_Field {continue}
+		if entry, _ := document_menu_entry(menu, i); entry.action != action {continue}
 		rect := ui.menu_row_rect(&menu.menu, i, f32(w.width), f32(w.height), w.scale)
-		return ui.field_box_standard(&menu.url, &w.ui_text, rect, w.scale), true
+		return ui.field_box_standard(field, &w.ui_text, rect, w.scale), field, true
 	}
-	return {}, false
+	return {}, nil, false
 }
 
 document_menu_hover :: proc(app: ^App, w: ^Window, x, y: f32, left_held: bool) {
@@ -845,9 +1126,20 @@ document_menu_hover :: proc(app: ^App, w: ^Window, x, y: f32, left_held: bool) {
 		pointer_set(app, w, shape)
 		return
 	}
-	if box, shown := document_url_box(w); shown {
-		if menu.url.dragging && left_held {
-			ui.field_pointer(&menu.url, ui.field_box_offset(box, x), false, true)
+	if _, actions := document_menu_actions(w); actions {
+		hit := ui.menu_hit(&menu.actions, x, y, f32(w.width), f32(w.height), w.scale)
+		if hit >= 0 && menu.actions.items[hit].enabled {
+			if hit != ui.menu_selected(&menu.actions) {ui.menu_select(&menu.actions, hit); w.dirty = true}
+			shape = .Hand
+		}
+		pointer_set(app, w, shape)
+		return
+	}
+	for action in ([?]Document_Menu_Action{.Url_Field, .Search_Field}) {
+		box, field, shown := document_field_box(w, action)
+		if !shown {continue}
+		if field.dragging && left_held {
+			ui.field_pointer(field, ui.field_box_offset(box, x), false, true)
 			w.dirty = true
 		}
 		if render.rect_contains(box.rect, x, y) {
@@ -875,6 +1167,7 @@ document_menu_tooltip :: proc(_: ^App, w: ^Window, x, y: f32) -> string {
 		level, hit := document_popout_hit(w, x, y)
 		return hit ? DOCUMENT_LEVEL_LABELS[level] : ""
 	}
+	if _, actions := document_menu_actions(w); actions {return ""}
 	width, height := f32(w.width), f32(w.height)
 	row := ui.menu_hit(&menu.menu, x, y, width, height, w.scale)
 	entry, _ := document_menu_entry(menu, row)
@@ -890,11 +1183,13 @@ document_menu_tooltip :: proc(_: ^App, w: ^Window, x, y: f32) -> string {
 	return ""
 }
 
+// A left click runs a row; a right click on a pinned document opens its right-click menu there.
 document_menu_button :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) {
 	menu := &w.document_menu
 	if !e.pressed {
 		w.dirty = true
 		ui.field_release(&menu.url)
+		ui.field_release(&menu.search)
 		return
 	}
 	gesture_swallow(w, e.button, .Document_Menu)
@@ -907,16 +1202,30 @@ document_menu_button :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event)
 		}
 		return
 	}
+	if _, actions := document_menu_actions(w); actions {
+		hit := ui.menu_hit(&menu.actions, x, y, f32(w.width), f32(w.height), w.scale)
+		if hit >= 0 && e.button == .Left && menu.actions.items[hit].enabled {
+			document_actions_choose(app, w, Link_Action(menu.actions.items[hit].payload))
+		} else if hit < 0 {
+			document_popout_close(app, w)
+		}
+		return
+	}
 	width, height := f32(w.width), f32(w.height)
 	hit := ui.menu_hit(&menu.menu, x, y, width, height, w.scale)
 	if hit < 0 {
 		overlay_close(app, w)
 		return
 	}
+	entry, _ := document_menu_entry(menu, hit)
+	if e.button == .Right {
+		document_actions_open(app, w, hit, x, y)
+		return
+	}
 	if e.button != .Left {return}
-	if entry, _ := document_menu_entry(menu, hit); entry.action == .Url_Field {
-		if box, shown := document_url_box(w); shown {
-			ui.field_pointer(&menu.url, ui.field_box_offset(box, x), true, .Shift in e.modifiers)
+	if entry.action == .Url_Field || entry.action == .Search_Field {
+		if box, field, shown := document_field_box(w, entry.action); shown {
+			ui.field_pointer(field, ui.field_box_offset(box, x), true, .Shift in e.modifiers)
 			w.dirty = true
 		}
 		return
@@ -940,14 +1249,24 @@ document_menu_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 	width, height := f32(w.width), f32(w.height)
 	if result := ui.menu_draw(&menu.menu, &w.list, &w.ui_text, app.theme, width, height, s, w.pointer);
 	   result != .Ok {return result}
-	if box, shown := document_url_box(w); shown {
+	_, entering := document_menu_url_entry(w)
+	for action in ([?]Document_Menu_Action{.Search_Field, .Url_Field}) {
+		box, _, shown := document_field_box(w, action)
+		if !shown {continue}
+		url := action == .Url_Field
 		radius := ui.RADIUS_CONTROL * s
 		fill := render.Rect_Instance{rect = box.rect, color = app.theme.pane, radius = radius}
 		if render.push_rect(&w.list, fill) != .None {return .Ok}
-		edge := render.Rect_Instance{rect = box.rect, color = app.theme.accent, radius = radius, stroke = s}
+		ink := url ? app.theme.accent : app.theme.border
+		edge := render.Rect_Instance{rect = box.rect, color = ink, radius = radius, stroke = s}
 		if render.push_rect(&w.list, edge) != .None {return .Ok}
-		if result := ui.field_box_draw(box, &w.list, app.theme, ui.field_box_baseline(box), true, "https://");
+		focused := url == entering
+		placeholder := url ? "https://" : "Search links"
+		if result := ui.field_box_draw(box, &w.list, app.theme, ui.field_box_baseline(box), focused, placeholder);
 		   result != .Ok {return result}
+	}
+	if _, actions := document_menu_actions(w); actions {
+		return ui.menu_draw(&menu.actions, &w.list, &w.ui_text, app.theme, width, height, s, w.pointer)
 	}
 	popout, shown := document_menu_popout(w)
 	if !shown {return .Ok}
@@ -970,7 +1289,7 @@ document_menu_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 }
 
 when AIO_CONTROL {
-	// The document menu's keys; documents.mode is list, pin or link, and empty while it is closed.
+	// The Links menu's keys; documents.mode is list, pin or link, and empty while it is closed.
 	document_menu_state_report :: proc(r: ^State_Report, w: ^Window) {
 		mode := ""
 		if state, shown := w.overlay.(Overlay_Document_Menu); shown {
@@ -982,11 +1301,14 @@ when AIO_CONTROL {
 		}
 		_, popout := document_menu_popout(w)
 		_, url_entry := document_menu_url_entry(w)
+		_, actions := document_menu_actions(w)
 		state_value(r, "documents.open", document_menu_shown(w))
 		state_text(r, "documents.mode", mode)
 		state_value(r, "documents.count", w.document_menu.count)
 		state_value(r, "documents.popout", popout)
 		state_value(r, "documents.url_open", url_entry)
+		state_value(r, "documents.actions", actions)
+		state_text(r, "documents.query", ui.field_string(&w.document_menu.search))
 	}
 }
 
@@ -1003,6 +1325,7 @@ document_menu_pointer_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target
 @(private)
 document_menu_pointer_cancel :: proc(_: ^App, w: ^Window) {
 	ui.field_release(&w.document_menu.url)
+	ui.field_release(&w.document_menu.search)
 }
 
 @(private)

@@ -50,6 +50,7 @@ Icon :: enum {
 	Document,
 	Folder,
 	Globe,
+	Link,
 	Minimize,
 }
 
@@ -154,6 +155,18 @@ icon_draw :: proc(
 		pen_path(p, {1.5, 8}, {14.5, 8})
 		pen_path(p, {8, 1.5}, {5.5, 4.5}, {4.5, 8}, {5.5, 11.5}, {8, 14.5})
 		pen_path(p, {8, 1.5}, {10.5, 4.5}, {11.5, 8}, {10.5, 11.5}, {8, 14.5})
+	case .Link:
+		// Two chain links along the rising diagonal, each a stadium overlapping the other.
+		for side in ([?]f32{-1, 1}) {
+			c := [2]f32{8 + side * 2.3, 8 - side * 2.3}
+			a, r := f32(1.8), f32(2.5)
+			u, v := [2]f32{0.7071, -0.7071} * a, [2]f32{0.7071, 0.7071} * r
+			pen_path(p, c - u + v, c + u + v)
+			pen_path(p, c - u - v, c + u - v)
+			e1, e2 := c - u, c + u
+			pen_arc(p, e2.x, e2.y, r, -3 * math.PI / 4, math.PI)
+			pen_arc(p, e1.x, e1.y, r, math.PI / 4, math.PI)
+		}
 	case .Close:
 		pen_path(p, {4, 4}, {12, 12})
 		pen_path(p, {12, 4}, {4, 12})

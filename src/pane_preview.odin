@@ -73,7 +73,7 @@ pane_header_card :: proc(
 		return {description = PANE_HEADER_REFUSAL_TEXT[refusal]}
 	}
 	switch button {
-	case .Documents, .Close:
+	case .Links, .Close:
 	case .Split_Right:
 		return pane_preview_split(app, w, pane.node, .Right, "A new pane to the right of this one.")
 	case .Split_Down:

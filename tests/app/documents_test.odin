@@ -197,9 +197,43 @@ press :: proc(s: ^app.App, w: ^app.Window, x, y: f32, button: input.Mouse_Button
 }
 
 @(private = "file")
-key :: proc(s: ^app.App, w: ^app.Window, which: input.Key) {
-	app.handle_event(s, input.Key_Event{window = w.id, key = which, pressed = true})
-	app.handle_event(s, input.Key_Event{window = w.id, key = which, pressed = false})
+key :: proc(s: ^app.App, w: ^app.Window, which: input.Key, modifiers: input.Modifiers = {}) {
+	app.handle_event(s, input.Key_Event{window = w.id, key = which, modifiers = modifiers, pressed = true})
+	app.handle_event(s, input.Key_Event{window = w.id, key = which, modifiers = modifiers, pressed = false})
+}
+
+@(private = "file")
+actions_shown :: proc(w: ^app.Window) -> bool {
+	_, shown := app.document_menu_actions(w)
+	return shown
+}
+
+// The right-click menu's row for `action`, or -1.
+@(private = "file")
+action_row :: proc(w: ^app.Window, action: app.Link_Action) -> int {
+	actions := &w.document_menu.actions
+	for item, i in actions.items {
+		if !item.separator && app.Link_Action(item.payload) == action {return i}
+	}
+	return -1
+}
+
+// Chooses `action` in the open right-click menu: Down to it and Enter, or a click on its row.
+@(private = "file")
+choose_action :: proc(s: ^app.App, w: ^app.Window, action: app.Link_Action, keyboard := false) {
+	actions := &w.document_menu.actions
+	row := action_row(w, action)
+	if row < 0 {return}
+	if keyboard {
+		for _ in 0 ..< len(actions.items) {
+			if ui.menu_selected(actions) == row {break}
+			key(s, w, .Arrow_Down)
+		}
+		key(s, w, .Enter)
+		return
+	}
+	r := ui.menu_row_rect(actions, row, f32(w.width), f32(w.height), w.scale)
+	press(s, w, r.x + 40 * w.scale, r.y + r.height / 2)
 }
 
 @(private = "file")
@@ -208,7 +242,7 @@ center :: proc(r: [4]f32) -> (f32, f32) {return r[0] + r[2] / 2, r[1] + r[3] / 2
 @(private = "file")
 open_button :: proc(s: ^app.App, w: ^app.Window) {
 	l := app.pane_header_layout(w, w.panes[0])
-	x, y := center(transmute([4]f32)l.buttons[.Documents])
+	x, y := center(transmute([4]f32)l.buttons[.Links])
 	press(s, w, x, y)
 }
 
@@ -355,16 +389,16 @@ document_menu_lists_opens_moves_and_removes_from_the_pane_header :: proc(t: ^tes
 	press(s, w, 2, f32(w.height) - 2)
 	testing.expect(t, app.document_menu_shown(w) && !popout_shown(w))
 
-	// Keyboard: Right opens the popout, arrows choose, Enter applies.
+	// Keyboard: Ctrl+Enter opens the selected row's right-click menu, arrows move, Enter chooses.
 	ui.menu_select(&menu.menu, row_of(w, .Open, "https://example.com/a"))
-	key(s, w, .Arrow_Right)
-	testing.expect(t, popout_shown(w))
-	key(s, w, .Arrow_Left)
-	key(s, w, .Enter)
+	key(s, w, .Enter, {.Control})
+	testing.expect(t, actions_shown(w))
+	choose_action(s, w, .Move_Pane, keyboard = true)
+	testing.expect(t, app.document_menu_shown(w) && !actions_shown(w))
 	testing.expect_value(t, len(scopes.pane), 1)
 	testing.expect_value(t, len(scopes.tab), 0)
 
-	// Remove with the row's button, shown once selected, and with Delete. The menu stays.
+	// Remove with the row's button, shown once selected, and from a right-click. The menu stays.
 	row := row_of(w, .Open, "https://example.com/a")
 	r = ui.menu_row_rect(&menu.menu, row, f32(w.width), f32(w.height), w.scale)
 	app.handle_event(s, input.Mouse_Move_Event{window = w.id, x = i32(r.x + 40), y = i32(r.y + r.height / 2)})
@@ -372,19 +406,41 @@ document_menu_lists_opens_moves_and_removes_from_the_pane_header :: proc(t: ^tes
 	click_part(s, w, row, .Selected_Action)
 	testing.expect_value(t, len(scopes.pane), 0)
 	testing.expect(t, app.document_menu_shown(w))
-	ui.menu_select(&menu.menu, row_of(w, .Open, "https://example.com/b"))
-	key(s, w, .Delete)
+	r = ui.menu_row_rect(&menu.menu, row_of(w, .Open, "https://example.com/b"), f32(w.width), f32(w.height), w.scale)
+	press(s, w, r.x + 40 * w.scale, r.y + r.height / 2, .Right)
+	testing.expect(t, actions_shown(w))
+	choose_action(s, w, .Remove)
 	testing.expect_value(t, len(scopes.workspace), 0)
 	testing.expect(t, app.document_menu_shown(w) && row_of(w, .Open) < 0)
 
-	// Clicking a row opens it and closes the menu.
+	// Typing searches: the field has the keyboard as the menu opens, Enter opens the one match, and Escape
+	// clears a search before it closes the menu.
 	_ = app.document_pin(scopes, .Tab, {target = "https://example.com/c"})
+	_ = app.document_pin(scopes, .Tab, {target = "https://example.org/d"})
 	app.overlay_close(s, w)
 	open_button(s, w)
-	click_row(s, w, row_of(w, .Open, "https://example.com/c"))
+	app.handle_event(s, input.Text_Event{window = w.id, text = "org"})
+	testing.expect_value(t, ui.field_string(&menu.search), "org")
+	testing.expect(t, row_of(w, .Open, "https://example.org/d") >= 0 && row_of(w, .Open, "https://example.com/c") < 0)
+	key(s, w, .Escape)
+	testing.expect(t, app.document_menu_shown(w) && row_of(w, .Open, "https://example.com/c") >= 0)
+	app.handle_event(s, input.Text_Event{window = w.id, text = "example"})
+	key(s, w, ui.LIST_NEXT_KEY, {.Control})
+	testing.expect_value(t, menu.entries[ui.menu_selected(&menu.menu)].target, "https://example.org/d")
+	key(s, w, ui.LIST_PREVIOUS_KEY, {.Control})
+	testing.expect_value(t, menu.entries[ui.menu_selected(&menu.menu)].target, "https://example.com/c")
+	key(s, w, .Enter)
 	testing.expect(t, !app.document_menu_shown(w))
 	testing.expect_value(t, Open_Stub_State.calls, 1)
 	testing.expect_value(t, Open_Stub_State.uri, "https://example.com/c")
+
+	// Clicking a row opens it and closes the menu.
+	open_button(s, w)
+	testing.expect_value(t, ui.field_string(&menu.search), "")
+	click_row(s, w, row_of(w, .Open, "https://example.org/d"))
+	testing.expect(t, !app.document_menu_shown(w))
+	testing.expect_value(t, Open_Stub_State.calls, 2)
+	testing.expect_value(t, Open_Stub_State.uri, "https://example.org/d")
 
 	// A press outside closes the menu, and losing focus would too.
 	open_button(s, w)
@@ -428,6 +484,72 @@ document_menu_popout_takes_the_keyboard_from_the_address_field :: proc(t: ^testi
 	testing.expect_value(t, len(scopes.tab), 1)
 }
 
+// Only a Markdown file or a folder opens inside AIODev, so a web address's right-click menu offers no place;
+// each place opens the file beside the pane the menu belongs to.
+@(test)
+right_click_menu_opens_a_markdown_link_beside_the_pane :: proc(t: ^testing.T) {
+	sync.mutex_lock(&Link_Test_Lock)
+	defer sync.mutex_unlock(&Link_Test_Lock)
+	directory, directory_error := os.make_directory_temp("", "aio-links-actions-*", context.allocator)
+	if !testing.expect_value(t, directory_error, nil) {return}
+	defer delete(directory)
+	defer testing.expect_value(t, os.remove_all(directory), nil)
+	// The app frees the temporary allocator each tick, so the path outlives it.
+	file := strings.concatenate({directory, "\\Plan.md"})
+	defer delete(file)
+	if !testing.expect_value(t, os.write_entire_file(file, "# Plan\n"), nil) {return}
+	f: Palette_Fixture
+	defer palette_fixture_destroy(t, &f)
+	if !palette_fixture_create(t, &f, "documents-actions", false) {return}
+	s, w := &f.state, f.state.windows[0]
+	scopes, found := app.document_scopes(s, w.panes[0].content)
+	if !testing.expect(t, found) {return}
+	_ = app.document_pin(scopes, .Pane, {target = file})
+	_ = app.document_pin(scopes, .Pane, {target = "https://example.com/a"})
+	right_click :: proc(s: ^app.App, w: ^app.Window, row: int) {
+		r := ui.menu_row_rect(&w.document_menu.menu, row, f32(w.width), f32(w.height), w.scale)
+		press(s, w, r.x + 40 * w.scale, r.y + r.height / 2, .Right)
+	}
+	open_button(s, w)
+	right_click(s, w, row_of(w, .Open, "https://example.com/a"))
+	testing.expect(t, actions_shown(w))
+	testing.expect(t, action_row(w, .Open) >= 0 && action_row(w, .Split_Right) < 0)
+	// A press outside the right-click menu closes only it.
+	press(s, w, 2, f32(w.height) - 2)
+	testing.expect(t, app.document_menu_shown(w) && !actions_shown(w))
+
+	right_click(s, w, row_of(w, .Open, file))
+	for action in app.Link_Action.Split_Right ..= app.Link_Action.Linked_Window {
+		testing.expectf(t, action_row(w, action) >= 0, "a Markdown file offers %v", action)
+	}
+	app.overlay_close(s, w)
+
+	// From the keyboard, Open in Down Split puts the file under the pane.
+	open_button(s, w)
+	ui.menu_select(&w.document_menu.menu, row_of(w, .Open, file))
+	key(s, w, .Enter, {.Control})
+	choose_action(s, w, .Split_Down, keyboard = true)
+	testing.expect(t, !app.document_menu_shown(w))
+	if !testing.expect_value(t, len(w.panes), 2) {return}
+	above, below := w.panes[0], w.panes[1]
+	if above.content.kind == .Markdown {above, below = below, above}
+	testing.expect_value(t, below.content.kind, layout.Content_Kind.Markdown)
+	testing.expect(t, below.rect.y > above.rect.y)
+
+	// Open in Float from the pointer adds a floating pane.
+	open_button(s, w)
+	right_click(s, w, row_of(w, .Open, file))
+	choose_action(s, w, .Float)
+	testing.expect(t, !app.document_menu_shown(w))
+	tree := &app.selected_tab(w.workspace).tree
+	floats := 0
+	for _, id in tree.nodes {
+		content, is_pane := layout.pane_content(tree, layout.Node_Id(id))
+		if is_pane && content.kind == .Markdown && layout.is_floating(tree, layout.Node_Id(id)) {floats += 1}
+	}
+	testing.expect_value(t, floats, 1)
+}
+
 @(test)
 ctrl_right_click_on_a_terminal_link_offers_to_open_or_pin_it :: proc(t: ^testing.T) {
 	sync.mutex_lock(&Link_Test_Lock)
@@ -461,7 +583,7 @@ ctrl_right_click_on_a_terminal_link_offers_to_open_or_pin_it :: proc(t: ^testing
 	testing.expect_value(t, Open_Stub_State.calls, 0)
 
 	press(s, w, x, y, .Right, {.Control})
-	click_row(s, w, row_of(w, .Open_Link))
+	click_row(s, w, link_row(w, .Open))
 	testing.expect(t, !app.document_menu_shown(w))
 	testing.expect_value(t, Open_Stub_State.calls, 1)
 
@@ -473,10 +595,10 @@ ctrl_right_click_on_a_terminal_link_offers_to_open_or_pin_it :: proc(t: ^testing
 }
 
 @(private = "file")
-placement_row :: proc(w: ^app.Window, placement: app.Pane_Placement) -> int {
+link_row :: proc(w: ^app.Window, action: app.Link_Action) -> int {
 	menu := &w.document_menu
 	for i in 0 ..< menu.count {
-		if menu.entries[i].action == .Open_In && menu.entries[i].placement == placement {return i}
+		if menu.entries[i].action == .Link && menu.entries[i].link == action {return i}
 	}
 	return -1
 }
@@ -525,13 +647,13 @@ link_menu_opens_a_markdown_file_in_each_place_copies_it_and_shows_its_folder :: 
 	link_feed(t, &f, fmt.tprintf("\x1b[2J\x1b[3J\x1b[H%s", path))
 	// Shift+right-click shows the menu Ctrl+right-click shows, with every place a Markdown file can open.
 	if !menu_on_path(t, &f, terminal, {.Shift}) {return}
-	for placement in app.Pane_Placement {testing.expect(t, placement_row(w, placement) >= 0)}
-	testing.expect(t, row_of(w, .Open_External) >= 0 && row_of(w, .Copy_Target) >= 0 && row_of(w, .Open_Folder) >= 0)
+	for action in app.Link_Action.Split_Right ..= app.Link_Action.Linked_Window {testing.expect(t, link_row(w, action) >= 0)}
+	testing.expect(t, link_row(w, .Open_External) >= 0 && link_row(w, .Copy) >= 0 && link_row(w, .Open_Folder) >= 0)
 	held := strings.clone(held_target(w))
 	defer delete(held)
 
 	// Every choice opens its own pane, though the file already shows in another.
-	click_row(s, w, placement_row(w, .Split_Right))
+	click_row(s, w, link_row(w, .Split_Right))
 	tree := app.window_tree(w)
 	testing.expect_value(t, layout.pane_count(tree), 2)
 	focused, _ := layout.focused_content(tree)
@@ -540,23 +662,23 @@ link_menu_opens_a_markdown_file_in_each_place_copies_it_and_shows_its_folder :: 
 	testing.expect_value(t, focus_axis(tree), layout.Axis.Horizontal)
 
 	if !menu_on_path(t, &f, terminal, {.Control}) {return}
-	click_row(s, w, placement_row(w, .Split_Down))
+	click_row(s, w, link_row(w, .Split_Down))
 	testing.expect_value(t, layout.pane_count(tree), 3)
 	testing.expect_value(t, focus_axis(tree), layout.Axis.Vertical)
 
 	if !menu_on_path(t, &f, terminal, {.Control}) {return}
-	click_row(s, w, placement_row(w, .Float))
+	click_row(s, w, link_row(w, .Float))
 	testing.expect_value(t, len(app.floating_rects(w)), 1)
 	focused, _ = layout.focused_content(app.window_tree(w))
 	testing.expect_value(t, focused.kind, layout.Content_Kind.Markdown)
 
 	if !menu_on_path(t, &f, terminal, {.Control}) {return}
-	click_row(s, w, placement_row(w, .Tab))
+	click_row(s, w, link_row(w, .Tab))
 	testing.expect_value(t, len(w.workspace.tabs), 2)
 	testing.expect_value(t, w.workspace.selected, 1)
 
 	if !menu_on_path(t, &f, terminal, {.Control}) {return}
-	click_row(s, w, placement_row(w, .Linked_Window))
+	click_row(s, w, link_row(w, .Linked_Window))
 	linked: ^app.Window
 	for window in s.windows {if app.window_linked(window) {linked = window}}
 	if testing.expect(t, linked != nil) {
@@ -568,20 +690,20 @@ link_menu_opens_a_markdown_file_in_each_place_copies_it_and_shows_its_folder :: 
 
 	// The system's handler, the copy and the folder each act on the file the menu holds.
 	if !menu_on_path(t, &f, terminal, {.Control}) {return}
-	click_row(s, w, row_of(w, .Open_External))
+	click_row(s, w, link_row(w, .Open_External))
 	testing.expect_value(t, Open_Stub_State.calls, 1)
 	testing.expect(t, strings.has_suffix(Open_Stub_State.uri, `notes.md`), Open_Stub_State.uri)
 	testing.expect(t, !Open_Stub_State.confirmed)
 
 	if !menu_on_path(t, &f, terminal, {.Control}) {return}
-	click_row(s, w, row_of(w, .Copy_Target))
+	click_row(s, w, link_row(w, .Copy))
 	copied, copied_ok := platform.clipboard_get_text(&s.platform, context.allocator)
 	testing.expect(t, copied_ok)
 	testing.expect_value(t, copied, held)
 	delete(copied)
 
 	if !menu_on_path(t, &f, terminal, {.Control}) {return}
-	click_row(s, w, row_of(w, .Open_Folder))
+	click_row(s, w, link_row(w, .Open_Folder))
 	testing.expect_value(t, Open_Stub_State.calls, 2)
 	testing.expect(t, !strings.has_suffix(Open_Stub_State.uri, `notes.md`), Open_Stub_State.uri)
 	testing.expect(t, strings.has_prefix(held, Open_Stub_State.uri), Open_Stub_State.uri)
@@ -589,11 +711,13 @@ link_menu_opens_a_markdown_file_in_each_place_copies_it_and_shows_its_folder :: 
 	// A web address can only open in the browser, so it offers no pane or folder.
 	link_feed(t, &f, "\x1b[2J\x1b[3J\x1b[Hhttps://example.com/two")
 	if !menu_on_path(t, &f, terminal, {.Shift}) {return}
-	for placement in app.Pane_Placement {testing.expect(t, placement_row(w, placement) < 0)}
-	testing.expect(t, row_of(w, .Open_External) < 0 && row_of(w, .Open_Folder) < 0)
-	testing.expect(t, row_of(w, .Copy_Target) >= 0)
+	for action in app.Link_Action.Split_Right ..= app.Link_Action.Linked_Window {testing.expect(t, link_row(w, action) < 0)}
+	testing.expect(t, link_row(w, .Open_External) < 0 && link_row(w, .Open_Folder) < 0)
+	testing.expect(t, link_row(w, .Copy) >= 0)
 }
 
+// A folder opens a new shell there in each place, from a printed path or from its pin, with the profile of the
+// pane the menu came from.
 @(test)
 link_menu_opens_a_shell_in_a_folder_in_each_place_with_the_pane_profile :: proc(t: ^testing.T) {
 	sync.mutex_lock(&Link_Test_Lock)
@@ -612,24 +736,29 @@ link_menu_opens_a_shell_in_a_folder_in_each_place_with_the_pane_profile :: proc(
 	delete(source.profile_id)
 	source.profile_id = strings.clone("alternate")
 	link_feed(t, &f, fmt.tprintf("\x1b[2J\x1b[3J\x1b[H%s", root))
-
-	for placement in app.Pane_Placement {
-		if !menu_on_path(t, &f, terminal, {.Shift}) {return}
-		testing.expect(t, row_of(w, .Open_External) < 0 && row_of(w, .Open_Folder) < 0)
-		before := len(s.sessions)
-		click_row(s, w, placement_row(w, placement))
-		testing.expect(t, !app.document_menu_shown(w))
-		if !testing.expect_value(t, len(s.sessions), before + 1) {return}
-		opened := s.sessions[len(s.sessions) - 1]
+	opened_here :: proc(t: ^testing.T, s: ^app.App, before: int, root: string) -> ^app.Session_Entry {
+		if !testing.expect_value(t, len(s.sessions), before + 1) {return nil}
+		opened := &s.sessions[len(s.sessions) - 1]
 		testing.expect_value(t, opened.profile_id, "alternate")
 		testing.expect(t, strings.equal_fold(opened.header.launch_directory, root), opened.header.launch_directory)
+		return opened
+	}
+
+	for action in app.Link_Action.Split_Right ..= app.Link_Action.Linked_Window {
+		if !menu_on_path(t, &f, terminal, {.Shift}) {return}
+		testing.expect(t, link_row(w, .Open_External) < 0 && link_row(w, .Open_Folder) < 0)
+		before := len(s.sessions)
+		click_row(s, w, link_row(w, action))
+		testing.expect(t, !app.document_menu_shown(w))
+		opened := opened_here(t, s, before, root)
+		if opened == nil {return}
 		content := layout.Content{.Terminal, opened.id}
-		switch placement {
+		#partial switch action {
 		case .Split_Right, .Split_Down:
 			tree := app.window_tree(w)
 			focused, _ := layout.focused_content(tree)
 			testing.expect_value(t, focused, content)
-			testing.expect_value(t, focus_axis(tree), placement == .Split_Down ? layout.Axis.Vertical : .Horizontal)
+			testing.expect_value(t, focus_axis(tree), action == .Split_Down ? layout.Axis.Vertical : .Horizontal)
 		case .Float:
 			tree := app.window_tree(w)
 			testing.expect(t, layout.is_floating(tree, layout.find_content(tree, content)))
@@ -641,6 +770,72 @@ link_menu_opens_a_shell_in_a_folder_in_each_place_with_the_pane_profile :: proc(
 			linked := app.pane_link_window_of(s, content)
 			testing.expect(t, linked != nil && app.window_linked(linked))
 		}
+	}
+
+	// The folder pinned to the pane opens the same way from its right-click menu.
+	menu_on_path(t, &f, terminal, {.Shift})
+	held := strings.clone(held_target(w))
+	defer delete(held)
+	app.overlay_close(s, w)
+	scopes, found := app.document_scopes(s, terminal)
+	if !testing.expect(t, found) {return}
+	_ = app.document_pin(scopes, .Pane, {target = held, folder = true})
+	app.pane_focus(s, w, layout.find_content(app.window_tree(w), terminal))
+	app.document_menu_open_focused(s, w)
+	ui.menu_select(&w.document_menu.menu, row_of(w, .Open, held))
+	key(s, w, .Enter, {.Control})
+	before := len(s.sessions)
+	choose_action(s, w, .Split_Down, keyboard = true)
+	testing.expect(t, !app.document_menu_shown(w))
+	opened_here(t, s, before, root)
+}
+
+// D-085: a link's right-click menu and its pin's offer the same actions, apart from pinning, moving and
+// removing, for every kind of link.
+@(test)
+link_and_pinned_menus_offer_the_same_actions :: proc(t: ^testing.T) {
+	sync.mutex_lock(&Link_Test_Lock)
+	defer sync.mutex_unlock(&Link_Test_Lock)
+	f: Palette_Fixture
+	defer palette_fixture_destroy(t, &f)
+	if !palette_fixture_create(t, &f, "documents-link-parity", false) {return}
+	root, root_error := os.make_directory_temp("", "aio-link-parity-*", context.allocator)
+	if !testing.expect_value(t, root_error, nil) {return}
+	defer {testing.expect_value(t, os.remove_all(root), nil); delete(root)}
+	markdown := fmt.aprintf(`%s\notes.md`, root)
+	defer delete(markdown)
+	text := fmt.aprintf(`%s\notes.txt`, root)
+	defer delete(text)
+	testing.expect_value(t, os.write_entire_file(markdown, transmute([]u8)string("# Notes\n")), nil)
+	testing.expect_value(t, os.write_entire_file(text, transmute([]u8)string("x")), nil)
+	s, w := &f.state, f.state.windows[0]
+	terminal := w.panes[0].content
+	shared :: bit_set[app.Link_Action]{.Open, .Split_Right, .Split_Down, .Float, .Tab, .Linked_Window, .Open_External, .Copy, .Open_Folder}
+	for printed in ([?]string{markdown, text, root, "https://example.com/parity"}) {
+		link_feed(t, &f, fmt.tprintf("\x1b[2J\x1b[3J\x1b[H%s", printed))
+		if !menu_on_path(t, &f, terminal, {.Shift}) {return}
+		from_link: bit_set[app.Link_Action]
+		for i in 0 ..< w.document_menu.count {
+			if entry := w.document_menu.entries[i]; entry.action == .Link {from_link += {entry.link}}
+		}
+		state, _ := w.overlay.(app.Overlay_Document_Menu)
+		link, _ := state.mode.(app.Document_Menu_Link)
+		document := app.Document{strings.clone(link.document.target, context.temp_allocator), link.document.folder}
+		app.overlay_close(s, w)
+		scopes, found := app.document_scopes(s, terminal)
+		if !testing.expect(t, found) {return}
+		_ = app.document_pin(scopes, .Pane, document)
+		app.document_menu_open_focused(s, w)
+		ui.menu_select(&w.document_menu.menu, row_of(w, .Open, document.target))
+		key(s, w, .Enter, {.Control})
+		from_pin: bit_set[app.Link_Action]
+		for item in w.document_menu.actions.items {
+			if !item.separator {from_pin += {app.Link_Action(item.payload)}}
+		}
+		testing.expectf(t, from_link == from_pin & shared, "%s: link %v, pin %v", printed, from_link, from_pin)
+		testing.expect(t, card(from_link) > 1)
+		app.overlay_close(s, w)
+		testing.expect(t, app.document_remove(scopes, .Pane, document.target))
 	}
 }
 
