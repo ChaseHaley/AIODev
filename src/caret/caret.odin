@@ -40,23 +40,63 @@ effects_active :: proc(e: Effects) -> bool {
 }
 
 // `head` is the cursor, `tail` the far end of its smear or trail. A scheduler may sample them before a
-// build discovers the cursor's next destination, so retarget from `drawn_head`/`drawn_tail`, the
-// positions the preceding build actually drew. Motions start one refresh before the first
-// non-resuming frame, like ui.Motion.
+// build discovers the cursor's next destination, so retarget from the pose the preceding build
+// actually drew, recorded by motion_drawn. Motions start one refresh before the first non-resuming
+// frame, like ui.Motion.
+//
+// A smear or trail follows the path the cursor took: each retarget mid-motion leaves a corner where
+// the head was, and the tail travels through the corners it has yet to pass instead of cutting
+// straight across to the target. The tail drops a corner once it passes it.
 Motion :: struct {
 	effects:                                  Effects,
 	target, head_from, tail_from, head, tail: render.Rect,
 	drawn_head, drawn_tail:                   render.Rect,
+	// Oldest first, between `tail_from` and `target`; the tail has passed the first `passed`.
+	corners:                                  [CORNERS_MAX]render.Rect,
+	corner_count, passed, drawn_passed:       int,
 	started:                                  time.Tick,
 	active:                                   bool,
 	progress:                                 f32,
 }
 
+// The most corners a path keeps; past it the oldest goes, and the tail cuts across it.
+CORNERS_MAX :: 16
+
 // Sends the cursor toward `target` from the pose last drawn; the motion starts with the next frame
 // that samples it.
 motion_retarget :: proc(m: ^Motion, target: render.Rect) {
+	passed := clamp(m.drawn_passed, 0, m.corner_count)
+	count := m.corner_count - passed
+	copy(m.corners[:count], m.corners[passed:m.corner_count])
+	if !path_follows(m.effects) {
+		count = 0
+	} else if last := count > 0 ? m.corners[count - 1] : m.drawn_tail; m.drawn_head != last {
+		if count == CORNERS_MAX {
+			copy(m.corners[:], m.corners[1:])
+			count -= 1
+		}
+		m.corners[count] = m.drawn_head
+		count += 1
+	}
+	m.corner_count, m.passed, m.drawn_passed = count, 0, 0
 	m.head_from, m.tail_from = m.drawn_head, m.drawn_tail
 	m.target, m.started, m.active = target, {}, true
+}
+
+// Records the pose a build drew, which the next retarget starts from.
+motion_drawn :: proc(m: ^Motion) {
+	m.drawn_head, m.drawn_tail, m.drawn_passed = m.head, m.tail, m.passed
+}
+
+// The corners between the tail and the head, oldest first.
+motion_corners :: proc(m: ^Motion) -> []render.Rect {
+	return m.corners[m.passed:m.corner_count]
+}
+
+// Only a smear or trail with a tail behind the head has a path to follow.
+@(private)
+path_follows :: proc(e: Effects) -> bool {
+	return (e.preset == .Smear || e.preset == .Trail) && e.strength > 0
 }
 
 // Advances the motion to `frame`; true when the cursor's pose changed. Without `enabled` a motion
@@ -85,18 +125,65 @@ motion_progress :: proc(m: ^Motion, frame: render.Frame_Time) -> f32 {
 }
 
 // Places the head and the tail at progress `t`; a settled cursor sits on its target. The head lands on
-// whole pixels, like the cells or glyphs it passes, so its text clip and its rect agree.
+// whole pixels, like the cells or glyphs it passes, so its text clip and its rect agree. The tail
+// goes along the path through the corners, the head straight from the last of them.
 motion_place :: proc(m: ^Motion, t: f32) {
 	m.progress = t
 	if !m.active {
 		m.head, m.tail = m.target, m.target
+		m.corner_count, m.passed = 0, 0
 		return
 	}
 	head, tail := curves(m.effects, t)
 	h := lerp(m.head_from, m.target, head)
 	left, top := math.round(h.x), math.round(h.y)
 	m.head = {left, top, math.round(h.x + h.width) - left, math.round(h.y + h.height) - top}
-	m.tail = lerp(m.tail_from, m.target, tail)
+	points: [CORNERS_MAX + 2]render.Rect
+	n := path_points(&points, m.tail_from, m.corners[:m.corner_count], m.target)
+	m.tail, m.passed = path_at(points[:n], tail)
+}
+
+// Lays out `from`, `corners` and `to` as one path in `points`, returning how many points it has.
+@(private)
+path_points :: proc(
+	points: ^[CORNERS_MAX + 2]render.Rect, from: render.Rect, corners: []render.Rect, to: render.Rect,
+) -> int {
+	points[0] = from
+	copy(points[1:], corners)
+	points[len(corners) + 1] = to
+	return len(corners) + 2
+}
+
+// The point fraction `t` of the way along `points`, measured between their centres, and how many of
+// the inner points lie behind it.
+@(private)
+path_at :: proc(points: []render.Rect, t: f32) -> (at: render.Rect, passed: int) {
+	lengths: [CORNERS_MAX + 1]f32
+	total := path_lengths(points, &lengths)
+	last := len(points) - 1
+	if total <= 0 {return lerp(points[0], points[last], t), 0}
+	along := t * total
+	for i in 0 ..< last {
+		if along <= lengths[i] || i == last - 1 {
+			f := lengths[i] > 0 ? clamp(along / lengths[i], 0, 1) : 1
+			return lerp(points[i], points[i + 1], f), i
+		}
+		along -= lengths[i]
+	}
+	return points[last], last - 1
+}
+
+// Fills in the length of each step of `points` between centres and returns their sum.
+@(private)
+path_lengths :: proc(points: []render.Rect, lengths: ^[CORNERS_MAX + 1]f32) -> (total: f32) {
+	for i in 1 ..< len(points) {
+		a, b := points[i - 1], points[i]
+		dx := b.x + b.width / 2 - a.x - a.width / 2
+		dy := b.y + b.height / 2 - a.y - a.height / 2
+		lengths[i - 1] = math.sqrt(dx * dx + dy * dy)
+		total += lengths[i - 1]
+	}
+	return
 }
 
 // A smear's body and a trail where it meets the cursor show the cursor colour at these opacities.
@@ -107,26 +194,55 @@ TRAIL_OPACITY :: f32(0.7)
 // A trail's far end, as a fraction of the cursor's size.
 @(private)
 TRAIL_TAIL_SCALE :: f32(0.3)
-// A smear or trail draws as slices of at least SLICE_PX across the direction of the move, at most
-// SLICES_MAX of them, so a move of any length costs a bounded number of rects.
+// A smear or trail draws each step of its path as slices of at least SLICE_PX across the direction
+// of the step, at most SLICES_MAX of them, so a path of any length costs a bounded number of rects.
 @(private)
 SLICE_PX :: f32(2)
 @(private)
 SLICES_MAX :: 32
 
-// Draws the smear or trail between the boxes the cursor's shape fills at its tail and its head, if
-// the effects have one. Callers draw the head themselves, over it.
+// Draws the smear or trail along the boxes the cursor's shape fills at its tail, at each corner it
+// has yet to pass, and at its head, if the effects have one. Callers draw the head themselves, over
+// it. A trail tapers and fades along the whole path, from the head to the tail.
 body_draw :: proc(
-	list: ^render.Draw_List, tail, head: render.Rect, e: Effects, fill: render.Color, progress: f32,
+	list: ^render.Draw_List, tail: render.Rect, corners: []render.Rect, head: render.Rect, e: Effects,
+	fill: render.Color, progress: f32,
 ) {
-	if e.strength <= 0 || (e.preset != .Smear && e.preset != .Trail) || tail == head {return}
-	far := tail
-	if e.preset == .Trail {
-		shrink_x := far.width * (1 - TRAIL_TAIL_SCALE) / 2
-		shrink_y := far.height * (1 - TRAIL_TAIL_SCALE) / 2
-		far = {far.x + shrink_x, far.y + shrink_y, far.width - 2 * shrink_x, far.height - 2 * shrink_y}
+	if e.strength <= 0 || (e.preset != .Smear && e.preset != .Trail) {return}
+	points: [CORNERS_MAX + 2]render.Rect
+	n := path_points(&points, tail, corners[:min(len(corners), CORNERS_MAX)], head)
+	// A step that goes nowhere draws nothing of its own.
+	kept := 1
+	for i in 1 ..< n {
+		if points[i] != points[kept - 1] {
+			points[kept] = points[i]
+			kept += 1
+		}
 	}
-	body(list, far, head, e.preset == .Trail, fill, progress)
+	if kept < 2 {return}
+	lengths: [CORNERS_MAX + 1]f32
+	total := path_lengths(points[:kept], &lengths)
+	trail := e.preset == .Trail
+	along: f32
+	for i in 0 ..< kept - 1 {
+		fade := [2]f32{0, 1}
+		if total > 0 {fade = {along / total, (along + lengths[i]) / total}}
+		along += lengths[i]
+		from, to := points[i], points[i + 1]
+		if trail {from, to = taper(from, fade[0]), taper(to, fade[1])}
+		// Each corner belongs to the step that reaches it, so the next step leaves it out rather than
+		// blending over it twice.
+		skip := i > 0 ? from : render.Rect{}
+		body(list, from, to, trail, fill, progress, fade, skip)
+	}
+}
+
+// Shrinks `r` about its centre to the size a trail has fraction `f` of the way from its far end.
+@(private)
+taper :: proc(r: render.Rect, f: f32) -> render.Rect {
+	scale := TRAIL_TAIL_SCALE + (1 - TRAIL_TAIL_SCALE) * f
+	shrink_x, shrink_y := r.width * (1 - scale) / 2, r.height * (1 - scale) / 2
+	return {r.x + shrink_x, r.y + shrink_y, r.width - 2 * shrink_x, r.height - 2 * shrink_y}
 }
 
 // How far along their paths the head and the tail are at progress `t`. Both settle exactly at 1. The
@@ -159,10 +275,12 @@ lerp :: proc(a, b: render.Rect, t: f32) -> render.Rect {
 }
 
 // Fills the convex hull of `tail` and `head` with slices across the direction of the move, each
-// covering the hull where it lies. A trail fades from the head to nothing at the tail.
+// covering the hull where it lies, except where `skip` covers it. A trail fades from `fade[1]` at the
+// head to `fade[0]` at the tail, where 1 is full and 0 nothing.
 @(private)
 body :: proc(
 	list: ^render.Draw_List, tail, head: render.Rect, trail: bool, fill: render.Color, progress: f32,
+	fade: [2]f32, skip: render.Rect,
 ) {
 	// The hull is the union of the boxes between the two at every s in 0..1. Each slice keeps the s
 	// whose box reaches into it, and covers what those boxes cover across it.
@@ -201,6 +319,7 @@ body :: proc(
 				if to_center != from_center {
 					q = clamp(((near + far) / 2 - from_center) / (to_center - from_center), 0, 1)
 				}
+				q = fade[0] + (fade[1] - fade[0]) * q
 				alpha = TRAIL_OPACITY * q * (1 - progress)
 			}
 			if end > start && alpha > 0 {
@@ -208,10 +327,37 @@ body :: proc(
 				tinted.a *= alpha
 				piece := render.Rect{near, start, far - near, end - start}
 				if axis == 1 {piece = {start, near, end - start, far - near}}
-				_ = render.push_rect(list, {rect = piece, color = tinted})
+				piece_push(list, piece, skip, tinted)
 			}
 		}
 		near = far
+	}
+}
+
+// Fills `piece` except where it meets `skip`, in at most four rects.
+@(private)
+piece_push :: proc(list: ^render.Draw_List, piece, skip: render.Rect, color: render.Color) {
+	left, right := max(piece.x, skip.x), min(piece.x + piece.width, skip.x + skip.width)
+	top, bottom := max(piece.y, skip.y), min(piece.y + piece.height, skip.y + skip.height)
+	if right <= left || bottom <= top {
+		_ = render.push_rect(list, {rect = piece, color = color})
+		return
+	}
+	if top > piece.y {
+		_ = render.push_rect(list, {rect = {piece.x, piece.y, piece.width, top - piece.y}, color = color})
+	}
+	if bottom < piece.y + piece.height {
+		_ = render.push_rect(list, {
+			rect = {piece.x, bottom, piece.width, piece.y + piece.height - bottom}, color = color,
+		})
+	}
+	if left > piece.x {
+		_ = render.push_rect(list, {rect = {piece.x, top, left - piece.x, bottom - top}, color = color})
+	}
+	if right < piece.x + piece.width {
+		_ = render.push_rect(list, {
+			rect = {right, top, piece.x + piece.width - right, bottom - top}, color = color,
+		})
 	}
 }
 

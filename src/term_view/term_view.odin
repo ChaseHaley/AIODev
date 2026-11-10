@@ -723,7 +723,7 @@ build_cursor :: proc(v: ^View, b: ^Builder) -> Maybe(Cursor_Paint) {
 	}
 	defer {
 		if v.cursor.present && b.list.error == .None {
-			v.cursor.drawn_head, v.cursor.drawn_tail = v.cursor.head, v.cursor.tail
+			caret.motion_drawn(&v.cursor.motion)
 		}
 	}
 	if b.cursor_moving {

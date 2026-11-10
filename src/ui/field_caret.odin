@@ -55,7 +55,7 @@ field_caret_pose :: proc(
 		caret.motion_place(m, t)
 		if m.active {carets.moving = true}
 	}
-	m.drawn_head, m.drawn_tail = m.head, m.tail
+	caret.motion_drawn(m)
 	return m.head
 }
 
@@ -64,5 +64,5 @@ field_caret_pose :: proc(
 field_caret_body :: proc(c: ^Field_Caret, list: ^render.Draw_List, color: render.Color) {
 	m := &c.motion
 	if !m.active {return}
-	caret.body_draw(list, m.tail, m.head, m.effects, color, m.progress)
+	caret.body_draw(list, m.tail, caret.motion_corners(m), m.head, m.effects, color, m.progress)
 }

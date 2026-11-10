@@ -75,7 +75,7 @@ cursor_transition_draw :: proc(t: ^Cursor_Transition, list: ^render.Draw_List, c
 	if render.push_layer(list, clip) != .None {return}
 	p := t.paint
 	p.head, p.tail = t.motion.head, t.motion.tail
-	cursor_draw_body(list, p, t.motion.effects, t.motion.progress)
+	cursor_draw_body(list, p, nil, t.motion.effects, t.motion.progress)
 	if p.shape == .Block {
 		_ = render.push_rect(list, {rect = p.head, color = p.color})
 	} else {
@@ -274,7 +274,8 @@ cursor_outline :: proc(list: ^render.Draw_List, p: Cursor_Paint, hollow := false
 // text stays legible wherever the head is.
 @(private)
 cursor_draw_moving :: proc(v: ^View, b: ^Builder, paint: Cursor_Paint) {
-	cursor_draw_body(b.list, paint, b.style.cursor_effects, b.cursor_t)
+	corners := caret.motion_corners(&v.cursor.motion)
+	cursor_draw_body(b.list, paint, corners, b.style.cursor_effects, b.cursor_t)
 	layer := b.list.layers[len(b.list.layers) - 1]
 	if render.push_layer(b.list, layer.clip, layer.radius) != .None {return}
 	if paint.shape != .Block {
@@ -294,10 +295,16 @@ cursor_draw_moving :: proc(v: ^View, b: ^Builder, paint: Cursor_Paint) {
 	}
 }
 
+// The smear or trail from the paint's tail through `corners` to its head, as the cursor's shape fills
+// each of their cells.
 @(private)
-cursor_draw_body :: proc(list: ^render.Draw_List, p: Cursor_Paint, e: caret.Effects, progress: f32) {
-	if p.tail == p.head {return}
-	caret.body_draw(list, cursor_box(p, p.tail), cursor_box(p, p.head), e, p.color, progress)
+cursor_draw_body :: proc(
+	list: ^render.Draw_List, p: Cursor_Paint, corners: []render.Rect, e: caret.Effects, progress: f32,
+) {
+	boxes: [caret.CORNERS_MAX]render.Rect
+	n := min(len(corners), caret.CORNERS_MAX)
+	for cell, i in corners[:n] {boxes[i] = cursor_box(p, cell)}
+	caret.body_draw(list, cursor_box(p, p.tail), boxes[:n], cursor_box(p, p.head), e, p.color, progress)
 }
 
 @(private)
