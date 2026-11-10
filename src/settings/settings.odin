@@ -270,6 +270,7 @@ Settings :: struct {
 	themes:          [dynamic]Custom_Theme,
 	active_theme:    Theme,
 	pane:            Pane_Settings,
+	motion:          Motion_Settings,
 	tab:             Tab_Settings,
 	tabs:            Tabs_Settings,
 	status:          Status_Settings,
@@ -327,6 +328,8 @@ Setting_Validator :: enum {
 	None,
 	Padding_Groups,
 	Program_Icons,
+	// A motion context's value, read for the context its key names.
+	Motion,
 }
 // Where a Choice setting's options come from while the app runs.
 Live_Choices :: enum {
@@ -374,6 +377,8 @@ group_title :: proc(key: string) -> string {
 	switch dot < 0 ? key : key[:dot] {
 	case "theme":
 		return "Theme"
+	case "motion":
+		return "Motion"
 	case "pane":
 		return "Panes"
 	case "tab":
@@ -529,6 +534,115 @@ SCHEMA :: [?]Schema_Entry {
 		valid = {0, 32767},
 		description = "Minimum content rows for a new pane or split. Zero disables the height check; existing " +
 			"panes may shrink.",
+	},
+	{
+		key = "motion.speed",
+		title = "Animation Speed",
+		kind = .Float,
+		offset = offset_of(Settings, motion) + offset_of(Motion_Settings, speed),
+		default_value = "1",
+		valid = {0.25, 4},
+		step = 0.05,
+		description = "Speed of every pane animation: 2 runs them twice as fast, 0.5 at half speed. Windows' " +
+			"Animation effects setting still turns them all off.",
+	},
+	{
+		key = MOTION_CONTEXT_KEY[Motion_Context.Panes],
+		title = MOTION_CONTEXT_TITLE[Motion_Context.Panes],
+		kind = .String,
+		offset = MOTION_CONTEXTS_OFFSET + uintptr(Motion_Context.Panes) * size_of(string),
+		default_value = "on 160ms decelerate",
+		valid = {0, 128},
+		control = .Group,
+		validator = .Motion,
+		page_description = MOTION_CONTEXT_DESCRIPTION[Motion_Context.Panes],
+		description = MOTION_CONTEXT_DESCRIPTION[Motion_Context.Panes] + MOTION_ROOT_HINT,
+	},
+	{
+		key = MOTION_CONTEXT_KEY[Motion_Context.Split],
+		title = MOTION_CONTEXT_TITLE[Motion_Context.Split],
+		kind = .String,
+		offset = MOTION_CONTEXTS_OFFSET + uintptr(Motion_Context.Split) * size_of(string),
+		default_value = "",
+		valid = {0, 128},
+		control = .Group,
+		validator = .Motion,
+		page_description = MOTION_CONTEXT_DESCRIPTION[Motion_Context.Split],
+		description = MOTION_CONTEXT_DESCRIPTION[Motion_Context.Split] + MOTION_CHILD_HINT +
+			" Effects: grow, popin, fade or slide.",
+	},
+	{
+		key = MOTION_CONTEXT_KEY[Motion_Context.Close],
+		title = MOTION_CONTEXT_TITLE[Motion_Context.Close],
+		kind = .String,
+		offset = MOTION_CONTEXTS_OFFSET + uintptr(Motion_Context.Close) * size_of(string),
+		default_value = "",
+		valid = {0, 128},
+		control = .Group,
+		validator = .Motion,
+		page_description = MOTION_CONTEXT_DESCRIPTION[Motion_Context.Close],
+		description = MOTION_CONTEXT_DESCRIPTION[Motion_Context.Close] + MOTION_CHILD_HINT +
+			" Effects: collapse, popout, fade or slide.",
+	},
+	{
+		key = MOTION_CONTEXT_KEY[Motion_Context.View],
+		title = MOTION_CONTEXT_TITLE[Motion_Context.View],
+		kind = .String,
+		offset = MOTION_CONTEXTS_OFFSET + uintptr(Motion_Context.View) * size_of(string),
+		default_value = "",
+		valid = {0, 128},
+		control = .Group,
+		validator = .Motion,
+		page_description = MOTION_CONTEXT_DESCRIPTION[Motion_Context.View],
+		description = MOTION_CONTEXT_DESCRIPTION[Motion_Context.View] + MOTION_CHILD_HINT,
+	},
+	{
+		key = MOTION_CONTEXT_KEY[Motion_Context.Resize],
+		title = MOTION_CONTEXT_TITLE[Motion_Context.Resize],
+		kind = .String,
+		offset = MOTION_CONTEXTS_OFFSET + uintptr(Motion_Context.Resize) * size_of(string),
+		default_value = "",
+		valid = {0, 128},
+		control = .Group,
+		validator = .Motion,
+		page_description = MOTION_CONTEXT_DESCRIPTION[Motion_Context.Resize],
+		description = MOTION_CONTEXT_DESCRIPTION[Motion_Context.Resize] + MOTION_CHILD_HINT,
+	},
+	{
+		key = MOTION_CONTEXT_KEY[Motion_Context.Move],
+		title = MOTION_CONTEXT_TITLE[Motion_Context.Move],
+		kind = .String,
+		offset = MOTION_CONTEXTS_OFFSET + uintptr(Motion_Context.Move) * size_of(string),
+		default_value = "",
+		valid = {0, 128},
+		control = .Group,
+		validator = .Motion,
+		page_description = MOTION_CONTEXT_DESCRIPTION[Motion_Context.Move],
+		description = MOTION_CONTEXT_DESCRIPTION[Motion_Context.Move] + MOTION_CHILD_HINT,
+	},
+	{
+		key = MOTION_CONTEXT_KEY[Motion_Context.Float],
+		title = MOTION_CONTEXT_TITLE[Motion_Context.Float],
+		kind = .String,
+		offset = MOTION_CONTEXTS_OFFSET + uintptr(Motion_Context.Float) * size_of(string),
+		default_value = "",
+		valid = {0, 128},
+		control = .Group,
+		validator = .Motion,
+		page_description = MOTION_CONTEXT_DESCRIPTION[Motion_Context.Float],
+		description = MOTION_CONTEXT_DESCRIPTION[Motion_Context.Float] + MOTION_CHILD_HINT,
+	},
+	{
+		key = MOTION_CONTEXT_KEY[Motion_Context.Chrome],
+		title = MOTION_CONTEXT_TITLE[Motion_Context.Chrome],
+		kind = .String,
+		offset = MOTION_CONTEXTS_OFFSET + uintptr(Motion_Context.Chrome) * size_of(string),
+		default_value = "",
+		valid = {0, 128},
+		control = .Group,
+		validator = .Motion,
+		page_description = MOTION_CONTEXT_DESCRIPTION[Motion_Context.Chrome],
+		description = MOTION_CONTEXT_DESCRIPTION[Motion_Context.Chrome] + MOTION_CHILD_HINT,
 	},
 	{
 		key = "tab.confirm_close",
@@ -1280,6 +1394,12 @@ value_parse :: proc(
 				issue, err := problem(.Invalid_Value, allocator, program_icon_files_rules(buffer[:]))
 				return nil, issue, err
 			}
+		case .Motion:
+			c, _ := motion_context_from_key(entry.key)
+			if _, motion_issue := motion_spec_parse(c, value); motion_issue != "" {
+				issue, err := problem(.Invalid_Value, allocator, motion_issue)
+				return nil, issue, err
+			}
 		}
 		if f64(len(value)) < entry.valid.minimum || f64(len(value)) > entry.valid.maximum {
 			issue, err := range_problem(entry, value, allocator)
@@ -1380,6 +1500,7 @@ assign :: proc(
 		field := cast(^string)p
 		delete(field^, s.allocator)
 		field^ = copy
+		if entry.validator == .Motion {motion_spec_refresh(s, entry.key)}
 	case int:
 		(cast(^int)p)^ = v
 	case f64:
@@ -1432,6 +1553,7 @@ defaults :: proc(allocator := context.allocator) -> (Settings, runtime.Allocator
 	s.keys.allocator = allocator
 	s.themes.allocator = allocator
 	profiles_init(&s.profiles, allocator)
+	motion_init(&s.motion, allocator)
 	for entry in SCHEMA {
 		issue, err := assign(&s, entry, entry.default_value)
 		if err != nil {
@@ -1466,6 +1588,7 @@ destroy :: proc(s: ^Settings) {
 		}
 	}
 	profiles_destroy(&s.profiles)
+	motion_destroy(&s.motion, s.allocator)
 	for theme in s.themes {
 		delete(theme.id, s.allocator)
 		delete(theme.base, s.allocator)
@@ -1618,6 +1741,16 @@ parse :: proc(
 			if theme_error != nil {return {}, {}, theme_error}
 			continue
 		}
+		if strings.has_prefix(key, MOTION_CURVE_PREFIX) {
+			curve_error := parse_motion_curve_key(&s, &diagnostics, key, value, line.number)
+			if curve_error != nil {return {}, {}, curve_error}
+			continue
+		}
+		if strings.has_prefix(key, MOTION_PRESET_PREFIX) {
+			preset_error := parse_motion_preset_key(&s, &diagnostics, key, value, line.number)
+			if preset_error != nil {return {}, {}, preset_error}
+			continue
+		}
 		if field, is_legacy := legacy_shell_field(key); is_legacy {
 			if legacy[field] != nil {
 				err = duplicate_key_diagnostic(&diagnostics, key, line.number)
@@ -1669,6 +1802,7 @@ parse :: proc(
 		return {}, {}, legacy_error
 	}
 	if profile_error := profiles_finalize(&s); profile_error != nil {return {}, {}, profile_error}
+	if motion_error := motion_finalize(&s, &diagnostics); motion_error != nil {return {}, {}, motion_error}
 	if inputs != nil {
 		if detect_error := profiles_apply_detection(&s, inputs.detected[:]); detect_error != nil {
 			return {}, {}, detect_error
@@ -1718,7 +1852,11 @@ default_text :: proc(
 		DEFAULT_PROFILE_DIRECTORY,
 		"\"\n\n",
 		"# Custom themes: theme.custom.ID.base names another theme such as studio-dark, and\n",
-		"# theme.custom.ID.COLOR = #rrggbb overrides one color. Changing a color in Settings saves one.\n",
+		"# theme.custom.ID.COLOR = #rrggbb overrides one color. Changing a color in Settings saves one.\n\n",
+		"# Motion curves: motion.curve.NAME = x1, y1, x2, y2 is a cubic Bezier whose y may leave 0..1\n",
+		"# to overshoot, and motion.curve.NAME = spring BOUNCE a spring that bounces 0 to 0.9.\n\n",
+		"# Motion presets: motion.preset.NAME = panes: on 160ms decelerate; split: popin. Applying one in\n",
+		"# Settings copies its values into the motion.panes keys.\n",
 	) or_return
 	if len(extra_comments) > 0 {write_parts(&builder, "\n") or_return}
 	for line in extra_comments {

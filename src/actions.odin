@@ -1160,7 +1160,7 @@ command_execute :: proc(app: ^App, ctx: Command_Context, invocation: commands.In
 		pane_view_toggle(app, w, .Toggle_Screen)
 	case .Balance_Panes:
 		layout.balance(window_tree(w))
-		pane_motion_arm(w)
+		pane_motion_arm(w, .Resize)
 		window_relayout(app, w)
 	case .Keep_Pane_Open:
 		pane_keep_open(app, w)
@@ -1194,7 +1194,7 @@ command_execute :: proc(app: ^App, ctx: Command_Context, invocation: commands.In
 		step := param.resize
 		tree := window_tree(w)
 		if layout.resize_pixels(tree, tree.focus, step.axis, step.pixels, w.dividers[:]) {
-			pane_motion_arm(w)
+			pane_motion_arm(w, .Resize)
 			window_relayout(app, w)
 		}
 	case .Toggle_Tabs_Rail:
@@ -1213,7 +1213,7 @@ command_execute :: proc(app: ^App, ctx: Command_Context, invocation: commands.In
 	case .Status_Panel:
 		panel := app.settings.status.panel ? "false" : "true"
 		// The panel slides in or out and the panes ease into the space, when the change applies at once.
-		pane_motion_arm(w)
+		pane_motion_arm(w, .Chrome)
 		settings_save_value(app, "status.panel", panel, "Could not save the setting.")
 	case .Status_Dismiss_Finished:
 		status_dismiss_finished(app, w)

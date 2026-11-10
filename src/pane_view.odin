@@ -44,7 +44,7 @@ pane_view_toggle :: proc(app: ^App, w: ^Window, event: layout.Pane_View_Event) {
 	if !pane_view_apply(app, w, event) {return}
 	tree := window_tree(w)
 	content, _ := layout.pane_content(tree, layout.focus_tiled(tree))
-	pane_motion_arm(w, content)
+	pane_motion_arm(w, .View, content)
 	window_relayout(app, w)
 }
 

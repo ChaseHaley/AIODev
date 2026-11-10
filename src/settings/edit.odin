@@ -115,6 +115,13 @@ edit_text :: proc(
 			return
 		}
 		serialized = profile_serialized
+	} else if strings.has_prefix(key, MOTION_CURVE_PREFIX) || strings.has_prefix(key, MOTION_PRESET_PREFIX) {
+		motion_serialized, issue := motion_line_value(key, value)
+		if issue != "" {
+			message, err = strings.clone(issue, allocator)
+			return
+		}
+		serialized = motion_serialized
 	} else if !strings.has_prefix(key, KEY_BINDING_PREFIX) {
 		message, err = strings.clone("Unknown setting.", allocator)
 		return

@@ -375,7 +375,7 @@ floating_header_fire :: proc(app: ^App, w: ^Window, content: layout.Content, act
 		floating_minimize(app, w, node)
 	case .Dock:
 		if !layout.set_floating(tree, node, false) {return}
-		pane_motion_arm(w)
+		pane_motion_arm(w, .Float)
 		window_relayout(app, w)
 		layout_state_touch(app)
 	case .Close:
@@ -470,7 +470,7 @@ floating_toggle :: proc(app: ^App, w: ^Window) {
 		notify(app, .Info, "The tab keeps one tiled pane; split it before floating this one.")
 		return
 	}
-	pane_motion_arm(w)
+	pane_motion_arm(w, .Float)
 	window_relayout(app, w)
 	layout_state_touch(app)
 }
@@ -504,7 +504,7 @@ floating_minimize_all_toggle :: proc(app: ^App, w: ^Window) {
 		root := layout.Node_Id(i)
 		if layout.float_is_root(tree, root) {_ = layout.float_minimize(tree, root, shown > 0)}
 	}
-	pane_motion_arm(w)
+	pane_motion_arm(w, .Float)
 	if shown == 0 {
 		latest := layout.float_latest(tree, false)
 		if latest != layout.INVALID_NODE {pane_focus(app, w, latest)}
@@ -520,7 +520,7 @@ floating_minimize :: proc(app: ^App, w: ^Window, node: layout.Node_Id) {
 	if focused {focus_leave(app, w)}
 	if !layout.float_minimize(tree, node, true) {return}
 	// The float shrinks into its capsule.
-	pane_motion_arm(w)
+	pane_motion_arm(w, .Float)
 	window_floats_layout(app, w)
 	if focused {focus_enter(app, w)}
 	layout_state_touch(app)

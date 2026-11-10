@@ -260,7 +260,7 @@ rail_toggle :: proc(app: ^App, w: ^Window) {
 	}
 	if was_docked != rail_docked(w) {
 		// The docked rail slides in or out and the panes ease into the space.
-		pane_motion_arm(w)
+		pane_motion_arm(w, .Chrome)
 		window_relayout(app, w)
 	} else {
 		window_dividers(app, w)

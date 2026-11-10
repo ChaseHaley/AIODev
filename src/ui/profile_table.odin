@@ -228,7 +228,7 @@ profile_row_parts :: proc(kind: Row_Kind, row: render.Rect, scale: f32) -> Profi
 			parts.remove = {x, cy - size / 2, size, size}
 		}
 	case .Process_Group, .Profile_Add, .Text, .Integer, .Number, .Toggle, .Choice, .Color, .Optional_Color,
-	     .Shortcut, .Action, .Profile_Icon:
+	     .Shortcut, .Action, .Profile_Icon, .Motion_Context, .Curve:
 	}
 	return parts
 }

@@ -27,6 +27,7 @@ Settings_Section :: enum {
 	Profiles,
 	Shortcuts,
 	Colors,
+	Motion,
 }
 
 Settings_Section_Info :: struct {
@@ -39,6 +40,7 @@ SETTINGS_SECTIONS := [Settings_Section]Settings_Section_Info {
 	.Profiles  = {title = "Profiles", palette_key = "profiles"},
 	.Shortcuts = {query = settings.KEY_BINDING_PREFIX},
 	.Colors    = {query = SETTINGS_COLOR_PREFIX},
+	.Motion    = {title = "Motion", query = settings.MOTION_PREFIX},
 }
 
 // The key prefix of the active theme's color rows.
@@ -88,7 +90,8 @@ settings_reveal_page :: proc(p: ^ui.Editor, reveal: Settings_Reveal) {
 	if reveal.message != "" {ui.editor_message(p, reveal.message, false)}
 }
 
-// The row a reveal selects: a section's own target, a group setting's editor, or the named row.
+// The row a reveal selects: a section's own target, the program groups editor, or the named row.
+// Motion keys name rows of their own, so they reveal like any other row.
 @(private)
 settings_reveal_target :: proc(reveal: Settings_Reveal) -> Maybe(ui.Reveal_Target) {
 	section := reveal.section
@@ -97,9 +100,7 @@ settings_reveal_target :: proc(reveal: Settings_Reveal) -> Maybe(ui.Reveal_Targe
 	}
 	if section == .Profiles {return ui.Reveal_Profiles{}}
 	if reveal.key == "" {return nil}
-	if entry := settings.schema_find(reveal.key); entry != nil && entry.control == .Group {
-		return ui.Reveal_Program_Groups{}
-	}
+	if reveal.key == settings.PADDING_GROUPS_KEY {return ui.Reveal_Program_Groups{}}
 	return ui.Reveal_Row{reveal.key}
 }
 

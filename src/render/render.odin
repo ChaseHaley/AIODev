@@ -210,6 +210,35 @@ draw_translate :: proc(list: ^Draw_List, mark: Draw_Mark, offset: [2]f32, clip: 
 	for &image in list.images[mark.images:] {image.rect.x += offset.x; image.rect.y += offset.y}
 }
 
+// Scales everything drawn since `mark` about `centre` by `factor`, as a surface growing or shrinking in
+// place: positions, sizes, clips, corner radii and strokes alike, so its shapes keep their proportions.
+draw_scale :: proc(list: ^Draw_List, mark: Draw_Mark, centre: [2]f32, factor: f32) {
+	scaled :: proc(r: Rect, centre: [2]f32, factor: f32) -> Rect {
+		x, y := centre.x + (r.x - centre.x) * factor, centre.y + (r.y - centre.y) * factor
+		return {x, y, r.width * factor, r.height * factor}
+	}
+	for &layer in list.layers[mark.layers:] {
+		layer.clip = scaled(layer.clip, centre, factor)
+		layer.radius *= factor
+	}
+	for &rect in list.rects[mark.rects:] {
+		rect.rect = scaled(rect.rect, centre, factor)
+		rect.radius *= factor
+		rect.softness *= factor
+		rect.stroke *= factor
+		// The sheen holds pixels local to the rect, but for an arc's last two, its angles.
+		rect.sheen[0] *= factor
+		rect.sheen[1] *= factor
+		if rect.fill != RECT_FILL_ARC {rect.sheen[2] *= factor; rect.sheen[3] *= factor}
+	}
+	for &glyph in list.glyphs[mark.glyphs:] {
+		glyph.rect = scaled(glyph.rect, centre, factor)
+		glyph.fade_start = centre.x + (glyph.fade_start - centre.x) * factor
+		glyph.fade_end = centre.x + (glyph.fade_end - centre.x) * factor
+	}
+	for &image in list.images[mark.images:] {image.rect = scaled(image.rect, centre, factor)}
+}
+
 // Appends what `source` drew between `from` and `to` to `list`, as a copy that outlives `source`'s next
 // build. The range must start with a layer, so every instance in it belongs to one of its layers.
 @(require_results)

@@ -83,6 +83,9 @@
       "lane": "native",
       "reason": "Changes Windows' own client-animation setting (SystemParametersInfo) and checks the app follows it."
     },
+    "motion_settings": {
+      "lane": "headless"
+    },
     "notice_dismiss": {
       "lane": "headless"
     },
