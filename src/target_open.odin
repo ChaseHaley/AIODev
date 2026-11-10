@@ -2,7 +2,6 @@ package main
 
 import "aio:links"
 import "aio:localpath"
-import "aio:pty"
 import "core:log"
 import "core:path/filepath"
 import "core:strings"
@@ -19,15 +18,6 @@ Target_Opener :: struct {
 	file:    proc(path, approved: string) -> bool,
 	// Starts a link program's command line as a window of its own, in `directory`.
 	program: proc(command_line, directory: string) -> bool,
-}
-
-// Target_Opener.program on Windows; see pty.spawn_window.
-program_start_window :: proc(command_line, directory: string) -> bool {
-	if err := pty.spawn_window(command_line, directory, context.temp_allocator); err.kind != .None {
-		log.errorf("starting a link program failed: %v (%d)", err.kind, err.os_code)
-		return false
-	}
-	return true
 }
 
 // nil means nothing there reads as a target, which leaves the input to its other uses. Strings

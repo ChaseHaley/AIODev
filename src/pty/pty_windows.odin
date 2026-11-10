@@ -454,41 +454,6 @@ spawn :: proc(options: Spawn_Options, allocator := context.allocator) -> (Pty, S
 	return p, {}
 }
 
-// Starts command_line as a process of its own in working_directory: a windowed program opens its window
-// and a console program gets a console window. AIODev keeps no hold on it, so it outlives AIODev. A bare
-// executable name resolves as spawn resolves a shell's.
-@(require_results)
-spawn_window :: proc(command_line, working_directory: string, allocator := context.allocator) -> Spawn_Error {
-	if len(command_line) == 0 || strings.contains(command_line, "\x00") || !utf8.valid_string(command_line) {
-		return {.Invalid_Argument, 0}
-	}
-	if !working_directory_is_local(working_directory) {return {.Invalid_Working_Directory, ERROR_DIRECTORY}}
-	command := w.utf8_to_wstring(command_line, allocator)
-	if command == nil {return {.Out_Of_Memory, 0}}
-	defer delete(command, allocator)
-	application: w.LPCWSTR
-	defer if application != nil {delete(application, allocator)}
-	executable, resolve_error := resolve_command(command_line, allocator)
-	if resolve_error.kind != .None {return resolve_error}
-	defer executable_destroy(&executable, allocator)
-	if searched, ok := executable.(Searched_Executable); ok {
-		application = w.utf8_to_wstring(searched.path, allocator)
-		if application == nil {return {.Out_Of_Memory, 0}}
-	}
-	directory := w.utf8_to_wstring(working_directory, allocator)
-	if directory == nil {return {.Out_Of_Memory, 0}}
-	defer delete(directory, allocator)
-	startup := w.STARTUPINFOW{cb = size_of(w.STARTUPINFOW)}
-	info: w.PROCESS_INFORMATION
-	flags := u32(w.CREATE_NEW_CONSOLE | w.CREATE_NEW_PROCESS_GROUP)
-	if !bool(w.CreateProcessW(application, command, nil, nil, false, flags, nil, directory, &startup, &info)) {
-		return spawn_failure("CreateProcessW", .Start_Process, u32(w.GetLastError()))
-	}
-	close_handle(&info.hThread)
-	close_handle(&info.hProcess)
-	return {}
-}
-
 @(require_results)
 read :: proc(p: ^Pty, buffer: []u8) -> (n: int, err: Error) {
 	if p.output == nil {

@@ -374,8 +374,9 @@ link_program_run :: proc(
 	}
 }
 
-// The command line that runs `program` on `path`, in temporary memory. A batch script runs through cmd.exe,
-// which would read some characters of a path as commands, so such a path is refused.
+// The command line that runs `program` on `path`, in temporary memory, naming its executable by the path
+// found for it so nothing searches again. A batch script runs through cmd.exe, which would read some
+// characters of a path as commands, so such a path is refused.
 @(private = "file")
 link_program_line :: proc(app: ^App, program: ^settings.Opener, path: string) -> (string, bool) {
 	line, err := settings.opener_command_line(program.command, path, context.temp_allocator)
@@ -386,12 +387,15 @@ link_program_line :: proc(app: ^App, program: ^settings.Opener, path: string) ->
 		return "", false
 	}
 	defer pty.program_destroy(&resolved, context.temp_allocator)
-	if !resolved.batch {return line, true}
+	arguments := pty.command_arguments(line)
+	if !resolved.batch {
+		explicit, join_error := strings.concatenate({`"`, resolved.path, `" `, arguments}, context.temp_allocator)
+		return strings.trim_right_space(explicit), join_error == nil
+	}
 	if strings.contains_any(path, `%"&|<>^!`) {
 		notify(app, .Error, fmt.tprintf("%s cannot open a path containing %% \" & | < > ^ or !.", program.name))
 		return "", false
 	}
-	arguments := pty.command_arguments(line)
 	batch, batch_error := pty.batch_command_line(resolved.path, arguments, context.temp_allocator)
 	if batch_error.kind != .None {
 		notify(app, .Error, fmt.tprintf("Could not start %s.", program.name))

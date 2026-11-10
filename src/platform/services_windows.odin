@@ -330,6 +330,29 @@ when !AIO_HEADLESS {
 		return shell_open(uri)
 	}
 
+	// Starts command_line as a process of its own in `directory`: a windowed program opens its window and a
+	// console program a console window, and AIODev keeps no hold on it. The command line names its program
+	// by explicit path, so nothing is searched for.
+	@(require_results)
+	open_program :: proc(command_line, directory: string) -> bool {
+		command := w.utf8_to_wstring(command_line, context.allocator)
+		if command == nil {return false}
+		defer delete(command)
+		folder := w.utf8_to_wstring(directory, context.allocator)
+		if folder == nil {return false}
+		defer delete(folder)
+		startup := w.STARTUPINFOW{cb = size_of(w.STARTUPINFOW)}
+		info: w.PROCESS_INFORMATION
+		flags := u32(w.CREATE_NEW_CONSOLE | w.CREATE_NEW_PROCESS_GROUP)
+		if !bool(w.CreateProcessW(nil, command, nil, nil, false, flags, nil, folder, &startup, &info)) {
+			log.errorf("CreateProcessW failed: Win32 %d", w.GetLastError())
+			return false
+		}
+		w.CloseHandle(info.hThread)
+		w.CloseHandle(info.hProcess)
+		return true
+	}
+
 	// NOTIFYICONDATAW fields are fixed-width; cut on a rune boundary so no surrogate pair is split.
 	@(private, require_results)
 	clamp_utf16_units :: proc(s: string, max_units: int) -> string {

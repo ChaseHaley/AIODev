@@ -1004,7 +1004,10 @@ link_programs_open_links_in_panes_and_in_their_own_windows :: proc(t: ^testing.T
 	click_row(s, w, labelled_row(w, "Open in Echo"))
 	if !testing.expect_value(t, len(s.sessions), before + 1) {return}
 	opened := &s.sessions[len(s.sessions) - 1]
-	testing.expect_value(t, opened.header.command, fmt.tprintf("cmd.exe /d /k rem %s", file))
+	// The program is named by the path found for it, so nothing searches for it again.
+	command := opened.header.command
+	testing.expect(t, strings.has_prefix(command, `"`), command)
+	testing.expect(t, strings.has_suffix(command, fmt.tprintf(`\cmd.exe" /d /k rem %s`, file)), command)
 	testing.expect(t, strings.equal_fold(opened.header.launch_directory, root), opened.header.launch_directory)
 	testing.expect_value(t, focus_axis(app.window_tree(w)), layout.Axis.Vertical)
 
@@ -1021,7 +1024,8 @@ link_programs_open_links_in_panes_and_in_their_own_windows :: proc(t: ^testing.T
 	click_row(s, w, labelled_row(w, "Open in Viewer"))
 	testing.expect_value(t, len(s.sessions), before)
 	testing.expect_value(t, program_stub_state.calls, 1)
-	testing.expect_value(t, program_stub_state.command_line, fmt.tprintf(`cmd.exe /d /c rem "%s"`, file))
+	started := program_stub_state.command_line
+	testing.expect(t, strings.has_suffix(started, fmt.tprintf(`\cmd.exe" /d /c rem "%s"`, file)), started)
 	testing.expect(t, strings.equal_fold(program_stub_state.directory, root), program_stub_state.directory)
 
 	// A folder is offered the folder program as well, after Open in Shell.

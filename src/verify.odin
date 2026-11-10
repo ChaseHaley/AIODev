@@ -538,6 +538,12 @@ when AIO_CONTROL {
 			for url, i in urls {state_text(r, state_key("os.opened_url.%d", i + 1), url)}
 			state_value(r, "os.opened_paths", len(paths))
 			for path, i in paths {state_text(r, state_key("os.opened_path.%d", i + 1), path)}
+			programs, directories := platform.opened_programs()
+			state_value(r, "os.opened_programs", len(programs))
+			for program, i in programs {
+				state_text(r, state_key("os.opened_program.%d", i + 1), program)
+				state_text(r, state_key("os.opened_program.%d.directory", i + 1), directories[i])
+			}
 			state_value(r, "os.notifications", len(p.record.notifications))
 			for n, i in p.record.notifications {
 				state_text(r, state_key("os.notification.%d.kind", i + 1), n.balloon ? "balloon" : "toast")

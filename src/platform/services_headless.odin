@@ -154,9 +154,17 @@ when AIO_HEADLESS {
 		return record_opened(&headless_opened_urls, uri)
 	}
 
-	// open_path and open_url take no Platform, so what they opened is kept per process.
+	@(require_results)
+	open_program :: proc(command_line, directory: string) -> bool {
+		if !record_opened(&headless_opened_programs, command_line) {return false}
+		return record_opened(&headless_program_directories, directory)
+	}
+
+	// open_path, open_url and open_program take no Platform, so what they opened is kept per process.
 	@(private)
 	headless_opened_paths, headless_opened_urls: [dynamic]string
+	@(private)
+	headless_opened_programs, headless_program_directories: [dynamic]string
 
 	@(private, require_results)
 	record_opened :: proc(list: ^[dynamic]string, target: string) -> bool {
@@ -173,13 +181,22 @@ when AIO_HEADLESS {
 	// The paths and addresses open_path and open_url handed on, oldest first.
 	opened_paths :: proc() -> []string {return headless_opened_paths[:]}
 	opened_urls :: proc() -> []string {return headless_opened_urls[:]}
+	// The command lines open_program started and the directory each started in, oldest first.
+	opened_programs :: proc() -> (command_lines, directories: []string) {
+		return headless_opened_programs[:], headless_program_directories[:]
+	}
 
 	// Forgets what was opened; run between tests that check it.
 	opened_clear :: proc() {
-		for s in headless_opened_paths {delete(s, runtime.heap_allocator())}
-		for s in headless_opened_urls {delete(s, runtime.heap_allocator())}
-		clear(&headless_opened_paths)
-		clear(&headless_opened_urls)
+		for list in ([?]^[dynamic]string{
+			&headless_opened_paths,
+			&headless_opened_urls,
+			&headless_opened_programs,
+			&headless_program_directories,
+		}) {
+			for s in list {delete(s, runtime.heap_allocator())}
+			clear(list)
+		}
 	}
 
 	// A dialog that has already closed with the next scripted path, or with nothing.
