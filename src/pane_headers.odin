@@ -117,7 +117,7 @@ pane_header_row :: proc(w: ^Window, pane: layout.Pane_Rect) -> bool {
 
 // The header row or split overlay of a pane, which drawing and hit testing share. Every pane can split
 // and close; the view controls and Float apply only to the tiled layout, and a pane that takes no pins
-// has no Links button.
+// has no Links button. A pane shown alone by its view carries the hidden panes glyph after its badge.
 pane_header_layout :: proc(w: ^Window, pane: layout.Pane_Rect) -> Pane_Header_Layout {
 	r := pane.rect
 	area := render.Rect{r.x, r.y, r.width, r.height}
@@ -130,7 +130,8 @@ pane_header_layout :: proc(w: ^Window, pane: layout.Pane_Rect) -> Pane_Header_La
 	}
 	if !CONTENT_POLICY[pane.content.kind].documents {shown -= {.Links}}
 	if !row {return ui.split_overlay_layout(area, w.scale, shown, PANE_HEADER_GROUP_ENDS)}
-	return ui.header_layout(area, w.scale, shown, PANE_HEADER_GROUP_ENDS, PANE_HEADER_DROP_ORDER[:])
+	widget := hidden_panes_glyph_shown(w, pane) ? ui.HIDDEN_PANES_GLYPH_BOX : [2]f32{}
+	return ui.header_layout(area, w.scale, shown, PANE_HEADER_GROUP_ENDS, PANE_HEADER_DROP_ORDER[:], widget)
 }
 
 // The icon a header button shows, which can follow the window's state.
@@ -236,22 +237,9 @@ pane_header_draw :: proc(
 	if result != .Ok {return result}
 	status: ui.Status_Mark
 	status_text: string
-	if entry != nil && app.settings.status.pane_headers {
-		summary: Status_Summary
-		status_summary_add(app, &summary, entry)
-		if summary.found {
-			status = status_presentation(summary.top).mark
-			buffer: [8]u8
-			headline := status_headline(status, buffer[:])
-			status_text = strings.clone(headline, context.temp_allocator)
-			if summary.top.message != "" {
-				status_text = fmt.tprintf("%s · %s", headline, summary.top.message)
-				if status.glyph == .Working && status.progress < 0 {status_text = summary.top.message}
-			}
-		}
-	}
+	if entry != nil && app.settings.status.pane_headers {status, status_text = pane_status_line(app, entry)}
 	r := pane.rect
-	return ui.header_draw(
+	result = ui.header_draw(
 		&w.list,
 		&w.ui_text,
 		app.theme,
@@ -273,6 +261,23 @@ pane_header_draw :: proc(
 		status_phase(app, w, status),
 		badge.icon,
 	)
+	if result == .Ok && l.widget.width > 0 {hidden_panes_glyph_draw(app, w, l.widget)}
+	return result
+}
+
+// The most urgent status `entry`'s programs report and the line that names it, in temporary memory: the
+// headline, then the program's message after a dot; a working program without progress shows its message
+// alone. No mark and an empty line when nothing reports.
+pane_status_line :: proc(app: ^App, entry: ^Session_Entry) -> (ui.Status_Mark, string) {
+	summary: Status_Summary
+	status_summary_add(app, &summary, entry)
+	if !summary.found {return {}, ""}
+	status := status_presentation(summary.top).mark
+	buffer: [8]u8
+	headline := status_headline(status, buffer[:])
+	if summary.top.message == "" {return status, strings.clone(headline, context.temp_allocator)}
+	if status.glyph == .Working && status.progress < 0 {return status, summary.top.message}
+	return status, fmt.tprintf("%s · %s", headline, summary.top.message)
 }
 
 // A header row shows its buttons on the focused pane, the pane under the pointer and a pane whose document

@@ -66,6 +66,8 @@ Window :: struct {
 	split_overlay: bool,
 	// The pane under the pointer. Its header shows its buttons, as the focused pane's does.
 	header_pane: Maybe(layout.Content),
+	// The glyph's map of the panes the view hides, while it shows.
+	hidden_panes: Hidden_Panes_State,
 	list: render.Draw_List,
 	width, height: i32,
 	header_height: f32,
@@ -704,6 +706,7 @@ build_frame :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 			return result
 		}
 	}
+	if result := hidden_panes_draw(app, w); result != .Ok {return result}
 	if palette_visible(app, w) {
 		result := ui.palette_draw(
 			&app.palette, &w.list, &w.ui_text, app.theme, size.x, size.y, w.scale,
