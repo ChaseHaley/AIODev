@@ -238,31 +238,38 @@ pane_link_window_create :: proc(
 
 pane_link_toggle :: proc(app: ^App, w: ^Window) {
 	if window_linked(w) {pane_link_return_focused(app, w); return}
+	if tree := window_tree(w); tree != nil {_ = pane_link_open(app, w, tree.focus)}
+}
+
+// Moves the pane at `node` of w's selected tab into a new linked window. A refusal or failure says why in
+// a notice and leaves the pane where it was.
+@(require_results)
+pane_link_open :: proc(app: ^App, w: ^Window, node: layout.Node_Id) -> bool {
 	tab := selected_tab(w.workspace)
-	if tab == nil {return}
+	if tab == nil {return false}
 	tree := window_tree(w)
-	node := tree.focus
 	content, is_pane := layout.pane_content(&tab.tree, node)
-	if !is_pane {return}
+	if !is_pane {return false}
 	if !CONTENT_POLICY[content.kind].linkable {
-		notify(app, .Info, "Only a terminal pane can have a linked window.")
-		return
+		notify(app, .Info, PANE_HEADER_REFUSAL_TEXT[.Not_Linkable])
+		return false
 	}
 	focus_leave(app, w)
 	defer focus_enter(app, w)
 	if !layout.set_linked(tree, node, true) {
-		notify(app, .Info, "A tab must keep one pane in this window.")
-		return
+		notify(app, .Info, PANE_HEADER_REFUSAL_TEXT[.Keeps_One])
+		return false
 	}
 	linked := pane_link_window_create(app, tree, node, w.workspace)
 	if linked == nil {
 		if !layout.set_linked(tree, node, false) {log.error("returning the unlinked pane failed")}
 		notify(app, .Error, "Could not open a linked window. The pane was preserved.")
-		return
+		return false
 	}
 	window_relayout(app, w)
 	pane_link_activate(linked)
 	layout_state_touch(app)
+	return true
 }
 
 // Closing a linked window keeps its panes: they go back to their slot in the tab, arranged as they were.

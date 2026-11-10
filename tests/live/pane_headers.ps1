@@ -72,7 +72,7 @@ function Shot([string] $Label) {
     if ($LASTEXITCODE -ne 0) { throw 'Screenshot failed.' }
 }
 # Buttons are 24 DIPs from the header's right end inward, with a 9-DIP divider gap after each group:
-# Documents | Split right, Split down | Zoom, Fill window | Float, Linked window | Close.
+# Links | Split right, Split down | Zoom, Fill window | Float, Linked window | Close.
 function Header-Button([ValidateSet('split_right','split_down','zoom','close')][string] $Action) {
     $s = Read-State
     $r = $s["pane.$($s['panes.focused']).rect"] -split ',' | ForEach-Object { [double]$_ }

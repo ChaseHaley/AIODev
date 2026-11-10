@@ -46,6 +46,8 @@ Menu :: struct {
 	anchor_x, anchor_y:   f32,
 	// An embedded menu may stay inside its owning pane; zero uses the whole window.
 	bounds:               render.Rect,
+	// The surface's width in DIPs; zero is MENU_WIDTH.
+	width:                f32,
 	// The row button under the pointer, on the selected row.
 	hover_part:           Menu_Row_Part,
 }
@@ -158,7 +160,7 @@ menu_view :: proc(m: ^Menu, width, height, scale: f32) -> (surface: render.Rect,
 		first += 1
 		content, rows = menu_extent(m, first, bounds, scale)
 	}
-	surface_width := min(MENU_WIDTH * scale, max(0, bounds.width - 16 * scale))
+	surface_width := min((m.width > 0 ? m.width : MENU_WIDTH) * scale, max(0, bounds.width - 16 * scale))
 	left, top := bounds.x + 8 * scale, bounds.y + 8 * scale
 	x := clamp(m.anchor_x, left, max(left, bounds.x + bounds.width - surface_width - 8 * scale))
 	y := clamp(m.anchor_y, top, max(top, bounds.y + bounds.height - content - 8 * scale))

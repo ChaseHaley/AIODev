@@ -69,12 +69,12 @@ pane_header_title :: proc(header: ^Pane_Header_Metadata) -> string {
 	return header.title != "" ? header.title : header.executable
 }
 
-// The pane header's buttons, left to right, in groups by what they do: Documents; the splits; the views that
+// The pane header's buttons, left to right, in groups by what they do: Links; the splits; the views that
 // make the pane bigger; the moves that take it out of the tiling; Close. A pane in a float keeps its split
 // controls; minimizing, docking and moving belong to the float header. Tiled panes add their view controls,
 // Float and Linked window.
 Pane_Header_Button :: enum u8 {
-	Documents,
+	Links,
 	Split_Right,
 	Split_Down,
 	Zoom,
@@ -92,21 +92,21 @@ Pane_Header_Layout :: ui.Header_Layout(Pane_Header_Button)
 
 @(private = "file")
 PANE_HEADER_TILED :: bit_set[Pane_Header_Button] {
-	.Documents, .Split_Right, .Split_Down, .Zoom, .Fill_Window, .Linked_Window, .Dock, .Close,
+	.Links, .Split_Right, .Split_Down, .Zoom, .Fill_Window, .Linked_Window, .Dock, .Close,
 }
 @(private = "file")
-PANE_HEADER_FLOATING :: bit_set[Pane_Header_Button]{.Documents, .Split_Right, .Split_Down, .Close}
+PANE_HEADER_FLOATING :: bit_set[Pane_Header_Button]{.Links, .Split_Right, .Split_Down, .Close}
 @(private = "file")
-PANE_HEADER_OVERLAY :: bit_set[Pane_Header_Button]{.Documents, .Split_Right, .Split_Down}
+PANE_HEADER_OVERLAY :: bit_set[Pane_Header_Button]{.Links, .Split_Right, .Split_Down}
 // The last button of each group, which a divider sets apart from the next group.
 @(private = "file")
-PANE_HEADER_GROUP_ENDS :: bit_set[Pane_Header_Button]{.Documents, .Split_Down, .Fill_Window, .Linked_Window}
+PANE_HEADER_GROUP_ENDS :: bit_set[Pane_Header_Button]{.Links, .Split_Down, .Fill_Window, .Linked_Window}
 
-// The order buttons give way in a narrow header: the Documents button first, then the tiled view
+// The order buttons give way in a narrow header: the Links button first, then the tiled view
 // controls, so splitting, floating and closing stay longest.
 @(private = "file", rodata)
 PANE_HEADER_DROP_ORDER := [?]Pane_Header_Button {
-	.Documents, .Fill_Window, .Linked_Window, .Zoom, .Split_Down, .Split_Right, .Dock, .Close,
+	.Links, .Fill_Window, .Linked_Window, .Zoom, .Split_Down, .Split_Right, .Dock, .Close,
 }
 
 // Whether a pane shows a header row. A tiled pane without one carries its split controls in the split
@@ -117,7 +117,7 @@ pane_header_row :: proc(w: ^Window, pane: layout.Pane_Rect) -> bool {
 
 // The header row or split overlay of a pane, which drawing and hit testing share. Every pane can split
 // and close; the view controls and Float apply only to the tiled layout, and a pane that takes no pins
-// has no Documents button.
+// has no Links button.
 pane_header_layout :: proc(w: ^Window, pane: layout.Pane_Rect) -> Pane_Header_Layout {
 	r := pane.rect
 	area := render.Rect{r.x, r.y, r.width, r.height}
@@ -128,7 +128,7 @@ pane_header_layout :: proc(w: ^Window, pane: layout.Pane_Rect) -> Pane_Header_La
 	} else if pane.floating {
 		shown = PANE_HEADER_FLOATING
 	}
-	if !CONTENT_POLICY[pane.content.kind].documents {shown -= {.Documents}}
+	if !CONTENT_POLICY[pane.content.kind].documents {shown -= {.Links}}
 	if !row {return ui.split_overlay_layout(area, w.scale, shown, PANE_HEADER_GROUP_ENDS)}
 	return ui.header_layout(area, w.scale, shown, PANE_HEADER_GROUP_ENDS, PANE_HEADER_DROP_ORDER[:])
 }
@@ -137,8 +137,8 @@ pane_header_layout :: proc(w: ^Window, pane: layout.Pane_Rect) -> Pane_Header_La
 @(private = "file")
 pane_header_icon :: proc(w: ^Window, button: Pane_Header_Button) -> ui.Icon {
 	switch button {
-	case .Documents:
-		return .Document
+	case .Links:
+		return .Link
 	case .Split_Right:
 		return .Split_Right
 	case .Split_Down:
@@ -157,7 +157,7 @@ pane_header_icon :: proc(w: ^Window, button: Pane_Header_Button) -> ui.Icon {
 	return .None
 }
 
-// The command a header button runs. Documents opens its menu on press instead.
+// The command a header button runs. Links opens its menu on press instead.
 @(private)
 pane_header_command :: proc(button: Pane_Header_Button) -> (Action, bool) {
 	switch button {
@@ -175,7 +175,7 @@ pane_header_command :: proc(button: Pane_Header_Button) -> (Action, bool) {
 		return .Float_Pane, true
 	case .Close:
 		return .Close_Pane, true
-	case .Documents:
+	case .Links:
 	}
 	return {}, false
 }
@@ -186,8 +186,8 @@ pane_header_tooltip :: proc(w: ^Window, target: Pane_Header_Target) -> string {
 	button, ok := target.(Pane_Header_Button)
 	if !ok {return ""}
 	switch button {
-	case .Documents:
-		return "Documents"
+	case .Links:
+		return "Links"
 	case .Split_Right:
 		return "Split right"
 	case .Split_Down:
@@ -222,7 +222,7 @@ pane_header_draw :: proc(
 		face.motion = view.header_controls[button]
 		face.disabled = view.header_refused[button] != .None
 	}
-	buttons[.Documents].selected = open
+	buttons[.Links].selected = open
 	buttons[.Close].danger = true
 	if !pane_header_row(w, pane) {
 		if !w.split_overlay && !open {return .Ok}
@@ -310,7 +310,7 @@ pane_header_hit :: proc(w: ^Window, x, y: f32) -> (layout.Pane_Rect, Pane_Header
 	return {}, nil, false
 }
 
-// Where a pane's document menu hangs from: under its Documents button, or inside its corner without one.
+// Where a pane's Links menu hangs from: under its Links button, or inside its corner without one.
 // A split pane with headers off shows no controls, so its menu sits in the corner the header would use.
 pane_header_document_anchor :: proc(w: ^Window, pane: layout.Pane_Rect) -> [2]f32 {
 	r := pane.rect
@@ -319,7 +319,7 @@ pane_header_document_anchor :: proc(w: ^Window, pane: layout.Pane_Rect) -> [2]f3
 	if !pane_header_row(w, pane) && !pane_single_tiled(w) {
 		return {r.x + r.width - width - ui.SPACE_2 * s, r.y + ui.SPACE_2 * s}
 	}
-	button := pane_header_layout(w, pane).buttons[.Documents]
+	button := pane_header_layout(w, pane).buttons[.Links]
 	if button.width == 0 {
 		return {r.x + r.width - width - ui.SPACE_2 * s, r.y + ui.HEADER_HEIGHT * s + ui.SPACE_1 * s}
 	}
@@ -385,7 +385,7 @@ pane_header_press :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) {
 		profile_menu_open_pane(app, w, pane)
 		return
 	}
-	if target == Pane_Header_Button.Documents {
+	if target == Pane_Header_Button.Links {
 		document_menu_open_pane(app, w, pane)
 		return
 	}
