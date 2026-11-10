@@ -12,8 +12,6 @@ Profile_Mutation :: struct {
 	slot: int,
 }
 
-Profile_Mutation_Error :: enum {None, Unavailable, Limit, Edit, Allocation}
-
 // The resolved profiles include cached detection for this source. All returned strings are owned;
 // failures return no revision, so fields, order and default repair are published together.
 @(require_results)
@@ -22,7 +20,7 @@ profile_mutate :: proc(
 	profiles: ^Profiles,
 	change: Profile_Mutation,
 	allocator := context.allocator,
-) -> (updated, id, issue: string, error: Profile_Mutation_Error) {
+) -> (updated, id, issue: string, error: Mutation_Error) {
 	profile := profile_find(profiles, change.id)
 	if change.kind != .Add && profile == nil {return "", "", "", .Unavailable}
 	if (change.kind == .Add || change.kind == .Duplicate) && len(profiles.items) >= PROFILE_LIMIT {
@@ -42,7 +40,7 @@ profile_mutate :: proc(
 	revision: string
 	alloc_error: runtime.Allocator_Error
 	if change.kind == .Remove {
-		revision, alloc_error = remove_profile_text(source, target, allocator)
+		revision, alloc_error = remove_item_text(source, PROFILE_PREFIX, target, allocator)
 	} else {
 		revision, alloc_error = strings.clone(source, allocator)
 	}
@@ -67,7 +65,7 @@ profile_mutate :: proc(
 		for field in ([?]Profile_Field{.Name, .Command, .Directory, .Hidden, .Icon}) {
 			if field not_in fields {continue}
 			value := field == .Hidden ? "false" : profile_text(&values, field)^
-			if issue, error = profile_mutation_edit(
+			if issue, error = mutation_edit(
 				&revision, profile_field_key(target, field), value, allocator,
 			); error != .None {
 				return "", "", issue, error
@@ -96,31 +94,19 @@ profile_mutate :: proc(
 		written += 1
 	}
 	order := ordered[:written]
-	if change.kind == .Move {order = profile_move(order, from, change.slot, moved[:])}
-	order_text, order_error := profile_order_text(order, nil, allocator)
-	defer delete(order_text, allocator)
+	if change.kind == .Move {order = order_move(order, from, change.slot, moved[:])}
+	order_value, order_error := order_text(order, nil, allocator)
+	defer delete(order_value, allocator)
 	if order_error != nil {return "", "", "", .Allocation}
-	if issue, error = profile_mutation_edit(&revision, PROFILE_ORDER_KEY, order_text, allocator);
+	if issue, error = mutation_edit(&revision, PROFILE_ORDER_KEY, order_value, allocator);
 	   error != .None {return "", "", issue, error}
 	if change.kind == .Remove && profiles.default_id == target {
-		if issue, error = profile_mutation_edit(
+		if issue, error = mutation_edit(
 			&revision, "shell.default_profile", PROFILE_DEFAULT_ID, allocator,
 		); error != .None {return "", "", issue, error}
 	}
 	id, alloc_error = strings.clone(target, allocator)
 	if alloc_error != nil {return "", "", "", .Allocation}
 	updated, revision = revision, ""
-	return
-}
-
-@(private, require_results)
-profile_mutation_edit :: proc(
-	text: ^string,
-	key, value: string,
-	allocator: runtime.Allocator,
-) -> (issue: string, error: Profile_Mutation_Error) {
-	message, alloc_error := revision_edit_owned(text, key, value, allocator)
-	if alloc_error != nil {return "", .Allocation}
-	if message != "" {return message, .Edit}
 	return
 }

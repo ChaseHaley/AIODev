@@ -16,7 +16,7 @@ profile_move_includes_machine_rows_in_the_visible_order :: proc(t: ^testing.T) {
 	defer delete(text)
 	defer delete(id)
 	defer delete(issue)
-	if !testing.expect_value(t, error, settings.Profile_Mutation_Error.None) {return}
+	if !testing.expect_value(t, error, settings.Mutation_Error.None) {return}
 	after := mutation_parse(t, text)
 	defer settings.destroy(&after)
 	mutation_order(t, &after, {"found", "alpha", "default"})
@@ -54,7 +54,7 @@ profile_generated_names_remain_editable_after_repeated_add_and_duplicate :: proc
 		text, id, issue, error := settings.profile_mutate(source, &s.profiles, change)
 		defer delete(id)
 		defer delete(issue)
-		if !testing.expect_value(t, error, settings.Profile_Mutation_Error.None) {delete(text); return}
+		if !testing.expect_value(t, error, settings.Mutation_Error.None) {delete(text); return}
 		after := mutation_parse(t, text)
 		defer settings.destroy(&after)
 		profile := settings.profile_find(&after.profiles, id)
@@ -76,7 +76,7 @@ profile_mutation_add_owns_fields_id_and_eligible_order :: proc(t: ^testing.T) {
 	defer delete(text)
 	defer delete(id)
 	defer delete(issue)
-	testing.expect_value(t, error, settings.Profile_Mutation_Error.None)
+	testing.expect_value(t, error, settings.Mutation_Error.None)
 	testing.expect_value(t, id, "profile-2")
 	testing.expect_value(t, issue, "")
 	after := mutation_parse(t, text)
@@ -110,7 +110,7 @@ profile.order = found, alpha, default
 	defer delete(text)
 	defer delete(id)
 	defer delete(issue)
-	testing.expect_value(t, error, settings.Profile_Mutation_Error.None)
+	testing.expect_value(t, error, settings.Mutation_Error.None)
 	after := mutation_parse(t, text)
 	defer settings.destroy(&after)
 	profile := settings.profile_find(&after.profiles, id)
@@ -135,7 +135,7 @@ profile_mutation_remove_repairs_order_and_default_in_one_revision :: proc(t: ^te
 	defer delete(text)
 	defer delete(id)
 	defer delete(issue)
-	testing.expect_value(t, error, settings.Profile_Mutation_Error.None)
+	testing.expect_value(t, error, settings.Mutation_Error.None)
 	after := mutation_parse(t, text)
 	defer settings.destroy(&after)
 	testing.expect(t, settings.profile_find(&after.profiles, "alpha") == nil)
@@ -165,7 +165,7 @@ profile_mutation_move_owns_main_table_and_listed_detection_order :: proc(t: ^tes
 		defer delete(text)
 		defer delete(id)
 		defer delete(issue)
-		testing.expect_value(t, error, settings.Profile_Mutation_Error.None)
+		testing.expect_value(t, error, settings.Mutation_Error.None)
 		after := mutation_parse(t, text)
 		defer settings.destroy(&after)
 		mutation_order(t, &after, change.order)
@@ -186,7 +186,7 @@ profile_mutation_rejects_ineligible_requests_without_a_revision :: proc(t: ^test
 		defer delete(text)
 		defer delete(id)
 		defer delete(issue)
-		testing.expect_value(t, error, settings.Profile_Mutation_Error.Unavailable)
+		testing.expect_value(t, error, settings.Mutation_Error.Unavailable)
 		testing.expect_value(t, text, "")
 		testing.expect_value(t, id, "")
 	}
@@ -198,7 +198,7 @@ profile_mutation_rejects_ineligible_requests_without_a_revision :: proc(t: ^test
 		defer delete(text)
 		defer delete(id)
 		defer delete(issue)
-		testing.expect_value(t, error, settings.Profile_Mutation_Error.Limit)
+		testing.expect_value(t, error, settings.Mutation_Error.Limit)
 		testing.expect_value(t, text, "")
 	}
 }
@@ -212,7 +212,7 @@ profile_mutation_failed_edits_and_allocations_never_return_partial_revisions :: 
 	defer delete(text)
 	defer delete(id)
 	defer delete(issue)
-	testing.expect_value(t, error, settings.Profile_Mutation_Error.Edit)
+	testing.expect_value(t, error, settings.Mutation_Error.Edit)
 	testing.expect(t, issue != "")
 	testing.expect_value(t, text, "")
 	testing.expect_value(t, id, "")
@@ -227,7 +227,7 @@ profile_mutation_failed_edits_and_allocations_never_return_partial_revisions :: 
 		delete(target, allocator)
 		delete(problem, allocator)
 		if result == .None {reached_success = true; break}
-		testing.expect_value(t, result, settings.Profile_Mutation_Error.Allocation)
+		testing.expect_value(t, result, settings.Mutation_Error.Allocation)
 		testing.expect_value(t, revision, "")
 		testing.expect_value(t, target, "")
 	}

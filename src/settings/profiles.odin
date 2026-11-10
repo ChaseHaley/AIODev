@@ -1,7 +1,6 @@
 package settings
 
 import "base:runtime"
-import "core:fmt"
 import "core:strings"
 
 PROFILE_PREFIX :: "profile."
@@ -164,72 +163,6 @@ profile_own :: proc(
 	return nil
 }
 
-// One entry of a profile.order value: trimmed, possibly empty. `repeated` means an earlier entry
-// has the same text.
-@(private)
-Order_Token :: struct {
-	id:              string,
-	valid, repeated: bool,
-}
-
-// Steps through the comma-separated entries of a profile.order value without allocating; `offset`
-// starts at 0. Every entry, empty ones included, is returned so each caller applies its own policy.
-@(private)
-order_token_next :: proc(text: string, offset: ^int) -> (token: Order_Token, ok: bool) {
-	start := offset^
-	if start > len(text) {return {}, false}
-	end := strings.index_byte(text[start:], ',')
-	end = end < 0 ? len(text) : start + end
-	offset^ = end + 1
-	token.id = strings.trim_space(text[start:end])
-	token.valid = id_valid(token.id, PROFILE_ID_MAX_LENGTH)
-	for from := 0; from < start; {
-		comma := from + strings.index_byte(text[from:], ',')
-		token.repeated ||= strings.trim_space(text[from:comma]) == token.id
-		from = comma + 1
-	}
-	return token, true
-}
-
-// File parsing diagnoses and drops malformed or repeated IDs and keeps the rest.
-@(private, require_results)
-parse_profile_order :: proc(
-	p: ^Profiles,
-	value: string,
-	line: int,
-	diagnostics: ^[dynamic]Diagnostic,
-) -> runtime.Allocator_Error {
-	if p.order_line > 0 {
-		duplicate_key_diagnostic(diagnostics, PROFILE_ORDER_KEY, line) or_return
-	}
-	p.order_line = line
-	for id in p.order {delete(id, p.allocator)}
-	clear(&p.order)
-	offset := 0
-	for token in order_token_next(value, &offset) {
-		if token.id == "" {continue}
-		if !token.valid {
-			diagnostic_append(
-				diagnostics,
-				line,
-				PROFILE_ORDER_KEY,
-				"invalid profile ID in order; use lowercase letters, digits, - and _",
-			) or_return
-			continue
-		}
-		if token.repeated {
-			duplicate_key_diagnostic(diagnostics, PROFILE_ORDER_KEY, line) or_return
-			continue
-		}
-		owned := strings.clone(token.id, p.allocator) or_return
-		if _, append_error := append(&p.order, owned); append_error != nil {
-			delete(owned, p.allocator)
-			return append_error
-		}
-	}
-	return nil
-}
-
 // Parses one profile.* line. Invalid lines produce diagnostics and never stop startup.
 @(require_results)
 parse_profile_key :: proc(
@@ -240,7 +173,7 @@ parse_profile_key :: proc(
 ) -> runtime.Allocator_Error {
 	p := &s.profiles
 	if key == PROFILE_ORDER_KEY {
-		return parse_profile_order(p, value, line, diagnostics)
+		return parse_order(&p.order, &p.order_line, p.allocator, key, "profile", value, line, diagnostics)
 	}
 	id, field_name, shaped := profile_key_split(key)
 	if !shaped {
@@ -457,119 +390,15 @@ profile_detect :: proc(s: ^Settings, detected: Detected_Profile) -> runtime.Allo
 // ID. Hidden and commandless profiles are skipped when `visible_only` is set.
 // Returns the number written; `out` must hold at least len(p.items) entries.
 profiles_in_order :: proc(p: ^Profiles, out: []int, visible_only := false) -> int {
-	count := 0
-	used: [PROFILE_LIMIT]bool
-	for id in p.order {
-		for &profile, index in p.items {
-			if profile.id != id || used[index] {continue}
-			used[index] = true
-			if visible_only && !profile_visible(&profile) {continue}
-			if count < len(out) {
-				out[count] = index
-				count += 1
-			}
-		}
-	}
-	pending: [PROFILE_LIMIT]int
-	pending_count := 0
-	for &profile, index in p.items {
-		if used[index] {continue}
-		if visible_only && !profile_visible(&profile) {continue}
-		insert := pending_count
-		for insert > 0 && text_less(profile.id, p.items[pending[insert - 1]].id) {
-			pending[insert] = pending[insert - 1]
-			insert -= 1
-		}
-		pending[insert] = index
-		pending_count += 1
-	}
-	for index in pending[:pending_count] {
-		if count >= len(out) {break}
-		out[count] = index
-		count += 1
-	}
-	return count
-}
-
-@(private)
-text_less :: proc(a, b: string) -> bool {
-	for i in 0 ..< min(len(a), len(b)) {
-		if a[i] != b[i] {return a[i] < b[i]}
-	}
-	return len(a) < len(b)
+	keep: proc(profile: ^Profile) -> bool
+	if visible_only {keep = profile_visible}
+	return items_in_order(p.items[:], p.order[:], out, keep)
 }
 
 // Whether `id` already has an explicit place in profile.order. Unlisted machine profiles use
 // implicit ID order until the owner reorders the table.
 profile_order_has :: proc(p: ^Profiles, id: string) -> bool {
-	for known in p.order {
-		if known == id {return true}
-	}
-	return false
-}
-
-// Moves the profile at `from` into the gap before `to`, which is indexed in `ids` before the move.
-// `out` receives the reordered IDs and must hold at least len(ids) entries.
-profile_move :: proc(ids: []string, from, to: int, out: []string) -> []string {
-	count := min(len(ids), len(out))
-	if count == 0 {return out[:0]}
-	index := clamp(from, 0, count - 1)
-	slot := clamp(to, 0, count)
-	if slot > index {slot -= 1}
-	written := 0
-	for id, i in ids[:count] {
-		if i == index {continue}
-		if written == slot {
-			out[written] = ids[index]
-			written += 1
-		}
-		out[written] = id
-		written += 1
-	}
-	if written < count {
-		out[written] = ids[index]
-		written += 1
-	}
-	return out[:written]
-}
-
-// The order text after a move: the given IDs in order, then every other ID in `others` that is
-// not already listed. Stale IDs are dropped because nothing reads them.
-@(require_results)
-profile_order_text :: proc(
-	ids, others: []string,
-	allocator := context.allocator,
-) -> (
-	text: string,
-	alloc_error: runtime.Allocator_Error,
-) {
-	builder := strings.builder_make(allocator) or_return
-	defer strings.builder_destroy(&builder)
-	first := true
-	for id in ids {
-		if id == "" {continue}
-		if !first {
-			if write_error := write_parts(&builder, ", "); write_error != nil {
-				return "", write_error
-			}
-		}
-		if write_error := write_parts(&builder, id); write_error != nil {return "", write_error}
-		first = false
-	}
-	for id in others {
-		if id == "" {continue}
-		listed := false
-		for known in ids {listed ||= known == id}
-		if listed {continue}
-		if !first {
-			if write_error := write_parts(&builder, ", "); write_error != nil {
-				return "", write_error
-			}
-		}
-		if write_error := write_parts(&builder, id); write_error != nil {return "", write_error}
-		first = false
-	}
-	return strings.clone(strings.to_string(builder), allocator)
+	return order_has(p.order[:], id)
 }
 
 // Rewrites the legacy shell keys into profile.default.* and adds the new selection keys. Returns
@@ -691,47 +520,11 @@ write_migrated_value :: proc(b: ^strings.Builder, raw: string) -> runtime.Alloca
 	return write_parts(b, "\"", raw, "\"")
 }
 
-// Interactive order edits are all or nothing: any empty, malformed or repeated entry refuses them.
-@(private)
-profile_order_text_valid :: proc(text: string) -> bool {
-	offset := 0
-	for token in order_token_next(text, &offset) {
-		if !token.valid || token.repeated {return false}
-	}
-	return true
-}
-
-// Removes every profile.ID.* line while preserving comments, BOM and line endings.
-@(require_results)
-remove_profile_text :: proc(
-	text, id: string,
-	allocator := context.allocator,
-) -> (
-	string,
-	runtime.Allocator_Error,
-) {
-	builder, build_error := strings.builder_make(allocator)
-	if build_error != nil {return "", build_error}
-	defer strings.builder_destroy(&builder)
-	scanner := line_scanner_init(text)
-	if scanner.bom {
-		if err := write_parts(&builder, UTF8_BOM); err != nil {return "", err}
-	}
-	prefix := fmt.tprintf("%s%s.", PROFILE_PREFIX, id)
-	for {
-		line, ok := line_next(&scanner)
-		if !ok {break}
-		if line.split && strings.has_prefix(line.key, prefix) {continue}
-		if err := write_parts(&builder, line.raw); err != nil {return "", err}
-	}
-	return strings.clone(strings.to_string(builder), allocator)
-}
-
 // Serializes one profile row from the settings editor. The returned text is temporary and is
 // consumed immediately by edit_text.
 profile_edit_text :: proc(key, value: string) -> (serialized, issue: string) {
 	if key == PROFILE_ORDER_KEY {
-		if !profile_order_text_valid(value) {
+		if !order_text_valid(value) {
 			return "", "Use comma-separated profile IDs, each lowercase with digits, - or _."
 		}
 		return value, ""
@@ -751,12 +544,15 @@ profile_edit_text :: proc(key, value: string) -> (serialized, issue: string) {
 	text, field_issue := profile_field_check(field, value, .Interactive_Field)
 	if field_issue != .None {return "", profile_problem_text(field_issue, .Interactive_Field, value)}
 	if field == .Hidden {return text, ""}
-	builder, build_error := strings.builder_make(context.temp_allocator)
-	if build_error != nil {return "", "Could not allocate the settings change."}
-	defer strings.builder_destroy(&builder)
-	if write_parts(&builder, "\"", value, "\"") != nil {
-		return "", "Could not allocate the settings change."
-	}
-	return strings.to_string(builder), ""
+	return edit_quoted(value)
+}
+
+// A text field's file form: the value in one pair of double quotes, which file parsing removes.
+// Temporary; `issue` is set only when the text cannot be allocated.
+@(private)
+edit_quoted :: proc(value: string) -> (serialized, issue: string) {
+	quoted, quote_error := strings.concatenate({"\"", value, "\""}, context.temp_allocator)
+	if quote_error != nil {return "", "Could not allocate the settings change."}
+	return quoted, ""
 }
 

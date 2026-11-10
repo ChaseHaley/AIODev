@@ -417,18 +417,18 @@ profile_text_facts_match_load_and_edit_validation :: proc(t: ^testing.T) {
 profile_order_moves_do_not_duplicate_ids :: proc(t: ^testing.T) {
 	ids := [?]string{"default", "pwsh", "cmd"}
 	out: [3]string
-	moved := settings.profile_move(ids[:], 0, 2, out[:])
+	moved := settings.order_move(ids[:], 0, 2, out[:])
 	testing.expect_value(t, len(moved), 3)
 	testing.expect_value(t, moved[0], "pwsh")
 	testing.expect_value(t, moved[1], "default")
 	testing.expect_value(t, moved[2], "cmd")
 
-	moved = settings.profile_move(ids[:], 2, 0, out[:])
+	moved = settings.order_move(ids[:], 2, 0, out[:])
 	testing.expect_value(t, moved[0], "cmd")
 	testing.expect_value(t, moved[1], "default")
 	testing.expect_value(t, moved[2], "pwsh")
 
-	moved = settings.profile_move(ids[:], 1, 1, out[:])
+	moved = settings.order_move(ids[:], 1, 1, out[:])
 	testing.expect_value(t, moved[0], "default")
 	testing.expect_value(t, moved[1], "pwsh")
 	testing.expect_value(t, moved[2], "cmd")
@@ -437,7 +437,7 @@ profile_order_moves_do_not_duplicate_ids :: proc(t: ^testing.T) {
 @(test)
 profile_order_text_lists_the_table_then_the_rest :: proc(t: ^testing.T) {
 	others := [?]string{"cmd", "wsl-ubuntu"}
-	text, text_error := settings.profile_order_text(
+	text, text_error := settings.order_text(
 		[]string{"pwsh", "default"},
 		others[:],
 		context.allocator,
