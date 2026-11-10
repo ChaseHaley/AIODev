@@ -39,9 +39,14 @@ motion_editor_rows_follow_the_context_tree :: proc(t: ^testing.T) {
 	for key in ([]string{"motion.speed", ui.MOTION_PRESET_KEY, ui.MOTION_SAVE_PRESET_KEY}) {
 		testing.expectf(t, profile_item(p, key) >= 0, "%s is listed", key)
 	}
+	// Contexts start collapsed, so only Panes shows; its children appear once it expands.
 	keys := settings.MOTION_CONTEXT_KEY
+	testing.expect(t, profile_item(p, keys[.Panes]) >= 0)
+	testing.expect_value(t, profile_item(p, keys[.Split]), -1)
+	if !testing.expect(t, ui.editor_select_key(p, keys[.Panes])) {return}
+	profile_press(&f, {key = .Enter})
 	for key in keys {testing.expectf(t, profile_item(p, key) >= 0, "header %s is listed", key)}
-	// Contexts start collapsed; Enter on a header shows its fields in order under it.
+	// Enter on a child header shows its fields in order under it.
 	testing.expect_value(t, profile_item(p, "motion.panes.split.duration"), -1)
 	if !testing.expect(t, ui.editor_select_key(p, "motion.panes.split")) {return}
 	profile_press(&f, {key = .Enter})
@@ -67,6 +72,13 @@ motion_editor_rows_follow_the_context_tree :: proc(t: ^testing.T) {
 	p = profile_open(&f)
 	testing.expect(t, profile_item(p, "motion.panes.split.duration") >= 0)
 	testing.expect_value(t, profile_item(p, "motion.panes.view.duration"), -1)
+	// Collapsing Panes hides its children and their fields, and expanding it brings them back as they were.
+	if !testing.expect(t, ui.editor_select_key(p, keys[.Panes])) {return}
+	profile_press(&f, {key = .Arrow_Left})
+	testing.expect_value(t, profile_item(p, keys[.Split]), -1)
+	testing.expect_value(t, profile_item(p, "motion.panes.split.duration"), -1)
+	profile_press(&f, {key = .Arrow_Right})
+	testing.expect(t, profile_item(p, "motion.panes.split.duration") >= 0)
 }
 
 @(test)

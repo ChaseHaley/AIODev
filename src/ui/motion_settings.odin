@@ -313,11 +313,34 @@ motion_context_rows :: proc(
 	return nil
 }
 
-// A context's field rows show while it is expanded, and during a search so field and curve names
-// find them.
+// A context header shows while every context above it is expanded; a field row also needs its own
+// context expanded. Searching shows them all.
 @(private)
 motion_row_available :: proc(p: ^Editor, row: Editor_Row) -> bool {
-	return row.motion_context in p.motion_expanded || filtering(p)
+	return filtering(p) || motion_shown_needs(row) <= p.motion_expanded
+}
+
+// The contexts that must be expanded for `row` to show.
+@(private = "file")
+motion_shown_needs :: proc(row: Editor_Row) -> (needs: bit_set[settings.Motion_Context]) {
+	if row.motion_part in MOTION_FIELD_PARTS {needs += {row.motion_context}}
+	at := row.motion_context
+	for {
+		parent, has_parent := settings.motion_context_parent(at)
+		if !has_parent {return}
+		needs += {parent}
+		at = parent
+	}
+}
+
+// Expands what `row` needs to show; true when that changed anything.
+@(private)
+motion_reveal :: proc(p: ^Editor, row: Editor_Row) -> bool {
+	if row.motion_part not_in MOTION_FIELD_PARTS && row.motion_part != .Context {return false}
+	needs := motion_shown_needs(row)
+	if needs <= p.motion_expanded {return false}
+	p.motion_expanded += needs
+	return true
 }
 
 editor_motion_toggle :: proc(p: ^Editor, c: settings.Motion_Context) {

@@ -1043,10 +1043,7 @@ editor_reveal :: proc(p: ^Editor, target: Reveal_Target) -> bool {
 			editor_profile_set_expanded(p, row.profile)
 			editor_rebuild(p)
 		}
-		if row.motion_part in MOTION_FIELD_PARTS && row.motion_context not_in p.motion_expanded {
-			p.motion_expanded += {row.motion_context}
-			editor_rebuild(p)
-		}
+		if motion_reveal(p, row) {editor_rebuild(p)}
 		break
 	}
 	return editor_select_key(p, key)
@@ -1077,7 +1074,9 @@ row_matches :: proc(words: []string, haystack: string, fuzzy: bool = false) -> b
 // Whether a row belongs to the page in the current expansion state, before search ranks it.
 @(private)
 row_available :: proc(p: ^Editor, row: Editor_Row) -> bool {
-	if row.motion_part in MOTION_FIELD_PARTS {return motion_row_available(p, row)}
+	if row.motion_part in MOTION_FIELD_PARTS || row.motion_part == .Context {
+		return motion_row_available(p, row)
+	}
 	if row.process_field != .None {
 		return row.process == 0 || row.process_field == .Group || row.process == p.process_expanded
 	}
