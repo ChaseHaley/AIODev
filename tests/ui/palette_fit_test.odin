@@ -99,7 +99,7 @@ palette_fit_renders_final_selection_inside_client :: proc(t: ^testing.T) {
 		defer render.surface_destroy(surface)
 		ui.text_set_size(&text, 16*scale)
 		ui.palette_fit(&p, w, h, scale)
-		ui.palette_key(&p, &registry, key({key = .End}))
+		ui.palette_key(&p, &registry, key({key = .End, modifiers = {.Control}}))
 		testing.expect_value(t, p.selected, len(p.results)-1)
 		for id in ([?]string{"studio-dark", "studio-light"}) {
 			theme := ui.theme_from(fixtures.shipped_theme(id), fixtures.default_interface())
@@ -176,7 +176,7 @@ palette_fit_tracks_navigation_query_resize_and_pointer :: proc(t: ^testing.T) {
 				ui.palette_fit(&p, w, h, scale)
 				l := ui.palette_layout(&p, w, h, scale)
 				palette_fit_visible(t, &p, l, w, h)
-				ui.palette_key(&p, &registry, key({key = .End}))
+				ui.palette_key(&p, &registry, key({key = .End, modifiers = {.Control}}))
 				testing.expect_value(t, p.selected, len(p.results)-1)
 				palette_fit_visible(t, &p, l, w, h)
 				if l.rows == 0 {
@@ -200,7 +200,7 @@ palette_fit_tracks_navigation_query_resize_and_pointer :: proc(t: ^testing.T) {
 				}
 				ui.palette_key(&p, &registry, key({key = .P, modifiers = {.Control}}))
 				palette_fit_visible(t, &p, l, w, h)
-				ui.palette_key(&p, &registry, key({key = .Home}))
+				ui.palette_key(&p, &registry, key({key = .Home, modifiers = {.Control}}))
 				for _ in 0..<len(p.results) {
 					ui.palette_key(&p, &registry, key({key = .Arrow_Down}))
 					palette_fit_visible(t, &p, l, w, h)
@@ -241,7 +241,7 @@ palette_fit_tracks_navigation_query_resize_and_pointer :: proc(t: ^testing.T) {
 	testing.expect_value(t, normal.panel, render.Rect{220, 96, 560, 477})
 	// The scrollbar takes the list's right padding and 3 DIPs more, inside the panel border.
 	testing.expect_value(t, normal.list, render.Rect{228, 213, 541, 320})
-	ui.palette_key(&p, &registry, key({key = .End}))
+	ui.palette_key(&p, &registry, key({key = .End, modifiers = {.Control}}))
 	ui.palette_key(&p, &registry, key({key = .A, modifiers = {.Control}}))
 	selected_text := ui.palette_selection(&p)
 	cursor, anchor := p.query.cursor, p.query.anchor
@@ -266,7 +266,7 @@ palette_fit_tracks_navigation_query_resize_and_pointer :: proc(t: ^testing.T) {
 	ui.palette_fit(&p, 926, 928, 2)
 	l := ui.palette_layout(&p, 926, 928, 2)
 	testing.expect_value(t, l.rows, min(terminal, p.visible_rows))
-	ui.palette_key(&p, &registry, key({key = .End}))
+	ui.palette_key(&p, &registry, key({key = .End, modifiers = {.Control}}))
 	outcome, _ := ui.palette_key(&p, &registry, key({key = .Enter}))
 	testing.expect_value(t, outcome, ui.Outcome.Open_Setting)
 	testing.expect_value(t, chosen_setting(&p), "terminal.minimum_contrast")
@@ -278,7 +278,7 @@ palette_fit_tracks_navigation_query_resize_and_pointer :: proc(t: ^testing.T) {
 	testing.expect_value(t, l.rows, 1)
 	testing.expect_value(t, ui.palette_scroll(&p, -10000), ui.Outcome.None)
 	testing.expect_value(t, p.scroll, 0)
-	ui.palette_key(&p, &registry, key({key = .End}))
+	ui.palette_key(&p, &registry, key({key = .End, modifiers = {.Control}}))
 	testing.expect_value(t, p.selected, 0)
 	ui.palette_key(&p, &registry, key({key = .A, modifiers = {.Control}}))
 	ui.palette_text(&p, &registry, "zzzz setting")
@@ -341,7 +341,7 @@ palette_fit_draws_complete_selected_rows_with_reused_owned_storage :: proc(t: ^t
 			testing.expect_value(t, ui.palette_pointer_release(&p), ui.Outcome.None)
 			testing.expect(t, p.drag == nil)
 		}
-		ui.palette_key(&p, &registry, key({key = .End}))
+		ui.palette_key(&p, &registry, key({key = .End, modifiers = {.Control}}))
 		l = ui.palette_layout(&p, w, h, scale)
 		selected_y := l.list.y + f32(p.selected-p.scroll) * l.row_height
 		for id in ([?]string{"studio-dark", "studio-light"}) {
