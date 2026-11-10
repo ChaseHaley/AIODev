@@ -25,6 +25,7 @@ Reveal_Focus :: enum {
 Settings_Section :: enum {
 	None,
 	Profiles,
+	Link_Programs,
 	Shortcuts,
 	Colors,
 }
@@ -35,10 +36,11 @@ Settings_Section_Info :: struct {
 
 @(rodata)
 SETTINGS_SECTIONS := [Settings_Section]Settings_Section_Info {
-	.None      = {},
-	.Profiles  = {title = "Profiles", palette_key = "profiles"},
-	.Shortcuts = {query = settings.KEY_BINDING_PREFIX},
-	.Colors    = {query = SETTINGS_COLOR_PREFIX},
+	.None          = {},
+	.Profiles      = {title = "Profiles", palette_key = "profiles"},
+	.Link_Programs = {title = "Link Programs", palette_key = "link_programs"},
+	.Shortcuts     = {query = settings.KEY_BINDING_PREFIX},
+	.Colors        = {query = SETTINGS_COLOR_PREFIX},
 }
 
 // The key prefix of the active theme's color rows.
@@ -96,6 +98,7 @@ settings_reveal_target :: proc(reveal: Settings_Reveal) -> Maybe(ui.Reveal_Targe
 		if info.palette_key != "" && info.palette_key == reveal.key {section = candidate}
 	}
 	if section == .Profiles {return ui.Reveal_Profiles{}}
+	if section == .Link_Programs {return ui.Reveal_Openers{}}
 	if reveal.key == "" {return nil}
 	if entry := settings.schema_find(reveal.key); entry != nil && entry.control == .Group {
 		return ui.Reveal_Program_Groups{}

@@ -28,6 +28,8 @@ Row_Kind :: enum {
 	Process_Group,
 	Profile_Add,
 	Profile_Icon,
+	// A link program's table line; its fields are ordinary rows that name it in `opener`.
+	Opener,
 }
 
 // What saving an action or theme row asks the page owner to do. Rows are still found, searched and
@@ -40,6 +42,7 @@ Page_Action :: enum {
 	Theme_Delete,
 	Theme_Export,
 	Theme_Color,
+	Opener_Add,
 }
 
 // Facts the profile table draws beside a row. Ordinary settings rows leave these unset.
@@ -57,7 +60,7 @@ Editor_Row_Flag :: enum {
 // Strings, `choices` and `choice_labels` are owned by the editor. `choice_labels`, when present,
 // is what each choice displays; the choice itself is the saved value. An empty optional color has no
 // color at all. Profile rows also own `profile`, `badge`, `detail` (extra search text) and `note`
-// (an inline problem).
+// (an inline problem); link program rows own `opener`, the ID of the program they belong to.
 Editor_Row :: struct {
 	key, title, description, value, default_value: string,
 	group:                                         int,
@@ -82,6 +85,9 @@ Editor_Row :: struct {
 	profile, badge, detail, note:                  string,
 	// The profile field an inline profile row edits.
 	profile_field:                                 Maybe(settings.Profile_Field),
+	opener:                                        string,
+	// The link program field an inline row edits.
+	opener_field:                                  Maybe(settings.Opener_Field),
 	flags:                                         bit_set[Editor_Row_Flag],
 	process: int,
 	process_field: Process_Field,
@@ -188,6 +194,7 @@ Editor_Profile_Menu :: struct {}
 Order_Kind :: enum {
 	Profiles,
 	Process_Groups,
+	Openers,
 }
 
 // A reorder drag, then its blocks easing into place once it ends. Nil while nothing reorders;
@@ -205,10 +212,12 @@ Order_Dragging :: struct {
 	grab:         f32,
 }
 
-// The grabbed block: a profile, whose owned ID a drop hands to its request, or a process group.
+// The grabbed block: a profile or link program, whose owned ID a drop hands to its request, or a
+// process group.
 Order_Block :: union #no_nil {
 	Order_Profile,
 	Order_Group,
+	Order_Opener,
 }
 
 Order_Profile :: struct {
@@ -217,6 +226,10 @@ Order_Profile :: struct {
 
 Order_Group :: struct {
 	id: int,
+}
+
+Order_Opener :: struct {
+	id: string,
 }
 
 Order_Settling :: struct {
@@ -248,6 +261,8 @@ Editor_Request :: union {
 	Profile_Hidden_Request,
 	Profile_Order_Request,
 	Process_Remove_Request,
+	Opener_Remove_Request,
+	Opener_Order_Request,
 }
 
 Profile_Request :: struct {
@@ -267,6 +282,16 @@ Profile_Order_Request :: struct {
 
 Process_Remove_Request :: struct {
 	group: int,
+}
+
+Opener_Remove_Request :: struct {
+	id: string,
+}
+
+// Moves link program `id` into the gap before `slot`, counted among the programs before the move.
+Opener_Order_Request :: struct {
+	id:   string,
+	slot: int,
 }
 
 // A profile block's drawn first line while rows reorder. Like the tab strip's positions, the grabbed
@@ -352,11 +377,12 @@ editor_draft :: proc(p: ^Editor) -> bool {
 }
 
 // The settings page shown in a settings tab. Only the selected row is edited; its pending value lives
-// in `value` until it is saved. Profile, program group, revision and theme state belong to those
-// features and are nested here so the page's procedures read them as page fields.
+// in `value` until it is saved. Profile, program group, link program, revision and theme state
+// belong to those features and are nested here so the page's procedures read them as page fields.
 Editor :: struct {
 	using profiles:                                                    Profile_Editor_State,
 	using processes:                                                   Process_Editor_State,
+	using openers:                                                     Opener_Editor_State,
 	using page:                                                        Page_Revision_State,
 	using themes:                                                      Theme_Page_State,
 	hover_clear:                                                       bool,
@@ -384,8 +410,8 @@ Editor :: struct {
 	hsv:                                                               [3]f32,
 	message:                                                           string,
 	error:                                                             bool,
-	// A write the page owner performs for profiles or program groups, and the reorder that rewrites
-	// profile.order or the process groups.
+	// A write the page owner performs for profiles, program groups or link programs, and the
+	// reorder that rewrites profile.order, opener.order or the process groups.
 	request:                                                           Editor_Request,
 	order:                                                             Editor_Order,
 	profile_positions:                                                 [dynamic]Profile_Position,
@@ -399,6 +425,8 @@ Editor_Outcome :: enum {
 	Profile_Action,
 	Process_Save,
 	Process_Remove,
+	// The page owner performs the request for a link program: remove or reorder.
+	Opener_Action,
 	Font_Filter,
 }
 
@@ -407,6 +435,7 @@ Editor_Outcome :: enum {
 Editor_View :: struct {
 	process_expanded:  int,
 	expanded:          string,
+	opener_expanded:   string,
 	order:             Order_Kind,
 	profile_positions: [dynamic]Profile_Position,
 }
@@ -449,7 +478,7 @@ OUTLINE_MIN_PAGE :: 720
 
 // Every string a row owns, in one place for editor_add's copies and editor_row_destroy's frees.
 @(private)
-row_owned_strings :: proc(row: ^Editor_Row) -> [9]^string {
+row_owned_strings :: proc(row: ^Editor_Row) -> [10]^string {
 	return {
 		&row.key,
 		&row.title,
@@ -460,6 +489,7 @@ row_owned_strings :: proc(row: ^Editor_Row) -> [9]^string {
 		&row.badge,
 		&row.detail,
 		&row.note,
+		&row.opener,
 	}
 }
 
@@ -473,6 +503,7 @@ editor_row_destroy :: proc(row: ^Editor_Row) {
 
 editor_destroy :: proc(p: ^Editor) {
 	profile_editor_destroy(&p.profiles)
+	opener_editor_destroy(&p.openers)
 	for &row in p.rows {editor_row_destroy(&row)}
 	for group in p.groups {delete(group.title)}
 	delete(p.rows)
@@ -500,6 +531,7 @@ editor_destroy :: proc(p: ^Editor) {
 editor_view_take :: proc(p: ^Editor) -> (view: Editor_View, alloc_error: runtime.Allocator_Error) {
 	view.process_expanded = p.process_expanded
 	view.expanded = strings.clone(p.expanded) or_return
+	view.opener_expanded = strings.clone(p.opener_expanded) or_return
 	view.order, _ = order_kind(p)
 	view.profile_positions, p.profile_positions = p.profile_positions, {}
 	if _, settling := p.order.(Order_Settling); settling {order_settle(p, view.order)}
@@ -508,23 +540,30 @@ editor_view_take :: proc(p: ^Editor) -> (view: Editor_View, alloc_error: runtime
 
 editor_view_destroy :: proc(view: ^Editor_View) {
 	delete(view.expanded)
+	delete(view.opener_expanded)
 	profile_positions_clear(&view.profile_positions)
 	delete(view.profile_positions)
 	view^ = {}
 }
 
-// Restores a previous view into a page whose rows now exist, dropping a profile that no longer
-// does. A reload after a successful save must land back on the same expanded row.
+// Restores a previous view into a page whose rows now exist, dropping a profile or link program
+// that no longer does. A reload after a successful save must land back on the same expanded row.
 editor_view_restore :: proc(p: ^Editor, view: ^Editor_View) {
 	p.process_expanded = view.process_expanded
 	delete(p.expanded)
 	p.expanded, view.expanded = view.expanded, ""
+	delete(p.opener_expanded)
+	p.opener_expanded, view.opener_expanded = view.opener_expanded, ""
 	if drag, dragging := p.order.(Order_Dragging); dragging {order_block_free(drag.block)}
 	profile_positions_clear(&p.profile_positions)
 	delete(p.profile_positions)
 	p.profile_positions, view.profile_positions = view.profile_positions, {}
 	order_settle(p, view.order)
 	if p.expanded != "" && !editor_has_profile_row(p, p.expanded) {delete(p.expanded); p.expanded = ""}
+	if p.opener_expanded != "" && !editor_has_opener_row(p, p.opener_expanded) {
+		delete(p.opener_expanded)
+		p.opener_expanded = ""
+	}
 }
 
 // How a page meets a rebuild for a new revision.
@@ -710,6 +749,10 @@ editor_request_destroy :: proc(request: ^Editor_Request) {
 	case Profile_Order_Request:
 		delete(r.id)
 	case Process_Remove_Request:
+	case Opener_Remove_Request:
+		delete(r.id)
+	case Opener_Order_Request:
+		delete(r.id)
 	}
 	request^ = nil
 }
@@ -976,6 +1019,8 @@ Reveal_Target :: union #no_nil {
 	Reveal_Profiles,
 	// The first program group, or Add Group when there is none.
 	Reveal_Program_Groups,
+	// The first link program, or Add Link Program when there is none.
+	Reveal_Openers,
 }
 
 Reveal_Row :: struct {
@@ -986,8 +1031,10 @@ Reveal_Profiles :: struct {}
 
 Reveal_Program_Groups :: struct {}
 
-// Selects a row, opening the profile or program group that owns it first. A palette jump or a
-// reveal must be able to land on a field the collapsed table is not showing.
+Reveal_Openers :: struct {}
+
+// Selects a row, opening the profile, program group or link program that owns it first. A palette
+// jump or a reveal must be able to land on a field the collapsed table is not showing.
 editor_reveal :: proc(p: ^Editor, target: Reveal_Target) -> bool {
 	key: string
 	switch t in target {
@@ -1001,6 +1048,11 @@ editor_reveal :: proc(p: ^Editor, target: Reveal_Target) -> bool {
 	case Reveal_Program_Groups:
 		key = process_key(0, ".add")
 		for row in p.rows {if row.process_field == .Group {key = row.key; break}}
+	case Reveal_Openers:
+		for row in p.rows {
+			if row.kind == .Opener {key = row.key; break}
+			if row.action == .Opener_Add && key == "" {key = row.key}
+		}
 	}
 	for row in p.rows {
 		if row.key != key {continue}
@@ -1010,6 +1062,10 @@ editor_reveal :: proc(p: ^Editor, target: Reveal_Target) -> bool {
 		}
 		if row.kind != .Profile && row.profile != "" && p.expanded != row.profile {
 			editor_profile_set_expanded(p, row.profile)
+			editor_rebuild(p)
+		}
+		if row.kind != .Opener && row.opener != "" && p.opener_expanded != row.opener {
+			editor_opener_set_expanded(p, row.opener)
 			editor_rebuild(p)
 		}
 		break
@@ -1045,6 +1101,7 @@ row_available :: proc(p: ^Editor, row: Editor_Row) -> bool {
 	if row.process_field != .None {
 		return row.process == 0 || row.process_field == .Group || row.process == p.process_expanded
 	}
+	if row.opener != "" {return row.kind == .Opener || row.opener == p.opener_expanded}
 	#partial switch row.kind {
 	case .Profile, .Profile_Add:
 		return true
@@ -1149,20 +1206,19 @@ editor_profile_toggle :: proc(p: ^Editor, id: string) {
 	if p.expanded == id {editor_profile_collapse(p)} else {editor_profile_expand(p, id)}
 }
 
-
-// The profile table's index for a page item, counting only table rows before it.
+// A table's index for a page item, counting only the `kind` blocks' first rows before it.
 @(private)
-profile_index_at :: proc(p: ^Editor, item_index: int) -> int {
+block_index_at :: proc(p: ^Editor, item_index: int, kind: Order_Kind) -> int {
 	count := 0
 	for item, index in p.items {
 		if index >= item_index {break}
-		if item.row >= 0 && p.rows[item.row].kind == .Profile {count += 1}
+		if item.row >= 0 && order_head(p.rows[item.row], kind) {count += 1}
 	}
 	return count
 }
 
-// A reorderable block's first row and the inline editor rows under it, as page lines: a profile
-// with its expanded editor, or a process group with its fields.
+// A reorderable block's first row and the inline editor rows under it, as page lines: a profile or
+// link program with its expanded editor, or a process group with its fields.
 @(private)
 Profile_Block :: struct {
 	start, count: int,
@@ -1173,18 +1229,18 @@ Profile_Block :: struct {
 order_kind :: proc(p: ^Editor) -> (kind: Order_Kind, ok: bool) {
 	switch o in p.order {
 	case Order_Dragging:
-		_, group := o.block.(Order_Group)
-		return group ? .Process_Groups : .Profiles, true
+		switch _ in o.block {
+		case Order_Profile:
+			return .Profiles, true
+		case Order_Group:
+			return .Process_Groups, true
+		case Order_Opener:
+			return .Openers, true
+		}
 	case Order_Settling:
 		return o.kind, true
 	}
 	return
-}
-
-@(private)
-order_processes :: proc(p: ^Editor) -> bool {
-	kind, ok := order_kind(p)
-	return ok && kind == .Process_Groups
 }
 
 // Whether a reorder drag of `kind` holds the pointer.
@@ -1208,13 +1264,26 @@ editor_order_profile :: proc(p: ^Editor) -> string {
 	return profile.id
 }
 
-@(private)
-order_block_free :: proc(block: Order_Block) {
-	if profile, held := block.(Order_Profile); held {delete(profile.id)}
+// The link program a reorder drag holds, or "".
+editor_order_opener :: proc(p: ^Editor) -> string {
+	drag, dragging := p.order.(Order_Dragging)
+	if !dragging {return ""}
+	opener, _ := drag.block.(Order_Opener)
+	return opener.id
 }
 
-// Starts a reorder drag, taking ownership of a profile block's ID. Blocks still settling from an
-// earlier drag of the same kind keep their drawn lines.
+@(private)
+order_block_free :: proc(block: Order_Block) {
+	#partial switch b in block {
+	case Order_Profile:
+		delete(b.id)
+	case Order_Opener:
+		delete(b.id)
+	}
+}
+
+// Starts a reorder drag, taking ownership of a profile or link program block's ID. Blocks still
+// settling from an earlier drag of the same kind keep their drawn lines.
 @(private)
 order_begin :: proc(p: ^Editor, block: Order_Block, from: int, grab: f32) {
 	grabbed: string
@@ -1224,6 +1293,8 @@ order_begin :: proc(p: ^Editor, block: Order_Block, from: int, grab: f32) {
 		grabbed = b.id
 	case Order_Group:
 		grabbed, kind = process_key(b.id), .Process_Groups
+	case Order_Opener:
+		grabbed, kind = b.id, .Openers
 	}
 	if current, ok := order_kind(p); ok && current != kind {profile_positions_clear(&p.profile_positions)}
 	if drag, dragging := p.order.(Order_Dragging); dragging {order_block_free(drag.block)}
@@ -1256,24 +1327,58 @@ order_cancel :: proc(p: ^Editor) {
 }
 
 @(private)
-order_head :: proc(row: Editor_Row, processes: bool) -> bool {
-	return processes ? row.process_field == .Group : row.kind == .Profile
+order_head :: proc(row: Editor_Row, kind: Order_Kind) -> bool {
+	switch kind {
+	case .Profiles:
+		return row.kind == .Profile
+	case .Process_Groups:
+		return row.process_field == .Group
+	case .Openers:
+		return row.kind == .Opener
+	}
+	return false
 }
 
-// The reorderable blocks in page order. An expanded block includes its editor rows.
+// Whether `row` is one of the editor rows under the block `head` starts.
+@(private)
+order_member :: proc(row, head: Editor_Row, kind: Order_Kind) -> bool {
+	switch kind {
+	case .Profiles:
+		return row.kind != .Profile && row.profile == head.profile
+	case .Process_Groups:
+		return row.process_field != .Group && row.process == head.process
+	case .Openers:
+		return row.kind != .Opener && row.opener == head.opener
+	}
+	return false
+}
+
+// The identity a block's position is kept under across a settings reload.
+@(private)
+order_block_key :: proc(head: Editor_Row, kind: Order_Kind) -> string {
+	switch kind {
+	case .Profiles:
+		return head.profile
+	case .Process_Groups:
+		return head.key
+	case .Openers:
+		return head.opener
+	}
+	return ""
+}
+
+// The reorderable blocks of the reordering kind in page order. An expanded block includes its
+// editor rows.
 @(private)
 profile_blocks :: proc(p: ^Editor) -> []Profile_Block {
 	blocks := make([dynamic]Profile_Block, context.temp_allocator)
-	processes := order_processes(p)
+	kind, _ := order_kind(p)
 	for item, index in p.items {
-		if item.row < 0 || !order_head(p.rows[item.row], processes) {continue}
+		if item.row < 0 || !order_head(p.rows[item.row], kind) {continue}
 		head := p.rows[item.row]
 		end := index + 1
 		for end < len(p.items) && p.items[end].row >= 0 {
-			row := p.rows[p.items[end].row]
-			if processes {
-				if row.process != head.process || row.process_field == .Group {break}
-			} else if row.kind == .Profile || row.profile != head.profile {break}
+			if !order_member(p.rows[p.items[end].row], head, kind) {break}
 			end += 1
 		}
 		append(&blocks, Profile_Block{index, end - index})
@@ -1281,11 +1386,10 @@ profile_blocks :: proc(p: ^Editor) -> []Profile_Block {
 	return blocks[:]
 }
 
-// The identity a block's position is kept under across a settings reload.
 @(private)
 profile_block_id :: proc(p: ^Editor, block: Profile_Block) -> string {
-	row := p.rows[p.items[block.start].row]
-	return order_processes(p) ? row.key : row.profile
+	kind, _ := order_kind(p)
+	return order_block_key(p.rows[p.items[block.start].row], kind)
 }
 
 // Where block `index` belongs: its own line, or while a reorder drag is active, its line with the
@@ -1325,20 +1429,15 @@ profile_line_entry :: proc(p: ^Editor, index: int) -> (entry: ^Profile_Position,
 		return nil, 0
 	}
 	row := p.rows[p.items[index].row]
-	processes := order_processes(p)
-	if processes ? row.process <= 0 : row.profile == "" {return nil, 0}
+	kind, _ := order_kind(p)
 	start = index
-	for start >= 0 && (p.items[start].row < 0 || !order_head(p.rows[p.items[start].row], processes)) {
+	for start >= 0 && (p.items[start].row < 0 || !order_head(p.rows[p.items[start].row], kind)) {
 		start -= 1
 	}
 	if start < 0 {return nil, 0}
 	head := p.rows[p.items[start].row]
-	if processes {
-		if head.process != row.process {return nil, 0}
-		return profile_position(p, head.key), start
-	}
-	if head.profile != row.profile {return nil, 0}
-	return profile_position(p, row.profile), start
+	if start != index && !order_member(row, head, kind) {return nil, 0}
+	return profile_position(p, order_block_key(head, kind)), start
 }
 
 // How many lines from its own place the page line at `index` is drawn while rows reorder.
@@ -1716,6 +1815,9 @@ activate :: proc(p: ^Editor, row: ^Editor_Row) -> Editor_Outcome {
 		editor_mode_set(p, Editor_Editing{})
 		field_select_all(&p.value)
 	case .Process_Group:
+	case .Opener:
+		// The keyboard reaches the line's controls; Delete removes and Enter opens the fields.
+		editor_mode_set(p, Editor_Editing{})
 	case .Profile:
 		if editor_focus(p) == .Control {return profile_activate(p, row)}
 		editor_profile_toggle(p, row.profile)
@@ -1815,6 +1917,7 @@ editor_key :: proc(p: ^Editor, raw: input.Key_Event) -> Editor_Outcome {
 		if e.key != .Tab {return .None}
 	}
 	if result, handled := editor_process_key(p, row, e); handled {return result}
+	if result, handled := editor_opener_key(p, row, e); handled {return result}
 	if editor_popup(p) != .None && row != nil {
 		if outcome, handled := popup_key(p, row, e); handled {return outcome}
 	}
@@ -1837,6 +1940,13 @@ editor_key :: proc(p: ^Editor, raw: input.Key_Event) -> Editor_Outcome {
 		   row.profile == p.expanded &&
 		   (focus != .Control || row.kind == .Profile) {
 			editor_profile_collapse(p)
+			return .Changed
+		}
+		if row != nil &&
+		   row.opener != "" &&
+		   row.opener == p.opener_expanded &&
+		   (focus != .Control || row.kind == .Opener) {
+			editor_opener_toggle(p, row.opener)
 			return .Changed
 		}
 		if focus != .Search {
@@ -2154,7 +2264,7 @@ editor_row_parts :: proc(p: ^Editor, l: Editor_Layout, index: int) -> Row_Parts 
 		parts.text_right = parts.swatch.x - SPACE_3 * s
 	case .Shortcut:
 		shortcut_parts(&parts, s, index == p.selected)
-	case .Process_Group, .Profile, .Profile_Add:
+	case .Process_Group, .Profile, .Profile_Add, .Opener:
 		parts.reset = {}
 	}
 	if parts.field.width > 0 && parts.text_right > parts.field.x {parts.text_right = parts.field.x}
@@ -2415,6 +2525,7 @@ editor_press :: proc(
 	if row.process_field != .None {
 		if result, handled := editor_process_press(p, row, parts, x, y, s); handled {return result}
 	}
+	if row.kind == .Opener {return editor_opener_press(p, row, parts, index, x, y, s)}
 	if row.kind == .Profile || row.kind == .Profile_Add {
 		table := profile_row_parts(row.kind, parts.row, s)
 		switch {
@@ -2424,7 +2535,8 @@ editor_press :: proc(
 		case row.kind == .Profile && render.rect_contains(table.handle, x, y):
 			if filtering(p) {return .Changed}
 			grab := (y - parts.row.y) / l.row_height
-			order_begin(p, Order_Profile{strings.clone(row.profile)}, profile_index_at(p, index), grab)
+			from := block_index_at(p, index, .Profiles)
+			order_begin(p, Order_Profile{strings.clone(row.profile)}, from, grab)
 			return .Changed
 		case row.kind == .Profile && render.rect_contains(table.radio, x, y):
 			editor_mode_set(p, Editor_Editing{})
@@ -2595,8 +2707,8 @@ editor_pointer_cancel :: proc(p: ^Editor) {
 	_ = editor_release(p)
 }
 
-// Drops a reorder drag at its target slot. A profile names its new place in a request; a process
-// group moves within the page's draft.
+// Drops a reorder drag at its target slot. A profile or link program names its new place in a
+// request; a process group moves within the page's draft.
 @(private)
 order_drop :: proc(p: ^Editor) -> Editor_Outcome {
 	drag, dropped := order_release(p)
@@ -2615,6 +2727,13 @@ order_drop :: proc(p: ^Editor) -> Editor_Outcome {
 		}
 		editor_request_set(p, Profile_Order_Request{block.id, drag.target})
 		return .Profile_Action
+	case Order_Opener:
+		if drag.target == drag.from {
+			delete(block.id)
+			return .Changed
+		}
+		editor_request_set(p, Opener_Order_Request{block.id, drag.target})
+		return .Opener_Action
 	}
 	return .None
 }
@@ -2771,8 +2890,13 @@ editor_pointer :: proc(p: ^Editor, l: Editor_Layout, x, y: f32) -> platform.Curs
 	row := &p.rows[p.items[index].row]
 	parts := editor_row_parts(p, l, index)
 	if row.process_field == .Group {
-		cells := editor_process_parts(parts.row, s)
+		cells := editor_block_parts(parts.row, s)
 		if render.rect_contains(cells.handle, x, y) {return editor_process_orderable(p) ? .Resize_All : .Arrow}
+		return .Hand
+	}
+	if row.kind == .Opener {
+		cells := editor_block_parts(parts.row, s)
+		if render.rect_contains(cells.handle, x, y) {return filtering(p) ? .Arrow : .Resize_All}
 		return .Hand
 	}
 	#partial switch row.kind {
@@ -3169,7 +3293,7 @@ control_draw :: proc(
 	case .Text:
 	case .Profile_Icon:
 		profile_badge_draw(list, text, row.badge, parts.swatch, theme, scale, false)
-	case .Process_Group, .Profile, .Profile_Add:
+	case .Process_Group, .Profile, .Profile_Add, .Opener:
 		return .Ok
 	}
 	if selected {
@@ -3551,6 +3675,11 @@ editor_draw :: proc(
 			   result != .Ok {return result}
 			continue
 		}
+		if row.kind == .Opener {
+			if result := editor_opener_draw(p, row, parts, selected, list, text, theme, s);
+			   result != .Ok {return result}
+			continue
+		}
 		if row.kind == .Profile {
 			if result := profile_row_draw(p, row, parts, index, selected, list, text, theme, s);
 			   result != .Ok {
@@ -3565,7 +3694,7 @@ editor_draw :: proc(
 			}
 			continue
 		}
-		if row.profile != "" {
+		if row.profile != "" || row.opener != "" {
 			// Expanded editors carry an accent rail so they read as part of the row above.
 			rail := render.Rect{r.x + 2 * s, r.y + SPACE_2 * s, 3 * s, r.height - 2 * SPACE_2 * s}
 			draw_rect(list, {rect = rail, color = theme.accent, radius = pill_radius(rail)})

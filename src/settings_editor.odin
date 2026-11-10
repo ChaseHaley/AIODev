@@ -17,6 +17,8 @@ import "core:strings"
 @(private)
 PROFILE_ADD_KEY :: "profiles.add"
 @(private)
+OPENER_ADD_KEY :: "openers.add"
+@(private)
 THEME_KEY :: "theme.name"
 @(private)
 THEME_NAME_KEY :: "theme.display_name"
@@ -26,6 +28,11 @@ THEME_RENAME_KEY :: "theme.rename"
 @(private)
 settings_profile_row_key :: proc(id: string) -> string {
 	return fmt.tprintf("%s%s", settings.PROFILE_PREFIX, id)
+}
+
+@(private)
+settings_opener_row_key :: proc(id: string) -> string {
+	return fmt.tprintf("%s%s", settings.OPENER_PREFIX, id)
 }
 
 // Whether a profile's command line names an executable that exists. Explicit paths must exist;
@@ -106,6 +113,11 @@ settings_page_build :: proc(app: ^App, source: string, view: ^ui.Editor_View) ->
 	defer ui.profile_table_destroy(&table)
 	if !settings_page_profile_rows(p, table.rows[:]) {
 		notify(app, .Error, "Could not allocate the profile table.")
+		return
+	}
+	// Link programs follow the profile table's shape: a line per program, its fields under it.
+	if !settings_page_opener_rows(p, &s.openers) {
+		notify(app, .Error, "Could not allocate the link program table.")
 		return
 	}
 	if !settings_add_theme_rows(p, &s) || !settings_page_shortcut_rows(app, p, &s) {
@@ -235,6 +247,81 @@ settings_page_profile_rows :: proc(p: ^ui.Editor, profiles: []ui.Profile_Row) ->
 	return true
 }
 
+// One table line per link program in opener.order order, each followed by its field rows, which
+// stay hidden until the line expands, then the Add row.
+@(private, require_results)
+settings_page_opener_rows :: proc(p: ^ui.Editor, openers: ^settings.Openers) -> bool {
+	group := SETTINGS_SECTIONS[.Link_Programs].title
+	offers_names, offers_labels := settings.OPENER_OFFERS_NAME, settings.OPENER_OFFERS_LABEL
+	placement_names, placement_labels := settings.OPENER_PLACEMENT_NAME, settings.OPENER_PLACEMENT_LABEL
+	indices: [settings.OPENER_LIMIT]int
+	for index in indices[:settings.openers_in_order(openers, indices[:])] {
+		opener := &openers.items[index]
+		line := ui.Editor_Row {
+			key         = settings_opener_row_key(opener.id),
+			title       = opener.name,
+			description = opener.command,
+			value       = placement_labels[opener.placement],
+			detail      = fmt.tprintf(
+				"link program open with %s %s",
+				offers_labels[opener.offers],
+				placement_labels[opener.placement],
+			),
+			opener      = opener.id,
+			kind        = .Opener,
+		}
+		if ui.editor_add(p, line, group) != nil {return false}
+		fields := [settings.Opener_Field]ui.Editor_Row {
+			.Name = {
+				title = "Name",
+				description = "Shown in link menus.",
+				value = opener.name,
+				default_value = opener.name,
+				kind = .Text,
+			},
+			.Command = {
+				title = "Command line",
+				description = "%1 is the file or folder; without %1 it follows the command.",
+				value = opener.command,
+				default_value = opener.command,
+				kind = .Text,
+			},
+			.Offers = {
+				title = "Offered for",
+				description = "The links whose menu lists this program.",
+				value = offers_names[opener.offers],
+				default_value = offers_names[.Files_And_Folders],
+				kind = .Choice,
+				choices = slice.enumerated_array(&offers_names),
+				choice_labels = slice.enumerated_array(&offers_labels),
+			},
+			.Placement = {
+				title = "Opens in",
+				description = "Where the program runs.",
+				value = placement_names[opener.placement],
+				default_value = placement_names[.Right_Split],
+				kind = .Choice,
+				choices = slice.enumerated_array(&placement_names),
+				choice_labels = slice.enumerated_array(&placement_labels),
+			},
+		}
+		for &field_row, field in fields {
+			field_row.key = settings.opener_field_key(opener.id, field)
+			field_row.opener, field_row.opener_field = opener.id, field
+			if ui.editor_add(p, field_row, group) != nil {return false}
+		}
+	}
+	add := ui.Editor_Row {
+		key         = OPENER_ADD_KEY,
+		title       = "Add Link Program",
+		description = "Offer a program, such as an editor, for opening a link's file or folder.",
+		value       = "Add Program",
+		kind        = .Action,
+		action      = .Opener_Add,
+	}
+	return ui.editor_add(p, add, group) == nil
+}
+
 // One row per command a key can run, showing the file's shortcuts or the defaults.
 @(private, require_results)
 settings_page_shortcut_rows :: proc(app: ^App, p: ^ui.Editor, s: ^settings.Settings) -> bool {
@@ -299,6 +386,9 @@ editor_outcome :: proc(app: ^App, w: ^Window, outcome: ui.Editor_Outcome) {
 	case .Profile_Action:
 		editor_profile_action(app, w, request)
 		return
+	case .Opener_Action:
+		editor_opener_action(app, w, request)
+		return
 	case .Save, .Reset:
 	}
 	row := ui.editor_row(p)
@@ -317,6 +407,10 @@ editor_outcome :: proc(app: ^App, w: ^Window, outcome: ui.Editor_Outcome) {
 	if outcome == .Reset && row.action != .Theme_Color {ui.field_set(&p.value, row.default_value)}
 	if field, is_field := row.profile_field.?; is_field {
 		editor_profile_field(app, w, row.profile, field)
+		return
+	}
+	if field, is_field := row.opener_field.?; is_field {
+		editor_opener_field(app, w, row.opener, field)
 		return
 	}
 	switch row.action {
@@ -350,6 +444,8 @@ editor_outcome :: proc(app: ^App, w: ^Window, outcome: ui.Editor_Outcome) {
 		} else {
 			ui.editor_message(p, fmt.tprintf("Theme saved to %s", path), false)
 		}
+	case .Opener_Add:
+		editor_opener_mutate(app, w, {kind = .Add})
 	}
 }
 
@@ -374,10 +470,10 @@ editor_setting_save :: proc(app: ^App, w: ^Window, row: ^ui.Editor_Row, reset: b
 	ui.editor_message(p, text, false)
 }
 
-// Reports a profile change: one that did not apply on the page, one that did by showing
-// `select_key` with `message`, scrolled where the page was.
+// Reports a profile or link program change: one that did not apply on the page, one that did by
+// showing `select_key` with `message`, scrolled where the page was.
 @(private)
-editor_profile_saved :: proc(
+editor_table_saved :: proc(
 	w: ^Window,
 	result: Settings_Result,
 	workflow: Settings_Workflow,
@@ -417,7 +513,7 @@ editor_profile_field :: proc(app: ^App, w: ^Window, profile: string, field: sett
 		ui.editor_message(&w.editor, result.message, true)
 		return
 	}
-	editor_profile_saved(w, result, .Profile_Field, key, message, focus)
+	editor_table_saved(w, result, .Profile_Field, key, message, focus)
 }
 
 @(private)
@@ -446,7 +542,7 @@ editor_profile_mutate :: proc(app: ^App, w: ^Window, change: settings.Profile_Mu
 	} else if change.kind == .Remove && w.editor.expanded == result.id {
 		ui.editor_profile_set_expanded(&w.editor, "")
 	}
-	editor_profile_saved(w, result, .Profile, key, message)
+	editor_table_saved(w, result, .Profile, key, message)
 }
 
 // Performs the profile write a table control asked for.
@@ -459,7 +555,7 @@ editor_profile_action :: proc(app: ^App, w: ^Window, request: ui.Editor_Request)
 			result := settings_change(
 				app, Setting_Value{"shell.default_profile", r.id}, Settings_Page{&w.editor},
 			)
-			editor_profile_saved(
+			editor_table_saved(
 				w,
 				result,
 				.Profile_Field,
@@ -473,7 +569,7 @@ editor_profile_action :: proc(app: ^App, w: ^Window, request: ui.Editor_Request)
 		}
 	case ui.Profile_Hidden_Request:
 		value := Profile_Field_Value{r.id, .Hidden, r.hidden ? "true" : "false"}
-		editor_profile_saved(
+		editor_table_saved(
 			w,
 			settings_change(app, value, Settings_Page{&w.editor}),
 			.Profile_Field,
@@ -482,6 +578,62 @@ editor_profile_action :: proc(app: ^App, w: ^Window, request: ui.Editor_Request)
 		)
 	case ui.Profile_Order_Request:
 		editor_profile_mutate(app, w, {kind = .Move, id = r.id, slot = r.slot})
+	}
+}
+
+// Validates and writes one inline link program field. An empty name or command line stays inline:
+// the row is ringed, the field carries the message, and no modal appears.
+@(private)
+editor_opener_field :: proc(app: ^App, w: ^Window, opener: string, field: settings.Opener_Field) {
+	id := strings.clone(opener, context.temp_allocator)
+	value := strings.clone(ui.field_string(&w.editor.value), context.temp_allocator)
+	key := settings.opener_field_key(id, field)
+	// Text fields keep the keyboard for the next edit; a choice returns to its row.
+	focus := field == .Name || field == .Command ? Reveal_Focus.Control : Reveal_Focus.None
+	result := settings_change(app, Opener_Field_Value{id, field, value}, Settings_Page{&w.editor})
+	if result.status == .Refused {
+		ui.editor_error_set(&w.editor, "", key, result.message)
+		ui.editor_message(&w.editor, result.message, true)
+		return
+	}
+	editor_table_saved(w, result, .Opener_Field, key, "Saved. Link menus use it.", focus)
+}
+
+@(private)
+editor_opener_mutate :: proc(app: ^App, w: ^Window, change: settings.Opener_Mutation) {
+	result := settings_change(app, change, Settings_Page{&w.editor})
+	if result.status == .Unchanged {return}
+	if result.status != .Applied {
+		_ = settings_page_report(&w.editor, result, .Opener)
+		return
+	}
+	key := settings_opener_row_key(result.id)
+	message: string
+	switch change.kind {
+	case .Add:
+		message = "Link program added. Change its name and command line."
+	case .Remove:
+		message, key = "Link program removed.", OPENER_ADD_KEY
+	case .Move:
+		message = "Link program order saved. Link menus follow it."
+	}
+	// The reveal rebuilds the published page, which then opens the new program's fields.
+	if change.kind == .Add {
+		ui.editor_opener_set_expanded(&w.editor, result.id)
+	} else if change.kind == .Remove && w.editor.opener_expanded == result.id {
+		ui.editor_opener_set_expanded(&w.editor, "")
+	}
+	editor_table_saved(w, result, .Opener, key, message)
+}
+
+// Performs the link program write a table control asked for.
+@(private)
+editor_opener_action :: proc(app: ^App, w: ^Window, request: ui.Editor_Request) {
+	#partial switch r in request {
+	case ui.Opener_Remove_Request:
+		editor_opener_remove_ask(app, w, r.id)
+	case ui.Opener_Order_Request:
+		editor_opener_mutate(app, w, {kind = .Move, id = r.id, slot = r.slot})
 	}
 }
 
@@ -742,6 +894,42 @@ editor_profile_remove_destroy :: proc(remove: ^Profile_Remove) {
 	delete(remove.name)
 }
 
+// The link program a confirmation asks before deleting, and its name as the page showed it.
+Opener_Remove :: struct {
+	id, name: string,
+}
+
+editor_opener_remove_text :: proc(remove: Opener_Remove) -> Confirmation_Text {
+	return {title = fmt.tprintf("Delete %s?", remove.name), label = "Delete"}
+}
+
+// Asks before deleting a link program the page lists.
+editor_opener_remove_ask :: proc(app: ^App, w: ^Window, id: string) {
+	for row in w.editor.rows {
+		if row.kind != .Opener || row.opener != id {continue}
+		owned, err := strings.clone(id)
+		name, name_error := strings.clone(row.title)
+		if err != nil || name_error != nil {
+			delete(owned)
+			delete(name)
+			notify(app, .Error, "Could not prepare link program deletion.")
+			return
+		}
+		confirmation_ask(app, w, Opener_Remove{owned, name}, focus = .Cancel)
+		return
+	}
+}
+
+@(private)
+editor_opener_remove_finish :: proc(app: ^App, w: ^Window, remove: Opener_Remove, accepted: bool) {
+	if accepted {editor_opener_mutate(app, w, {kind = .Remove, id = remove.id})}
+}
+
+editor_opener_remove_destroy :: proc(remove: ^Opener_Remove) {
+	delete(remove.id)
+	delete(remove.name)
+}
+
 when AIO_CONTROL {
 	// The settings page's verification keys, with the page's row geometry as the drawer lays it out.
 	settings_page_state_report :: proc(r: ^State_Report, app: ^App, w: ^Window) {
@@ -769,6 +957,17 @@ when AIO_CONTROL {
 		profile_group := -1
 		for group, index in p.groups {
 			if group.title == SETTINGS_SECTIONS[.Profiles].title {profile_group = index; break}
+		}
+		opener_removing := confirmation_subject(w, Opener_Remove)
+		opener_group := -1
+		for group, index in p.groups {
+			if group.title == SETTINGS_SECTIONS[.Link_Programs].title {opener_group = index; break}
+		}
+		opener_ids := strings.builder_make(context.temp_allocator)
+		opener_indices: [settings.OPENER_LIMIT]int
+		for index, i in opener_indices[:settings.openers_in_order(&app.settings.openers, opener_indices[:])] {
+			if i > 0 {strings.write_byte(&opener_ids, ',')}
+			strings.write_string(&opener_ids, app.settings.openers.items[index].id)
 		}
 		state_value(r, "settings.open", ui.editor_loaded(p))
 		state_text(r, "settings.revision", settings_page_revision_word(p))
@@ -819,6 +1018,21 @@ when AIO_CONTROL {
 		state_value(r, "settings.profile.dragging", ui.editor_order_dragging(p, .Profiles))
 		state_value(r, "settings.profile.drag_target", ui.editor_order_target(p))
 		state_text(r, "settings.profile.drag_id", ui.editor_order_profile(p))
+		state_text(r, "settings.opener.expanded", p.opener_expanded)
+		state_text(r, "settings.opener.ids", strings.to_string(opener_ids))
+		state_value(r, "settings.opener.app_count", len(app.settings.openers.items))
+		state_text(
+			r,
+			"settings.opener.removing",
+			confirmation_asking(w, Opener_Remove) != nil ? opener_removing.id : "",
+		)
+		opener_title := opener_removing != nil ? editor_opener_remove_text(opener_removing^).title : ""
+		state_text(r, "settings.opener.remove_title", opener_title)
+		state_text(r, "settings.opener.rows", settings_page_row_rects(p, page, .Opener))
+		state_value(r, "settings.opener.group", opener_group)
+		state_value(r, "settings.opener.dragging", ui.editor_order_dragging(p, .Openers))
+		state_value(r, "settings.opener.drag_target", ui.editor_order_target(p))
+		state_text(r, "settings.opener.drag_id", ui.editor_order_opener(p))
 		state_rect(r, "settings.slider", selected.slider)
 		state_rect(r, "settings.search_rect", page.filter)
 		state_rect(r, "settings.outline_rect", page.outline)
@@ -848,10 +1062,11 @@ when AIO_CONTROL {
 	Settings_Page_Table :: enum {
 		Process,
 		Profile,
+		Opener,
 	}
 
-	// A table's rows as key@x,y,w,h (process) or id@x,y,w,h (profile), joined by ';', so a live
-	// journey can aim a drag at a row's grip.
+	// A table's rows as key@x,y,w,h (process) or id@x,y,w,h (profile, link program), joined by ';',
+	// so a live journey can aim a drag at a row's grip.
 	@(private = "file")
 	settings_page_row_rects :: proc(
 		p: ^ui.Editor,
@@ -871,6 +1086,9 @@ when AIO_CONTROL {
 			case .Profile:
 				if row.kind != .Profile {continue}
 				name = row.profile
+			case .Opener:
+				if row.kind != .Opener {continue}
+				name = row.opener
 			}
 			rect := ui.editor_row_parts(p, page, index).row
 			if !first {strings.write_byte(&builder, ';')}

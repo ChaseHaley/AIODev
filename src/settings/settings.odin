@@ -275,6 +275,7 @@ Settings :: struct {
 	status:          Status_Settings,
 	control:         Control_Settings,
 	profiles:        Profiles,
+	openers:         Openers,
 	allocator:       runtime.Allocator,
 	// The file line of each SCHEMA entry, zero when the file does not set it; read through
 	// setting_line. Sized by a constant because SCHEMA's own length depends on this struct.
@@ -1433,6 +1434,7 @@ defaults :: proc(allocator := context.allocator) -> (Settings, runtime.Allocator
 	s.keys.allocator = allocator
 	s.themes.allocator = allocator
 	profiles_init(&s.profiles, allocator)
+	openers_init(&s.openers, allocator)
 	for entry in SCHEMA {
 		issue, err := assign(&s, entry, entry.default_value)
 		if err != nil {
@@ -1467,6 +1469,7 @@ destroy :: proc(s: ^Settings) {
 		}
 	}
 	profiles_destroy(&s.profiles)
+	openers_destroy(&s.openers)
 	for theme in s.themes {
 		delete(theme.id, s.allocator)
 		delete(theme.base, s.allocator)
@@ -1614,6 +1617,11 @@ parse :: proc(
 			if profile_error != nil {return {}, {}, profile_error}
 			continue
 		}
+		if strings.has_prefix(key, OPENER_PREFIX) {
+			opener_error := parse_opener_key(&s, &diagnostics, key, value, line.number)
+			if opener_error != nil {return {}, {}, opener_error}
+			continue
+		}
 		if strings.has_prefix(key, CUSTOM_THEME_PREFIX) {
 			theme_error := parse_custom_theme_key(&s, &diagnostics, key, value, line.number)
 			if theme_error != nil {return {}, {}, theme_error}
@@ -1670,6 +1678,9 @@ parse :: proc(
 		return {}, {}, legacy_error
 	}
 	if profile_error := profiles_finalize(&s); profile_error != nil {return {}, {}, profile_error}
+	if opener_error := openers_finalize(&s.openers, &diagnostics); opener_error != nil {
+		return {}, {}, opener_error
+	}
 	if inputs != nil {
 		if detect_error := profiles_apply_detection(&s, inputs.detected[:]); detect_error != nil {
 			return {}, {}, detect_error
@@ -1718,6 +1729,14 @@ default_text :: proc(
 		"profile.default.directory = \"",
 		DEFAULT_PROFILE_DIRECTORY,
 		"\"\n\n",
+		"# Link programs open a link's file or folder from its menu: opener.ID.name, .command,\n",
+		"# .offers (both, files or folders) and .placement (right, down, float, tab, linked or\n",
+		"# window). %1 in the command is the path; without %1 the path follows the command.\n",
+		"# opener.order controls menu order; unlisted IDs follow by ID.\n",
+		"# opener.nvim.name = \"Neovim\"\n",
+		"# opener.nvim.command = \"nvim %1\"\n",
+		"# opener.nvim.offers = both\n",
+		"# opener.nvim.placement = right\n\n",
 		"# Custom themes: theme.custom.ID.base names another theme such as studio-dark, and\n",
 		"# theme.custom.ID.COLOR = #rrggbb overrides one color. Changing a color in Settings saves one.\n",
 	) or_return

@@ -8,7 +8,7 @@ import "core:strings"
 @(private)
 ORDER_LIMIT :: PROFILE_LIMIT
 
-// Why a list mutation such as profile_mutate returned no revision.
+// Why a list mutation (profile_mutate, opener_mutate) returned no revision.
 Mutation_Error :: enum {None, Unavailable, Limit, Edit, Allocation}
 
 // Sets `key` in the owned revision `text`; a refusal returns edit_text's owned message as `issue`.
@@ -22,6 +22,16 @@ mutation_edit :: proc(
 	if alloc_error != nil {return "", .Allocation}
 	if message != "" {return message, .Edit}
 	return
+}
+
+// Splits "PREFIX.ID.field", such as profile.default.name.
+@(private)
+item_key_split :: proc(key, prefix: string) -> (id, field: string, shaped: bool) {
+	if !strings.has_prefix(key, prefix) {return "", "", false}
+	rest := key[len(prefix):]
+	dot := strings.last_index_byte(rest, '.')
+	if dot <= 0 || dot + 1 >= len(rest) {return "", "", false}
+	return rest[:dot], rest[dot + 1:], true
 }
 
 // One entry of an order value such as profile.order: trimmed, possibly empty. `repeated` means an
@@ -248,4 +258,17 @@ remove_item_text :: proc(
 		if err := write_parts(&builder, line.raw); err != nil {return "", err}
 	}
 	return strings.clone(strings.to_string(builder), allocator)
+}
+
+// Whether `text` sets any PREFIX.ID.* key.
+@(private)
+item_text_has :: proc(text, prefix, id: string) -> bool {
+	scanner := line_scanner_init(text)
+	for {
+		line, ok := line_next(&scanner)
+		if !ok {return false}
+		if !line.split {continue}
+		item, _, shaped := item_key_split(line.key, prefix)
+		if shaped && item == id {return true}
+	}
 }

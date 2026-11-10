@@ -115,6 +115,13 @@ edit_text :: proc(
 			return
 		}
 		serialized = profile_serialized
+	} else if strings.has_prefix(key, OPENER_PREFIX) {
+		opener_serialized, issue := opener_edit_text(key, value)
+		if issue != "" {
+			message, err = strings.clone(issue, allocator)
+			return
+		}
+		serialized = opener_serialized
 	} else if !strings.has_prefix(key, KEY_BINDING_PREFIX) {
 		message, err = strings.clone("Unknown setting.", allocator)
 		return

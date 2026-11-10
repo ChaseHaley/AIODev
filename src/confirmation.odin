@@ -21,6 +21,7 @@ Confirmation_Subject :: union {
 	Pending_File,
 	Process_Remove,
 	Profile_Remove,
+	Opener_Remove,
 	Settings_Reset,
 }
 
@@ -96,6 +97,8 @@ confirmation_finish :: proc(app: ^App, w: ^Window, accept: bool) {
 		editor_process_remove_finish(app, w, subject, accept)
 	case Profile_Remove:
 		editor_profile_remove_finish(app, w, subject, accept)
+	case Opener_Remove:
+		editor_opener_remove_finish(app, w, subject, accept)
 	case Settings_Reset:
 		settings_reset_finish(app, subject, accept)
 	}
@@ -116,6 +119,8 @@ confirmation_clear :: proc(w: ^Window) {
 		editor_process_remove_destroy(&subject)
 	case Profile_Remove:
 		editor_profile_remove_destroy(&subject)
+	case Opener_Remove:
+		editor_opener_remove_destroy(&subject)
 	case Settings_Reset:
 		settings_reset_destroy(&subject)
 	}
@@ -219,6 +224,8 @@ confirmation_text :: proc(app: ^App, w: ^Window, c: ^Confirmation, recount: bool
 		return editor_process_remove_text(subject)
 	case Profile_Remove:
 		return editor_profile_remove_text(subject)
+	case Opener_Remove:
+		return editor_opener_remove_text(subject)
 	case Settings_Reset:
 		return settings_reset_text()
 	}

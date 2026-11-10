@@ -18,7 +18,9 @@ Process_Field :: enum {
 	Fallback,
 }
 
-Process_Parts :: struct {
+// The cells of a reorderable block's table line, a program group's or a link program's: the grip,
+// the label that opens or closes its fields, and remove.
+Block_Parts :: struct {
 	handle, expand, remove: render.Rect,
 }
 
@@ -30,7 +32,7 @@ Process_Editor_State :: struct {
 	process_dirty:                                                          bool,
 }
 
-editor_process_parts :: proc(row: render.Rect, scale: f32) -> Process_Parts {
+editor_block_parts :: proc(row: render.Rect, scale: f32) -> Block_Parts {
 	s := scale
 	size := min(28 * s, row.width / 4)
 	return {
@@ -357,7 +359,7 @@ editor_process_press :: proc(
 	p: ^Editor, row: ^Editor_Row, parts: Row_Parts, x, y, scale: f32,
 ) -> (Editor_Outcome, bool) {
 	if row.kind == .Process_Group {
-		cells := editor_process_parts(parts.row, scale)
+		cells := editor_block_parts(parts.row, scale)
 		if render.rect_contains(cells.handle, x, y) {
 			if !editor_process_orderable(p) {return .Changed, true}
 			from := 0
@@ -404,7 +406,7 @@ editor_process_draw :: proc(
 			p.process_fallback), r.x + 12 * s, baseline, theme.muted, max(1, r.width - 24 * s))
 	}
 	if row.process_field == .Group {
-		cells := editor_process_parts(r, s)
+		cells := editor_block_parts(r, s)
 		grip_ink := selected || editor_order_dragging(p, .Process_Groups) ? theme.muted : theme.faint
 		icon_draw(list, .Grip, cells.handle, grip_ink, ICON_BUTTON, s)
 		icon_draw(list, .Trash, cells.remove, theme.muted, ICON_BUTTON, s)

@@ -15,6 +15,8 @@ Settings_Edit :: union #no_nil {
 	Setting_Value,
 	Profile_Field_Value,
 	settings.Profile_Mutation,
+	Opener_Field_Value,
+	settings.Opener_Mutation,
 	Theme_Change,
 	Factory_Reset,
 }
@@ -27,6 +29,14 @@ Setting_Value :: struct {
 Profile_Field_Value :: struct {
 	id:    string,
 	field: settings.Profile_Field,
+	value: string,
+}
+
+// One inline link program field, checked as the page checks typing. Offers and placement take the
+// file's value.
+Opener_Field_Value :: struct {
+	id:    string,
+	field: settings.Opener_Field,
 	value: string,
 }
 
@@ -97,7 +107,7 @@ Settings_Result :: struct {
 	status:  Settings_Status,
 	// Refused: why. Applied: a shortcut warning, or empty. Temporary.
 	message: string,
-	// The profile or theme the change created, renamed to or selected. Temporary.
+	// The profile, link program or theme the change created, renamed to or selected. Temporary.
 	id:      string,
 }
 
@@ -106,6 +116,8 @@ Settings_Workflow :: enum {
 	Setting,
 	Profile_Field,
 	Profile,
+	Opener_Field,
+	Opener,
 	Process,
 	Theme,
 	Font_Filter,
@@ -128,6 +140,16 @@ SETTINGS_FAILURE_TEXT := [Settings_Workflow][Settings_Status]string {
 		.Unprepared = "Could not prepare the profile change.",
 		.Conflict = SETTINGS_CONFLICT_TEXT,
 		.Failed = "Could not save the profile. Check the settings path and permissions.",
+	},
+	.Opener_Field = #partial [Settings_Status]string {
+		.Unprepared = "Could not allocate settings change.",
+		.Conflict = SETTINGS_CONFLICT_TEXT,
+		.Failed = "Could not save the link program. Check the settings path and permissions.",
+	},
+	.Opener = #partial [Settings_Status]string {
+		.Unprepared = "Could not prepare the link program change.",
+		.Conflict = SETTINGS_CONFLICT_TEXT,
+		.Failed = "Could not save the link program. Check the settings path and permissions.",
 	},
 	.Process = #partial [Settings_Status]string {
 		.Unprepared = "Could not prepare program settings.",
@@ -255,8 +277,8 @@ Settings_Built :: struct {
 	result:   Settings_Result,
 }
 
-// The revision `edit` makes of `source`. Profile and theme changes resolve against the revision
-// `source` parses to, never against the running settings, which a page may be behind.
+// The revision `edit` makes of `source`. Profile, link program and theme changes resolve against
+// the revision `source` parses to, never against the running settings, which a page may be behind.
 @(private, require_results)
 settings_edit_build :: proc(app: ^App, edit: Settings_Edit, source: string) -> (built: Settings_Built) {
 	switch e in edit {
@@ -266,7 +288,8 @@ settings_edit_build :: proc(app: ^App, edit: Settings_Edit, source: string) -> (
 		defaults, err := settings.default_text()
 		if err != nil {return {result = {status = .Unprepared}}}
 		return {revision = defaults}
-	case Profile_Field_Value, settings.Profile_Mutation, Theme_Change:
+	case Profile_Field_Value, settings.Profile_Mutation, Opener_Field_Value, settings.Opener_Mutation,
+	     Theme_Change:
 	}
 	model, diagnostics, parse_error := settings.parse(source, inputs = &app.settings_inputs)
 	settings.diagnostics_destroy(&diagnostics)
@@ -275,8 +298,12 @@ settings_edit_build :: proc(app: ^App, edit: Settings_Edit, source: string) -> (
 	#partial switch e in edit {
 	case Profile_Field_Value:
 		return settings_profile_field_edit(&model, source, e)
+	case Opener_Field_Value:
+		return settings_opener_field_edit(&model, source, e)
 	case settings.Profile_Mutation:
 		return settings_profile_mutation_edit(&model, source, e)
+	case settings.Opener_Mutation:
+		return settings_opener_mutation_edit(&model, source, e)
 	case Theme_Change:
 		return settings_theme_edit(&model, source, e)
 	}
@@ -345,6 +372,54 @@ settings_profile_mutation_edit :: proc(
 		built.result = {status = .Refused, message = "Profile limit reached. Remove one before duplicating."}
 		if change.kind == .Add {
 			built.result.message = "Profile limit reached. Remove one before adding another."
+		}
+	case .Allocation:
+		built.result.status = .Unprepared
+	}
+	if error != .None {delete(updated)}
+	return
+}
+
+// A link program that no longer exists is left alone rather than recreated by its field; empty
+// names and commands and unknown choices are refused with the page's inline wording.
+@(private, require_results)
+settings_opener_field_edit :: proc(
+	model: ^settings.Settings,
+	source: string,
+	change: Opener_Field_Value,
+) -> Settings_Built {
+	if settings.opener_find(&model.openers, change.id) == nil {return {result = {status = .Unchanged}}}
+	_, problem := settings.opener_field_check(change.field, change.value, .Interactive_Field)
+	if problem != .None {
+		text := settings.opener_problem_text(problem, .Interactive_Field, change.value)
+		return {result = {status = .Refused, message = text}}
+	}
+	return settings_text_edit(source, settings.opener_field_key(change.id, change.field), change.value)
+}
+
+@(private, require_results)
+settings_opener_mutation_edit :: proc(
+	model: ^settings.Settings,
+	source: string,
+	change: settings.Opener_Mutation,
+) -> (
+	built: Settings_Built,
+) {
+	updated, id, issue, error := settings.opener_mutate(source, &model.openers, change)
+	defer delete(id)
+	defer delete(issue)
+	switch error {
+	case .None:
+		built.revision = updated
+		built.result.id, _ = strings.clone(id, context.temp_allocator)
+	case .Unavailable:
+		built.result.status = .Unchanged
+	case .Edit:
+		built.result.status = .Refused
+		built.result.message, _ = strings.clone(issue, context.temp_allocator)
+	case .Limit:
+		built.result = {
+			status = .Refused, message = "Link program limit reached. Remove one before adding another.",
 		}
 	case .Allocation:
 		built.result.status = .Unprepared

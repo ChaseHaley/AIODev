@@ -163,7 +163,7 @@ process_groups_drag_escape_and_required_delete_outcome :: proc(t: ^testing.T) {
 	ui.editor_fit(&p, l)
 	testing.expect(t, ui.editor_reveal(&p, ui.Reveal_Row{"process.group.1"}))
 	row := ui.editor_row_parts(&p, l, p.selected).row
-	parts := ui.editor_process_parts(row, 1)
+	parts := ui.editor_block_parts(row, 1)
 	testing.expect_value(t, ui.editor_press(&p, l, nil, parts.handle.x + 4, parts.handle.y + 4, false),
 		ui.Editor_Outcome.Changed)
 	testing.expect(t, ui.editor_order_dragging(&p, .Process_Groups))
@@ -259,7 +259,7 @@ process_groups_drag_reflows_whole_groups_like_profiles :: proc(t: ^testing.T) {
 	header_row := ui.editor_row_parts(&p, l, header).row
 	name_row := ui.editor_row_parts(&p, l, name).row
 	tools_row := ui.editor_row_parts(&p, l, tools).row
-	handle := ui.editor_process_parts(header_row, 1).handle
+	handle := ui.editor_block_parts(header_row, 1).handle
 	x, y := handle.x + handle.width / 2, handle.y + handle.height / 2
 	testing.expect_value(t, ui.editor_press(&p, l, nil, x, y, false), ui.Editor_Outcome.Changed)
 	testing.expect(t, ui.editor_order_dragging(&p, .Process_Groups))

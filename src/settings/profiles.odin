@@ -97,11 +97,7 @@ profiles_add :: proc(p: ^Profiles, id: string) -> (^Profile, runtime.Allocator_E
 
 // Splits "profile.ID.field"; `profile.order` is handled before this is called.
 profile_key_split :: proc(key: string) -> (id, field: string, shaped: bool) {
-	if !strings.has_prefix(key, PROFILE_PREFIX) {return "", "", false}
-	rest := key[len(PROFILE_PREFIX):]
-	dot := strings.last_index_byte(rest, '.')
-	if dot <= 0 || dot + 1 >= len(rest) {return "", "", false}
-	return rest[:dot], rest[dot + 1:], true
+	return item_key_split(key, PROFILE_PREFIX)
 }
 
 // The three pre-profile shell keys, in migration order. They stay accepted so a file whose
