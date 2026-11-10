@@ -33,16 +33,10 @@ choice_list_move :: proc(c: ^Choice_List, delta, count, visible: int) {
 	choice_list_keep_visible(c, count, visible)
 }
 
-// Steps the highlight with list_step's chords, and Page Up or Page Down by a list's height.
+// Moves the highlight by list_key_step.
 choice_list_key :: proc(c: ^Choice_List, e: input.Key_Event, count, visible: int) -> bool {
-	delta := list_step(e)
-	#partial switch e.key {
-	case .Page_Up:
-		delta = -max(1, visible)
-	case .Page_Down:
-		delta = max(1, visible)
-	}
-	if delta == 0 || !e.pressed {return false}
+	delta := list_key_step(e, visible, count)
+	if delta == 0 {return false}
 	choice_list_move(c, delta, count, visible)
 	return true
 }

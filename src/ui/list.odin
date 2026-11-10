@@ -24,3 +24,23 @@ list_step :: proc(e: input.Key_Event) -> int {
 	}
 	return 0
 }
+
+// How far a key moves a list of `count` items showing `visible` rows: list_step's chords by one, Page
+// Up and Page Down by a page, Ctrl+Home and Ctrl+End to either end. Plain Home and End are not list
+// keys: a search field over the list keeps them for its caret, as every text field does.
+list_key_step :: proc(e: input.Key_Event, visible, count: int) -> int {
+	if step := list_step(e); step != 0 {return step}
+	if !e.pressed {return 0}
+	jump := .Control in e.modifiers && .Shift not_in e.modifiers && .Alt not_in e.modifiers
+	#partial switch e.key {
+	case .Page_Up:
+		return -max(1, visible)
+	case .Page_Down:
+		return max(1, visible)
+	case .Home:
+		if jump {return -max(1, count)}
+	case .End:
+		if jump {return max(1, count)}
+	}
+	return 0
+}

@@ -49,6 +49,8 @@ Window :: struct {
 	id: input.Window_Id,
 	surface: Window_Surface,
 	ui_text: ui.Text,
+	// Every text field caret this window draws; ui_text points here.
+	carets: ui.Carets,
 	using markdown_pointer: Markdown_Pointer,
 	using resources: Workspace_View_Resources,
 	// Tiled panes easing to the places a split or close gave them; see pane_motion.odin.
@@ -383,6 +385,7 @@ window_settings_fields :: proc(app: ^App, scale: f32, linked: bool) -> Window_Se
 
 window_apply_settings :: proc(app: ^App, w: ^Window) {
 	w.ui_text = app.ui_text
+	w.ui_text.carets = &w.carets
 	ui.text_set_size(&w.ui_text, points_pixels(f32(app.settings.interface.font_size), w.scale))
 	fields := window_settings_fields(app, w.scale, window_linked(w))
 	w.metrics = fields.metrics
@@ -626,9 +629,11 @@ window_render :: proc(app: ^App, w: ^Window, wait := true) {
 
 // Only a completed draw list may be submitted or counted as built. Failed construction keeps
 // the window dirty, so a later healthy attempt can recover without waiting for new terminal output.
+// Field carets count the frame once, so a retried build still continues their motion.
 @(require_results)
 window_build_frame :: proc(app: ^App, w: ^Window) -> bool {
 	build := render.frame_build_begin(&w.list, app.device)
+	ui.carets_begin(&w.carets, cursor_effects(app), w.frame)
 	for {
 		build_frame(app, w)
 		switch render.frame_build_finish(&build) {

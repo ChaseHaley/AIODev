@@ -91,6 +91,8 @@ Text :: struct {
 	family, strong_family, icons: font.Family,
 	has_icons:                    bool,
 	size_px, ascent, line_height: f32,
+	// The window's field carets; nil draws every caret where it is.
+	carets:                       ^Carets,
 }
 
 @(require_results)

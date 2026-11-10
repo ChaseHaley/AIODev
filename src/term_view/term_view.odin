@@ -1,5 +1,6 @@
 package term_view
 
+import "aio:caret"
 import "aio:colour"
 import "aio:font"
 import "aio:ghostty"
@@ -32,7 +33,7 @@ Style :: struct {
 	// The link under the pointer is view state, not cell style: it only adds an underline overlay.
 	hover:                                                            Maybe(term.Link_Range),
 	// The zero value draws the cursor only where the terminal puts it.
-	cursor_effects:                                                   Cursor_Effects,
+	cursor_effects:                                                   caret.Effects,
 }
 
 Frame :: struct {
@@ -717,12 +718,12 @@ build_cursor :: proc(v: ^View, b: ^Builder) -> Maybe(Cursor_Paint) {
 	if b.style.cursor_suppressed {return paint}
 	if v.cursor.present {
 		v.cursor.target = cell
-		cursor_place(&v.cursor, b.cursor_t)
+		caret.motion_place(&v.cursor.motion, b.cursor_t)
 		paint.head, paint.tail = v.cursor.head, v.cursor.tail
 	}
 	defer {
 		if v.cursor.present && b.list.error == .None {
-			v.cursor.drawn_head, v.cursor.drawn_tail = v.cursor.head, v.cursor.tail
+			caret.motion_drawn(&v.cursor.motion)
 		}
 	}
 	if b.cursor_moving {

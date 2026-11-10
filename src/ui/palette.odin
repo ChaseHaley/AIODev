@@ -112,7 +112,7 @@ Palette_Key_Hint :: struct {
 // At most navigate, three selection actions, and close.
 @(private) PALETTE_HINT_CAP :: 5
 
-// The palette's chords beyond list_step, each beside the keycap the footer shows for it. palette_key
+// The palette's chords beyond list_key_step, each beside the keycap the footer shows for it. palette_key
 // and edit_key match these, so changing a chord changes its hint. Enter and Numpad Enter both accept.
 // The operate modifier with Enter edits a command's shortcut or operates a setting's control.
 @(private) PALETTE_OPERATE :: input.Modifier.Control
@@ -899,7 +899,6 @@ palette_key :: proc(
 			return .Changed, 0
 		}
 	}
-	shift := .Shift in e.modifiers
 	if (e.key == .Enter || e.key == .Numpad_Enter) && PALETTE_OPERATE in e.modifiers &&
 	   p.selected >= 0 && p.selected < len(p.results) && p.results[p.selected].kind == .Command {
 		return palette_binding_open(p, p.selected), 0
@@ -917,21 +916,13 @@ palette_key :: proc(
 			if PALETTE_OPERATE in e.modifiers {return control_activate(p, setting), 0}
 		}
 	}
-	if step := list_step(e); step != 0 {return move(p, step), 0}
+	if step := list_key_step(e, p.visible_rows, len(p.results)); step != 0 {return move(p, step), 0}
 	#partial switch e.key {
 	case PALETTE_CANCEL_KEY:
 		palette_close(p)
 		return .Closed, 0
 	case .Enter, .Numpad_Enter:
 		return run(p, p.selected)
-	case .Page_Up:
-		return move(p, -max(1, p.visible_rows)), 0
-	case .Page_Down:
-		return move(p, max(1, p.visible_rows)), 0
-	case .Home:
-		if !shift {return move(p, -len(p.results)), 0}
-	case .End:
-		if !shift {return move(p, len(p.results)), 0}
 	}
 	return edited(p, registry, field_key(&p.query, e)), 0
 }

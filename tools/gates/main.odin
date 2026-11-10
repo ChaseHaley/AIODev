@@ -20,6 +20,7 @@ Exit codes: 0 planned, 2 no paths or bad arguments.
 UI_PREFIXES :: []string {
 	"src/ui/",
 	"src/term_view/",
+	"src/caret/",
 	"src/render/",
 	"src/layout/",
 	"src/commands/",
@@ -44,6 +45,7 @@ PERF_PREFIXES :: []string {
 	"src/dwrite/",
 	"src/glyphs/",
 	"src/term_view/",
+	"src/caret/",
 }
 PERF_FILES :: []string{"src/window.odin"}
 
