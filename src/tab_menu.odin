@@ -160,7 +160,7 @@ tab_menu_key :: proc(app: ^App, w: ^Window, e: input.Key_Event) {
 	w.dirty = true
 	tab_menu_sync(w)
 	switch ui.menu_key(&w.tab_menu.menu, e) {
-	case .None:
+	case .None, .Submenu:
 	case .Changed: tab_menu_reveal(w)
 	case .Chosen: tab_menu_choose(app, w)
 	case .Closed: overlay_close(app, w)

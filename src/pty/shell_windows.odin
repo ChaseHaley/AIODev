@@ -163,25 +163,29 @@ resolve_executable :: proc(
 		return copy, {}
 	}
 	if len(directories) == 0 {return "", {.Start_Process, w.ERROR_FILE_NOT_FOUND}}
+	return search_path(token, directories, ".exe", allocator)
+}
+
+// Finds `name` in `directories`, adding `extension` when the name has none.
+@(private, require_results)
+search_path :: proc(name: string, directories: []string, extension: string, allocator: runtime.Allocator) -> (
+	string,
+	Spawn_Error,
+) {
 	path, join_error := strings.join(directories, ";", allocator)
 	if join_error != nil {return "", {.Out_Of_Memory, 0}}
 	defer delete(path, allocator)
 	wide_path := w.utf8_to_wstring(path, allocator)
 	if wide_path == nil {return "", {.Out_Of_Memory, 0}}
 	defer delete(wide_path, allocator)
-	wide_token := w.utf8_to_wstring(token, allocator)
-	if wide_token == nil {return "", {.Out_Of_Memory, 0}}
-	defer delete(wide_token, allocator)
-	extension := [5]u16{'.', 'e', 'x', 'e', 0}
+	wide_name := w.utf8_to_wstring(name, allocator)
+	if wide_name == nil {return "", {.Out_Of_Memory, 0}}
+	defer delete(wide_name, allocator)
+	wide_extension := w.utf8_to_wstring(extension, allocator)
+	if wide_extension == nil {return "", {.Out_Of_Memory, 0}}
+	defer delete(wide_extension, allocator)
 	buffer: [w.MAX_PATH_WIDE]u16
-	n := SearchPathW(
-		wide_path,
-		wide_token,
-		cstring16(&extension[0]),
-		u32(len(buffer)),
-		raw_data(buffer[:]),
-		nil,
-	)
+	n := SearchPathW(wide_path, wide_name, wide_extension, u32(len(buffer)), raw_data(buffer[:]), nil)
 	if n == 0 || n >= u32(len(buffer)) {return "", {.Start_Process, w.ERROR_FILE_NOT_FOUND}}
 	result, conversion_error := w.utf16_to_utf8(buffer[:n], allocator)
 	if conversion_error != nil {return "", {.Out_Of_Memory, 0}}
@@ -226,4 +230,83 @@ resolve_command :: proc(command_line: string, allocator := context.allocator) ->
 executable_destroy :: proc(executable: ^Executable, allocator := context.allocator) {
 	if searched, ok := executable.(Searched_Executable); ok {delete(searched.path, allocator)}
 	executable^ = nil
+}
+
+// What a link program's command line runs: an executable, or a batch script, which only cmd.exe runs.
+Program :: struct {
+	// Owned.
+	path:  string,
+	batch: bool,
+}
+
+// Resolves a link program as resolve_command resolves a shell, except that a bare name may also be a
+// .com, .bat or .cmd file, tried in Windows' default PATHEXT order: VS Code's `code` is code.cmd. An
+// explicit path is kept as written.
+@(require_results)
+resolve_program :: proc(command_line: string, allocator := context.allocator) -> (Program, Spawn_Error) {
+	token := executable_token(command_line)
+	if token == "" {return {}, {.Invalid_Argument, 0}}
+	if is_explicit_path(token) {
+		path, err := strings.clone(token, allocator)
+		if err != nil {return {}, {.Out_Of_Memory, 0}}
+		return {path, is_batch(path)}, {}
+	}
+	directories, directories_error := search_directories(allocator)
+	if directories_error != nil {return {}, {.Out_Of_Memory, 0}}
+	defer {
+		for directory in directories {delete(directory, allocator)}
+		delete(directories, allocator)
+	}
+	if len(directories) == 0 {return {}, {.Start_Process, w.ERROR_FILE_NOT_FOUND}}
+	for extension in ([?]string{".com", ".exe", ".bat", ".cmd"}) {
+		path, err := search_path(token, directories, extension, allocator)
+		if err.kind == .Start_Process {continue}
+		if err.kind != .None {return {}, err}
+		return {path, is_batch(path)}, {}
+	}
+	return {}, {.Start_Process, w.ERROR_FILE_NOT_FOUND}
+}
+
+program_destroy :: proc(program: ^Program, allocator := context.allocator) {
+	delete(program.path, allocator)
+	program^ = {}
+}
+
+@(private, require_results)
+is_batch :: proc(path: string) -> bool {
+	lower := strings.to_lower(path, context.temp_allocator)
+	return strings.has_suffix(lower, ".bat") || strings.has_suffix(lower, ".cmd")
+}
+
+// The text after the command line's executable token, which borrows it.
+@(require_results)
+command_arguments :: proc(command_line: string) -> string {
+	token := executable_token(command_line)
+	if token == "" {return ""}
+	start := strings.index(command_line, token) + len(token)
+	if start < len(command_line) && command_line[start] == '"' {start += 1}
+	return strings.trim_left(command_line[start:], " \t")
+}
+
+// The command line that runs batch script `script` with `arguments` through the system's cmd.exe. /d
+// skips the user's AutoRun commands, and /s with the outer quotes hands cmd the rest as written.
+@(require_results)
+batch_command_line :: proc(
+	script, arguments: string,
+	allocator := context.allocator,
+) -> (
+	string,
+	Spawn_Error,
+) {
+	buffer: [w.MAX_PATH_WIDE]u16
+	n := GetSystemDirectoryW(raw_data(buffer[:]), u32(len(buffer)))
+	if n == 0 || n >= u32(len(buffer)) {return "", {.Start_Process, u32(w.GetLastError())}}
+	system, err := w.utf16_to_utf8(buffer[:n], context.temp_allocator)
+	if err != nil {return "", {.Out_Of_Memory, 0}}
+	line, line_error := strings.concatenate(
+		{`"`, system, `\cmd.exe" /d /s /c ""`, script, `" `, arguments, `"`},
+		allocator,
+	)
+	if line_error != nil {return "", {.Out_Of_Memory, 0}}
+	return line, {}
 }

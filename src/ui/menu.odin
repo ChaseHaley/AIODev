@@ -26,6 +26,9 @@ Menu_Item :: struct {
 	selected_action:       Icon,
 	// The label is an error.
 	danger:                bool,
+	// The row leads to a menu of its own, which its owner shows beside it: the row ends in a chevron, and
+	// Right on it is Menu_Outcome.Submenu.
+	submenu:               bool,
 	// The owner's key for what choosing the row does; the menu only carries it.
 	payload:               u32,
 }
@@ -238,6 +241,8 @@ Menu_Outcome :: enum {
 	Changed,
 	Chosen,
 	Closed,
+	// Right on a submenu row: its owner opens the row's menu.
+	Submenu,
 }
 
 // Closed asks the owner to close the menu; whether it shows is the owner's state.
@@ -256,6 +261,11 @@ menu_key :: proc(m: ^Menu, e: input.Key_Event) -> Menu_Outcome {
 	case .End:
 		menu_select_edge(m, true)
 		return .Changed
+	case .Arrow_Right:
+		if selected := menu_selected(m); selected >= 0 && selected < len(m.items) {
+			item := m.items[selected]
+			if item.enabled && item.submenu {return .Submenu}
+		}
 	case .Enter, .Numpad_Enter, .Space:
 		if selected := menu_selected(m); selected >= 0 && selected < len(m.items) {
 			item := m.items[selected]
@@ -267,6 +277,34 @@ menu_key :: proc(m: ^Menu, e: input.Key_Event) -> Menu_Outcome {
 
 menu_wheel :: proc(m: ^Menu, rows: int) {
 	menu_step(m, -rows, false)
+}
+
+// Where a submenu of `child_width` DIPs hangs beside row `index` of `parent`: level with the row, on the
+// right, or on the left when the window has no room there. The child's own layout clamps it vertically.
+menu_submenu_anchor :: proc(parent: ^Menu, index: int, child_width, width, height, scale: f32) -> [2]f32 {
+	surface, _, _ := menu_view(parent, width, height, scale)
+	row := menu_row_rect(parent, index, width, height, scale)
+	bounds := menu_bounds(parent, width, height)
+	child := (child_width > 0 ? child_width : MENU_WIDTH) * scale
+	gap := SPACE_1 * scale
+	x := surface.x + surface.width + gap
+	if x + child > bounds.x + bounds.width - 8 * scale {x = surface.x - gap - child}
+	return {x, row.y - OVERLAY_PADDING * scale}
+}
+
+// Whether the pointer, moving from `from` to `to`, is heading for the submenu surface `target`: `to` is in
+// the triangle from `from` to the submenu's near edge, or on the submenu. A row the pointer crosses on that
+// way keeps the submenu open instead of taking the selection.
+menu_aim :: proc(from, to: [2]f32, target: render.Rect) -> bool {
+	if render.rect_contains(target, to.x, to.y) {return true}
+	if from == to {return false}
+	near := target.x >= from.x ? target.x : target.x + target.width
+	top, bottom := [2]f32{near, target.y}, [2]f32{near, target.y + target.height}
+	side :: proc(a, b, p: [2]f32) -> f32 {return (b.x - a.x) * (p.y - a.y) - (b.y - a.y) * (p.x - a.x)}
+	d1, d2, d3 := side(from, top, to), side(top, bottom, to), side(bottom, from, to)
+	negative := d1 < 0 || d2 < 0 || d3 < 0
+	positive := d1 > 0 || d2 > 0 || d3 > 0
+	return !(negative && positive)
 }
 
 // Draws the rows around the selection; it reads the menu and changes nothing in it.
@@ -336,6 +374,11 @@ menu_draw :: proc(
 		}
 		if has_action {
 			end = menu_action_rect(m, i, .Action, width, height, scale).x
+		}
+		if item.submenu {
+			chevron := render.Rect{end - ICON_BUTTON * scale, row.y, ICON_BUTTON * scale, row.height}
+			icon_draw(list, .Chevron_Right, chevron, theme.faint, ICON_BUTTON, scale)
+			end = chevron.x - SPACE_2 * scale
 		}
 		shortcut_width := f32(0)
 		if item.shortcut != "" {

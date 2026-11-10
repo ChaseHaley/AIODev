@@ -179,7 +179,7 @@ dock_divider_menu_key :: proc(app: ^App, w: ^Window, e: input.Key_Event) {
 	if !e.pressed {return}
 	w.dirty = true
 	switch ui.menu_key(&w.divider_menu, e) {
-	case .None:
+	case .None, .Submenu:
 	case .Changed: ui.menu_reveal(&w.divider_menu, f32(w.width), f32(w.height), w.scale)
 	case .Chosen: dock_divider_menu_choose(app, w)
 	case .Closed: overlay_close(app, w)

@@ -1889,7 +1889,7 @@ editor_key :: proc(p: ^Editor, raw: input.Key_Event) -> Editor_Outcome {
 		case .Chosen: return editor_profile_menu_choose(p)
 		// Escape closes the menu; the keyboard stays on the row's More control.
 		case .Closed: editor_mode_set(p, Editor_Editing{})
-		case .None, .Changed:
+		case .None, .Changed, .Submenu:
 		}
 		return .Changed
 	}

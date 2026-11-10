@@ -208,12 +208,12 @@ actions_shown :: proc(w: ^app.Window) -> bool {
 	return shown
 }
 
-// The right-click menu's row for `action`, or -1.
+// The right-click menu's row running `action`, or -1.
 @(private = "file")
 action_row :: proc(w: ^app.Window, action: app.Link_Action) -> int {
 	actions := &w.document_menu.actions
 	for item, i in actions.items {
-		if !item.separator && app.Link_Action(item.payload) == action {return i}
+		if !item.separator && (transmute(app.Link_Choice)item.payload).action == action {return i}
 	}
 	return -1
 }
@@ -234,6 +234,58 @@ choose_action :: proc(s: ^app.App, w: ^app.Window, action: app.Link_Action, keyb
 	}
 	r := ui.menu_row_rect(actions, row, f32(w.width), f32(w.height), w.scale)
 	press(s, w, r.x + 40 * w.scale, r.y + r.height / 2)
+}
+
+// The open submenu's row for `placement`, or -1.
+@(private = "file")
+placement_row :: proc(w: ^app.Window, placement: app.Link_Placement) -> int {
+	if !app.document_submenu_shown(w) {return -1}
+	for item, i in w.document_menu.submenu.items {
+		if (transmute(app.Link_Choice)item.payload).placement == placement {return i}
+	}
+	return -1
+}
+
+// Chooses `placement` from the submenu of row `row` of `parent`, the link menu or the right-click menu: the
+// pointer rests on the row and clicks the placement, or the keyboard goes Down to the row, Right into its
+// submenu, Down to the placement and Enter.
+@(private = "file")
+choose_placement :: proc(
+	s: ^app.App,
+	w: ^app.Window,
+	parent: ^ui.Menu,
+	row: int,
+	placement: app.Link_Placement,
+	keyboard := false,
+) {
+	if row < 0 {return}
+	if keyboard {
+		for _ in 0 ..< len(parent.items) {
+			if ui.menu_selected(parent) == row {break}
+			key(s, w, .Arrow_Down)
+		}
+		key(s, w, .Arrow_Right)
+		submenu := &w.document_menu.submenu
+		target := placement_row(w, placement)
+		for _ in 0 ..< len(submenu.items) {
+			if ui.menu_selected(submenu) == target {break}
+			key(s, w, .Arrow_Down)
+		}
+		key(s, w, .Enter)
+		return
+	}
+	point_at(s, w, parent, row)
+	target := placement_row(w, placement)
+	if target < 0 {return}
+	p := ui.menu_row_rect(&w.document_menu.submenu, target, f32(w.width), f32(w.height), w.scale)
+	press(s, w, p.x + 40 * w.scale, p.y + p.height / 2)
+}
+
+// Rests the pointer on row `row` of `parent`, which shows its placements.
+@(private = "file")
+point_at :: proc(s: ^app.App, w: ^app.Window, parent: ^ui.Menu, row: int) {
+	r := ui.menu_row_rect(parent, row, f32(w.width), f32(w.height), w.scale)
+	app.handle_event(s, input.Mouse_Move_Event{window = w.id, x = i32(r.x + 40 * w.scale), y = i32(r.y + r.height / 2)})
 }
 
 @(private = "file")
@@ -513,22 +565,22 @@ right_click_menu_opens_a_markdown_link_beside_the_pane :: proc(t: ^testing.T) {
 	open_button(s, w)
 	right_click(s, w, row_of(w, .Open, "https://example.com/a"))
 	testing.expect(t, actions_shown(w))
-	testing.expect(t, action_row(w, .Open) >= 0 && action_row(w, .Split_Right) < 0)
+	open := action_row(w, .Open)
+	testing.expect(t, open >= 0 && !w.document_menu.actions.items[open].submenu)
 	// A press outside the right-click menu closes only it.
 	press(s, w, 2, f32(w.height) - 2)
 	testing.expect(t, app.document_menu_shown(w) && !actions_shown(w))
 
 	right_click(s, w, row_of(w, .Open, file))
-	for action in app.Link_Action.Split_Right ..= app.Link_Action.Linked_Window {
-		testing.expectf(t, action_row(w, action) >= 0, "a Markdown file offers %v", action)
-	}
+	open = action_row(w, .Open)
+	testing.expect(t, open >= 0 && w.document_menu.actions.items[open].submenu, "a Markdown file opens in a pane")
 	app.overlay_close(s, w)
 
 	// From the keyboard, Open in Down Split puts the file under the pane.
 	open_button(s, w)
 	ui.menu_select(&w.document_menu.menu, row_of(w, .Open, file))
 	key(s, w, .Enter, {.Control})
-	choose_action(s, w, .Split_Down, keyboard = true)
+	choose_placement(s, w, &w.document_menu.actions, action_row(w, .Open), .Split_Down, keyboard = true)
 	testing.expect(t, !app.document_menu_shown(w))
 	if !testing.expect_value(t, len(w.panes), 2) {return}
 	above, below := w.panes[0], w.panes[1]
@@ -539,7 +591,7 @@ right_click_menu_opens_a_markdown_link_beside_the_pane :: proc(t: ^testing.T) {
 	// Open in Float from the pointer adds a floating pane.
 	open_button(s, w)
 	right_click(s, w, row_of(w, .Open, file))
-	choose_action(s, w, .Float)
+	choose_placement(s, w, &w.document_menu.actions, action_row(w, .Open), .Float)
 	testing.expect(t, !app.document_menu_shown(w))
 	tree := &app.selected_tab(w.workspace).tree
 	floats := 0
@@ -598,7 +650,7 @@ ctrl_right_click_on_a_terminal_link_offers_to_open_or_pin_it :: proc(t: ^testing
 link_row :: proc(w: ^app.Window, action: app.Link_Action) -> int {
 	menu := &w.document_menu
 	for i in 0 ..< menu.count {
-		if menu.entries[i].action == .Link && menu.entries[i].link == action {return i}
+		if menu.entries[i].action == .Link && menu.entries[i].link.action == action {return i}
 	}
 	return -1
 }
@@ -647,13 +699,19 @@ link_menu_opens_a_markdown_file_in_each_place_copies_it_and_shows_its_folder :: 
 	link_feed(t, &f, fmt.tprintf("\x1b[2J\x1b[3J\x1b[H%s", path))
 	// Shift+right-click shows the menu Ctrl+right-click shows, with every place a Markdown file can open.
 	if !menu_on_path(t, &f, terminal, {.Shift}) {return}
-	for action in app.Link_Action.Split_Right ..= app.Link_Action.Linked_Window {testing.expect(t, link_row(w, action) >= 0)}
+	open := link_row(w, .Open)
+	testing.expect(t, open >= 0 && w.document_menu.menu.items[open].submenu)
 	testing.expect(t, link_row(w, .Open_External) >= 0 && link_row(w, .Copy) >= 0 && link_row(w, .Open_Folder) >= 0)
+	// Its placements, the default marked: a split, as pane.markdown_floating is off.
+	point_at(s, w, &w.document_menu.menu, open)
+	testing.expect(t, app.document_submenu_shown(w))
+	testing.expect_value(t, w.document_menu.submenu.items[placement_row(w, .Split_Right)].shortcut, "Default")
+	testing.expect_value(t, len(w.document_menu.submenu.items), 5)
 	held := strings.clone(held_target(w))
 	defer delete(held)
 
 	// Every choice opens its own pane, though the file already shows in another.
-	click_row(s, w, link_row(w, .Split_Right))
+	choose_placement(s, w, &w.document_menu.menu, link_row(w, .Open), .Split_Right)
 	tree := app.window_tree(w)
 	testing.expect_value(t, layout.pane_count(tree), 2)
 	focused, _ := layout.focused_content(tree)
@@ -662,23 +720,23 @@ link_menu_opens_a_markdown_file_in_each_place_copies_it_and_shows_its_folder :: 
 	testing.expect_value(t, focus_axis(tree), layout.Axis.Horizontal)
 
 	if !menu_on_path(t, &f, terminal, {.Control}) {return}
-	click_row(s, w, link_row(w, .Split_Down))
+	choose_placement(s, w, &w.document_menu.menu, link_row(w, .Open), .Split_Down, keyboard = true)
 	testing.expect_value(t, layout.pane_count(tree), 3)
 	testing.expect_value(t, focus_axis(tree), layout.Axis.Vertical)
 
 	if !menu_on_path(t, &f, terminal, {.Control}) {return}
-	click_row(s, w, link_row(w, .Float))
+	choose_placement(s, w, &w.document_menu.menu, link_row(w, .Open), .Float)
 	testing.expect_value(t, len(app.floating_rects(w)), 1)
 	focused, _ = layout.focused_content(app.window_tree(w))
 	testing.expect_value(t, focused.kind, layout.Content_Kind.Markdown)
 
 	if !menu_on_path(t, &f, terminal, {.Control}) {return}
-	click_row(s, w, link_row(w, .Tab))
+	choose_placement(s, w, &w.document_menu.menu, link_row(w, .Open), .Tab)
 	testing.expect_value(t, len(w.workspace.tabs), 2)
 	testing.expect_value(t, w.workspace.selected, 1)
 
 	if !menu_on_path(t, &f, terminal, {.Control}) {return}
-	click_row(s, w, link_row(w, .Linked_Window))
+	choose_placement(s, w, &w.document_menu.menu, link_row(w, .Open), .Linked_Window)
 	linked: ^app.Window
 	for window in s.windows {if app.window_linked(window) {linked = window}}
 	if testing.expect(t, linked != nil) {
@@ -708,10 +766,11 @@ link_menu_opens_a_markdown_file_in_each_place_copies_it_and_shows_its_folder :: 
 	testing.expect(t, !strings.has_suffix(Open_Stub_State.uri, `notes.md`), Open_Stub_State.uri)
 	testing.expect(t, strings.has_prefix(held, Open_Stub_State.uri), Open_Stub_State.uri)
 
-	// A web address can only open in the browser, so it offers no pane or folder.
+	// A web address can only open in the browser, so it offers no pane, program or folder.
 	link_feed(t, &f, "\x1b[2J\x1b[3J\x1b[Hhttps://example.com/two")
 	if !menu_on_path(t, &f, terminal, {.Shift}) {return}
-	for action in app.Link_Action.Split_Right ..= app.Link_Action.Linked_Window {testing.expect(t, link_row(w, action) < 0)}
+	open = link_row(w, .Open)
+	testing.expect(t, open >= 0 && !w.document_menu.menu.items[open].submenu)
 	testing.expect(t, link_row(w, .Open_External) < 0 && link_row(w, .Open_Folder) < 0)
 	testing.expect(t, link_row(w, .Copy) >= 0)
 }
@@ -744,21 +803,22 @@ link_menu_opens_a_shell_in_a_folder_in_each_place_with_the_pane_profile :: proc(
 		return opened
 	}
 
-	for action in app.Link_Action.Split_Right ..= app.Link_Action.Linked_Window {
+	for placement in app.Link_Placement.Split_Right ..= app.Link_Placement.Linked_Window {
 		if !menu_on_path(t, &f, terminal, {.Shift}) {return}
-		testing.expect(t, link_row(w, .Open_External) < 0 && link_row(w, .Open_Folder) < 0)
+		testing.expect(t, link_row(w, .Open) < 0 && link_row(w, .Open_Folder) < 0)
+		testing.expect(t, link_row(w, .Open_External) >= 0)
 		before := len(s.sessions)
-		click_row(s, w, link_row(w, action))
+		choose_placement(s, w, &w.document_menu.menu, link_row(w, .Open_Shell), placement)
 		testing.expect(t, !app.document_menu_shown(w))
 		opened := opened_here(t, s, before, root)
 		if opened == nil {return}
 		content := layout.Content{.Terminal, opened.id}
-		#partial switch action {
+		#partial switch placement {
 		case .Split_Right, .Split_Down:
 			tree := app.window_tree(w)
 			focused, _ := layout.focused_content(tree)
 			testing.expect_value(t, focused, content)
-			testing.expect_value(t, focus_axis(tree), action == .Split_Down ? layout.Axis.Vertical : .Horizontal)
+			testing.expect_value(t, focus_axis(tree), placement == .Split_Down ? layout.Axis.Vertical : .Horizontal)
 		case .Float:
 			tree := app.window_tree(w)
 			testing.expect(t, layout.is_floating(tree, layout.find_content(tree, content)))
@@ -770,6 +830,17 @@ link_menu_opens_a_shell_in_a_folder_in_each_place_with_the_pane_profile :: proc(
 			linked := app.pane_link_window_of(s, content)
 			testing.expect(t, linked != nil && app.window_linked(linked))
 		}
+	}
+
+	// Clicking Open in Shell itself opens its default, a right split.
+	if !menu_on_path(t, &f, terminal, {.Shift}) {return}
+	before := len(s.sessions)
+	click_row(s, w, link_row(w, .Open_Shell))
+	if opened := opened_here(t, s, before, root); opened != nil {
+		tree := app.window_tree(w)
+		focused, _ := layout.focused_content(tree)
+		testing.expect_value(t, focused, layout.Content{.Terminal, opened.id})
+		testing.expect_value(t, focus_axis(tree), layout.Axis.Horizontal)
 	}
 
 	// The folder pinned to the pane opens the same way from its right-click menu.
@@ -784,8 +855,8 @@ link_menu_opens_a_shell_in_a_folder_in_each_place_with_the_pane_profile :: proc(
 	app.document_menu_open_focused(s, w)
 	ui.menu_select(&w.document_menu.menu, row_of(w, .Open, held))
 	key(s, w, .Enter, {.Control})
-	before := len(s.sessions)
-	choose_action(s, w, .Split_Down, keyboard = true)
+	before = len(s.sessions)
+	choose_placement(s, w, &w.document_menu.actions, action_row(w, .Open_Shell), .Split_Down, keyboard = true)
 	testing.expect(t, !app.document_menu_shown(w))
 	opened_here(t, s, before, root)
 }
@@ -810,13 +881,13 @@ link_and_pinned_menus_offer_the_same_actions :: proc(t: ^testing.T) {
 	testing.expect_value(t, os.write_entire_file(text, transmute([]u8)string("x")), nil)
 	s, w := &f.state, f.state.windows[0]
 	terminal := w.panes[0].content
-	shared :: bit_set[app.Link_Action]{.Open, .Split_Right, .Split_Down, .Float, .Tab, .Linked_Window, .Open_External, .Copy, .Open_Folder}
+	shared :: bit_set[app.Link_Action]{.Open, .Open_Shell, .Program, .Open_External, .Copy, .Open_Folder}
 	for printed in ([?]string{markdown, text, root, "https://example.com/parity"}) {
 		link_feed(t, &f, fmt.tprintf("\x1b[2J\x1b[3J\x1b[H%s", printed))
 		if !menu_on_path(t, &f, terminal, {.Shift}) {return}
 		from_link: bit_set[app.Link_Action]
 		for i in 0 ..< w.document_menu.count {
-			if entry := w.document_menu.entries[i]; entry.action == .Link {from_link += {entry.link}}
+			if entry := w.document_menu.entries[i]; entry.action == .Link {from_link += {entry.link.action}}
 		}
 		state, _ := w.overlay.(app.Overlay_Document_Menu)
 		link, _ := state.mode.(app.Document_Menu_Link)
@@ -830,13 +901,137 @@ link_and_pinned_menus_offer_the_same_actions :: proc(t: ^testing.T) {
 		key(s, w, .Enter, {.Control})
 		from_pin: bit_set[app.Link_Action]
 		for item in w.document_menu.actions.items {
-			if !item.separator {from_pin += {app.Link_Action(item.payload)}}
+			if !item.separator {from_pin += {(transmute(app.Link_Choice)item.payload).action}}
 		}
 		testing.expectf(t, from_link == from_pin & shared, "%s: link %v, pin %v", printed, from_link, from_pin)
 		testing.expect(t, card(from_link) > 1)
 		app.overlay_close(s, w)
 		testing.expect(t, app.document_remove(scopes, .Pane, document.target))
 	}
+}
+
+// What the own-window launcher was last asked to start; the test frees the strings.
+@(private = "file")
+Program_Stub :: struct {
+	calls:                   int,
+	command_line, directory: string,
+}
+
+@(private = "file")
+program_stub_state: Program_Stub
+
+@(private = "file")
+program_stub :: proc(command_line, directory: string) -> bool {
+	delete(program_stub_state.command_line)
+	delete(program_stub_state.directory)
+	program_stub_state.calls += 1
+	program_stub_state.command_line = strings.clone(command_line)
+	program_stub_state.directory = strings.clone(directory)
+	return true
+}
+
+// The labels of the link menu's program rows, in order.
+@(private = "file")
+program_labels :: proc(w: ^app.Window) -> []string {
+	labels := make([dynamic]string, context.temp_allocator)
+	menu := &w.document_menu
+	for i in 0 ..< menu.count {
+		if menu.entries[i].action == .Link && menu.entries[i].link.action == .Program {
+			append(&labels, menu.menu.items[i].label)
+		}
+	}
+	return labels[:]
+}
+
+// The link menu's row labelled `label`, or -1.
+@(private = "file")
+labelled_row :: proc(w: ^app.Window, label: string) -> int {
+	for item, i in w.document_menu.menu.items {
+		if item.label == label {return i}
+	}
+	return -1
+}
+
+// WORK-381: a Link Programs entry runs on a file or folder in a new pane, at its default placement on a click
+// or at any other from its submenu, or as a window of its own; it starts in the link's folder. A program
+// for folders only is not offered for a file.
+@(test)
+link_programs_open_links_in_panes_and_in_their_own_windows :: proc(t: ^testing.T) {
+	sync.mutex_lock(&Link_Test_Lock)
+	defer sync.mutex_unlock(&Link_Test_Lock)
+	f: Palette_Fixture
+	defer palette_fixture_destroy(t, &f)
+	if !palette_fixture_create(t, &f, "documents-link-programs", false) {return}
+	root, root_error := os.make_directory_temp("", "aio-link-programs-*", context.allocator)
+	if !testing.expect_value(t, root_error, nil) {return}
+	defer {testing.expect_value(t, os.remove_all(root), nil); delete(root)}
+	file := fmt.aprintf(`%s\notes.txt`, root)
+	defer delete(file)
+	if !testing.expect_value(t, os.write_entire_file(file, transmute([]u8)string("x")), nil) {return}
+	s, w := &f.state, f.state.windows[0]
+	existing, read_error := os.read_entire_file(f.path, context.allocator)
+	if !testing.expect_value(t, read_error, nil) {return}
+	defer delete(existing)
+	programs := "\nopener.echo.name = Echo\nopener.echo.command = cmd.exe /d /k rem %1\nopener.echo.placement = down\n" +
+		"opener.dirs.name = Folder Tool\nopener.dirs.command = cmd.exe /d /k rem\nopener.dirs.offers = folders\n" +
+		"opener.view.name = Viewer\nopener.view.command = cmd.exe /d /c rem \"%1\"\nopener.view.placement = window\n"
+	updated := strings.concatenate({string(existing), programs}, context.temp_allocator)
+	if !testing.expect_value(t, os.write_entire_file(f.path, transmute([]u8)updated), nil) {return}
+	app.reload_settings(s, false)
+	program_stub_state = {}
+	s.opener.program = program_stub
+	defer {
+		s.opener.program = nil
+		delete(program_stub_state.command_line)
+		delete(program_stub_state.directory)
+		program_stub_state = {}
+	}
+	terminal := w.panes[0].content
+	link_feed(t, &f, fmt.tprintf("\x1b[2J\x1b[3J\x1b[H%s", file))
+
+	// A file is offered the programs for files, in settings' order, after Open; only pane programs have
+	// placements.
+	if !menu_on_path(t, &f, terminal, {.Shift}) {return}
+	labels := program_labels(w)
+	if !testing.expect_value(t, len(labels), 2) {return}
+	testing.expect_value(t, labels[0], "Open in Echo")
+	testing.expect_value(t, labels[1], "Open in Viewer")
+	testing.expect(t, w.document_menu.menu.items[labelled_row(w, "Open in Echo")].submenu)
+	testing.expect(t, !w.document_menu.menu.items[labelled_row(w, "Open in Viewer")].submenu)
+
+	// Clicking a program opens it at its default, a down split, running its command in the file's folder.
+	before := len(s.sessions)
+	click_row(s, w, labelled_row(w, "Open in Echo"))
+	if !testing.expect_value(t, len(s.sessions), before + 1) {return}
+	opened := &s.sessions[len(s.sessions) - 1]
+	testing.expect_value(t, opened.header.command, fmt.tprintf("cmd.exe /d /k rem %s", file))
+	testing.expect(t, strings.equal_fold(opened.header.launch_directory, root), opened.header.launch_directory)
+	testing.expect_value(t, focus_axis(app.window_tree(w)), layout.Axis.Vertical)
+
+	// Its submenu marks that default and opens it anywhere else.
+	if !menu_on_path(t, &f, terminal, {.Shift}) {return}
+	point_at(s, w, &w.document_menu.menu, labelled_row(w, "Open in Echo"))
+	testing.expect_value(t, w.document_menu.submenu.items[placement_row(w, .Split_Down)].shortcut, "Default")
+	choose_placement(s, w, &w.document_menu.menu, labelled_row(w, "Open in Echo"), .Float)
+	testing.expect_value(t, len(app.floating_rects(w)), 1)
+
+	// A windowed program starts on its own, its quotes kept, and opens no pane.
+	if !menu_on_path(t, &f, terminal, {.Shift}) {return}
+	before = len(s.sessions)
+	click_row(s, w, labelled_row(w, "Open in Viewer"))
+	testing.expect_value(t, len(s.sessions), before)
+	testing.expect_value(t, program_stub_state.calls, 1)
+	testing.expect_value(t, program_stub_state.command_line, fmt.tprintf(`cmd.exe /d /c rem "%s"`, file))
+	testing.expect(t, strings.equal_fold(program_stub_state.directory, root), program_stub_state.directory)
+
+	// A folder is offered the folder program as well, after Open in Shell.
+	link_feed(t, &f, fmt.tprintf("\x1b[2J\x1b[3J\x1b[H%s", root))
+	if !menu_on_path(t, &f, terminal, {.Shift}) {return}
+	labels = program_labels(w)
+	if !testing.expect_value(t, len(labels), 3) {return}
+	testing.expect_value(t, labels[0], "Open in Folder Tool")
+	testing.expect(t, link_row(w, .Open_Shell) < labelled_row(w, "Open in Folder Tool"))
+	app.overlay_close(s, w)
 }
 
 @(test)

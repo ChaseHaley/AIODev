@@ -24,6 +24,49 @@ executable_token_parsing :: proc(t: ^testing.T) {
 }
 
 @(test)
+command_arguments_follow_the_executable :: proc(t: ^testing.T) {
+	cases := [?]struct {
+		line, arguments: string,
+	} {
+		{"nvim C:\\notes.md", "C:\\notes.md"},
+		{`"C:\Program Files\Neovim\bin\nvim.exe"  "C:\a b\x.md"`, `"C:\a b\x.md"`},
+		{"code", ""},
+		{"", ""},
+	}
+	for c in cases {
+		testing.expect_value(t, pty.command_arguments(c.line), c.arguments)
+	}
+}
+
+// A link program may be a batch script, as VS Code's `code` is; an executable found by name is not one.
+@(test)
+resolve_program_tells_batch_scripts_from_executables :: proc(t: ^testing.T) {
+	script, script_err := pty.resolve_program(`C:\Tools\code.CMD "C:\a b\x.md"`)
+	testing.expect_value(t, script_err.kind, pty.Spawn_Error_Kind.None)
+	defer pty.program_destroy(&script)
+	testing.expect_value(t, script.path, `C:\Tools\code.CMD`)
+	testing.expect(t, script.batch)
+
+	found, found_err := pty.resolve_program("cmd /d /c rem")
+	testing.expect_value(t, found_err.kind, pty.Spawn_Error_Kind.None)
+	defer pty.program_destroy(&found)
+	testing.expect(t, strings.has_suffix(strings.to_lower(found.path, context.temp_allocator), `\system32\cmd.exe`), found.path)
+	testing.expect(t, !found.batch)
+
+	_, missing := pty.resolve_program("aio_missing_program_51207")
+	testing.expect_value(t, missing.kind, pty.Spawn_Error_Kind.Start_Process)
+}
+
+// cmd.exe /s strips the outer quotes and runs the rest as written, so the script keeps its own quotes.
+@(test)
+batch_command_line_runs_the_script_through_cmd :: proc(t: ^testing.T) {
+	line, err := pty.batch_command_line(`C:\Tools\code.cmd`, `"C:\a b\x.md"`)
+	testing.expect_value(t, err.kind, pty.Spawn_Error_Kind.None)
+	defer delete(line)
+	testing.expect(t, strings.has_suffix(line, `\cmd.exe" /d /s /c ""C:\Tools\code.cmd" "C:\a b\x.md""`), line)
+}
+
+@(test)
 explicit_path_detection :: proc(t: ^testing.T) {
 	cases := [?]struct {
 		token:    string,

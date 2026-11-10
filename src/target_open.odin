@@ -2,6 +2,7 @@ package main
 
 import "aio:links"
 import "aio:localpath"
+import "aio:pty"
 import "core:log"
 import "core:path/filepath"
 import "core:strings"
@@ -14,8 +15,19 @@ import "core:strings"
 // such as a test fixture that never installs a stub, refuses every target in every build rather than
 // launching a browser or a file.
 Target_Opener :: struct {
-	url:  proc(uri: string) -> bool,
-	file: proc(path, approved: string) -> bool,
+	url:     proc(uri: string) -> bool,
+	file:    proc(path, approved: string) -> bool,
+	// Starts a link program's command line as a window of its own, in `directory`.
+	program: proc(command_line, directory: string) -> bool,
+}
+
+// Target_Opener.program on Windows; see pty.spawn_window.
+program_start_window :: proc(command_line, directory: string) -> bool {
+	if err := pty.spawn_window(command_line, directory, context.temp_allocator); err.kind != .None {
+		log.errorf("starting a link program failed: %v (%d)", err.kind, err.os_code)
+		return false
+	}
+	return true
 }
 
 // nil means nothing there reads as a target, which leaves the input to its other uses. Strings

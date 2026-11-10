@@ -66,7 +66,7 @@ start :: proc() -> int {
 	}
 	app := App {
 		options = options,
-		opener = {url = platform.open_url, file = localpath.open_file},
+		opener = {url = platform.open_url, file = localpath.open_file, program = program_start_window},
 	}
 	defer app_destroy(&app)
 	id, id_error := instance.app_id(options, context.allocator)

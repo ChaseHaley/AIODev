@@ -574,13 +574,23 @@ a_markdown_link_offers_the_link_menu_and_opens_its_file_in_a_linked_window :: pr
 	testing.expect(t, is_link && strings.has_suffix(link.document.target, "other.md"), link.document.target)
 	testing.expect_value(t, state.content, shown.content)
 
+	// Open leads to its placements; the pointer rests on it, then clicks Linked Window.
 	menu := &w.document_menu
 	row := -1
 	for i in 0 ..< menu.count {
-		if menu.entries[i].action == .Link && menu.entries[i].link == .Linked_Window {row = i}
+		if menu.entries[i].action == .Link && menu.entries[i].link.action == .Open {row = i}
 	}
 	if !testing.expect(t, row >= 0) {return}
 	rect := ui.menu_row_rect(&menu.menu, row, f32(w.width), f32(w.height), w.scale)
+	app.handle_event(&f.state, input.Mouse_Move_Event{window = w.id, x = i32(rect.x + 40 * w.scale),
+		y = i32(rect.y + rect.height / 2)})
+	if !testing.expect(t, app.document_submenu_shown(w)) {return}
+	place := -1
+	for item, i in menu.submenu.items {
+		if (transmute(app.Link_Choice)item.payload).placement == .Linked_Window {place = i}
+	}
+	if !testing.expect(t, place >= 0) {return}
+	rect = ui.menu_row_rect(&menu.submenu, place, f32(w.width), f32(w.height), w.scale)
 	for pressed in ([?]bool{true, false}) {
 		app.handle_event(&f.state, input.Mouse_Button_Event{window = w.id, x = i32(rect.x + 40 * w.scale),
 			y = i32(rect.y + rect.height / 2), button = .Left, pressed = pressed})

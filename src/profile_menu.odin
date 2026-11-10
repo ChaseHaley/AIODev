@@ -215,7 +215,7 @@ profile_menu_choose :: proc(app: ^App, w: ^Window) {
 profile_menu_key :: proc(app: ^App, w: ^Window, e: input.Key_Event) -> bool {
 	if !profile_menu_shown(w) {return false}
 	switch ui.menu_key(&w.profile_menu.menu, e) {
-	case .None:
+	case .None, .Submenu:
 	case .Changed:
 		ui.menu_reveal(&w.profile_menu.menu, f32(w.width), f32(w.height), w.scale)
 		w.dirty = true
