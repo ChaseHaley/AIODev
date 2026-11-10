@@ -99,6 +99,10 @@ settings_page_build :: proc(app: ^App, source: string, view: ^ui.Editor_View) ->
 		notify(app, .Error, "Could not allocate settings editor.")
 		return
 	}
+	if ui.editor_motion_load(p, &s) != nil {
+		notify(app, .Error, "Could not build the motion settings.")
+		return
+	}
 	if ui.editor_process_load(p, s.process.padding_groups, s.window.padding) != nil {
 		notify(app, .Error, "Could not build the program groups.")
 		return
@@ -397,6 +401,11 @@ editor_outcome :: proc(app: ^App, w: ^Window, outcome: ui.Editor_Outcome) {
 		if row.process_field == .Add_Group || row.process_field == .Add_Program {
 			_ = ui.editor_process_activate(p, row)
 		} else {editor_process_save(app, w)}
+		return
+	}
+	// Motion rows write a context's whole text or a curve or preset change, never their own key.
+	if row.motion_part != .None {
+		editor_motion_save(app, w, outcome == .Reset)
 		return
 	}
 	if row.kind == .Profile_Add {

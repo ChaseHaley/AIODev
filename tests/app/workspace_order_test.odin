@@ -27,7 +27,7 @@ workspace_order_grabbed_row_follows_pointer_instead_of_a_drop_line :: proc(t: ^t
 	if !testing.expect(t, neighbour != nil) {return}
 	testing.expect_value(t, neighbour.position.target, f32(0))
 	testing.expect_value(t, neighbour.position.duration, 140 * time.Millisecond)
-	testing.expect_value(t, neighbour.position.easing, ui.Easing.Decelerate)
+	testing.expect_value(t, neighbour.position.curve, ui.EASING_CURVES[.Decelerate])
 	// The move sampled the window's next frame, which started the neighbour's motion.
 	started := neighbour.position.started
 	testing.expect(t, started != {})
@@ -47,7 +47,7 @@ workspace_order_grabbed_row_follows_pointer_instead_of_a_drop_line :: proc(t: ^t
 	testing.expect(t, grabbed.position.value > 1 && grabbed.position.value < 1.25)
 	testing.expect_value(t, grabbed.position.target, f32(1))
 	testing.expect_value(t, grabbed.position.duration, 140 * time.Millisecond)
-	testing.expect_value(t, grabbed.position.easing, ui.Easing.Decelerate)
+	testing.expect_value(t, grabbed.position.curve, ui.EASING_CURVES[.Decelerate])
 	settling := app.workspace_picker_row_rect(&w, 1).y
 	app.workspace_row_menu_open(&state, &w, 1)
 	testing.expect_value(t, len(w.workspace_picker.order_positions), 4)

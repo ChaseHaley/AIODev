@@ -18,6 +18,7 @@ Settings_Edit :: union #no_nil {
 	Opener_Field_Value,
 	settings.Opener_Mutation,
 	Theme_Change,
+	settings.Motion_Mutation,
 	Factory_Reset,
 }
 
@@ -120,6 +121,7 @@ Settings_Workflow :: enum {
 	Opener,
 	Process,
 	Theme,
+	Motion,
 	Font_Filter,
 	Reset,
 }
@@ -160,6 +162,11 @@ SETTINGS_FAILURE_TEXT := [Settings_Workflow][Settings_Status]string {
 		.Unprepared = "Could not prepare the theme change.",
 		.Conflict = SETTINGS_CONFLICT_TEXT,
 		.Failed = "Could not save the theme. Check the settings path and permissions.",
+	},
+	.Motion = #partial [Settings_Status]string {
+		.Unprepared = "Could not prepare the motion change.",
+		.Conflict = SETTINGS_CONFLICT_TEXT,
+		.Failed = "Could not save motion settings. Check the settings path and permissions.",
 	},
 	.Font_Filter = #partial [Settings_Status]string {
 		.Refused = FONT_FILTER_FAILURE_TEXT,
@@ -289,7 +296,7 @@ settings_edit_build :: proc(app: ^App, edit: Settings_Edit, source: string) -> (
 		if err != nil {return {result = {status = .Unprepared}}}
 		return {revision = defaults}
 	case Profile_Field_Value, settings.Profile_Mutation, Opener_Field_Value, settings.Opener_Mutation,
-	     Theme_Change:
+	     Theme_Change, settings.Motion_Mutation:
 	}
 	model, diagnostics, parse_error := settings.parse(source, inputs = &app.settings_inputs)
 	settings.diagnostics_destroy(&diagnostics)
@@ -306,6 +313,8 @@ settings_edit_build :: proc(app: ^App, edit: Settings_Edit, source: string) -> (
 		return settings_opener_mutation_edit(&model, source, e)
 	case Theme_Change:
 		return settings_theme_edit(&model, source, e)
+	case settings.Motion_Mutation:
+		return settings_motion_edit(&model, source, e)
 	}
 	return
 }
@@ -426,6 +435,23 @@ settings_opener_mutation_edit :: proc(
 	}
 	if error != .None {delete(updated)}
 	return
+}
+
+@(private, require_results)
+settings_motion_edit :: proc(
+	model: ^settings.Settings,
+	source: string,
+	change: settings.Motion_Mutation,
+) -> Settings_Built {
+	revision, message, err := settings.motion_mutate(model, source, change)
+	defer delete(message)
+	if err != nil {return {result = {status = .Unprepared}}}
+	if message != "" {
+		refused := Settings_Built{result = {status = .Refused}}
+		refused.result.message, _ = strings.clone(message, context.temp_allocator)
+		return refused
+	}
+	return {revision = revision}
 }
 
 @(private, require_results)

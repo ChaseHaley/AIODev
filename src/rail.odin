@@ -237,8 +237,11 @@ rail_reveal_active :: proc(w: ^Window) {
 	}
 }
 
+// Empty while the window has no title bar, as in Fullscreen, so the title controls after it take no clicks
+// from the pane header beneath their place.
 tab_orientation_button_rect :: proc(w: ^Window) -> render.Rect {
 	s := w.scale
+	if window_title_height(w) <= 0 {return {}}
 	return {4 * s, 4 * s, ui.TITLE_BUTTON_WIDTH * s, ui.HEIGHT_STANDARD * s}
 }
 
@@ -260,7 +263,7 @@ rail_toggle :: proc(app: ^App, w: ^Window) {
 	}
 	if was_docked != rail_docked(w) {
 		// The docked rail slides in or out and the panes ease into the space.
-		pane_motion_arm(w)
+		pane_motion_arm(w, .Chrome)
 		window_relayout(app, w)
 	} else {
 		window_dividers(app, w)

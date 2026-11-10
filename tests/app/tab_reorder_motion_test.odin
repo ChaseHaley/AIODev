@@ -50,7 +50,7 @@ tab_reorder_motion_follows_pointer_and_displaces_rows_in_both_orientations :: pr
 		distance := horizontal ? (displaced.x - first.x) / first.width : (displaced.y - first.y) / first.height
 		testing.expect(t, distance > 0 && distance <= 1)
 		testing.expect_value(t, w.tab_positions[0].duration, 140 * time.Millisecond)
-		testing.expect_value(t, w.tab_positions[0].easing, ui.Easing.Decelerate)
+		testing.expect_value(t, w.tab_positions[0].curve, ui.EASING_CURVES[.Decelerate])
 		app.tab_drag_release(&state, &w)
 		app.update_motion(&state)
 		testing.expect(t, ui.motion_active(w.tab_positions[1]))

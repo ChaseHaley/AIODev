@@ -14,6 +14,10 @@ motion_frame :: proc(display: time.Tick) -> ui.Frame_Time {
 	return {display = display, period = 16 * time.Millisecond}
 }
 
+// How long pane motions take with the default motion settings.
+@(private = "file")
+PANE_DURATION :: 160 * time.Millisecond
+
 @(test)
 split_and_close_ease_panes_while_the_layout_changes_at_once :: proc(t: ^testing.T) {
 	f: Palette_Fixture
@@ -36,7 +40,7 @@ split_and_close_ease_panes_while_the_layout_changes_at_once :: proc(t: ^testing.
 	shown := app.pane_motion_rect(w, added)
 	testing.expect(t, shown.width > 0 && shown.x > added.rect.x, "the new pane opens from the right edge")
 	testing.expect_value(t, shown.x + shown.width, added.rect.x + added.rect.width)
-	app.window_motion_update(s, w, motion_frame(time.tick_add(first.display, app.PANE_MOTION_DURATION)))
+	app.window_motion_update(s, w, motion_frame(time.tick_add(first.display, PANE_DURATION)))
 	testing.expect(t, !app.pane_motion_animating(w))
 	testing.expect_value(t, app.pane_motion_rect(w, added), added.rect)
 
@@ -49,7 +53,7 @@ split_and_close_ease_panes_while_the_layout_changes_at_once :: proc(t: ^testing.
 	app.window_motion_update(s, w, closing)
 	grown := app.pane_motion_rect(w, w.panes[0])
 	testing.expect(t, grown.width > kept.rect.width && grown.width < whole.width)
-	app.window_motion_update(s, w, motion_frame(time.tick_add(closing.display, app.PANE_MOTION_DURATION)))
+	app.window_motion_update(s, w, motion_frame(time.tick_add(closing.display, PANE_DURATION)))
 	testing.expect_value(t, app.pane_motion_rect(w, w.panes[0]), whole)
 
 	// Without system animations, and for a tab that is not in view, the layout shows at once.
@@ -80,7 +84,7 @@ closed_pane_keeps_its_last_frame_while_it_collapses :: proc(t: ^testing.T) {
 	app.pane_split(s, w, .Right)
 	split := motion_frame(time.tick_now())
 	app.window_motion_update(s, w, split)
-	app.window_motion_update(s, w, motion_frame(time.tick_add(split.display, app.PANE_MOTION_DURATION)))
+	app.window_motion_update(s, w, motion_frame(time.tick_add(split.display, PANE_DURATION)))
 	w.dirty = true
 	app.window_render(s, w)
 	if !testing.expect_value(t, len(w.panes), 2) {return}
@@ -135,7 +139,7 @@ panes_move_within_a_float_as_within_the_tiling :: proc(t: ^testing.T) {
 	testing.expect_value(t, app.pane_motion_rect(w, w.panes[0]), tiled.rect)
 	split := motion_frame(time.tick_now())
 	app.window_motion_update(s, w, split)
-	app.window_motion_update(s, w, motion_frame(time.tick_add(split.display, app.PANE_MOTION_DURATION)))
+	app.window_motion_update(s, w, motion_frame(time.tick_add(split.display, PANE_DURATION)))
 	testing.expect(t, !app.pane_motion_animating(w))
 	w.dirty = true
 	app.window_render(s, w)
@@ -169,7 +173,32 @@ panes_move_within_a_float_as_within_the_tiling :: proc(t: ^testing.T) {
 motion_settle :: proc(s: ^app.App, w: ^app.Window) {
 	first := motion_frame(time.tick_now())
 	app.window_motion_update(s, w, first)
-	app.window_motion_update(s, w, motion_frame(time.tick_add(first.display, app.PANE_MOTION_DURATION)))
+	app.window_motion_update(s, w, motion_frame(time.tick_add(first.display, PANE_DURATION)))
+}
+
+// A close takes its duration from the Close motion settings, while a split keeps the default.
+@(test)
+close_takes_its_duration_from_the_motion_settings :: proc(t: ^testing.T) {
+	f: Palette_Fixture
+	defer palette_fixture_destroy(t, &f)
+	if !palette_fixture_create(t, &f, "pane-motion-close-duration", second_window = false) {return}
+	s := &f.state
+	s.animations = true
+	w := s.windows[0]
+	s.settings.motion.specs[.Close] = {duration = 400}
+	app.pane_split(s, w, .Right)
+	motion_settle(s, w)
+	testing.expect(t, !app.pane_motion_animating(w), "the split took the default duration")
+	if !testing.expect_value(t, len(w.panes), 2) {return}
+
+	app.pane_close(s, w)
+	testing.expect(t, app.pane_motion_animating(w))
+	first := motion_frame(time.tick_now())
+	app.window_motion_update(s, w, first)
+	app.window_motion_update(s, w, motion_frame(time.tick_add(first.display, PANE_DURATION)))
+	testing.expect(t, app.pane_motion_animating(w), "the close outlasts the default duration")
+	app.window_motion_update(s, w, motion_frame(time.tick_add(first.display, 400 * time.Millisecond)))
+	testing.expect(t, !app.pane_motion_animating(w))
 }
 
 // Swapping, resizing from the keyboard and balancing move panes from where they were drawn.
@@ -266,7 +295,7 @@ minimized_float_shrinks_into_its_capsule_and_grows_back :: proc(t: ^testing.T) {
 	first := motion_frame(time.tick_now())
 	app.window_motion_update(s, w, first)
 	// Early on, before it reaches the notices drawn in the corner.
-	app.window_motion_update(s, w, motion_frame(time.tick_add(first.display, app.PANE_MOTION_DURATION / 8)))
+	app.window_motion_update(s, w, motion_frame(time.tick_add(first.display, PANE_DURATION / 8)))
 	shrinking := app.pane_motion_frame(w, id, {})
 	testing.expect(t, shrinking.width < frame.width && shrinking.width > capsule.width)
 	testing.expect(t, shrinking.x > frame.x, "the frame heads for the capsule")
@@ -284,7 +313,7 @@ minimized_float_shrinks_into_its_capsule_and_grows_back :: proc(t: ^testing.T) {
 	}
 	mid := slice.clone(pixels)
 	defer delete(mid)
-	app.window_motion_update(s, w, motion_frame(time.tick_add(first.display, app.PANE_MOTION_DURATION)))
+	app.window_motion_update(s, w, motion_frame(time.tick_add(first.display, PANE_DURATION)))
 	if !testing.expect(t, app.window_build_frame(s, w)) {return}
 	after, after_error := render.surface_create_offscreen(s.device, w.width, w.height)
 	if !testing.expect_value(t, after_error, render.Error.None) {return}
@@ -332,7 +361,7 @@ fill_window_slides_chrome_out_while_the_pane_grows :: proc(t: ^testing.T) {
 	testing.expect_value(t, app.pane_motion_rect(w, w.panes[0]), pane.rect)
 	first := motion_frame(time.tick_now())
 	app.window_motion_update(s, w, first)
-	app.window_motion_update(s, w, motion_frame(time.tick_add(first.display, app.PANE_MOTION_DURATION / 2)))
+	app.window_motion_update(s, w, motion_frame(time.tick_add(first.display, PANE_DURATION / 2)))
 	sliding := app.pane_motion_region_begin(w, app.PANE_MOTION_PANEL, {}).shown
 	testing.expect(t, sliding.x > panel.x && sliding.width < panel.width, "the panel slides to the right edge")
 	testing.expect(t, sliding.x + sliding.width <= panel.x + panel.width + 1)

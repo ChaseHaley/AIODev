@@ -1,12 +1,21 @@
 package ui
 
 import "aio:render"
+import "aio:settings"
 import "core:time"
 
+// Shorthand for the curves fixed motions use; user-customizable motions take a settings.Motion_Curve.
 Easing :: enum {
 	Linear,
 	Decelerate,
 	Accelerate,
+}
+
+// The builtin settings curves of the same names, so a fixed motion eases as its customizable namesake.
+EASING_CURVES :: [Easing]settings.Motion_Curve {
+	.Linear     = {p = {0, 0, 1, 1}},
+	.Decelerate = {p = {0.2, 0, 0, 1}},
+	.Accelerate = {p = {0.4, 0, 1, 1}},
 }
 
 // When the frame being built will be on screen; see render.Frame_Time.
@@ -21,7 +30,7 @@ Motion :: struct {
 	from, value, target: f32,
 	started:             time.Tick,
 	duration:            time.Duration,
-	easing:              Easing,
+	curve:               settings.Motion_Curve,
 }
 
 // How long a reordered list item takes to ease into its slot (D-069). Tabs, workspace rows and
@@ -43,30 +52,29 @@ motion_update :: proc(m: ^Motion, frame: Frame_Time) -> bool {
 	}
 	t := clamp(f32(time.tick_diff(m.started, frame.display)) / f32(m.duration), 0, 1)
 	if t >= 1 {m.value = m.target; return true}
-	m.value = m.from + (m.target - m.from) * ease(m.easing, t)
+	m.value = m.from + (m.target - m.from) * settings.motion_curve_ease(m.curve, t)
 	return true
-}
-
-// Progress `t` in 0..1 along the easing curve. The curves are cubic-beziers through (0,0) and (1,1):
-// decelerate (0.2, 0, 0, 1) and accelerate (0.4, 0, 1, 1).
-ease :: proc(easing: Easing, t: f32) -> f32 {
-	if easing == .Linear {return t}
-	x1, x2 := easing == .Decelerate ? f32(0.2) : f32(0.4), easing == .Decelerate ? f32(0) : f32(1)
-	u, lo, hi := t, f32(0), f32(1)
-	for _ in 0 ..< 16 {
-		u = (lo + hi) / 2
-		x := 3 * (1 - u) * (1 - u) * u * x1 + 3 * (1 - u) * u * u * x2 + u * u * u
-		if x < t {lo = u} else {hi = u}
-	}
-	return 3 * (1 - u) * u * u + u * u * u
 }
 
 // Retargets from the value last drawn; the motion starts with the next frame that samples it. Disabled
 // animations land on the target at once.
 motion_target :: proc(m: ^Motion, target: f32, duration: time.Duration, easing: Easing, enabled: bool) {
+	@(static, rodata)
+	curves := EASING_CURVES
+	motion_target_curve(m, target, duration, curves[easing], enabled)
+}
+
+// As motion_target, along a curve of the user's motion settings.
+motion_target_curve :: proc(
+	m: ^Motion,
+	target: f32,
+	duration: time.Duration,
+	curve: settings.Motion_Curve,
+	enabled: bool,
+) {
 	if !enabled {m.value, m.target = target, target; return}
 	if m.target == target {return}
-	m.from, m.target, m.started, m.duration, m.easing = m.value, target, {}, duration, easing
+	m.from, m.target, m.started, m.duration, m.curve = m.value, target, {}, duration, curve
 }
 
 // Applies `fade` to everything drawn since `mark`, so a surface's fade moves and dims only what it drew.

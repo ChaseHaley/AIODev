@@ -30,6 +30,9 @@ Row_Kind :: enum {
 	Profile_Icon,
 	// A link program's table line; its fields are ordinary rows that name it in `opener`.
 	Opener,
+	// The Motion section: a context's header, and the field that opens the curve popover.
+	Motion_Context,
+	Curve,
 }
 
 // What saving an action or theme row asks the page owner to do. Rows are still found, searched and
@@ -91,6 +94,11 @@ Editor_Row :: struct {
 	flags:                                         bit_set[Editor_Row_Flag],
 	process: int,
 	process_field: Process_Field,
+	// The Motion section part this row is, for `motion_context`. A field row is `motion_inherited`
+	// when its context leaves the field to a parent or the built-in fallback.
+	motion_part:      Motion_Part,
+	motion_context:   settings.Motion_Context,
+	motion_inherited: bool,
 }
 
 // A command shortcut holds several comma-separated alternatives; a Single chord such as the leader
@@ -125,6 +133,7 @@ Editor_Popup :: enum {
 	Choice,
 	Color,
 	Shortcuts,
+	Curve,
 }
 
 // What the page is doing, one state at a time. Each state carries what is valid only in it, so a
@@ -138,6 +147,7 @@ Editor_Mode :: union #no_nil {
 	Editor_Shortcut,
 	Editor_Choice_Popup,
 	Editor_Color_Popup,
+	Editor_Curve_Popup,
 	Editor_Profile_Menu,
 }
 
@@ -187,6 +197,13 @@ Color_Drag :: enum {
 	None,
 	Wheel,
 	Ramp,
+}
+
+// The curve popover of the selected Curve row; `drag` while the pointer holds a handle or the bounce,
+// `naming` while the keyboard edits the shown curve's name.
+Editor_Curve_Popup :: struct {
+	drag:   Curve_Drag,
+	naming: bool,
 }
 
 Editor_Profile_Menu :: struct {}
@@ -370,10 +387,11 @@ editor_revision_stale :: proc(p: ^Editor, reason: Editor_Stale_Reason) {
 	p.revision = Editor_Stale{editor_source(p), reason}
 }
 
-// Pending work in the selected field, a shortcut capture or the program groups.
+// Pending work in the selected field, a shortcut capture, a curve edit or the program groups.
 editor_draft :: proc(p: ^Editor) -> bool {
 	row := editor_row(p)
-	return p.process_dirty || editor_capturing(p) || (row != nil && field_string(&p.value) != row.value)
+	return p.process_dirty || p.motion_curve_edited || editor_capturing(p) ||
+		(row != nil && field_string(&p.value) != row.value)
 }
 
 // The settings page shown in a settings tab. Only the selected row is edited; its pending value lives
@@ -383,6 +401,7 @@ Editor :: struct {
 	using profiles:                                                    Profile_Editor_State,
 	using processes:                                                   Process_Editor_State,
 	using openers:                                                     Opener_Editor_State,
+	using motions:                                                     Motion_Editor_State,
 	using page:                                                        Page_Revision_State,
 	using themes:                                                      Theme_Page_State,
 	hover_clear:                                                       bool,
@@ -434,6 +453,7 @@ Editor_Outcome :: enum {
 // the kind of block they are.
 Editor_View :: struct {
 	process_expanded:  int,
+	motion_expanded:   bit_set[settings.Motion_Context],
 	expanded:          string,
 	opener_expanded:   string,
 	order:             Order_Kind,
@@ -514,6 +534,7 @@ editor_destroy :: proc(p: ^Editor) {
 	delete(p.choice_search.bytes)
 	delete(p.choice_matches)
 	delete(p.process_source)
+	motion_editor_destroy(&p.motions)
 	editor_revision_close(p)
 	delete(p.message)
 	delete(p.theme)
@@ -530,6 +551,7 @@ editor_destroy :: proc(p: ^Editor) {
 @(require_results)
 editor_view_take :: proc(p: ^Editor) -> (view: Editor_View, alloc_error: runtime.Allocator_Error) {
 	view.process_expanded = p.process_expanded
+	view.motion_expanded = p.motion_expanded
 	view.expanded = strings.clone(p.expanded) or_return
 	view.opener_expanded = strings.clone(p.opener_expanded) or_return
 	view.order, _ = order_kind(p)
@@ -550,6 +572,7 @@ editor_view_destroy :: proc(view: ^Editor_View) {
 // that no longer does. A reload after a successful save must land back on the same expanded row.
 editor_view_restore :: proc(p: ^Editor, view: ^Editor_View) {
 	p.process_expanded = view.process_expanded
+	p.motion_expanded = view.motion_expanded
 	delete(p.expanded)
 	p.expanded, view.expanded = view.expanded, ""
 	delete(p.opener_expanded)
@@ -640,6 +663,10 @@ editor_carry :: proc(to, from: ^Editor, draft: bool) {
 		previous_color, previous_ok, _ := colour.parse(field_string(&from.value), .Permissive)
 		next_color, next_ok, _ := colour.parse(field_string(&to.value), .Permissive)
 		if previous_ok && next_ok && previous_color == next_color {to.hsv = from.hsv}
+	}
+	if popup == .Curve && next.kind == .Curve {
+		mode = Editor_Curve_Popup{}
+		motion_popover_carry(to, from, next, draft)
 	}
 	if draft {
 		delete(to.value.bytes)
@@ -853,6 +880,8 @@ editor_popup :: proc(p: ^Editor) -> Editor_Popup {
 		return .Choice
 	case Editor_Color_Popup:
 		return .Color
+	case Editor_Curve_Popup:
+		return .Curve
 	case Editor_Shortcut:
 		if p.capture.state == .Alternatives {return .Shortcuts}
 	}
@@ -879,6 +908,8 @@ editor_dragging :: proc(p: ^Editor) -> bool {
 	case Editor_Choice_Popup:
 		return m.drag != nil
 	case Editor_Color_Popup:
+		return m.drag != .None
+	case Editor_Curve_Popup:
 		return m.drag != .None
 	case Editor_Positions, Editor_Reset_All, Editor_Shortcut, Editor_Profile_Menu:
 	}
@@ -907,6 +938,8 @@ editor_mode_set :: proc(p: ^Editor, next: Editor_Mode) {
 	p.mode = next
 	// The capture's state means something only while its field has the keyboard.
 	if _, shortcut := next.(Editor_Shortcut); !shortcut {p.capture.state = .Idle}
+	// An unsaved curve edit lives only in its popover.
+	if _, curve := next.(Editor_Curve_Popup); !curve {p.motion_curve_edited = false}
 }
 
 @(private)
@@ -1033,8 +1066,8 @@ Reveal_Program_Groups :: struct {}
 
 Reveal_Openers :: struct {}
 
-// Selects a row, opening the profile, program group or link program that owns it first. A palette
-// jump or a reveal must be able to land on a field the collapsed table is not showing.
+// Selects a row, opening the profile, program group, link program or motion context that owns it first. A
+// palette jump or a reveal must be able to land on a field the collapsed table is not showing.
 editor_reveal :: proc(p: ^Editor, target: Reveal_Target) -> bool {
 	key: string
 	switch t in target {
@@ -1068,6 +1101,7 @@ editor_reveal :: proc(p: ^Editor, target: Reveal_Target) -> bool {
 			editor_opener_set_expanded(p, row.opener)
 			editor_rebuild(p)
 		}
+		if motion_reveal(p, row) {editor_rebuild(p)}
 		break
 	}
 	return editor_select_key(p, key)
@@ -1098,6 +1132,9 @@ row_matches :: proc(words: []string, haystack: string, fuzzy: bool = false) -> b
 // Whether a row belongs to the page in the current expansion state, before search ranks it.
 @(private)
 row_available :: proc(p: ^Editor, row: Editor_Row) -> bool {
+	if row.motion_part in MOTION_FIELD_PARTS || row.motion_part == .Context {
+		return motion_row_available(p, row)
+	}
 	if row.process_field != .None {
 		return row.process == 0 || row.process_field == .Group || row.process == p.process_expanded
 	}
@@ -1609,6 +1646,10 @@ editor_wheel :: proc(p: ^Editor, l: Editor_Layout, x, y: f32, rows: int) {
 		}
 		return
 	}
+	if editor_popup(p) == .Curve && render.rect_contains(editor_popup_rect(p, l), x, y) {
+		editor_motion_wheel(p, rows)
+		return
+	}
 	if render.rect_contains(l.outline, x, y) {
 		p.outline_scroll = clamp(
 			p.outline_scroll - rows,
@@ -1814,7 +1855,9 @@ activate :: proc(p: ^Editor, row: ^Editor_Row) -> Editor_Outcome {
 	case .Text, .Integer, .Number, .Profile_Icon:
 		editor_mode_set(p, Editor_Editing{})
 		field_select_all(&p.value)
-	case .Process_Group:
+	case .Curve:
+		motion_popover_open(p, row)
+	case .Process_Group, .Motion_Context:
 	case .Opener:
 		// The keyboard reaches the line's controls; Delete removes and Enter opens the fields.
 		editor_mode_set(p, Editor_Editing{})
@@ -1918,6 +1961,7 @@ editor_key :: proc(p: ^Editor, raw: input.Key_Event) -> Editor_Outcome {
 	}
 	if result, handled := editor_process_key(p, row, e); handled {return result}
 	if result, handled := editor_opener_key(p, row, e); handled {return result}
+	if result, handled := editor_motion_key(p, row, e); handled {return result}
 	if editor_popup(p) != .None && row != nil {
 		if outcome, handled := popup_key(p, row, e); handled {return outcome}
 	}
@@ -2056,6 +2100,10 @@ editor_text :: proc(p: ^Editor, text: string) {
 		return
 	}
 	row := editor_row(p)
+	if curve, open := p.mode.(Editor_Curve_Popup); open && curve.naming {
+		_ = field_text(&p.choice_search, text)
+		return
+	}
 	if choice, open := p.mode.(Editor_Choice_Popup); open && choice_searchable(row) {
 		if choice.toggle_focus {return}
 		if field_text(&p.choice_search, text) == .Edited {choice_filter(p, row)}
@@ -2243,7 +2291,7 @@ editor_row_parts :: proc(p: ^Editor, l: Editor_Layout, index: int) -> Row_Parts 
 	case .Toggle:
 		parts.toggle = {right - SWITCH_WIDTH * s, cy - SWITCH_HEIGHT / 2 * s, SWITCH_WIDTH * s, SWITCH_HEIGHT * s}
 		parts.text_right = parts.toggle.x - 48 * s
-	case .Choice:
+	case .Choice, .Curve:
 		parts.field = field(right, cy, 180, s)
 	case .Integer, .Number:
 		parts.field = field(right, cy, 88, s)
@@ -2264,11 +2312,12 @@ editor_row_parts :: proc(p: ^Editor, l: Editor_Layout, index: int) -> Row_Parts 
 		parts.text_right = parts.swatch.x - SPACE_3 * s
 	case .Shortcut:
 		shortcut_parts(&parts, s, index == p.selected)
-	case .Process_Group, .Profile, .Profile_Add, .Opener:
+	case .Process_Group, .Motion_Context, .Profile, .Profile_Add, .Opener:
 		parts.reset = {}
 	}
 	if parts.field.width > 0 && parts.text_right > parts.field.x {parts.text_right = parts.field.x}
 	parts.text_right -= 16 * s
+	if row.motion_part != .None {return editor_motion_parts(&row, parts)}
 	return parts
 }
 
@@ -2353,6 +2402,7 @@ editor_popup_rect :: proc(p: ^Editor, l: Editor_Layout) -> render.Rect {
 	parts := editor_row_parts(p, l, p.selected)
 	s := l.scale
 	if popup == .Shortcuts {return shortcut_capture_popup_rect(&p.capture, parts, l.page, row.value, s)}
+	if popup == .Curve {return motion_popover_rect(parts, l.page, s)}
 	if popup == .Choice {
 		count := choice_popup_rows(p, row, l)
 		shown := &p.choice_list
@@ -2480,6 +2530,7 @@ editor_press :: proc(
 		if popup == .Shortcuts {
 			return shortcut_outcome(p, shortcut_capture_press(&p.capture, &p.value, row.value, r, x, y, s))
 		}
+		if popup == .Curve {return editor_motion_popup_press(p, r, x, y, s)}
 		c := color_parts(r, row.kind == .Optional_Color, s)
 		drag: Color_Drag
 		switch {
@@ -2526,6 +2577,9 @@ editor_press :: proc(
 		if result, handled := editor_process_press(p, row, parts, x, y, s); handled {return result}
 	}
 	if row.kind == .Opener {return editor_opener_press(p, row, parts, index, x, y, s)}
+	if row.motion_part != .None {
+		if result, handled := editor_motion_press(p, row, parts, x, y); handled {return result}
+	}
 	if row.kind == .Profile || row.kind == .Profile_Add {
 		table := profile_row_parts(row.kind, parts.row, s)
 		switch {
@@ -2667,6 +2721,8 @@ editor_drag :: proc(p: ^Editor, l: Editor_Layout, text: ^Text, x, y: f32) -> boo
 		if m.drag == .None {return false}
 		pick_color(p, color_parts(editor_popup_rect(p, l), row.kind == .Optional_Color, l.scale), m.drag, x, y)
 		return true
+	case Editor_Curve_Popup:
+		return editor_motion_popup_drag(p, editor_popup_rect(p, l), m.drag, x, y, l.scale)
 	case Editor_Browsing, Editor_Positions, Editor_Reset_All, Editor_Shortcut, Editor_Profile_Menu:
 	}
 	return false
@@ -2693,6 +2749,11 @@ editor_release :: proc(p: ^Editor) -> Editor_Outcome {
 	case Editor_Color_Popup:
 		settled = m.drag != .None
 		if settled {editor_mode_set(p, Editor_Color_Popup{})}
+	case Editor_Curve_Popup:
+		if m.drag == .None {break}
+		editor_mode_set(p, Editor_Curve_Popup{})
+		// A drag that changed the curve saves it; the popover stays open on the saved curve.
+		return p.motion_curve_edited ? .Save : .Changed
 	case Editor_Positions, Editor_Reset_All, Editor_Shortcut, Editor_Profile_Menu:
 	}
 	row := editor_row(p)
@@ -2757,6 +2818,10 @@ editor_hover :: proc(p: ^Editor, l: Editor_Layout, x, y: f32) -> bool {
 		row := editor_row(p)
 		if row != nil && popup_open == .Shortcuts &&
 		   shortcut_capture_hover(&p.capture, editor_popup_rect(p, l), l.page, row.value, x, y, l.scale) {
+			return true
+		}
+		if row != nil && popup_open == .Curve &&
+		   editor_motion_popup_hover(p, editor_popup_rect(p, l), x, y, l.scale) {
 			return true
 		}
 		if row != nil && popup_open == .Choice {
@@ -2866,6 +2931,10 @@ editor_pointer :: proc(p: ^Editor, l: Editor_Layout, x, y: f32) -> platform.Curs
 		case .Shortcuts:
 			count := len(commands.shortcut_alternatives(row.value, context.temp_allocator))
 			if option >= 0 && option + p.capture.alternatives.scroll <= count {return .Hand}
+		case .Curve:
+			target, _ := motion_popup_hit(p, popup, x, y, s)
+			if target == .Name {return .Text}
+			if target != .None {return .Hand}
 		case .Color:
 			c := color_parts(popup, row.kind == .Optional_Color, s)
 			ramp := render.Rect{c.ramp.x, c.ramp.y - 6 * s, c.ramp.width, c.ramp.height + 12 * s}
@@ -2919,7 +2988,7 @@ editor_pointer :: proc(p: ^Editor, l: Editor_Layout, x, y: f32) -> platform.Curs
 		return .Hand
 	case render.rect_contains(parts.field, x, y):
 		#partial switch row.kind {
-		case .Choice, .Shortcut, .Action:
+		case .Choice, .Curve, .Shortcut, .Action:
 			return .Hand
 		}
 		return .Text
@@ -3252,6 +3321,8 @@ control_draw :: proc(
 			parts.toggle.y + (parts.toggle.height - text.line_height) / 2 + text.ascent,
 			theme.muted,
 		)
+	case .Curve:
+		return motion_curve_field_draw(p, row, parts, selected, list, text, theme, scale)
 	case .Choice:
 		box_draw(list, parts.field, theme, focused, scale)
 		if r := draw_text(
@@ -3293,7 +3364,7 @@ control_draw :: proc(
 	case .Text:
 	case .Profile_Icon:
 		profile_badge_draw(list, text, row.badge, parts.swatch, theme, scale, false)
-	case .Process_Group, .Profile, .Profile_Add, .Opener:
+	case .Process_Group, .Motion_Context, .Profile, .Profile_Add, .Opener:
 		return .Ok
 	}
 	if selected {
@@ -3339,6 +3410,7 @@ popup_draw :: proc(
 	if render.push_layer(list, l.page) != .None {return .Ok}
 	frame := popover_panel(r, s)
 	if panel_draw(list, frame, theme) != .None {return .Ok}
+	if editor_popup(p) == .Curve {return editor_motion_popup_draw(p, l, r, list, text, theme, pointer)}
 	if editor_popup(p) == .Choice {
 		count := choice_popup_rows(p, row, l)
 		if choice_searchable(row) {
@@ -3678,6 +3750,11 @@ editor_draw :: proc(
 		if row.kind == .Opener {
 			if result := editor_opener_draw(p, row, parts, selected, list, text, theme, s);
 			   result != .Ok {return result}
+			continue
+		}
+		if row.motion_part != .None {
+			if result := editor_motion_draw(p, item.row, parts, selected, index == p.hover_reset, list, text,
+				theme, l.list, pointer, s); result != .Ok {return result}
 			continue
 		}
 		if row.kind == .Profile {

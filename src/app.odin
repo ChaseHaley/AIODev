@@ -442,6 +442,7 @@ Window_Timer :: enum u8 {
 	Capture_Hold,
 	Selection_Autoscroll,
 	Tooltip,
+	Hidden_Panes,
 }
 
 @(private = "file")
@@ -459,6 +460,8 @@ window_timer_advance :: proc(app: ^App, w: ^Window, timer: Window_Timer, now: ti
 		selection_autoscroll_tick(app, w, now)
 	case .Tooltip:
 		tooltip_tick(w, now)
+	case .Hidden_Panes:
+		hidden_panes_tick(w, now)
 	}
 }
 
@@ -477,6 +480,8 @@ window_timer_deadline :: proc(w: ^Window, timer: Window_Timer) -> (time.Tick, bo
 		return selection_autoscroll_deadline(w)
 	case .Tooltip:
 		return tooltip_deadline(w)
+	case .Hidden_Panes:
+		return hidden_panes_deadline(w)
 	}
 	return {}, false
 }

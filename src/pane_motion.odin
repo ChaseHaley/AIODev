@@ -2,22 +2,26 @@ package main
 
 import "aio:layout"
 import "aio:render"
+import "aio:settings"
 import "aio:ui"
 import "core:math"
-import "core:time"
 
 // When a split or a close changes a tab's panes, they ease from where they were drawn to their new
 // rectangles together, each within its container, the tiling or its floating group; nothing here depends
 // on which. A new pane opens out of the side of the pane it divides, and a closed pane keeps showing its
 // last frame while it collapses under the neighbour taking its place. Only drawing moves: grids, hit
 // targets and input take the new layout at once (a closed pane's session ends at once too), and each
-// pane's content keeps its new size, anchored to the moving frame's corner and clipped to it.
+// pane's content keeps its new size, anchored to the moving frame's corner and clipped to it. The motion
+// settings of what armed the change set its duration and curve, and for a split or a close whether the
+// pane opens or collapses at the side or pops, fades or slides in or out in place.
 Pane_Motion :: struct {
 	moving: ui.Layout_Motion,
 	// The tab layout the window last placed; placing another one, a tab switch, never moves.
 	tree:   ^layout.Layout,
-	// The next placement of this tab layout moves: a split or close changed it.
+	// The next placement of this tab layout moves: a split or close changed it, and `cause` says which
+	// motion settings it takes.
 	armed:  ^layout.Layout,
+	cause:  settings.Motion_Context,
 	// The tiled pane drawn above the others while the motion runs, as a zoomed pane shrinking back over the
 	// panes it uncovers, and the one the next armed placement raises.
 	raised, raise_next: Maybe(u64),
@@ -72,12 +76,11 @@ Pane_Motion_Shown :: struct {
 	capsules: []ui.Layout_Hint,
 }
 
-PANE_MOTION_DURATION :: 160 * time.Millisecond
-
-// The next relayout of w's visible tab eases its panes to their new places; `raised` draws above the
-// other tiled panes while they move.
-pane_motion_arm :: proc(w: ^Window, raised: Maybe(layout.Content) = nil) {
+// The next relayout of w's visible tab eases its panes to their new places with `motion`'s settings;
+// `raised` draws above the other tiled panes while they move.
+pane_motion_arm :: proc(w: ^Window, motion: settings.Motion_Context, raised: Maybe(layout.Content) = nil) {
 	w.pane_motion.armed = window_tree(w)
+	w.pane_motion.cause = motion
 	w.pane_motion.raise_next = nil
 	if content, ok := raised.?; ok {w.pane_motion.raise_next = pane_motion_key(content)}
 }
@@ -197,14 +200,22 @@ pane_motion_placed :: proc(app: ^App, w: ^Window, shown: Pane_Motion_Shown) {
 	pane_ghosts_clear(m)
 	m.raised = raise
 	hints := pane_motion_hints(app, w, shown, targets)
+	motion := settings.motion_resolve(&app.settings, m.cause)
+	duration := settings.motion_duration(&app.settings, motion)
+	// Only a split brings a pane in, and only a close takes one away, in the ways their settings choose.
+	enter, leave: settings.Motion_Effect
+	if m.cause == .Split {enter = motion.effect}
+	if m.cause == .Close {leave = motion.effect}
 	ui.layout_motion_begin(
 		&m.moving,
 		shown.places,
 		targets,
-		PANE_MOTION_DURATION,
-		.Decelerate,
-		app.animations,
+		duration,
+		motion.curve,
+		app.animations && motion.on && duration > 0,
 		hints,
+		enter,
+		leave,
 	)
 	if !pane_motion_animating(w) {return}
 	for place in shown.places {
@@ -300,6 +311,12 @@ pane_motion_drawn :: proc(w: ^Window, pane: layout.Pane_Rect, from: render.Draw_
 	_, _ = append(&w.pane_motion.drawn, Pane_Drawn{key, pane.group, from, to, pane_motion_rect(w, pane)})
 }
 
+// Presents what build_frame drew for `pane` since `from` as its split's effect has it now.
+pane_motion_present :: proc(w: ^Window, pane: layout.Pane_Rect, from: render.Draw_Mark) {
+	r := pane_motion_rect(w, pane)
+	pane_look_apply(w, pane_motion_key(pane.content), {r.x, r.y, r.width, r.height}, from)
+}
+
 // Notes where build_frame drew a float frame or chrome region under `key`, at `rect`, from `from` to the
 // list's end. Each is its own container: it never takes an edge from another.
 pane_motion_region_drawn :: proc(w: ^Window, key: u64, rect: layout.Rect, from: render.Draw_Mark) {
@@ -315,7 +332,8 @@ pane_motion_drawn_reset :: proc(w: ^Window) {
 }
 
 // Draws the last frame of each closed pane collapsing beneath `pane`, just before `pane` draws, so it sits
-// in the same container and stacking position: moved with its collapsing rectangle and clipped to it.
+// in the same container and stacking position: moved with its collapsing rectangle and clipped to it, or
+// in place, presented by its close effect.
 pane_ghosts_draw :: proc(app: ^App, w: ^Window, pane: layout.Pane_Rect) {
 	if len(w.pane_motion.ghosts) == 0 {return}
 	key := pane_motion_key(pane.content)
@@ -362,9 +380,46 @@ pane_ghost_draw :: proc(app: ^App, w: ^Window, ghost: ^Pane_Ghost) {
 	if render.append_list(&w.list, &ghost.list) != .None {return}
 	offset := [2]f32{math.round(shown.x - ghost.rect.x), math.round(shown.y - ghost.rect.y)}
 	render.draw_translate(&w.list, mark, offset, shown)
+	pane_look_apply(w, ghost.key, shown, mark)
 	to := render.draw_mark(&w.list)
 	r := layout.Rect{shown.x, shown.y, shown.width, shown.height}
 	_, _ = append(&w.pane_motion.drawn, Pane_Drawn{ghost.key, ghost.container, mark, to, r})
+}
+
+// The size a popping pane starts from, or ends at, as a share of its own.
+@(private = "file")
+PANE_POP_SCALE :: f32(0.85)
+
+// Presents what was drawn since `mark` for the entering or leaving item `key` at `rect`, as its motion has
+// it now: Pop scales it about the centre of `rect` and fades it, Fade fades it, and Slide moves it across
+// the edge it opens from or collapses onto, clipped to `rect`. An item moving by its rectangle stays as
+// drawn.
+@(private = "file")
+pane_look_apply :: proc(w: ^Window, key: u64, rect: render.Rect, mark: render.Draw_Mark) {
+	look := ui.layout_motion_look(&w.pane_motion.moving, key)
+	opacity := clamp(look.amount, 0, 1)
+	switch look.effect {
+	case .Edge:
+	case .Pop:
+		centre := [2]f32{rect.x + rect.width / 2, rect.y + rect.height / 2}
+		render.draw_scale(&w.list, mark, centre, PANE_POP_SCALE + (1 - PANE_POP_SCALE) * look.amount)
+		ui.fade_draw(&w.list, mark, {opacity = opacity})
+	case .Fade:
+		ui.fade_draw(&w.list, mark, {opacity = opacity})
+	case .Slide:
+		// A whole extent beyond the edge's side when hidden; an item that shares no edge stays put. Whole
+		// pixels keep its text sharp.
+		edge, away := look.from, 1 - look.amount
+		offset: [2]f32
+		if edge.width == 0 {
+			side := edge.x < rect.x + rect.width / 2 ? f32(-1) : f32(1)
+			offset.x = math.round(side * away * rect.width)
+		} else if edge.height == 0 {
+			side := edge.y < rect.y + rect.height / 2 ? f32(-1) : f32(1)
+			offset.y = math.round(side * away * rect.height)
+		}
+		render.draw_translate(&w.list, mark, offset, rect)
+	}
 }
 
 // Copies what the last frame drew for the pane under `key` before its drawing is lost.

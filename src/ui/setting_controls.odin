@@ -72,7 +72,7 @@ row_step :: proc(row: ^Editor_Row) -> f64 {
 // steps finer than a tenth.
 @(private)
 number_text :: proc(step, value: f64) -> string {
-	if step >= 1 {return fmt.tprintf("%d", int(math.round(value)))}
+	if step >= 1 {return fmt.tprintf("%d", int(math.round(value / step) * step))}
 	rounded := math.round(value / step) * step
 	if step < 0.1 {return fmt.tprintf("%.2f", rounded)}
 	return fmt.tprintf("%g", rounded)

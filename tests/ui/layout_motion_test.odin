@@ -3,6 +3,7 @@ package ui_test
 import "core:testing"
 import "core:time"
 import "aio:render"
+import "aio:settings"
 import "aio:ui"
 
 @(private = "file")
@@ -11,7 +12,7 @@ LAYOUT_DURATION :: 160 * time.Millisecond
 // Starts a linear layout motion from `shown` to `targets` and draws its first frame.
 @(private = "file")
 layout_motion_first_frame :: proc(m: ^ui.Layout_Motion, shown, targets: []ui.Layout_Place) -> ui.Frame_Time {
-	ui.layout_motion_begin(m, shown, targets, LAYOUT_DURATION, .Linear, true)
+	ui.layout_motion_begin(m, shown, targets, LAYOUT_DURATION, ui.EASING_CURVES[.Linear], true)
 	first := test_frame(time.tick_now())
 	ui.layout_motion_update(m, first)
 	return first
@@ -35,7 +36,7 @@ layout_split_opens_the_new_item_from_the_side_it_divides :: proc(t: ^testing.T) 
 		defer ui.layout_motion_destroy(&m)
 		shown := []ui.Layout_Place{{1, old, 0}}
 		targets := []ui.Layout_Place{{1, c.kept, 0}, {2, c.added, 0}}
-		ui.layout_motion_begin(&m, shown, targets, LAYOUT_DURATION, .Linear, true)
+		ui.layout_motion_begin(&m, shown, targets, LAYOUT_DURATION, ui.EASING_CURVES[.Linear], true)
 		testing.expect(t, ui.layout_motion_active(&m))
 		testing.expect_value(t, ui.layout_motion_rect(&m, 1, c.kept), old)
 		testing.expect_value(t, ui.layout_motion_rect(&m, 2, c.added), c.grows_from)
@@ -80,10 +81,10 @@ layout_motion_without_animations_or_change_lands_at_once :: proc(t: ^testing.T) 
 	defer ui.layout_motion_destroy(&m)
 	shown := []ui.Layout_Place{{1, {0, 0, 100, 40}, 0}}
 	split := []ui.Layout_Place{{1, {0, 0, 48, 40}, 0}, {2, {52, 0, 48, 40}, 0}}
-	ui.layout_motion_begin(&m, shown, split, LAYOUT_DURATION, .Decelerate, false)
+	ui.layout_motion_begin(&m, shown, split, LAYOUT_DURATION, ui.EASING_CURVES[.Decelerate], false)
 	testing.expect(t, !ui.layout_motion_active(&m))
 	testing.expect_value(t, ui.layout_motion_rect(&m, 2, split[1].rect), split[1].rect)
-	ui.layout_motion_begin(&m, split, split, LAYOUT_DURATION, .Decelerate, true)
+	ui.layout_motion_begin(&m, split, split, LAYOUT_DURATION, ui.EASING_CURVES[.Decelerate], true)
 	testing.expect(t, !ui.layout_motion_active(&m), "nothing moved, so nothing animates")
 }
 
@@ -116,9 +117,9 @@ layout_items_move_within_their_container :: proc(t: ^testing.T) {
 	tiled := ui.Layout_Place{1, {0, 0, 400, 300}, 0}
 	shown := []ui.Layout_Place{tiled, {2, {100, 100, 200, 100}, 7}}
 	split := []ui.Layout_Place{tiled, {2, {100, 100, 98, 100}, 7}, {3, {202, 100, 98, 100}, 7}}
-	ui.layout_motion_begin(&m, shown, split, LAYOUT_DURATION, .Linear, true)
+	ui.layout_motion_begin(&m, shown, split, LAYOUT_DURATION, ui.EASING_CURVES[.Linear], true)
 	testing.expect_value(t, ui.layout_motion_rect(&m, 3, split[2].rect), render.Rect{300, 100, 0, 100})
-	ui.layout_motion_begin(&m, split, shown, LAYOUT_DURATION, .Linear, true)
+	ui.layout_motion_begin(&m, split, shown, LAYOUT_DURATION, ui.EASING_CURVES[.Linear], true)
 	successor, leaving := ui.layout_motion_leaving(&m, 3)
 	testing.expect(t, leaving)
 	testing.expect_value(t, successor.? or_else 0, u64(2))
@@ -135,7 +136,7 @@ layout_items_follow_hints_in_and_out :: proc(t: ^testing.T) {
 	tiled := ui.Layout_Place{1, {0, 0, 400, 300}, 0}
 	float := []ui.Layout_Place{tiled, {10, {100, 70, 200, 130}, 10}, {2, {100, 100, 200, 100}, 7}}
 	hints := []ui.Layout_Hint{{10, capsule}, {2, capsule}}
-	ui.layout_motion_begin(&m, {tiled}, float, LAYOUT_DURATION, .Linear, true, hints)
+	ui.layout_motion_begin(&m, {tiled}, float, LAYOUT_DURATION, ui.EASING_CURVES[.Linear], true, hints)
 	testing.expect_value(t, ui.layout_motion_rect(&m, 10, float[1].rect), capsule)
 	testing.expect_value(t, ui.layout_motion_rect(&m, 2, float[2].rect), capsule)
 	first := test_frame(time.tick_now())
@@ -146,7 +147,7 @@ layout_items_follow_hints_in_and_out :: proc(t: ^testing.T) {
 	testing.expect(t, frame.width > capsule.width && frame.width < float[1].rect.width)
 	testing.expect_value(t, ui.layout_motion_rect(&m, 1, tiled.rect), tiled.rect)
 
-	ui.layout_motion_begin(&m, float, {tiled}, LAYOUT_DURATION, .Linear, true, hints)
+	ui.layout_motion_begin(&m, float, {tiled}, LAYOUT_DURATION, ui.EASING_CURVES[.Linear], true, hints)
 	successor, leaving := ui.layout_motion_leaving(&m, 2)
 	testing.expect(t, leaving && successor == nil)
 	testing.expect_value(t, ui.layout_motion_rect(&m, 2, {}), float[2].rect)
@@ -154,4 +155,88 @@ layout_items_follow_hints_in_and_out :: proc(t: ^testing.T) {
 	ui.layout_motion_update(&m, last)
 	ui.layout_motion_update(&m, test_frame(time.tick_add(last.display, LAYOUT_DURATION)))
 	testing.expect(t, !ui.layout_motion_active(&m))
+}
+
+// A curve that dips below its start and overshoots its end, as bouncy curves do.
+@(private = "file")
+OVERSHOOT :: settings.Motion_Curve{p = {0.1, -1, 0.9, 2}}
+
+// Overshooting curves carry edges past their targets, but an item never turns inside out: through a split
+// and a close, every item keeps a size of zero or more.
+@(test)
+layout_overshoot_never_gives_negative_sizes :: proc(t: ^testing.T) {
+	whole := []ui.Layout_Place{{1, {0, 0, 100, 40}, 0}}
+	split := []ui.Layout_Place{{1, {0, 0, 48, 40}, 0}, {2, {52, 0, 48, 40}, 0}}
+	for change in ([?][2][]ui.Layout_Place{{whole, split}, {split, whole}}) {
+		m: ui.Layout_Motion
+		defer ui.layout_motion_destroy(&m)
+		ui.layout_motion_begin(&m, change[0], change[1], LAYOUT_DURATION, OVERSHOOT, true)
+		first := test_frame(time.tick_now())
+		for step := time.Duration(0); step <= LAYOUT_DURATION; step += 4 * time.Millisecond {
+			ui.layout_motion_update(&m, test_frame(time.tick_add(first.display, step)))
+			for key in ([?]u64{1, 2}) {
+				r := ui.layout_motion_rect(&m, key, {})
+				testing.expectf(t, r.width >= 0 && r.height >= 0, "item %v at %v: %v", key, step, r)
+			}
+		}
+	}
+}
+
+// Pop, Fade and Slide keep a new item at its place and present it instead: hidden as the split starts and
+// fully shown once it ends, sliding from the edge it would have grown out of. The divided item still
+// shrinks by its rectangle.
+@(test)
+layout_entering_effects_keep_the_target_and_report_the_look :: proc(t: ^testing.T) {
+	shown := []ui.Layout_Place{{1, {0, 0, 100, 40}, 0}}
+	split := []ui.Layout_Place{{1, {0, 0, 48, 40}, 0}, {2, {52, 0, 48, 40}, 0}}
+	linear := ui.EASING_CURVES[.Linear]
+	for effect in ([?]settings.Motion_Effect{.Pop, .Fade, .Slide}) {
+		m: ui.Layout_Motion
+		defer ui.layout_motion_destroy(&m)
+		ui.layout_motion_begin(&m, shown, split, LAYOUT_DURATION, linear, true, nil, effect)
+		testing.expect(t, ui.layout_motion_active(&m))
+		testing.expect_value(t, ui.layout_motion_rect(&m, 2, split[1].rect), split[1].rect)
+		look := ui.layout_motion_look(&m, 2)
+		testing.expect_value(t, look.effect, effect)
+		testing.expect_value(t, look.amount, f32(0))
+		testing.expect_value(t, look.from, render.Rect{100, 0, 0, 40})
+		testing.expect_value(t, ui.layout_motion_look(&m, 1).effect, settings.Motion_Effect.Edge)
+		first := test_frame(time.tick_now())
+		ui.layout_motion_update(&m, first)
+		ui.layout_motion_update(&m, test_frame(time.tick_add(first.display, LAYOUT_DURATION / 2)))
+		testing.expect_value(t, ui.layout_motion_rect(&m, 2, split[1].rect), split[1].rect)
+		amount := ui.layout_motion_look(&m, 2).amount
+		testing.expect(t, amount > 0 && amount < 1)
+		divided := ui.layout_motion_rect(&m, 1, split[0].rect)
+		testing.expect(t, divided.width > 48 && divided.width < 100)
+		ui.layout_motion_update(&m, test_frame(time.tick_add(first.display, LAYOUT_DURATION)))
+		testing.expect(t, !ui.layout_motion_active(&m))
+		testing.expect_value(t, ui.layout_motion_rect(&m, 2, split[1].rect), split[1].rect)
+		testing.expect_value(t, ui.layout_motion_look(&m, 2).amount, f32(1))
+	}
+}
+
+// A closed item that fades keeps its shown rectangle beneath the neighbour growing over it.
+@(test)
+layout_leaving_fade_keeps_the_shown_rect :: proc(t: ^testing.T) {
+	m: ui.Layout_Motion
+	defer ui.layout_motion_destroy(&m)
+	shown := []ui.Layout_Place{{1, {0, 0, 48, 40}, 0}, {2, {52, 0, 48, 40}, 0}}
+	whole := []ui.Layout_Place{{1, {0, 0, 100, 40}, 0}}
+	linear := ui.EASING_CURVES[.Linear]
+	ui.layout_motion_begin(&m, shown, whole, LAYOUT_DURATION, linear, true, nil, .Edge, .Fade)
+	successor, leaving := ui.layout_motion_leaving(&m, 2)
+	testing.expect(t, leaving)
+	testing.expect_value(t, successor.? or_else 0, u64(1))
+	testing.expect_value(t, ui.layout_motion_rect(&m, 2, {}), shown[1].rect)
+	testing.expect_value(t, ui.layout_motion_look(&m, 2).amount, f32(1))
+	first := test_frame(time.tick_now())
+	ui.layout_motion_update(&m, first)
+	ui.layout_motion_update(&m, test_frame(time.tick_add(first.display, LAYOUT_DURATION / 2)))
+	testing.expect_value(t, ui.layout_motion_rect(&m, 2, {}), shown[1].rect)
+	look := ui.layout_motion_look(&m, 2)
+	testing.expect_value(t, look.effect, settings.Motion_Effect.Fade)
+	testing.expect(t, look.amount > 0 && look.amount < 1, "it fades as the neighbour grows over it")
+	grown := ui.layout_motion_rect(&m, 1, whole[0].rect)
+	testing.expect(t, grown.width > 48 && grown.width < 100)
 }

@@ -165,7 +165,7 @@ divider_press :: proc(app: ^App, w: ^Window, x, y: f32, time_ns: i64) -> bool {
 			}
 		}
 		if balanced {
-			pane_motion_arm(w)
+			pane_motion_arm(w, .Resize)
 			window_relayout(app, w)
 		}
 		return true

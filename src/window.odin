@@ -68,6 +68,8 @@ Window :: struct {
 	split_overlay: bool,
 	// The pane under the pointer. Its header shows its buttons, as the focused pane's does.
 	header_pane: Maybe(layout.Content),
+	// The glyph's map of the panes the view hides, while it shows.
+	hidden_panes: Hidden_Panes_State,
 	list: render.Draw_List,
 	width, height: i32,
 	header_height: f32,
@@ -709,6 +711,7 @@ build_frame :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 			return result
 		}
 	}
+	if result := hidden_panes_draw(app, w); result != .Ok {return result}
 	if palette_visible(app, w) {
 		result := ui.palette_draw(
 			&app.palette, &w.list, &w.ui_text, app.theme, size.x, size.y, w.scale,
@@ -733,7 +736,8 @@ build_frame :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 }
 
 // Draws a pane where its container draws it: first any closed pane collapsing beneath it, then the pane,
-// noting where its drawing sits so the pane can keep showing it if it closes; see pane_motion.odin.
+// presented as its split's effect has it, noting where its drawing sits so the pane can keep showing it if
+// it closes; see pane_motion.odin.
 @(private = "file")
 pane_draw_noted :: proc(
 	app: ^App,
@@ -744,6 +748,7 @@ pane_draw_noted :: proc(
 	pane_ghosts_draw(app, w, pane)
 	from := render.draw_mark(&w.list)
 	if result := pane_draw(app, w, pane, blinking); result != .Ok {return result}
+	pane_motion_present(w, pane, from)
 	pane_motion_drawn(w, pane, from)
 	return .Ok
 }
