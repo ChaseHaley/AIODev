@@ -41,6 +41,15 @@ Motion_Editor_State :: struct {
 	motion_curve_name:   string,
 	motion_curve:        settings.Motion_Curve,
 	motion_curve_edited: bool,
+	// What the next save of the open popover does with the shown curve instead of saving its points.
+	motion_curve_action: Motion_Curve_Action,
+}
+
+Motion_Curve_Action :: enum u8 {
+	None,
+	// To the name typed in the popover's name field, which edits `choice_search`.
+	Rename,
+	Delete,
 }
 
 // The curve popover's pointer drags: a Bézier handle, or a spring's bounce slider.
@@ -57,16 +66,18 @@ Curve_Target :: enum {
 	Option,
 	New_Bezier,
 	New_Spring,
+	Name,
+	Delete,
 	First,
 	Second,
 	Bounce,
 }
 
-// The curve popover: the curve list on the left, the plot with its controls on the right. `graph` is the
-// plot's 0..1 time span, inset from its frame so handles at either end stay whole. `bounce` exists only
-// for a spring.
+// The curve popover: the curve list on the left; on the right the shown curve's name and Delete, then
+// its plot with its controls. `graph` is the plot's 0..1 time span, inset from its frame so handles at
+// either end stay whole. `bounce` exists only for a spring.
 Curve_Parts :: struct {
-	list, plot, graph, bounce, new_bezier, new_spring: render.Rect,
+	list, name, delete, plot, graph, bounce, new_bezier, new_spring: render.Rect,
 }
 
 // What saving a Motion row writes: one context's whole text, or a curve or preset change. Nil when
@@ -88,6 +99,8 @@ MOTION_PLOT_HIGH :: f32(1.5)
 MOTION_POPOVER_WIDTH :: 440
 @(private = "file")
 MOTION_CURVE_LIST_WIDTH :: 184
+@(private = "file")
+MOTION_DELETE_WIDTH :: 72
 @(private = "file")
 MOTION_PLOT_STEPS :: 48
 @(private = "file")
@@ -374,6 +387,15 @@ editor_motion_change :: proc(p: ^Editor, reset: bool) -> (change: Motion_Change,
 		return settings.Motion_Mutation(settings.Motion_Preset_Remove{name = name}), ""
 	case .On, .Duration, .Curve, .Effect:
 		c := row.motion_context
+		if part == .Curve && p.motion_curve_action != .None {
+			action := p.motion_curve_action
+			p.motion_curve_action = .None
+			from := strings.clone(p.motion_curve_name, context.temp_allocator)
+			if action == .Delete {return settings.Motion_Mutation(settings.Motion_Curve_Remove{name = from}), ""}
+			to := settings.motion_name_from(field_string(&p.choice_search))
+			if to == "" {return nil, "Name the curve with letters or digits."}
+			return settings.Motion_Mutation(settings.Motion_Curve_Rename{from = from, to = to}), ""
+		}
 		if part == .Curve && p.motion_curve_edited {
 			name := strings.clone(p.motion_curve_name, context.temp_allocator)
 			set := settings.Motion_Curve_Set{name = name, curve = p.motion_curve, assign = c}
@@ -594,6 +616,10 @@ motion_curve_parts :: proc(popup: render.Rect, spring: bool, scale: f32) -> Curv
 		bottom = c.bounce.y - SPACE_3 * s
 	}
 	top := popup.y + SPACE_3 * s
+	delete_width := MOTION_DELETE_WIDTH * s
+	c.name = {left, top, max(0, width - delete_width - SPACE_2 * s), button}
+	c.delete = {left + width - delete_width, top, delete_width, button}
+	top += button + SPACE_2 * s
 	c.plot = {left, top, width, max(0, bottom - top)}
 	inset := SPACE_3 * s
 	c.graph = {c.plot.x + inset, c.plot.y, max(0, c.plot.width - 2 * inset), c.plot.height}
@@ -618,6 +644,11 @@ motion_popup_hit :: proc(
 		return .New_Bezier, option
 	case render.rect_contains(c.new_spring, x, y):
 		return .New_Spring, option
+	case render.rect_contains(c.name, x, y), render.rect_contains(c.delete, x, y):
+		// Only the file's own curves can be renamed or deleted.
+		if settings.motion_curve_builtin(p.motion_curve_name) {return}
+		target = render.rect_contains(c.name, x, y) ? .Name : .Delete
+		return
 	}
 	if p.motion_curve.spring {
 		slack := SPACE_2 * scale
@@ -641,6 +672,10 @@ motion_popup_hit :: proc(
 @(private)
 editor_motion_popup_press :: proc(p: ^Editor, popup: render.Rect, x, y, scale: f32) -> Editor_Outcome {
 	target, option := motion_popup_hit(p, popup, x, y, scale)
+	// A press anywhere but the name field ends naming without renaming.
+	if curve, open := p.mode.(Editor_Curve_Popup); open && curve.naming && target != .Name {
+		editor_mode_set(p, Editor_Curve_Popup{})
+	}
 	drag: Curve_Drag
 	switch target {
 	case .None:
@@ -649,6 +684,12 @@ editor_motion_popup_press :: proc(p: ^Editor, popup: render.Rect, x, y, scale: f
 		return motion_curve_choose(p, option)
 	case .New_Bezier, .New_Spring:
 		return motion_curve_new(p, target == .New_Spring)
+	case .Name:
+		motion_curve_naming(p)
+		return .Changed
+	case .Delete:
+		p.motion_curve_action = .Delete
+		return .Save
 	case .First:
 		drag = .First
 	case .Second:
@@ -656,9 +697,18 @@ editor_motion_popup_press :: proc(p: ^Editor, popup: render.Rect, x, y, scale: f
 	case .Bounce:
 		drag = .Bounce
 	}
-	editor_mode_set(p, Editor_Curve_Popup{drag})
+	editor_mode_set(p, Editor_Curve_Popup{drag = drag})
 	motion_curve_pick(p, motion_curve_parts(popup, p.motion_curve.spring, scale), drag, x, y)
 	return .Changed
+}
+
+// Starts editing the shown user curve's name in the popover, all of it selected.
+@(private = "file")
+motion_curve_naming :: proc(p: ^Editor) {
+	if settings.motion_curve_builtin(p.motion_curve_name) {return}
+	field_set(&p.choice_search, p.motion_curve_name)
+	field_select_all(&p.choice_search)
+	editor_mode_set(p, Editor_Curve_Popup{naming = true})
 }
 
 @(private)
@@ -687,7 +737,20 @@ editor_motion_wheel :: proc(p: ^Editor, rows: int) {
 // Headers expand with Enter or Right and collapse with Left; the open popover takes its list keys.
 editor_motion_key :: proc(p: ^Editor, row: ^Editor_Row, e: input.Key_Event) -> (Editor_Outcome, bool) {
 	if row == nil {return .None, false}
-	if _, open := p.mode.(Editor_Curve_Popup); open {
+	if curve, open := p.mode.(Editor_Curve_Popup); open {
+		if curve.naming {
+			#partial switch e.key {
+			case .Enter, .Numpad_Enter:
+				p.motion_curve_action = .Rename
+				return .Save, true
+			case .Escape:
+				editor_mode_set(p, Editor_Curve_Popup{})
+				return .Changed, true
+			}
+			// Typed text arrives through editor_text; the field takes every other key.
+			_ = field_key(&p.choice_search, e)
+			return .Changed, true
+		}
 		count := motion_curve_count(p)
 		visible := min(count, CHOICE_LIST_ROWS)
 		if choice_list_key(&p.choice_list, e, count, visible) {return .Changed, true}
@@ -700,6 +763,9 @@ editor_motion_key :: proc(p: ^Editor, row: ^Editor_Row, e: input.Key_Event) -> (
 			return .Changed, true
 		case .Enter, .Numpad_Enter, .Space:
 			return motion_curve_choose(p, p.choice_list.index), true
+		case .F2:
+			motion_curve_naming(p)
+			return .Changed, true
 		}
 		return .None, false
 	}
@@ -944,15 +1010,36 @@ editor_motion_popup_draw :: proc(
 	buffer: [96]u8
 	caption: string
 	if curve.spring {
-		caption = fmt.bprintf(buffer[:], "%s · bounce %.2f", p.motion_curve_name, curve.p[0])
+		caption = fmt.bprintf(buffer[:], "bounce %.2f", curve.p[0])
 	} else {
-		caption = fmt.bprintf(buffer[:], "%s · %.2f, %.2f, %.2f, %.2f",
-			p.motion_curve_name, curve.p[0], curve.p[1], curve.p[2], curve.p[3])
+		caption = fmt.bprintf(buffer[:], "%.2f, %.2f, %.2f, %.2f", curve.p[0], curve.p[1], curve.p[2], curve.p[3])
 	}
 	if result := draw_text(&small, list, caption, c.plot.x + SPACE_2 * s, c.plot.y + SPACE_2 * s + small.ascent,
 		theme.muted, max(1, c.plot.width - SPACE_4 * s)); result != .Ok {return result}
+	if result := motion_curve_name_draw(p, c, list, text, theme, pointer, s); result != .Ok {return result}
 	if curve.spring {slider_draw(list, c.bounce, curve.p[0] / MOTION_BOUNCE_MAXIMUM, theme, s)}
 	if result := text_button_draw(list, text, theme, c.new_bezier, "New Bézier", false, s, pointer);
 	   result != .Ok {return result}
 	return text_button_draw(list, text, theme, c.new_spring, "New Spring", false, s, pointer)
+}
+
+// The shown curve's name: a field while naming, else its name, with Delete for the file's own curves.
+// A built-in says so and has neither.
+@(private = "file")
+motion_curve_name_draw :: proc(
+	p: ^Editor, c: Curve_Parts, list: ^render.Draw_List, text: ^Text, theme: Theme, pointer: [2]f32, s: f32,
+) -> render.Build_Status {
+	naming := false
+	if curve, open := p.mode.(Editor_Curve_Popup); open {naming = curve.naming}
+	box_draw(list, c.name, theme, naming, s)
+	box := field_box_standard(&p.choice_search, text, c.name, s)
+	if naming {return field_box_draw(box, list, theme, field_box_baseline(box), true, "")}
+	builtin := settings.motion_curve_builtin(p.motion_curve_name)
+	buffer: [64]u8
+	label := builtin ? fmt.bprintf(buffer[:], "%s (built-in)", p.motion_curve_name) : p.motion_curve_name
+	x := c.name.x + CONTROL_INSET * s
+	if result := draw_text(text, list, label, x, field_box_baseline(box), builtin ? theme.muted : theme.text,
+		max(1, c.name.x + c.name.width - CONTROL_INSET * s - x)); result != .Ok {return result}
+	if builtin {return .Ok}
+	return text_button_draw(list, text, theme, c.delete, "Delete", false, s, pointer)
 }

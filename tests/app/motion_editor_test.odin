@@ -151,6 +151,26 @@ motion_editor_curve_drag_forks_a_builtin_and_assigns_it :: proc(t: ^testing.T) {
 	testing.expect_value(t, ui.editor_popup(p), ui.Editor_Popup.Curve)
 	testing.expect_value(t, ui.editor_row(p).value, "decelerate-2")
 	testing.expect(t, !ui.editor_draft(p))
+	// F2 names the user curve; Enter renames it and the context follows the new name.
+	profile_press(&f, {key = .F2})
+	ui.editor_text(p, "Snap Out")
+	profile_press(&f, {key = .Enter})
+	testing.expect(t, !p.error)
+	testing.expect_value(t, f.state.settings.motion.specs[.Split].curve, "snap-out")
+	_, renamed := settings.motion_curve_find(&f.state.settings, "snap-out")
+	testing.expect(t, renamed)
+	testing.expect_value(t, ui.editor_popup(p), ui.Editor_Popup.Curve)
+	testing.expect_value(t, ui.editor_row(p).value, "snap-out")
+	// Delete removes it, and the context inherits its curve again.
+	l = motion_editor_layout(p)
+	delete_button := ui.motion_curve_parts(ui.editor_popup_rect(p, l), false, 1).delete
+	outcome := ui.editor_press(p, l, nil, delete_button.x + 4, delete_button.y + 4, false)
+	testing.expect_value(t, outcome, ui.Editor_Outcome.Save)
+	app.editor_outcome(&f.state, w, outcome)
+	testing.expect(t, !p.error)
+	testing.expect_value(t, len(f.state.settings.motion.curves), 0)
+	testing.expect_value(t, f.state.settings.motion.specs[.Split].curve, "")
+	testing.expect_value(t, ui.editor_row(p).value, "decelerate")
 	// Escape closes it.
 	profile_press(&f, {key = .Escape})
 	testing.expect_value(t, ui.editor_popup(p), ui.Editor_Popup.None)

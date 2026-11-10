@@ -893,9 +893,15 @@ Motion_Curve_Set :: struct {
 	assign: Maybe(Motion_Context),
 }
 
-// Contexts naming the removed curve keep their text and inherit their curve until it returns.
+// Removes user curve `name`. Contexts and saved presets naming it drop the name and inherit their
+// curve again, so nothing is left pointing at a curve that no longer exists.
 Motion_Curve_Remove :: struct {
 	name: string,
+}
+
+// Renames user curve `from` to `to`, and every context and saved preset naming it, in one revision.
+Motion_Curve_Rename :: struct {
+	from, to: string,
 }
 
 // Copies a preset's values for `root` and every context below it. The values are copied, not
@@ -917,6 +923,7 @@ Motion_Preset_Remove :: struct {
 Motion_Mutation :: union #no_nil {
 	Motion_Curve_Set,
 	Motion_Curve_Remove,
+	Motion_Curve_Rename,
 	Motion_Preset_Apply,
 	Motion_Preset_Save,
 	Motion_Preset_Remove,
@@ -940,7 +947,9 @@ motion_mutate :: proc(
 	case Motion_Curve_Set:
 		refusal, err = motion_curve_set(model, &revision, change, allocator)
 	case Motion_Curve_Remove:
-		refusal, err = motion_line_remove(model, &revision, .Curve, change.name, allocator)
+		refusal, err = motion_curve_rename(model, &revision, change.name, "", allocator)
+	case Motion_Curve_Rename:
+		refusal, err = motion_curve_rename(model, &revision, change.from, change.to, allocator)
 	case Motion_Preset_Apply:
 		refusal, err = motion_preset_apply(model, &revision, change, allocator)
 	case Motion_Preset_Save:
@@ -998,6 +1007,55 @@ motion_curve_set :: proc(
 	spec := model.motion.specs[c]
 	spec.curve = change.name
 	return motion_edit_line(revision, motion_context_key(c), motion_spec_text(c, spec), allocator)
+}
+
+// Moves user curve `from` to the name `to`, or removes it when `to` is empty, and points every
+// context and saved preset that names it at the new name, or at nothing.
+@(private, require_results)
+motion_curve_rename :: proc(
+	model: ^Settings,
+	revision: ^string,
+	from, to: string,
+	allocator: runtime.Allocator,
+) -> (
+	refusal: string,
+	err: runtime.Allocator_Error,
+) {
+	if from == to {return}
+	refusal = motion_line_remove(model, revision, .Curve, from, allocator) or_return
+	if refusal != "" {return}
+	if to != "" {
+		if problem := motion_name_problem(.Curve, to); problem != "" {return problem, nil}
+		if motion_curve_index(model, to) >= 0 {
+			return fmt.tprintf("a curve named \"%s\" already exists", to), nil
+		}
+		curve := model.motion.curves[motion_curve_index(model, from)].curve
+		key := fmt.tprintf("%s%s", MOTION_CURVE_PREFIX, to)
+		refusal = motion_edit_line(revision, key, motion_curve_text(curve), allocator) or_return
+		if refusal != "" {return}
+	}
+	for c in Motion_Context {
+		spec := model.motion.specs[c]
+		if spec.curve != from {continue}
+		spec.curve = to
+		value := motion_spec_text(c, spec)
+		refusal = motion_edit_line(revision, motion_context_key(c), value, allocator) or_return
+		if refusal != "" {return}
+	}
+	for preset in model.motion.presets {
+		specs, named := preset.specs, false
+		for &text, c in specs {
+			spec, _ := motion_spec_parse(c, text)
+			if spec.curve != from {continue}
+			spec.curve, named = to, true
+			text = motion_spec_text(c, spec)
+		}
+		if !named {continue}
+		key := fmt.tprintf("%s%s", MOTION_PRESET_PREFIX, preset.name)
+		refusal = motion_edit_line(revision, key, motion_preset_text(specs), allocator) or_return
+		if refusal != "" {return}
+	}
+	return
 }
 
 @(private, require_results)

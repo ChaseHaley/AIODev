@@ -339,8 +339,9 @@ motion_curve_set_saves_the_curve_and_assigns_it :: proc(t: ^testing.T) {
 }
 
 @(test)
-motion_curve_remove_leaves_contexts_naming_it_to_inherit :: proc(t: ^testing.T) {
-	source :: "motion.curve.mine = spring 0.3\nmotion.panes.split = mine\n"
+motion_curve_remove_points_contexts_and_presets_back_at_inheriting :: proc(t: ^testing.T) {
+	source :: "motion.curve.mine = spring 0.3\nmotion.panes.split = 300ms mine\n" +
+		"motion.preset.keep = split: mine popin\n"
 	model := mutation_parse(t, source)
 	defer settings.destroy(&model)
 	revision, message, err := settings.motion_mutate(&model, source, settings.Motion_Curve_Remove{"mine"})
@@ -352,12 +353,38 @@ motion_curve_remove_leaves_contexts_naming_it_to_inherit :: proc(t: ^testing.T) 
 	defer settings.destroy(&after)
 	defer settings.diagnostics_destroy(&d)
 	testing.expect_value(t, parse_error, nil)
+	testing.expect_value(t, len(d), 0)
 	testing.expect_value(t, len(after.motion.curves), 0)
-	testing.expect_value(t, after.motion.contexts[.Split], "mine")
-	testing.expect_value(t, len(d), 1)
-	testing.expect_value(t, settings.motion_resolve(&after, .Split).curve_name, "decelerate")
+	testing.expect_value(t, after.motion.contexts[.Split], "300ms")
+	if testing.expect_value(t, len(after.motion.presets), 1) {
+		testing.expect_value(t, after.motion.presets[0].specs[.Split], "popin")
+	}
 	motion_refused(t, source, settings.Motion_Curve_Remove{"spring"})
 	motion_refused(t, source, settings.Motion_Curve_Remove{"other"})
+}
+
+@(test)
+motion_curve_rename_moves_the_curve_and_everything_naming_it :: proc(t: ^testing.T) {
+	source :: "motion.curve.mine = 0.3, 1.4, 0.2, 1\nmotion.curve.other = spring 0.2\n" +
+		"motion.panes.split = 300ms mine\nmotion.panes.close = other\nmotion.preset.keep = split: mine popin\n"
+	after, ok := motion_mutated(t, source, settings.Motion_Curve_Rename{"mine", "snap"})
+	if !ok {return}
+	defer settings.destroy(&after)
+	_, old := settings.motion_curve_find(&after, "mine")
+	testing.expect(t, !old)
+	curve, renamed := settings.motion_curve_find(&after, "snap")
+	testing.expect(t, renamed)
+	testing.expect_value(t, curve, settings.Motion_Curve{p = {0.3, 1.4, 0.2, 1}})
+	testing.expect_value(t, after.motion.contexts[.Split], "300ms snap")
+	testing.expect_value(t, after.motion.contexts[.Close], "other")
+	if testing.expect_value(t, len(after.motion.presets), 1) {
+		testing.expect_value(t, after.motion.presets[0].specs[.Split], "snap popin")
+	}
+	motion_refused(t, source, settings.Motion_Curve_Rename{"mine", "other"})
+	motion_refused(t, source, settings.Motion_Curve_Rename{"mine", "linear"})
+	motion_refused(t, source, settings.Motion_Curve_Rename{"mine", "Not A Name"})
+	motion_refused(t, source, settings.Motion_Curve_Rename{"decelerate", "slow"})
+	motion_refused(t, source, settings.Motion_Curve_Rename{"nosuch", "slow"})
 }
 
 @(test)

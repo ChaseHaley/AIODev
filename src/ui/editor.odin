@@ -193,9 +193,11 @@ Color_Drag :: enum {
 	Ramp,
 }
 
-// The curve popover of the selected Curve row; `drag` while the pointer holds a handle or the bounce.
+// The curve popover of the selected Curve row; `drag` while the pointer holds a handle or the bounce,
+// `naming` while the keyboard edits the shown curve's name.
 Editor_Curve_Popup :: struct {
-	drag: Curve_Drag,
+	drag:   Curve_Drag,
+	naming: bool,
 }
 
 Editor_Profile_Menu :: struct {}
@@ -1984,6 +1986,10 @@ editor_text :: proc(p: ^Editor, text: string) {
 		return
 	}
 	row := editor_row(p)
+	if curve, open := p.mode.(Editor_Curve_Popup); open && curve.naming {
+		_ = field_text(&p.choice_search, text)
+		return
+	}
 	if choice, open := p.mode.(Editor_Choice_Popup); open && choice_searchable(row) {
 		if choice.toggle_focus {return}
 		if field_text(&p.choice_search, text) == .Edited {choice_filter(p, row)}
@@ -2803,7 +2809,9 @@ editor_pointer :: proc(p: ^Editor, l: Editor_Layout, x, y: f32) -> platform.Curs
 			count := len(commands.shortcut_alternatives(row.value, context.temp_allocator))
 			if option >= 0 && option + p.capture.alternatives.scroll <= count {return .Hand}
 		case .Curve:
-			if target, _ := motion_popup_hit(p, popup, x, y, s); target != .None {return .Hand}
+			target, _ := motion_popup_hit(p, popup, x, y, s)
+			if target == .Name {return .Text}
+			if target != .None {return .Hand}
 		case .Color:
 			c := color_parts(popup, row.kind == .Optional_Color, s)
 			ramp := render.Rect{c.ramp.x, c.ramp.y - 6 * s, c.ramp.width, c.ramp.height + 12 * s}

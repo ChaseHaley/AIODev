@@ -24,6 +24,8 @@ editor_motion_save :: proc(app: ^App, w: ^Window, reset: bool) {
 			text = fmt.tprintf("Saved curve %s.", m.name)
 		case settings.Motion_Curve_Remove:
 			text = fmt.tprintf("Deleted curve %s.", m.name)
+		case settings.Motion_Curve_Rename:
+			text = fmt.tprintf("Renamed curve %s to %s.", m.from, m.to)
 		case settings.Motion_Preset_Apply:
 			text = fmt.tprintf("Applied preset %s.", m.name)
 		case settings.Motion_Preset_Save:
