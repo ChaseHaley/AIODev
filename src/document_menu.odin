@@ -11,6 +11,7 @@ import "aio:ui"
 import "core:fmt"
 import "core:log"
 import "core:os"
+import "core:path/filepath"
 import "core:strings"
 
 // What the Links menu shows; it is held by Overlay_Document_Menu while the menu shows. The list is a search
@@ -51,14 +52,18 @@ Document_Actions :: struct {
 	row: int,
 }
 
-// A pinned document's actions. Opening in a split, float or linked window is for a Markdown file, the one
-// kind AIODev shows itself; moving names the level it moves to.
+// A pinned document's actions. Opening in a split, float, tab or linked window, or with the default app, is
+// for a Markdown file, the one kind AIODev shows itself; moving names the level it moves to.
 Document_Row_Action :: enum u8 {
 	Open,
 	Split_Right,
 	Split_Down,
 	Float,
+	Tab,
 	Linked_Window,
+	Open_External,
+	Copy,
+	Open_Folder,
 	Move_Pane,
 	Move_Tab,
 	Move_Workspace,
@@ -120,7 +125,11 @@ DOCUMENT_ROW_ACTIONS := [Document_Row_Action]struct {
 	.Split_Right    = {"Open in Right Split", .Split_Right},
 	.Split_Down     = {"Open in Down Split", .Split_Down},
 	.Float          = {"Open in Float", .Float_Pane},
+	.Tab            = {"Open in New Tab", .Layout_Top},
 	.Linked_Window  = {"Open in Linked Window", .Window_Out},
+	.Open_External  = {"Open with Default App", .None},
+	.Copy           = {"Copy Path", .Copy},
+	.Open_Folder    = {"Open Containing Folder", .Folder},
 	.Move_Pane      = {"Move to This Pane", .Split_Right},
 	.Move_Tab       = {"Move to This Tab", .Layout_Top},
 	.Move_Workspace = {"Move to This Workspace", .Workspace},
@@ -701,16 +710,22 @@ document_actions_open :: proc(app: ^App, w: ^Window, index: int, x, y: f32) {
 	}
 	actions := &menu.actions
 	ui.menu_clear(actions)
-	add :: proc(actions: ^ui.Menu, action: Document_Row_Action) {
+	add :: proc(actions: ^ui.Menu, action: Document_Row_Action, label := "") {
 		row := DOCUMENT_ROW_ACTIONS[action]
-		item := ui.Menu_Item{label = row.label, glyph = row.glyph, enabled = true, payload = u32(action)}
+		text := label != "" ? label : row.label
+		item := ui.Menu_Item{label = text, glyph = row.glyph, enabled = true, payload = u32(action)}
 		if _, err := ui.menu_add(actions, item); err != nil {log.errorf("adding a link action failed: %v", err)}
 	}
+	web := document_is_web(entry.target)
+	file := !entry.folder && !web
 	add(actions, .Open)
 	// Only a Markdown file opens inside AIODev, so only it has a choice of where.
-	if !entry.folder && !document_is_web(entry.target) && markdown_is_path(entry.target) {
-		for action in Document_Row_Action.Split_Right ..= Document_Row_Action.Linked_Window {add(actions, action)}
+	if file && markdown_is_path(entry.target) {
+		for action in Document_Row_Action.Split_Right ..= Document_Row_Action.Open_External {add(actions, action)}
 	}
+	_, _ = ui.menu_add(actions, {separator = true})
+	add(actions, .Copy, web ? "Copy Link" : "")
+	if file {add(actions, .Open_Folder)}
 	_, _ = ui.menu_add(actions, {separator = true})
 	scopes, found := document_scopes(app, state.content)
 	for level in Document_Level {
@@ -748,9 +763,18 @@ document_actions_choose :: proc(app: ^App, w: ^Window, action: Document_Row_Acti
 	case .Open:
 		overlay_close(app, w)
 		target_open(app, w, target_from_document(target))
-	case .Split_Right, .Split_Down, .Float, .Linked_Window:
+	case .Split_Right, .Split_Down, .Float, .Tab, .Linked_Window:
 		overlay_close(app, w)
 		document_open_placed(app, w, content, target, action)
+	case .Open_External:
+		overlay_close(app, w)
+		document_open_external(app, w, target)
+	case .Copy:
+		overlay_close(app, w)
+		_ = clipboard_copy(app, target)
+	case .Open_Folder:
+		overlay_close(app, w)
+		target_open(app, w, File_Target{filepath.dir(target)})
 	case .Move_Pane, .Move_Tab, .Move_Workspace:
 		document_popout_close(app, w)
 		document_menu_move(app, w, actions.row, Document_Level(int(action) - int(Document_Row_Action.Move_Pane)))
@@ -760,8 +784,26 @@ document_actions_choose :: proc(app: ^App, w: ^Window, action: Document_Row_Acti
 	}
 }
 
+// Hands a Markdown file to the system instead of a pane. A type that needs confirming takes the usual
+// confirmation.
+@(private = "file")
+document_open_external :: proc(app: ^App, w: ^Window, path: string) {
+	file, ok := localpath.prepare_open(path)
+	if !ok {
+		target_unavailable(app)
+		return
+	}
+	if file.confirm {
+		localpath.open_file_destroy(&file)
+		target_open(app, w, File_Target{path})
+		return
+	}
+	defer localpath.open_file_destroy(&file)
+	if !target_open_approved(app, file.path, "") {notify(app, .Error, "Could not open the file.")}
+}
+
 // Opens a Markdown file in a new pane beside the pane showing `content` in w. A split joins w, linked or
-// not; a float or a linked window belongs to the window showing the tab, beside its focused pane.
+// not; a float, tab or linked window belongs to the window showing the tab, beside its focused pane.
 @(private = "file")
 document_open_placed :: proc(
 	app: ^App,
@@ -777,7 +819,7 @@ document_open_placed :: proc(
 	}
 	defer localpath.open_file_destroy(&file)
 	acting := w
-	if placement == .Float || placement == .Linked_Window {acting = pane_link_acting_window(app, w)}
+	if placement != .Split_Right && placement != .Split_Down {acting = pane_link_acting_window(app, w)}
 	tree := window_tree(acting)
 	if tree == nil || window_linked(acting) {
 		notify(app, .Error, "Could not open the file.")
@@ -800,6 +842,8 @@ document_open_placed :: proc(
 		failure = pane_split_insert(app, acting, workspace, tab_index, beside, direction, ratio, true, added, true)
 	case .Float:
 		if !floating_attach(app, acting, workspace, tab_index, added, true) {failure = .Layout}
+	case .Tab:
+		if !markdown_new_tab(app, acting, workspace, added, true) {failure = .Layout}
 	case .Linked_Window:
 		// The new pane leaves for its own window at once, so it needs no room here; it splits a tiled pane.
 		if layout.is_floating(tree, beside) {beside = layout.focus_tiled(tree)}
