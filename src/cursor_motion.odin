@@ -1,16 +1,18 @@
 package main
 
+import "aio:caret"
 import "aio:layout"
 import "aio:render"
 import "aio:term_view"
 import "aio:ui"
 import "core:time"
 
-// Presets and tuning reach every terminal through the same style, including cached split panes.
-// Windows' motion preference overrides the preset without changing the user's saved choice.
-cursor_effects :: proc(app: ^App) -> term_view.Cursor_Effects {
+// Presets and tuning reach every terminal through the same style, including cached split panes, and
+// every text field's caret through the window's ui.Carets. Windows' motion preference overrides the
+// preset without changing the user's saved choice.
+cursor_effects :: proc(app: ^App) -> caret.Effects {
 	c := app.settings.cursor
-	preset := term_view.Cursor_Preset.Off
+	preset := caret.Preset.Off
 	if app.animations {
 		switch c.animation {
 		case .Off:    preset = .Off
@@ -43,7 +45,7 @@ Cursor_Crossing :: struct {
 	source, destination: layout.Content,
 	drawn, goal: term_view.Cursor_Paint,
 	drawn_at: time.Tick,
-	effects: term_view.Cursor_Effects,
+	effects: caret.Effects,
 	transition: term_view.Cursor_Transition,
 }
 
@@ -62,7 +64,7 @@ cursor_paint_translate :: proc(paint: term_view.Cursor_Paint, offset: [2]f32) ->
 cursor_crossing_enabled :: proc(app: ^App, w: ^Window) -> bool {
 	return app.settings.cursor.animation_across_panes && app.animations &&
 	       app.settings.cursor.animation != .Off && window_drawable(w) &&
-	       term_view.cursor_effects_active(cursor_effects(app))
+	       caret.effects_active(cursor_effects(app))
 }
 
 @(private = "file")

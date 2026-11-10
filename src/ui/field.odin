@@ -7,11 +7,12 @@ import "core:unicode/utf8"
 
 // One line of editable text. The selection runs between anchor and cursor; they are equal when
 // nothing is selected. Both are byte offsets on rune boundaries. `dragging` holds from a pointer press
-// in the field until its owner calls field_release.
+// in the field until its owner calls field_release. `caret` is how its caret last moved on screen.
 Text_Field :: struct {
 	bytes:          [dynamic]u8,
 	cursor, anchor: int,
 	dragging:       bool,
+	caret:          Field_Caret,
 }
 
 Field_Change :: enum {
@@ -216,15 +217,10 @@ field_draw :: proc(
 	caret_width: f32,
 ) -> render.Build_Status {
 	value := field_string(f)
-	if value == "" {
-		if result := draw_text(text, list, placeholder, x, baseline, theme.muted, available);
-		   result != .Ok {
-			return result
-		}
-	} else {
-		start := field_view_start(f, text, available)
+	start := field_view_start(f, text, available)
+	if focused && value != "" {
 		low, high := field_selection(f)
-		if focused && low != high {
+		if low != high {
 			left := x + text_width(text, value[start:max(start, low)])
 			right := x + text_width(text, value[start:max(start, high)])
 			left, right = min(left, x + available), min(right, x + available)
@@ -236,21 +232,23 @@ field_draw :: proc(
 				},
 			)
 		}
-		if result := draw_text(text, list, value[start:], x, baseline, color, available);
+	}
+	head: render.Rect
+	if focused {
+		at := x + min(available, text_width(text, value[start:f.cursor]))
+		target := render.Rect{at, baseline - text.ascent, caret_width, text.line_height}
+		head = field_caret_pose(&f.caret, text.carets, {x, baseline}, target)
+		field_caret_body(&f.caret, list, theme.accent)
+	}
+	if value == "" {
+		if result := draw_text(text, list, placeholder, x, baseline, theme.muted, available);
 		   result != .Ok {
 			return result
 		}
+	} else if result := draw_text(text, list, value[start:], x, baseline, color, available);
+	   result != .Ok {
+		return result
 	}
-	if focused {
-		start := field_view_start(f, text, available)
-		caret := x + min(available, text_width(text, value[start:f.cursor]))
-		draw_rect(
-			list,
-			{
-				rect = {caret, baseline - text.ascent, caret_width, text.line_height},
-				color = theme.accent,
-			},
-		)
-	}
+	if focused {draw_rect(list, {rect = head, color = theme.accent})}
 	return .Ok
 }

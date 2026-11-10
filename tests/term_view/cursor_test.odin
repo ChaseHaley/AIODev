@@ -1,6 +1,7 @@
 package term_view_test
 
 import "aio:render"
+import "aio:caret"
 import "aio:term_view"
 import "core:math"
 import "core:slice"
@@ -21,7 +22,7 @@ frame_at :: proc(n: int, resuming := false) -> render.Frame_Time {
 
 @(private)
 effects_style :: proc(
-	f: ^Fixture, preset: term_view.Cursor_Preset, movement := true, strength := f32(1),
+	f: ^Fixture, preset: caret.Preset, movement := true, strength := f32(1),
 ) -> term_view.Style {
 	return {
 		family = f.family,
@@ -293,7 +294,7 @@ blink_hidden_moves_show_every_selected_preset_and_resume_idle_blinking :: proc(t
 	f, ok := headless_create(t)
 	defer fixture_destroy(&f)
 	if !ok {return}
-	for choice in ([5]struct {preset: term_view.Cursor_Preset, movement: bool} {
+	for choice in ([5]struct {preset: caret.Preset, movement: bool} {
 		{.Smooth, true}, {.Smear, true}, {.Trail, true}, {.Smear, false}, {.Trail, false},
 	}) {
 		term_view.cursor_reset(&f.view)

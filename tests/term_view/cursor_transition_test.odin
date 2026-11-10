@@ -2,6 +2,7 @@ package term_view_test
 
 import "base:runtime"
 import "aio:render"
+import "aio:caret"
 import "aio:term_view"
 import "core:slice"
 import "core:testing"
@@ -18,7 +19,7 @@ transition_retargets_the_last_draw_not_the_next_frame_sample :: proc(t: ^testing
 	clip := render.Rect{0, 0, 400, 200}
 	from := transition_cell({0, 0, 10, 20})
 	to := transition_cell({100, 40, 20, 20})
-	effects := term_view.Cursor_Effects{preset = .Smooth, duration = 5 * PERIOD, movement = true}
+	effects := caret.Effects{preset = .Smooth, duration = 5 * PERIOD, movement = true}
 	transition: term_view.Cursor_Transition
 	term_view.cursor_transition_start(&transition, from, to, effects)
 	testing.expect(t, term_view.cursor_transition_active(&transition))
@@ -62,10 +63,10 @@ transition_uses_existing_no_movement_and_disabled_policies :: proc(t: ^testing.T
 	from := transition_cell({0, 0, 10, 20})
 	to := transition_cell({100, 0, 10, 20})
 	clip := render.Rect{0, 0, 200, 40}
-	for preset in ([2]term_view.Cursor_Preset{.Smear, .Trail}) {
+	for preset in ([2]caret.Preset{.Smear, .Trail}) {
 		transition: term_view.Cursor_Transition
-		effects := term_view.Cursor_Effects{preset = preset, duration = 5 * PERIOD, strength = 1}
-		testing.expect(t, term_view.cursor_effects_active(effects))
+		effects := caret.Effects{preset = preset, duration = 5 * PERIOD, strength = 1}
+		testing.expect(t, caret.effects_active(effects))
 		term_view.cursor_transition_start(&transition, from, to, effects)
 		term_view.cursor_transition_animate(&transition, frame_at(0, resuming = true), true)
 		render.draw_list_reset(&list)
@@ -83,9 +84,9 @@ transition_uses_existing_no_movement_and_disabled_policies :: proc(t: ^testing.T
 		term_view.cursor_transition_commit(&transition)
 		testing.expect_value(t, term_view.cursor_transition_paint(&transition).tail, to.target)
 	}
-	for preset in ([2]term_view.Cursor_Preset{.Off, .Smooth}) {
-		effects := term_view.Cursor_Effects{preset = preset, duration = 5 * PERIOD}
-		testing.expect(t, !term_view.cursor_effects_active(effects))
+	for preset in ([2]caret.Preset{.Off, .Smooth}) {
+		effects := caret.Effects{preset = preset, duration = 5 * PERIOD}
+		testing.expect(t, !caret.effects_active(effects))
 		transition: term_view.Cursor_Transition
 		term_view.cursor_transition_start(&transition, from, to, effects)
 		testing.expect(t, !term_view.cursor_transition_active(&transition))
@@ -248,7 +249,7 @@ window_transitions_match_local_preset_pixels_and_frame_timing :: proc(t: ^testin
 	list := render.draw_list_init()
 	defer render.draw_list_destroy(&list)
 	clip := render.Rect{0, 0, COLUMNS * f.metrics.cell_width, ROWS * f.metrics.cell_height}
-	for preset in ([3]term_view.Cursor_Preset{.Smooth, .Smear, .Trail}) {
+	for preset in ([3]caret.Preset{.Smooth, .Smear, .Trail}) {
 		for movement in ([2]bool{true, false}) {
 			term_view.cursor_reset(&f.view)
 			write(&f, "\x1b[H")

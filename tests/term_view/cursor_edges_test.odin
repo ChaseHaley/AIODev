@@ -1,5 +1,6 @@
 package term_view_test
 
+import "aio:caret"
 import "aio:term_view"
 import "core:slice"
 import "core:testing"
@@ -10,7 +11,7 @@ zero_strength_smear_matches_smooth_without_a_fringe :: proc(t: ^testing.T) {
 	defer fixture_destroy(&f)
 	if !ok {return}
 	frames: [2][]u8
-	for preset, i in ([2]term_view.Cursor_Preset{.Smooth, .Smear}) {
+	for preset, i in ([2]caret.Preset{.Smooth, .Smear}) {
 		term_view.cursor_reset(&f.view)
 		write(&f, "\x1b[H")
 		style := effects_style(&f, preset, strength = 0)
