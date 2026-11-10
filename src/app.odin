@@ -443,6 +443,7 @@ Window_Timer :: enum u8 {
 	Selection_Autoscroll,
 	Tooltip,
 	Hidden_Panes,
+	Link_Submenu,
 }
 
 @(private = "file")
@@ -462,6 +463,8 @@ window_timer_advance :: proc(app: ^App, w: ^Window, timer: Window_Timer, now: ti
 		tooltip_tick(w, now)
 	case .Hidden_Panes:
 		hidden_panes_tick(w, now)
+	case .Link_Submenu:
+		document_submenu_tick(app, w, now)
 	}
 }
 
@@ -482,6 +485,8 @@ window_timer_deadline :: proc(w: ^Window, timer: Window_Timer) -> (time.Tick, bo
 		return tooltip_deadline(w)
 	case .Hidden_Panes:
 		return hidden_panes_deadline(w)
+	case .Link_Submenu:
+		return document_submenu_deadline(w)
 	}
 	return {}, false
 }

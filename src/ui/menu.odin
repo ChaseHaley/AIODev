@@ -292,21 +292,6 @@ menu_submenu_anchor :: proc(parent: ^Menu, index: int, child_width, width, heigh
 	return {x, row.y - OVERLAY_PADDING * scale}
 }
 
-// Whether the pointer, moving from `from` to `to`, is heading for the submenu surface `target`: `to` is in
-// the triangle from `from` to the submenu's near edge, or on the submenu. A row the pointer crosses on that
-// way keeps the submenu open instead of taking the selection.
-menu_aim :: proc(from, to: [2]f32, target: render.Rect) -> bool {
-	if render.rect_contains(target, to.x, to.y) {return true}
-	if from == to {return false}
-	near := target.x >= from.x ? target.x : target.x + target.width
-	top, bottom := [2]f32{near, target.y}, [2]f32{near, target.y + target.height}
-	side :: proc(a, b, p: [2]f32) -> f32 {return (b.x - a.x) * (p.y - a.y) - (b.y - a.y) * (p.x - a.x)}
-	d1, d2, d3 := side(from, top, to), side(top, bottom, to), side(bottom, from, to)
-	negative := d1 < 0 || d2 < 0 || d3 < 0
-	positive := d1 > 0 || d2 > 0 || d3 > 0
-	return !(negative && positive)
-}
-
 // Draws the rows around the selection; it reads the menu and changes nothing in it.
 menu_draw :: proc(
 	m: ^Menu,

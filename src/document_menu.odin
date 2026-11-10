@@ -14,6 +14,7 @@ import "core:log"
 import "core:os"
 import "core:path/filepath"
 import "core:strings"
+import "core:time"
 
 // What the Links menu shows; it is held by Overlay_Document_Menu while the menu shows. The list is a search
 // field, the other windows showing part of this tab, then pinned documents: files, folders and web addresses.
@@ -142,8 +143,8 @@ Document_Menu :: struct {
 	// the link menu (D-088). Its rows' payloads are Link_Choices. Any change of mode or rows closes it.
 	submenu:     ui.Menu,
 	submenu_row: Maybe(int),
-	// The pointer at its last move, to tell a move toward the submenu from one along the menu.
-	aim_from:    [2]f32,
+	// Keeps the submenu while the pointer heads from its row to it (menu aim).
+	reveal:      ui.Hover_Reveal,
 }
 
 @(private = "file", rodata)
@@ -471,7 +472,7 @@ document_menu_close :: proc(menu: ^Document_Menu, mode: Document_Menu_Mode) {
 	ui.field_release(&menu.url)
 	ui.field_release(&menu.search)
 	menu.menu.hover_part = .Row
-	menu.submenu_row = nil
+	document_submenu_reset(menu)
 }
 
 // Takes w because a menu still showing when its window is freed holds a document in w.overlay.
@@ -578,7 +579,26 @@ document_submenu_open :: proc(app: ^App, w: ^Window, row: int, select_first: boo
 
 @(private = "file")
 document_submenu_close :: proc(w: ^Window) {
-	if w.document_menu.submenu_row != nil {w.document_menu.submenu_row, w.dirty = nil, true}
+	if w.document_menu.submenu_row != nil {w.dirty = true}
+	document_submenu_reset(&w.document_menu)
+}
+
+@(private = "file")
+document_submenu_reset :: proc(menu: ^Document_Menu) {
+	menu.submenu_row = nil
+	ui.hover_reveal_close(&menu.reveal)
+}
+
+// An aim at the submenu that stopped short of it gives the row under the pointer its turn.
+document_submenu_tick :: proc(app: ^App, w: ^Window, now: time.Tick) {
+	if !ui.hover_reveal_tick(&w.document_menu.reveal, now) || !document_menu_shown(w) {return}
+	document_submenu_close(w)
+	document_menu_hover(app, w, w.pointer.x, w.pointer.y, false)
+}
+
+document_submenu_deadline :: proc(w: ^Window) -> (time.Tick, bool) {
+	if !document_menu_shown(w) {return {}, false}
+	return ui.hover_reveal_deadline(w.document_menu.reveal)
 }
 
 // The link the shared rows act on and the pane they are for: the link menu's link, or the pinned link the
@@ -625,30 +645,39 @@ document_submenu_key :: proc(app: ^App, w: ^Window, logical: input.Key_Event) ->
 	return true
 }
 
-// The pointer at x, y over the submenu or the menu it hangs from, coming from `from`. On the submenu it
-// selects there. A move toward the open submenu leaves everything as it is; otherwise the parent row under
-// the pointer shows its placements or, having none, closes them. True when the pointer is the submenu's.
+// The pointer at x, y over the submenu or the menu it hangs from. On the submenu it selects there. While
+// the pointer heads from a row to its submenu (ui.Hover_Reveal) everything stays as it is; otherwise the
+// parent row under the pointer shows its placements or, having none, closes them. True when the submenu
+// keeps the pointer.
 @(private = "file")
-document_submenu_hover :: proc(app: ^App, w: ^Window, from: [2]f32, x, y: f32) -> bool {
+document_submenu_hover :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {
 	parent := document_submenu_parent(w)
 	if parent == nil {return false}
-	submenu := &w.document_menu.submenu
+	menu := &w.document_menu
 	width, height := f32(w.width), f32(w.height)
-	if document_submenu_shown(w) {
-		if hit := ui.menu_hit(submenu, x, y, width, height, w.scale); hit >= 0 {
-			if hit != ui.menu_selected(submenu) {ui.menu_select(submenu, hit); w.dirty = true}
+	slack, now := ui.HOVER_AIM_SLACK * w.scale, clock_now(&app.clock)
+	if row, shown := menu.submenu_row.?; shown {
+		trigger := ui.menu_row_rect(parent, row, width, height, w.scale)
+		surface, _ := ui.menu_layout(&menu.submenu, width, height, w.scale)
+		on_trigger, on_surface := render.rect_contains(trigger, x, y), render.rect_contains(surface, x, y)
+		ui.hover_reveal_move(&menu.reveal, {x, y}, on_trigger, on_surface, trigger, surface, slack, now)
+		if on_surface {
+			hit := ui.menu_hit(&menu.submenu, x, y, width, height, w.scale)
+			if hit >= 0 && hit != ui.menu_selected(&menu.submenu) {ui.menu_select(&menu.submenu, hit); w.dirty = true}
 			return true
 		}
-		surface, _ := ui.menu_layout(submenu, width, height, w.scale)
-		if ui.menu_aim(from, {x, y}, surface) {return true}
+		if menu.reveal.open && !on_trigger {return true}
 	}
-	if hit := ui.menu_hit(parent, x, y, width, height, w.scale); hit >= 0 {
-		if parent.items[hit].submenu {
-			document_submenu_open(app, w, hit, false)
-		} else {
-			document_submenu_close(w)
-		}
+	hit := ui.menu_hit(parent, x, y, width, height, w.scale)
+	if hit < 0 {return false}
+	if !parent.items[hit].submenu {
+		document_submenu_close(w)
+		return false
 	}
+	document_submenu_open(app, w, hit, false)
+	trigger := ui.menu_row_rect(parent, hit, width, height, w.scale)
+	surface, _ := ui.menu_layout(&menu.submenu, width, height, w.scale)
+	ui.hover_reveal_move(&menu.reveal, {x, y}, true, false, trigger, surface, slack, now)
 	return false
 }
 
@@ -685,7 +714,7 @@ document_menu_set :: proc(app: ^App, w: ^Window, next: Document_Menu_Mode, rows:
 	}
 	document_menu_mode_release(state.mode)
 	state.mode, w.dirty = next, true
-	w.document_menu.submenu_row = nil
+	document_submenu_reset(&w.document_menu)
 	switch rows {
 	case .Keep:
 	case .Rebuild: document_menu_build(app, w)
@@ -912,7 +941,7 @@ document_menu_build :: proc(app: ^App, w: ^Window, select_first := false) {
 	menu := &w.document_menu
 	selected, scroll := ui.menu_selected(&menu.menu), menu.menu.scroll
 	ui.menu_clear(&menu.menu)
-	menu.submenu_row = nil
+	document_submenu_reset(menu)
 	document_menu_text_clear(menu)
 	menu.count = 0
 	menu.entries = {}
@@ -1454,9 +1483,7 @@ document_menu_hover :: proc(app: ^App, w: ^Window, x, y: f32, left_held: bool) {
 		pointer_set(app, w, shape)
 		return
 	}
-	from := menu.aim_from
-	menu.aim_from = {x, y}
-	if document_submenu_hover(app, w, from, x, y) {
+	if document_submenu_hover(app, w, x, y) {
 		over := ui.menu_hit(&menu.submenu, x, y, f32(w.width), f32(w.height), w.scale) >= 0
 		pointer_set(app, w, over ? .Hand : .Arrow)
 		return
