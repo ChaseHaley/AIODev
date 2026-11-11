@@ -304,6 +304,37 @@ cursor_crossing_travels_from_a_float_to_the_tiling :: proc(t: ^testing.T) {
 	testing.expect(t, cursor_head(t, s, w) != float_head)
 }
 
+// A float restored from its capsule takes focus with its cursor in place: the cursor travels neither into
+// it nor, on minimize, out of it.
+@(test)
+cursor_crossing_skips_restoring_a_float :: proc(t: ^testing.T) {
+	f: Palette_Fixture
+	defer palette_fixture_destroy(t, &f)
+	s, w, _, ok := float_fixture(t, &f, "cursor-crossing-restore")
+	if !ok {return}
+	app.handle_event(s, platform.Focus_Event{w.id, true})
+	s.animations = true
+	s.settings.cursor.animation = .Smooth
+	s.settings.cursor.animation_duration = 100
+	s.settings.cursor.animation_movement = true
+	s.settings.cursor.animation_across_panes = true
+	w.frame = render.frame_time_at(time.tick_add({}, time.Second))
+	for restore in ([?]app.Action{.Minimize_Floating, .Minimize_All_Floating}) {
+		cursor_feed(t, s, w, "\x1b[2J\x1b[H")
+		if !testing.expect(t, app.window_build_frame(s, w)) {return}
+		app.run_action(s, w, restore)
+		testing.expect_value(t, len(app.floating_rects(w)), 0)
+		if !cursor_restore_frame(t, s, w) {return}
+		if !cursor_restore_frame(t, s, w) {return}
+		testing.expect_value(t, w.cursor_crossing.phase, app.Cursor_Crossing_Phase.Tracking)
+		app.run_action(s, w, restore)
+		testing.expect_value(t, len(app.floating_rects(w)), 1)
+		if !cursor_restore_frame(t, s, w) {return}
+		testing.expect(t, w.cursor_crossing.phase == .Tracking || w.cursor_crossing.phase == .Empty)
+		testing.expect(t, !app.cursor_motion_animating(w), "no cursor flies into the restored float")
+	}
+}
+
 @(private = "file")
 cursor_restore_frame :: proc(t: ^testing.T, s: ^app.App, w: ^app.Window) -> bool {
 	// A landed overlay owns the settlement frame. The next display frame must replace its

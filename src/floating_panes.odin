@@ -506,6 +506,8 @@ floating_minimize_all_toggle :: proc(app: ^App, w: ^Window) {
 	}
 	pane_motion_arm(w, .Float)
 	if shown == 0 {
+		// Restored floats appear with the cursor in place, as a single restore does.
+		cursor_crossing_forget(w)
 		latest := layout.float_latest(tree, false)
 		if latest != layout.INVALID_NODE {pane_focus(app, w, latest)}
 	}

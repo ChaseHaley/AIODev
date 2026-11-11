@@ -335,8 +335,12 @@ pane_focus :: proc(app: ^App, w: ^Window, node: layout.Node_Id) {
 	}
 	focus_leave(app, w)
 	// A floating pane rises above the others, and comes out of its capsule, as it takes focus; out of
-	// its capsule, it grows from it.
-	if floating, ok := layout.float_of(tree, node); ok && floating.minimized {pane_motion_arm(w, .Float)}
+	// its capsule, it grows from it, and the cursor appears in it without travelling there, as it
+	// leaves a minimized float without travelling back.
+	if floating, ok := layout.float_of(tree, node); ok && floating.minimized {
+		pane_motion_arm(w, .Float)
+		cursor_crossing_forget(w)
+	}
 	filled := layout.fill_floating(tree)
 	floats_changed := layout.focus_set(tree, node)
 	// A single-pane view shows the pane focus moves to, as a zoomed float shows its focused pane.
