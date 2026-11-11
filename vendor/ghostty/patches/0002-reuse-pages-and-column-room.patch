@@ -1,0 +1,306 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Chase Haley <chasehaley33@gmail.com>
+Date: Wed, 11 Nov 2026 08:08:45 -0600
+Subject: [PATCH 2/2] PageList: reuse pages that leave the list, leave room to
+ grow columns
+
+Line pruning and column growth without reflow each destroy about one
+page for every page they create. Destroying a pool page decommits it
+(a memset and DiscardVirtualMemory on Windows) and the next page
+faults the memory back in. Keep one zeroed page as a spare for the
+next createPage instead.
+
+Pages copied to grow the columns also get a quarter more column
+capacity, so a window widened a column at a time copies its history
+once per quarter instead of once per column.
+
+On an i9-14900K at 120x32 with a 10,000-line limit, ManyLine output
+recorded from ConPTY parses at 490 MB/s instead of 104 MB/s, and
+resizing from 120 to 480 columns and back with full history takes
+0.09 ms per step instead of 3.3 ms (worst 3.8 ms instead of 12 ms).
+---
+ src/terminal/PageList.zig | 185 ++++++++++++++++++++++++++++++++++++--
+ 1 file changed, 179 insertions(+), 6 deletions(-)
+
+diff --git a/src/terminal/PageList.zig b/src/terminal/PageList.zig
+index f46d75b..8e69885 100644
+--- a/src/terminal/PageList.zig
++++ b/src/terminal/PageList.zig
+@@ -449,6 +449,15 @@ page_compression: IncrementalCompressionState = .{},
+ /// outside of an in-progress reflow.
+ recycle_node: ?*List.Node = null,
+ 
++/// A standard page that left the list, zeroed and kept for the next
++/// createPage. Scrollback at its line limit prunes about one page for
++/// every page it allocates, and growing the columns copies each page into
++/// a new one. Returning each to the pool decommits its memory and the
++/// next page faults it back in, which costs as much as the printing or
++/// copying itself. At most one page is kept, and page_size doesn't count
++/// it.
++spare_node: ?*List.Node = null,
++
+ /// The capacities that the last `grow_hint_pages` full pages before the
+ /// last one needed for styles, graphemes, strings, and hyperlinks,
+ /// measured by `utilizationCapacity` when `grow` moved past each of
+@@ -983,6 +992,7 @@ pub fn deinit(self: *PageList) void {
+     self.tracked_pins.deinit(self.pool.alloc);
+ 
+     // Release every page and node back to the pools, then free the pools.
++    self.releaseSpare();
+     releasePages(&self.pool, self.pages);
+     self.pool.deinit();
+ }
+@@ -1022,6 +1032,7 @@ pub fn reset(self: *PageList) void {
+     // Before resetting our pools we need to release our pages: heap-owned
+     // pages go back to the page allocator and pool-owned pages back to
+     // the page pool.
++    self.releaseSpare();
+     releasePages(&self.pool, self.pages);
+ 
+     // Reset our pools to free as much memory as possible while retaining
+@@ -3013,7 +3024,16 @@ fn resizeWithoutReflowGrowCols(
+     // Try to fit our new column size into our existing page capacity.
+     // If that doesn't work then use a non-standard page with the
+     // given columns.
++    //
++    // A window being widened grows its columns a few at a time, and each
++    // growth past a page's capacity copies the whole page, so a drag
++    // across a wide screen would copy all of history once per column.
++    // Leave room for more columns: growth up to it takes the fast path
++    // above. The extra columns cost bytes per row, so a standard page
++    // holds fewer rows, but only the pages this copies have them.
+     const cap = page.capacity.adjust(
++        .{ .cols = growColsHeadroom(cols) },
++    ) catch page.capacity.adjust(
+         .{ .cols = cols },
+     ) catch |err| err: {
+         comptime assert(@TypeOf(err) == error{OutOfMemory});
+@@ -3126,6 +3146,7 @@ fn resizeWithoutReflowGrowCols(
+     while (copied < page.size.rows) {
+         const new_node = try self.createPage(.{ .cap = cap });
+         const new_page = new_node.page();
++        new_page.size.cols = cols;
+         defer new_page.assertIntegrity();
+ 
+         // The length we can copy into the new page is at most the number
+@@ -3181,10 +3202,17 @@ fn resizeWithoutReflowGrowCols(
+     // we don't have any more errors.
+     errdefer comptime unreachable;
+ 
+-    // Remove the old page.
+-    // Deallocate the old page.
++    // Remove the old page. The next chunk's copy can reuse it.
+     self.pages.remove(chunk.node);
+-    self.destroyNode(chunk.node);
++    self.retirePage(chunk.node);
++}
++
++/// The column capacity resizeWithoutReflowGrowCols gives the pages it
++/// copies when growing to `cols`: a quarter more, and at least 16 more.
++fn growColsHeadroom(cols: size.CellCountInt) size.CellCountInt {
++    const max = std.math.maxInt(size.CellCountInt);
++    const extra = @max(cols / 4, 16);
++    return if (cols > max - extra) max else cols + extra;
+ }
+ 
+ /// Returns the number of trailing blank lines, not to exceed max. Max
+@@ -5105,6 +5133,27 @@ inline fn createPage(
+         return node;
+     }
+ 
++    // A page that left the list (see spare_node). It was zeroed when it
++    // was kept.
++    if (self.spare_node) |node| spare: {
++        if (opts.exact_size) break :spare;
++        const layout = Page.layout(opts.cap);
++        if (layout.total_size > std_size) break :spare;
++
++        self.spare_node = null;
++        const item: *align(std.heap.page_size_min) [std_size]u8 =
++            @ptrCast(@alignCast(node.data.resident.memory.ptr));
++        node.* = .{
++            .data = .{ .resident = .initBuf(.init(item), layout) },
++            .serial = self.page_serial,
++            .owned = .pool,
++        };
++        node.page().size.rows = 0;
++        self.page_serial += 1;
++        self.page_size += PagePool.item_size;
++        return node;
++    }
++
+     return try createPageExt(
+         &self.pool,
+         opts,
+@@ -5113,6 +5162,31 @@ inline fn createPage(
+     );
+ }
+ 
++/// Takes a page that left the list: keeps it as the spare when there is
++/// none and it is a standard, resident pool page, and destroys it
++/// otherwise.
++fn retirePage(self: *PageList, node: *List.Node) void {
++    if (self.spare_node != null or
++        node.owned != .pool or
++        node.data != .resident)
++    {
++        self.destroyNode(node);
++        return;
++    }
++
++    // Only the page's own layout can be dirty (see destroyNodeExt).
++    @memset(node.data.resident.memory, 0);
++    self.page_size -= PagePool.item_size;
++    self.spare_node = node;
++}
++
++/// Gives the spare page, if any, back to the pool.
++fn releaseSpare(self: *PageList) void {
++    const node = self.spare_node orelse return;
++    self.spare_node = null;
++    destroyNodeExt(&self.pool, node, null);
++}
++
+ inline fn createPageExt(
+     pool: *MemoryPool,
+     opts: CreatePage,
+@@ -6200,6 +6274,13 @@ fn eraseRows(
+ /// responsible for accounting for the removed rows before or after calling
+ /// this function.
+ fn erasePage(self: *PageList, node: *List.Node) void {
++    self.unlinkPage(node);
++    self.destroyNode(node);
++}
++
++/// erasePage without destroying the page: moves the pins off it and
++/// takes it out of the list.
++fn unlinkPage(self: *PageList, node: *List.Node) void {
+     // Must not be the final page.
+     assert(node.next != null or node.prev != null);
+ 
+@@ -6221,7 +6302,6 @@ fn erasePage(self: *PageList, node: *List.Node) void {
+ 
+     // Remove the page from the linked list
+     self.pages.remove(node);
+-    self.destroyNode(node);
+ }
+ 
+ /// Returns the pin for the given point. The pin is NOT tracked so it
+@@ -7648,8 +7728,13 @@ const Limits = struct {
+ 
+             // erasePage updates the list, pin targets, and byte accounting.
+             // Row accounting belongs to the caller because erasePage is also used
+-            // by paths that already adjusted total_rows.
+-            pagelist.erasePage(first);
++            // by paths that already adjusted total_rows. Line pruning keeps
++            // the page for the next allocation (see spare_node).
++            pagelist.unlinkPage(first);
++            switch (key) {
++                .lines => pagelist.retirePage(first),
++                .bytes => pagelist.destroyNode(first),
++            }
+             pagelist.total_rows -= first_rows;
+             removed += first_rows;
+         }
+@@ -12050,6 +12135,45 @@ test "PageList max lines does not round larger limits" {
+     );
+ }
+ 
++test "PageList line pruning keeps the pruned page for the next one" {
++    const testing = std.testing;
++    const cols: size.CellCountInt = 80;
++    const page_rows: usize = initialCapacity(cols).rows;
++
++    var s = try init(testing.allocator, .{
++        .cols = cols,
++        .rows = 1,
++        .max_lines = page_rows,
++    });
++    defer s.deinit();
++
++    // Grow until the line limit prunes a page: it becomes the spare.
++    for (0..8 * page_rows) |_| {
++        if (s.spare_node != null) break;
++        _ = try s.grow();
++    } else return error.TestUnexpectedResult;
++    const spare = s.spare_node.?;
++    try testing.expectEqual(s.totalPages() * PagePool.item_size, s.page_size);
++    try testing.expect(s.total_rows - s.rows <= s.limits.max(.lines));
++
++    // The next page is the spare, blank.
++    const free = s.pool.pages.freeCount();
++    const node = for (0..8 * page_rows) |_| {
++        if (try s.grow()) |n| break n;
++    } else return error.TestUnexpectedResult;
++    try testing.expectEqual(spare, node);
++    try testing.expectEqual(free, s.pool.pages.freeCount());
++    try testing.expectEqual(s.pages.last.?, node);
++    try testing.expectEqual(s.totalPages() * PagePool.item_size, s.page_size);
++    const page = node.page();
++    try testing.expectEqual(@as(usize, 1), node.rows());
++    for (page.getCells(page.getRow(0))) |cell| try testing.expect(cell.isEmpty());
++
++    // Writing into the reused page works like any other.
++    s.assertIntegrity();
++    try page.verifyIntegrity(testing.allocator);
++}
++
+ test "PageList max lines and max size enforce the smaller limit" {
+     const testing = std.testing;
+     const cols: size.CellCountInt = 80;
+@@ -16446,6 +16570,55 @@ test "PageList resize (no reflow) more cols" {
+     }
+ }
+ 
++test "PageList resize (no reflow) more cols leaves room to grow" {
++    const testing = std.testing;
++    const alloc = testing.allocator;
++
++    var s = try init(alloc, .{ .cols = 80, .rows = 3 });
++    defer s.deinit();
++    try s.growRows(20);
++    {
++        const page = s.pages.first.?.page();
++        const rac = page.getRowAndCell(79, 0);
++        rac.cell.* = .{
++            .content_tag = .codepoint,
++            .content = .{ .codepoint = .{ .data = 'x' } },
++        };
++    }
++
++    // The first growth past the capacity copies the page, with room for
++    // a quarter more columns.
++    const before = s.pages.first.?;
++    try s.resize(.{ .cols = 81, .reflow = false });
++    const copied = s.pages.first.?;
++    try testing.expect(copied != before);
++    try testing.expectEqual(growColsHeadroom(81), copied.page().capacity.cols);
++    try testing.expectEqual(@as(size.CellCountInt, 81), copied.page().size.cols);
++
++    // Growth within that room keeps the page and its content, with blank
++    // new columns.
++    try s.resize(.{ .cols = growColsHeadroom(81), .reflow = false });
++    try testing.expectEqual(copied, s.pages.first.?);
++    try testing.expectEqual(growColsHeadroom(81), s.cols);
++    try testing.expectEqual(@as(usize, 23), s.totalRows());
++    var it = s.rowIterator(.right_down, .{ .screen = .{} }, null);
++    var y: usize = 0;
++    while (it.next()) |offset| : (y += 1) {
++        const cells = offset.node.page().getCells(offset.rowAndCell().row);
++        try testing.expectEqual(@as(usize, s.cols), cells.len);
++        for (cells, 0..) |cell, x| {
++            if (y == 0 and x == 79) {
++                try testing.expectEqual(@as(u21, 'x'), cell.content.codepoint.data);
++            } else try testing.expect(cell.isEmpty());
++        }
++    }
++
++    // Past the room it copies again.
++    try s.resize(.{ .cols = growColsHeadroom(81) + 1, .reflow = false });
++    try testing.expect(s.pages.first.? != copied);
++    try testing.expectEqual(@as(usize, 23), s.totalRows());
++}
++
+ test "PageList resize (no reflow) more cols with spacer head" {
+     const testing = std.testing;
+     const alloc = testing.allocator;
