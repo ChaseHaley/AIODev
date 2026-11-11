@@ -331,6 +331,7 @@ window_free :: proc(w: ^Window) {
 	confirmation_clear(w)
 	pane_motion_destroy(w)
 	workspace_overview_destroy(w)
+	hidden_panes_destroy(w)
 	render.draw_list_destroy(&w.list)
 	free(w)
 }
