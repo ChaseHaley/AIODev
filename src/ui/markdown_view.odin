@@ -337,8 +337,12 @@ flow :: proc(
 		if block.kind == .Code {fallback = .Code}
 		height, baseline := v.faces[fallback].line_height, v.faces[fallback].baseline
 		if from < visible {height, baseline = 0, 0}
+		// Items come in runs of one span, and a span has one face.
+		measured := i32(-1)
 		for item in v.items[from:visible] {
-			m := v.faces[face_of(block, doc.spans[item.span].style)]
+			if item.span == measured {continue}
+			measured = item.span
+			m := &v.faces[face_of(block, doc.spans[measured].style)]
 			height, baseline = max(height, m.line_height), max(baseline, m.baseline)
 		}
 		line := Line {
