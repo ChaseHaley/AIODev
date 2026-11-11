@@ -1,5 +1,7 @@
 package term
 
+import "core:bytes"
+
 @(private)
 WIN32_INPUT_MODE :: 9001
 
@@ -21,12 +23,15 @@ Mode_Scanner :: struct {
 
 // Returns the last win32-input-mode state set within data, and whether data set it at all.
 scan_win32_input_mode :: proc(s: ^Mode_Scanner, data: []u8) -> (enabled, changed: bool) {
-	for b in data {
+	for i := 0; i < len(data); i += 1 {
+		b := data[i]
 		switch s.state {
 		case .Ground:
-			if b == 0x1b {
-				s.state = .Escape
-			}
+			// Output is mostly text: jump to the next escape instead of stepping through it.
+			next := bytes.index_byte(data[i:], 0x1b)
+			if next < 0 {return}
+			i += next
+			s.state = .Escape
 		case .Escape:
 			s.state = b == '[' ? .Csi : .Ground
 		case .Csi:
