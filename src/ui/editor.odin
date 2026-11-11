@@ -27,7 +27,8 @@ Row_Kind :: enum {
 	Profile,
 	Process_Group,
 	Profile_Add,
-	Profile_Icon,
+	// A PNG path with a Clear button and a preview: a profile's or a link program's Icon.
+	Icon_File,
 	// A link program's table line; its fields are ordinary rows that name it in `opener`.
 	Opener,
 	// The Motion section: a context's header, and the field that opens the curve popover.
@@ -91,6 +92,9 @@ Editor_Row :: struct {
 	opener:                                        string,
 	// The link program field an inline row edits.
 	opener_field:                                  Maybe(settings.Opener_Field),
+	// The image a link program's line and Icon row show, which its owner sets before each draw; empty
+	// draws the row's own glyph or badge.
+	icon_atlas:                                    render.Rect,
 	flags:                                         bit_set[Editor_Row_Flag],
 	process: int,
 	process_field: Process_Field,
@@ -1857,7 +1861,7 @@ text_kind :: proc(kind: Row_Kind) -> bool {
 		kind == .Number ||
 		kind == .Color ||
 		kind == .Optional_Color ||
-		kind == .Profile_Icon \
+		kind == .Icon_File \
 	)
 }
 
@@ -1921,7 +1925,7 @@ activate :: proc(p: ^Editor, row: ^Editor_Row) -> Editor_Outcome {
 	case .Color, .Optional_Color:
 		editor_mode_set(p, Editor_Color_Popup{})
 		field_select_all(&p.value)
-	case .Text, .Integer, .Number, .Profile_Icon:
+	case .Text, .Integer, .Number, .Icon_File:
 		editor_mode_set(p, Editor_Editing{})
 		field_select_all(&p.value)
 	case .Curve:
@@ -2369,7 +2373,7 @@ editor_row_parts :: proc(p: ^Editor, l: Editor_Layout, index: int) -> Row_Parts 
 		parts.text_right = parts.slider.x - SPACE_3 * s
 	case .Text:
 		parts.field = field(right, cy, min(360, r.width / s * 0.42), s)
-	case .Profile_Icon:
+	case .Icon_File:
 		edge := r.x + r.width - SPACE_3 * s
 		parts.clear = {edge - 56 * s, cy - HEIGHT_COMPACT / 2 * s, 56 * s, HEIGHT_COMPACT * s}
 		parts.field = field(parts.clear.x - SPACE_2 * s, cy, min(300, r.width / s * 0.38), s)
@@ -2710,7 +2714,7 @@ editor_press :: proc(
 	case render.rect_contains(parts.positions, x, y):
 		p.capture.physical = !p.capture.physical
 		return .Changed
-	case render.rect_contains(parts.swatch, x, y) && row.kind != .Profile_Icon:
+	case render.rect_contains(parts.swatch, x, y) && row.kind != .Icon_File:
 		editor_mode_set(p, Editor_Color_Popup{})
 		return .Changed
 	case render.rect_contains(parts.slider, x, y) ||
@@ -3053,7 +3057,7 @@ editor_pointer :: proc(p: ^Editor, l: Editor_Layout, x, y: f32) -> platform.Curs
 	     render.rect_contains(parts.clear, x, y),
 	     render.rect_contains(parts.toggle, x, y),
 	     render.rect_contains(parts.positions, x, y),
-	     render.rect_contains(parts.swatch, x, y) && row.kind != .Profile_Icon,
+	     render.rect_contains(parts.swatch, x, y) && row.kind != .Icon_File,
 	     parts.slider.width > 0 && render.rect_contains(slider, x, y):
 		return .Hand
 	case render.rect_contains(parts.field, x, y):
@@ -3432,8 +3436,16 @@ control_draw :: proc(
 			empty_label = row.shortcut_mode == .Alternatives ? "Add shortcut" : "None",
 		}, page, scale)
 	case .Text:
-	case .Profile_Icon:
-		profile_badge_draw(list, text, row.badge, parts.swatch, theme, scale, false)
+	case .Icon_File:
+		profile_badge_draw(list, text, row.icon_atlas.width > 0 ? "" : row.badge, parts.swatch, theme, scale, false)
+		if row.icon_atlas.width > 0 {
+			side := ICON_BUTTON * scale
+			slot := parts.swatch
+			image := render.Rect{slot.x + (slot.width - side) / 2, slot.y + (slot.height - side) / 2, side, side}
+			if result := shell_badge_draw(list, text, theme, image, "", scale, row.icon_atlas); result != .Ok {
+				return result
+			}
+		}
 	case .Process_Group, .Motion_Context, .Profile, .Profile_Add, .Opener:
 		return .Ok
 	}
@@ -3889,7 +3901,7 @@ editor_draw :: proc(
 		   result != .Ok {
 			return result
 		}
-		if row.kind == .Profile_Icon {
+		if row.kind == .Icon_File {
 			box_draw(list, parts.clear, theme, false, s)
 			label := "Clear"
 			if result := draw_text(

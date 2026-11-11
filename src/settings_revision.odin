@@ -191,6 +191,7 @@ settings_apply_running :: proc(app: ^App) {
 	}
 	status_apply_settings(app)
 	shell_icons_load(app)
+	link_programs_load(app)
 	program_icons_reload(app)
 	control_cli_sync(app)
 }

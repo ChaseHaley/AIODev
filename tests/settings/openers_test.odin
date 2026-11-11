@@ -11,6 +11,7 @@ openers_parse_fields_and_display_order :: proc(t: ^testing.T) {
 opener.zed.command = "zed %1"
 opener.zed.offers = files
 opener.zed.placement = window
+opener.zed.icon = "~/icons/zed.png"
 opener.alpha.name = "Alpha"
 opener.alpha.command = alpha.exe
 opener.mid.name = Mid
@@ -29,6 +30,8 @@ opener.order = mid
 	if !testing.expect(t, zed != nil && alpha != nil) {return}
 	testing.expect_value(t, zed.name, "Zed")
 	testing.expect_value(t, zed.command, "zed %1")
+	testing.expect_value(t, zed.icon, "~/icons/zed.png")
+	testing.expect_value(t, alpha.icon, "")
 	testing.expect_value(t, zed.offers, settings.Opener_Offers{.Files})
 	testing.expect_value(t, zed.placement, settings.Opener_Placement.Own_Window)
 	testing.expect_value(t, alpha.name, "Alpha")
@@ -145,6 +148,26 @@ editing_an_opener_field_writes_its_key :: proc(t: ^testing.T) {
 	if testing.expect(t, nvim != nil) {
 		testing.expect_value(t, nvim.command, "nvim -R %1")
 		testing.expect_value(t, nvim.offers, settings.Opener_Offers{.Folders})
+	}
+	// An icon takes any path and may be cleared, which leaves the program to a found icon.
+	icon, icon_message, icon_error := settings.edit_text(
+		source, settings.opener_field_key("nvim", .Icon), `C:\icons\nvim.png`,
+	)
+	defer delete(icon)
+	defer delete(icon_message)
+	testing.expect_value(t, icon_error, nil)
+	testing.expect(t, strings.has_suffix(icon, "opener.nvim.icon = \"C:\\icons\\nvim.png\"\n"), icon)
+	cleared, cleared_message, cleared_error := settings.edit_text(
+		icon, settings.opener_field_key("nvim", .Icon), "",
+	)
+	defer delete(cleared)
+	defer delete(cleared_message)
+	testing.expect_value(t, cleared_error, nil)
+	testing.expect_value(t, cleared_message, "")
+	after := mutation_parse(t, cleared)
+	defer settings.destroy(&after)
+	if cleared_nvim := settings.opener_find(&after.openers, "nvim"); testing.expect(t, cleared_nvim != nil) {
+		testing.expect_value(t, cleared_nvim.icon, "")
 	}
 	for refused in ([?]struct {
 		field:          settings.Opener_Field,

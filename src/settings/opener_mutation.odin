@@ -49,13 +49,14 @@ opener_mutate :: proc(
 	defer delete(revision, allocator)
 	if change.kind == .Add {
 		placements := OPENER_PLACEMENT_NAME
-		values := [Opener_Field]string {
+		values := #partial [Opener_Field]string {
 			.Name      = OPENER_NEW_NAME,
 			.Command   = OPENER_NEW_COMMAND,
 			.Offers    = opener_link_names[.Files],
 			.Placement = placements[.Own_Window],
 		}
 		for value, field in values {
+			if value == "" {continue}
 			if issue, error = mutation_edit(&revision, opener_field_key(target, field), value, allocator);
 			   error != .None {return "", "", issue, error}
 		}

@@ -17,7 +17,7 @@ Menu_Item :: struct {
 	icon_atlas:            render.Rect,
 	checked, enabled:      bool,
 	separator:             bool,
-	// A line icon in place of a badge, inked like the label.
+	// A line icon in place of a badge, inked like the label; a badge or image replaces it.
 	glyph:                 Icon,
 	// Secondary text after the label, fading out where it runs out of room.
 	detail:                string,
@@ -346,7 +346,7 @@ menu_draw :: proc(
 		}
 		ink := item.enabled ? theme.text : theme.muted
 		if item.danger {ink = theme.error}
-		if item.glyph != .None {
+		if item.glyph != .None && item.icon == "" && item.icon_atlas.width <= 0 {
 			glyph := render.Rect{label_x, row.y, ICON_BUTTON * scale, row.height}
 			icon_draw(list, item.glyph, glyph, ink, ICON_BUTTON, scale)
 			label_x += (ICON_BUTTON + SPACE_2) * scale

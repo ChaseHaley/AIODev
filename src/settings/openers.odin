@@ -35,7 +35,8 @@ Opener_Placement :: enum u8 {
 // programs with a name and a command line survive parsing. `set` records the fields the file
 // supplied; `line` is the first line that named the program, where diagnostics about it point.
 Opener :: struct {
-	id, name, command: string,
+	// `icon` is the file's Icon as written; empty when the program uses a found icon.
+	id, name, command, icon: string,
 	offers:            Opener_Offers,
 	placement:         Opener_Placement,
 	set:               bit_set[Opener_Field],
@@ -68,6 +69,7 @@ opener_destroy :: proc(opener: ^Opener, allocator: runtime.Allocator) {
 	delete(opener.id, allocator)
 	delete(opener.name, allocator)
 	delete(opener.command, allocator)
+	delete(opener.icon, allocator)
 }
 
 opener_find :: proc(o: ^Openers, id: string) -> ^Opener {
@@ -122,8 +124,8 @@ parse_opener_key :: proc(
 			diagnostics,
 			line,
 			key,
-			"expected opener.ID.name, opener.ID.command, opener.ID.offers, opener.ID.placement " +
-			"or opener.order",
+			"expected opener.ID.name, opener.ID.command, opener.ID.icon, opener.ID.offers, " +
+			"opener.ID.placement or opener.order",
 			.Unknown_Key,
 		)
 	}
@@ -139,11 +141,15 @@ parse_opener_key :: proc(
 	field, known := opener_field_from_name(field_name)
 	if !known {
 		message, message_error := strings.concatenate(
-			{"unknown link program field \"", field_name, "\"; expected name, command, offers or placement"},
+			{
+				"unknown link program field \"",
+				field_name,
+				"\"; expected name, command, icon, offers or placement",
+			},
 			context.temp_allocator,
 		)
 		if message_error != nil {
-			message = "unknown link program field; expected name, command, offers or placement"
+			message = "unknown link program field; expected name, command, icon, offers or placement"
 		}
 		return diagnostic_append(diagnostics, line, key, message, .Unknown_Key)
 	}
@@ -169,6 +175,8 @@ parse_opener_key :: proc(
 		profile_own(&opener.name, text, o.allocator) or_return
 	case .Command:
 		profile_own(&opener.command, text, o.allocator) or_return
+	case .Icon:
+		profile_own(&opener.icon, text, o.allocator) or_return
 	case .Offers:
 		opener.offers, _ = opener_offers_parse(text)
 	case .Placement:
@@ -219,7 +227,7 @@ opener_edit_text :: proc(key, value: string) -> (serialized, issue: string) {
 	}
 	id, field_name, shaped := opener_key_split(key)
 	if !shaped {
-		return "", "Expected opener.ID.name, opener.ID.command, opener.ID.offers, " +
+		return "", "Expected opener.ID.name, opener.ID.command, opener.ID.icon, opener.ID.offers, " +
 			"opener.ID.placement or opener.order."
 	}
 	if !id_valid(id, OPENER_ID_MAX_LENGTH) {
@@ -227,7 +235,7 @@ opener_edit_text :: proc(key, value: string) -> (serialized, issue: string) {
 	}
 	field, known := opener_field_from_name(field_name)
 	if !known {
-		return "", "Unknown link program field. Expected name, command, offers or placement."
+		return "", "Unknown link program field. Expected name, command, icon, offers or placement."
 	}
 	text, field_issue := opener_field_check(field, value, .Interactive_Field)
 	if field_issue != .None {return "", opener_problem_text(field_issue, .Interactive_Field, value)}

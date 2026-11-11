@@ -223,7 +223,7 @@ settings_page_profile_rows :: proc(p: ^ui.Editor, profiles: []ui.Profile_Row) ->
 				description = "PNG path; empty uses the shell's own icon, else its text badge.",
 				value = row.icon,
 				badge = row.badge,
-				kind = .Profile_Icon,
+				kind = .Icon_File,
 			},
 			.Hidden = {
 				title = "Show in menus",
@@ -289,6 +289,12 @@ settings_page_opener_rows :: proc(p: ^ui.Editor, openers: ^settings.Openers) -> 
 				value = opener.command,
 				default_value = opener.command,
 				kind = .Text,
+			},
+			.Icon = {
+				title = "Icon",
+				description = "PNG path; empty finds one, such as Neovim's.",
+				value = opener.icon,
+				kind = .Icon_File,
 			},
 			.Offers = {
 				title = "Offered for",
@@ -677,7 +683,7 @@ editor_opener_field :: proc(
 	id := strings.clone(opener, context.temp_allocator)
 	key := settings.opener_field_key(id, field)
 	// Text fields keep the keyboard for the next edit; a choice returns to its row.
-	focus := field == .Name || field == .Command ? Reveal_Focus.Control : Reveal_Focus.None
+	focus := field == .Offers || field == .Placement ? Reveal_Focus.None : Reveal_Focus.Control
 	result := settings_change(app, Opener_Field_Value{id, field, value}, editor_field_base(&w.editor, kept))
 	if result.status == .Refused {
 		if kept {
@@ -1065,6 +1071,13 @@ when AIO_CONTROL {
 			if i > 0 {strings.write_byte(&opener_ids, ',')}
 			strings.write_string(&opener_ids, app.settings.openers.items[index].id)
 		}
+		// Link programs whose table line drew their icon in the last frame.
+		opener_icons := strings.builder_make(context.temp_allocator)
+		for row in p.rows {
+			if row.kind != .Opener || row.icon_atlas.width <= 0 {continue}
+			if strings.builder_len(opener_icons) > 0 {strings.write_byte(&opener_icons, ',')}
+			strings.write_string(&opener_icons, row.opener)
+		}
 		state_value(r, "settings.open", ui.editor_loaded(p))
 		state_text(r, "settings.revision", settings_page_revision_word(p))
 		state_value(r, "settings.theme_delete_armed", p.delete_armed)
@@ -1116,6 +1129,7 @@ when AIO_CONTROL {
 		state_text(r, "settings.profile.drag_id", ui.editor_order_profile(p))
 		state_text(r, "settings.opener.expanded", p.opener_expanded)
 		state_text(r, "settings.opener.ids", strings.to_string(opener_ids))
+		state_text(r, "settings.opener.icons", strings.to_string(opener_icons))
 		state_value(r, "settings.opener.app_count", len(app.settings.openers.items))
 		state_text(
 			r,

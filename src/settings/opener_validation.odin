@@ -4,10 +4,12 @@ import "core:fmt"
 import "core:slice"
 import "core:strings"
 
-// The fields of one link program, each an opener.ID.<name> key.
+// The fields of one link program, each an opener.ID.<name> key, in the order Settings shows them.
 Opener_Field :: enum {
 	Name,
 	Command,
+	// A PNG path, home-expanded and relative to the settings folder; empty uses a found icon.
+	Icon,
 	Offers,
 	Placement,
 }
@@ -16,6 +18,7 @@ Opener_Field :: enum {
 opener_field_names := [Opener_Field]string {
 	.Name      = "name",
 	.Command   = "command",
+	.Icon      = "icon",
 	.Offers    = "offers",
 	.Placement = "placement",
 }
@@ -105,9 +108,9 @@ Opener_Problem :: enum {
 	Invalid_Placement,
 }
 
-// Checks one field value. A File name or command may carry one pair of double quotes, which `text`
-// drops; otherwise `text` is `value`. Offers lists one or both link kinds; placement must be exactly
-// one of its names.
+// Checks one field value. A File name, command or icon may carry one pair of double quotes, which
+// `text` drops; otherwise `text` is `value`. Offers lists one or both link kinds; placement must be
+// exactly one of its names. Only the icon may be empty.
 opener_field_check :: proc(
 	field: Opener_Field,
 	value: string,
@@ -123,7 +126,7 @@ opener_field_check :: proc(
 	case .Placement:
 		if _, known := opener_placement_from_name(value); !known {return "", .Invalid_Placement}
 		return value, .None
-	case .Name, .Command:
+	case .Name, .Command, .Icon:
 	}
 	text = value
 	if ctx == .File {
@@ -133,6 +136,7 @@ opener_field_check :: proc(
 	} else if !text_valid(value) {
 		return "", .Invalid_Text
 	}
+	if field == .Icon {return text, .None}
 	if strings.trim_space(text) == "" {return "", field == .Name ? .Empty_Name : .Empty_Command}
 	return text, .None
 }

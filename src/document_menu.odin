@@ -1665,6 +1665,12 @@ document_menu_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 	menu := &w.document_menu
 	s := w.scale
 	width, height := f32(w.width), f32(w.height)
+	for &item, row in menu.menu.items {
+		item.icon_atlas = {}
+		entry, listed := document_menu_entry(menu, row)
+		if !listed || entry.action != .Link {continue}
+		if result := link_choice_icon(app, w, &item, entry.link); result != .Ok {return result}
+	}
 	if result := ui.menu_draw(&menu.menu, &w.list, &w.ui_text, app.theme, width, height, s, w.pointer);
 	   result != .Ok {return result}
 	_, entering := document_menu_url_entry(w)
@@ -1685,6 +1691,13 @@ document_menu_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 	}
 	_, actions := document_menu_actions(w)
 	if actions {
+		for &item in menu.actions.items {
+			item.icon_atlas = {}
+			if item.separator {continue}
+			if result := link_choice_icon(app, w, &item, transmute(Link_Choice)item.payload); result != .Ok {
+				return result
+			}
+		}
 		if result := ui.menu_draw(&menu.actions, &w.list, &w.ui_text, app.theme, width, height, s, w.pointer);
 		   result != .Ok {return result}
 	}
@@ -1712,6 +1725,23 @@ document_menu_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 	return .Ok
 }
 
+// Gives a program's row the program's icon once it is ready; until then, and for other rows, the row
+// keeps its glyph.
+@(private = "file")
+link_choice_icon :: proc(
+	app: ^App,
+	w: ^Window,
+	item: ^ui.Menu_Item,
+	choice: Link_Choice,
+) -> render.Build_Status {
+	if choice.action != .Program {return .Ok}
+	program, found := link_program(app, int(choice.program))
+	if !found {return .Ok}
+	atlas, result := link_program_icon(app, program, 16 * w.scale)
+	item.icon_atlas = atlas
+	return result
+}
+
 when AIO_CONTROL {
 	// The Links menu's keys; documents.mode is list, pin or link, and empty while it is closed.
 	document_menu_state_report :: proc(r: ^State_Report, w: ^Window) {
@@ -1734,6 +1764,16 @@ when AIO_CONTROL {
 		state_value(r, "documents.actions", actions)
 		state_value(r, "documents.submenu", document_submenu_shown(w))
 		state_text(r, "documents.query", ui.field_string(&w.document_menu.search))
+		// The labels of program rows that drew their program's icon in the last frame, joined by ';'.
+		icons := strings.builder_make(context.temp_allocator)
+		for menu in ([?]^ui.Menu{&w.document_menu.menu, &w.document_menu.actions}) {
+			for item in menu.items {
+				if item.icon_atlas.width <= 0 {continue}
+				if strings.builder_len(icons) > 0 {strings.write_byte(&icons, ';')}
+				strings.write_string(&icons, item.label)
+			}
+		}
+		state_text(r, "documents.program_icons", strings.to_string(icons))
 	}
 }
 

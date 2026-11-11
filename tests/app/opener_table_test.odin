@@ -127,4 +127,18 @@ opener_fields_save_when_left_and_offers_files_and_folders_separately :: proc(t: 
 	testing.expect_value(t, e.error_text, "Choose files, folders or both.")
 	testing.expect_value(t, e.choice_set, u32(0b11))
 	testing.expect(t, profile_file_has(f.path, "opener.program-1.offers = files, folders"))
+
+	// The Icon row takes a PNG path and, cleared, leaves the program to a found icon.
+	if !testing.expect(t, ui.editor_select_key(e, "opener.program-1.icon")) {return}
+	testing.expect_value(t, ui.editor_row(e).kind, ui.Row_Kind.Icon_File)
+	ui.editor_focus_row(e)
+	ui.field_set(&e.value, `icons\viewer.png`)
+	app.editor_outcome(&f.state, w, .Save)
+	testing.expect(t, profile_file_has(f.path, `opener.program-1.icon = "icons\viewer.png"`))
+	opener = settings.opener_find(&f.state.settings.openers, "program-1")
+	if testing.expect(t, opener != nil) {testing.expect_value(t, opener.icon, `icons\viewer.png`)}
+	ui.field_set(&e.value, "")
+	app.editor_outcome(&f.state, w, .Save)
+	opener = settings.opener_find(&f.state.settings.openers, "program-1")
+	if testing.expect(t, opener != nil) {testing.expect_value(t, opener.icon, "")}
 }

@@ -2,6 +2,7 @@ package main
 
 import "aio:layout"
 import "aio:render"
+import "aio:settings"
 import "aio:ui"
 import "aio:input"
 
@@ -85,6 +86,7 @@ settings_pane_under_pointer :: proc(
 // The settings page inside its pane; pane_draw draws the card, header and outline around it.
 @(require_results)
 settings_pane_draw :: proc(app: ^App, w: ^Window, pane: layout.Pane_Rect) -> render.Build_Status {
+	if result := settings_page_icons(app, &w.editor, w.scale); result != .Ok {return result}
 	return ui.editor_draw(
 		&w.editor,
 		settings_layout_for(w, pane),
@@ -94,6 +96,23 @@ settings_pane_draw :: proc(app: ^App, w: ^Window, pane: layout.Pane_Rect) -> ren
 		pane_shows_focus(w, pane) && !palette_active(app, w),
 		w.pointer,
 	)
+}
+
+// Gives each link program's line and Icon row the program's icon once it is ready.
+@(private = "file", require_results)
+settings_page_icons :: proc(app: ^App, p: ^ui.Editor, scale: f32) -> render.Build_Status {
+	for &row in p.rows {
+		row.icon_atlas = {}
+		if row.opener == "" {continue}
+		field, is_field := row.opener_field.?
+		if row.kind != .Opener && !(is_field && field == .Icon) {continue}
+		opener := settings.opener_find(&app.settings.openers, row.opener)
+		if opener == nil {continue}
+		atlas, result := link_program_icon(app, opener, ui.ICON_BUTTON * scale)
+		if result != .Ok {return result}
+		row.icon_atlas = atlas
+	}
+	return .Ok
 }
 
 // Keeps the window's settings page matching its workspace: load one when a settings pane arrives

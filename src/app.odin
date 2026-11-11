@@ -68,6 +68,8 @@ App :: struct {
 	render_driver:         render.Driver,
 	cache:                 glyphs.Cache,
 	shell_icons:           [dynamic]Shell_Icon,
+	// What each link program's command line runs, found when settings apply (WORK-395).
+	link_programs:         [dynamic]Link_Program_Target,
 	processes:             Process_Worker,
 	program_icons:         Program_Icon_Cache,
 	program_art:           program_art.Catalogue,
@@ -174,6 +176,7 @@ app_init :: proc(app: ^App) -> bool {
 		return false
 	}
 	shell_icons_load(app)
+	link_programs_load(app)
 	apply_fonts(app)
 	apply_theme(app)
 	tray_init(app)
@@ -215,6 +218,7 @@ app_destroy :: proc(app: ^App) {
 	program_icon_cache_destroy(&app.program_icons)
 	program_art.catalogue_destroy(&app.program_art)
 	shell_icons_destroy(&app.shell_icons)
+	link_programs_destroy(&app.link_programs)
 	glyphs.destroy(&app.cache)
 	if app.device != nil {
 		render.device_destroy(app.device)

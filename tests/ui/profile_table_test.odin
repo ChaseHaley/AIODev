@@ -520,7 +520,7 @@ editor_profile_row_click_expands_and_the_icon_clear_stays_inside :: proc(t: ^tes
 				value = "icon.png",
 				profile = "beta",
 				badge = ">_",
-				kind = .Profile_Icon,
+				kind = .Icon_File,
 			},
 			"Profiles",
 		),

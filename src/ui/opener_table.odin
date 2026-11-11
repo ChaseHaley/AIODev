@@ -108,8 +108,8 @@ editor_opener_press :: proc(
 	return .Changed
 }
 
-// A link program's table line: the grip, its name over its command line, where it opens, the
-// chevron of its fields and remove.
+// A link program's table line: the grip, its icon, its name over its command line, where it opens, the
+// chevron of its fields and remove. Without a ready icon the slot shows the terminal glyph link menus use.
 @(private)
 editor_opener_draw :: proc(
 	p: ^Editor,
@@ -140,9 +140,16 @@ editor_opener_draw :: proc(
 		theme.muted,
 		max(1, chevron.x - placement),
 	); result != .Ok {return result}
-	width := max(1, placement - cells.expand.x - 12 * s)
+	icon := render.Rect{cells.expand.x, r.y + (r.height - ICON_BUTTON * s) / 2, ICON_BUTTON * s, ICON_BUTTON * s}
+	if row.icon_atlas.width > 0 {
+		if result := shell_badge_draw(list, text, theme, icon, "", s, row.icon_atlas); result != .Ok {return result}
+	} else {
+		icon_draw(list, .Terminal, {icon.x, r.y, icon.width, r.height}, theme.muted, ICON_BUTTON, s)
+	}
+	x := icon.x + icon.width + SPACE_2 * s
+	width := max(1, placement - x - 12 * s)
 	name_baseline, command_baseline := stacked_baselines(r, text, &small, s)
-	if result := draw_text(text, list, row.title, cells.expand.x, name_baseline, theme.text, width);
+	if result := draw_text(text, list, row.title, x, name_baseline, theme.text, width);
 	   result != .Ok {return result}
-	return draw_fading_text(&small, list, row.description, cells.expand.x, command_baseline, theme.muted, width)
+	return draw_fading_text(&small, list, row.description, x, command_baseline, theme.muted, width)
 }
