@@ -77,15 +77,15 @@ flatten_node :: proc(l: ^Layout, id: Node_Id, out: ^[dynamic]Flat_Node, focus: ^
 // Rebuilds `l` from flat nodes; node i of the tree is flat node i, so the caller can find each pane again.
 // Every node must be reached exactly once from the root at 0, so cycles, shared children and orphans fail,
 // as do unknown content kinds and axes and NaN ratios. Ratios and floating bounds are brought into range,
-// focus order follows the flat order, and focus starts on `focus` or else the first pane. A linked or
-// floating group holds no other group, a slot holds only `linkable` content, and a tree left with no shown
-// pane takes its detached panes back. A failure frees the nodes it allocated.
+// focus order follows the flat order, and focus starts on `focus` or else the first pane; the tree comes
+// back in the split view. A linked or floating group holds no other group, a slot holds only `linkable`
+// content, and a tree left with no shown pane takes its detached panes back. A failure frees the nodes it
+// allocated.
 @(require_results)
 unflatten :: proc(
 	l: ^Layout,
 	flat: []Flat_Node,
 	focus: int,
-	zoomed: bool,
 	linkable: bit_set[Content_Kind],
 	allocator := context.allocator,
 ) -> bool {
@@ -107,7 +107,6 @@ unflatten :: proc(
 		for node, i in flat {if !node.split {focused = i; break}}
 	}
 	l.focus = Node_Id(focused)
-	l.zoomed = zoomed
 	float_stack_restore(l)
 	links_repair(l)
 	return true

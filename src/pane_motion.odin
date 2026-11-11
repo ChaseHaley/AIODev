@@ -32,6 +32,27 @@ Pane_Motion :: struct {
 	drawn:  [dynamic]Pane_Drawn,
 	// Closed panes collapsing away, each drawn from a copy of its last frame.
 	ghosts: [dynamic]Pane_Ghost,
+	// What the last placement showed, which the next compares with to see whether a single-pane view shows
+	// another pane; see pane_slide_toward.
+	stage:  Pane_Stage,
+	// The panes draw above the chrome while they move: a pane growing over the window or shrinking off it,
+	// or panes sliding across it, with the chrome staying where it is beneath them.
+	over_chrome: bool,
+	// The area panes slide within while a single-pane view shows another pane; what they draw is kept
+	// inside it. Nil for any other motion.
+	slide:  Maybe(render.Rect),
+	// How far the window's client area moved on the screen, as it went full screen or back, since the last
+	// placement, which starts its motion from where everything was on the screen.
+	shift:  [2]f32,
+}
+
+// What a placement showed: its workspace and tab, by ids that outlive a closed tab, the index the tab had
+// then, and in a single-pane view, the tiled pane it showed, by its motion key.
+Pane_Stage :: struct {
+	workspace, tab: u32,
+	tab_index:      int,
+	solo:           bool,
+	pane:           u64,
 }
 
 @(private = "file")
@@ -55,11 +76,12 @@ Pane_Ghost :: struct {
 }
 
 // Motion keys: a pane's content (below these bits), a float's frame by its Float.id, and a chrome region:
-// the docked tab rail and the Activity panel.
+// the docked tab rail, the Activity panel and the title bar.
 PANE_MOTION_FRAME :: u64(1) << 62
 PANE_MOTION_CHROME :: u64(2) << 62
 PANE_MOTION_RAIL :: PANE_MOTION_CHROME | 1
 PANE_MOTION_PANEL :: PANE_MOTION_CHROME | 2
+PANE_MOTION_TITLE :: PANE_MOTION_CHROME | 3
 
 // A chrome region drawing from the motion: its background at `shown`, and its content laid out at `rect`,
 // the layout's rectangle, then moved with `shown`'s corner and clipped to it, as a pane's content is.
@@ -101,6 +123,28 @@ pane_motion_destroy :: proc(w: ^Window) {
 
 pane_motion_animating :: proc(w: ^Window) -> bool {
 	return ui.layout_motion_active(&w.pane_motion.moving)
+}
+
+// Whether the panes draw above the chrome this frame; see Pane_Motion.over_chrome.
+pane_motion_over_chrome :: proc(w: ^Window) -> bool {
+	return w.pane_motion.over_chrome && pane_motion_animating(w)
+}
+
+// Keeps what the panes drew since `mark` inside the area they slide within, while they slide.
+pane_motion_slide_clip :: proc(w: ^Window, mark: render.Draw_Mark) {
+	stage, sliding := w.pane_motion.slide.?
+	if sliding && pane_motion_animating(w) {render.draw_translate(&w.list, mark, {}, stage)}
+}
+
+// The window's client area moved on the screen by `-by`; see Pane_Motion.shift.
+pane_motion_shift :: proc(w: ^Window, by: [2]f32) {
+	w.pane_motion.shift += by
+}
+
+// A change the window cannot show now, as while it is minimized, neither moves nor slides when it is
+// shown later.
+pane_motion_lapse :: proc(w: ^Window) {
+	w.pane_motion.armed, w.pane_motion.stage, w.pane_motion.shift = nil, {}, {}
 }
 
 pane_motion_animate :: proc(app: ^App, w: ^Window, frame: ui.Frame_Time) -> bool {
@@ -177,15 +221,26 @@ pane_motion_capsules :: proc(w: ^Window) -> []ui.Layout_Hint {
 	return capsules[:]
 }
 
-// After a relayout placed w.panes: an armed change of the same tab starts the motion from `shown`, any
-// other change of that tab carries a running motion to the new rectangles, and another tab stops it.
+// After a relayout placed w.panes: a single-pane view showing another pane, tab or workspace slides to it,
+// an armed change of the same tab starts the motion from `shown`, any other change of that tab carries a
+// running motion to the new rectangles, and another tab stops it.
 pane_motion_placed :: proc(app: ^App, w: ^Window, shown: Pane_Motion_Shown) {
 	m := &w.pane_motion
 	tree := window_tree(w)
 	armed := m.armed != nil && m.armed == tree && m.tree == tree
 	raise := m.raise_next
 	m.armed, m.raise_next = nil, nil
+	before := m.stage
+	m.stage = pane_stage(w)
+	// The temporary places are this placement's own, so they move with the screen in place.
+	places := shown.places
+	for &place in places {place.rect.x, place.rect.y = place.rect.x + m.shift.x, place.rect.y + m.shift.y}
+	m.shift = {}
 	defer m.tree = tree
+	if toward, slides := pane_slide_toward(app, w, before, m.stage).?; slides && !armed {
+		pane_slide_begin(app, w, places, toward)
+		return
+	}
 	if m.tree != tree {
 		ui.layout_motion_stop(&m.moving)
 		pane_ghosts_clear(m)
@@ -198,8 +253,12 @@ pane_motion_placed :: proc(app: ^App, w: ^Window, shown: Pane_Motion_Shown) {
 		return
 	}
 	pane_ghosts_clear(m)
-	m.raised = raise
+	m.raised, m.slide = raise, nil
+	// A view grows the focused pane over everything else, or shrinks it back off it, so nothing else moves:
+	// what it covers stays drawn where it was until covered, and what it uncovers is already in place.
+	m.over_chrome = m.cause == .View
 	hints := pane_motion_hints(app, w, shown, targets)
+	if m.over_chrome {hints = pane_hints_in_place(places, targets)}
 	motion := settings.motion_resolve(&app.settings, m.cause)
 	duration := settings.motion_duration(&app.settings, motion)
 	// Only a split brings a pane in, and only a close takes one away, in the ways their settings choose.
@@ -217,11 +276,134 @@ pane_motion_placed :: proc(app: ^App, w: ^Window, shown: Pane_Motion_Shown) {
 		enter,
 		leave,
 	)
+	pane_ghosts_capture_leaving(app, w, shown.places)
+}
+
+// Copies the last frame of everything leaving the motion that just began, while it goes.
+@(private = "file")
+pane_ghosts_capture_leaving :: proc(app: ^App, w: ^Window, places: []ui.Layout_Place) {
 	if !pane_motion_animating(w) {return}
-	for place in shown.places {
-		successor, leaving := ui.layout_motion_leaving(&m.moving, place.key)
+	for place in places {
+		successor, leaving := ui.layout_motion_leaving(&w.pane_motion.moving, place.key)
 		if leaving {pane_ghost_capture(app, w, place.key, successor)}
 	}
+}
+
+// Holds whatever comes or goes where it is: leaving, at the rectangle it was drawn at, and entering, at the
+// one the layout gives it.
+@(private = "file")
+pane_hints_in_place :: proc(places, targets: []ui.Layout_Place) -> []ui.Layout_Hint {
+	hints := make([dynamic]ui.Layout_Hint, 0, len(places) + len(targets), context.temp_allocator)
+	for place in places {
+		if !pane_place_find(targets, place.key) {append(&hints, ui.Layout_Hint{place.key, place.rect})}
+	}
+	for target in targets {
+		if !pane_place_find(places, target.key) {append(&hints, ui.Layout_Hint{target.key, target.rect})}
+	}
+	return hints[:]
+}
+
+// What the window shows now; see Pane_Stage.
+@(private = "file")
+pane_stage :: proc(w: ^Window) -> Pane_Stage {
+	tab := selected_tab(w.workspace)
+	if tab == nil {return {}}
+	stage := Pane_Stage{workspace = w.workspace.id, tab = tab.id, tab_index = w.workspace.selected}
+	if tiled := window_tiled_rects(w); pane_view_solo(w) && len(tiled) > 0 {
+		stage.solo, stage.pane = true, pane_motion_key(tiled[0].content)
+	}
+	return stage
+}
+
+// The side what the window now shows comes in from, when it shows another tab of its workspace, or when a
+// single-pane view shows another pane. Another tab comes from further along the tabs: the right of the
+// strip, or below in the rail. Another pane of the same tab comes from the side it lies on in the split
+// view. Another workspace does not slide; the workspace overview plays instead.
+@(private = "file")
+pane_slide_toward :: proc(app: ^App, w: ^Window, before, now: Pane_Stage) -> Maybe([2]f32) {
+	if before.workspace == 0 || before.workspace != now.workspace {return nil}
+	// A tab that is gone counts from where it was, which its successor takes.
+	side :: proc(from, to: int) -> f32 {return to >= from ? 1 : -1}
+	if before.tab != now.tab {
+		from := tab_index_by_id(w.workspace, before.tab)
+		if from < 0 {from = before.tab_index}
+		along := side(from, now.tab_index)
+		return w.tabs_horizontal ? [2]f32{along, 0} : [2]f32{0, along}
+	}
+	if !before.solo || !now.solo || before.pane == now.pane {return nil}
+	split := make([dynamic]layout.Pane_Rect, context.temp_allocator)
+	layout.compute(window_tree(w), window_content_area_in(app, w, .None), window_gap(app, w), &split)
+	old, new: Maybe(layout.Rect)
+	for pane in split {
+		key := pane_motion_key(pane.content)
+		if key == before.pane {old = pane.rect}
+		if key == now.pane {new = pane.rect}
+	}
+	a, had := old.?
+	b, has := new.?
+	if !had || !has {return nil}
+	d := [2]f32{b.x + b.width / 2 - (a.x + a.width / 2), b.y + b.height / 2 - (a.y + a.height / 2)}
+	if d == {} {return nil}
+	if abs(d.x) >= abs(d.y) {return [2]f32{math.sign(d.x), 0}}
+	return [2]f32{0, math.sign(d.y)}
+}
+
+// What the window showed slides out across the stage, the area panes take before and after, while what it
+// shows now slides in from the side `toward` points to, with the Switch Pane motion settings. The
+// chrome stays where it is beneath them, and what comes or goes of it does so in place.
+@(private = "file")
+pane_slide_begin :: proc(app: ^App, w: ^Window, places: []ui.Layout_Place, toward: [2]f32) {
+	m := &w.pane_motion
+	pane_ghosts_clear(m)
+	defer pane_bars_refresh(app, w)
+	targets := pane_motion_targets(app, w)
+	// A slide still running already spans what the window showed; its panes, part way out, do not.
+	before, shown := m.slide.?
+	if !shown || !pane_motion_animating(w) {before, shown = pane_stage_rect(places).?}
+	after, placed := pane_stage_rect(targets).?
+	if !shown || !placed {
+		ui.layout_motion_stop(&m.moving)
+		return
+	}
+	left, top := min(before.x, after.x), min(before.y, after.y)
+	right := max(before.x + before.width, after.x + after.width)
+	bottom := max(before.y + before.height, after.y + after.height)
+	stage := render.Rect{left, top, right - left, bottom - top}
+	m.raised, m.over_chrome, m.slide = nil, true, stage
+	gap := window_gap(app, w)
+	offset := toward * ([2]f32{stage.width, stage.height} + gap)
+	hints := make([dynamic]ui.Layout_Hint, 0, len(places) + len(targets), context.temp_allocator)
+	for place in places {
+		if pane_place_find(targets, place.key) {continue}
+		r := place.rect
+		if place.key & PANE_MOTION_CHROME == 0 {r.x, r.y = r.x - offset.x, r.y - offset.y}
+		append(&hints, ui.Layout_Hint{place.key, r})
+	}
+	for target in targets {
+		if pane_place_find(places, target.key) {continue}
+		r := target.rect
+		if target.key & PANE_MOTION_CHROME == 0 {r.x, r.y = r.x + offset.x, r.y + offset.y}
+		append(&hints, ui.Layout_Hint{target.key, r})
+	}
+	motion := settings.motion_resolve(&app.settings, .Switch)
+	duration := settings.motion_duration(&app.settings, motion)
+	enabled := app.animations && motion.on && duration > 0
+	ui.layout_motion_begin(&m.moving, places, targets, duration, motion.curve, enabled, hints[:])
+	pane_ghosts_capture_leaving(app, w, places)
+}
+
+// The smallest rectangle holding every pane and float frame in `places`; nil when there is none.
+@(private = "file")
+pane_stage_rect :: proc(places: []ui.Layout_Place) -> Maybe(render.Rect) {
+	lo, hi := [2]f32{math.INF_F32, math.INF_F32}, [2]f32{math.NEG_INF_F32, math.NEG_INF_F32}
+	for place in places {
+		if place.key & PANE_MOTION_CHROME != 0 {continue}
+		r := place.rect
+		lo = {min(lo.x, r.x), min(lo.y, r.y)}
+		hi = {max(hi.x, r.x + r.width), max(hi.y, r.y + r.height)}
+	}
+	if hi.x <= lo.x || hi.y <= lo.y {return nil}
+	return render.Rect{lo.x, lo.y, hi.x - lo.x, hi.y - lo.y}
 }
 
 // A float that went into its capsule shrinks into it, frame and panes together, and one that came back
@@ -342,8 +524,8 @@ pane_ghosts_draw :: proc(app: ^App, w: ^Window, pane: layout.Pane_Rect) {
 	}
 }
 
-// Draws what went away on its own, such as a float shrinking into its capsule: the chrome regions when
-// `chrome`, the floats otherwise, each where the live one would draw.
+// Draws what went away on its own, such as a float shrinking into its capsule or a pane sliding away: the
+// chrome regions when `chrome`, the panes otherwise, each where the live one would draw.
 pane_ghosts_draw_alone :: proc(app: ^App, w: ^Window, chrome: bool) {
 	ghosts := w.pane_motion.ghosts[:]
 	alone :: proc(g: Pane_Ghost, kind: u64) -> bool {
@@ -353,7 +535,9 @@ pane_ghosts_draw_alone :: proc(app: ^App, w: ^Window, chrome: bool) {
 		for &ghost in ghosts {if alone(ghost, PANE_MOTION_CHROME) {pane_ghost_draw(app, w, &ghost)}}
 		return
 	}
-	// Float by float, each frame beneath its own panes, then panes whose frame stayed.
+	// Tiled panes beneath every float, then float by float, each frame beneath its own panes, then panes
+	// whose frame stayed.
+	for &pane in ghosts {if alone(pane, 0) && pane.container == 0 {pane_ghost_draw(app, w, &pane)}}
 	for &frame in ghosts {
 		if !alone(frame, PANE_MOTION_FRAME) {continue}
 		pane_ghost_draw(app, w, &frame)
@@ -366,7 +550,8 @@ pane_ghosts_draw_alone :: proc(app: ^App, w: ^Window, chrome: bool) {
 		return false
 	}
 	for &pane in ghosts {
-		if alone(pane, 0) && !framed(ghosts, pane.container) {pane_ghost_draw(app, w, &pane)}
+		if !alone(pane, 0) || pane.container == 0 || framed(ghosts, pane.container) {continue}
+		pane_ghost_draw(app, w, &pane)
 	}
 }
 
@@ -454,7 +639,11 @@ pane_ghosts_clear :: proc(m: ^Pane_Motion) {
 // Where the layout now puts every pane, every shown float's frame and the chrome regions.
 @(private = "file")
 pane_motion_targets :: proc(app: ^App, w: ^Window) -> []ui.Layout_Place {
-	places := make([dynamic]ui.Layout_Place, 0, len(w.panes) + 4, context.temp_allocator)
+	places := make([dynamic]ui.Layout_Place, 0, len(w.panes) + 5, context.temp_allocator)
+	if w.pane_fill != .Screen {
+		bar := render.Rect{0, 0, f32(w.width), window_title_height(w)}
+		append(&places, ui.Layout_Place{PANE_MOTION_TITLE, bar, PANE_MOTION_TITLE})
+	}
 	if rail, ok := rail_current_layout(w); ok && rail_docked(w) {
 		append(&places, ui.Layout_Place{PANE_MOTION_RAIL, rail.area, PANE_MOTION_RAIL})
 	}
@@ -526,6 +715,8 @@ pane_bars_refresh :: proc(app: ^App, w: ^Window) {
 		for d in w.dividers {append(bars, layout.Edge{d.axis, d.rect})}
 		return
 	}
+	// Sliding panes have no neighbours that stay put, so each draws its own outline.
+	if _, sliding := w.pane_motion.slide.?; sliding {return}
 	gap := window_gap(app, w)
 	for a in w.panes {
 		if a.floating {continue}

@@ -109,8 +109,10 @@ Window :: struct {
 	using surfaces: Overlay_Surfaces,
 	workspace_picker: Workspace_Picker,
 	maximized: bool,
+	// The fill the window lays out with: its shown tab's; see pane_view.odin.
 	pane_fill: layout.Pane_Fill,
-	shown_tab: Shown_Tab,
+	// The zoomed-out flight between workspaces; see workspace_overview.odin.
+	overview: Workspace_Overview,
 	paste_confirm: Paste_Confirm,
 	wheel_remainder: f32,
 	cursor_blink: Cursor_Blink,
@@ -328,6 +330,8 @@ window_free :: proc(w: ^Window) {
 	floating_window_destroy(&w.floats)
 	confirmation_clear(w)
 	pane_motion_destroy(w)
+	workspace_overview_destroy(w)
+	hidden_panes_destroy(w)
 	render.draw_list_destroy(&w.list)
 	free(w)
 }
@@ -432,7 +436,8 @@ window_relayout :: proc(app: ^App, w: ^Window) {
 	}
 	if w.phase == .Preparing || window_minimized(w) {
 		// A change the window cannot show now does not move when it is shown later.
-		w.pane_motion.armed = nil
+		pane_motion_lapse(w)
+		workspace_overview_lapse(w)
 		return
 	}
 	bar_height := window_title_height(w)
@@ -452,6 +457,7 @@ window_relayout :: proc(app: ^App, w: ^Window) {
 	// After the capsules are placed, which a float shrinking into one heads for.
 	window_panes_placed(app, w, 0)
 	pane_motion_placed(app, w, shown)
+	workspace_overview_placed(app, w)
 	rail_reveal_active(w)
 }
 
@@ -654,7 +660,17 @@ build_frame :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 	w.frame_wakes = {}
 	pane_motion_drawn_reset(w)
 	cursor_crossing_prepare(app, w)
-	// Floating panes draw after the chrome, whose shared pane borders would otherwise cross them.
+	// While a workspace switch plays, all of this shrinks into its card; see workspace_overview.odin.
+	content := workspace_overview_frame_begin(app, w)
+	// Floating panes draw after the chrome, whose shared pane borders would otherwise cross them. While a
+	// pane grows over the window or panes slide across it, they all draw above the chrome instead, and what
+	// they cover or leave beneath them.
+	over := pane_motion_over_chrome(w)
+	if over {
+		if result := window_chrome_layers_draw(app, w); result != .Ok {return result}
+	}
+	panes := render.draw_mark(&w.list)
+	if over {pane_ghosts_draw_alone(app, w, false)}
 	raised: Maybe(layout.Pane_Rect)
 	for pane in w.panes {
 		if pane.floating {continue}
@@ -664,13 +680,9 @@ build_frame :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 	if pane, ok := raised.?; ok {
 		if result := pane_draw_noted(app, w, pane, &blinking); result != .Ok {return result}
 	}
-	if w.pane_fill != .Screen {
-		if result := window_chrome_draw(app, w); result != .Ok {return result}
+	if !over {
+		if result := window_chrome_layers_draw(app, w); result != .Ok {return result}
 	}
-	if result := rail_draw(app, w); result != .Ok {return result}
-	if result := status_panel_draw(app, w); result != .Ok {return result}
-	// Chrome sliding out of view, as the rail and panel do when a pane fills the window.
-	pane_ghosts_draw_alone(app, w, true)
 	group := layout.INVALID_NODE
 	tree := window_tree(w)
 	for pane in w.panes {
@@ -685,13 +697,15 @@ build_frame :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 		if result := pane_draw_noted(app, w, pane, &blinking); result != .Ok {return result}
 	}
 	// Floats shrinking into their capsules draw above the others.
-	pane_ghosts_draw_alone(app, w, false)
+	if !over {pane_ghosts_draw_alone(app, w, false)}
+	if over {pane_motion_slide_clip(w, panes)}
 	if result := floating_capsules_draw(app, w); result != .Ok {return result}
 	cursor_crossing_draw(app, w)
 	cursor_blink_observe(w, blinking, clock_now(&app.clock))
 	if result := pane_drag_draw(app, w); result != .Ok {return result}
 	if result := tab_drag_draw(app, w); result != .Ok {return result}
 	if result := window_leader_draw(app, w); result != .Ok {return result}
+	if result := workspace_overview_frame_end(app, w, content); result != .Ok {return result}
 	size := [2]f32{f32(w.width), f32(w.height)}
 	if ui.find_is_open(&w.find) {
 		status, enabled := find_presentation(w, find_target(app, w))
@@ -733,6 +747,19 @@ build_frame :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 		w.scale,
 		w.pointer,
 	)
+}
+
+// The title bar (gone in Fullscreen), the docked rail and the Activity panel, then the chrome going away,
+// as the rail and panel do when they are hidden.
+@(private = "file")
+window_chrome_layers_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
+	if w.pane_fill != .Screen {
+		if result := window_chrome_draw(app, w); result != .Ok {return result}
+	}
+	if result := rail_draw(app, w); result != .Ok {return result}
+	if result := status_panel_draw(app, w); result != .Ok {return result}
+	pane_ghosts_draw_alone(app, w, true)
+	return .Ok
 }
 
 // Draws a pane where its container draws it: first any closed pane collapsing beneath it, then the pane,

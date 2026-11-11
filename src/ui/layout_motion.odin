@@ -161,9 +161,9 @@ layout_motion_look :: proc(m: ^Layout_Motion, key: u64) -> Layout_Look {
 	return {.Edge, 1, {}}
 }
 
-// The layout changed under a running motion for a reason of its own, such as a window resize: items keep
-// their starts and progress and head for their new targets, and leaving items keep leaving. New items
-// appear in place.
+// The layout changed under a running motion for a reason of its own, such as a window resize: moving items
+// keep their starts and progress and head for their new targets, items standing still stay still at their
+// new rectangles, and leaving items keep leaving. New items appear in place.
 layout_motion_retarget :: proc(m: ^Layout_Motion, targets: []Layout_Place) {
 	if !motion_active(m.progress) {return}
 	kept := 0
@@ -172,8 +172,8 @@ layout_motion_retarget :: proc(m: ^Layout_Motion, targets: []Layout_Place) {
 			m.items[kept] = item
 			kept += 1
 		} else if to, found := layout_place_rect(targets, item.key); found {
-			// An item presenting itself by its effect stays at its rectangle, now the new one.
-			from := item.effect == .Edge ? item.from : to
+			// One presenting itself by its effect, or standing still, keeps to its rectangle, now the new one.
+			from := item.effect == .Edge && item.from != item.to ? item.from : to
 			m.items[kept] = {item.key, from, to, false, nil, item.effect, item.edge}
 			kept += 1
 		}

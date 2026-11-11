@@ -19,6 +19,9 @@ MOTION_DURATION_MAXIMUM :: 5000
 // before motion became a setting.
 MOTION_DEFAULT_DURATION :: 160
 MOTION_DEFAULT_CURVE :: "decelerate"
+// A workspace switch zooms out, travels and zooms back in, so it takes longer than the other pane motions.
+// Its duration is the whole switch to a neighbouring workspace.
+MOTION_WORKSPACE_DEFAULT :: "940ms"
 // The file comments of the context settings add the value grammar to each description.
 @(private)
 MOTION_ROOT_HINT ::
@@ -35,6 +38,8 @@ Motion_Context :: enum u8 {
 	Split,
 	Close,
 	View,
+	Switch,
+	Workspace,
 	Resize,
 	Move,
 	Float,
@@ -47,6 +52,8 @@ MOTION_CONTEXT_PARENT :: [Motion_Context]Motion_Context {
 	.Split  = .Panes,
 	.Close  = .Panes,
 	.View   = .Panes,
+	.Switch = .Panes,
+	.Workspace = .Panes,
 	.Resize = .Panes,
 	.Move   = .Panes,
 	.Float  = .Panes,
@@ -58,6 +65,8 @@ MOTION_CONTEXT_KEY :: [Motion_Context]string {
 	.Split  = "motion.panes.split",
 	.Close  = "motion.panes.close",
 	.View   = "motion.panes.view",
+	.Switch = "motion.panes.switch",
+	.Workspace = "motion.panes.workspace",
 	.Resize = "motion.panes.resize",
 	.Move   = "motion.panes.move",
 	.Float  = "motion.panes.float",
@@ -70,6 +79,8 @@ MOTION_CONTEXT_NAME :: [Motion_Context]string {
 	.Split  = "split",
 	.Close  = "close",
 	.View   = "view",
+	.Switch = "switch",
+	.Workspace = "workspace",
 	.Resize = "resize",
 	.Move   = "move",
 	.Float  = "float",
@@ -81,6 +92,8 @@ MOTION_CONTEXT_TITLE :: [Motion_Context]string {
 	.Split  = "Split",
 	.Close  = "Close",
 	.View   = "Zoom and Fill Window",
+	.Switch = "Switch Pane",
+	.Workspace = "Switch Workspace",
 	.Resize = "Balance and Resize",
 	.Move   = "Rearrange and Swap",
 	.Float  = "Floating Panes",
@@ -91,7 +104,9 @@ MOTION_CONTEXT_DESCRIPTION :: [Motion_Context]string {
 	.Panes  = "Every pane layout change. The other pane motions inherit what they leave unset.",
 	.Split  = "A new pane opening out of the pane it divides.",
 	.Close  = "A closing pane giving its space back to its neighbors.",
-	.View   = "A pane zooming in or filling the window, and returning.",
+	.View   = "A pane zooming in, filling the window or the screen, and returning.",
+	.Switch = "Sliding to another tab, or to another pane in Zoom, Fill Window or Fullscreen.",
+	.Workspace = "Zooming out to every workspace, travelling to the one chosen and zooming back in.",
 	.Resize = "Panes settling after Balance, a keyboard resize or a divider snap.",
 	.Move   = "Panes trading places when you rearrange or swap them.",
 	.Float  = "Panes floating, tiling, minimizing and restoring.",
@@ -526,6 +541,7 @@ MOTION_BUILTIN_PRESETS :: [?]Motion_Preset {
 			.Panes = "on 160ms decelerate",
 			.Split = "grow",
 			.Close = "collapse",
+			.Workspace = MOTION_WORKSPACE_DEFAULT,
 		},
 	},
 	{name = "snappy", specs = #partial [Motion_Context]string{.Panes = "on 110ms quick"}},
@@ -592,7 +608,7 @@ motion_preset_find :: proc(s: ^Settings, name: string) -> (Motion_Preset, bool) 
 
 // The first preset that animates every context exactly as the settings do, or empty ("Custom").
 // Presets compare by resolved values, so a preset that spells out what the settings inherit, such as
-// the default preset's "grow", still matches.
+// the default preset's "grow", still matches. A context both turn off matches whatever else it holds.
 motion_preset_matching :: proc(s: ^Settings) -> string {
 	@(static, rodata)
 	builtins := MOTION_BUILTIN_PRESETS
@@ -612,8 +628,10 @@ motion_preset_matches :: proc(s: ^Settings, preset: Motion_Preset) -> bool {
 	for c in Motion_Context {
 		wanted := motion_resolve_specs(s, &specs, c)
 		current := motion_resolve(s, c)
-		if wanted.on != current.on || wanted.duration != current.duration ||
-		   wanted.curve_name != current.curve_name || wanted.effect != current.effect {
+		if wanted.on != current.on {return false}
+		if !wanted.on {continue}
+		if wanted.duration != current.duration || wanted.curve_name != current.curve_name ||
+		   wanted.effect != current.effect {
 			return false
 		}
 	}

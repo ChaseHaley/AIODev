@@ -131,6 +131,8 @@ Layout :: struct {
 	nodes:            [dynamic]Node,
 	root, focus:      Node_Id,
 	next_pane_order:  u64,
+	// The tab's view, kept while other tabs show; see Pane_View.
+	fill:             Pane_Fill,
 	zoomed:           bool,
 	// See panes_changed.
 	panes_changed:    bool,

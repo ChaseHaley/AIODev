@@ -35,12 +35,12 @@ Saved_Workspace :: struct {
 	documents: []Document `json:"documents,omitempty"`,
 }
 
-// Nodes are stored root first; splits refer to their children by index.
+// Nodes are stored root first; splits refer to their children by index. A tab's view is not saved, so a
+// tab comes back in the split view.
 Saved_Tab :: struct {
-	name:   string `json:"name,omitempty"`,
-	focus:  int,
-	zoomed: bool,
-	nodes:  []Saved_Node,
+	name:  string `json:"name,omitempty"`,
+	focus: int,
+	nodes: []Saved_Node,
 	documents: []Document `json:"documents,omitempty"`,
 }
 
@@ -242,7 +242,6 @@ layout_tab_encode :: proc(app: ^App, tab: ^Tab, processes: []procinfo.Process_In
 	return {
 			name = tab.name,
 			focus = focus,
-			zoomed = tab.tree.zoomed,
 			nodes = nodes,
 			documents = tab.documents[:],
 		},
@@ -543,5 +542,5 @@ layout_tree_decode :: proc(saved: ^Saved_Tab, tree: ^layout.Layout) -> bool {
 	}
 	linkable: bit_set[layout.Content_Kind]
 	for policy, kind in CONTENT_POLICY {if policy.linkable {linkable += {kind}}}
-	return layout.unflatten(tree, flat, saved.focus, saved.zoomed, linkable)
+	return layout.unflatten(tree, flat, saved.focus, linkable)
 }

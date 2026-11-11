@@ -92,16 +92,23 @@ layout_motion_without_animations_or_change_lands_at_once :: proc(t: ^testing.T) 
 layout_retarget_carries_progress_to_new_rectangles :: proc(t: ^testing.T) {
 	m: ui.Layout_Motion
 	defer ui.layout_motion_destroy(&m)
-	shown := []ui.Layout_Place{{1, {0, 0, 100, 40}, 0}}
-	split := []ui.Layout_Place{{1, {0, 0, 48, 40}, 0}, {2, {52, 0, 48, 40}, 0}}
+	shown := []ui.Layout_Place{{1, {0, 0, 100, 40}, 0}, {4, {0, 90, 100, 10}, 4}}
+	split := []ui.Layout_Place{{1, {0, 0, 48, 40}, 0}, {2, {52, 0, 48, 40}, 0}, {4, {0, 90, 100, 10}, 4}}
 	first := layout_motion_first_frame(&m, shown, split)
 	progress := m.progress.value
 	// The window grows mid-motion; a third item arrives without a motion of its own.
-	wider := []ui.Layout_Place{{1, {0, 0, 98, 40}, 0}, {2, {102, 0, 98, 40}, 0}, {3, {0, 44, 200, 40}, 0}}
+	wider := []ui.Layout_Place {
+		{1, {0, 0, 98, 40}, 0},
+		{2, {102, 0, 98, 40}, 0},
+		{3, {0, 44, 200, 40}, 0},
+		{4, {0, 90, 200, 10}, 4},
+	}
 	ui.layout_motion_retarget(&m, wider)
 	testing.expect(t, ui.layout_motion_active(&m))
 	testing.expect_value(t, m.progress.value, progress)
 	testing.expect_value(t, ui.layout_motion_rect(&m, 3, wider[2].rect), wider[2].rect)
+	// Item 4 was standing still, so it stays still at its new place rather than starting to move.
+	testing.expect_value(t, ui.layout_motion_rect(&m, 4, wider[3].rect), wider[3].rect)
 	// Item 2 still grows from the old right edge, now toward its wider place, a tenth of the way.
 	testing.expect_value(t, ui.layout_motion_rect(&m, 2, wider[1].rect), render.Rect{100, 0, 10, 40})
 	ui.layout_motion_update(&m, test_frame(time.tick_add(first.display, LAYOUT_DURATION)))

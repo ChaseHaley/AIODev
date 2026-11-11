@@ -1,6 +1,7 @@
 package layout
 
-// How much of a window its focused pane takes. The window owns this; Layout.zoomed belongs to the tab.
+// How much of a window a tab's focused pane takes. The tab owns this beside Layout.zoomed, so each tab
+// keeps its own view; the window applies the view of the tab it shows.
 Pane_Fill :: enum u8 {
 	None,
 	// The focused pane fills everything under the title bar.
@@ -9,8 +10,8 @@ Pane_Fill :: enum u8 {
 	Screen,
 }
 
-// What a window shows of its selected tab. Zoom, fill and fullscreen are one choice: the one the owner
-// last made is the one in force, and turning it off clears the tab's zoom as well as the window's fill.
+// What a tab shows of its panes. Zoom, fill and fullscreen are one choice: the one the owner last made is
+// the one in force, and turning it off clears the tab's zoom as well as its fill.
 Pane_View :: enum u8 {
 	Split,
 	Zoom,
@@ -26,13 +27,11 @@ Pane_View_Event :: enum u8 {
 	Toggle_Screen,
 	// The tab gained a pane, or lost its focused one: its panes must be seen, so every view ends.
 	Panes_Changed,
-	// The window shows another tab, chosen, closed into or brought by a workspace switch: every view ends.
-	Tab_Changed,
 }
 
 // The only definition of how views change. The enumerated arrays make it a compile error to leave a
-// state or an event without an answer. Switching focused panes is not an event: the view stays, and
-// shows whatever pane is now focused.
+// state or an event without an answer. Switching tab, workspace or focused pane is not an event: each
+// tab keeps its view, and a single-pane view shows whatever pane is now focused.
 @(rodata)
 PANE_VIEW_TRANSITIONS := [Pane_View][Pane_View_Event]Pane_View {
 	.Split = {
@@ -40,42 +39,36 @@ PANE_VIEW_TRANSITIONS := [Pane_View][Pane_View_Event]Pane_View {
 		.Toggle_Fill = .Fill,
 		.Toggle_Screen = .Screen,
 		.Panes_Changed = .Split,
-		.Tab_Changed = .Split,
 	},
 	.Zoom = {
 		.Toggle_Zoom = .Split,
 		.Toggle_Fill = .Fill_Over_Zoom,
 		.Toggle_Screen = .Screen_Over_Zoom,
 		.Panes_Changed = .Split,
-		.Tab_Changed = .Split,
 	},
 	.Fill = {
 		.Toggle_Zoom = .Zoom,
 		.Toggle_Fill = .Split,
 		.Toggle_Screen = .Screen,
 		.Panes_Changed = .Split,
-		.Tab_Changed = .Split,
 	},
 	.Fill_Over_Zoom = {
 		.Toggle_Zoom = .Zoom,
 		.Toggle_Fill = .Split,
 		.Toggle_Screen = .Screen_Over_Zoom,
 		.Panes_Changed = .Split,
-		.Tab_Changed = .Split,
 	},
 	.Screen = {
 		.Toggle_Zoom = .Zoom,
 		.Toggle_Fill = .Fill,
 		.Toggle_Screen = .Split,
 		.Panes_Changed = .Split,
-		.Tab_Changed = .Split,
 	},
 	.Screen_Over_Zoom = {
 		.Toggle_Zoom = .Zoom,
 		.Toggle_Fill = .Fill_Over_Zoom,
 		.Toggle_Screen = .Split,
 		.Panes_Changed = .Split,
-		.Tab_Changed = .Split,
 	},
 }
 

@@ -73,7 +73,8 @@ hidden_panes_map_switches_the_shown_pane_and_keeps_the_view :: proc(t: ^testing.
 
 	move(s, w, g.x + g.width / 2, g.y + g.height / 2)
 	testing.expect(t, w.hidden_panes.reveal.open, "hovering the glyph opens the map")
-	surface := ui.hidden_panes_map_rect(g, f32(w.width), f32(w.height), w.scale)
+	area := app.window_content_area(s, w)
+	surface := ui.hidden_panes_map_rect(g, {area.width, area.height}, f32(w.width), f32(w.height), w.scale)
 	move(s, w, g.x + g.width / 2, (g.y + g.height + surface.y) / 2)
 	testing.expect(t, w.hidden_panes.reveal.open, "the gap under the glyph keeps the map")
 	move(s, w, g.x + g.width / 2, g.y + g.height / 2)
