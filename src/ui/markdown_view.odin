@@ -131,6 +131,20 @@ Markdown_View :: struct {
 	scale:      f32,
 	// A layout append failed during this fit; fit discards the partial layout.
 	failed:     bool,
+	// Each face's ASCII glyphs as found so far; see face_glyph. Reset whenever the faces change.
+	ascii:      [Markdown_Face][128]Ascii_Glyph,
+}
+
+@(private = "file")
+Ascii_Glyph :: struct {
+	glyph:   font.Glyph,
+	// At the face's size; zero when the face has no glyph.
+	advance: f32,
+	state:   enum u8 {
+		Unknown,
+		Found,
+		Missing,
+	},
 }
 
 @(private = "file")
@@ -191,6 +205,7 @@ markdown_view_fit :: proc(
 			baseline = math.round((height - (m.ascent + m.descent)) / 2 + m.ascent),
 		}
 	}
+	v.ascii = {}
 	clear(&v.runs)
 	clear(&v.lines)
 	clear(&v.boxes)
@@ -230,13 +245,30 @@ face_of :: proc(block: markdown.Block, style: markdown.Style) -> Markdown_Face {
 
 @(private = "file")
 rune_advance :: proc(v: ^Markdown_View, face: Markdown_Face, r: rune) -> f32 {
-	m := &v.faces[face]
 	if r == '\n' {return 0}
 	shown, repeat := r, f32(1)
 	if r == '\t' {shown, repeat = ' ', 4}
-	g, found := font.glyph_lookup(v.fonts, m.family, m.style, shown)
-	if !found {return 0}
-	return font.glyph_advance(v.fonts, g, m.size_px) * repeat
+	_, _, advance := face_glyph(v, face, shown)
+	return advance * repeat
+}
+
+// A face's glyph for a rune and its advance at the face's size. ASCII, nearly every rune of a
+// document, comes from the view's table: looking each rune up in the font system's map was most of
+// the time a layout took.
+@(private = "file")
+face_glyph :: proc(v: ^Markdown_View, face: Markdown_Face, r: rune) -> (font.Glyph, bool, f32) {
+	m := &v.faces[face]
+	if r < 0 || int(r) >= len(v.ascii[face]) {
+		glyph, found := font.glyph_lookup(v.fonts, m.family, m.style, r)
+		return glyph, found, found ? font.glyph_advance(v.fonts, glyph, m.size_px) : 0
+	}
+	known := &v.ascii[face][r]
+	if known.state == .Unknown {
+		glyph, found := font.glyph_lookup(v.fonts, m.family, m.style, r)
+		known^ = {glyph, 0, .Missing}
+		if found {known.advance, known.state = font.glyph_advance(v.fonts, glyph, m.size_px), .Found}
+	}
+	return known.glyph, known.state == .Found, known.advance
 }
 
 @(private = "file")
@@ -743,7 +775,7 @@ draw_run :: proc(
 	for r, at in string(doc.text[run.start:run.end]) {
 		advance := rune_advance(v, run.face, r)
 		if r != ' ' && r != '\t' && r != '\n' {
-			if g, found := font.glyph_lookup(v.fonts, m.family, m.style, r); found {
+			if g, found, _ := face_glyph(v, run.face, r); found {
 				offset := int(run.start) + at
 				for next < len(find.matches) && find.matches[next].end <= offset {next += 1}
 				matched := next < len(find.matches) && find.matches[next].start <= offset
