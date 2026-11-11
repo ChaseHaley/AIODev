@@ -491,19 +491,22 @@ build_row :: proc(v: ^View, b: ^Builder, y: int) -> render.Build_Status {
 	top := b.origin.y + f32(y) * b.metrics.cell_height
 	id, cacheable := row_cache_id(v, b, y)
 	raw: []ghostty.Cell
+	marked: bool
 	if cacheable {
+		marked = row_marked(v, y)
+		if !marked && row_cache_replay_clean(v, b, id, top) {return .Ok}
 		plain: bool
-		raw, plain = row_cache_plain_raw(v, y)
-		if plain && row_cache_replay_raw(v, b, id, raw, top) {return .Ok}
+		raw, plain = row_cache_plain_raw(v, marked)
+		if plain && row_cache_replay_raw(v, b, id, raw, top, marked) {return .Ok}
 	}
 	row_paints(v, b, y)
 	if b.list.error != .None {return .Ok}
 	cacheable &&= b.row_plain
-	if cacheable && row_cache_replay(v, b, id, top) {return .Ok}
+	if cacheable && row_cache_replay(v, b, id, top, marked) {return .Ok}
 	rects, glyphs := len(b.list.rects), len(b.list.glyphs)
 	result := build_row_draw(v, b, y, top)
 	if cacheable && result == .Ok && b.list.error == .None {
-		row_cache_store(v, b, id, top, rects, glyphs, raw)
+		row_cache_store(v, b, id, top, rects, glyphs, raw, marked)
 	}
 	return result
 }

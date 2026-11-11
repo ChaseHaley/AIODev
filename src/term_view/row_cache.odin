@@ -14,10 +14,15 @@ import "core:mem"
 // clusters and panes with images are always drawn afresh, since their drawing depends on more than
 // paints.
 //
-// Paints need every cell read. A row without styles, selection or search marks is checked on its
-// raw cells instead, which one call returns: its paints follow from them and the drawing inputs in
-// the key alone. A styled row cannot be: a style id that went out of use can come back meaning
-// another style.
+// Reading those paints means reading every cell, so two cheaper checks come first:
+//
+// - **Unchanged rows:** libghostty marks a row dirty whenever an update rebuilds it. The view clears
+//   the flag once the row's drawing is cached. A row that is still clean replays without reading
+//   anything, unless it has a selection or search marks, or had them when it was cached.
+// - **Plain rows:** a row without styles, selection or search marks is checked on its raw cells,
+//   which one call returns. Its paints follow from those cells and the drawing inputs in the key.
+//   A styled row cannot be checked this way: a style id that went out of use can come back meaning
+//   another style.
 @(private)
 Row_Cache :: struct {
 	rows:    map[ghostty.Render_State_Row_Id]Cached_Row,
@@ -34,11 +39,13 @@ Row_Cache :: struct {
 Cached_Row :: struct {
 	paints: [dynamic]Cell_Paint,
 	// The raw cells, kept when the row had no styles, selection or marks; empty otherwise.
-	raw:    [dynamic]ghostty.Cell,
-	rects:  [dynamic]render.Rect_Instance,
-	glyphs: [dynamic]render.Glyph_Instance,
-	top:    f32,
-	build:  u64,
+	raw:      [dynamic]ghostty.Cell,
+	rects:    [dynamic]render.Rect_Instance,
+	glyphs:   [dynamic]render.Glyph_Instance,
+	top:      f32,
+	build:    u64,
+	// The row had no selection or search marks when last drawn.
+	unmarked: bool,
 }
 
 // What a row's drawing depends on beyond its paints; any change empties the cache.
@@ -132,17 +139,36 @@ row_cache_id :: proc(v: ^View, b: ^Builder, y: int) -> (id: ghostty.Render_State
 	return id, true
 }
 
+// Whether the row has a selection or search marks.
+@(private)
+row_marked :: proc(v: ^View, y: int) -> bool {
+	selection := ghostty.sized(ghostty.Render_State_Row_Selection)
+	if ghostty.render_state_row_get(v.rows, .Selection, &selection) == .Success {return true}
+	for h in v.highlights {if h.row == y {return true}}
+	return false
+}
+
+// Draws the row from the cache when no update has rebuilt it since it was cached, and it is
+// unmarked now and was then.
+@(private)
+row_cache_replay_clean :: proc(v: ^View, b: ^Builder, id: ghostty.Render_State_Row_Id, top: f32) -> bool {
+	dirty := true
+	if ghostty.render_state_row_get(v.rows, .Dirty, &dirty) != .Success || dirty {return false}
+	row, found := &v.row_cache.rows[id]
+	if !found || !row.unmarked {return false}
+	row_cache_draw(v, b, row, top)
+	return true
+}
+
 // The row's raw cells, when it has no styles, grapheme clusters, selection or search marks.
 @(private)
-row_cache_plain_raw :: proc(v: ^View, y: int) -> (cells: []ghostty.Cell, ok: bool) {
+row_cache_plain_raw :: proc(v: ^View, marked: bool) -> (cells: []ghostty.Cell, ok: bool) {
+	if marked {return}
 	row: ghostty.Row
 	if ghostty.render_state_row_get(v.rows, .Raw, &row) != .Success {return}
 	styled, grapheme := true, true
 	if ghostty.row_get(row, .Styled, &styled) != .Success || styled {return}
 	if ghostty.row_get(row, .Grapheme, &grapheme) != .Success || grapheme {return}
-	selection := ghostty.sized(ghostty.Render_State_Row_Selection)
-	if ghostty.render_state_row_get(v.rows, .Selection, &selection) == .Success {return}
-	for h in v.highlights {if h.row == y {return}}
 	view: ghostty.Cells_View
 	if ghostty.render_state_row_get(v.rows, .Cells_Raw, &view) != .Success || view.ptr == nil {return}
 	return ([^]ghostty.Cell)(view.ptr)[:view.len], true
@@ -156,20 +182,29 @@ row_cache_replay_raw :: proc(
 	id: ghostty.Render_State_Row_Id,
 	raw: []ghostty.Cell,
 	top: f32,
+	marked: bool,
 ) -> bool {
 	row, found := &v.row_cache.rows[id]
 	if !found || len(row.raw) == 0 || len(row.raw) != len(raw) {return false}
 	if mem.compare_ptrs(raw_data(row.raw), raw_data(raw), len(raw) * size_of(ghostty.Cell)) != 0 {return false}
 	row_cache_draw(v, b, row, top)
+	row_cache_drawn(v, row, marked)
 	return true
 }
 
 // Draws the row from the cache when it was drawn with the same paints.
 @(private)
-row_cache_replay :: proc(v: ^View, b: ^Builder, id: ghostty.Render_State_Row_Id, top: f32) -> bool {
+row_cache_replay :: proc(
+	v: ^View,
+	b: ^Builder,
+	id: ghostty.Render_State_Row_Id,
+	top: f32,
+	marked: bool,
+) -> bool {
 	row, found := &v.row_cache.rows[id]
 	if !found || !paints_equal(row.paints[:], v.paints[:]) {return false}
 	row_cache_draw(v, b, row, top)
+	row_cache_drawn(v, row, marked)
 	return true
 }
 
@@ -179,6 +214,15 @@ row_cache_draw :: proc(v: ^View, b: ^Builder, row: ^Cached_Row, top: f32) {
 	v.row_cache.replays += 1
 	// Cell heights are whole pixels, so rows move by whole pixels and glyphs stay on the pixel grid.
 	_ = render.push_instances(b.list, row.rects[:], row.glyphs[:], math.round(top - row.top))
+}
+
+// The cached row now draws the row as it is: clearing the row's dirty flag lets later builds
+// replay it unread until an update rebuilds it.
+@(private)
+row_cache_drawn :: proc(v: ^View, row: ^Cached_Row, marked: bool) {
+	row.unmarked = !marked
+	clean := false
+	_ = ghostty.render_state_row_set(v.rows, .Dirty, &clean)
 }
 
 // Keeps the draw commands the row just added, from `rects` and `glyphs` on, and its raw cells when
@@ -191,6 +235,7 @@ row_cache_store :: proc(
 	top: f32,
 	rects, glyphs: int,
 	raw: []ghostty.Cell,
+	marked: bool,
 ) {
 	c := &v.row_cache
 	row, found := &c.rows[id]
@@ -204,16 +249,20 @@ row_cache_store :: proc(
 	clear(&row.raw)
 	clear(&row.rects)
 	clear(&row.glyphs)
+	row.top, row.build = top, c.build
 	_, paints_err := append(&row.paints, ..v.paints[:])
 	_, raw_err := append(&row.raw, ..raw)
 	_, rects_err := append(&row.rects, ..b.list.rects[rects:])
 	_, glyphs_err := append(&row.glyphs, ..b.list.glyphs[glyphs:])
 	if paints_err != nil || raw_err != nil || rects_err != nil || glyphs_err != nil {
-		// A partial copy must not be replayed; empty paints and cells never match a row's.
+		// A partial copy must never be replayed: empty paints and cells match no row, and the row
+		// stays dirty.
 		clear(&row.paints)
 		clear(&row.raw)
+		row.unmarked = false
+		return
 	}
-	row.top, row.build = top, c.build
+	row_cache_drawn(v, row, marked)
 }
 
 @(private)

@@ -65,6 +65,8 @@ row_cache_draws_what_a_fresh_build_draws :: proc(t: ^testing.T) {
 		"\x1b[2;1H\x1b[32mrewritten\x1b[0m\x1b[6;1H",
 		// The same text in a new background on the third row.
 		"\x1b[3;1H\x1b[45mcolored\x1b[0m row\x1b[6;1H",
+		// The second row's text again, in yellow: only the style changes.
+		"\x1b[2;1H\x1b[33mrewritten\x1b[0m\x1b[6;1H",
 		"\r\nlast line\r\n",
 	}
 	for step, i in steps {
@@ -79,6 +81,9 @@ row_cache_draws_what_a_fresh_build_draws :: proc(t: ^testing.T) {
 			build_twice(t, &f, &out)
 			expect_same_draws(t, &f.list, &out)
 			term.clear_selection(f.session)
+			// Rows drawn selected repaint without it, though no output rebuilt them.
+			build_twice(t, &f, &out)
+			expect_same_draws(t, &f.list, &out)
 		}
 	}
 	// New default colours repaint every row, styled or not.
