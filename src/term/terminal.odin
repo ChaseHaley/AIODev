@@ -35,9 +35,25 @@ Geometry :: struct {
 	padding_left, padding_top:     u32,
 }
 
-process_id :: proc(s: ^Session) -> u32 {return pty.process_id(&s.pty)}
+// Zero while a starter thread is still starting the process.
+process_id :: proc(s: ^Session) -> u32 {
+	if !process_started(s) {return 0}
+	return pty.process_id(&s.pty)
+}
+
+// Empty while a starter thread is still starting the process.
 process_image :: proc(s: ^Session, allocator := context.allocator) -> string {
+	if !process_started(s) {return ""}
 	return pty.process_image(&s.pty, allocator)
+}
+
+// Whether Session.pty is settled: a starter thread writes it while the process is Starting.
+@(private)
+process_started :: proc(s: ^Session) -> bool {
+	sync.mutex_lock(&s.mutex)
+	defer sync.mutex_unlock(&s.mutex)
+	_, starting := s.process.(Process_Starting)
+	return !starting
 }
 
 Config :: struct {
@@ -56,6 +72,10 @@ Config :: struct {
 	// Stamps program status reports. create keeps it for the session's life, so restart ignores it;
 	// the zero value reads the system clock.
 	wall_clock:                      Wall_Clock,
+	// Starts the process on a thread, so several sessions can start theirs at once; the caller
+	// must call start_wait before relying on the process. Otherwise create and restart start it
+	// before they return.
+	start_later:                     bool,
 }
 
 // A time-of-day source the reader thread can call.
@@ -97,14 +117,20 @@ Status :: struct {
 
 // The session's child-process lifecycle; nil means no process: none spawned yet, a headless replay,
 // or one stop_process has released. Only the process_* transitions write Session.process, under
-// Session.mutex, so the main, reader and waiter threads always agree on one phase.
+// Session.mutex, so the main, starter, reader and waiter threads always agree on one phase.
 @(private)
 Process :: union {
+	Process_Starting,
 	Process_Running,
 	Process_Exited,
 	Process_Failed,
 	Process_Stopping,
 }
+
+// A starter thread is starting the process (config.start_later); Session.pty is not set yet. The
+// session reports itself running, and input waits in the write queue.
+@(private)
+Process_Starting :: struct {}
 
 @(private)
 Process_Running :: struct {}
@@ -184,6 +210,9 @@ Session :: struct {
 	geometry:                                                 Geometry,
 	pty:                                                      pty.Pty,
 	reader, writer, waiter:                                   ^thread.Thread,
+	// Runs start_process for config.start_later, from `start`; see spawn.
+	starter:                                                  ^thread.Thread,
+	start:                                                    Start_Request,
 	queue:                                                    Write_Queue,
 	scanner:                                                  Mode_Scanner,
 	win32_input:                                              bool,
@@ -416,6 +445,16 @@ apply_mode_defaults :: proc(terminal: ghostty.Terminal) -> bool {
 	return true
 }
 
+// What a starter thread starts, copied into the session's memory because the caller's config may be
+// temporary.
+@(private)
+Start_Request :: struct {
+	options:     pty.Spawn_Options,
+	environment: []pty.Env_Var,
+}
+
+// Starts the session's process: at once, or with config.start_later on a starter thread that
+// start_wait joins.
 @(private)
 spawn :: proc(s: ^Session, config: Config) {
 	environment: [3 + MAX_HOST_ENVIRONMENT]pty.Env_Var = {
@@ -436,6 +475,38 @@ spawn :: proc(s: ^Session, config: Config) {
 		refresh_environment = config.refresh_environment,
 		inherit_cursor      = config.preface != "",
 	}
+	if !config.start_later || !start_request_copy(&s.start, options, s.allocator) {
+		start_process(s, options)
+		return
+	}
+	process_apply(s, Process_Starting{})
+	// The caller's context, as when the caller starts the process itself, so its logger reports.
+	s.starter = thread.create_and_start_with_poly_data(s, starter_main, context)
+	if s.starter == nil {
+		start_request_free(&s.start, s.allocator)
+		start_process(s, options)
+	}
+}
+
+// Waits for a process started with config.start_later to have started or failed, after which the
+// session is as if it had started at once. Returns at once for any other session.
+start_wait :: proc(s: ^Session) {
+	join_thread(&s.starter)
+}
+
+@(private)
+starter_main :: proc(s: ^Session) {
+	defer if context.temp_allocator.procedure == runtime.default_temp_allocator_proc {
+		runtime.default_temp_allocator_destroy(cast(^runtime.Default_Temp_Allocator)context.temp_allocator.data)
+	}
+	start_process(s, s.start.options)
+	start_request_free(&s.start, s.allocator)
+	notify(s)
+}
+
+// Starts the process and the threads that serve it.
+@(private)
+start_process :: proc(s: ^Session, options: pty.Spawn_Options) {
 	process, err := pty.spawn(options, s.allocator)
 	if err.kind != .None {
 		message, message_error := pty.error_message(err, options, s.allocator)
@@ -445,22 +516,82 @@ spawn :: proc(s: ^Session, config: Config) {
 		process_apply(s, Process_Failed{message})
 		return
 	}
+	sync.mutex_lock(&s.mutex)
 	s.pty = process
-	process_apply(s, Process_Running{})
+	process_enter(s, Process_Running{})
+	geometry := s.geometry
+	sync.mutex_unlock(&s.mutex)
 	s.reader = thread.create_and_start_with_poly_data(s, reader_main, s.callback_context)
 	s.waiter = thread.create_and_start_with_poly_data(s, waiter_main, s.callback_context)
 	s.writer = thread.create_and_start_with_poly_data(s, writer_main, s.callback_context)
 	if s.reader == nil || s.waiter == nil || s.writer == nil {
 		log.error("term: creating session threads failed")
-		stop_process(s)
+		stop_started(s)
 		process_apply(s, Process_Failed{})
+		return
+	}
+	// A grid resized while a starter thread started the process.
+	if geometry.columns != options.cols || geometry.rows != options.rows {
+		if err := pty.resize(&s.pty, geometry.columns, geometry.rows); err != .None && err != .Closed {
+			log.errorf("term: console resize failed: %v", err)
+		}
 	}
 }
 
+@(private, require_results)
+start_request_copy :: proc(
+	r: ^Start_Request,
+	options: pty.Spawn_Options,
+	allocator: runtime.Allocator,
+) -> bool {
+	ok := true
+	copy_text :: proc(text: string, allocator: runtime.Allocator, ok: ^bool) -> string {
+		copied, err := strings.clone(text, allocator)
+		ok^ &&= err == nil
+		return copied
+	}
+	r.options = options
+	r.options.command_line = copy_text(options.command_line, allocator, &ok)
+	r.options.working_directory = copy_text(options.working_directory, allocator, &ok)
+	r.options.title = copy_text(options.title, allocator, &ok)
+	r.options.path_append = copy_text(options.path_append, allocator, &ok)
+	environment, err := make([]pty.Env_Var, len(options.environment), allocator)
+	ok &&= err == nil
+	r.environment = environment
+	for variable, i in options.environment {
+		if i >= len(r.environment) {break}
+		r.environment[i] = {copy_text(variable.name, allocator, &ok), copy_text(variable.value, allocator, &ok)}
+	}
+	r.options.environment = r.environment
+	if !ok {start_request_free(r, allocator)}
+	return ok
+}
+
+@(private)
+start_request_free :: proc(r: ^Start_Request, allocator: runtime.Allocator) {
+	delete(r.options.command_line, allocator)
+	delete(r.options.working_directory, allocator)
+	delete(r.options.title, allocator)
+	delete(r.options.path_append, allocator)
+	for variable in r.environment {
+		delete(variable.name, allocator)
+		delete(variable.value, allocator)
+	}
+	delete(r.environment, allocator)
+	r^ = {}
+}
+
 // Takes the process down and releases its threads and console; a session with no process only
-// forgets a failure.
+// forgets a failure. A process still starting finishes starting first.
 @(private)
 stop_process :: proc(s: ^Session) {
+	start_wait(s)
+	stop_started(s)
+}
+
+// stop_process once no starter thread runs.
+@(private)
+stop_started :: proc(s: ^Session) {
 	stopping, live := process_stop(s)
 	if !live {
 		return
@@ -497,7 +628,7 @@ process_enter :: proc(s: ^Session, next: Process) {
 	switch _ in next {
 	case Process_Running, Process_Exited, Process_Failed:
 		sync.atomic_store(&s.status_changed, true)
-	case Process_Stopping:
+	case Process_Starting, Process_Stopping:
 	}
 }
 
@@ -533,7 +664,7 @@ process_stop :: proc(s: ^Session) -> (stopping: Process_Stopping, live: bool) {
 	case Process_Failed:
 		process_enter(s, nil)
 		return
-	case Process_Stopping, nil:
+	case Process_Starting, Process_Stopping, nil:
 		return
 	}
 	process_enter(s, stopping)
@@ -818,8 +949,10 @@ resize :: proc(s: ^Session, geometry: Geometry) {
 		geometry.cell_width,
 		geometry.cell_height,
 	)
+	// A process still starting has no console yet; its starter applies the size the grid has then.
 	_, failed := s.process.(Process_Failed)
-	live := s.process != nil && !failed
+	_, starting := s.process.(Process_Starting)
+	live := s.process != nil && !failed && !starting
 	sync.mutex_unlock(&s.mutex)
 	if result != .Success {
 		log.errorf("term: resize to %vx%v failed: %v", geometry.columns, geometry.rows, result)

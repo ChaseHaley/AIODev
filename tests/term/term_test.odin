@@ -197,6 +197,44 @@ failed_spawn_reports_message :: proc(t: ^testing.T) {
 	testing.expect(t, strings.has_prefix(status.message, "Could not start \"aio_missing_program_5512.exe\""))
 }
 
+// A session that starts later reads as running until start_wait, then as if it had started at once:
+// input sent meanwhile reaches the process, and a failure to start carries its message.
+@(test)
+start_later_settles_at_wait :: proc(t: ^testing.T) {
+	testing.set_fail_timeout(t, 60 * time.Second)
+	wakes: Wakes
+	later := config("cmd.exe /d /q /k")
+	later.start_later = true
+	s, err := term.create(later, {on_wake, &wakes})
+	if !testing.expect_value(t, err, term.Error.None) {return}
+	defer term.destroy(s)
+	testing.expect_value(t, term.status(s).kind, term.Status_Kind.Running)
+	testing.expect(t, term.send_text(s, "echo AIO_LATER_INPUT\r"))
+	term.start_wait(s)
+	testing.expect(t, term.process_id(s) != 0)
+	testing.expect(t, await(t, s, shows, "AIO_LATER_INPUT"))
+
+	logger := context.logger
+	context.logger = {}
+	missing := config("aio_missing_program_5512.exe")
+	missing.start_later = true
+	failed, failed_err := term.create(missing, {on_wake, &wakes})
+	if failed_err == .None {term.start_wait(failed)}
+	context.logger = logger
+	if !testing.expect_value(t, failed_err, term.Error.None) {return}
+	defer term.destroy(failed)
+	status := term.status(failed)
+	testing.expect_value(t, status.kind, term.Status_Kind.Failed)
+	testing.expect(t, strings.has_prefix(status.message, "Could not start \"aio_missing_program_5512.exe\""))
+
+	// Destroying a session whose start was never waited for waits for it.
+	unwaited := config("cmd.exe /d /q /k")
+	unwaited.start_later = true
+	if dropped, dropped_err := term.create(unwaited, {on_wake, &wakes}); dropped_err == .None {
+		term.destroy(dropped)
+	}
+}
+
 @(test)
 shift_enter_reaches_console_programs :: proc(t: ^testing.T) {
 	wakes: Wakes

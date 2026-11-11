@@ -408,6 +408,8 @@ layout_state_restore_workspaces :: proc(app: ^App) -> (restore: Layout_Restore, 
 			}
 		}
 	}
+	// The panes' shells started side by side, each on a thread of its own.
+	for &entry in app.sessions {session_start_finish(&entry)}
 	return restore, len(restore.workspaces) > 0
 }
 
@@ -482,7 +484,9 @@ layout_workspace_restore :: proc(
 	return workspace
 }
 
-// Opens the linked panes' windows, or with `links` leaves them there for the caller to open.
+// Opens the linked panes' windows and starts the panes' shells. With `links`, as at startup, it
+// leaves the windows there for the caller to open and the shells starting for it to finish with
+// session_start_finish.
 @(private, require_results)
 layout_tab_restore :: proc(
 	app: ^App,
@@ -506,7 +510,7 @@ layout_tab_restore :: proc(
 		kind := pane.content.kind
 		switch kind {
 		case .Terminal:
-			pane.content.id, restored = layout_session_restore(app, &saved.nodes[i])
+			pane.content.id, restored = layout_session_restore(app, &saved.nodes[i], links != nil)
 		case .Settings:
 			restored = true
 		case .Markdown:
@@ -548,9 +552,17 @@ layout_tab_restore :: proc(
 	return true
 }
 
-// Opens the saved pane's session and returns its id.
+// Opens the saved pane's session and returns its id. With start_later its shell starts on a thread,
+// and the caller finishes it with session_start_finish.
 @(private, require_results)
-layout_session_restore :: proc(app: ^App, saved: ^Saved_Node) -> (session: u32, ok: bool) {
+layout_session_restore :: proc(
+	app: ^App,
+	saved: ^Saved_Node,
+	start_later := false,
+) -> (
+	session: u32,
+	ok: bool,
+) {
 	// A directory that is remote or no longer exists falls back to the profile's own.
 	directory, refused := local_launch_directory(saved.directory)
 	if refused {
@@ -564,7 +576,15 @@ layout_session_restore :: proc(app: ^App, saved: ^Saved_Node) -> (session: u32, 
 	if !utf8.valid_string(command) || len(command) > PROGRAM_COMMAND_LIMIT * 4 {command = ""}
 	resume := app.settings.pane.resume_agents ? saved.resume : ""
 	// A pane resuming its agent shows the agent coming back rather than a note about it.
-	id, opened := session_open(app, "", directory, saved.profile, resume != "" ? "" : command, saved.key)
+	id, opened := session_open(
+		app,
+		"",
+		directory,
+		saved.profile,
+		resume != "" ? "" : command,
+		saved.key,
+		start_later,
+	)
 	if !opened {return 0, false}
 	entry := session_find(app, id)
 	entry.keep_open = saved.keep_open

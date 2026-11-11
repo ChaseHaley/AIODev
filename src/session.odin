@@ -135,7 +135,9 @@ session_config :: proc(
 
 // Opens a session and returns the id it was registered under. The session may hold a shell that
 // failed to start; only a session that could not be created or registered fails. `key` keeps a reopened
-// or restored pane's key when it is still free.
+// or restored pane's key when it is still free. With start_later the shell starts on a thread, so
+// several panes can start theirs at once, and the caller must call session_start_finish before
+// anything else reads the session.
 @(private, require_results)
 session_open :: proc(
 	app: ^App,
@@ -144,6 +146,7 @@ session_open :: proc(
 	profile_id: string = "",
 	last_command: string = "",
 	key: string = "",
+	start_later := false,
 ) -> (
 	id: u32,
 	ok: bool,
@@ -168,6 +171,7 @@ session_open :: proc(
 		)
 	}
 	if launch_directory != "" {config.working_directory = launch_directory}
+	config.start_later = start_later
 	session, err := term.create(config, {wake_platform, &app.platform})
 	if err != .None {
 		log.errorf("creating the terminal session failed: %v", err)
@@ -201,6 +205,14 @@ session_open :: proc(
 	pane_header_launch(&app.sessions[len(app.sessions) - 1].header, config, session)
 	session_status_sync(&app.sessions[len(app.sessions) - 1])
 	return id, true
+}
+
+// Finishes a session that session_open started later: waits for its shell to have started or
+// failed, then reads what opening it would have read. Returns at once for any other session.
+session_start_finish :: proc(entry: ^Session_Entry) {
+	term.start_wait(entry.session)
+	if entry.header.executable_path == "" {entry.header.executable_path = term.process_image(entry.session)}
+	session_status_sync(entry)
 }
 
 // The settings a running session follows; create, restart and configure all take the whole set.
