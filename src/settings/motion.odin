@@ -97,7 +97,7 @@ MOTION_CONTEXT_DESCRIPTION :: [Motion_Context]string {
 	.Split  = "A new pane opening out of the pane it divides.",
 	.Close  = "A closing pane giving its space back to its neighbors.",
 	.View   = "A pane zooming in, filling the window or the screen, and returning.",
-	.Switch = "Sliding to another pane, tab or workspace in Zoom, Fill Window or Fullscreen.",
+	.Switch = "Sliding to another tab, or to another pane or workspace in Zoom, Fill Window or Fullscreen.",
 	.Resize = "Panes settling after Balance, a keyboard resize or a divider snap.",
 	.Move   = "Panes trading places when you rearrange or swap them.",
 	.Float  = "Panes floating, tiling, minimizing and restoring.",

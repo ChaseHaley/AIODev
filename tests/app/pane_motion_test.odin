@@ -413,11 +413,10 @@ zoom_slides_to_the_pane_focus_moves_to :: proc(t: ^testing.T) {
 	testing.expect(t, entering.x >= right.rect.x + right.rect.width, "the right pane comes in from the right")
 }
 
-// Changing tabs while either shows a single pane slides along the tabs: sideways for a tab strip, up or
-// down for a rail; the tab further along comes from the right or from below. Between two split tabs the
-// change shows at once.
+// Changing tabs slides along the tabs: sideways for a tab strip, up or down for a rail; the tab further
+// along comes from the right or from below. Split tabs slide too, every pane together.
 @(test)
-changing_tabs_in_a_single_pane_view_slides_along_the_tabs :: proc(t: ^testing.T) {
+changing_tabs_slides_along_the_tabs :: proc(t: ^testing.T) {
 	f: Palette_Fixture
 	defer palette_fixture_destroy(t, &f)
 	if !palette_fixture_create(t, &f, "pane-motion-tabs", second_window = false) {return}
@@ -457,9 +456,26 @@ changing_tabs_in_a_single_pane_view_slides_along_the_tabs :: proc(t: ^testing.T)
 	}
 
 	app.run_action(s, w, .Fill_Window_Pane)
+	app.pane_split(s, w, .Right)
 	motion_settle(s, w)
+	w.tabs_horizontal = true
+	app.window_relayout(s, w)
+	w.dirty = true
+	app.window_render(s, w)
 	app.tab_select(s, w, 0)
-	testing.expect(t, !app.pane_motion_animating(w))
+	testing.expect(t, app.pane_motion_animating(w))
+	target := w.panes[0].rect
+	earlier := app.pane_motion_rect(w, w.panes[0])
+	testing.expect(t, earlier.x + earlier.width <= target.x, "a split tab slides in too")
+	motion_settle(s, w)
+	w.dirty = true
+	app.window_render(s, w)
+	app.tab_select(s, w, 1)
+	if !testing.expect_value(t, len(w.panes), 2) {return}
+	for pane in w.panes {
+		shown := app.pane_motion_rect(w, pane)
+		testing.expect(t, shown.x > pane.rect.x && shown.width == pane.rect.width, "every pane slides together")
+	}
 }
 
 // Switching workspace while either shows a single pane slides up or down, as the workspace list orders

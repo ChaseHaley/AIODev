@@ -321,16 +321,20 @@ pane_stage :: proc(app: ^App, w: ^Window) -> Pane_Stage {
 	return stage
 }
 
-// When a single-pane view showed, or now shows, a different pane than before, the side the pane now shown
-// comes in from. Another workspace comes from below when it is further down the workspace list, and from
-// above when it is further up; another tab, from further along the tabs: the right of the strip, or below
-// in the rail. Another pane of the same tab comes from the side it lies on in the split view.
+// The side what the window now shows comes in from, when it shows another tab, or when a single-pane view
+// showed, or now shows, another pane or workspace. Another tab comes from further along the tabs: the
+// right of the strip, or below in the rail. Another workspace comes from below when it is further down the
+// workspace list, and from above when it is further up. Another pane of the same tab comes from the side it
+// lies on in the split view.
 @(private = "file")
 pane_slide_toward :: proc(app: ^App, w: ^Window, before, now: Pane_Stage) -> Maybe([2]f32) {
-	if before.workspace == 0 || now.workspace == 0 || !(before.solo || now.solo) {return nil}
+	if before.workspace == 0 || now.workspace == 0 {return nil}
+	solo := before.solo || now.solo
 	// A workspace or tab that is gone counts from where it was, which its successor takes.
 	side :: proc(from, to: int) -> f32 {return to >= from ? 1 : -1}
 	if before.workspace != now.workspace {
+		// Between split views a workspace shows at once until its own motion is chosen (WORK-392).
+		if !solo {return nil}
 		from := before.workspace_index
 		for workspace, i in app.workspaces {if workspace.id == before.workspace {from = i}}
 		return [2]f32{0, side(from, now.workspace_index)}
@@ -726,6 +730,8 @@ pane_bars_refresh :: proc(app: ^App, w: ^Window) {
 		for d in w.dividers {append(bars, layout.Edge{d.axis, d.rect})}
 		return
 	}
+	// Sliding panes have no neighbours that stay put, so each draws its own outline.
+	if _, sliding := w.pane_motion.slide.?; sliding {return}
 	gap := window_gap(app, w)
 	for a in w.panes {
 		if a.floating {continue}
