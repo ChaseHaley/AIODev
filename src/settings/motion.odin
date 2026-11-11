@@ -91,7 +91,7 @@ MOTION_CONTEXT_DESCRIPTION :: [Motion_Context]string {
 	.Panes  = "Every pane layout change. The other pane motions inherit what they leave unset.",
 	.Split  = "A new pane opening out of the pane it divides.",
 	.Close  = "A closing pane giving its space back to its neighbors.",
-	.View   = "A pane zooming in or filling the window, and returning.",
+	.View   = "A pane zooming in or filling, returning, and sliding to another pane, tab or workspace.",
 	.Resize = "Panes settling after Balance, a keyboard resize or a divider snap.",
 	.Move   = "Panes trading places when you rearrange or swap them.",
 	.Float  = "Panes floating, tiling, minimizing and restoring.",

@@ -339,10 +339,10 @@ minimized_float_shrinks_into_its_capsule_and_grows_back :: proc(t: ^testing.T) {
 	testing.expect_value(t, app.pane_motion_rect(w, w.panes[1]), whole)
 }
 
-// Fill Window slides the Activity panel out to the window edge while the focused pane grows over the
-// space; leaving it slides the panel back in.
+// Fill Window grows the focused pane over the Activity panel, drawn above it, while the panel stays where
+// it was beneath it; leaving it, the pane shrinks back off the panel, which is already in place.
 @(test)
-fill_window_slides_chrome_out_while_the_pane_grows :: proc(t: ^testing.T) {
+fill_window_grows_the_pane_over_chrome_that_stays_in_place :: proc(t: ^testing.T) {
 	f: Palette_Fixture
 	defer palette_fixture_destroy(t, &f)
 	if !palette_fixture_create(t, &f, "pane-motion-fill", second_window = false) {return}
@@ -357,34 +357,142 @@ fill_window_slides_chrome_out_while_the_pane_grows :: proc(t: ^testing.T) {
 
 	app.run_action(s, w, .Fill_Window_Pane)
 	testing.expect_value(t, app.status_panel_rect(s, w).width, f32(0))
-	testing.expect(t, app.pane_motion_animating(w))
+	testing.expect(t, app.pane_motion_animating(w) && app.pane_motion_over_chrome(w))
 	testing.expect_value(t, app.pane_motion_rect(w, w.panes[0]), pane.rect)
 	first := motion_frame(time.tick_now())
 	app.window_motion_update(s, w, first)
 	app.window_motion_update(s, w, motion_frame(time.tick_add(first.display, PANE_DURATION / 2)))
-	sliding := app.pane_motion_region_begin(w, app.PANE_MOTION_PANEL, {}).shown
-	testing.expect(t, sliding.x > panel.x && sliding.width < panel.width, "the panel slides to the right edge")
-	testing.expect(t, sliding.x + sliding.width <= panel.x + panel.width + 1)
+	growing := app.pane_motion_rect(w, w.panes[0])
+	testing.expect(t, growing.width > pane.rect.width, "the pane grows over the panel")
+	testing.expect_value(t, app.pane_motion_region_begin(w, app.PANE_MOTION_PANEL, {}).shown, panel)
 
-	// Leaving Fill Window before the panel has gone brings it back from where it is.
+	// Leaving Fill Window before the pane has covered the panel shrinks it back from where it is.
 	if !testing.expect(t, app.window_build_frame(s, w)) {return}
 	app.run_action(s, w, .Fill_Window_Pane)
-	testing.expect(t, app.pane_motion_animating(w))
-	testing.expect_value(t, app.pane_motion_region_begin(w, app.PANE_MOTION_PANEL, panel).shown, sliding)
+	testing.expect(t, app.pane_motion_animating(w) && app.pane_motion_over_chrome(w))
+	testing.expect_value(t, app.pane_motion_rect(w, w.panes[0]), growing)
+	testing.expect_value(t, app.pane_motion_region_begin(w, app.PANE_MOTION_PANEL, panel).shown, panel)
+	motion_settle(s, w)
+	testing.expect(t, !app.pane_motion_over_chrome(w))
+	testing.expect_value(t, app.pane_motion_rect(w, w.panes[0]), pane.rect)
+}
+
+// A single-pane view showing another pane slides it in from the side it lies on in the split view, while
+// the one it showed slides out the other way; both keep their size.
+@(test)
+zoom_slides_to_the_pane_focus_moves_to :: proc(t: ^testing.T) {
+	f: Palette_Fixture
+	defer palette_fixture_destroy(t, &f)
+	if !palette_fixture_create(t, &f, "pane-motion-slide", second_window = false) {return}
+	s := &f.state
+	s.animations = true
+	w := s.windows[0]
+	app.pane_split(s, w, .Right)
+	app.run_action(s, w, .Zoom_Pane)
+	motion_settle(s, w)
+	w.dirty = true
+	app.window_render(s, w)
+	right := w.panes[0]
+
+	app.run_action(s, w, .Focus_Left)
+	if !testing.expect_value(t, len(w.panes), 1) {return}
+	left := w.panes[0]
+	testing.expect(t, left.content != right.content)
+	testing.expect(t, app.pane_motion_animating(w) && app.pane_motion_over_chrome(w))
+	entering := app.pane_motion_rect(w, left)
+	testing.expect(t, entering.x + entering.width <= left.rect.x, "the left pane comes in from the left")
+	testing.expect_value(t, entering.width, left.rect.width)
+	motion_settle(s, w)
+	testing.expect_value(t, app.pane_motion_rect(w, left), left.rect)
+
+	// Back to the right pane, which comes in from the right.
+	w.dirty = true
+	app.window_render(s, w)
+	app.run_action(s, w, .Focus_Right)
+	entering = app.pane_motion_rect(w, w.panes[0])
+	testing.expect(t, entering.x >= right.rect.x + right.rect.width, "the right pane comes in from the right")
+}
+
+// Changing tabs while either shows a single pane slides along the tabs: sideways for a tab strip, up or
+// down for a rail; the tab further along comes from the right or from below. Between two split tabs the
+// change shows at once.
+@(test)
+changing_tabs_in_a_single_pane_view_slides_along_the_tabs :: proc(t: ^testing.T) {
+	f: Palette_Fixture
+	defer palette_fixture_destroy(t, &f)
+	if !palette_fixture_create(t, &f, "pane-motion-tabs", second_window = false) {return}
+	s := &f.state
+	s.animations = true
+	w := s.windows[0]
+	app.tab_new(s, w)
+	app.run_action(s, w, .Fill_Window_Pane)
+	motion_settle(s, w)
+
+	for horizontal in ([?]bool{true, false}) {
+		w.tabs_horizontal = horizontal
+		app.window_relayout(s, w)
+		w.dirty = true
+		app.window_render(s, w)
+		app.tab_select(s, w, 0)
+		testing.expect(t, app.pane_motion_animating(w) && app.pane_motion_over_chrome(w))
+		target := w.panes[0].rect
+		earlier := app.pane_motion_rect(w, w.panes[0])
+		if horizontal {
+			testing.expect(t, earlier.x + earlier.width <= target.x, "an earlier tab comes from the left")
+		} else {
+			testing.expect(t, earlier.y + earlier.height <= target.y, "an earlier tab comes from above")
+		}
+		motion_settle(s, w)
+		w.dirty = true
+		app.window_render(s, w)
+		app.tab_select(s, w, 1)
+		target = w.panes[0].rect
+		later := app.pane_motion_rect(w, w.panes[0])
+		if horizontal {
+			testing.expect(t, later.x >= target.x + target.width, "a later tab comes from the right")
+		} else {
+			testing.expect(t, later.y >= target.y + target.height, "a later tab comes from below")
+		}
+		motion_settle(s, w)
+	}
+
+	app.run_action(s, w, .Fill_Window_Pane)
+	motion_settle(s, w)
+	app.tab_select(s, w, 0)
+	testing.expect(t, !app.pane_motion_animating(w))
+}
+
+// Switching workspace while either shows a single pane slides up or down, as the workspace list orders
+// them: one further down the list comes from below.
+@(test)
+switching_workspace_in_a_single_pane_view_slides_along_the_workspace_list :: proc(t: ^testing.T) {
+	f: Palette_Fixture
+	defer palette_fixture_destroy(t, &f)
+	if !palette_fixture_create(t, &f, "pane-motion-workspaces", second_window = false) {return}
+	s := &f.state
+	s.animations = true
+	w := s.windows[0]
+	original := w.workspace
+	app.run_action(s, w, .Zoom_Pane)
 	motion_settle(s, w)
 	w.dirty = true
 	app.window_render(s, w)
 
-	// From a settled Fill Window, the panel slides in from the window edge.
-	app.run_action(s, w, .Fill_Window_Pane)
+	app.workspace_new(s, w, false, name_it = false)
+	if !testing.expect(t, w.workspace != original) {return}
+	testing.expect(t, app.pane_motion_animating(w))
+	target := w.panes[0].rect
+	below := app.pane_motion_rect(w, w.panes[0])
+	testing.expect(t, below.y >= target.y + target.height, "a workspace further down comes from below")
 	motion_settle(s, w)
 	w.dirty = true
 	app.window_render(s, w)
-	app.run_action(s, w, .Fill_Window_Pane)
-	testing.expect(t, app.pane_motion_animating(w))
-	entering := app.pane_motion_region_begin(w, app.PANE_MOTION_PANEL, panel).shown
-	testing.expect_value(t, entering.width, f32(0))
-	testing.expect(t, abs(entering.x - (panel.x + panel.width)) <= 1)
+
+	if !testing.expect(t, app.workspace_select(s, w, original)) {return}
+	testing.expect_value(t, app.pane_view_current(w), layout.Pane_View.Zoom)
+	target = w.panes[0].rect
+	above := app.pane_motion_rect(w, w.panes[0])
+	testing.expect(t, above.y + above.height <= target.y, "a workspace further up comes from above")
 }
 
 // Double-clicking the Activity panel's edge returns it to its default width while the panes follow it.
