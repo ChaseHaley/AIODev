@@ -66,6 +66,7 @@ View :: struct {
 	scrollbar:  Maybe(term.Scrollbar),
 	cursor:     Cursor_Motion,
 	cursor_rows: [dynamic]ghostty.Render_State_Row_Id,
+	row_cache:  Row_Cache,
 }
 
 @(require_results)
@@ -78,6 +79,9 @@ create :: proc(v: ^View, allocator := context.allocator) -> bool {
 	v.columns = make([dynamic]int, allocator)
 	v.shaped = make([dynamic]font.Shaped_Glyph, allocator)
 	v.cursor_rows = make([dynamic]ghostty.Render_State_Row_Id, allocator)
+	v.row_cache.rows = make(map[ghostty.Render_State_Row_Id]Cached_Row, allocator)
+	v.row_cache.spare = make([dynamic]Cached_Row, allocator)
+	v.row_cache.evicted = make([dynamic]ghostty.Render_State_Row_Id, allocator)
 	ok := ghostty.render_state_new(nil, &v.state) == .Success
 	ok &&= ghostty.render_state_row_iterator_new(nil, &v.rows) == .Success
 	ok &&= ghostty.render_state_row_cells_new(nil, &v.cells) == .Success
@@ -101,6 +105,7 @@ destroy :: proc(v: ^View) {
 	delete(v.columns)
 	delete(v.shaped)
 	delete(v.cursor_rows)
+	row_cache_destroy(&v.row_cache)
 	v^ = {}
 }
 
@@ -181,6 +186,10 @@ Builder :: struct {
 	cursor_color:      render.Color,
 	// Below-text images took a pass of their own for the backgrounds that go under them.
 	backgrounds_drawn: bool,
+	// Rows may come from the view's row cache: the pane draws no images.
+	row_cache:         bool,
+	// Every cell of the row row_paints just read is plain text, so its paints say all it draws.
+	row_plain:         bool,
 	frame_time:        render.Frame_Time,
 	// The cursor is between cells at progress `cursor_t`; its head covers rows `cursor_row` and the
 	// one below, whose text glyphs `cursor_text` holds.
@@ -274,6 +283,8 @@ build :: proc(
 			if list.error != .None {return frame, .Ok}
 		}
 	}
+	b.row_cache = !has_images
+	row_cache_begin(v, &b)
 	for y := 0; ghostty.render_state_row_iterator_next(v.rows); y += 1 {
 		if result := build_row(v, &b, y); result != .Ok {
 			return frame, result
@@ -281,6 +292,7 @@ build :: proc(
 		if list.error != .None {return frame, .Ok}
 	}
 	if list.error != .None {return frame, .Ok}
+	row_cache_end(v)
 	// A moving block clips its text to its head. Above-text images still use the whole pane.
 	cell_layer := list.layers[len(list.layers) - 1]
 	frame.cursor = build_cursor(v, &b)
@@ -427,9 +439,11 @@ row_paints :: proc(v: ^View, b: ^Builder, y: int) {
 	}
 	clear(&v.paints)
 	previous: term.Render_Cell
+	b.row_plain = true
 	for x := 0; ghostty.render_state_row_cells_next(v.cells); x += 1 {
 		mark := x < len(v.marks) ? v.marks[x] : .None
 		p := paint_cell(v, b, x, y, selection, selected, mark, &previous)
+		b.row_plain &&= p.plain
 		if _, err := append(&v.paints, p); err != nil {
 			b.list.error = .Out_Of_Memory
 			return
@@ -474,10 +488,30 @@ row_backgrounds :: proc(v: ^View, b: ^Builder, top: f32) {
 
 @(private)
 build_row :: proc(v: ^View, b: ^Builder, y: int) -> render.Build_Status {
-	m := b.metrics
-	top := b.origin.y + f32(y) * m.cell_height
+	top := b.origin.y + f32(y) * b.metrics.cell_height
+	id, cacheable := row_cache_id(v, b, y)
+	raw: []ghostty.Cell
+	if cacheable {
+		plain: bool
+		raw, plain = row_cache_plain_raw(v, y)
+		if plain && row_cache_replay_raw(v, b, id, raw, top) {return .Ok}
+	}
 	row_paints(v, b, y)
 	if b.list.error != .None {return .Ok}
+	cacheable &&= b.row_plain
+	if cacheable && row_cache_replay(v, b, id, top) {return .Ok}
+	rects, glyphs := len(b.list.rects), len(b.list.glyphs)
+	result := build_row_draw(v, b, y, top)
+	if cacheable && result == .Ok && b.list.error == .None {
+		row_cache_store(v, b, id, top, rects, glyphs, raw)
+	}
+	return result
+}
+
+// Draws the row whose paints row_paints prepared.
+@(private)
+build_row_draw :: proc(v: ^View, b: ^Builder, y: int, top: f32) -> render.Build_Status {
+	m := b.metrics
 	if !b.backgrounds_drawn {row_backgrounds(v, b, top)}
 	for p, x in v.paints {
 		if result := decorate(b, p, b.origin.x + f32(x) * m.cell_width, top); result != .Ok {

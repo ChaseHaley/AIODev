@@ -341,6 +341,27 @@ push_glyph :: proc(list: ^Draw_List, instance: Glyph_Instance) -> Error {
 	return .None
 }
 
+// Appends draw commands kept from an earlier build to the current layer, moved down by `dy`.
+@(require_results)
+push_instances :: proc(list: ^Draw_List, rects: []Rect_Instance, glyphs: []Glyph_Instance, dy: f32) -> Error {
+	if list.error != .None {return list.error}
+	assert(len(list.layers) > 0, "push_layer must precede push_instances")
+	if reserve(&list.rects, len(list.rects) + len(rects)) != nil ||
+	   reserve(&list.glyphs, len(list.glyphs) + len(glyphs)) != nil {
+		list.error = .Out_Of_Memory
+		return list.error
+	}
+	rect_start, glyph_start := len(list.rects), len(list.glyphs)
+	append(&list.rects, ..rects)
+	append(&list.glyphs, ..glyphs)
+	for &r in list.rects[rect_start:] {r.rect.y += dy}
+	for &g in list.glyphs[glyph_start:] {g.rect.y += dy}
+	layer := &list.layers[len(list.layers) - 1]
+	layer.rect_count += len(rects)
+	layer.glyph_count += len(glyphs)
+	return .None
+}
+
 @(require_results)
 push_image :: proc(list: ^Draw_List, instance: Image_Instance) -> Error {
 	if list.error != .None {return list.error}
