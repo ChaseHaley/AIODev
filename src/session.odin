@@ -322,9 +322,10 @@ update_sessions :: proc(app: ^App) {
 	}
 }
 
-// A sum of the generations of the sessions w shows, which changes whenever one of their screens does.
+// A sum of the generations of the sessions w shows, and of those its hidden panes map previews, which
+// changes whenever one of their screens does.
 window_generation :: proc(app: ^App, w: ^Window) -> u64 {
-	generation: u64
+	generation := hidden_panes_generation(app, w)
 	for pane in w.panes {
 		if entry := workspace_session_for_content(app, pane.content); entry != nil {
 			generation += term.generation(entry.session)
