@@ -145,6 +145,9 @@ Document_Menu :: struct {
 	submenu_row: Maybe(int),
 	// Keeps the submenu while the pointer heads from its row to it (menu aim).
 	reveal:      ui.Hover_Reveal,
+	// A row the pointer rests on whose submenu shows LINK_SUBMENU_DELAY after `pending_since`.
+	pending_row:   Maybe(int),
+	pending_since: time.Tick,
 }
 
 @(private = "file", rodata)
@@ -585,19 +588,49 @@ document_submenu_close :: proc(w: ^Window) {
 
 @(private = "file")
 document_submenu_reset :: proc(menu: ^Document_Menu) {
-	menu.submenu_row = nil
+	menu.submenu_row, menu.pending_row = nil, nil
 	ui.hover_reveal_close(&menu.reveal)
 }
 
-// An aim at the submenu that stopped short of it gives the row under the pointer its turn.
+// How long the pointer rests on a row before its submenu shows, Radix UI's open delay, so a sweep down the
+// menu does not flash each submenu it crosses. The keyboard opens one at once.
+LINK_SUBMENU_DELAY :: 100 * time.Millisecond
+
+// Shows the submenu of the row the pointer, at `point`, rests on once LINK_SUBMENU_DELAY has passed. True
+// when it did.
+@(private = "file")
+document_submenu_settle :: proc(app: ^App, w: ^Window, point: [2]f32, now: time.Tick) -> bool {
+	menu := &w.document_menu
+	row, pending := menu.pending_row.?
+	if !pending || time.tick_diff(time.tick_add(menu.pending_since, LINK_SUBMENU_DELAY), now) < 0 {return false}
+	menu.pending_row = nil
+	parent := document_submenu_parent(w)
+	if parent == nil {return false}
+	width, height := f32(w.width), f32(w.height)
+	if ui.menu_hit(parent, point.x, point.y, width, height, w.scale) != row {return false}
+	document_submenu_open(app, w, row, false)
+	trigger := ui.menu_row_rect(parent, row, width, height, w.scale)
+	surface, _ := ui.menu_layout(&menu.submenu, width, height, w.scale)
+	slack := ui.HOVER_AIM_SLACK * w.scale
+	ui.hover_reveal_move(&menu.reveal, point, true, false, false, trigger, surface, slack, now)
+	return true
+}
+
+// An aim at the submenu that stopped short of it gives the row under the pointer its turn, and a row the
+// pointer has rested on long enough shows its submenu.
 document_submenu_tick :: proc(app: ^App, w: ^Window, now: time.Tick) {
-	if !ui.hover_reveal_tick(&w.document_menu.reveal, now) || !document_menu_shown(w) {return}
+	if !document_menu_shown(w) {return}
+	if document_submenu_settle(app, w, w.pointer, now) {return}
+	if !ui.hover_reveal_tick(&w.document_menu.reveal, now) {return}
 	document_submenu_close(w)
 	document_menu_hover(app, w, w.pointer.x, w.pointer.y, false)
 }
 
 document_submenu_deadline :: proc(w: ^Window) -> (time.Tick, bool) {
 	if !document_menu_shown(w) {return {}, false}
+	if _, pending := w.document_menu.pending_row.?; pending {
+		return time.tick_add(w.document_menu.pending_since, LINK_SUBMENU_DELAY), true
+	}
 	return ui.hover_reveal_deadline(w.document_menu.reveal)
 }
 
@@ -674,15 +707,25 @@ document_submenu_hover :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {
 		}
 		if menu.reveal.open && !on_trigger {return true}
 	}
-	if hit < 0 {return false}
+	if hit < 0 {
+		menu.pending_row = nil
+		return false
+	}
 	if !parent.items[hit].submenu {
 		document_submenu_close(w)
 		return false
 	}
-	document_submenu_open(app, w, hit, false)
-	trigger := ui.menu_row_rect(parent, hit, width, height, w.scale)
-	surface, _ := ui.menu_layout(&menu.submenu, width, height, w.scale)
-	ui.hover_reveal_move(&menu.reveal, {x, y}, true, false, false, trigger, surface, slack, now)
+	if current, open := menu.submenu_row.?; open && current == hit {
+		trigger := ui.menu_row_rect(parent, hit, width, height, w.scale)
+		surface, _ := ui.menu_layout(&menu.submenu, width, height, w.scale)
+		ui.hover_reveal_move(&menu.reveal, {x, y}, true, false, false, trigger, surface, slack, now)
+		return false
+	}
+	if menu.submenu_row != nil {document_submenu_close(w)}
+	if pending, waiting := menu.pending_row.?; !waiting || pending != hit {
+		menu.pending_row, menu.pending_since = hit, now
+	}
+	_ = document_submenu_settle(app, w, {x, y}, now)
 	return false
 }
 

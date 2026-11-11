@@ -584,6 +584,7 @@ a_markdown_link_offers_the_link_menu_and_opens_its_file_in_a_linked_window :: pr
 	rect := ui.menu_row_rect(&menu.menu, row, f32(w.width), f32(w.height), w.scale)
 	app.handle_event(&f.state, input.Mouse_Move_Event{window = w.id, x = i32(rect.x + 40 * w.scale),
 		y = i32(rect.y + rect.height / 2)})
+	app.document_submenu_tick(&f.state, w, time.tick_add(time.tick_now(), time.Second))
 	if !testing.expect(t, app.document_submenu_shown(w)) {return}
 	place := -1
 	for item, i in menu.submenu.items {

@@ -6,6 +6,7 @@ import "core:os"
 import "core:strings"
 import "core:sync"
 import "core:testing"
+import "core:time"
 import app "../../src"
 import "aio:input"
 import "aio:layout"
@@ -284,6 +285,14 @@ choose_placement :: proc(
 // Rests the pointer on row `row` of `parent`, which shows its placements.
 @(private = "file")
 point_at :: proc(s: ^app.App, w: ^app.Window, parent: ^ui.Menu, row: int) {
+	pass_over(s, w, parent, row)
+	// Resting there: a row shows its submenu after app.LINK_SUBMENU_DELAY.
+	app.document_submenu_tick(s, w, time.tick_add(time.tick_now(), time.Second))
+}
+
+// Moves the pointer onto row `row` of `parent` without resting there.
+@(private = "file")
+pass_over :: proc(s: ^app.App, w: ^app.Window, parent: ^ui.Menu, row: int) {
 	r := ui.menu_row_rect(parent, row, f32(w.width), f32(w.height), w.scale)
 	app.handle_event(s, input.Mouse_Move_Event{window = w.id, x = i32(r.x + 40 * w.scale), y = i32(r.y + r.height / 2)})
 }
@@ -1016,9 +1025,12 @@ link_programs_open_links_in_panes_and_in_their_own_windows :: proc(t: ^testing.T
 	point_at(s, w, &w.document_menu.menu, labelled_row(w, "Open in Echo"))
 	testing.expect_value(t, w.document_menu.submenu.items[placement_row(w, .Split_Down)].shortcut, "Default")
 	// Moving straight down to the next row is not heading for the submenu: that row takes the hover at once.
-	point_at(s, w, &w.document_menu.menu, labelled_row(w, "Open in Viewer"))
+	pass_over(s, w, &w.document_menu.menu, labelled_row(w, "Open in Viewer"))
 	testing.expect_value(t, ui.menu_selected(&w.document_menu.menu), labelled_row(w, "Open in Viewer"))
 	testing.expect(t, !app.document_submenu_shown(w), "the submenu gives way")
+	// Passing over a row with placements shows them only once the pointer rests there.
+	pass_over(s, w, &w.document_menu.menu, labelled_row(w, "Open in Echo"))
+	testing.expect(t, !app.document_submenu_shown(w), "not while passing over")
 	point_at(s, w, &w.document_menu.menu, labelled_row(w, "Open in Echo"))
 	choose_placement(s, w, &w.document_menu.menu, labelled_row(w, "Open in Echo"), .Float)
 	testing.expect_value(t, len(app.floating_rects(w)), 1)

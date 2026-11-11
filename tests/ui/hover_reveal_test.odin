@@ -98,62 +98,52 @@ hover_reveal_hides_the_surface_when_the_pointer_stops_short :: proc(t: ^testing.
 }
 
 // A submenu beside its row, with the menu's next rows below the row. Over one of them the submenu stays only
-// while the pointer heads for it, measured over the last few moves so one jittery step does not count.
+// inside the grace polygon from where the pointer left the row to the submenu, while moving toward it, and
+// for HOVER_AIM_GRACE after leaving.
 @(test)
-hover_reveal_gives_way_to_a_competitor_unless_heading_for_the_surface :: proc(t: ^testing.T) {
+hover_reveal_gives_a_competitor_the_hover_outside_the_grace :: proc(t: ^testing.T) {
 	row := render.Rect{0, 0, 200, 30}
 	submenu := render.Rect{200, 0, 160, 150}
+	grace := int(time.duration_milliseconds(ui.HOVER_AIM_GRACE))
 	start := time.tick_now()
 	step :: proc(r: ^ui.Hover_Reveal, row, submenu: render.Rect, p: [2]f32, now: time.Tick) {
 		on_row, on_submenu := render.rect_contains(row, p.x, p.y), render.rect_contains(submenu, p.x, p.y)
 		_ = ui.hover_reveal_move(r, p, on_row, on_submenu, !on_row && !on_submenu, row, submenu, 16, now)
 	}
 	r: ui.Hover_Reveal
-	step(&r, row, submenu, {40, 15}, start)
+	step(&r, row, submenu, {30, 15}, start)
+	step(&r, row, submenu, {40, 15}, at(start, 8))
 	step(&r, row, submenu, {40, 45}, at(start, 16))
-	testing.expect(t, !r.open, "straight down to the next row hides it at once")
+	testing.expect(t, !r.open, "straight down to the next row")
 
 	r = {}
-	step(&r, row, submenu, {120, 15}, start)
-	step(&r, row, submenu, {140, 35}, at(start, 16))
-	step(&r, row, submenu, {140, 36}, at(start, 32))
-	testing.expect(t, r.open, "a jittery step while crossing diagonally keeps it")
-	step(&r, row, submenu, {165, 50}, at(start, 48))
-	testing.expect(t, r.open && r.aiming, "still heading for it")
-	step(&r, row, submenu, {165, 70}, at(start, 64))
-	step(&r, row, submenu, {165, 90}, at(start, 80))
-	step(&r, row, submenu, {165, 110}, at(start, 96))
-	testing.expect(t, !r.open, "turning down the menu hides it")
-}
-
-// Over a competitor the aim must keep moving: a pause gives the competitor the hover after
-// HOVER_AIM_CONTESTED, and a hand drifting slowly toward the submenu while settling on the next row does not
-// count as heading for it.
-@(test)
-hover_reveal_gives_way_quickly_to_a_competitor_when_the_pointer_settles :: proc(t: ^testing.T) {
-	row := render.Rect{0, 0, 200, 30}
-	submenu := render.Rect{200, 0, 160, 150}
-	contested := int(time.duration_milliseconds(ui.HOVER_AIM_CONTESTED))
-	start := time.tick_now()
-	step :: proc(r: ^ui.Hover_Reveal, row, submenu: render.Rect, p: [2]f32, now: time.Tick) {
-		on_row, on_submenu := render.rect_contains(row, p.x, p.y), render.rect_contains(submenu, p.x, p.y)
-		_ = ui.hover_reveal_move(r, p, on_row, on_submenu, !on_row && !on_submenu, row, submenu, 16, now)
-	}
-	r: ui.Hover_Reveal
-	step(&r, row, submenu, {120, 15}, start)
-	step(&r, row, submenu, {140, 35}, at(start, 16))
-	testing.expect(t, r.open, "heading for it")
-	testing.expect(t, !ui.hover_reveal_tick(&r, at(start, 16 + contested - 1)))
-	testing.expect(t, ui.hover_reveal_tick(&r, at(start, 16 + contested)), "a pause on the row gives it the hover")
+	step(&r, row, submenu, {100, 15}, start)
+	step(&r, row, submenu, {120, 15}, at(start, 8))
+	step(&r, row, submenu, {124, 45}, at(start, 16))
+	testing.expect(t, !r.open, "drifting down onto the next row, below the polygon")
 
 	r = {}
-	step(&r, row, submenu, {120, 15}, start)
-	step(&r, row, submenu, {121, 32}, at(start, 40))
-	step(&r, row, submenu, {122, 34}, at(start, 80))
-	step(&r, row, submenu, {123, 35}, at(start, 120))
-	testing.expect(t, r.open, "still coming down off the row")
-	step(&r, row, submenu, {124, 36}, at(start, 160))
-	testing.expect(t, !r.open, "a slow drift closer is settling, not aiming")
+	step(&r, row, submenu, {100, 15}, start)
+	step(&r, row, submenu, {120, 15}, at(start, 8))
+	step(&r, row, submenu, {140, 32}, at(start, 16))
+	step(&r, row, submenu, {160, 45}, at(start, 24))
+	testing.expect(t, r.open && r.aiming, "crossing the next row toward the submenu")
+	testing.expect(t, !ui.hover_reveal_tick(&r, at(start, 16 + grace - 1)))
+	testing.expect(t, ui.hover_reveal_tick(&r, at(start, 16 + grace)), "stopping there ends the grace")
+
+	r = {}
+	step(&r, row, submenu, {100, 15}, start)
+	step(&r, row, submenu, {120, 15}, at(start, 8))
+	step(&r, row, submenu, {140, 32}, at(start, 16))
+	step(&r, row, submenu, {135, 40}, at(start, 24))
+	testing.expect(t, !r.open, "turning back inside the polygon")
+
+	r = {}
+	step(&r, row, submenu, {100, 15}, start)
+	step(&r, row, submenu, {120, 15}, at(start, 8))
+	step(&r, row, submenu, {140, 32}, at(start, 16))
+	step(&r, row, submenu, {160, 45}, at(start, 16 + grace))
+	testing.expect(t, !r.open, "arriving after the grace")
 }
 
 // The safe area is the hull of the trigger and the surface: it reaches past the trigger's whole box, not
