@@ -10,13 +10,6 @@ Render_State_Dirty :: enum i32 {
 	Full    = 2,
 }
 
-Render_State_Cursor_Visual_Style :: enum i32 {
-	Bar          = 0,
-	Block        = 1,
-	Underline    = 2,
-	Block_Hollow = 3,
-}
-
 Render_State_Overscan :: struct {
 	above: u16,
 	below: u16,
@@ -27,33 +20,75 @@ Render_State_Row_Id :: struct {
 }
 
 Render_State_Data :: enum i32 {
-	Invalid                   = 0,
-	Cols                      = 1,
-	Rows                      = 2,
-	Dirty                     = 3,
-	Row_Iterator              = 4,
-	Color_Background          = 5,
-	Color_Foreground          = 6,
-	Color_Cursor              = 7,
-	Color_Cursor_Has_Value    = 8,
-	Color_Palette             = 9,
-	Cursor_Visual_Style       = 10,
-	Cursor_Visible            = 11,
-	Cursor_Blinking           = 12,
-	Cursor_Password_Input     = 13,
-	Cursor_Viewport_Has_Value = 14,
-	Cursor_Viewport_X         = 15,
-	Cursor_Viewport_Y         = 16,
-	Cursor_Viewport_Wide_Tail = 17,
-	Cursor                    = 18,
-	Colors                    = 19,
-	Overscan                  = 20,
-	Overscan_Request          = 21,
+	Invalid                     = 0,
+	Cols                        = 1,
+	Rows                        = 2,
+	Dirty                       = 3,
+	Row_Iterator                = 4,
+	Color_Background            = 5,
+	Color_Foreground            = 6,
+	Color_Cursor                = 7,
+	Color_Cursor_Has_Value      = 8,
+	Color_Palette               = 9,
+	Cursor_Visual_Style         = 10,
+	Cursor_Visible              = 11,
+	Cursor_Blinking             = 12,
+	Cursor_Password_Input       = 13,
+	Cursor_Viewport_Has_Value   = 14,
+	Cursor_Viewport_X           = 15,
+	Cursor_Viewport_Y           = 16,
+	Cursor_Viewport_Wide_Tail   = 17,
+	Cursor                      = 18,
+	Colors                      = 19,
+	Overscan                    = 20,
+	Overscan_Request            = 21,
+	Image_Iterator              = 22,
+	Image_Placements_Generation = 23,
 }
 
 Render_State_Option :: enum i32 {
-	Dirty    = 0,
-	Overscan = 1,
+	Invalid  = 0,
+	Dirty    = 1,
+	Overscan = 2,
+}
+
+Image_Protocol :: enum i32 {
+	Kitty = 0,
+}
+
+Image_Layer :: enum i32 {
+	Below_Background = 0,
+	Below_Text       = 1,
+	Above_Text       = 2,
+}
+
+Render_State_Kitty_Placement_Kind :: enum i32 {
+	Virtual  = 0,
+	Relative = 1,
+	Fixed    = 2,
+}
+
+Render_State_Image_Data :: enum i32 {
+	Invalid            = 0,
+	Protocol           = 1,
+	Image_Id           = 2,
+	Image_Generation   = 3,
+	Layer              = 4,
+	Z                  = 5,
+	Viewport_Col       = 6,
+	Viewport_Row       = 7,
+	Grid_Cols          = 8,
+	Grid_Rows          = 9,
+	Cell_Offset_X      = 10,
+	Cell_Offset_Y      = 11,
+	Pixel_Width        = 12,
+	Pixel_Height       = 13,
+	Source_X           = 14,
+	Source_Y           = 15,
+	Source_Width       = 16,
+	Source_Height      = 17,
+	Kitty_Placement_Id = 18,
+	Kitty_Kind         = 19,
 }
 
 Render_State_Row_Data :: enum i32 {
@@ -68,7 +103,8 @@ Render_State_Row_Data :: enum i32 {
 }
 
 Render_State_Row_Option :: enum i32 {
-	Dirty = 0,
+	Invalid = 0,
+	Dirty   = 1,
 }
 
 Render_State_Row_Selection :: struct {
@@ -86,7 +122,7 @@ Render_State_Cursor :: struct {
 	visible:            bool,
 	blinking:           bool,
 	password_input:     bool,
-	visual_style:       Render_State_Cursor_Visual_Style,
+	visual_style:       Cursor_Style,
 }
 
 Render_State_Colors :: struct {
@@ -154,4 +190,13 @@ foreign lib {
 	@(require_results)
 	render_state_row_cells_get_multi :: proc(cells: Render_State_Row_Cells, count: uint, keys: [^]Render_State_Row_Cells_Data, values: [^]rawptr, out_written: ^uint) -> Result ---
 	render_state_row_cells_free :: proc(cells: Render_State_Row_Cells) ---
+	@(require_results)
+	render_state_image_iterator_new :: proc(allocator: ^Allocator, out_iterator: ^Render_State_Image_Iterator) -> Result ---
+	render_state_image_iterator_free :: proc(iterator: Render_State_Image_Iterator) ---
+	@(require_results)
+	render_state_image_iterator_next :: proc(iterator: Render_State_Image_Iterator) -> bool ---
+	@(require_results)
+	render_state_image_get :: proc(iterator: Render_State_Image_Iterator, data: Render_State_Image_Data, out: rawptr) -> Result ---
+	@(require_results)
+	render_state_image_get_multi :: proc(iterator: Render_State_Image_Iterator, count: uint, keys: [^]Render_State_Image_Data, values: [^]rawptr, out_written: ^uint) -> Result ---
 }

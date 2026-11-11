@@ -9,6 +9,7 @@ Result :: enum i32 {
 	Io_Error       = -5,
 	Limit_Exceeded = -6,
 	Rejected       = -7,
+	Unsupported    = -8,
 }
 
 Terminal :: distinct rawptr
@@ -19,10 +20,21 @@ Render_State_Row_Iterator :: distinct rawptr
 
 Render_State_Row_Cells :: distinct rawptr
 
+Render_State_Image_Iterator :: distinct rawptr
+
+Formatter :: distinct rawptr
+
 Formatter_Format :: enum i32 {
-	Plain,
-	Vt,
-	Html,
+	Plain = 0,
+	Vt    = 1,
+	Html  = 2,
+}
+
+Cursor_Style :: enum i32 {
+	Bar          = 0,
+	Block        = 1,
+	Underline    = 2,
+	Block_Hollow = 3,
 }
 
 String :: struct {
@@ -43,6 +55,12 @@ Surface_Position :: struct {
 
 Codepoints :: struct {
 	ptr: [^]u32,
+	len: uint,
+}
+
+Codepoint_Buffer :: struct {
+	ptr: [^]u32,
+	cap: uint,
 	len: uint,
 }
 

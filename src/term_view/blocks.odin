@@ -83,8 +83,8 @@ blocks_row :: proc(
 		has_bg := false
 		if rgb, ok := c.foreground.?; ok {fg = color(rgb)}
 		if rgb, ok := c.background.?; ok {bg, has_bg = color(rgb), true}
-		if c.style.inverse {fg, bg, has_bg = bg, fg, true}
-		if c.style.faint {fg.a *= 0.5}
+		if c.style.flags.inverse {fg, bg, has_bg = bg, fg, true}
+		if c.style.flags.faint {fg.a *= 0.5}
 		// The trailing half of a wide character continues whatever its lead began.
 		if c.width == .Spacer_Tail {continue}
 		want: Maybe(render.Color)
@@ -107,7 +107,7 @@ blocks_row :: proc(
 // Whether a cell shows a character: written, not a space, and not hidden.
 @(private = "file")
 blocks_written :: proc(c: term.Render_Cell) -> bool {
-	if c.style.invisible || c.width == .Spacer_Head {return false}
+	if c.style.flags.invisible || c.width == .Spacer_Head {return false}
 	has_text: bool
 	if ghostty.cell_get(c.raw, .Has_Text, &has_text) != .Success || !has_text {return false}
 	codepoint: u32

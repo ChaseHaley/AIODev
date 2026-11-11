@@ -24,7 +24,6 @@ Ghostty_Clipboard_Content :: struct {
 }
 
 Ghostty_Clipboard_Write :: struct {
-	size:         uint,
 	location:     i32,
 	contents:     [^]Ghostty_Clipboard_Content,
 	contents_len: uint,
@@ -37,7 +36,6 @@ Ghostty_Clipboard_Write :: struct {
 }
 
 Ghostty_Clipboard_Read :: struct {
-	size:         uint,
 	location:     i32,
 	mimes:        [^]ghostty.String,
 	mimes_len:    uint,
@@ -51,13 +49,13 @@ Ghostty_Clipboard_Read :: struct {
 }
 
 #assert(size_of(Ghostty_Clipboard_Content) == 32)
-#assert(size_of(Ghostty_Clipboard_Write) == 72)
-#assert(size_of(Ghostty_Clipboard_Read) == 80)
-#assert(offset_of(Ghostty_Clipboard_Write, contents) == 16)
-#assert(offset_of(Ghostty_Clipboard_Write, reply) == 64)
-#assert(offset_of(Ghostty_Clipboard_Read, mimes) == 16)
-#assert(offset_of(Ghostty_Clipboard_Read, list) == 32)
-#assert(offset_of(Ghostty_Clipboard_Read, reply) == 72)
+#assert(size_of(Ghostty_Clipboard_Write) == 64)
+#assert(size_of(Ghostty_Clipboard_Read) == 72)
+#assert(offset_of(Ghostty_Clipboard_Write, contents) == 8)
+#assert(offset_of(Ghostty_Clipboard_Write, reply) == 56)
+#assert(offset_of(Ghostty_Clipboard_Read, mimes) == 8)
+#assert(offset_of(Ghostty_Clipboard_Read, list) == 24)
+#assert(offset_of(Ghostty_Clipboard_Read, reply) == 64)
 
 foreign import user32 "system:user32.lib"
 

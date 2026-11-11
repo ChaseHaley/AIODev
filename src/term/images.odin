@@ -153,14 +153,15 @@ image_pixels :: proc(
 	current: u64
 	width, height: u32
 	format: ghostty.Kitty_Image_Format
-	data: [^]u8
-	length: uint
-	keys := [?]ghostty.Kitty_Graphics_Image_Data{.Generation, .Width, .Height, .Format, .Data_Len, .Data_Ptr}
-	values := [?]rawptr{&current, &width, &height, &format, &length, &data}
+	pixels: ghostty.String
+	keys := [?]ghostty.Kitty_Graphics_Image_Data{.Generation, .Width, .Height, .Format, .Pixels}
+	values := [?]rawptr{&current, &width, &height, &format, &pixels}
+	// Pixels still in transit report no value, which fails the whole query.
 	if ghostty.kitty_graphics_image_get_multi(image, len(keys), &keys[0], &values[0], nil) != .Success {
 		return nil, false
 	}
-	if current != generation || data == nil {return nil, false}
+	if current != generation || pixels.ptr == nil {return nil, false}
+	data, length := pixels.ptr, pixels.len
 	count := int(width) * int(height)
 	out, allocation_error := make([]u8, count * 4, allocator)
 	if allocation_error != nil {

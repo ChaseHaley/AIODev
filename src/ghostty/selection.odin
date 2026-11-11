@@ -9,7 +9,6 @@ Selection_Gesture :: distinct rawptr
 Selection_Gesture_Event :: distinct rawptr
 
 Selection :: struct {
-	size:      uint,
 	start:     Grid_Ref,
 	end:       Grid_Ref,
 	rectangle: bool,
@@ -42,14 +41,6 @@ Terminal_Select_Line_Options :: struct {
 	whitespace:               [^]u32,
 	whitespace_len:           uint,
 	semantic_prompt_boundary: bool,
-}
-
-Terminal_Selection_Format_Options :: struct {
-	size:      uint,
-	emit:      Formatter_Format,
-	unwrap:    bool,
-	trim:      bool,
-	selection: ^Selection,
 }
 
 Selection_Order :: enum i32 {
@@ -99,11 +90,12 @@ Selection_Gesture_Autoscroll :: enum i32 {
 }
 
 Selection_Gesture_Data :: enum i32 {
-	Click_Count = 0,
-	Dragged     = 1,
-	Autoscroll  = 2,
-	Behavior    = 3,
-	Anchor      = 4,
+	Invalid     = 0,
+	Click_Count = 1,
+	Dragged     = 2,
+	Autoscroll  = 3,
+	Behavior    = 4,
+	Anchor      = 5,
 }
 
 Selection_Gesture_Event_Type :: enum i32 {
@@ -115,16 +107,17 @@ Selection_Gesture_Event_Type :: enum i32 {
 }
 
 Selection_Gesture_Event_Option :: enum i32 {
-	Ref                      = 0,
-	Position                 = 1,
-	Repeat_Distance          = 2,
-	Time_Ns                  = 3,
-	Repeat_Interval_Ns       = 4,
-	Word_Boundary_Codepoints = 5,
-	Behaviors                = 6,
-	Rectangle                = 7,
-	Geometry                 = 8,
-	Viewport                 = 9,
+	Invalid                  = 0,
+	Ref                      = 1,
+	Position                 = 2,
+	Repeat_Distance          = 3,
+	Time_Ns                  = 4,
+	Repeat_Interval_Ns       = 5,
+	Word_Boundary_Codepoints = 6,
+	Behaviors                = 7,
+	Rectangle                = 8,
+	Geometry                 = 9,
+	Viewport                 = 10,
 }
 
 @(default_calling_convention = "c", link_prefix = "ghostty_")
@@ -153,11 +146,7 @@ foreign lib {
 	@(require_results)
 	terminal_select_all :: proc(terminal: Terminal, out_selection: ^Selection) -> Result ---
 	@(require_results)
-	terminal_select_output :: proc(terminal: Terminal, ref: Grid_Ref, out_selection: ^Selection) -> Result ---
-	@(require_results)
-	terminal_selection_format_buf :: proc(terminal: Terminal, options: Terminal_Selection_Format_Options, buf: [^]u8, buf_len: uint, out_written: ^uint) -> Result ---
-	@(require_results)
-	terminal_selection_format_alloc :: proc(terminal: Terminal, allocator: ^Allocator, options: Terminal_Selection_Format_Options, out_ptr: ^[^]u8, out_len: ^uint) -> Result ---
+	terminal_select_output :: proc(terminal: Terminal, ref: ^Grid_Ref, out_selection: ^Selection) -> Result ---
 	@(require_results)
 	terminal_selection_adjust :: proc(terminal: Terminal, selection: ^Selection, adjustment: Selection_Adjust) -> Result ---
 	@(require_results)

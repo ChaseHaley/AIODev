@@ -37,17 +37,22 @@ foreign lib {
 	@(require_results)
 	mouse_event_new :: proc(allocator: ^Allocator, event: ^Mouse_Event) -> Result ---
 	mouse_event_free :: proc(event: Mouse_Event) ---
-	mouse_event_set_action :: proc(event: Mouse_Event, action: Mouse_Action) ---
+	@(require_results)
+	mouse_event_set_action :: proc(event: Mouse_Event, action: Mouse_Action) -> Result ---
 	@(require_results)
 	mouse_event_get_action :: proc(event: Mouse_Event) -> Mouse_Action ---
-	mouse_event_set_button :: proc(event: Mouse_Event, button: Mouse_Button) ---
-	mouse_event_clear_button :: proc(event: Mouse_Event) ---
 	@(require_results)
-	mouse_event_get_button :: proc(event: Mouse_Event, out_button: ^Mouse_Button) -> bool ---
-	mouse_event_set_mods :: proc(event: Mouse_Event, mods: Mods) ---
+	mouse_event_set_button :: proc(event: Mouse_Event, button: Mouse_Button) -> Result ---
+	@(require_results)
+	mouse_event_clear_button :: proc(event: Mouse_Event) -> Result ---
+	@(require_results)
+	mouse_event_get_button :: proc(event: Mouse_Event, out_button: ^Mouse_Button) -> Result ---
+	@(require_results)
+	mouse_event_set_mods :: proc(event: Mouse_Event, mods: Mods) -> Result ---
 	@(require_results)
 	mouse_event_get_mods :: proc(event: Mouse_Event) -> Mods ---
-	mouse_event_set_position :: proc(event: Mouse_Event, position: Mouse_Position) ---
+	@(require_results)
+	mouse_event_set_position :: proc(event: Mouse_Event, position: Mouse_Position) -> Result ---
 	@(require_results)
 	mouse_event_get_position :: proc(event: Mouse_Event) -> Mouse_Position ---
 }

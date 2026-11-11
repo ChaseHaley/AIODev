@@ -71,14 +71,23 @@ consumed_mods :: proc(event: input.Key_Event) -> ghostty.Mods {
 @(private)
 encode_key :: proc(s: ^Session, event: input.Key_Event, out: []u8) -> int {
 	e := s.key_event
-	ghostty.key_encoder_setopt_from_terminal(s.key_encoder, s.terminal)
-	ghostty.key_event_set_action(e, key_action(event))
-	ghostty.key_event_set_key(e, ghostty_keys[event.key])
-	ghostty.key_event_set_mods(e, ghostty_mods(event.modifiers))
-	ghostty.key_event_set_consumed_mods(e, consumed_mods(event))
-	ghostty.key_event_set_composing(e, false)
-	ghostty.key_event_set_utf8(e, raw_data(event.text), len(event.text))
-	ghostty.key_event_set_unshifted_codepoint(e, u32(event.unshifted))
+	text := ghostty.String{raw_data(event.text), uint(len(event.text))}
+	results := [?]ghostty.Result {
+		ghostty.key_encoder_set_from_terminal(s.key_encoder, s.terminal),
+		ghostty.key_event_set_action(e, key_action(event)),
+		ghostty.key_event_set_key(e, ghostty_keys[event.key]),
+		ghostty.key_event_set_mods(e, ghostty_mods(event.modifiers)),
+		ghostty.key_event_set_consumed_mods(e, consumed_mods(event)),
+		ghostty.key_event_set_composing(e, false),
+		ghostty.key_event_set_utf8(e, text),
+		ghostty.key_event_set_unshifted_codepoint(e, u32(event.unshifted)),
+	}
+	for result in results {
+		if result != .Success {
+			log.errorf("term: preparing a key event failed: %v", result)
+			return 0
+		}
+	}
 	n: uint
 	result := ghostty.key_encoder_encode(s.key_encoder, e, raw_data(out), len(out), &n)
 	if result != .Success {
@@ -228,14 +237,19 @@ encode_mouse :: proc(
 	out: []u8,
 ) -> int {
 	e := s.mouse_event
-	ghostty.mouse_event_set_action(e, action)
-	if b, ok := button.?; ok {
-		ghostty.mouse_event_set_button(e, b)
-	} else {
-		ghostty.mouse_event_clear_button(e)
+	b, has_button := button.?
+	results := [?]ghostty.Result {
+		ghostty.mouse_event_set_action(e, action),
+		has_button ? ghostty.mouse_event_set_button(e, b) : ghostty.mouse_event_clear_button(e),
+		ghostty.mouse_event_set_mods(e, ghostty_mods(modifiers)),
+		ghostty.mouse_event_set_position(e, {x, y}),
 	}
-	ghostty.mouse_event_set_mods(e, ghostty_mods(modifiers))
-	ghostty.mouse_event_set_position(e, {x, y})
+	for result in results {
+		if result != .Success {
+			log.errorf("term: preparing a mouse event failed: %v", result)
+			return 0
+		}
+	}
 	n: uint
 	result := ghostty.mouse_encoder_encode(s.mouse_encoder, e, raw_data(out), len(out), &n)
 	if result != .Success {
@@ -245,13 +259,23 @@ encode_mouse :: proc(
 	return int(n)
 }
 
-@(private)
-configure_mouse_encoder :: proc(s: ^Session, any_pressed: bool) {
+// Points the encoder at the terminal's mouse modes and the current geometry; false when it refused.
+@(private, require_results)
+configure_mouse_encoder :: proc(s: ^Session, any_pressed: bool) -> bool {
 	size := encoder_size(s.geometry)
 	pressed := any_pressed
-	ghostty.mouse_encoder_setopt_from_terminal(s.mouse_encoder, s.terminal)
-	ghostty.mouse_encoder_setopt(s.mouse_encoder, .Size, &size)
-	ghostty.mouse_encoder_setopt(s.mouse_encoder, .Any_Button_Pressed, &pressed)
+	results := [?]ghostty.Result {
+		ghostty.mouse_encoder_set_from_terminal(s.mouse_encoder, s.terminal),
+		ghostty.mouse_encoder_set(s.mouse_encoder, .Size, &size),
+		ghostty.mouse_encoder_set(s.mouse_encoder, .Any_Button_Pressed, &pressed),
+	}
+	for result in results {
+		if result != .Success {
+			log.errorf("term: configuring the mouse encoder failed: %v", result)
+			return false
+		}
+	}
+	return true
 }
 
 // Reports a mouse event to the running program; x and y are surface pixels.
@@ -283,8 +307,10 @@ send_mouse :: proc(
 	}
 	buffer: [64]u8
 	sync.mutex_lock(&s.mutex)
-	configure_mouse_encoder(s, card(pressed) > 0)
-	n := encode_mouse(s, ghostty_action, target, modifiers, x, y, buffer[:])
+	n := 0
+	if configure_mouse_encoder(s, card(pressed) > 0) {
+		n = encode_mouse(s, ghostty_action, target, modifiers, x, y, buffer[:])
+	}
 	sync.mutex_unlock(&s.mutex)
 	if n > 0 {
 		_ = queue_push(&s.queue, buffer[:n])
@@ -311,7 +337,7 @@ scroll :: proc(s: ^Session, rows: int, modifiers: input.Modifiers, x, y: f32) {
 	steps := min(abs(rows), 8)
 	switch {
 	case tracked:
-		configure_mouse_encoder(s, false)
+		if !configure_mouse_encoder(s, false) {break}
 		button: ghostty.Mouse_Button = rows > 0 ? .Four : .Five
 		for _ in 0 ..< steps {
 			n += encode_mouse(s, .Press, button, modifiers, x, y, buffer[n:])
@@ -322,7 +348,13 @@ scroll :: proc(s: ^Session, rows: int, modifiers: input.Modifiers, x, y: f32) {
 			n += encode_key(s, {key = key, pressed = true}, buffer[n:])
 		}
 	case:
-		ghostty.terminal_scroll_viewport(s.terminal, {tag = .Delta, value = {delta = -rows}})
+		behavior := ghostty.Terminal_Scroll_Viewport {
+			tag = .Delta,
+			value = {delta = -rows},
+		}
+		if result := ghostty.terminal_scroll_viewport(s.terminal, behavior); result != .Success {
+			log.errorf("term: scrolling the viewport failed: %v", result)
+		}
 	}
 	sync.mutex_unlock(&s.mutex)
 	if n > 0 {

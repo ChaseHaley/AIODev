@@ -211,25 +211,32 @@ foreign lib {
 	@(require_results)
 	key_event_new :: proc(allocator: ^Allocator, event: ^Key_Event) -> Result ---
 	key_event_free :: proc(event: Key_Event) ---
-	key_event_set_action :: proc(event: Key_Event, action: Key_Action) ---
+	@(require_results)
+	key_event_set_action :: proc(event: Key_Event, action: Key_Action) -> Result ---
 	@(require_results)
 	key_event_get_action :: proc(event: Key_Event) -> Key_Action ---
-	key_event_set_key :: proc(event: Key_Event, key: Key) ---
+	@(require_results)
+	key_event_set_key :: proc(event: Key_Event, key: Key) -> Result ---
 	@(require_results)
 	key_event_get_key :: proc(event: Key_Event) -> Key ---
-	key_event_set_mods :: proc(event: Key_Event, mods: Mods) ---
+	@(require_results)
+	key_event_set_mods :: proc(event: Key_Event, mods: Mods) -> Result ---
 	@(require_results)
 	key_event_get_mods :: proc(event: Key_Event) -> Mods ---
-	key_event_set_consumed_mods :: proc(event: Key_Event, consumed_mods: Mods) ---
+	@(require_results)
+	key_event_set_consumed_mods :: proc(event: Key_Event, consumed_mods: Mods) -> Result ---
 	@(require_results)
 	key_event_get_consumed_mods :: proc(event: Key_Event) -> Mods ---
-	key_event_set_composing :: proc(event: Key_Event, composing: bool) ---
+	@(require_results)
+	key_event_set_composing :: proc(event: Key_Event, composing: bool) -> Result ---
 	@(require_results)
 	key_event_get_composing :: proc(event: Key_Event) -> bool ---
-	key_event_set_utf8 :: proc(event: Key_Event, utf8: [^]u8, len: uint) ---
 	@(require_results)
-	key_event_get_utf8 :: proc(event: Key_Event, len: ^uint) -> [^]u8 ---
-	key_event_set_unshifted_codepoint :: proc(event: Key_Event, codepoint: u32) ---
+	key_event_set_utf8 :: proc(event: Key_Event, utf8: String) -> Result ---
+	@(require_results)
+	key_event_get_utf8 :: proc(event: Key_Event) -> String ---
+	@(require_results)
+	key_event_set_unshifted_codepoint :: proc(event: Key_Event, codepoint: u32) -> Result ---
 	@(require_results)
 	key_event_get_unshifted_codepoint :: proc(event: Key_Event) -> u32 ---
 }

@@ -20,10 +20,11 @@ Sys_Decode_Png_Fn :: proc "c" (
 ) -> bool
 
 Sys_Option :: enum i32 {
-	Userdata      = 0,
-	Decode_Png    = 1,
-	Log           = 2,
-	Random_Secure = 3,
+	Invalid       = 0,
+	Userdata      = 1,
+	Decode_Png    = 2,
+	Log           = 3,
+	Random_Secure = 4,
 }
 
 @(default_calling_convention = "c", link_prefix = "ghostty_")

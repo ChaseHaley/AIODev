@@ -22,7 +22,7 @@ source :: proc(
 	defer ghostty.render_state_free(state)
 	ghostty.terminal_vt_write(terminal, raw_data(text), uint(len(text)))
 	if selected {
-		selection := ghostty.sized(ghostty.Selection)
+		selection: ghostty.Selection
 		if !testing.expect_value(t, ghostty.terminal_select_all(terminal, &selection),
 		                         ghostty.Result.Success) {
 			return {}, false
@@ -32,7 +32,12 @@ source :: proc(
 			return {}, false
 		}
 	}
-	if scroll != 0 { ghostty.terminal_scroll_viewport(terminal, {tag = .Delta, value = {delta = scroll}}) }
+	if scroll != 0 {
+		up := ghostty.Terminal_Scroll_Viewport{tag = .Delta, value = {delta = scroll}}
+		if !testing.expect_value(t, ghostty.terminal_scroll_viewport(terminal, up), ghostty.Result.Success) {
+			return {}, false
+		}
+	}
 	if !testing.expect_value(t, ghostty.render_state_update(state, terminal), ghostty.Result.Success) {
 		return {}, false
 	}

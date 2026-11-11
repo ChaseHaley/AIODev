@@ -35,11 +35,12 @@ Mouse_Encoder_Size :: struct {
 }
 
 Mouse_Encoder_Option :: enum i32 {
-	Event              = 0,
-	Format             = 1,
-	Size               = 2,
-	Any_Button_Pressed = 3,
-	Track_Last_Cell    = 4,
+	Invalid            = 0,
+	Event              = 1,
+	Format             = 2,
+	Size               = 3,
+	Any_Button_Pressed = 4,
+	Track_Last_Cell    = 5,
 }
 
 @(default_calling_convention = "c", link_prefix = "ghostty_")
@@ -47,9 +48,18 @@ foreign lib {
 	@(require_results)
 	mouse_encoder_new :: proc(allocator: ^Allocator, encoder: ^Mouse_Encoder) -> Result ---
 	mouse_encoder_free :: proc(encoder: Mouse_Encoder) ---
-	mouse_encoder_setopt :: proc(encoder: Mouse_Encoder, option: Mouse_Encoder_Option, value: rawptr) ---
-	mouse_encoder_setopt_from_terminal :: proc(encoder: Mouse_Encoder, terminal: Terminal) ---
-	mouse_encoder_reset :: proc(encoder: Mouse_Encoder) ---
 	@(require_results)
-	mouse_encoder_encode :: proc(encoder: Mouse_Encoder, event: Mouse_Event, out_buf: [^]u8, out_buf_size: uint, out_len: ^uint) -> Result ---
+	mouse_encoder_set :: proc(encoder: Mouse_Encoder, option: Mouse_Encoder_Option, value: rawptr) -> Result ---
+	@(require_results)
+	mouse_encoder_set_from_terminal :: proc(encoder: Mouse_Encoder, terminal: Terminal) -> Result ---
+	@(require_results)
+	mouse_encoder_reset :: proc(encoder: Mouse_Encoder) -> Result ---
+	@(require_results)
+	mouse_encoder_encode :: proc(
+		encoder: Mouse_Encoder,
+		event: Mouse_Event,
+		buf: [^]u8,
+		buf_len: uint,
+		out_written: ^uint,
+	) -> Result ---
 }

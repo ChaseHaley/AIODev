@@ -384,7 +384,8 @@ a_url_running_below_the_viewport_keeps_its_full_target :: proc(t: ^testing.T) {
 	source, ok := link_source(t, strings.to_string(text), 20, 3)
 	if !ok {return}
 	defer link_source_destroy(&source)
-	ghostty.terminal_scroll_viewport(source.terminal, {tag = .Delta, value = {delta = -3}})
+	up := ghostty.Terminal_Scroll_Viewport{tag = .Delta, value = {delta = -3}}
+	testing.expect_value(t, ghostty.terminal_scroll_viewport(source.terminal, up), ghostty.Result.Success)
 	m, scanned := link_map(t, source)
 	if !scanned {return}
 	defer term.link_map_destroy(&m)
@@ -431,7 +432,8 @@ hover_hit_testing_follows_scrollback :: proc(t: ^testing.T) {
 	source, ok := link_source(t, strings.to_string(text), 40, 6)
 	if !ok {return}
 	defer link_source_destroy(&source)
-	ghostty.terminal_scroll_viewport(source.terminal, {tag = .Delta, value = {delta = -3}})
+	up := ghostty.Terminal_Scroll_Viewport{tag = .Delta, value = {delta = -3}}
+	testing.expect_value(t, ghostty.terminal_scroll_viewport(source.terminal, up), ghostty.Result.Success)
 	m, scanned := link_map(t, source)
 	if !scanned {return}
 	defer term.link_map_destroy(&m)

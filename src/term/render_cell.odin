@@ -15,7 +15,6 @@ Render_Cell :: struct {
 @(require_results)
 read_render_cell :: proc(cells: ghostty.Render_State_Row_Cells) -> Render_Cell {
 	cell := Render_Cell {
-		style = ghostty.sized(ghostty.Style),
 		width = .Narrow,
 	}
 	if ghostty.render_state_row_cells_get(cells, .Raw, &cell.raw) == .Success {
@@ -27,7 +26,7 @@ read_render_cell :: proc(cells: ghostty.Render_State_Row_Cells) -> Render_Cell {
 	styled: bool
 	if ghostty.render_state_row_cells_get(cells, .Has_Styling, &styled) == .Success && styled {
 		if ghostty.render_state_row_cells_get(cells, .Style, &cell.style) != .Success {
-			cell.style = ghostty.sized(ghostty.Style)
+			cell.style = {}
 		}
 	}
 	foreground: ghostty.Color_Rgb
@@ -70,8 +69,8 @@ render_cell_graphemes :: proc(
 			return nil, .Out_Of_Memory
 		}
 		if count > 0 {
-			result :=
-				ghostty.render_state_row_cells_get(cells, .Graphemes_Buf, raw_data(buffer^[start:]))
+			graphemes := ghostty.Codepoint_Buffer{raw_data(buffer^[start:]), uint(count), 0}
+			result := ghostty.render_state_row_cells_get(cells, .Graphemes_Buf, &graphemes)
 			if result != .Success {
 				return nil, .Terminal_Failed
 			}

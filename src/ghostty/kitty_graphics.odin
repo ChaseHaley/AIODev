@@ -41,16 +41,16 @@ Kitty_Image_Format :: enum i32 {
 }
 
 Kitty_Graphics_Image_Data :: enum i32 {
-	Invalid     = 0,
-	Id          = 1,
-	Number      = 2,
-	Width       = 3,
-	Height      = 4,
-	Format      = 5,
-	Compression = 6,
-	Data_Ptr    = 7,
-	Data_Len    = 8,
-	Generation  = 9,
+	Invalid      = 0,
+	Id           = 1,
+	Number       = 2,
+	Width        = 3,
+	Height       = 4,
+	Format       = 5,
+	Compression  = 6,
+	Pixels       = 7,
+	Expected_Len = 8,
+	Generation   = 9,
 }
 
 Kitty_Graphics_Placement_Render_Info :: struct {

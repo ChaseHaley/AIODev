@@ -273,7 +273,7 @@ screen_anchor :: proc(terminal: ghostty.Terminal, columns, rows: int) -> u64 {
 @(private, require_results)
 screen_row_ref :: proc(terminal: ghostty.Terminal, y: int) -> (ghostty.Grid_Ref, bool) {
 	point := ghostty.Point{tag = .Screen, value = {coordinate = {x = 0, y = u32(y)}}}
-	ref := ghostty.sized(ghostty.Grid_Ref)
+	ref: ghostty.Grid_Ref
 	ok := ghostty.terminal_grid_ref(terminal, point, &ref) == .Success
 	return ref, ok
 }
@@ -435,16 +435,20 @@ pattern_select :: proc(s: ^Session, older: bool) -> bool {
 	p.selected = search.step_index(p.selected, total, older)
 	match := matches[p.selected]
 	p.selected_match = match
+	result := ghostty.Result.Success
 	sync.mutex_lock(&s.mutex)
 	if top, ok := screen_top(s.terminal); ok {
 		rows := int(s.geometry.rows)
 		first, last := int(match.first_row), int(match.last_row)
 		if first < int(top) || last >= int(top) + rows {
 			delta := first - rows / 2 - int(top)
-			ghostty.terminal_scroll_viewport(s.terminal, {tag = .Delta, value = {delta = delta}})
+			result = ghostty.terminal_scroll_viewport(s.terminal, {tag = .Delta, value = {delta = delta}})
 		}
 	}
 	sync.mutex_unlock(&s.mutex)
+	if result != .Success {
+		log.errorf("term: scrolling to the selected match failed: %v", result)
+	}
 	mark_changed(s)
 	return true
 }

@@ -6,8 +6,10 @@ reproduced here. Where a component offers a choice of licenses, the license
 AIODev elects is noted.
 
 ================================================================================
-libghostty-vt (Ghostty)
-https://github.com/ghostty-org/ghostty, revision e3ebb1d1bf772cf5d1bc70b5ae19e6943e33a110. Statically linked.
+libghostty-vt 1.0.0 (Ghostty)
+https://github.com/ghostty-org/ghostty, release libghostty-vt-1.0.0.tar.gz from
+https://release.files.ghostty.org/libghostty-vt/1.0.0/, plus the local patches in vendor/ghostty/patches.
+Statically linked.
 --------------------------------------------------------------------------------
 
 MIT License
@@ -88,7 +90,7 @@ SOFTWARE.
 
 ================================================================================
 simdutf
-https://github.com/simdutf/simdutf. Linked into libghostty-vt. Dual Apache-2.0 / MIT; MIT elected.
+https://github.com/simdutf/simdutf, version 9.0.0 (vendored in libghostty-vt). Linked into libghostty-vt. Dual Apache-2.0 / MIT; MIT elected.
 --------------------------------------------------------------------------------
 
 Copyright 2021 The simdutf authors
@@ -112,7 +114,7 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 ================================================================================
 Highway
-https://github.com/google/highway. Linked into libghostty-vt. Dual Apache-2.0 / BSD-3-Clause; BSD-3-Clause elected.
+https://github.com/google/highway, version 1.2.0, revision 66486a10623fa0d72fe91260f96c892e41aceb06. Linked into libghostty-vt. Dual Apache-2.0 / BSD-3-Clause; BSD-3-Clause elected.
 --------------------------------------------------------------------------------
 
 Copyright (c) The Highway Project Authors. All rights reserved.
@@ -143,7 +145,7 @@ OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ================================================================================
 Wuffs
-https://github.com/google/wuffs. Linked into libghostty-vt. Dual Apache-2.0 / MIT; MIT elected.
+https://github.com/google/wuffs, version 0.4.0-alpha.10, revision 7411f488fe2e2c205c3d3b3d28638b7356522930. Linked into libghostty-vt. Dual Apache-2.0 / MIT; MIT elected.
 --------------------------------------------------------------------------------
 
 Copyright 2023 The Wuffs Authors
@@ -174,7 +176,7 @@ DEALINGS IN THE SOFTWARE.
 
 ================================================================================
 uucode
-https://github.com/jacobsandlund/uucode. Linked into libghostty-vt.
+https://github.com/jacobsandlund/uucode, version 0.2.0, revision 1fb73433bba5d93366c57f23ff2e9d7939746500. Linked into libghostty-vt.
 --------------------------------------------------------------------------------
 
 MIT License
@@ -260,6 +262,33 @@ Except as contained in this notice, the name of a copyright holder shall
 not be used in advertising or otherwise to promote the sale, use or other
 dealings in these Data Files or Software without prior written
 authorization of the copyright holder.
+
+================================================================================
+translate-c (Zig)
+https://codeberg.org/ziglang/translate-c, version 2.0.0, revision 02ff0c523fb92a38939b04d0145c4a9602a74d56. Helper functions linked into libghostty-vt.
+--------------------------------------------------------------------------------
+
+The MIT License (Expat)
+
+Copyright (c) Zig contributors
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
 
 ================================================================================
 Zig standard library and compiler-rt

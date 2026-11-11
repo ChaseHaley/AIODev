@@ -5,8 +5,8 @@ when ODIN_OS == .Windows {
 }
 
 Allocator_Vtable :: struct {
-	alloc:  proc "c" (ctx: rawptr, len: uint, alignment: u8, ret_addr: uintptr) -> rawptr,
-	resize: proc "c" (
+	alloc:    proc "c" (ctx: rawptr, len: uint, alignment: u8, ret_addr: uintptr) -> rawptr,
+	resize:   proc "c" (
 		ctx: rawptr,
 		memory: rawptr,
 		memory_len: uint,
@@ -14,7 +14,7 @@ Allocator_Vtable :: struct {
 		new_len: uint,
 		ret_addr: uintptr,
 	) -> bool,
-	remap:  proc "c" (
+	remap:    proc "c" (
 		ctx: rawptr,
 		memory: rawptr,
 		memory_len: uint,
@@ -22,13 +22,14 @@ Allocator_Vtable :: struct {
 		new_len: uint,
 		ret_addr: uintptr,
 	) -> rawptr,
-	free:   proc "c" (
+	free:     proc "c" (
 		ctx: rawptr,
 		memory: rawptr,
 		memory_len: uint,
 		alignment: u8,
 		ret_addr: uintptr,
 	),
+	reserved: [4]rawptr,
 }
 
 Allocator :: struct {

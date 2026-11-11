@@ -69,15 +69,17 @@ invalid_arguments_and_sized :: proc(t: ^testing.T) {
 	defer ghostty.terminal_free(terminal)
 	testing.expect_value(t, ghostty.terminal_get(nil, .Cols, nil), INVALID)
 	testing.expect_value(t, ghostty.render_state_update(nil, nil), INVALID)
-	ref := ghostty.sized(ghostty.Grid_Ref)
-	testing.expect_value(t, ref.size, uint(size_of(ghostty.Grid_Ref)))
-	testing.expect(t, ref.node == nil && ref.x == 0 && ref.y == 0)
+	stop := ghostty.sized(ghostty.Terminal_Write_Stop)
+	testing.expect_value(t, stop.size, uint(size_of(ghostty.Terminal_Write_Stop)))
+	ref: ghostty.Grid_Ref
 	testing.expect_value(t, ghostty.grid_ref_cell(&ref, nil), INVALID)
-	style := ghostty.sized(ghostty.Style)
+	// A zeroed style is the default style; render cells rely on it when a cell has no styling.
+	zero: ghostty.Style
+	testing.expect(t, ghostty.style_is_default(&zero))
+	style: ghostty.Style
 	ghostty.style_default(&style)
-	testing.expect_value(t, style.size, uint(size_of(ghostty.Style)))
 	testing.expect(t, ghostty.style_is_default(&style))
-	style.bold = true
+	style.flags.bold = true
 	testing.expect(t, !ghostty.style_is_default(&style))
 	ghostty.free(nil, nil, 0)
 }
@@ -90,17 +92,18 @@ parser_ground_and_multi_get :: proc(t: ^testing.T) {
 	}
 	defer ghostty.terminal_free(terminal)
 	write(terminal, "\x1b[")
-	consumed: uint
-	result := ghostty.terminal_vt_write_until_ground(terminal, raw_data(string("2;")), 2, &consumed)
+	stop := ghostty.sized(ghostty.Terminal_Write_Stop)
+	result := ghostty.terminal_vt_write_until(terminal, raw_data(string("2;")), 2, {.Ground}, &stop)
 	testing.expect_value(t, result, NONE)
-	testing.expect_value(t, consumed, 2)
-	result = ghostty.terminal_vt_write_until_ground(terminal, raw_data(string("3Hxyz")), 5, &consumed)
+	testing.expect_value(t, stop.consumed, 2)
+	result = ghostty.terminal_vt_write_until(terminal, raw_data(string("3Hxyz")), 5, {.Ground}, &stop)
 	testing.expect_value(t, result, SUCCESS)
-	testing.expect_value(t, consumed, 2)
+	testing.expect_value(t, stop.consumed, 2)
+	testing.expect_value(t, stop.reached, ghostty.Terminal_Boundaries{.Ground})
 	expect_cursor(t, terminal, 2, 1)
-	result = ghostty.terminal_vt_write_until_ground(terminal, raw_data(string("xyz")), 3, &consumed)
+	result = ghostty.terminal_vt_write_until(terminal, raw_data(string("xyz")), 3, {.Ground}, &stop)
 	testing.expect_value(t, result, SUCCESS)
-	testing.expect_value(t, consumed, 0)
+	testing.expect_value(t, stop.consumed, 0)
 	cols, rows: u16
 	keys := [3]ghostty.Terminal_Data{.Cols, .Rows, .Invalid}
 	values := [3]rawptr{&cols, &rows, nil}

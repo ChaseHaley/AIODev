@@ -94,15 +94,15 @@ render_cell_frame_and_snapshot_agree :: proc(t: ^testing.T) {
 				underline_color = term.Color{rgb.r, rgb.g, rgb.b}
 			}
 			testing.expect_value(t, expected.style, term.Snapshot_Style {
-				bold            = style.bold,
-				faint           = style.faint,
-				italic          = style.italic,
-				blink           = style.blink,
-				inverse         = style.inverse,
-				invisible       = style.invisible,
-				strikethrough   = style.strikethrough,
-				overline        = style.overline,
-				underline       = underlines[ghostty.Sgr_Underline(style.underline)],
+				bold            = style.flags.bold,
+				faint           = style.flags.faint,
+				italic          = style.flags.italic,
+				blink           = style.flags.blink,
+				inverse         = style.flags.inverse,
+				invisible       = style.flags.invisible,
+				strikethrough   = style.flags.strikethrough,
+				overline        = style.flags.overline,
+				underline       = underlines[ghostty.Sgr_Underline(style.flags.underline)],
 				underline_color = underline_color,
 			})
 			if rgb, has := cell.foreground.?; has {

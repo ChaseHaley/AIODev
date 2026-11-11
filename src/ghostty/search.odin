@@ -18,21 +18,21 @@ Search_Scroll :: enum i32 {
 }
 
 Search_Data :: enum i32 {
-	Status           = 0,
-	Needle           = 1,
-	Total_Matches    = 2,
-	Selected_Index   = 3,
-	Selected_Match   = 4,
-	Matches          = 5,
-	Viewport_Matches = 6,
-	Select_Scroll    = 7,
+	Invalid          = 0,
+	Status           = 1,
+	Needle           = 2,
+	Total_Matches    = 3,
+	Selected_Index   = 4,
+	Selected_Match   = 5,
+	Matches          = 6,
+	Viewport_Matches = 7,
+	Select_Scroll    = 8,
 }
 
 Search_Option :: enum i32 {
-	Needle        = 0,
-	Select_Next   = 1,
-	Select_Prev   = 2,
-	Select_Scroll = 3,
+	Invalid       = 0,
+	Needle        = 1,
+	Select_Scroll = 4,
 }
 
 @(default_calling_convention = "c", link_prefix = "ghostty_")
@@ -46,6 +46,10 @@ foreign lib {
 	search_feed :: proc(search: Search) -> Result ---
 	@(require_results)
 	search_run :: proc(search: Search) -> Result ---
+	@(require_results)
+	search_select_next :: proc(search: Search) -> Result ---
+	@(require_results)
+	search_select_prev :: proc(search: Search) -> Result ---
 	@(require_results)
 	search_set :: proc(search: Search, option: Search_Option, value: rawptr) -> Result ---
 	@(require_results)

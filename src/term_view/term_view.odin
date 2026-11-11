@@ -346,7 +346,7 @@ paint_cell :: proc(
 	if rgb, ok := cell.background.?; ok {
 		p.background, p.has_background = color(rgb), true
 	}
-	if p.style.inverse {
+	if p.style.flags.inverse {
 		background := p.has_background ? p.background : color(b.colors.background)
 		p.foreground, p.background, p.has_background = background, p.foreground, true
 	}
@@ -361,13 +361,13 @@ paint_cell :: proc(
 			p.foreground = fg
 		}
 	}
-	if p.style.faint {
+	if p.style.flags.faint {
 		p.foreground.a *= 0.5
 	}
 	if block_cursor_at(b, x, y) {
 		p.foreground = b.style.cursor_text
 	}
-	if b.style.minimum_contrast > 1 && !p.style.invisible {
+	if b.style.minimum_contrast > 1 && !p.style.flags.invisible {
 		background := p.has_background ? p.background : color(b.colors.background)
 		if block_cursor_at(b, x, y) {background = b.cursor_color}
 		p.foreground = minimum_contrast_cached(
@@ -478,7 +478,7 @@ build_row :: proc(v: ^View, b: ^Builder, y: int) -> render.Build_Status {
 				x += 1
 				continue
 			}
-			if ghostty.Sgr_Underline(p.style.underline) != .None {
+			if ghostty.Sgr_Underline(p.style.flags.underline) != .None {
 				x += 1
 				continue
 			}
@@ -490,7 +490,7 @@ build_row :: proc(v: ^View, b: ^Builder, y: int) -> render.Build_Status {
 					next := v.paints[x]
 					if next.width != .Narrow ||
 					   next.foreground != p.foreground ||
-					   ghostty.Sgr_Underline(next.style.underline) != .None {
+					   ghostty.Sgr_Underline(next.style.flags.underline) != .None {
 						break
 					}
 					width += m.cell_width
@@ -521,7 +521,7 @@ build_row :: proc(v: ^View, b: ^Builder, y: int) -> render.Build_Status {
 	}
 	for p, x in v.paints {
 		span: []u32
-		if !p.style.invisible {
+		if !p.style.flags.invisible {
 			if ghostty.render_state_row_cells_select(v.cells, u16(x)) != .Success {
 				b.list.error = .Construction_Failed
 				return .Ok
@@ -535,7 +535,7 @@ build_row :: proc(v: ^View, b: ^Builder, y: int) -> render.Build_Status {
 			span = text
 		}
 		next_face := cell_face(p)
-		if p.style.invisible ||
+		if p.style.flags.invisible ||
 		   len(span) == 0 ||
 		   previous != x - 1 ||
 		   next_face != face ||
@@ -545,7 +545,7 @@ build_row :: proc(v: ^View, b: ^Builder, y: int) -> render.Build_Status {
 			clear(&v.runes)
 			clear(&v.columns)
 		}
-		if p.style.invisible || len(span) == 0 {continue}
+		if p.style.flags.invisible || len(span) == 0 {continue}
 		if reserve(&v.runes, len(v.runes) + len(span)) != nil ||
 		   reserve(&v.columns, len(v.columns) + len(span)) != nil {
 			b.list.error = .Out_Of_Memory
@@ -568,9 +568,9 @@ build_row :: proc(v: ^View, b: ^Builder, y: int) -> render.Build_Status {
 
 @(private)
 cell_face :: proc(p: Cell_Paint) -> font.Style {
-	if p.style.bold && p.style.italic {return .Bold_Italic}
-	if p.style.bold {return .Bold}
-	if p.style.italic {return .Italic}
+	if p.style.flags.bold && p.style.flags.italic {return .Bold_Italic}
+	if p.style.flags.bold {return .Bold}
+	if p.style.flags.italic {return .Italic}
 	return .Regular
 }
 
@@ -659,14 +659,14 @@ draw_codepoints :: proc(v: ^View, b: ^Builder, face: font.Style, top: f32) -> re
 decorate :: proc(b: ^Builder, p: Cell_Paint, left, top: f32) -> render.Build_Status {
 	m := b.metrics
 	baseline := top + m.baseline
-	if p.style.strikethrough {
+	if p.style.flags.strikethrough {
 		rect(
 			b,
 			{left, baseline - m.strikethrough_offset, m.cell_width, m.strikethrough_thickness},
 			p.foreground,
 		)
 	}
-	underline := ghostty.Sgr_Underline(p.style.underline)
+	underline := ghostty.Sgr_Underline(p.style.flags.underline)
 	if underline == .None {
 		return .Ok
 	}

@@ -200,15 +200,15 @@ snapshot_underline :: proc(underline: i32) -> Underline {
 @(private, require_results)
 snapshot_style :: proc(style: ghostty.Style, palette: ^[256]Color) -> Snapshot_Style {
 	s := Snapshot_Style {
-		bold          = style.bold,
-		faint         = style.faint,
-		italic        = style.italic,
-		blink         = style.blink,
-		inverse       = style.inverse,
-		invisible     = style.invisible,
-		strikethrough = style.strikethrough,
-		overline      = style.overline,
-		underline     = snapshot_underline(style.underline),
+		bold          = style.flags.bold,
+		faint         = style.flags.faint,
+		italic        = style.flags.italic,
+		blink         = style.flags.blink,
+		inverse       = style.flags.inverse,
+		invisible     = style.flags.invisible,
+		strikethrough = style.flags.strikethrough,
+		overline      = style.flags.overline,
+		underline     = snapshot_underline(i32(style.flags.underline)),
 	}
 	switch style.underline_color.tag {
 	case .None:
@@ -344,14 +344,12 @@ screen_text :: proc(s: ^Session, options: Text_Options, allocator := context.all
 		return "", .Terminal_Failed
 	}
 	end_ref.x = s.geometry.columns - 1
-	selection := ghostty.sized(ghostty.Selection)
-	selection.start, selection.end = start_ref, end_ref
-	format := ghostty.sized(ghostty.Terminal_Selection_Format_Options)
-	format.emit, format.unwrap, format.trim, format.selection = .Plain, options.unwrap, true, &selection
-	text: [^]u8
-	length: uint
-	if result := ghostty.terminal_selection_format_alloc(s.terminal, nil, format, &text, &length);
-	   result != .Success {
+	selection := ghostty.Selection {
+		start = start_ref,
+		end   = end_ref,
+	}
+	text, length, result := format_selection(s.terminal, &selection, options.unwrap)
+	if result != .Success {
 		log.errorf("term: formatting the screen text failed: %v", result)
 		return "", result == .Out_Of_Memory ? .Out_Of_Memory : .Terminal_Failed
 	}

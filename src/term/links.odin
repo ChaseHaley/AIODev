@@ -266,7 +266,6 @@ cell_value :: proc(
 	ok: bool,
 ) {
 	point := ghostty.Point{tag = tag, value = {coordinate = {x = x, y = y}}}
-	ref = ghostty.sized(ghostty.Grid_Ref)
 	if ghostty.terminal_grid_ref(terminal, point, &ref) != .Success {
 		return {}, ref, false
 	}
@@ -286,7 +285,7 @@ cell_value :: proc(
 @(private, require_results)
 row_continues :: proc(terminal: ghostty.Terminal, tag: ghostty.Point_Tag, y: u32) -> bool {
 	point := ghostty.Point{tag = tag, value = {coordinate = {x = 0, y = y}}}
-	ref := ghostty.sized(ghostty.Grid_Ref)
+	ref: ghostty.Grid_Ref
 	if ghostty.terminal_grid_ref(terminal, point, &ref) != .Success {
 		return false
 	}
@@ -364,7 +363,7 @@ append_screen_row :: proc(
 screen_top :: proc(terminal: ghostty.Terminal) -> (u32, bool) {
 	top := ghostty.Point_Coordinate{}
 	point := ghostty.Point{tag = .Viewport, value = {coordinate = {x = 0, y = 0}}}
-	ref := ghostty.sized(ghostty.Grid_Ref)
+	ref: ghostty.Grid_Ref
 	if ghostty.terminal_grid_ref(terminal, point, &ref) != .Success ||
 	   ghostty.terminal_point_from_grid_ref(terminal, &ref, .Screen, &top) != .Success {
 		return 0, false
@@ -519,7 +518,7 @@ scan_text :: proc(m: ^Link_Map, terminal: ghostty.Terminal, columns, rows: int) 
 	for y in 0 ..< rows {
 		m.row_start[y] = len(m.row_text)
 		point := ghostty.Point{tag = .Viewport, value = {coordinate = {x = 0, y = u32(y)}}}
-		ref := ghostty.sized(ghostty.Grid_Ref)
+		ref: ghostty.Grid_Ref
 		if ghostty.terminal_grid_ref(terminal, point, &ref) != .Success {
 			return false
 		}
@@ -819,11 +818,11 @@ scan_lines :: proc(m: ^Link_Map, terminal: ghostty.Terminal, columns, rows: int)
 @(private, require_results)
 scan_selection :: proc(m: ^Link_Map, terminal: ghostty.Terminal) -> bool {
 	m.selection_active = false
-	selection := ghostty.sized(ghostty.Selection)
+	selection: ghostty.Selection
 	if ghostty.terminal_get(terminal, .Selection, &selection) != .Success || selection.rectangle {
 		return true
 	}
-	ordered := ghostty.sized(ghostty.Selection)
+	ordered: ghostty.Selection
 	if ghostty.terminal_selection_ordered(terminal, &selection, .Forward, &ordered) != .Success {
 		return true
 	}
@@ -833,10 +832,8 @@ scan_selection :: proc(m: ^Link_Map, terminal: ghostty.Terminal) -> bool {
 	   int(last.y - first.y) >= links.SELECTION_ROWS {
 		return true
 	}
-	options := selection_format_options()
-	text: [^]u8
-	length: uint
-	if ghostty.terminal_selection_format_alloc(terminal, nil, options, &text, &length) != .Success {
+	text, length, result := format_selection(terminal, &selection, true)
+	if result != .Success {
 		return true
 	}
 	defer ghostty.free(nil, text, length)
@@ -927,9 +924,7 @@ link_map_scan_locked :: proc(
 when ODIN_TEST {
 	@(require_results)
 	link_test_select :: proc(terminal: ghostty.Terminal, first_x, first_y, last_x, last_y: int) -> bool {
-		selection := ghostty.sized(ghostty.Selection)
-		selection.start = ghostty.sized(ghostty.Grid_Ref)
-		selection.end = ghostty.sized(ghostty.Grid_Ref)
+		selection: ghostty.Selection
 		start := ghostty.Point{tag = .Viewport, value = {coordinate = {x = u16(first_x), y = u32(first_y)}}}
 		end := ghostty.Point{tag = .Viewport, value = {coordinate = {x = u16(last_x), y = u32(last_y)}}}
 		if ghostty.terminal_grid_ref(terminal, start, &selection.start) != .Success ||

@@ -46,7 +46,7 @@ cursor_and_grid :: proc(t: ^testing.T) {
 	defer ghostty.terminal_free(terminal)
 	write(terminal, "abc\x1b[3;5HZ\x1b[1A\x1b[2D")
 	expect_cursor(t, terminal, 3, 1)
-	ref := ghostty.sized(ghostty.Grid_Ref)
+	ref: ghostty.Grid_Ref
 	testing.expect_value(t, ghostty.terminal_grid_ref(terminal, point(4, 2), &ref), SUCCESS)
 	cell: ghostty.Cell
 	testing.expect_value(t, ghostty.grid_ref_cell(&ref, &cell), SUCCESS)
@@ -100,12 +100,13 @@ render_styles_and_wide_characters :: proc(t: ^testing.T) {
 	}
 	testing.expect_value(t, ghostty.render_state_row_get(rows, .Cells, &cells), SUCCESS)
 	testing.expect_value(t, ghostty.render_state_row_cells_select(cells, 0), SUCCESS)
-	style := ghostty.sized(ghostty.Style)
+	style: ghostty.Style
 	testing.expect_value(t, ghostty.render_state_row_cells_get(cells, .Style, &style), SUCCESS)
-	testing.expect(t, style.bold && style.italic)
-	testing.expect_value(t, style.underline, i32(ghostty.Sgr_Underline.Curly))
-	testing.expect(t, !style.faint && !style.blink && !style.inverse && !style.invisible)
-	testing.expect(t, !style.strikethrough && !style.overline)
+	testing.expect(t, style.flags.bold && style.flags.italic)
+	testing.expect_value(t, ghostty.Sgr_Underline(style.flags.underline), ghostty.Sgr_Underline.Curly)
+	testing.expect(t, !style.flags.faint && !style.flags.blink)
+	testing.expect(t, !style.flags.inverse && !style.flags.invisible)
+	testing.expect(t, !style.flags.strikethrough && !style.flags.overline)
 	testing.expect_value(t, style.fg_color.tag, ghostty.Style_Color_Tag.Rgb)
 	testing.expect_value(t, style.fg_color.value.rgb, ghostty.Color_Rgb{12, 34, 56})
 	testing.expect_value(t, style.bg_color.tag, ghostty.Style_Color_Tag.Palette)
@@ -142,7 +143,12 @@ render_styles_and_wide_characters :: proc(t: ^testing.T) {
 	graphemes: [2]u32
 	testing.expect_value(t, ghostty.render_state_row_cells_get(cells, .Graphemes_Len, &count), SUCCESS)
 	testing.expect_value(t, count, 2)
-	testing.expect_value(t, ghostty.render_state_row_cells_get(cells, .Graphemes_Buf, &graphemes), SUCCESS)
+	codepoints := ghostty.Codepoint_Buffer{raw_data(graphemes[:]), 1, 0}
+	testing.expect_value(t, ghostty.render_state_row_cells_get(cells, .Graphemes_Buf, &codepoints), SPACE)
+	testing.expect_value(t, codepoints.len, 2)
+	codepoints.cap = len(graphemes)
+	testing.expect_value(t, ghostty.render_state_row_cells_get(cells, .Graphemes_Buf, &codepoints), SUCCESS)
+	testing.expect_value(t, codepoints.len, 2)
 	testing.expect_value(t, graphemes, [2]u32{'e', 0x301})
 	buffer: ghostty.Buffer
 	testing.expect_value(t, ghostty.render_state_row_cells_get(cells, .Graphemes_Utf8, &buffer), SPACE)
@@ -180,14 +186,15 @@ resize_and_scrollback :: proc(t: ^testing.T) {
 	testing.expect_value(t, ghostty.terminal_get(terminal, .Scrollback_Rows, &history), SUCCESS)
 	testing.expect_value(t, total, 5)
 	testing.expect_value(t, history, 2)
-	ghostty.terminal_scroll_viewport(terminal, {tag = .Top})
+	testing.expect_value(t, ghostty.terminal_scroll_viewport(terminal, {tag = .Top}), SUCCESS)
 	scrollbar: ghostty.Terminal_Scrollbar
 	testing.expect_value(t, ghostty.terminal_get(terminal, .Scrollbar, &scrollbar), SUCCESS)
 	testing.expect_value(t, scrollbar, ghostty.Terminal_Scrollbar{total = 5, offset = 0, len = 3})
-	ghostty.terminal_scroll_viewport(terminal, {tag = .Delta, value = {delta = 1}})
+	down := ghostty.Terminal_Scroll_Viewport{tag = .Delta, value = {delta = 1}}
+	testing.expect_value(t, ghostty.terminal_scroll_viewport(terminal, down), SUCCESS)
 	testing.expect_value(t, ghostty.terminal_get(terminal, .Scrollbar, &scrollbar), SUCCESS)
 	testing.expect_value(t, scrollbar.offset, 1)
-	ghostty.terminal_scroll_viewport(terminal, {tag = .Bottom})
+	testing.expect_value(t, ghostty.terminal_scroll_viewport(terminal, {tag = .Bottom}), SUCCESS)
 	testing.expect_value(t, ghostty.terminal_resize(terminal, 8, 4, 9, 18), SUCCESS)
 	testing.expect_value(t, ghostty.terminal_get(terminal, .Total_Rows, &total), SUCCESS)
 	testing.expect_value(t, ghostty.terminal_get(terminal, .Scrollback_Rows, &history), SUCCESS)

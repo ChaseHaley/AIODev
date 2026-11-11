@@ -28,7 +28,7 @@ viewport_ref :: proc(s: ^Session, x, y: f32) -> (ghostty.Grid_Ref, bool) {
 		tag = .Viewport,
 		value = {coordinate = {x = u16(column), y = u32(row)}},
 	}
-	ref := ghostty.sized(ghostty.Grid_Ref)
+	ref: ghostty.Grid_Ref
 	found := ghostty.terminal_grid_ref(s.terminal, point, &ref) == .Success
 	return ref, found
 }
@@ -52,7 +52,7 @@ apply_gesture :: proc(s: ^Session, event: ghostty.Selection_Gesture_Event, x, y:
 // Applies a configured gesture event and installs the selection it produces. The caller holds the mutex.
 @(private)
 run_gesture :: proc(s: ^Session, event: ghostty.Selection_Gesture_Event) {
-	selection := ghostty.sized(ghostty.Selection)
+	selection: ghostty.Selection
 	result := ghostty.selection_gesture_event(s.gesture, s.terminal, event, &selection)
 	#partial switch result {
 	case .Success:
@@ -161,13 +161,13 @@ selection_release :: proc(s: ^Session, x, y: f32) {
 has_selection :: proc(s: ^Session) -> bool {
 	sync.mutex_lock(&s.mutex)
 	defer sync.mutex_unlock(&s.mutex)
-	selection := ghostty.sized(ghostty.Selection)
+	selection: ghostty.Selection
 	return ghostty.terminal_get(s.terminal, .Selection, &selection) == .Success
 }
 
 select_all :: proc(s: ^Session) {
 	sync.mutex_lock(&s.mutex)
-	selection := ghostty.sized(ghostty.Selection)
+	selection: ghostty.Selection
 	result := ghostty.terminal_select_all(s.terminal, &selection)
 	if result == .Success {
 		result = ghostty.terminal_set(s.terminal, .Selection, &selection)
@@ -190,24 +190,41 @@ clear_selection :: proc(s: ^Session) {
 	mark_changed(s)
 }
 
-// How selected text reads as text: plain, soft-wrapped lines joined and trailing blanks trimmed. Copying
-// and the link scanner's reading of a selection both use it.
-@(private)
-selection_format_options :: proc() -> ghostty.Terminal_Selection_Format_Options {
-	options := ghostty.sized(ghostty.Terminal_Selection_Format_Options)
-	options.emit = .Plain
-	options.unwrap = true
-	options.trim = true
-	return options
+// Formats a selection as selected text reads: plain, trailing blanks trimmed and, with unwrap,
+// soft-wrapped lines joined. Copying, the link scanner and screen text all read text this way. The
+// caller holds the session mutex and releases the text with ghostty.free(nil, text, length).
+@(private, require_results)
+format_selection :: proc(
+	terminal: ghostty.Terminal,
+	selection: ^ghostty.Selection,
+	unwrap: bool,
+) -> (
+	text: [^]u8,
+	length: uint,
+	result: ghostty.Result,
+) {
+	formatter: ghostty.Formatter
+	result = ghostty.formatter_terminal_new(nil, &formatter, terminal)
+	if result != .Success {return}
+	defer ghostty.formatter_free(formatter)
+	// A new formatter already emits plain text with trailing blanks trimmed.
+	join := unwrap
+	result = ghostty.formatter_set(formatter, .Unwrap, &join)
+	if result == .Success {result = ghostty.formatter_set(formatter, .Selection, selection)}
+	if result == .Success {result = ghostty.formatter_format_alloc(formatter, nil, &text, &length)}
+	return
 }
 
 // Returns the selected text with soft-wrapped lines joined, or false when nothing is selected.
 selection_text :: proc(s: ^Session, allocator := context.allocator) -> (string, bool) {
-	options := selection_format_options()
 	text: [^]u8
 	length: uint
+	selection: ghostty.Selection
 	sync.mutex_lock(&s.mutex)
-	result := ghostty.terminal_selection_format_alloc(s.terminal, nil, options, &text, &length)
+	result := ghostty.terminal_get(s.terminal, .Selection, &selection)
+	if result == .Success {
+		text, length, result = format_selection(s.terminal, &selection, true)
+	}
 	sync.mutex_unlock(&s.mutex)
 	if result == .No_Value {
 		return "", false

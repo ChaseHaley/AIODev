@@ -9,19 +9,26 @@ expect_selection_text :: proc(
 	selection: ^ghostty.Selection,
 	expected: string,
 ) {
-	options := ghostty.sized(ghostty.Terminal_Selection_Format_Options)
-	options.selection = selection
-	options.trim = true
-	options.unwrap = true
+	formatter: ghostty.Formatter
+	if !testing.expect_value(t, ghostty.formatter_terminal_new(nil, &formatter, terminal), SUCCESS) {
+		return
+	}
+	defer ghostty.formatter_free(formatter)
+	emit := ghostty.Formatter_Format.Plain
+	trim, unwrap := true, true
+	testing.expect_value(t, ghostty.formatter_set(formatter, .Emit, &emit), SUCCESS)
+	testing.expect_value(t, ghostty.formatter_set(formatter, .Trim, &trim), SUCCESS)
+	testing.expect_value(t, ghostty.formatter_set(formatter, .Unwrap, &unwrap), SUCCESS)
+	testing.expect_value(t, ghostty.formatter_set(formatter, .Selection, selection), SUCCESS)
 	n: uint
-	testing.expect_value(t, ghostty.terminal_selection_format_buf(terminal, options, nil, 0, &n), SPACE)
+	testing.expect_value(t, ghostty.formatter_format_buf(formatter, nil, 0, &n), SPACE)
 	testing.expect_value(t, n, uint(len(expected)))
 	buffer: [256]u8
-	result := ghostty.terminal_selection_format_buf(terminal, options, raw_data(buffer[:]), len(buffer), &n)
+	result := ghostty.formatter_format_buf(formatter, raw_data(buffer[:]), len(buffer), &n)
 	testing.expect_value(t, result, SUCCESS)
 	testing.expect_value(t, string(buffer[:n]), expected)
 	allocated: [^]u8
-	result = ghostty.terminal_selection_format_alloc(terminal, nil, options, &allocated, &n)
+	result = ghostty.formatter_format_alloc(formatter, nil, &allocated, &n)
 	if testing.expect_value(t, result, SUCCESS) {
 		defer ghostty.free(nil, allocated, n)
 		testing.expect_value(t, string(allocated[:n]), expected)
@@ -36,11 +43,11 @@ selection_ranges :: proc(t: ^testing.T) {
 	}
 	defer ghostty.terminal_free(terminal)
 	write(terminal, "hello world\r\nsecond line")
-	ref := ghostty.sized(ghostty.Grid_Ref)
+	ref: ghostty.Grid_Ref
 	testing.expect_value(t, ghostty.terminal_grid_ref(terminal, point(2, 0), &ref), SUCCESS)
 	options := ghostty.sized(ghostty.Terminal_Select_Word_Options)
 	options.ref = ref
-	selection := ghostty.sized(ghostty.Selection)
+	selection: ghostty.Selection
 	testing.expect_value(t, ghostty.terminal_select_word(terminal, &options, &selection), SUCCESS)
 	expect_selection_text(t, terminal, &selection, "hello")
 	contains: bool
@@ -53,7 +60,7 @@ selection_ranges :: proc(t: ^testing.T) {
 	order: ghostty.Selection_Order
 	testing.expect_value(t, ghostty.terminal_selection_order(terminal, &selection, &order), SUCCESS)
 	testing.expect_value(t, order, ghostty.Selection_Order.Forward)
-	reversed := ghostty.sized(ghostty.Selection)
+	reversed: ghostty.Selection
 	result = ghostty.terminal_selection_ordered(terminal, &selection, .Reverse, &reversed)
 	testing.expect_value(t, result, SUCCESS)
 	testing.expect_value(t, ghostty.terminal_selection_order(terminal, &reversed, &order), SUCCESS)
@@ -100,9 +107,9 @@ selection_gestures :: proc(t: ^testing.T) {
 		return
 	}
 	defer ghostty.selection_gesture_event_free(release)
-	selection := ghostty.sized(ghostty.Selection)
+	selection: ghostty.Selection
 	testing.expect_value(t, ghostty.selection_gesture_event(gesture, terminal, press, &selection), INVALID)
-	ref := ghostty.sized(ghostty.Grid_Ref)
+	ref: ghostty.Grid_Ref
 	testing.expect_value(t, ghostty.terminal_grid_ref(terminal, point(0, 0), &ref), SUCCESS)
 	testing.expect_value(t, ghostty.selection_gesture_event_set(press, .Ref, &ref), SUCCESS)
 	testing.expect_value(t, ghostty.selection_gesture_event(gesture, terminal, press, &selection), NONE)
@@ -117,6 +124,6 @@ selection_gestures :: proc(t: ^testing.T) {
 	expect_selection_text(t, terminal, &selection, "hello")
 	testing.expect_value(t, ghostty.selection_gesture_event(gesture, terminal, release, &selection), NONE)
 	ghostty.selection_gesture_reset(gesture, terminal)
-	anchor := ghostty.sized(ghostty.Grid_Ref)
+	anchor: ghostty.Grid_Ref
 	testing.expect_value(t, ghostty.selection_gesture_get(gesture, terminal, .Anchor, &anchor), NONE)
 }

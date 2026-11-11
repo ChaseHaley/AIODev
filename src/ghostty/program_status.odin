@@ -17,7 +17,6 @@ Program_Status_Kind :: enum i32 {
 }
 
 Terminal_Program_Status :: struct {
-	size:                    uint,
 	state:                   Program_Status_State,
 	kind:                    Program_Status_Kind,
 	progress:                i8,
@@ -46,7 +45,6 @@ Semantic_Prompt_Prompt_Kind :: enum i32 {
 }
 
 Terminal_Semantic_Prompt :: struct {
-	size:           uint,
 	kind:           Semantic_Prompt_Kind,
 	prompt_kind:    Semantic_Prompt_Prompt_Kind,
 	has_exit_code:  bool,

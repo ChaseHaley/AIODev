@@ -5,7 +5,6 @@ when ODIN_OS == .Windows {
 }
 
 Grid_Ref :: struct {
-	size: uint,
 	node: rawptr,
 	x:    u16,
 	y:    u16,
@@ -18,9 +17,9 @@ foreign lib {
 	@(require_results)
 	grid_ref_row :: proc(ref: ^Grid_Ref, out_row: ^Row) -> Result ---
 	@(require_results)
-	grid_ref_graphemes :: proc(ref: ^Grid_Ref, buf: [^]u32, buf_len: uint, out_len: ^uint) -> Result ---
+	grid_ref_graphemes :: proc(ref: ^Grid_Ref, buf: [^]u32, buf_len: uint, out_written: ^uint) -> Result ---
 	@(require_results)
-	grid_ref_hyperlink_uri :: proc(ref: ^Grid_Ref, buf: [^]u8, buf_len: uint, out_len: ^uint) -> Result ---
+	grid_ref_hyperlink_uri :: proc(ref: ^Grid_Ref, buf: [^]u8, buf_len: uint, out_written: ^uint) -> Result ---
 	@(require_results)
 	grid_ref_style :: proc(ref: ^Grid_Ref, out_style: ^Style) -> Result ---
 }

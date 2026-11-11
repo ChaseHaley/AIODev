@@ -31,17 +31,17 @@ search_scrollback :: proc(t: ^testing.T) {
 	testing.expect_value(t, total, 3)
 	index: uint
 	testing.expect_value(t, ghostty.search_get(search, .Selected_Index, &index), NONE)
-	testing.expect_value(t, ghostty.search_set(search, .Select_Next, nil), SUCCESS)
+	testing.expect_value(t, ghostty.search_select_next(search), SUCCESS)
 	testing.expect_value(t, ghostty.search_get(search, .Selected_Index, &index), SUCCESS)
 	testing.expect_value(t, index, 0)
-	match := ghostty.sized(ghostty.Selection)
+	match: ghostty.Selection
 	testing.expect_value(t, ghostty.search_get(search, .Selected_Match, &match), SUCCESS)
 	expect_selection_text(t, terminal, &match, "Needle")
 	coordinate: ghostty.Point_Coordinate
 	result := ghostty.terminal_point_from_grid_ref(terminal, &match.start, .Screen, &coordinate)
 	testing.expect_value(t, result, SUCCESS)
 	testing.expect_value(t, coordinate, ghostty.Point_Coordinate{7, 23})
-	testing.expect_value(t, ghostty.search_set(search, .Select_Prev, nil), SUCCESS)
+	testing.expect_value(t, ghostty.search_select_prev(search), SUCCESS)
 	testing.expect_value(t, ghostty.search_get(search, .Selected_Index, &index), SUCCESS)
 	testing.expect_value(t, index, 2)
 	matches: ghostty.Selection_Buffer
@@ -50,5 +50,5 @@ search_scrollback :: proc(t: ^testing.T) {
 	testing.expect_value(t, ghostty.search_set(search, .Needle, nil), SUCCESS)
 	testing.expect_value(t, ghostty.search_get(search, .Total_Matches, &total), SUCCESS)
 	testing.expect_value(t, total, 0)
-	testing.expect_value(t, ghostty.search_set(search, .Select_Next, nil), NONE)
+	testing.expect_value(t, ghostty.search_select_next(search), NONE)
 }

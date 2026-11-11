@@ -15,7 +15,7 @@ key_encoding :: proc(t: ^testing.T) {
 		return
 	}
 	defer ghostty.key_event_free(event)
-	ghostty.key_event_set_action(event, .Press)
+	testing.expect_value(t, ghostty.key_event_set_action(event, .Press), SUCCESS)
 	cases := []struct {
 		key: ghostty.Key,
 		mods: ghostty.Mods,
@@ -33,31 +33,33 @@ key_encoding :: proc(t: ^testing.T) {
 		{.Shift_Left, {.Shift}, "", ""},
 	}
 	for item in cases {
-		ghostty.key_event_set_key(event, item.key)
-		ghostty.key_event_set_mods(event, item.mods)
-		ghostty.key_event_set_utf8(event, raw_data(item.text), uint(len(item.text)))
-		ghostty.key_event_set_unshifted_codepoint(event, 0)
+		text := ghostty.String{raw_data(item.text), uint(len(item.text))}
+		testing.expect_value(t, ghostty.key_event_set_key(event, item.key), SUCCESS)
+		testing.expect_value(t, ghostty.key_event_set_mods(event, item.mods), SUCCESS)
+		testing.expect_value(t, ghostty.key_event_set_utf8(event, text), SUCCESS)
+		testing.expect_value(t, transmute(string)ghostty.key_event_get_utf8(event), item.text)
+		testing.expect_value(t, ghostty.key_event_set_unshifted_codepoint(event, 0), SUCCESS)
 		buffer: [64]u8
 		n: uint
 		result := ghostty.key_encoder_encode(encoder, event, raw_data(buffer[:]), len(buffer), &n)
 		testing.expect_value(t, result, SUCCESS)
 		testing.expect_value(t, string(buffer[:n]), item.expected)
 	}
-	ghostty.key_event_set_key(event, .Arrow_Up)
-	ghostty.key_event_set_mods(event, {})
-	ghostty.key_event_set_utf8(event, nil, 0)
+	testing.expect_value(t, ghostty.key_event_set_key(event, .Arrow_Up), SUCCESS)
+	testing.expect_value(t, ghostty.key_event_set_mods(event, {}), SUCCESS)
+	testing.expect_value(t, ghostty.key_event_set_utf8(event, {}), SUCCESS)
 	required: uint
 	testing.expect_value(t, ghostty.key_encoder_encode(encoder, event, nil, 0, &required), SPACE)
 	testing.expect_value(t, required, 3)
 	backarrow := true
-	ghostty.key_encoder_setopt(encoder, .Backarrow_Key_Mode, &backarrow)
-	ghostty.key_event_set_key(event, .Backspace)
+	testing.expect_value(t, ghostty.key_encoder_set(encoder, .Backarrow_Key_Mode, &backarrow), SUCCESS)
+	testing.expect_value(t, ghostty.key_event_set_key(event, .Backspace), SUCCESS)
 	buffer: [64]u8
 	n: uint
 	result := ghostty.key_encoder_encode(encoder, event, raw_data(buffer[:]), len(buffer), &n)
 	testing.expect_value(t, result, SUCCESS)
 	testing.expect_value(t, string(buffer[:n]), "\x08")
-	ghostty.key_event_set_action(event, .Release)
+	testing.expect_value(t, ghostty.key_event_set_action(event, .Release), SUCCESS)
 	result = ghostty.key_encoder_encode(encoder, event, raw_data(buffer[:]), len(buffer), &n)
 	testing.expect_value(t, result, SUCCESS)
 	testing.expect_value(t, n, 0)
@@ -80,17 +82,17 @@ key_modes_from_terminal :: proc(t: ^testing.T) {
 		return
 	}
 	defer ghostty.key_event_free(event)
-	ghostty.key_event_set_action(event, .Press)
-	ghostty.key_event_set_key(event, .Arrow_Up)
+	testing.expect_value(t, ghostty.key_event_set_action(event, .Press), SUCCESS)
+	testing.expect_value(t, ghostty.key_event_set_key(event, .Arrow_Up), SUCCESS)
 	write(terminal, "\x1b[?1h")
-	ghostty.key_encoder_setopt_from_terminal(encoder, terminal)
+	testing.expect_value(t, ghostty.key_encoder_set_from_terminal(encoder, terminal), SUCCESS)
 	buffer: [32]u8
 	n: uint
 	result := ghostty.key_encoder_encode(encoder, event, raw_data(buffer[:]), len(buffer), &n)
 	testing.expect_value(t, result, SUCCESS)
 	testing.expect_value(t, string(buffer[:n]), "\x1bOA")
 	write(terminal, "\x1b[?1l")
-	ghostty.key_encoder_setopt_from_terminal(encoder, terminal)
+	testing.expect_value(t, ghostty.key_encoder_set_from_terminal(encoder, terminal), SUCCESS)
 	result = ghostty.key_encoder_encode(encoder, event, raw_data(buffer[:]), len(buffer), &n)
 	testing.expect_value(t, result, SUCCESS)
 	testing.expect_value(t, string(buffer[:n]), "\x1b[A")
@@ -118,11 +120,14 @@ mouse_sgr :: proc(t: ^testing.T) {
 	geometry.screen_height = 480
 	geometry.cell_width = 10
 	geometry.cell_height = 20
-	ghostty.mouse_encoder_setopt(encoder, .Size, &geometry)
+	testing.expect_value(t, ghostty.mouse_encoder_set(encoder, .Size, &geometry), SUCCESS)
 	write(terminal, "\x1b[?1000h\x1b[?1006h")
-	ghostty.mouse_encoder_setopt_from_terminal(encoder, terminal)
-	ghostty.mouse_event_set_position(event, {x = 25, y = 65})
-	ghostty.mouse_event_set_button(event, .Left)
+	testing.expect_value(t, ghostty.mouse_encoder_set_from_terminal(encoder, terminal), SUCCESS)
+	testing.expect_value(t, ghostty.mouse_event_set_position(event, {x = 25, y = 65}), SUCCESS)
+	testing.expect_value(t, ghostty.mouse_event_set_button(event, .Left), SUCCESS)
+	button: ghostty.Mouse_Button
+	testing.expect_value(t, ghostty.mouse_event_get_button(event, &button), SUCCESS)
+	testing.expect_value(t, button, ghostty.Mouse_Button.Left)
 	cases := []struct {
 		action: ghostty.Mouse_Action,
 		mods: ghostty.Mods,
@@ -134,20 +139,20 @@ mouse_sgr :: proc(t: ^testing.T) {
 		{.Motion, {}, ""},
 	}
 	for item in cases {
-		ghostty.mouse_event_set_action(event, item.action)
-		ghostty.mouse_event_set_mods(event, item.mods)
+		testing.expect_value(t, ghostty.mouse_event_set_action(event, item.action), SUCCESS)
+		testing.expect_value(t, ghostty.mouse_event_set_mods(event, item.mods), SUCCESS)
 		buffer: [64]u8
 		n: uint
 		result := ghostty.mouse_encoder_encode(encoder, event, raw_data(buffer[:]), len(buffer), &n)
 		testing.expect_value(t, result, SUCCESS)
 		testing.expect_value(t, string(buffer[:n]), item.expected)
 	}
-	ghostty.mouse_event_set_action(event, .Press)
+	testing.expect_value(t, ghostty.mouse_event_set_action(event, .Press), SUCCESS)
 	n: uint
 	testing.expect_value(t, ghostty.mouse_encoder_encode(encoder, event, nil, 0, &n), SPACE)
 	testing.expect_value(t, n, 9)
 	write(terminal, "\x1b[?1000l")
-	ghostty.mouse_encoder_setopt_from_terminal(encoder, terminal)
+	testing.expect_value(t, ghostty.mouse_encoder_set_from_terminal(encoder, terminal), SUCCESS)
 	buffer: [64]u8
 	result := ghostty.mouse_encoder_encode(encoder, event, raw_data(buffer[:]), len(buffer), &n)
 	testing.expect_value(t, result, SUCCESS)

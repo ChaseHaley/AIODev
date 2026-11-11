@@ -22,7 +22,7 @@ Paste :: struct {
 @(default_calling_convention = "c", link_prefix = "ghostty_")
 foreign lib {
 	@(require_results)
-	terminal_paste :: proc(terminal: Terminal, paste: ^Paste, out_written: ^bool) -> Result ---
+	terminal_paste :: proc(terminal: Terminal, paste: ^Paste, out_pasted: ^bool) -> Result ---
 	@(require_results)
 	paste_is_safe :: proc(data: [^]u8, len: uint) -> bool ---
 	@(require_results)

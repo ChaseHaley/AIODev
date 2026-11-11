@@ -149,7 +149,7 @@ search_select :: proc(s: ^Session, older: bool) -> bool {
 @(private)
 ghostty_select :: proc(s: ^Session, older: bool) -> bool {
 	sync.mutex_lock(&s.mutex)
-	result := ghostty.search_set(s.search, older ? .Select_Next : .Select_Prev, nil)
+	result := older ? ghostty.search_select_next(s.search) : ghostty.search_select_prev(s.search)
 	sync.mutex_unlock(&s.mutex)
 	if result != .Success && result != .No_Value {
 		log.errorf("term: selecting a search match failed: %v", result)
@@ -210,12 +210,8 @@ collect_highlights :: proc(s: ^Session, out: ^[dynamic]Highlight) {
 	buffer := ghostty.Selection_Buffer{raw_data(s.search_matches), uint(len(s.search_matches)), 0}
 	result := ghostty.search_get(s.search, .Viewport_Matches, &buffer)
 	if result == .Out_Of_Space {
-		previous := len(s.search_matches)
 		if runtime.resize_dynamic_array(&s.search_matches, int(buffer.len)) != nil {
 			return
-		}
-		for &match in s.search_matches[previous:] {
-			match = ghostty.sized(ghostty.Selection)
 		}
 		buffer = {raw_data(s.search_matches), uint(len(s.search_matches)), 0}
 		result = ghostty.search_get(s.search, .Viewport_Matches, &buffer)
@@ -229,7 +225,7 @@ collect_highlights :: proc(s: ^Session, out: ^[dynamic]Highlight) {
 			return
 		}
 	}
-	selected := ghostty.sized(ghostty.Selection)
+	selected: ghostty.Selection
 	if ghostty.search_get(s.search, .Selected_Match, &selected) == .Success {
 		append_highlight(s, &selected, true, out)
 	}

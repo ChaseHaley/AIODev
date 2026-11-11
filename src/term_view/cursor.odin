@@ -10,7 +10,7 @@ import "core:math"
 // target is the terminal's current logical destination, including a wide character's full width.
 Cursor_Paint :: struct {
 	head, tail, target:    render.Rect,
-	shape:                 ghostty.Render_State_Cursor_Visual_Style,
+	shape:                 ghostty.Cursor_Style,
 	color, text_color:    render.Color,
 	stroke, minimum_contrast: f32,
 }
@@ -119,7 +119,7 @@ cursor_transition_pane :: proc(
 // checked separately across the entire viewport, including scrolling regions below the first row.
 @(private)
 Cursor_Key :: struct {
-	style:     ghostty.Render_State_Cursor_Visual_Style,
+	style:     ghostty.Cursor_Style,
 	metrics:   Metrics,
 	origin:    [2]f32,
 	grid:      [2]int,

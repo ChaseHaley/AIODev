@@ -338,6 +338,7 @@ ghostty_create :: proc(s: ^Session, g: Geometry, session_options: Options) -> Er
 	semantic_prompt: ghostty.Terminal_Semantic_Prompt_Fn = on_semantic_prompt
 	size: ghostty.Terminal_Size_Fn = on_size
 	image_limit := IMAGE_STORAGE_LIMIT
+	unlimited := max(uint)
 	png_decoder_install()
 	options := [?]struct {
 		option: ghostty.Terminal_Option,
@@ -351,8 +352,8 @@ ghostty_create :: proc(s: ^Session, g: Geometry, session_options: Options) -> Er
 		{.Reset, rawptr(title_changed)},
 		{.Render_Hold, rawptr(render_hold)},
 		{.Semantic_Prompt, rawptr(semantic_prompt)},
-		// The engine's default byte cap otherwise prunes before our configured line limit.
-		{.Scrollback_Max_Bytes, nil},
+		// Unlimited: the engine's default byte cap, about one page, would prune before the line limit.
+		{.Scrollback_Max_Bytes, &unlimited},
 		{.Size, rawptr(size)},
 		{.Kitty_Image_Storage_Limit, &image_limit},
 	}
@@ -882,15 +883,21 @@ generation :: proc(s: ^Session) -> u64 {
 
 scroll_viewport :: proc(s: ^Session, rows: int) {
 	sync.mutex_lock(&s.mutex)
-	ghostty.terminal_scroll_viewport(s.terminal, {tag = .Delta, value = {delta = rows}})
+	result := ghostty.terminal_scroll_viewport(s.terminal, {tag = .Delta, value = {delta = rows}})
 	sync.mutex_unlock(&s.mutex)
+	if result != .Success {
+		log.errorf("term: scrolling the viewport failed: %v", result)
+	}
 	mark_changed(s)
 }
 
 scroll_to_bottom :: proc(s: ^Session) {
 	sync.mutex_lock(&s.mutex)
-	ghostty.terminal_scroll_viewport(s.terminal, {tag = .Bottom})
+	result := ghostty.terminal_scroll_viewport(s.terminal, {tag = .Bottom})
 	sync.mutex_unlock(&s.mutex)
+	if result != .Success {
+		log.errorf("term: scrolling to the bottom failed: %v", result)
+	}
 	mark_changed(s)
 }
 
@@ -951,7 +958,7 @@ configure :: proc(s: ^Session, options: Options) {
 // caller holds the session mutex; each failure is logged and the rest still applied.
 @(private, require_results)
 options_install :: proc(s: ^Session, options: Options) -> bool {
-	style: ghostty.Terminal_Cursor_Style
+	style: ghostty.Cursor_Style
 	switch options.cursor {
 	case .Block:
 		style = .Block

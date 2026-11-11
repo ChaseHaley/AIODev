@@ -24,14 +24,15 @@ Option_As_Alt :: enum i32 {
 }
 
 Key_Encoder_Option :: enum i32 {
-	Cursor_Key_Application     = 0,
-	Keypad_Key_Application     = 1,
-	Ignore_Keypad_With_Numlock = 2,
-	Alt_Esc_Prefix             = 3,
-	Modify_Other_Keys_State_2  = 4,
-	Kitty_Flags                = 5,
-	Macos_Option_As_Alt        = 6,
-	Backarrow_Key_Mode         = 7,
+	Invalid                    = 0,
+	Cursor_Key_Application     = 1,
+	Keypad_Key_Application     = 2,
+	Ignore_Keypad_With_Numlock = 3,
+	Alt_Esc_Prefix             = 4,
+	Modify_Other_Keys_State_2  = 5,
+	Kitty_Flags                = 6,
+	Macos_Option_As_Alt        = 7,
+	Backarrow_Key_Mode         = 8,
 }
 
 KITTY_KEY_ALL :: Kitty_Key_Flags {
@@ -47,8 +48,10 @@ foreign lib {
 	@(require_results)
 	key_encoder_new :: proc(allocator: ^Allocator, encoder: ^Key_Encoder) -> Result ---
 	key_encoder_free :: proc(encoder: Key_Encoder) ---
-	key_encoder_setopt :: proc(encoder: Key_Encoder, option: Key_Encoder_Option, value: rawptr) ---
-	key_encoder_setopt_from_terminal :: proc(encoder: Key_Encoder, terminal: Terminal) ---
 	@(require_results)
-	key_encoder_encode :: proc(encoder: Key_Encoder, event: Key_Event, out_buf: [^]u8, out_buf_size: uint, out_len: ^uint) -> Result ---
+	key_encoder_set :: proc(encoder: Key_Encoder, option: Key_Encoder_Option, value: rawptr) -> Result ---
+	@(require_results)
+	key_encoder_set_from_terminal :: proc(encoder: Key_Encoder, terminal: Terminal) -> Result ---
+	@(require_results)
+	key_encoder_encode :: proc(encoder: Key_Encoder, event: Key_Event, buf: [^]u8, buf_len: uint, out_written: ^uint) -> Result ---
 }

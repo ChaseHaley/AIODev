@@ -5,11 +5,11 @@ when ODIN_OS == .Windows {
 }
 
 Terminal_Scroll_Viewport_Tag :: enum i32 {
-	Top,
-	Bottom,
-	Delta,
-	Row,
-	Delta_Prompt,
+	Top          = 0,
+	Bottom       = 1,
+	Delta        = 2,
+	Row          = 3,
+	Delta_Prompt = 4,
 }
 
 Terminal_Scroll_Viewport_Value :: struct #raw_union {
@@ -29,11 +29,45 @@ Terminal_Screen :: enum i32 {
 	Alternate = 1,
 }
 
-Terminal_Cursor_Style :: enum i32 {
-	Bar          = 0,
-	Block        = 1,
-	Underline    = 2,
-	Block_Hollow = 3,
+Terminal_Boundary :: enum u32 {
+	Ground,
+	Apc_Start,
+	Apc_End,
+	Dcs_Start,
+	Dcs_End,
+	Osc_Start,
+	Osc_End,
+}
+
+Terminal_Boundaries :: bit_set[Terminal_Boundary;u32]
+
+Terminal_String_Kind :: enum i32 {
+	Apc = 0,
+	Dcs = 1,
+	Osc = 2,
+}
+
+Terminal_String_Introducer :: enum i32 {
+	Esc = 0,
+	C1  = 1,
+}
+
+Terminal_String_End :: enum i32 {
+	St_Esc    = 0,
+	St_C1     = 1,
+	Cancelled = 2,
+	Aborted   = 3,
+	Bel       = 4,
+}
+
+Terminal_Write_Stop :: struct {
+	size:       uint,
+	consumed:   uint,
+	reached:    Terminal_Boundaries,
+	kind:       Terminal_String_Kind,
+	introducer: Terminal_String_Introducer,
+	end:        Terminal_String_End,
+	byte:       u8,
 }
 
 Terminal_Scrollbar :: struct {
@@ -94,54 +128,55 @@ Terminal_Mode_Config :: struct {
 }
 
 Terminal_Option :: enum i32 {
-	Userdata                      = 0,
-	Write_Pty                     = 1,
-	Bell                          = 2,
-	Enquiry                       = 3,
-	Xtversion                     = 4,
-	Title_Changed                 = 5,
-	Size                          = 6,
-	Color_Scheme                  = 7,
-	Device_Attributes             = 8,
-	Title                         = 9,
-	Pwd                           = 10,
-	Color_Foreground              = 11,
-	Color_Background              = 12,
-	Color_Cursor                  = 13,
-	Color_Palette                 = 14,
-	Kitty_Image_Storage_Limit     = 15,
-	Kitty_Image_Medium_File       = 16,
-	Kitty_Image_Medium_Temp_File  = 17,
-	Kitty_Image_Medium_Shared_Mem = 18,
-	Apc_Max_Bytes                 = 19,
-	Apc_Max_Bytes_Kitty           = 20,
-	Selection                     = 21,
-	Default_Cursor_Style          = 22,
-	Default_Cursor_Blink          = 23,
-	Glyph_Protocol                = 24,
-	Pwd_Changed                   = 25,
-	Clipboard_Write               = 26,
-	Scrollback_Max_Bytes          = 27,
-	Scrollback_Max_Lines          = 28,
-	Desktop_Notification          = 29,
-	Progress_Report               = 30,
-	Continuation_Max_Bytes        = 31,
-	Title_Report                  = 32,
-	Mode_Default                  = 33,
-	Mode                          = 34,
-	Unknown_Sequence              = 35,
-	Unknown_Max_Bytes             = 36,
-	Terminfo_Name                 = 37,
-	Clipboard_Read                = 38,
-	Clipboard_Write_Max_Bytes     = 39,
-	Resize_Pull_Scrollback        = 40,
-	Render_Hold                   = 41,
-	Semantic_Prompt               = 42,
-	Reset                         = 43,
-	Xt_Checksum_Report            = 44,
-	Xt_Checksum_Extension         = 45,
-	Program_Status                = 46,
-	Resize_Window                 = 47,
+	Invalid                       = 0,
+	Userdata                      = 1,
+	Write_Pty                     = 2,
+	Bell                          = 3,
+	Enquiry                       = 4,
+	Xtversion                     = 5,
+	Title_Changed                 = 6,
+	Size                          = 7,
+	Color_Scheme                  = 8,
+	Device_Attributes             = 9,
+	Title                         = 10,
+	Pwd                           = 11,
+	Color_Foreground              = 12,
+	Color_Background              = 13,
+	Color_Cursor                  = 14,
+	Color_Palette                 = 15,
+	Kitty_Image_Storage_Limit     = 16,
+	Kitty_Image_Medium_File       = 17,
+	Kitty_Image_Medium_Temp_File  = 18,
+	Kitty_Image_Medium_Shared_Mem = 19,
+	Apc_Max_Bytes                 = 20,
+	Apc_Max_Bytes_Kitty           = 21,
+	Selection                     = 22,
+	Default_Cursor_Style          = 23,
+	Default_Cursor_Blink          = 24,
+	Glyph_Protocol                = 25,
+	Pwd_Changed                   = 26,
+	Clipboard_Write               = 27,
+	Scrollback_Max_Bytes          = 28,
+	Scrollback_Max_Lines          = 29,
+	Desktop_Notification          = 30,
+	Progress_Report               = 31,
+	Continuation_Max_Bytes        = 32,
+	Title_Report                  = 33,
+	Mode_Default                  = 34,
+	Mode                          = 35,
+	Unknown_Sequence              = 36,
+	Unknown_Max_Bytes             = 37,
+	Terminfo_Name                 = 38,
+	Clipboard_Read                = 39,
+	Clipboard_Write_Max_Bytes     = 40,
+	Resize_Pull_Scrollback        = 41,
+	Render_Hold                   = 42,
+	Semantic_Prompt               = 43,
+	Reset                         = 44,
+	Xt_Checksum_Report            = 45,
+	Xt_Checksum_Extension         = 46,
+	Program_Status                = 47,
+	Resize_Window                 = 48,
 }
 
 Terminal_Data :: enum i32 {
@@ -155,7 +190,7 @@ Terminal_Data :: enum i32 {
 	Cursor_Visible                = 7,
 	Kitty_Keyboard_Flags          = 8,
 	Scrollbar                     = 9,
-	Cursor_Style                  = 10,
+	Cursor_Sgr_Style              = 10,
 	Mouse_Tracking                = 11,
 	Title                         = 12,
 	Pwd                           = 13,
@@ -202,8 +237,15 @@ foreign lib {
 	terminal_set :: proc(terminal: Terminal, option: Terminal_Option, value: rawptr) -> Result ---
 	terminal_vt_write :: proc(terminal: Terminal, data: [^]u8, len: uint) ---
 	@(require_results)
-	terminal_vt_write_until_ground :: proc(terminal: Terminal, data: [^]u8, len: uint, out_consumed: ^uint) -> Result ---
-	terminal_scroll_viewport :: proc(terminal: Terminal, behavior: Terminal_Scroll_Viewport) ---
+	terminal_vt_write_until :: proc(
+		terminal: Terminal,
+		data: [^]u8,
+		len: uint,
+		boundaries: Terminal_Boundaries,
+		out: ^Terminal_Write_Stop,
+	) -> Result ---
+	@(require_results)
+	terminal_scroll_viewport :: proc(terminal: Terminal, behavior: Terminal_Scroll_Viewport) -> Result ---
 	@(require_results)
 	terminal_get :: proc(terminal: Terminal, data: Terminal_Data, out: rawptr) -> Result ---
 	@(require_results)

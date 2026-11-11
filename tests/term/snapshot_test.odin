@@ -89,7 +89,8 @@ snapshot_wrapping_and_overscan :: proc(t: ^testing.T) {
 	source, ok := snapshot_source(t, "0\r\n1\r\n2\r\n3\r\n4")
 	if !ok { return }
 	defer snapshot_source_destroy(&source)
-	ghostty.terminal_scroll_viewport(source.terminal, {tag = .Delta, value = {delta = -1}})
+	up := ghostty.Terminal_Scroll_Viewport{tag = .Delta, value = {delta = -1}}
+	testing.expect_value(t, ghostty.terminal_scroll_viewport(source.terminal, up), ghostty.Result.Success)
 	overscan := ghostty.Render_State_Overscan{above = 1, below = 1}
 	testing.expect_value(t, ghostty.render_state_set(source.state, .Overscan, &overscan), ghostty.Result.Success)
 	testing.expect_value(t, ghostty.render_state_update(source.state, source.terminal), ghostty.Result.Success)
@@ -165,7 +166,7 @@ snapshot_cursor_and_selection :: proc(t: ^testing.T) {
 	source, ok := snapshot_source(t, "hello\r\n\u754c\x1b[2;2H\x1b[5 q")
 	if !ok { return }
 	defer snapshot_source_destroy(&source)
-	selection := ghostty.sized(ghostty.Selection)
+	selection: ghostty.Selection
 	testing.expect_value(t, ghostty.terminal_select_all(source.terminal, &selection), ghostty.Result.Success)
 	result := ghostty.terminal_set(source.terminal, .Selection, &selection)
 	testing.expect_value(t, result, ghostty.Result.Success)
