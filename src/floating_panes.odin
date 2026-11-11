@@ -506,6 +506,8 @@ floating_minimize_all_toggle :: proc(app: ^App, w: ^Window) {
 	}
 	pane_motion_arm(w, .Float)
 	if shown == 0 {
+		// Restored floats appear with the cursor in place, as a single restore does.
+		cursor_crossing_forget(w)
 		latest := layout.float_latest(tree, false)
 		if latest != layout.INVALID_NODE {pane_focus(app, w, latest)}
 	}
@@ -598,11 +600,14 @@ floating_grab :: proc(w: ^Window, pane: layout.Pane_Rect, x, y: f32) -> (Float_G
 	return {content = pane.content, start = {x, y}, rect = rect}, found
 }
 
+// Where a move or resize leaves the float. A `centred` resize, Ctrl held, moves the opposite edges by the
+// same amount the other way, so the float keeps its centre; it stops where the nearer side meets the area.
 floating_drag_rect :: proc(
 	area, original: layout.Rect,
 	delta: [2]f32,
 	edges: Float_Edges,
 	scale: f32,
+	centred := false,
 ) -> layout.Rect {
 	r := original
 	if edges == {} {
@@ -612,6 +617,17 @@ floating_drag_rect :: proc(
 	}
 	min_width := min(FLOAT_MINIMUM_WIDTH * scale, area.width)
 	min_height := min(FLOAT_MINIMUM_HEIGHT * scale, area.height)
+	if centred {
+		if edges & {.Left, .Right} != {} {
+			grow := .Left in edges ? -delta.x : delta.x
+			r.x, r.width = floating_centred_span(area.x, area.width, r.x, r.width, grow, min_width)
+		}
+		if edges & {.Top, .Bottom} != {} {
+			grow := .Top in edges ? -delta.y : delta.y
+			r.y, r.height = floating_centred_span(area.y, area.height, r.y, r.height, grow, min_height)
+		}
+		return r
+	}
 	right, bottom := r.x + r.width, r.y + r.height
 	if .Left in edges {r.x = clamp(r.x + delta.x, area.x, right - min_width)}
 	if .Right in edges {right = clamp(right + delta.x, r.x + min_width, area.x + area.width)}
@@ -619,6 +635,16 @@ floating_drag_rect :: proc(
 	if .Bottom in edges {bottom = clamp(bottom + delta.y, r.y + min_height, area.y + area.height)}
 	r.width, r.height = right - r.x, bottom - r.y
 	return r
+}
+
+// One axis of a centred resize: the span grows by `grow` on each side about its centre, kept at least
+// `minimum` and within the area.
+@(private = "file")
+floating_centred_span :: proc(area_start, area_size, start, size, grow, minimum: f32) -> (f32, f32) {
+	centre := start + size / 2
+	widest := 2 * min(centre - area_start, area_start + area_size - centre)
+	span := clamp(size + 2 * grow, min(minimum, widest), widest)
+	return centre - span / 2, span
 }
 
 floating_bounds_for_rect :: proc(area, rect: layout.Rect) -> layout.Rect {
@@ -633,7 +659,7 @@ floating_bounds_for_rect :: proc(area, rect: layout.Rect) -> layout.Rect {
 // Follows the pointer while a float moves or resizes: a header press past FLOAT_DRAG_THRESHOLD becomes a
 // move. False when no such press is held, or its float no longer floats, which ends it.
 @(private)
-floating_drag_follow :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {
+floating_drag_follow :: proc(app: ^App, w: ^Window, x, y: f32, modifiers: input.Modifiers) -> bool {
 	grab: Float_Grab
 	edges: Float_Edges
 	#partial switch p in w.float_press {
@@ -654,7 +680,8 @@ floating_drag_follow :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {
 	if !layout.is_floating(tree, node) {w.float_press = nil; return false}
 	area := floating_area(w)
 	if area.width <= 0 || area.height <= 0 {return true}
-	r := floating_drag_rect(area, grab.rect, {x - grab.start.x, y - grab.start.y}, edges, w.scale)
+	delta := [2]f32{x - grab.start.x, y - grab.start.y}
+	r := floating_drag_rect(area, grab.rect, delta, edges, w.scale, .Control in modifiers)
 	bounds := floating_bounds_for_rect(area, r)
 	if layout.float_set_bounds(tree, node, bounds) {window_floats_layout(app, w)}
 	return true
@@ -674,7 +701,7 @@ floating_pointer_move :: proc(app: ^App, w: ^Window, e: input.Mouse_Move_Event) 
 		pointer_set(app, w, .Arrow)
 		return true
 	}
-	if !floating_drag_follow(app, w, x, y) {return false}
+	if !floating_drag_follow(app, w, x, y, e.modifiers) {return false}
 	resize, resizing := w.float_press.(Float_Resize)
 	pointer_set(app, w, resizing ? floating_edge_cursor(resize.edges) : .Arrow)
 	return true
@@ -977,7 +1004,7 @@ floating_release :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) -> 
 		return false
 	case Float_Header_Press, Float_Move, Float_Resize:
 		moved := floating_dragging(w)
-		if moved {_ = floating_drag_follow(app, w, x, y)}
+		if moved {_ = floating_drag_follow(app, w, x, y, e.modifiers)}
 		w.float_press = nil
 		if moved {layout_state_touch(app)}
 		pane_header_cancel(w)

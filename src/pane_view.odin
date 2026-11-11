@@ -4,19 +4,21 @@ import "aio:layout"
 import "aio:platform"
 import "aio:ui"
 
-// The window's half of layout.PANE_VIEW_TRANSITIONS. Each tab owns its view, tree.fill and tree.zoomed,
-// and keeps it while other tabs show; only pane_view_apply changes it. The window applies the view of the
-// tab it shows: w.pane_fill is the fill it lays out with, which pane_view_sync takes from that tab at
-// every layout, so it differs from the tab's only between a tab change and the layout that follows.
+// The window's half of layout.PANE_VIEW_TRANSITIONS. Each tab owns its view, tree.fill and the zooms of
+// its tiling and floats, and keeps it while other tabs show; only pane_view_apply changes it. A view acts
+// on the focused pane's container, tiled or floating. The window applies the view of the tab it shows:
+// w.pane_fill is the fill it lays out with, which pane_view_sync takes from that tab at every layout, so it
+// differs from the tab's only between a tab change and the layout that follows.
 
-// The shown tree is nil only for the moment a window has lost its last tab.
+// The tab's view as its tiling holds it, which is the window's fill whatever pane it shows. The shown tree
+// is nil only for the moment a window has lost its last tab.
 pane_view_current :: proc(w: ^Window) -> layout.Pane_View {
 	tree := window_tree(w)
 	if tree == nil {return .Split}
 	return layout.pane_view_of(tree.fill, tree.zoomed)
 }
 
-// Whether the window shows the focused pane alone.
+// Whether the tiling shows its focused pane alone, or nothing beside a filling floating pane.
 pane_view_solo :: proc(w: ^Window) -> bool {
 	return pane_view_current(w) != .Split
 }
@@ -35,12 +37,14 @@ window_title_height_in :: proc(w: ^Window, fill: layout.Pane_Fill) -> f32 {
 	return ui.TITLE_BAR_HEIGHT * w.scale
 }
 
-// The owner chose a view. The window follows at once, unless the operating system refused, and the
-// focused pane eases there above everything else, growing over the window or shrinking back off it.
+// The owner chose a view for the focused pane. The window follows at once, unless the operating system
+// refused, and the pane eases there above everything else, growing over the window or shrinking back off
+// it.
 pane_view_toggle :: proc(app: ^App, w: ^Window, event: layout.Pane_View_Event) {
-	if !pane_view_apply(app, w, event) {return}
 	tree := window_tree(w)
-	content, _ := layout.pane_content(tree, layout.focus_tiled(tree))
+	node := tree.focus
+	if !pane_view_apply(app, w, node, event) {return}
+	content, _ := layout.pane_content(tree, node)
 	pane_motion_arm(w, .View, content)
 	window_relayout(app, w)
 }
@@ -51,24 +55,28 @@ pane_view_toggle :: proc(app: ^App, w: ^Window, event: layout.Pane_View_Event) {
 pane_view_sync :: proc(app: ^App, w: ^Window) {
 	tree := window_tree(w)
 	if tree == nil {return}
-	if tree.panes_changed {_ = pane_view_apply(app, w, .Panes_Changed)}
+	if tree.panes_changed {_ = pane_view_apply(app, w, layout.focus_tiled(tree), .Panes_Changed)}
 	if tree.fill == w.pane_fill || pane_fill_set(app, w, tree.fill) {return}
 	// The window stayed in or out of full screen, so the tab takes the fill the window can give it.
 	tree.fill = w.pane_fill == .Screen ? .Screen : .None
 	w.pane_fill = tree.fill
 }
 
-// The operating system goes first, so a refusal leaves every part of the view as it was.
+// The operating system goes first, so a refusal leaves every part of the view as it was. The tab's panes
+// changing ends the fill whichever container held it, since layout hands such a fill to the tiling.
 @(private = "file", require_results)
-pane_view_apply :: proc(app: ^App, w: ^Window, event: layout.Pane_View_Event) -> bool {
+pane_view_apply :: proc(
+	app: ^App,
+	w: ^Window,
+	node: layout.Node_Id,
+	event: layout.Pane_View_Event,
+) -> bool {
 	tree := window_tree(w)
 	tree.panes_changed = false
-	from := pane_view_current(w)
-	to := layout.PANE_VIEW_TRANSITIONS[from][event]
-	if to == from {return false}
-	fill, zoomed := layout.pane_view_parts(to)
+	to, fill := layout.pane_view_next(tree, node, event)
+	if to == layout.pane_view_at(tree, node) {return false}
 	if !pane_fill_set(app, w, fill) {return false}
-	tree.fill, tree.zoomed = fill, zoomed
+	layout.pane_view_set(tree, node, to)
 	divider_cancel(w)
 	return true
 }

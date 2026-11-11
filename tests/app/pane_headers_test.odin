@@ -8,8 +8,9 @@ import "aio:layout"
 import "aio:render"
 import "aio:ui"
 
+// A pane in a float keeps its split, view and close controls; floating and linking belong to tiled panes.
 @(test)
-pane_headers_in_a_float_keep_split_and_close_only :: proc(t: ^testing.T) {
+pane_headers_in_a_float_drop_float_and_linked_window :: proc(t: ^testing.T) {
 	w := new(app.Window)
 	defer free(w)
 	w.scale, w.header_height = 1, 28
@@ -19,7 +20,7 @@ pane_headers_in_a_float_keep_split_and_close_only :: proc(t: ^testing.T) {
 	in_tile, in_float := app.pane_header_layout(w, tiled), app.pane_header_layout(w, floating)
 	for button in app.Pane_Header_Button {
 		testing.expectf(t, in_tile.buttons[button].width > 0, "a tiled header shows %v", button)
-		kept := button == .Links || button == .Split_Right || button == .Split_Down || button == .Close
+		kept := button != .Dock && button != .Linked_Window
 		testing.expectf(t, (in_float.buttons[button].width > 0) == kept, "a floating header and %v", button)
 	}
 }

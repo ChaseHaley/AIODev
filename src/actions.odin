@@ -1185,7 +1185,7 @@ command_execute :: proc(app: ^App, ctx: Command_Context, invocation: commands.In
 		// Leaving a floating group's outer edge continues from the tiled pane behind it.
 		tree := window_tree(w)
 		if other == start && layout.is_floating(tree, start) {
-			tiled := window_tiled_rects(w)
+			tiled := pane_tiled_action_rects(app, w)
 			other = layout.focus_direction(tiled, layout.focus_tiled(tree), param.direction)
 		}
 		pane_focus(app, w, other)
@@ -1221,22 +1221,22 @@ command_execute :: proc(app: ^App, ctx: Command_Context, invocation: commands.In
 	return {}
 }
 
-// The panes sharing the focused pane's arrangement: its floating group, or the tiled panes.
+// The panes sharing the focused pane's arrangement, placed as its split places them whatever view shows:
+// its floating group, or the tiled panes.
 @(private)
 pane_action_rects :: proc(app: ^App, w: ^Window) -> []layout.Pane_Rect {
 	tree := window_tree(w)
-	root := layout.float_root(tree, tree.focus)
-	if root != layout.INVALID_NODE {
-		floats := floating_rects(w)
-		start := -1
-		for pane, i in floats {
-			same := layout.float_root(tree, pane.node) == root
-			if same && start < 0 {start = i}
-			if !same && start >= 0 {return floats[start:i]}
-		}
-		if start >= 0 {return floats[start:]}
-	}
+	if !layout.is_floating(tree, tree.focus) {return pane_tiled_action_rects(app, w)}
+	rects := make([dynamic]layout.Pane_Rect, context.temp_allocator)
+	g := window_geometry(app, w, w.pane_fill)
+	layout.float_group_place(tree, tree.focus, g.floating, g.gap, g.header, &rects)
+	return rects[:]
+}
+
+@(private)
+pane_tiled_action_rects :: proc(app: ^App, w: ^Window) -> []layout.Pane_Rect {
 	if !pane_view_solo(w) {return window_tiled_rects(w)}
+	tree := window_tree(w)
 	rects := make([dynamic]layout.Pane_Rect, context.temp_allocator)
 	layout.compute(tree, window_content_area(app, w), window_gap(app, w), &rects)
 	return rects[:]
