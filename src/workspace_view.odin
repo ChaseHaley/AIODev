@@ -26,10 +26,11 @@ workspace_view_init :: proc(app: ^App, resources: ^Workspace_View_Resources, wor
 	resources.views = make([dynamic]Pane_View)
 	resources.panes = make([dynamic]layout.Pane_Rect)
 	tab_presentation_init(&resources.presentation)
-	if settings_tab_index(workspace) >= 0 && !settings_load(app, &resources.editor) {
+	if settings_tab_index(workspace) >= 0 && !settings_load(app, &resources.editor, &workspace.settings_view) {
 		workspace_view_destroy(resources)
 		return false
 	}
+	ui.editor_view_destroy(&workspace.settings_view)
 	resources.editor.scroll = workspace.settings_scroll
 	return true
 }
@@ -115,8 +116,11 @@ workspace_adopt :: proc(
 	confirmation_workspace_depart(app, w)
 	overlay_close(app, w)
 	workspace_picker_cancel(w)
-	// Editor storage belongs to the window; its reading position belongs to the workspace.
+	// Editor storage belongs to the window; its reading position and open rows belong to the workspace.
 	w.workspace.settings_scroll = w.editor.scroll
+	ui.editor_view_destroy(&w.workspace.settings_view)
+	view, view_error := ui.editor_view_take(&w.editor)
+	if view_error == nil {w.workspace.settings_view = view} else {ui.editor_view_destroy(&view)}
 	switch adoption {
 	case .Retain:
 		workspace_view_rebind(&w.resources, &prepared)

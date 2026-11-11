@@ -51,9 +51,9 @@ profile_command_exists :: proc(command: string) -> bool {
 	return false
 }
 
-// Fills the page from the settings file, keeping its expansion and settling reorders. A failure
-// leaves the page as it was.
-settings_load :: proc(app: ^App, p: ^ui.Editor) -> bool {
+// Fills the page from the settings file, keeping its expansion and settling reorders, or restoring
+// `kept` instead when given. A failure leaves the page as it was.
+settings_load :: proc(app: ^App, p: ^ui.Editor, kept: ^ui.Editor_View = nil) -> bool {
 	data, err := os.read_entire_file(app.settings_path, context.temp_allocator)
 	if err != nil {
 		notify(app, .Error, "Could not read settings. Check the settings path and permissions.")
@@ -65,7 +65,7 @@ settings_load :: proc(app: ^App, p: ^ui.Editor) -> bool {
 		notify(app, .Error, "Could not allocate settings editor.")
 		return false
 	}
-	page, built := settings_page_build(app, string(data), &view)
+	page, built := settings_page_build(app, string(data), kept != nil ? kept : &view)
 	if !built {return false}
 	ui.editor_destroy(p)
 	p^ = page

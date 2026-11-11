@@ -126,7 +126,10 @@ settings_page_icons :: proc(app: ^App, p: ^ui.Editor, scale: f32) -> render.Buil
 workspace_settings_sync :: proc(app: ^App, workspace: ^Workspace) {
 	if workspace == nil {return}
 	present := workspace_has_content(workspace, {.Settings, 0})
-	if !present {workspace.settings_scroll = 0}
+	if !present {
+		workspace.settings_scroll = 0
+		ui.editor_view_destroy(&workspace.settings_view)
+	}
 	for w in app.windows {
 		if w.workspace != workspace {continue}
 		if present {

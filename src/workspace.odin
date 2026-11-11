@@ -28,7 +28,9 @@ Workspace :: struct {
 	selected: int,
 	next_tab_id: u32,
 	selection_anchor: u32,
+	// The settings page's reading position and open rows while no window shows this workspace.
 	settings_scroll: int,
+	settings_view: ui.Editor_View,
 	documents: Document_List,
 }
 
@@ -115,6 +117,7 @@ tab_create :: proc(
 workspace_destroy :: proc(workspace: ^Workspace) {
 	for tab in workspace.tabs {tab_record_free(tab)}
 	documents_destroy(&workspace.documents)
+	ui.editor_view_destroy(&workspace.settings_view)
 	delete(workspace.tabs)
 	delete(workspace.name)
 	delete(workspace.icon.emoji)
