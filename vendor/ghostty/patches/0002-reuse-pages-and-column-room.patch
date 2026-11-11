@@ -1,14 +1,15 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Chase Haley <chasehaley33@gmail.com>
 Date: Wed, 11 Nov 2026 08:08:45 -0600
-Subject: [PATCH 2/2] PageList: reuse pages that leave the list, leave room to
+Subject: [PATCH 2/3] PageList: reuse pages that leave the list, leave room to
  grow columns
 
-Line pruning and column growth without reflow each destroy about one
-page for every page they create. Destroying a pool page decommits it
-(a memset and DiscardVirtualMemory on Windows) and the next page
-faults the memory back in. Keep one zeroed page as a spare for the
-next createPage instead.
+Line pruning, column growth without reflow and reflow each give up
+about one page for every page they create. Destroying a pool page
+decommits it (a memset and DiscardVirtualMemory on Windows) and the
+next page faults the memory back in. Keep one zeroed page as a spare
+for the next createPage instead, and let reflow hand its leftover
+source pages to it.
 
 Pages copied to grow the columns also get a quarter more column
 capacity, so a window widened a column at a time copies its history
@@ -16,14 +17,14 @@ once per quarter instead of once per column.
 
 On an i9-14900K at 120x32 with a 10,000-line limit, ManyLine output
 recorded from ConPTY parses at 490 MB/s instead of 104 MB/s, and
-resizing from 120 to 480 columns and back with full history takes
+resizing from 120 to 480 columns and back without reflow takes
 0.09 ms per step instead of 3.3 ms (worst 3.8 ms instead of 12 ms).
 ---
- src/terminal/PageList.zig | 185 ++++++++++++++++++++++++++++++++++++--
- 1 file changed, 179 insertions(+), 6 deletions(-)
+ src/terminal/PageList.zig | 189 ++++++++++++++++++++++++++++++++++++--
+ 1 file changed, 181 insertions(+), 8 deletions(-)
 
 diff --git a/src/terminal/PageList.zig b/src/terminal/PageList.zig
-index f46d75b..8e69885 100644
+index f46d75b..2706d0b 100644
 --- a/src/terminal/PageList.zig
 +++ b/src/terminal/PageList.zig
 @@ -449,6 +449,15 @@ page_compression: IncrementalCompressionState = .{},
@@ -58,6 +59,24 @@ index f46d75b..8e69885 100644
      releasePages(&self.pool, self.pages);
  
      // Reset our pools to free as much memory as possible while retaining
+@@ -1484,7 +1495,7 @@ fn resizeCols(
+     // node must not outlive the reflow.
+     defer if (self.recycle_node) |node| {
+         self.recycle_node = null;
+-        self.destroyNode(node);
++        self.retirePage(node);
+     };
+ 
+     // Set our new page as the only page. This orphans the existing pages
+@@ -1512,7 +1523,7 @@ fn resizeCols(
+                     row.node.owned != .pool or
+                     row.node.data != .resident)
+                 {
+-                    self.destroyNode(row.node);
++                    self.retirePage(row.node);
+                     break :destroy_node;
+                 }
+ 
 @@ -3013,7 +3024,16 @@ fn resizeWithoutReflowGrowCols(
      // Try to fit our new column size into our existing page capacity.
      // If that doesn't work then use a non-standard page with the

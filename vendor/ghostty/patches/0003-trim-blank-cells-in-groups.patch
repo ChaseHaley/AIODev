@@ -1,0 +1,95 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Chase Haley <chasehaley33@gmail.com>
+Date: Wed, 11 Nov 2026 08:28:17 -0600
+Subject: [PATCH 3/3] PageList: find a row's trailing blanks a group of cells
+ at a time
+
+Reflow trims each row's trailing blank cells before copying it, one
+cell at a time from the right edge. Short lines in a wide terminal
+spent most of a resize there: with 10,000 rows of ManyLine history,
+a reflowing resize between 120 and 480 columns took 2.3 ms per step.
+Cell.trimEmptyLen checks eight cells at once on the OR of their raw
+bits, exactly as isEmptyAll does, which brings it to 1.8 ms.
+---
+ src/terminal/PageList.zig |  5 +----
+ src/terminal/page.zig     | 25 +++++++++++++++++++++++--
+ 2 files changed, 24 insertions(+), 6 deletions(-)
+
+diff --git a/src/terminal/PageList.zig b/src/terminal/PageList.zig
+index 2706d0b..86127ed 100644
+--- a/src/terminal/PageList.zig
++++ b/src/terminal/PageList.zig
+@@ -1694,10 +1694,7 @@ const ReflowCursor = struct {
+         // rightmost blanks.
+         var cols_len = src_page.size.cols;
+         if (!src_row.wrap) {
+-            while (cols_len > 0) {
+-                if (!cells[cols_len - 1].isEmpty()) break;
+-                cols_len -= 1;
+-            }
++            cols_len = @intCast(pagepkg.Cell.trimEmptyLen(cells));
+ 
+             // If the row has a semantic prompt then the blank row is meaningful
+             // so we just consider pretend the first cell of the row isn't empty.
+diff --git a/src/terminal/page.zig b/src/terminal/page.zig
+index d917047..4622c70 100644
+--- a/src/terminal/page.zig
++++ b/src/terminal/page.zig
+@@ -2670,6 +2670,23 @@ pub const Cell = packed struct(u64) {
+         return false;
+     }
+ 
++    /// Returns the length of `cells` without its trailing empty cells
++    /// (see `isEmpty`). Like `isEmptyAll`, this checks a group of cells
++    /// at a time on the OR of their raw bits.
++    pub fn trimEmptyLen(cells: []const Cell) usize {
++        var len = cells.len;
++        while (len >= any_group_len) {
++            const group: AnyGroup = @bitCast(cells[len - any_group_len ..][0..any_group_len].*);
++            if (@reduce(.Or, group) & non_empty_bits != 0) break;
++            len -= any_group_len;
++        }
++        while (len > 0) {
++            if (@as(Backing, @bitCast(cells[len - 1])) & non_empty_bits != 0) break;
++            len -= 1;
++        }
++        return len;
++    }
++
+     /// Returns true if every cell in the set is empty (see `isEmpty`).
+     ///
+     /// This is the same as calling `isEmpty` on each cell, but is exact
+@@ -3151,7 +3168,7 @@ test "Cell is zero by default" {
+     try std.testing.expectEqual(Cell.SemanticContent.output, cell.semantic_content);
+ }
+ 
+-test "Cell hasTextAny and isEmptyAll match the per-cell checks" {
++test "Cell hasTextAny, isEmptyAll and trimEmptyLen match the per-cell checks" {
+     // Each case the bulk checks must tell apart. Every pair is tried at
+     // every two positions of every row length up to past two groups, so
+     // pairs share a group, sit in different groups, or sit in the tail.
+@@ -3171,6 +3188,7 @@ test "Cell hasTextAny and isEmptyAll match the per-cell checks" {
+ 
+     try testing.expect(!Cell.hasTextAny(&.{}));
+     try testing.expect(Cell.isEmptyAll(&.{}));
++    try testing.expectEqual(@as(usize, 0), Cell.trimEmptyLen(&.{}));
+ 
+     var row: [19]Cell = undefined;
+     for (1..row.len + 1) |len| {
+@@ -3181,12 +3199,15 @@ test "Cell hasTextAny and isEmptyAll match the per-cell checks" {
+ 
+             var text = false;
+             var empty = true;
+-            for (row[0..len]) |cell| {
++            var trimmed: usize = 0;
++            for (row[0..len], 1..) |cell, n| {
+                 text = text or cell.hasText();
+                 empty = empty and cell.isEmpty();
++                if (!cell.isEmpty()) trimmed = n;
+             }
+             try testing.expectEqual(text, Cell.hasTextAny(row[0..len]));
+             try testing.expectEqual(empty, Cell.isEmptyAll(row[0..len]));
++            try testing.expectEqual(trimmed, Cell.trimEmptyLen(row[0..len]));
+         };
+     }
+ }
