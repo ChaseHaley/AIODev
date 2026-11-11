@@ -349,34 +349,84 @@ file_replace :: proc(path, text: string) -> bool {
 	return true
 }
 
-// Rebuilds the saved workspaces and opens their windows. False leaves startup to create the
-// default workspace; anything restored before a failure is kept.
+// What layout_state_restore_workspaces rebuilt, in saved order, for layout_state_restore_windows.
+// The lists are temporary.
+Layout_Restore :: struct {
+	workspaces: [dynamic]Layout_Restored,
+}
+
+Layout_Restored :: struct {
+	workspace: ^Workspace,
+	// Whether the workspace had a window open.
+	open:      bool,
+	links:     [dynamic]Layout_Link,
+}
+
+// A linked pane whose window is still to open, where it was saved.
+Layout_Link :: struct {
+	tab:    ^Tab,
+	slot:   layout.Node_Id,
+	window: []Saved_Window,
+}
+
+// Rebuilds the saved workspaces, whose panes start their shells; layout_state_restore_windows then
+// opens their windows, once the graphics device exists. False, with nothing rebuilt, leaves startup
+// to create the default workspace.
 @(require_results)
-layout_state_restore :: proc(app: ^App) -> bool {
+layout_state_restore_workspaces :: proc(app: ^App) -> (restore: Layout_Restore, ok: bool) {
 	path, enabled := layout_state_path(app)
-	if !enabled {return false}
+	if !enabled {return}
 	data, read_error := os.read_entire_file(path, context.temp_allocator)
-	if read_error == .Not_Exist {return false}
+	if read_error == .Not_Exist {return}
 	if read_error != nil {
 		log.errorf("reading %s failed: %v", path, read_error)
 		notify(app, .Error, "Could not read the saved workspaces. Starting with a new workspace.")
-		return false
+		return
 	}
 	state: Layout_State
 	decode_error := json.unmarshal(data, &state, allocator = context.temp_allocator)
 	if decode_error != nil || state.version != LAYOUT_STATE_VERSION {
 		log.warnf("the saved layout is unreadable: %v (version %d)", decode_error, state.version)
 		layout_state_quarantine(app, path)
-		return false
+		return
 	}
-	opened, first: ^Workspace
+	restore.workspaces = make([dynamic]Layout_Restored, context.temp_allocator)
 	for &saved in state.workspaces {
-		workspace := layout_workspace_restore(app, &saved)
-		if workspace == nil {continue}
-		if first == nil {first = workspace}
-		if saved.open && window_open(app, workspace) && opened == nil {opened = workspace}
+		restored := Layout_Restored {
+			open  = saved.open,
+			links = make([dynamic]Layout_Link, context.temp_allocator),
+		}
+		restored.workspace = layout_workspace_restore(app, &saved, &restored.links)
+		if restored.workspace == nil {continue}
+		if _, err := append(&restore.workspaces, restored); err != nil {
+			// Unlisted, it gets no window now; its linked panes go back to their tabs, losing nothing.
+			log.error("listing a restored workspace failed")
+			for link in restored.links {
+				if !layout.set_linked(&link.tab.tree, link.slot, false) {
+					log.error("returning a saved linked pane failed")
+				}
+			}
+		}
 	}
-	if opened == nil && first != nil && window_open(app, first) {opened = first}
+	return restore, len(restore.workspaces) > 0
+}
+
+// Opens the restored workspaces' linked windows and the windows that were open, or the first
+// workspace's if none could open. False leaves startup to create the default workspace; the restored
+// workspaces are kept.
+@(require_results)
+layout_state_restore_windows :: proc(app: ^App, restore: Layout_Restore) -> bool {
+	opened: ^Workspace
+	for &restored in restore.workspaces {
+		for link in restored.links {
+			pane_link_restore(app, restored.workspace, link.tab, link.slot, link.window)
+		}
+		if restored.open && window_open(app, restored.workspace) && opened == nil {
+			opened = restored.workspace
+		}
+	}
+	first := restore.workspaces[0].workspace
+	if opened == nil && window_open(app, first) {opened = first}
 	return opened != nil
 }
 
@@ -396,8 +446,13 @@ layout_state_quarantine :: proc(app: ^App, path: string) {
 	notify(app, .Error, "Could not read the saved workspaces. The old file was kept beside it as .bad.")
 }
 
+// Linked panes' windows wait in `links` for layout_state_restore_windows.
 @(private)
-layout_workspace_restore :: proc(app: ^App, saved: ^Saved_Workspace) -> ^Workspace {
+layout_workspace_restore :: proc(
+	app: ^App,
+	saved: ^Saved_Workspace,
+	links: ^[dynamic]Layout_Link,
+) -> ^Workspace {
 	workspace := workspace_create_empty(app)
 	if workspace == nil {return nil}
 	if saved.name != "" && utf8.valid_string(saved.name) {
@@ -417,7 +472,7 @@ layout_workspace_restore :: proc(app: ^App, saved: ^Saved_Workspace) -> ^Workspa
 	documents_restore(&workspace.documents, saved.documents)
 	selected := saved.selected
 	for &tab, i in saved.tabs {
-		if !layout_tab_restore(app, workspace, &tab) && i <= saved.selected {selected -= 1}
+		if !layout_tab_restore(app, workspace, &tab, links) && i <= saved.selected {selected -= 1}
 	}
 	if len(workspace.tabs) == 0 {
 		_ = workspace_discard_empty(app, workspace)
@@ -427,8 +482,14 @@ layout_workspace_restore :: proc(app: ^App, saved: ^Saved_Workspace) -> ^Workspa
 	return workspace
 }
 
+// Opens the linked panes' windows, or with `links` leaves them there for the caller to open.
 @(private, require_results)
-layout_tab_restore :: proc(app: ^App, workspace: ^Workspace, saved: ^Saved_Tab) -> bool {
+layout_tab_restore :: proc(
+	app: ^App,
+	workspace: ^Workspace,
+	saved: ^Saved_Tab,
+	links: ^[dynamic]Layout_Link = nil,
+) -> bool {
 	tab, reserved := tab_record_reserve(workspace)
 	if !reserved {return false}
 	if !layout_tree_decode(saved, &tab.tree) {
@@ -475,8 +536,13 @@ layout_tab_restore :: proc(app: ^App, workspace: ^Workspace, saved: ^Saved_Tab) 
 	tab_record_commit(app, workspace, tab)
 	for i in 0 ..< len(tab.tree.nodes) {
 		slot := layout.Node_Id(i)
-		if layout.link_root(&tab.tree, slot) == slot {
-			pane_link_restore(app, workspace, tab, slot, saved.nodes[i].window)
+		if layout.link_root(&tab.tree, slot) != slot {continue}
+		window := saved.nodes[i].window
+		if links == nil {
+			pane_link_restore(app, workspace, tab, slot, window)
+		} else if _, err := append(links, Layout_Link{tab, slot, window}); err != nil {
+			log.error("keeping a saved linked pane for later failed")
+			if !layout.set_linked(&tab.tree, slot, false) {log.error("returning a saved linked pane failed")}
 		}
 	}
 	return true

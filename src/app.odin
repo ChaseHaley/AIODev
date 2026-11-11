@@ -213,6 +213,17 @@ app_init :: proc(app: ^App) -> bool {
 		log.errorf("font system creation failed: %v", font_error)
 		return false
 	}
+	apply_fonts(app)
+	apply_theme(app)
+	// Each shell takes 30 to 40 ms to start, so the panes start theirs while the graphics device is
+	// still being created; the windows showing them open once it exists.
+	restoring, restored := layout_state_restore_workspaces(app)
+	fresh: ^Workspace
+	if !restored {
+		fresh = workspace_create_empty(app)
+		if fresh == nil {return false}
+		if _, created := tab_create(app, fresh); !created {return false}
+	}
 	render_error: render.Error
 	app.device, render_error = device_finish(&starting)
 	if render_error != .None {
@@ -231,20 +242,18 @@ app_init :: proc(app: ^App) -> bool {
 	}
 	shell_icons_load(app)
 	link_programs_load(app)
-	apply_fonts(app)
-	apply_theme(app)
 	tray_init(app)
 	platform_api.set_modal_loop_callback(
 		&app.platform,
 		proc(user: rawptr) {tick((^App)(user), wait_frames = true)},
 		app,
 	)
-	if !layout_state_restore(app) {
-		workspace := workspace_create_empty(app)
-		if workspace == nil {return false}
-		if _, created := tab_create(app, workspace); !created {return false}
-		if !window_open(app, workspace) {return false}
+	if restored && !layout_state_restore_windows(app, restoring) {
+		fresh = workspace_create_empty(app)
+		if fresh == nil {return false}
+		if _, created := tab_create(app, fresh); !created {return false}
 	}
+	if fresh != nil && !window_open(app, fresh) {return false}
 	agent_records_prune(app)
 	when AIO_CONTROL {verify_start(app)}
 	control_cli_sync(app)
