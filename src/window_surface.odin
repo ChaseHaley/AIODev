@@ -73,10 +73,25 @@ window_surface_resize :: proc(app: ^App, w: ^Window, width, height: i32) {
 		w.surface = nil
 		return
 	}
-	if err := render.surface_resize(app.device, surface, width, height); err != .None {
+	// While the user drags the frame, most steps then reuse the swap chain's buffers.
+	slack := platform.window_sizing(&app.platform, w.id)
+	if err := render.surface_resize(app.device, surface, width, height, slack); err != .None {
 		log.errorf("resizing the window surface failed: %v", err)
 		if err == .Device_Lost {recover_device(app)}
 	}
+}
+
+// Gives back the room a drag left in the swap chain once the drag is over.
+window_surface_settle :: proc(app: ^App, w: ^Window) {
+	surface := window_surface(w)
+	if surface == nil || !render.surface_has_slack(surface) || platform.window_sizing(&app.platform, w.id) {
+		return
+	}
+	if err := render.surface_settle(app.device, surface); err != .None {
+		log.errorf("settling the window surface failed: %v", err)
+		if err == .Device_Lost {recover_device(app)}
+	}
+	w.dirty = true
 }
 
 // Presents w's draw list. Any render call can lose the device; this module recovers it, here as for

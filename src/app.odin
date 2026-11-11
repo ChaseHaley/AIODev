@@ -343,6 +343,7 @@ tick :: proc(app: ^App, wait_frames := true) {
 			if window.phase == .Preparing {window.dirty = false}
 			continue
 		}
+		window_surface_settle(app, window)
 		if window.dirty || window_animating(app, window) {
 			window_render(app, window, wait_frames)
 			// The harness counts this window's present now; its After_Draw timer reads every window's.

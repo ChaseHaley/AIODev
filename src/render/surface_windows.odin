@@ -21,6 +21,9 @@ Surface :: struct {
 	waitable:      win.HANDLE,
 	window:        win.HWND,
 	width, height: i32,
+	// The swap chain's buffers, which a resize with slack leaves larger than width x height.
+	buffer_width:  i32,
+	buffer_height: i32,
 	clock:         Frame_Clock,
 	// Frames rendered to an offscreen surface, which has no swap chain to count presents.
 	rendered:      u32,
@@ -101,6 +104,7 @@ swap_chain_create :: proc(d: ^Device, s: ^Surface, window: win.HWND, width, heig
 		Flags = {.FRAME_LATENCY_WAITABLE_OBJECT},
 	}
 	s.window = window
+	s.buffer_width, s.buffer_height = width, height
 	chain: ^dxgi.ISwapChain1
 	hr := d.factory->CreateSwapChainForHwnd(d.native, window, &desc, nil, nil, &chain)
 	if err := checked(d, hr, "CreateSwapChainForHwnd", .Surface_Failed); err != .None {
@@ -163,34 +167,65 @@ surface_target_create :: proc(s: ^Surface, width, height: i32) -> Error {
 	return .None
 }
 
+// Resizes the surface to `width` x `height`. With `slack`, as while the user drags a window edge,
+// a swap chain keeps buffers larger than the window, so most steps of a drag reallocate nothing.
+// Frames then draw to the buffers' top-left part, which the swap chain's DXGI_SCALING_NONE shows
+// unscaled and crops to the window; surface_settle gives the room back afterwards.
 @(require_results)
-surface_resize :: proc(d: ^Device, s: ^Surface, width, height: i32) -> Error {
+surface_resize :: proc(d: ^Device, s: ^Surface, width, height: i32, slack := false) -> Error {
 	assert(s.owner == d)
 	if !valid_size(width, height) {
 		return .Invalid_Argument
 	}
-	if width == s.width && height == s.height {
+	exact := width == s.buffer_width && height == s.buffer_height
+	if width == s.width && height == s.height && (slack || exact || s.chain == nil) {
+		return .None
+	}
+	if s.chain != nil && (slack || exact) && width <= s.buffer_width && height <= s.buffer_height {
+		s.width, s.height = width, height
 		return .None
 	}
 	release(s.target)
 	release(s.texture)
 	s.target, s.texture = nil, nil
 	if s.chain != nil {
+		buffer_width, buffer_height := width, height
+		if slack {
+			buffer_width, buffer_height = slack_size(width), slack_size(height)
+		}
 		// DXGI requires every reference to the back buffers to be gone, including deferred ones.
 		d.ctx->ClearState()
 		d.ctx->Flush()
 		hr := s.chain->ResizeBuffers(
 			SWAP_CHAIN_BUFFERS,
-			u32(width),
-			u32(height),
+			u32(buffer_width),
+			u32(buffer_height),
 			.B8G8R8A8_UNORM,
 			{.FRAME_LATENCY_WAITABLE_OBJECT},
 		)
 		if err := checked(d, hr, "ResizeBuffers", .Surface_Failed); err != .None {
 			return err
 		}
+		s.buffer_width, s.buffer_height = buffer_width, buffer_height
 	}
 	return surface_target_create(s, width, height)
+}
+
+// Gives back the room a resize with slack left in the swap chain's buffers.
+@(require_results)
+surface_settle :: proc(d: ^Device, s: ^Surface) -> Error {
+	return surface_resize(d, s, s.width, s.height)
+}
+
+// Whether the swap chain's buffers are larger than the surface, after a resize with slack.
+surface_has_slack :: proc(s: ^Surface) -> bool {
+	return s.chain != nil && (s.width != s.buffer_width || s.height != s.buffer_height)
+}
+
+// A buffer dimension with room for a drag to grow by an eighth before the next reallocation.
+@(private)
+slack_size :: proc(size: i32) -> i32 {
+	return min(size + max(size / 8, 64), MAX_SURFACE_SIZE)
 }
 
 surface_destroy :: proc(s: ^Surface) {

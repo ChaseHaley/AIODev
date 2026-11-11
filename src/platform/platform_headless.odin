@@ -545,6 +545,11 @@ when AIO_HEADLESS {
 		return window != nil && window.maximized
 	}
 
+	// The headless desktop has no modal sizing loop.
+	window_sizing :: proc(_: ^Platform, _: input.Window_Id) -> bool {
+		return false
+	}
+
 	@(require_results)
 	window_placement :: proc(p: ^Platform, id: input.Window_Id) -> (Window_Placement, Error) {
 		window := find_window(p, id)

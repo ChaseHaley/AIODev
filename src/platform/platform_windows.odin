@@ -1402,6 +1402,12 @@ when !AIO_HEADLESS {
 		return window != nil && bool(w.IsZoomed(window.hwnd))
 	}
 
+	// The user is moving or sizing the window by its frame, inside the system's modal loop.
+	window_sizing :: proc(p: ^Platform, id: input.Window_Id) -> bool {
+		window := find_window(p, id)
+		return window != nil && window.size_move != .None
+	}
+
 	// window_set_screen covers the monitor with no caption or frame, and restores the prior placement.
 	// An error means the window stayed as it was, so the caller's view of it stays true.
 	window_set_screen :: proc(p: ^Platform, id: input.Window_Id, on: bool) -> Error {
