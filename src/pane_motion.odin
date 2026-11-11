@@ -46,13 +46,13 @@ Pane_Motion :: struct {
 	shift:  [2]f32,
 }
 
-// What a placement showed: the tab, by ids that outlive a closed tab or workspace and by the index each
-// had then, and in a single-pane view, the tiled pane it showed, by its motion key.
+// What a placement showed: its workspace and tab, by ids that outlive a closed tab, the index the tab had
+// then, and in a single-pane view, the tiled pane it showed, by its motion key.
 Pane_Stage :: struct {
-	workspace, tab:             u32,
-	workspace_index, tab_index: int,
-	solo:                       bool,
-	pane:                       u64,
+	workspace, tab: u32,
+	tab_index:      int,
+	solo:           bool,
+	pane:           u64,
 }
 
 @(private = "file")
@@ -231,7 +231,7 @@ pane_motion_placed :: proc(app: ^App, w: ^Window, shown: Pane_Motion_Shown) {
 	raise := m.raise_next
 	m.armed, m.raise_next = nil, nil
 	before := m.stage
-	m.stage = pane_stage(app, w)
+	m.stage = pane_stage(w)
 	// The temporary places are this placement's own, so they move with the screen in place.
 	places := shown.places
 	for &place in places {place.rect.x, place.rect.y = place.rect.x + m.shift.x, place.rect.y + m.shift.y}
@@ -305,40 +305,25 @@ pane_hints_in_place :: proc(places, targets: []ui.Layout_Place) -> []ui.Layout_H
 
 // What the window shows now; see Pane_Stage.
 @(private = "file")
-pane_stage :: proc(app: ^App, w: ^Window) -> Pane_Stage {
+pane_stage :: proc(w: ^Window) -> Pane_Stage {
 	tab := selected_tab(w.workspace)
 	if tab == nil {return {}}
-	stage := Pane_Stage {
-		workspace       = w.workspace.id,
-		tab             = tab.id,
-		workspace_index = -1,
-		tab_index       = w.workspace.selected,
-	}
-	for workspace, i in app.workspaces {if workspace == w.workspace {stage.workspace_index = i}}
+	stage := Pane_Stage{workspace = w.workspace.id, tab = tab.id, tab_index = w.workspace.selected}
 	if tiled := window_tiled_rects(w); pane_view_solo(w) && len(tiled) > 0 {
 		stage.solo, stage.pane = true, pane_motion_key(tiled[0].content)
 	}
 	return stage
 }
 
-// The side what the window now shows comes in from, when it shows another tab, or when a single-pane view
-// showed, or now shows, another pane or workspace. Another tab comes from further along the tabs: the
-// right of the strip, or below in the rail. Another workspace comes from below when it is further down the
-// workspace list, and from above when it is further up. Another pane of the same tab comes from the side it
-// lies on in the split view.
+// The side what the window now shows comes in from, when it shows another tab of its workspace, or when a
+// single-pane view shows another pane. Another tab comes from further along the tabs: the right of the
+// strip, or below in the rail. Another pane of the same tab comes from the side it lies on in the split
+// view. Another workspace does not slide; the workspace overview plays instead.
 @(private = "file")
 pane_slide_toward :: proc(app: ^App, w: ^Window, before, now: Pane_Stage) -> Maybe([2]f32) {
-	if before.workspace == 0 || now.workspace == 0 {return nil}
-	solo := before.solo || now.solo
-	// A workspace or tab that is gone counts from where it was, which its successor takes.
+	if before.workspace == 0 || before.workspace != now.workspace {return nil}
+	// A tab that is gone counts from where it was, which its successor takes.
 	side :: proc(from, to: int) -> f32 {return to >= from ? 1 : -1}
-	if before.workspace != now.workspace {
-		// Between split views a workspace shows at once until its own motion is chosen (WORK-392).
-		if !solo {return nil}
-		from := before.workspace_index
-		for workspace, i in app.workspaces {if workspace.id == before.workspace {from = i}}
-		return [2]f32{0, side(from, now.workspace_index)}
-	}
 	if before.tab != now.tab {
 		from := tab_index_by_id(w.workspace, before.tab)
 		if from < 0 {from = before.tab_index}

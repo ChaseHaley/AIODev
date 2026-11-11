@@ -478,39 +478,6 @@ changing_tabs_slides_along_the_tabs :: proc(t: ^testing.T) {
 	}
 }
 
-// Switching workspace while either shows a single pane slides up or down, as the workspace list orders
-// them: one further down the list comes from below.
-@(test)
-switching_workspace_in_a_single_pane_view_slides_along_the_workspace_list :: proc(t: ^testing.T) {
-	f: Palette_Fixture
-	defer palette_fixture_destroy(t, &f)
-	if !palette_fixture_create(t, &f, "pane-motion-workspaces", second_window = false) {return}
-	s := &f.state
-	s.animations = true
-	w := s.windows[0]
-	original := w.workspace
-	app.run_action(s, w, .Zoom_Pane)
-	motion_settle(s, w)
-	w.dirty = true
-	app.window_render(s, w)
-
-	app.workspace_new(s, w, false, name_it = false)
-	if !testing.expect(t, w.workspace != original) {return}
-	testing.expect(t, app.pane_motion_animating(w))
-	target := w.panes[0].rect
-	below := app.pane_motion_rect(w, w.panes[0])
-	testing.expect(t, below.y >= target.y + target.height, "a workspace further down comes from below")
-	motion_settle(s, w)
-	w.dirty = true
-	app.window_render(s, w)
-
-	if !testing.expect(t, app.workspace_select(s, w, original)) {return}
-	testing.expect_value(t, app.pane_view_current(w), layout.Pane_View.Zoom)
-	target = w.panes[0].rect
-	above := app.pane_motion_rect(w, w.panes[0])
-	testing.expect(t, above.y + above.height <= target.y, "a workspace further up comes from above")
-}
-
 // Double-clicking the Activity panel's edge returns it to its default width while the panes follow it.
 @(test)
 dock_edge_reset_eases_the_panel_and_panes :: proc(t: ^testing.T) {

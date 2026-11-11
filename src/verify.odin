@@ -576,6 +576,11 @@ when AIO_CONTROL {
 		state_value(r, "window.focused", w.focused)
 		state_value(r, "window.maximized", w.maximized)
 		state_value(r, "window.pane_view", pane_view_current(w))
+		if camera, flying := workspace_overview_camera(w); flying {
+			state_valuef(r, "workspace.overview", "%g,%g", camera.scale, camera.card)
+		} else {
+			state_text(r, "workspace.overview", "none")
+		}
 		state_value(r, "window.preparing", w.phase == .Preparing)
 		state_word(r, "pointer.shape", w.pointer_shape)
 		state_value(r, "pointer.updates", app.verify.pointer_updates)

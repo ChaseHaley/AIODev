@@ -14,6 +14,7 @@ Window_Motion :: enum u8 {
 	Rail,
 	Tabs,
 	Panes,
+	Workspace_Overview,
 	Pane_Drag,
 	Settings_Profiles,
 	Pane_Headers,
@@ -38,6 +39,8 @@ window_motion_advance :: proc(app: ^App, w: ^Window, part: Window_Motion, frame:
 		return tab_presentation_animate(app, w, frame)
 	case .Panes:
 		return pane_motion_animate(app, w, frame)
+	case .Workspace_Overview:
+		return workspace_overview_animate(app, w, frame)
 	case .Pane_Drag:
 		// It marks the window itself.
 		pane_drag_animate(app, w, app.animations, frame)
@@ -74,6 +77,8 @@ window_motion_running :: proc(w: ^Window, part: Window_Motion) -> bool {
 		return tab_presentation_animating(w)
 	case .Panes:
 		return pane_motion_animating(w)
+	case .Workspace_Overview:
+		return workspace_overview_animating(w)
 	case .Pane_Drag:
 		return pane_drag_animating(w)
 	case .Settings_Profiles:

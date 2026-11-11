@@ -609,6 +609,18 @@ SCHEMA :: [?]Schema_Entry {
 		description = MOTION_CONTEXT_DESCRIPTION[Motion_Context.Switch] + MOTION_CHILD_HINT,
 	},
 	{
+		key = MOTION_CONTEXT_KEY[Motion_Context.Workspace],
+		title = MOTION_CONTEXT_TITLE[Motion_Context.Workspace],
+		kind = .String,
+		offset = MOTION_CONTEXTS_OFFSET + uintptr(Motion_Context.Workspace) * size_of(string),
+		default_value = MOTION_WORKSPACE_DEFAULT,
+		valid = {0, 128},
+		control = .Group,
+		validator = .Motion,
+		page_description = MOTION_CONTEXT_DESCRIPTION[Motion_Context.Workspace],
+		description = MOTION_CONTEXT_DESCRIPTION[Motion_Context.Workspace] + MOTION_CHILD_HINT,
+	},
+	{
 		key = MOTION_CONTEXT_KEY[Motion_Context.Resize],
 		title = MOTION_CONTEXT_TITLE[Motion_Context.Resize],
 		kind = .String,
