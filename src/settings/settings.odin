@@ -597,6 +597,18 @@ SCHEMA :: [?]Schema_Entry {
 		description = MOTION_CONTEXT_DESCRIPTION[Motion_Context.View] + MOTION_CHILD_HINT,
 	},
 	{
+		key = MOTION_CONTEXT_KEY[Motion_Context.Switch],
+		title = MOTION_CONTEXT_TITLE[Motion_Context.Switch],
+		kind = .String,
+		offset = MOTION_CONTEXTS_OFFSET + uintptr(Motion_Context.Switch) * size_of(string),
+		default_value = "",
+		valid = {0, 128},
+		control = .Group,
+		validator = .Motion,
+		page_description = MOTION_CONTEXT_DESCRIPTION[Motion_Context.Switch],
+		description = MOTION_CONTEXT_DESCRIPTION[Motion_Context.Switch] + MOTION_CHILD_HINT,
+	},
+	{
 		key = MOTION_CONTEXT_KEY[Motion_Context.Resize],
 		title = MOTION_CONTEXT_TITLE[Motion_Context.Resize],
 		kind = .String,

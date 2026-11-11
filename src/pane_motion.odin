@@ -360,7 +360,7 @@ pane_slide_toward :: proc(app: ^App, w: ^Window, before, now: Pane_Stage) -> May
 }
 
 // What the window showed slides out across the stage, the area panes take before and after, while what it
-// shows now slides in from the side `toward` points to, with the Zoom and Fill Window motion settings. The
+// shows now slides in from the side `toward` points to, with the Switch Pane motion settings. The
 // chrome stays where it is beneath them, and what comes or goes of it does so in place.
 @(private = "file")
 pane_slide_begin :: proc(app: ^App, w: ^Window, places: []ui.Layout_Place, toward: [2]f32) {
@@ -396,7 +396,7 @@ pane_slide_begin :: proc(app: ^App, w: ^Window, places: []ui.Layout_Place, towar
 		if target.key & PANE_MOTION_CHROME == 0 {r.x, r.y = r.x + offset.x, r.y + offset.y}
 		append(&hints, ui.Layout_Hint{target.key, r})
 	}
-	motion := settings.motion_resolve(&app.settings, .View)
+	motion := settings.motion_resolve(&app.settings, .Switch)
 	duration := settings.motion_duration(&app.settings, motion)
 	enabled := app.animations && motion.on && duration > 0
 	ui.layout_motion_begin(&m.moving, places, targets, duration, motion.curve, enabled, hints[:])
