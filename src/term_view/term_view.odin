@@ -61,6 +61,9 @@ View :: struct {
 	shaped:     [dynamic]font.Shaped_Glyph,
 	contrast:   Contrast_Cache,
 	images:     term.Image_Capture,
+	// The scrollbar as of the last capture, which the drawn screen shows; nil before the first
+	// capture or when reading it failed.
+	scrollbar:  Maybe(term.Scrollbar),
 	cursor:     Cursor_Motion,
 	cursor_rows: [dynamic]ghostty.Render_State_Row_Id,
 }
@@ -226,7 +229,7 @@ build :: proc(
 	render.Build_Status,
 ) {
 	if list.error != .None {return {}, .Ok}
-	capture := term.capture(session, v.state, &v.highlights, &v.images)
+	capture := term.capture(session, v.state, &v.highlights, &v.images, &v.scrollbar)
 	b := Builder {
 		list       = list,
 		cache      = cache,

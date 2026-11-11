@@ -188,6 +188,10 @@ Session :: struct {
 	scanner:                                                  Mode_Scanner,
 	win32_input:                                              bool,
 	generation:                                               u64,
+	// 1 while capture waits for or holds the mutex. The reader takes it back only afterwards: it
+	// relocks within microseconds while output floods, so the unfair lock would otherwise keep the
+	// frame waiting for chunk after chunk.
+	capture_waiting:                                          sync.Futex,
 	title_changed, bell:                                      bool,
 	status_changed:                                           bool,
 	program_status_changed:                                   bool,
@@ -583,6 +587,8 @@ reader_main :: proc(s: ^Session) {
 		sync.mutex_unlock(&s.mutex)
 		mark_changed(s)
 		notify(s)
+		// A frame asked for the lock while this chunk was parsed: let it read the screen first.
+		for sync.atomic_load(&s.capture_waiting) != 0 {sync.futex_wait(&s.capture_waiting, 1)}
 	}
 }
 
@@ -736,16 +742,19 @@ Capture_Held :: struct {
 Capture_Failed :: struct {}
 
 // Updates `state` from the terminal and, given `highlights`, replaces it with the visible search
-// matches. Given `images`, it also reads the visible image placements.
+// matches. Given `images`, it also reads the visible image placements, and given `scrollbar`, the
+// scrollbar, all under the one hold of the session lock.
 capture :: proc(
 	s: ^Session,
 	state: ghostty.Render_State,
 	highlights: ^[dynamic]Highlight = nil,
 	images: ^Image_Capture = nil,
+	scrollbar: ^Maybe(Scrollbar) = nil,
 ) -> Capture_Result {
+	sync.atomic_store(&s.capture_waiting, 1)
 	sync.mutex_lock(&s.mutex)
 	if since, held := s.render_hold.?; held && time.tick_since(since) < RENDER_HOLD_LIMIT {
-		sync.mutex_unlock(&s.mutex)
+		capture_unlock(s)
 		return Capture_Held{time.tick_add(since, RENDER_HOLD_LIMIT)}
 	}
 	generation := sync.atomic_load(&s.generation)
@@ -756,7 +765,16 @@ capture :: proc(
 	if result == .Success && images != nil {
 		collect_images(s, images)
 	}
-	sync.mutex_unlock(&s.mutex)
+	if result == .Success && scrollbar != nil {
+		bar: Scrollbar
+		if bar_result := scrollbar_read(s, &bar); bar_result == .Success {
+			scrollbar^ = bar
+		} else {
+			scrollbar^ = nil
+			log.errorf("term: reading scrollbar failed: %v", bar_result)
+		}
+	}
+	capture_unlock(s)
 	if result == .Success {
 		result = ghostty.render_state_end_update(state)
 	}
@@ -765,6 +783,14 @@ capture :: proc(
 		return Capture_Failed{}
 	}
 	return Capture_Updated{generation}
+}
+
+// Ends capture's hold of the session lock and lets a reader that stepped aside continue.
+@(private)
+capture_unlock :: proc(s: ^Session) {
+	sync.mutex_unlock(&s.mutex)
+	sync.atomic_store(&s.capture_waiting, 0)
+	sync.futex_broadcast(&s.capture_waiting)
 }
 
 // Moves the pane's grid on the surface when its size is unchanged, as dragging a floating pane does, so
@@ -909,13 +935,21 @@ Scrollbar :: struct {
 scrollbar :: proc(s: ^Session) -> (Scrollbar, bool) {
 	sync.mutex_lock(&s.mutex)
 	defer sync.mutex_unlock(&s.mutex)
-	value: ghostty.Terminal_Scrollbar
-	result := ghostty.terminal_get(s.terminal, .Scrollbar, &value)
-	if result != .Success {
+	bar: Scrollbar
+	if result := scrollbar_read(s, &bar); result != .Success {
 		log.errorf("term: reading scrollbar failed: %v", result)
 		return {}, false
 	}
-	return {value.total, value.offset, value.len}, true
+	return bar, true
+}
+
+// The caller holds the session mutex.
+@(private, require_results)
+scrollbar_read :: proc(s: ^Session, out: ^Scrollbar) -> ghostty.Result {
+	value: ghostty.Terminal_Scrollbar
+	result := ghostty.terminal_get(s.terminal, .Scrollbar, &value)
+	if result == .Success {out^ = {value.total, value.offset, value.len}}
+	return result
 }
 
 clear_scrollback :: proc(s: ^Session) {

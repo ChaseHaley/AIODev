@@ -54,8 +54,16 @@ pane_scrollbar_geometry :: proc(
 	case .Terminal:
 		entry := workspace_session_for_content(app, pane.content)
 		if entry == nil || !app.settings.terminal.scrollbar {return}
-		lines, ok := term.scrollbar(entry.session)
-		if !ok {return}
+		// The bar the drawn screen was captured with; reading it again would wait on the session
+		// lock, which output holds while it is parsed.
+		lines: term.Scrollbar
+		if state := pane_view(w, pane.content); state != nil && state.view.scrollbar != nil {
+			lines = state.view.scrollbar.?
+		} else {
+			ok: bool
+			lines, ok = term.scrollbar(entry.session)
+			if !ok {return}
+		}
 		area = pane_scrollbar_area(pane_body_rect(w, pane), w.scale)
 		extent = {int(lines.total), int(lines.len), int(lines.offset)}
 	case .Markdown:
