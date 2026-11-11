@@ -14,9 +14,10 @@ import "core:time"
 // hides it.
 //
 // The safe area spans whatever lies between, such as the rows of the menu a submenu hangs from. Over one of
-// those, something else wants the hover, so as in jQuery-menu-aim it waits only while the pointer is
-// heading for the surface: closer to it than HOVER_AIM_TRAIL moves ago. A move straight down to the next row
-// gets no closer, and that row takes the hover at once.
+// those, something else wants the hover, so the aim must look deliberate, as in jQuery-menu-aim and Floating
+// UI's safePolygon: the pointer is closer to the surface than HOVER_AIM_TRAIL moves ago, at no less than
+// HOVER_AIM_MIN_SPEED, and moves again within HOVER_AIM_CONTESTED. A move straight down to the next row, a
+// slow drift while settling on it, or a pause there gives that row the hover.
 //
 // The owner reports every pointer move with hover_reveal_move, schedules a wake for hover_reveal_deadline
 // and passes it to hover_reveal_tick, and calls hover_reveal_close when its surface must go regardless.
@@ -27,8 +28,10 @@ Hover_Reveal :: struct {
 	aiming:   bool,
 	closest:  f32,
 	deadline: time.Tick,
-	// The latest pointer positions, oldest first, which tell where it is heading over a competitor.
+	// The latest pointer positions and when they came, oldest first, which tell where and how fast it is
+	// heading over a competitor.
 	trail:    [HOVER_AIM_TRAIL][2]f32,
+	times:    [HOVER_AIM_TRAIL]time.Tick,
 	trailed:  int,
 }
 
@@ -36,8 +39,13 @@ Hover_Reveal :: struct {
 // diagonal move does not read as a turn.
 HOVER_AIM_TRAIL :: 3
 
-// Kamens's delay for a pointer that has stopped short of its submenu.
+// Kamens's delay for a pointer that has stopped short of its surface with nothing else wanting the hover.
 HOVER_AIM_PATIENCE :: 300 * time.Millisecond
+// How long an aim over a competitor lasts without another move: Floating UI's 40 ms, plus room for a
+// pointer that reports every 16 ms frame.
+HOVER_AIM_CONTESTED :: 50 * time.Millisecond
+// Floating UI's resting speed, in DIPs per millisecond: slower than this over a competitor is settling there.
+HOVER_AIM_MIN_SPEED :: f32(0.1)
 // How far, in DIPs, the safe area reaches past the trigger and the surface.
 HOVER_AIM_SLACK :: f32(16)
 
@@ -62,8 +70,14 @@ hover_reveal_move :: proc(
 		r.aiming = false
 	case !hover_aim_safe(rect_grown(trigger, slack), rect_grown(surface, slack), pointer):
 		hover_reveal_close(r)
-	case on_other && r.trailed > 0 && rect_distance(surface, pointer) >= rect_distance(surface, r.trail[0]):
-		hover_reveal_close(r)
+	case on_other:
+		if !hover_aim_heading(r, pointer, surface, slack / HOVER_AIM_SLACK, now) {
+			hover_reveal_close(r)
+			break
+		}
+		distance := rect_distance(surface, pointer)
+		if !r.aiming || distance < r.closest {r.closest = distance}
+		r.aiming, r.deadline = true, time.tick_add(now, HOVER_AIM_CONTESTED)
 	case:
 		distance := rect_distance(surface, pointer)
 		if !r.aiming || distance < r.closest {
@@ -72,17 +86,38 @@ hover_reveal_move :: proc(
 			hover_reveal_close(r)
 		}
 	}
-	if r.open {hover_trail_push(r, pointer)}
+	if r.open {hover_trail_push(r, pointer, now)}
 	return r.open != was
 }
 
+// Whether the pointer is heading for `surface` since the oldest trail position: closer to it, and moving at
+// least HOVER_AIM_MIN_SPEED DIPs per millisecond at `scale` pixels per DIP.
 @(private = "file")
-hover_trail_push :: proc(r: ^Hover_Reveal, pointer: [2]f32) {
+hover_aim_heading :: proc(
+	r: ^Hover_Reveal,
+	pointer: [2]f32,
+	surface: render.Rect,
+	scale: f32,
+	now: time.Tick,
+) -> bool {
+	if r.trailed == 0 {return false}
+	from := r.trail[0]
+	if rect_distance(surface, pointer) >= rect_distance(surface, from) {return false}
+	elapsed := f32(time.duration_milliseconds(time.tick_diff(r.times[0], now)))
+	if elapsed <= 0 {return true}
+	delta := pointer - from
+	least := HOVER_AIM_MIN_SPEED * scale * elapsed
+	return delta.x * delta.x + delta.y * delta.y >= least * least
+}
+
+@(private = "file")
+hover_trail_push :: proc(r: ^Hover_Reveal, pointer: [2]f32, now: time.Tick) {
 	if r.trailed == HOVER_AIM_TRAIL {
 		copy(r.trail[:], r.trail[1:])
+		copy(r.times[:], r.times[1:])
 		r.trailed -= 1
 	}
-	r.trail[r.trailed] = pointer
+	r.trail[r.trailed], r.times[r.trailed] = pointer, now
 	r.trailed += 1
 }
 

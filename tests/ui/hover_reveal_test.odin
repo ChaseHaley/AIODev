@@ -126,6 +126,36 @@ hover_reveal_gives_way_to_a_competitor_unless_heading_for_the_surface :: proc(t:
 	testing.expect(t, !r.open, "turning down the menu hides it")
 }
 
+// Over a competitor the aim must keep moving: a pause gives the competitor the hover after
+// HOVER_AIM_CONTESTED, and a hand drifting slowly toward the submenu while settling on the next row does not
+// count as heading for it.
+@(test)
+hover_reveal_gives_way_quickly_to_a_competitor_when_the_pointer_settles :: proc(t: ^testing.T) {
+	row := render.Rect{0, 0, 200, 30}
+	submenu := render.Rect{200, 0, 160, 150}
+	contested := int(time.duration_milliseconds(ui.HOVER_AIM_CONTESTED))
+	start := time.tick_now()
+	step :: proc(r: ^ui.Hover_Reveal, row, submenu: render.Rect, p: [2]f32, now: time.Tick) {
+		on_row, on_submenu := render.rect_contains(row, p.x, p.y), render.rect_contains(submenu, p.x, p.y)
+		_ = ui.hover_reveal_move(r, p, on_row, on_submenu, !on_row && !on_submenu, row, submenu, 16, now)
+	}
+	r: ui.Hover_Reveal
+	step(&r, row, submenu, {120, 15}, start)
+	step(&r, row, submenu, {140, 35}, at(start, 16))
+	testing.expect(t, r.open, "heading for it")
+	testing.expect(t, !ui.hover_reveal_tick(&r, at(start, 16 + contested - 1)))
+	testing.expect(t, ui.hover_reveal_tick(&r, at(start, 16 + contested)), "a pause on the row gives it the hover")
+
+	r = {}
+	step(&r, row, submenu, {120, 15}, start)
+	step(&r, row, submenu, {121, 32}, at(start, 40))
+	step(&r, row, submenu, {122, 34}, at(start, 80))
+	step(&r, row, submenu, {123, 35}, at(start, 120))
+	testing.expect(t, r.open, "still coming down off the row")
+	step(&r, row, submenu, {124, 36}, at(start, 160))
+	testing.expect(t, !r.open, "a slow drift closer is settling, not aiming")
+}
+
 // The safe area is the hull of the trigger and the surface: it reaches past the trigger's whole box, not
 // just from one point of it, and no further.
 @(test)
