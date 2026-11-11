@@ -7,11 +7,17 @@ import "aio:term_view"
 
 // Builds the screen into `list` with `view`.
 @(private = "file")
-build_into :: proc(t: ^testing.T, f: ^Fixture, view: ^term_view.View, list: ^render.Draw_List) {
+build_into :: proc(
+	t: ^testing.T,
+	f: ^Fixture,
+	view: ^term_view.View,
+	list: ^render.Draw_List,
+	origin: [2]f32,
+) {
 	for _ in 0 ..< 2 {
 		render.draw_list_reset(list)
 		testing.expect_value(t, render.push_layer(list, {0, 0, 2000, 2000}), render.Error.None)
-		_, result := term_view.build(view, f.session, f.fonts, &f.cache, list, {0, 0}, f.metrics, {family = f.family})
+		_, result := term_view.build(view, f.session, f.fonts, &f.cache, list, origin, f.metrics, {family = f.family})
 		if result == .Ok {break}
 	}
 }
@@ -19,12 +25,12 @@ build_into :: proc(t: ^testing.T, f: ^Fixture, view: ^term_view.View, list: ^ren
 // Builds the screen with f.view, which keeps its row cache across builds, and with a view that has
 // never drawn before.
 @(private = "file")
-build_twice :: proc(t: ^testing.T, f: ^Fixture, out: ^render.Draw_List) {
-	build_into(t, f, &f.view, &f.list)
+build_twice :: proc(t: ^testing.T, f: ^Fixture, out: ^render.Draw_List, origin := [2]f32{0, 0}) {
+	build_into(t, f, &f.view, &f.list, origin)
 	fresh: term_view.View
 	if !testing.expect(t, term_view.create(&fresh)) {return}
 	defer term_view.destroy(&fresh)
-	build_into(t, f, &fresh, out)
+	build_into(t, f, &fresh, out, origin)
 }
 
 @(private = "file")
@@ -99,6 +105,32 @@ row_cache_draws_what_a_fresh_build_draws :: proc(t: ^testing.T) {
 	// Drawing the unchanged screen again replays every row but the cursor's.
 	before := term_view.row_cache_replays(&f.view)
 	build_twice(t, &f, &out)
+	expect_same_draws(t, &f.list, &out)
+	testing.expect_value(t, term_view.row_cache_replays(&f.view) - before, 5)
+}
+
+// A resize rewraps the screen into rows with new ids. Rows whose content came out the same draw from
+// the cache, plain or styled, as do the rows of a pane that moved; all draw what drawing them afresh
+// does.
+@(test)
+row_cache_follows_content_across_resizes_and_moves :: proc(t: ^testing.T) {
+	f, ok := headless_create(t, rows = 6)
+	defer fixture_destroy(&f)
+	if !ok {return}
+	out := render.draw_list_init()
+	defer render.draw_list_destroy(&out)
+	text := "short\r\n\x1b[31mred short\x1b[0m\r\n" + "a line longer than twenty columns wraps\r\nlast"
+	term.replay_write(f.session, transmute([]u8)text)
+	build_twice(t, &f, &out)
+	g := term.geometry(f.session)
+	g.columns -= 3
+	term.resize(f.session, g)
+	before := term_view.row_cache_replays(&f.view)
+	build_twice(t, &f, &out)
+	expect_same_draws(t, &f.list, &out)
+	testing.expect(t, term_view.row_cache_replays(&f.view) - before >= 2, "the short rows replay")
+	before = term_view.row_cache_replays(&f.view)
+	build_twice(t, &f, &out, {7, 3})
 	expect_same_draws(t, &f.list, &out)
 	testing.expect_value(t, term_view.row_cache_replays(&f.view) - before, 5)
 }

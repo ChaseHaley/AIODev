@@ -341,9 +341,14 @@ push_glyph :: proc(list: ^Draw_List, instance: Glyph_Instance) -> Error {
 	return .None
 }
 
-// Appends draw commands kept from an earlier build to the current layer, moved down by `dy`.
+// Appends draw commands kept from an earlier build to the current layer, moved by `offset`.
 @(require_results)
-push_instances :: proc(list: ^Draw_List, rects: []Rect_Instance, glyphs: []Glyph_Instance, dy: f32) -> Error {
+push_instances :: proc(
+	list: ^Draw_List,
+	rects: []Rect_Instance,
+	glyphs: []Glyph_Instance,
+	offset: [2]f32,
+) -> Error {
 	if list.error != .None {return list.error}
 	assert(len(list.layers) > 0, "push_layer must precede push_instances")
 	if reserve(&list.rects, len(list.rects) + len(rects)) != nil ||
@@ -354,8 +359,16 @@ push_instances :: proc(list: ^Draw_List, rects: []Rect_Instance, glyphs: []Glyph
 	rect_start, glyph_start := len(list.rects), len(list.glyphs)
 	append(&list.rects, ..rects)
 	append(&list.glyphs, ..glyphs)
-	for &r in list.rects[rect_start:] {r.rect.y += dy}
-	for &g in list.glyphs[glyph_start:] {g.rect.y += dy}
+	for &r in list.rects[rect_start:] {r.rect.x += offset.x; r.rect.y += offset.y}
+	for &g in list.glyphs[glyph_start:] {
+		g.rect.x += offset.x
+		g.rect.y += offset.y
+		// Only a fading glyph's bounds mean anything; others keep them zero, as drawn afresh.
+		if g.flags & GLYPH_FADE != 0 {
+			g.fade_start += offset.x
+			g.fade_end += offset.x
+		}
+	}
 	layer := &list.layers[len(list.layers) - 1]
 	layer.rect_count += len(rects)
 	layer.glyph_count += len(glyphs)
