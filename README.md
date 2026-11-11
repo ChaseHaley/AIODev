@@ -62,8 +62,9 @@ Requirements:
 ./build.ps1 package  # release zip and SHA256 in build/
 ```
 
-`vendor/ghostty` holds a prebuilt libghostty-vt pinned to `vendor/ghostty/REVISION`. Rebuilding it
-needs Zig 0.16: `tools/build_ghostty.ps1`.
+`vendor/ghostty` holds a prebuilt libghostty-vt release pinned by version and SHA256 in
+`vendor/ghostty/VERSION`, with local patches in `vendor/ghostty/patches`. Rebuilding it needs Zig
+0.17: `tools/build_ghostty.ps1 -Zig <path to zig.exe>`.
 
 Floating UI surfaces use `ui.Presence` transitions for opening, closing and releasing their
 payloads. Toasts live in one list with entering, timed, sticky or fading state; fading a toast
