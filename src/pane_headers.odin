@@ -71,8 +71,8 @@ pane_header_title :: proc(header: ^Pane_Header_Metadata) -> string {
 
 // The pane header's buttons, left to right, in groups by what they do: Links; the splits; the views that
 // make the pane bigger; the moves that take it out of the tiling; Close. A pane in a float keeps its split
-// controls; minimizing, docking and moving belong to the float header. Tiled panes add their view controls,
-// Float and Linked window.
+// and view controls; minimizing, docking and moving belong to the float header. Tiled panes add Float and
+// Linked window.
 Pane_Header_Button :: enum u8 {
 	Links,
 	Split_Right,
@@ -95,7 +95,9 @@ PANE_HEADER_TILED :: bit_set[Pane_Header_Button] {
 	.Links, .Split_Right, .Split_Down, .Zoom, .Fill_Window, .Linked_Window, .Dock, .Close,
 }
 @(private = "file")
-PANE_HEADER_FLOATING :: bit_set[Pane_Header_Button]{.Links, .Split_Right, .Split_Down, .Close}
+PANE_HEADER_FLOATING :: bit_set[Pane_Header_Button] {
+	.Links, .Split_Right, .Split_Down, .Zoom, .Fill_Window, .Close,
+}
 @(private = "file")
 PANE_HEADER_OVERLAY :: bit_set[Pane_Header_Button]{.Links, .Split_Right, .Split_Down}
 // The last button of each group, which a divider sets apart from the next group.
@@ -112,12 +114,19 @@ PANE_HEADER_DROP_ORDER := [?]Pane_Header_Button {
 // Whether a pane shows a header row. A tiled pane without one carries its split controls in the split
 // overlay, which shows while the pointer is near its top or its document menu is open.
 pane_header_row :: proc(w: ^Window, pane: layout.Pane_Rect) -> bool {
-	return pane.floating || w.header_height > 0
+	return pane_in_float(w, pane) || w.header_height > 0
 }
 
-// The header row or split overlay of a pane, which drawing and hit testing share. Every pane can split
-// and close; the view controls and Float apply only to the tiled layout, and a pane that takes no pins
-// has no Links button. A pane shown alone by its view carries the hidden panes glyph after its badge.
+// Whether the pane belongs to a float, whether drawn in its frame or alone in a fill.
+@(private = "file")
+pane_in_float :: proc(w: ^Window, pane: layout.Pane_Rect) -> bool {
+	tree := window_tree(w)
+	return pane.floating || (tree != nil && layout.is_floating(tree, pane.node))
+}
+
+// The header row or split overlay of a pane, which drawing and hit testing share. Every pane can split,
+// zoom, fill and close; Float and Linked window apply only to the tiled layout, and a pane that takes no
+// pins has no Links button. A pane shown alone by its view carries the hidden panes glyph after its badge.
 pane_header_layout :: proc(w: ^Window, pane: layout.Pane_Rect) -> Pane_Header_Layout {
 	r := pane.rect
 	area := render.Rect{r.x, r.y, r.width, r.height}
@@ -125,7 +134,7 @@ pane_header_layout :: proc(w: ^Window, pane: layout.Pane_Rect) -> Pane_Header_La
 	shown := PANE_HEADER_TILED
 	if !row {
 		shown = PANE_HEADER_OVERLAY
-	} else if pane.floating {
+	} else if pane_in_float(w, pane) {
 		shown = PANE_HEADER_FLOATING
 	}
 	if !CONTENT_POLICY[pane.content.kind].documents {shown -= {.Links}}
@@ -134,9 +143,16 @@ pane_header_layout :: proc(w: ^Window, pane: layout.Pane_Rect) -> Pane_Header_La
 	return ui.header_layout(area, w.scale, shown, PANE_HEADER_GROUP_ENDS, PANE_HEADER_DROP_ORDER[:], widget)
 }
 
-// The icon a header button shows, which can follow the window's state.
+// The view of the pane's container, which its Zoom and Fill window buttons show.
 @(private = "file")
-pane_header_icon :: proc(w: ^Window, button: Pane_Header_Button) -> ui.Icon {
+pane_header_view :: proc(w: ^Window, pane: layout.Pane_Rect) -> layout.Pane_View {
+	tree := window_tree(w)
+	return tree == nil ? .Split : layout.pane_view_at(tree, pane.node)
+}
+
+// The icon a header button shows, which can follow the view of the pane's container.
+@(private = "file")
+pane_header_icon :: proc(w: ^Window, pane: layout.Pane_Rect, button: Pane_Header_Button) -> ui.Icon {
 	switch button {
 	case .Links:
 		return .Link
@@ -145,9 +161,10 @@ pane_header_icon :: proc(w: ^Window, button: Pane_Header_Button) -> ui.Icon {
 	case .Split_Down:
 		return .Split_Down
 	case .Zoom:
-		return pane_view_current(w) == .Zoom ? .Collapse : .Expand
+		return pane_header_view(w, pane) == .Zoom ? .Collapse : .Expand
 	case .Fill_Window:
-		return w.pane_fill == .Content ? .Restore : .Zoom
+		fill, _ := layout.pane_view_parts(pane_header_view(w, pane))
+		return fill == .Content ? .Restore : .Zoom
 	case .Linked_Window:
 		return window_linked(w) ? .Window_In : .Window_Out
 	case .Dock:
@@ -181,9 +198,9 @@ pane_header_command :: proc(button: Pane_Header_Button) -> (Action, bool) {
 	return {}, false
 }
 
-// What a header button's tooltip says it does, which can depend on the window's current state. The badge
-// and title have none.
-pane_header_tooltip :: proc(w: ^Window, target: Pane_Header_Target) -> string {
+// What a header button's tooltip says it does, which can depend on the view of the pane's container. The
+// badge and title have none.
+pane_header_tooltip :: proc(w: ^Window, pane: layout.Pane_Rect, target: Pane_Header_Target) -> string {
 	button, ok := target.(Pane_Header_Button)
 	if !ok {return ""}
 	switch button {
@@ -196,7 +213,8 @@ pane_header_tooltip :: proc(w: ^Window, target: Pane_Header_Target) -> string {
 	case .Zoom:
 		return "Zoom"
 	case .Fill_Window:
-		return w.pane_fill == .Content ? "Exit fill window" : "Fill window"
+		fill, _ := layout.pane_view_parts(pane_header_view(w, pane))
+		return fill == .Content ? "Exit fill window" : "Fill window"
 	case .Linked_Window:
 		return window_linked(w) ? "Return pane to tab" : "Move pane to linked window"
 	case .Dock:
@@ -218,7 +236,7 @@ pane_header_draw :: proc(
 	buttons: [Pane_Header_Button]ui.Header_Button
 	view := pane_view(w, pane.content)
 	for &face, button in buttons {
-		face.icon = pane_header_icon(w, button)
+		face.icon = pane_header_icon(w, pane, button)
 		if view == nil {continue}
 		face.motion = view.header_controls[button]
 		face.disabled = view.header_refused[button] != .None
@@ -479,8 +497,8 @@ header_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: input.Mous
 
 @(private)
 header_tooltip :: proc(_: ^App, w: ^Window, x, y: f32) -> string {
-	_, target, _ := pane_header_hit(w, x, y)
-	return pane_header_tooltip(w, target)
+	pane, target, _ := pane_header_hit(w, x, y)
+	return pane_header_tooltip(w, pane, target)
 }
 
 @(private)

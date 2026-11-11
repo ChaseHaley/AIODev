@@ -43,7 +43,7 @@ pane_header_refusals :: proc(
 	if _, refusal := pane_trial_split_minimum(app, w, pane.node, .Down); refusal != .None {
 		refused[.Split_Down] = refusal
 	}
-	if !pane.floating {
+	if !layout.is_floating(window_tree(w), pane.node) {
 		refused[.Dock] = pane_trial_float(w, pane.node)
 		refused[.Linked_Window] = pane_trial_link(w, pane)
 	}
@@ -178,7 +178,8 @@ pane_preview_split :: proc(
 	return {description = description, preview = preview}
 }
 
-// Zoom and Fill window follow the one view table, so the picture shows the view the button leads to.
+// Zoom and Fill window follow the one view table, acting on the pane's container, so the picture shows the
+// view the button leads to.
 @(private = "file")
 pane_preview_view :: proc(
 	app: ^App,
@@ -186,24 +187,31 @@ pane_preview_view :: proc(
 	node: layout.Node_Id,
 	event: layout.Pane_View_Event,
 ) -> Tooltip_Card {
-	to := layout.PANE_VIEW_TRANSITIONS[pane_view_current(w)][event]
+	trial, copy_error := layout.clone(window_tree(w), context.temp_allocator)
+	if copy_error != nil {return {}}
+	// Pressing the header focuses its pane first, and the view acts on the focused pane.
+	_ = layout.focus_set(&trial, node)
+	from := layout.pane_view_at(&trial, node)
+	to, fill := layout.pane_view_next(&trial, node, event)
+	floating := layout.is_floating(&trial, node)
 	description: string
 	switch to {
 	case .Split:
 		description = "Show the tab's other panes again."
+		if floating {
+			description = from == .Zoom ? "Show the float's other panes again." : "Return this pane to its float."
+		}
 	case .Zoom:
 		description = "This pane fills the tab. The tab bar and panels stay."
+		if floating {description = "This pane fills its float."}
 	case .Fill, .Fill_Over_Zoom:
 		description = "This pane covers the window. The tabs and panels slide away."
 	case .Screen, .Screen_Over_Zoom:
 		description = "This pane covers the screen."
 	}
-	trial, copy_error := layout.clone(window_tree(w), context.temp_allocator)
-	if copy_error != nil {return {description = description}}
-	// The view shows the focused pane, and pressing the header focuses its pane first.
-	trial.focus = node
-	fill, _ := layout.pane_view_parts(to)
-	preview := pane_preview_of(app, w, &trial, fill, to != .Split, node)
+	layout.pane_view_set(&trial, node, to)
+	solo := layout.pane_view_of(trial.fill, trial.zoomed) != .Split
+	preview := pane_preview_of(app, w, &trial, fill, solo, node)
 	return {description = description, preview = preview}
 }
 

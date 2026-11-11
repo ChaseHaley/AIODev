@@ -115,6 +115,7 @@ Pane_Rect :: struct {
 	content:  Content,
 	rect:     Rect,
 	order:    u64,
+	// Drawn in its float's frame. A floating pane a fill shows alone is placed as a tiled pane.
 	floating: bool,
 	// The floating group the pane is in (its Float.id), zero for a tiled pane: panes in the same group,
 	// or all tiled panes, share one container.
@@ -131,9 +132,13 @@ Layout :: struct {
 	nodes:            [dynamic]Node,
 	root, focus:      Node_Id,
 	next_pane_order:  u64,
-	// The tab's view, kept while other tabs show; see Pane_View.
+	// The tab's view, kept while other tabs show; see Pane_View. The tiling's zoom is `zoomed`; a floating
+	// group's is its Float.zoomed.
 	fill:             Pane_Fill,
 	zoomed:           bool,
+	// The floating group (its Float.id) the fill was chosen in, whose focused pane it shows alone; zero
+	// when it shows the tiled pane. See fill_floating.
+	fill_float:       u64,
 	// See panes_changed.
 	panes_changed:    bool,
 	// The tiled pane focus returns to when a floating pane gives it up; see focus_set.
@@ -350,6 +355,8 @@ node_wrap :: proc(
 ) -> Node_Id {
 	// Before the new split exists: it also holds `node`, and a vacant node can put it first in the scan.
 	parent := parent_of(l, node)
+	// A zoomed floating group gaining a pane must show it, so its zoom ends.
+	if group, in_float := node_float(l, float_root(l, node)); in_float {group.zoomed = false}
 	frame: Float
 	floating, was_floating := node_float(l, node)
 	if was_floating {frame = floating^; node_set_float(l, node, false)}
@@ -496,8 +503,14 @@ remove :: proc(l: ^Layout, node: Node_Id) -> bool {
 	_, ok := l.nodes[node].(Pane)
 	if !ok {return false}
 	float_group := float_root(l, node)
-	// A floating pane takes no part in the tiled arrangement, so its close leaves any zoom in place.
-	if l.focus == node && float_group == INVALID_NODE {panes_changed(l)}
+	if float_group == INVALID_NODE {
+		// A floating pane takes no part in the tiled arrangement, so its close leaves any zoom in place.
+		if l.focus == node {panes_changed(l)}
+	} else {
+		// A view ends with the pane it shows: a zoomed group's, or a fill's.
+		if fill_floating(l) == node {panes_changed(l)}
+		if group, _ := node_float(l, float_group); float_shown(l, float_group) == node {group.zoomed = false}
+	}
 	parent := parent_of(l, node)
 	if parent == INVALID_NODE {
 		l.root, l.focus = INVALID_NODE, INVALID_NODE
@@ -641,8 +654,15 @@ Geometry :: struct {
 }
 
 // Places the panes a window shows: every tiled pane, or only the focused one when `solo`, then the floating
-// groups above them. The window's view decides what shows alone, not the tab's zoom.
+// groups above them. The window's view decides what shows alone, not the tab's zoom. A fill showing a
+// floating pane places it alone in `tiled`, outside its float, as the tiled pane it stands in for.
 place_shown :: proc(l: ^Layout, g: Geometry, solo: bool, out: ^[dynamic]Pane_Rect) {
+	if filled := fill_floating(l); filled != INVALID_NODE {
+		clear(out)
+		pane := l.nodes[filled].(Pane)
+		append(out, Pane_Rect{filled, pane.content, g.tiled, pane.order, false, 0})
+		return
+	}
 	if solo {compute_focused(l, g.tiled, out)} else {compute(l, g.tiled, g.gap, out)}
 	floats_place(l, g.floating, g.gap, g.header, out)
 }
@@ -650,7 +670,7 @@ place_shown :: proc(l: ^Layout, g: Geometry, solo: bool, out: ^[dynamic]Pane_Rec
 // The dividers a window shows: those between tiled panes unless one shows alone, then those inside
 // floating groups.
 dividers_shown :: proc(l: ^Layout, g: Geometry, solo: bool, out: ^[dynamic]Divider) {
-	if solo {clear(out)} else {dividers(l, g.tiled, g.gap, out)}
+	if solo || fill_floating(l) != INVALID_NODE {clear(out)} else {dividers(l, g.tiled, g.gap, out)}
 	floats_dividers(l, g.floating, g.gap, g.header, out)
 }
 

@@ -576,6 +576,9 @@ when AIO_CONTROL {
 		state_value(r, "window.focused", w.focused)
 		state_value(r, "window.maximized", w.maximized)
 		state_value(r, "window.pane_view", pane_view_current(w))
+		view_tree := window_tree(w)
+		filled := view_tree != nil && layout.fill_floating(view_tree) != layout.INVALID_NODE
+		state_value(r, "window.pane_view_floating", filled)
 		if camera, flying := workspace_overview_camera(w); flying {
 			state_valuef(r, "workspace.overview", "%g,%g", camera.scale, camera.card)
 		} else {
@@ -640,6 +643,7 @@ when AIO_CONTROL {
 					float_key := state_key("tab.%d.pane.%d.float", n, id)
 					state_valuef(r, float_key, "%g,%g,%g,%g", b.x, b.y, b.width, b.height)
 					state_value(r, state_key("tab.%d.pane.%d.minimized", n, id), floating.minimized)
+					state_value(r, state_key("tab.%d.pane.%d.zoomed", n, id), floating.zoomed)
 				}
 			}
 			shown_floats, minimized_floats := layout.float_counts(&tab.tree)

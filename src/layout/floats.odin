@@ -18,6 +18,11 @@ Float :: struct {
 	minimized: bool,
 	// Names the group while it floats, through every split and close inside it; nonzero.
 	id:        u64,
+	// The group shows one of its panes alone, filling its frame; see float_shown. Not saved, like a tab's
+	// view.
+	zoomed:    bool,
+	// The pane of the group focus last held, which a zoomed group shows while focus is elsewhere.
+	focus:     Node_Id,
 }
 
 // The smallest share of the content area either side of a floating pane may take.
@@ -253,17 +258,22 @@ float_minimize :: proc(l: ^Layout, node: Node_Id, minimized: bool) -> bool {
 }
 
 // Moves focus to a pane, remembering the tiled pane a floating group was opened over. A floating group
-// comes to the top and out of its capsule; the result reports the presentation change.
+// comes to the top and out of its capsule; the result reports the presentation change. A fill showing a
+// floating pane alone hides every other pane, so it shows whichever pane focus moves to.
 focus_set :: proc(l: ^Layout, node: Node_Id) -> (floats_changed: bool) {
 	if int(node) >= len(l.nodes) {return false}
 	if _, pane := l.nodes[node].(Pane); !pane {return false}
+	following := fill_floating(l) != INVALID_NODE
 	if pane_tiled(l, node) {
 		l.tiled_focus = node
 	} else if pane_tiled(l, l.focus) {
 		l.tiled_focus = l.focus
 	}
+	l.fill_float = 0
 	if root := float_root(l, node); root != INVALID_NODE {
 		floating, _ := node_float(l, root)
+		floating.focus = node
+		if following {l.fill_float = floating.id}
 		if floating.minimized {floating.minimized, floats_changed = false, true}
 		if floating.stack != l.next_float_stack {
 			l.next_float_stack += 1
@@ -272,6 +282,24 @@ focus_set :: proc(l: ^Layout, node: Node_Id) -> (floats_changed: bool) {
 	}
 	l.focus = node
 	return
+}
+
+// Whether the floating group holding `node` is zoomed.
+float_zoomed :: proc(l: ^Layout, node: Node_Id) -> bool {
+	floating, ok := float_of(l, node)
+	return ok && floating.zoomed
+}
+
+// The pane a zoomed floating group shows: the focused pane while focus is in the group, otherwise the
+// pane focus last held there, or its first pane.
+@(private)
+float_shown :: proc(l: ^Layout, root: Node_Id) -> Node_Id {
+	if float_root(l, l.focus) == root {return l.focus}
+	floating, _ := node_float(l, root)
+	if float_root(l, floating.focus) == root {
+		if _, pane := l.nodes[floating.focus].(Pane); pane {return floating.focus}
+	}
+	return pane_first(l, root)
 }
 
 @(private)
@@ -316,8 +344,10 @@ float_content_rect :: proc(frame: Rect, header: f32) -> Rect {
 	return {frame.x, frame.y + h, frame.width, frame.height - h}
 }
 
-// Appends every shown floating group, bottom first, and every pane inside it.
+// Appends every shown floating group, bottom first, and every pane inside it, or only the pane a zoomed
+// group shows. A fill showing a floating pane alone hides them all.
 floats_place :: proc(l: ^Layout, area: Rect, gap, header: f32, out: ^[dynamic]Pane_Rect) {
+	if fill_floating(l) != INVALID_NODE {return}
 	stack: u64
 	index := -1
 	for {
@@ -325,9 +355,25 @@ floats_place :: proc(l: ^Layout, area: Rect, gap, header: f32, out: ^[dynamic]Pa
 		if root == INVALID_NODE {return}
 		rect, _ := float_rect(l, root, area)
 		floating, _ := node_float(l, root)
-		float_place(l, root, float_content_rect(rect, header), gap, floating.id, out)
+		shown := floating.zoomed ? float_shown(l, root) : root
+		float_place(l, shown, float_content_rect(rect, header), gap, floating.id, out)
 		stack, index = next_stack, int(root)
 	}
+}
+
+// Appends every pane of the floating group holding `node` where its split places it, zoomed or not.
+float_group_place :: proc(
+	l: ^Layout,
+	node: Node_Id,
+	area: Rect,
+	gap, header: f32,
+	out: ^[dynamic]Pane_Rect,
+) {
+	root := float_root(l, node)
+	rect, found := float_rect(l, root, area)
+	if !found {return}
+	floating, _ := node_float(l, root)
+	float_place(l, root, float_content_rect(rect, header), gap, floating.id, out)
 }
 
 @(private)
@@ -340,15 +386,18 @@ float_place_dividers :: proc(l: ^Layout, id: Node_Id, area: Rect, gap: f32, out:
 	}
 }
 
-// Appends dividers inside every shown floating group, bottom groups first.
+// Appends dividers inside every shown floating group that is not zoomed, bottom groups first.
 floats_dividers :: proc(l: ^Layout, area: Rect, gap, header: f32, out: ^[dynamic]Divider) {
+	if fill_floating(l) != INVALID_NODE {return}
 	stack: u64
 	index := -1
 	for {
 		root, next_stack := float_next(l, stack, index, false)
 		if root == INVALID_NODE {return}
 		rect, _ := float_rect(l, root, area)
-		float_place_dividers(l, root, float_content_rect(rect, header), gap, out)
+		if floating, _ := node_float(l, root); !floating.zoomed {
+			float_place_dividers(l, root, float_content_rect(rect, header), gap, out)
+		}
 		stack, index = next_stack, int(root)
 	}
 }

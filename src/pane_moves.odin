@@ -337,10 +337,12 @@ pane_focus :: proc(app: ^App, w: ^Window, node: layout.Node_Id) {
 	// A floating pane rises above the others, and comes out of its capsule, as it takes focus; out of
 	// its capsule, it grows from it.
 	if floating, ok := layout.float_of(tree, node); ok && floating.minimized {pane_motion_arm(w, .Float)}
+	filled := layout.fill_floating(tree)
 	floats_changed := layout.focus_set(tree, node)
-	if pane_view_solo(w) && !layout.is_floating(tree, node) {
+	// A single-pane view shows the pane focus moves to, as a zoomed float shows its focused pane.
+	if filled != layout.fill_floating(tree) || (pane_view_solo(w) && !layout.is_floating(tree, node)) {
 		window_relayout(app, w)
-	} else if floats_changed {
+	} else if floats_changed || layout.float_zoomed(tree, node) {
 		window_floats_layout(app, w)
 	}
 	focus_enter(app, w)
