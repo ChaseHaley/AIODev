@@ -278,6 +278,9 @@ environment_block :: proc(
 	return serialize_environment(entries[:], allocator)
 }
 
+@(private)
+OUTPUT_PIPE_BYTES :: 64 * 1024
+
 @(require_results)
 spawn :: proc(options: Spawn_Options, allocator := context.allocator) -> (Pty, Spawn_Error) {
 	p: Pty
@@ -341,7 +344,9 @@ spawn :: proc(options: Spawn_Options, allocator := context.allocator) -> (Pty, S
 	if !bool(w.CreatePipe(&console_input, &p.input, nil, 0)) {
 		return {}, spawn_failure("CreatePipe", .Pipe, u32(w.GetLastError()))
 	}
-	if !bool(w.CreatePipe(&p.output, &console_output, nil, 0)) {
+	// With the default buffer of a few KiB, conhost stalls on every write while the reader parses the
+	// previous chunk.
+	if !bool(w.CreatePipe(&p.output, &console_output, nil, OUTPUT_PIPE_BYTES)) {
 		return {}, spawn_failure("CreatePipe", .Pipe, u32(w.GetLastError()))
 	}
 	size_cells := w.COORD{i16(options.cols), i16(options.rows)}
