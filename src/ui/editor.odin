@@ -432,6 +432,8 @@ Editor :: struct {
 	// A write the page owner performs for profiles, program groups or link programs, and the
 	// reorder that rewrites profile.order, opener.order or the process groups.
 	request:                                                           Editor_Request,
+	// A value typed into a field the user moved off without saving, for the page owner to save.
+	kept:                                                              Editor_Kept,
 	order:                                                             Editor_Order,
 	profile_positions:                                                 [dynamic]Profile_Position,
 }
@@ -447,6 +449,11 @@ Editor_Outcome :: enum {
 	// The page owner performs the request for a link program: remove or reorder.
 	Opener_Action,
 	Font_Filter,
+}
+
+// A field the user typed into and then left: its row's key and the typed text. Owned.
+Editor_Kept :: struct {
+	key, value: string,
 }
 
 // Table state a settings reload keeps: expansion and blocks still settling after a reorder, with
@@ -539,6 +546,7 @@ editor_destroy :: proc(p: ^Editor) {
 	delete(p.message)
 	delete(p.theme)
 	editor_request_destroy(&p.request)
+	editor_kept_destroy(&p.kept)
 	if drag, dragging := p.order.(Order_Dragging); dragging {order_block_free(drag.block)}
 	profile_positions_clear(&p.profile_positions)
 	delete(p.profile_positions)
@@ -668,9 +676,12 @@ editor_carry :: proc(to, from: ^Editor, draft: bool) {
 		mode = Editor_Curve_Popup{}
 		motion_popover_carry(to, from, next, draft)
 	}
-	if draft {
+	// The same text keeps its caret and selection, as when another field's save rebuilt the page.
+	if draft || field_string(&from.value) == field_string(&to.value) {
 		delete(to.value.bytes)
 		to.value, from.value = from.value, {}
+	}
+	if draft {
 		shortcut_capture_carry(&to.capture, &from.capture)
 		to.choice_list = from.choice_list
 		to.choice_set = from.choice_set
@@ -782,6 +793,63 @@ editor_request_destroy :: proc(request: ^Editor_Request) {
 		delete(r.id)
 	}
 	request^ = nil
+}
+
+// Moving off a field keeps what was typed into it: the text goes to `kept` for the page owner to
+// save, and the field shows the row's saved value until that save publishes. Rows saved through
+// an action, a Motion context or the program groups' shared draft are not kept.
+@(private)
+editor_keep :: proc(p: ^Editor) {
+	if _, editing := p.mode.(Editor_Editing); !editing {return}
+	row := editor_row(p)
+	if row == nil || !text_kind(row.kind) || row.action != .None || row.motion_part != .None ||
+	   row.process_field != .None {return}
+	value := field_string(&p.value)
+	if value == row.value {return}
+	editor_kept_destroy(&p.kept)
+	p.kept = {strings.clone(row.key), strings.clone(value)}
+	field_set(&p.value, row.value)
+}
+
+// Hands the kept field to the page owner, who saves it after handling the event that left it and
+// frees it with editor_kept_destroy. An empty key means nothing was kept.
+@(require_results)
+editor_kept_take :: proc(p: ^Editor) -> Editor_Kept {
+	kept := p.kept
+	p.kept = {}
+	return kept
+}
+
+editor_kept_destroy :: proc(kept: ^Editor_Kept) {
+	delete(kept.key)
+	delete(kept.value)
+	kept^ = {}
+}
+
+// Gives a kept field back to the page until it can be saved, taking ownership. A field kept since
+// is the newer one, so the older is dropped.
+editor_kept_put :: proc(p: ^Editor, kept: ^Editor_Kept) {
+	if p.kept.key == "" {
+		p.kept, kept^ = kept^, {}
+		return
+	}
+	editor_kept_destroy(kept)
+}
+
+// Whether nothing on the page is mid-gesture: no popup or profile menu is open and no pointer
+// drags a field, slider, selection or row.
+editor_resting :: proc(p: ^Editor) -> bool {
+	if _, dragging := p.order.(Order_Dragging); dragging {return false}
+	switch m in p.mode {
+	case Editor_Browsing:
+		return !m.selecting
+	case Editor_Editing:
+		return m.drag == .None
+	case Editor_Positions, Editor_Reset_All, Editor_Shortcut:
+		return true
+	case Editor_Choice_Popup, Editor_Color_Popup, Editor_Curve_Popup, Editor_Profile_Menu:
+	}
+	return false
 }
 
 @(private)
@@ -1006,10 +1074,11 @@ stop_editing :: proc(p: ^Editor) {
 	}
 }
 
-// Selects a page line. Whatever the previous row had open closes; a field keeps the keyboard when
-// the next row can take it.
+// Selects a page line. Whatever the previous row had open closes, keeping what was typed into its
+// field; a field keeps the keyboard when the next row can take it.
 editor_select :: proc(p: ^Editor, index: int) {
 	if !editor_process_capture(p) {return}
+	editor_keep(p)
 	if p.error || mode_shows_hint(p.mode) {editor_message(p, "", false)}
 	if p.error_text != "" {
 		editor_message(p, "", false)
@@ -1687,7 +1756,7 @@ editor_jump :: proc(p: ^Editor, entry: int) {
 	entries := outline_entries(p)
 	if entry < 0 || entry >= len(entries) {return}
 	header := entries[entry]
-	if editor_focus(p) != .Search {stop_editing(p)}
+	if editor_focus(p) != .Search {editor_keep(p); stop_editing(p)}
 	p.scroll = clamp(header, 0, max_scroll(p))
 	editor_select(p, header + 1)
 	p.scroll = clamp(header, 0, max_scroll(p))
@@ -2006,6 +2075,7 @@ editor_key :: proc(p: ^Editor, raw: input.Key_Event) -> Editor_Outcome {
 		if row == nil || row.kind == .Profile_Add {stops = 1}
 		if row != nil && row.kind == .Shortcut {stops = 3}
 		current := focus == .Reset_All ? stops : int(focus)
+		if focus == .Control {editor_keep(p)}
 		next := Editor_Focus((current + (.Shift in e.modifiers ? stops : 1)) % (stops + 1))
 		if int(next) == stops {editor_mode_set(p, Editor_Reset_All{}); return .Changed}
 		if editor_popup(p) != .None {editor_mode_set(p, Editor_Editing{})}
@@ -2550,13 +2620,13 @@ editor_press :: proc(
 		return .Changed
 	}
 	if render.rect_contains(editor_clear_rect(p, l), x, y) {
-		if editor_focus(p) != .Search {stop_editing(p)}
+		if editor_focus(p) != .Search {editor_keep(p); stop_editing(p)}
 		field_set(&p.filter, "")
 		editor_filter(p)
 		return .Changed
 	}
 	if render.rect_contains(l.filter, x, y) {
-		if editor_focus(p) != .Search {stop_editing(p)}
+		if editor_focus(p) != .Search {editor_keep(p); stop_editing(p)}
 		field_pointer(&p.filter, field_box_offset(filter_box(p, l, text), x), true, extend)
 		editor_mode_set(p, Editor_Browsing{selecting = true})
 		return .Changed
@@ -3771,19 +3841,22 @@ editor_draw :: proc(
 			}
 			continue
 		}
+		// A profile's or link program's fields sit one step in from its line, as Motion's do.
+		inset := ITEM_INSET * s
 		if row.profile != "" || row.opener != "" {
+			inset += SPACE_6 * s
 			// Expanded editors carry an accent rail so they read as part of the row above.
 			rail := render.Rect{r.x + 2 * s, r.y + SPACE_2 * s, 3 * s, r.height - 2 * SPACE_2 * s}
 			draw_rect(list, {rect = rail, color = theme.accent, radius = pill_radius(rail)})
 		}
-		text_width_limit := max(1, parts.text_right - r.x - ITEM_INSET * s)
+		text_width_limit := max(1, parts.text_right - r.x - inset)
 		baseline, detail_baseline := stacked_baselines(r, text, &small, s)
 		if row.description == "" {baseline = r.y + (r.height - text.line_height) / 2 + text.ascent}
 		if result := draw_text(
 			text,
 			list,
 			row.title,
-			r.x + ITEM_INSET * s,
+			r.x + inset,
 			baseline,
 			theme.text,
 			text_width_limit,
@@ -3798,7 +3871,7 @@ editor_draw :: proc(
 				&small,
 				list,
 				note,
-				r.x + ITEM_INSET * s,
+				r.x + inset,
 				detail_baseline,
 				theme.error,
 				text_width_limit,
@@ -3807,7 +3880,7 @@ editor_draw :: proc(
 			&small,
 			list,
 			row.description,
-			r.x + ITEM_INSET * s,
+			r.x + inset,
 			detail_baseline,
 			theme.muted,
 			text_width_limit,

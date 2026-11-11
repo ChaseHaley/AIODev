@@ -48,12 +48,11 @@ opener_mutate :: proc(
 	if alloc_error != nil {return "", "", "", .Allocation}
 	defer delete(revision, allocator)
 	if change.kind == .Add {
-		names := OPENER_OFFERS_NAME
 		placements := OPENER_PLACEMENT_NAME
 		values := [Opener_Field]string {
 			.Name      = OPENER_NEW_NAME,
 			.Command   = OPENER_NEW_COMMAND,
-			.Offers    = names[.Files],
+			.Offers    = opener_link_names[.Files],
 			.Placement = placements[.Own_Window],
 		}
 		for value, field in values {
@@ -77,11 +76,19 @@ opener_mutate :: proc(
 	}
 	order := ordered[:written]
 	if change.kind == .Move {order = order_move(order, from, change.slot, moved[:])}
-	order_value, order_error := order_text(order, nil, allocator)
-	defer delete(order_value, allocator)
-	if order_error != nil {return "", "", "", .Allocation}
-	if issue, error = mutation_edit(&revision, OPENER_ORDER_KEY, order_value, allocator); error != .None {
-		return "", "", issue, error
+	if len(order) == 0 {
+		// Removing the last program leaves no order to keep, and an empty one is not an edit.
+		emptied, empty_error := remove_key_text(revision, OPENER_ORDER_KEY, allocator)
+		if empty_error != nil {return "", "", "", .Allocation}
+		delete(revision, allocator)
+		revision = emptied
+	} else {
+		order_value, order_error := order_text(order, nil, allocator)
+		defer delete(order_value, allocator)
+		if order_error != nil {return "", "", "", .Allocation}
+		if issue, error = mutation_edit(&revision, OPENER_ORDER_KEY, order_value, allocator); error != .None {
+			return "", "", issue, error
+		}
 	}
 	id, alloc_error = strings.clone(target, allocator)
 	if alloc_error != nil {return "", "", "", .Allocation}

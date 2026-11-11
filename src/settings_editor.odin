@@ -256,7 +256,7 @@ settings_page_profile_rows :: proc(p: ^ui.Editor, profiles: []ui.Profile_Row) ->
 @(private, require_results)
 settings_page_opener_rows :: proc(p: ^ui.Editor, openers: ^settings.Openers) -> bool {
 	group := SETTINGS_SECTIONS[.Link_Programs].title
-	offers_names, offers_labels := settings.OPENER_OFFERS_NAME, settings.OPENER_OFFERS_LABEL
+	offers_names, offers_labels := settings.opener_offers_choices()
 	placement_names, placement_labels := settings.OPENER_PLACEMENT_NAME, settings.OPENER_PLACEMENT_LABEL
 	indices: [settings.OPENER_LIMIT]int
 	for index in indices[:settings.openers_in_order(openers, indices[:])] {
@@ -268,7 +268,7 @@ settings_page_opener_rows :: proc(p: ^ui.Editor, openers: ^settings.Openers) -> 
 			value       = placement_labels[opener.placement],
 			detail      = fmt.tprintf(
 				"link program open with %s %s",
-				offers_labels[opener.offers],
+				settings.set_text(offers_labels, u32(transmute(u8)opener.offers)),
 				placement_labels[opener.placement],
 			),
 			opener      = opener.id,
@@ -293,11 +293,13 @@ settings_page_opener_rows :: proc(p: ^ui.Editor, openers: ^settings.Openers) -> 
 			.Offers = {
 				title = "Offered for",
 				description = "The links whose menu lists this program.",
-				value = offers_names[opener.offers],
-				default_value = offers_names[.Files_And_Folders],
+				value = settings.opener_offers_text(opener.offers),
+				default_value = settings.opener_offers_text(settings.OPENER_OFFERS_ALL),
 				kind = .Choice,
-				choices = slice.enumerated_array(&offers_names),
-				choice_labels = slice.enumerated_array(&offers_labels),
+				multiple = true,
+				choice_mask = u32(transmute(u8)opener.offers),
+				choices = offers_names,
+				choice_labels = offers_labels,
 			},
 			.Placement = {
 				title = "Opens in",
@@ -367,6 +369,10 @@ editor_outcome :: proc(app: ^App, w: ^Window, outcome: ui.Editor_Outcome) {
 	// The outcome that names a request is the only one that may act on it.
 	request := ui.editor_request_take(p)
 	defer ui.editor_request_destroy(&request)
+	kept := ui.editor_kept_take(p)
+	defer ui.editor_kept_destroy(&kept)
+	// A field the user moved off saves what was typed into it, after what the move itself did.
+	defer editor_kept_save(app, w, &kept)
 	if outcome == .None {return}
 	w.dirty = true
 	ui.editor_outcome_begin(p, outcome)
@@ -414,17 +420,21 @@ editor_outcome :: proc(app: ^App, w: ^Window, outcome: ui.Editor_Outcome) {
 	}
 	// A color's reset returns it to its base theme instead of writing the shown default.
 	if outcome == .Reset && row.action != .Theme_Color {ui.field_set(&p.value, row.default_value)}
+	value := ui.field_string(&p.value)
+	// A combination of choices is edited as option bits; the file stores their names.
+	if row.multiple && outcome != .Reset {value = settings.set_text(row.choices, ui.editor_choice_set(p))}
+	value = strings.clone(value, context.temp_allocator)
 	if field, is_field := row.profile_field.?; is_field {
-		editor_profile_field(app, w, row.profile, field)
+		editor_profile_field(app, w, row.profile, field, value)
 		return
 	}
 	if field, is_field := row.opener_field.?; is_field {
-		editor_opener_field(app, w, row.opener, field)
+		editor_opener_field(app, w, row.opener, field, value)
 		return
 	}
 	switch row.action {
 	case .None:
-		editor_setting_save(app, w, row, outcome == .Reset)
+		editor_setting_save(app, w, row, value)
 	case .Theme_Color:
 		editor_theme_color(app, w, row, outcome == .Reset)
 	case .Theme_Name:
@@ -458,17 +468,62 @@ editor_outcome :: proc(app: ^App, w: ^Window, outcome: ui.Editor_Outcome) {
 	}
 }
 
-// Saves the selected schema setting or shortcut.
+// Saves a field the user moved off without pressing Enter (ui.editor_keep), once the page is at
+// rest: an open popup or a pointer drag would not survive the page taking the new revision, so
+// until then the field stays kept. The selection stays where the user went. A refusal rings the
+// field's row with the reason, unless the event that left it reported a problem of its own.
 @(private)
-editor_setting_save :: proc(app: ^App, w: ^Window, row: ^ui.Editor_Row, reset: bool) {
+editor_kept_save :: proc(app: ^App, w: ^Window, kept: ^ui.Editor_Kept) {
+	if kept.key == "" {return}
+	p := &w.editor
+	if !ui.editor_resting(p) {
+		ui.editor_kept_put(p, kept)
+		return
+	}
+	// Back on the same row, its own field is the newer value.
+	if row := ui.editor_row(p); row != nil && row.key == kept.key {return}
+	w.dirty = true
+	for &row in p.rows {
+		if row.key != kept.key {continue}
+		if field, is_field := row.profile_field.?; is_field {
+			editor_profile_field(app, w, row.profile, field, kept.value, kept = true)
+			return
+		}
+		if field, is_field := row.opener_field.?; is_field {
+			editor_opener_field(app, w, row.opener, field, kept.value, kept = true)
+			return
+		}
+		editor_setting_save(app, w, &row, kept.value, kept = true)
+		return
+	}
+}
+
+// Shows why a kept field's value was refused on its row, unless the page already shows a problem.
+@(private)
+editor_kept_refused :: proc(p: ^ui.Editor, profile, key, message: string) {
+	if p.error || p.error_text != "" {return}
+	ui.editor_error_set(p, profile, key, message)
+	ui.editor_message(p, message, true)
+}
+
+// The base a field save computes against: the page, or for a `kept` field the page as it keeps
+// another row selected.
+@(private)
+editor_field_base :: proc(p: ^ui.Editor, kept: bool) -> Settings_Base {
+	return kept ? Settings_Kept{p} : Settings_Page{p}
+}
+
+// Saves a schema setting or shortcut as `value`: the selected row's, or a `kept` one the user left.
+@(private)
+editor_setting_save :: proc(app: ^App, w: ^Window, row: ^ui.Editor_Row, value: string, kept := false) {
 	p := &w.editor
 	key := strings.clone(row.key, context.temp_allocator)
 	kind := row.kind
-	value := ui.field_string(&p.value)
-	// A combination of choices is edited as option bits; the file stores their names.
-	if row.multiple && !reset {value = settings.set_text(row.choices, ui.editor_choice_set(p))}
-	value = strings.clone(value, context.temp_allocator)
-	result := settings_change(app, Setting_Value{key, value}, Settings_Page{p})
+	result := settings_change(app, Setting_Value{key, value}, editor_field_base(p, kept))
+	if kept && result.status == .Refused {
+		editor_kept_refused(p, "", key, result.message)
+		return
+	}
 	if !settings_page_report(p, result, .Setting) {return}
 	if kind == .Shortcut {ui.editor_browse(p)}
 	text := "Saved and applied."
@@ -480,7 +535,8 @@ editor_setting_save :: proc(app: ^App, w: ^Window, row: ^ui.Editor_Row, reset: b
 }
 
 // Reports a profile or link program change: one that did not apply on the page, one that did by
-// showing `select_key` with `message`, scrolled where the page was.
+// showing `select_key` with `message`, scrolled where the page was. With `stay` the selection and
+// focus remain where they are, as for a field the user moved off.
 @(private)
 editor_table_saved :: proc(
 	w: ^Window,
@@ -488,8 +544,13 @@ editor_table_saved :: proc(
 	workflow: Settings_Workflow,
 	select_key, message: string,
 	focus := Reveal_Focus.None,
+	stay := false,
 ) {
 	if !settings_page_report(&w.editor, result, workflow) {return}
+	if stay {
+		ui.editor_message(&w.editor, message, false)
+		return
+	}
 	ui.editor_browse(&w.editor)
 	settings_reveal_page(
 		&w.editor,
@@ -497,13 +558,20 @@ editor_table_saved :: proc(
 	)
 }
 
-// Validates and writes one inline profile field. Empty names and commands, duplicate names and a
-// command line whose executable cannot be found stay inline: the row is ringed, the field carries
-// the message, and no modal appears.
+// Validates and writes one inline profile field as `value`. Empty names and commands, duplicate
+// names and a command line whose executable cannot be found stay inline: the row is ringed, the
+// field carries the message, and no modal appears.
 @(private)
-editor_profile_field :: proc(app: ^App, w: ^Window, profile: string, field: settings.Profile_Field) {
+editor_profile_field :: proc(
+	app: ^App,
+	w: ^Window,
+	profile: string,
+	field: settings.Profile_Field,
+	value: string,
+	kept := false,
+) {
 	id := strings.clone(profile, context.temp_allocator)
-	value := strings.clone(ui.field_string(&w.editor.value), context.temp_allocator)
+	stored := value
 	key := settings.profile_field_key(id, field)
 	message := "Saved."
 	focus := Reveal_Focus.Control
@@ -512,17 +580,21 @@ editor_profile_field :: proc(app: ^App, w: ^Window, profile: string, field: sett
 		message = "Saved. Applies to new or restarted shells."
 	case .Hidden:
 		// The toggle shows "Show in menus"; the file stores the opposite.
-		value = value == "true" ? "false" : "true"
+		stored = value == "true" ? "false" : "true"
 		focus = .None
 	case .Name, .Icon:
 	}
-	result := settings_change(app, Profile_Field_Value{id, field, value}, Settings_Page{&w.editor})
+	result := settings_change(app, Profile_Field_Value{id, field, stored}, editor_field_base(&w.editor, kept))
 	if result.status == .Refused {
+		if kept {
+			editor_kept_refused(&w.editor, id, key, result.message)
+			return
+		}
 		ui.editor_error_set(&w.editor, id, key, result.message)
 		ui.editor_message(&w.editor, result.message, true)
 		return
 	}
-	editor_table_saved(w, result, .Profile_Field, key, message, focus)
+	editor_table_saved(w, result, .Profile_Field, key, message, focus, kept)
 }
 
 @(private)
@@ -590,22 +662,37 @@ editor_profile_action :: proc(app: ^App, w: ^Window, request: ui.Editor_Request)
 	}
 }
 
-// Validates and writes one inline link program field. An empty name or command line stays inline:
-// the row is ringed, the field carries the message, and no modal appears.
+// Validates and writes one inline link program field as `value`. An empty name or command line,
+// or a program offered for no links, stays inline: the row is ringed, the field carries the
+// message, and no modal appears.
 @(private)
-editor_opener_field :: proc(app: ^App, w: ^Window, opener: string, field: settings.Opener_Field) {
+editor_opener_field :: proc(
+	app: ^App,
+	w: ^Window,
+	opener: string,
+	field: settings.Opener_Field,
+	value: string,
+	kept := false,
+) {
 	id := strings.clone(opener, context.temp_allocator)
-	value := strings.clone(ui.field_string(&w.editor.value), context.temp_allocator)
 	key := settings.opener_field_key(id, field)
 	// Text fields keep the keyboard for the next edit; a choice returns to its row.
 	focus := field == .Name || field == .Command ? Reveal_Focus.Control : Reveal_Focus.None
-	result := settings_change(app, Opener_Field_Value{id, field, value}, Settings_Page{&w.editor})
+	result := settings_change(app, Opener_Field_Value{id, field, value}, editor_field_base(&w.editor, kept))
 	if result.status == .Refused {
+		if kept {
+			editor_kept_refused(&w.editor, "", key, result.message)
+			return
+		}
 		ui.editor_error_set(&w.editor, "", key, result.message)
 		ui.editor_message(&w.editor, result.message, true)
+		// The open list shows the links the program is still offered for.
+		if row := ui.editor_row(&w.editor); row != nil && row.key == key {w.editor.choice_set = row.choice_mask}
 		return
 	}
-	editor_table_saved(w, result, .Opener_Field, key, "Saved. Link menus use it.", focus)
+	// Offered for is a list of links whose popup stays open while each one is switched.
+	stay := kept || field == .Offers
+	editor_table_saved(w, result, .Opener_Field, key, "Saved. Link menus use it.", focus, stay)
 }
 
 @(private)

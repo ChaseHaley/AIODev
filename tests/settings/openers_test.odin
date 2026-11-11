@@ -15,7 +15,7 @@ opener.alpha.name = "Alpha"
 opener.alpha.command = alpha.exe
 opener.mid.name = Mid
 opener.mid.command = mid %1
-opener.mid.offers = folders
+opener.mid.offers = folders, files
 opener.mid.placement = tab
 opener.order = mid
 `
@@ -29,10 +29,12 @@ opener.order = mid
 	if !testing.expect(t, zed != nil && alpha != nil) {return}
 	testing.expect_value(t, zed.name, "Zed")
 	testing.expect_value(t, zed.command, "zed %1")
-	testing.expect_value(t, zed.offers, settings.Opener_Offers.Files)
+	testing.expect_value(t, zed.offers, settings.Opener_Offers{.Files})
 	testing.expect_value(t, zed.placement, settings.Opener_Placement.Own_Window)
 	testing.expect_value(t, alpha.name, "Alpha")
-	testing.expect_value(t, alpha.offers, settings.Opener_Offers.Files_And_Folders)
+	testing.expect_value(t, alpha.offers, settings.OPENER_OFFERS_ALL)
+	mid := settings.opener_find(&s.openers, "mid")
+	if testing.expect(t, mid != nil) {testing.expect_value(t, mid.offers, settings.OPENER_OFFERS_ALL)}
 	testing.expect_value(t, alpha.placement, settings.Opener_Placement.Right_Split)
 	opener_order_expect(t, &s.openers, {"mid", "alpha", "zed"})
 }
@@ -92,7 +94,7 @@ opener.commandless.name = Commandless
 	if !testing.expect(t, nvim != nil) {return}
 	testing.expect_value(t, nvim.name, "Neovim")
 	testing.expect_value(t, nvim.command, "nvim %1")
-	testing.expect_value(t, nvim.offers, settings.Opener_Offers.Files_And_Folders)
+	testing.expect_value(t, nvim.offers, settings.OPENER_OFFERS_ALL)
 	testing.expect_value(t, nvim.placement, settings.Opener_Placement.Right_Split)
 	opener_order_expect(t, &s.openers, {"nvim"})
 }
@@ -142,14 +144,15 @@ editing_an_opener_field_writes_its_key :: proc(t: ^testing.T) {
 	nvim := settings.opener_find(&s.openers, "nvim")
 	if testing.expect(t, nvim != nil) {
 		testing.expect_value(t, nvim.command, "nvim -R %1")
-		testing.expect_value(t, nvim.offers, settings.Opener_Offers.Folders)
+		testing.expect_value(t, nvim.offers, settings.Opener_Offers{.Folders})
 	}
 	for refused in ([?]struct {
 		field:          settings.Opener_Field,
 		value, message: string,
 	} {
 		{.Placement, "left", "Expected right, down, float, tab, linked or window."},
-		{.Offers, "all", "Expected both, files or folders."},
+		{.Offers, "both", "Choose files, folders or both."},
+		{.Offers, "none", "Choose files, folders or both."},
 		{.Name, "  ", "A link program needs a name."},
 		{.Command, "", "A link program needs a command line."},
 	}) {
@@ -182,7 +185,7 @@ opener_mutation_adds_with_defaults_and_a_fresh_id :: proc(t: ^testing.T) {
 	if !testing.expect(t, added != nil) {return}
 	testing.expect_value(t, added.name, settings.OPENER_NEW_NAME)
 	testing.expect_value(t, added.command, settings.OPENER_NEW_COMMAND)
-	testing.expect_value(t, added.offers, settings.Opener_Offers.Files)
+	testing.expect_value(t, added.offers, settings.Opener_Offers{.Files})
 	testing.expect_value(t, added.placement, settings.Opener_Placement.Own_Window)
 	opener_order_expect(t, &after.openers, {"nvim", "program-2"})
 }
@@ -205,6 +208,23 @@ opener_mutation_removes_lines_and_order_entry :: proc(t: ^testing.T) {
 	defer settings.destroy(&after)
 	testing.expect(t, settings.opener_find(&after.openers, "code") == nil)
 	opener_order_expect(t, &after.openers, {"nvim"})
+}
+
+@(test)
+opener_mutation_removes_the_last_program :: proc(t: ^testing.T) {
+	source :: "opener.nvim.name = Neovim\nopener.nvim.command = nvim %1\nopener.order = nvim\n"
+	s := mutation_parse(t, source)
+	defer settings.destroy(&s)
+	text, id, issue, error := settings.opener_mutate(source, &s.openers, {kind = .Remove, id = "nvim"})
+	defer delete(text)
+	defer delete(id)
+	defer delete(issue)
+	testing.expect_value(t, issue, "")
+	if !testing.expect_value(t, error, settings.Mutation_Error.None) {return}
+	testing.expect_value(t, text, "")
+	after := mutation_parse(t, text)
+	defer settings.destroy(&after)
+	testing.expect_value(t, len(after.openers.items), 0)
 }
 
 @(test)

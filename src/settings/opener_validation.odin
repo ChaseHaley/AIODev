@@ -1,6 +1,7 @@
 package settings
 
 import "core:fmt"
+import "core:slice"
 import "core:strings"
 
 // The fields of one link program, each an opener.ID.<name> key.
@@ -19,16 +20,28 @@ opener_field_names := [Opener_Field]string {
 	.Placement = "placement",
 }
 
-// The file values of Opener_Offers, and how Settings shows them.
-OPENER_OFFERS_NAME :: [Opener_Offers]string {
-	.Files_And_Folders = "both",
-	.Files             = "files",
-	.Folders           = "folders",
+// The file names of Opener_Link, and how Settings shows them. opener.ID.offers lists names
+// separated by commas, as set_text writes them.
+@(rodata)
+opener_link_names := [Opener_Link]string {
+	.Files   = "files",
+	.Folders = "folders",
 }
-OPENER_OFFERS_LABEL :: [Opener_Offers]string {
-	.Files_And_Folders = "Files and folders",
-	.Files             = "Files",
-	.Folders           = "Folders",
+@(rodata)
+opener_link_labels := [Opener_Link]string {
+	.Files   = "Files",
+	.Folders = "Folders",
+}
+
+// The names Settings offers for opener.ID.offers, bit i naming Opener_Link(i), and how it shows them.
+opener_offers_choices :: proc() -> (names, labels: []string) {
+	return slice.enumerated_array(&opener_link_names), slice.enumerated_array(&opener_link_labels)
+}
+
+// The file form of `offers`. Temporary.
+opener_offers_text :: proc(offers: Opener_Offers) -> string {
+	names, _ := opener_offers_choices()
+	return set_text(names, u32(transmute(u8)offers))
 }
 
 // The file values of Opener_Placement, and how Settings shows them.
@@ -61,11 +74,12 @@ opener_field_key :: proc(id: string, field: Opener_Field) -> string {
 	return fmt.tprintf("%s%s.%s", OPENER_PREFIX, id, opener_field_names[field])
 }
 
-opener_offers_from_name :: proc(name: string) -> (Opener_Offers, bool) {
-	for candidate, offers in OPENER_OFFERS_NAME {
-		if candidate == name {return offers, true}
-	}
-	return {}, false
+// Reads comma-separated link kinds; a program offered for none is refused.
+opener_offers_parse :: proc(value: string) -> (Opener_Offers, bool) {
+	names, _ := opener_offers_choices()
+	mask, _, ok := set_parse(names, value)
+	if !ok || mask == 0 {return {}, false}
+	return transmute(Opener_Offers)u8(mask), true
 }
 
 opener_placement_from_name :: proc(name: string) -> (Opener_Placement, bool) {
@@ -92,7 +106,8 @@ Opener_Problem :: enum {
 }
 
 // Checks one field value. A File name or command may carry one pair of double quotes, which `text`
-// drops; otherwise `text` is `value`. Offers and placement must be exactly one of their names.
+// drops; otherwise `text` is `value`. Offers lists one or both link kinds; placement must be exactly
+// one of its names.
 opener_field_check :: proc(
 	field: Opener_Field,
 	value: string,
@@ -103,7 +118,7 @@ opener_field_check :: proc(
 ) {
 	switch field {
 	case .Offers:
-		if _, known := opener_offers_from_name(value); !known {return "", .Invalid_Offers}
+		if _, known := opener_offers_parse(value); !known {return "", .Invalid_Offers}
 		return value, .None
 	case .Placement:
 		if _, known := opener_placement_from_name(value); !known {return "", .Invalid_Placement}
@@ -138,8 +153,8 @@ opener_problem_text :: proc(issue: Opener_Problem, ctx: Opener_Validation_Contex
 	case .Empty_Command:
 		return file ? "link program command line cannot be empty" : "A link program needs a command line."
 	case .Invalid_Offers:
-		if !file {return "Expected both, files or folders."}
-		return fmt.tprintf("invalid offers \"%s\", expected both, files or folders", value)
+		if !file {return "Choose files, folders or both."}
+		return fmt.tprintf("invalid offers \"%s\", expected files, folders or \"files, folders\"", value)
 	case .Invalid_Placement:
 		if !file {return "Expected right, down, float, tab, linked or window."}
 		return fmt.tprintf(

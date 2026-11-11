@@ -243,6 +243,31 @@ remove_item_text :: proc(
 	string,
 	runtime.Allocator_Error,
 ) {
+	return remove_lines_text(text, fmt.tprintf("%s%s.", prefix, id), true, allocator)
+}
+
+// Removes every line that sets `key`, like remove_item_text.
+@(private, require_results)
+remove_key_text :: proc(
+	text, key: string,
+	allocator: runtime.Allocator,
+) -> (
+	string,
+	runtime.Allocator_Error,
+) {
+	return remove_lines_text(text, key, false, allocator)
+}
+
+// Removes the lines whose key is `key`, or starts with it when `prefix`.
+@(private, require_results)
+remove_lines_text :: proc(
+	text, key: string,
+	prefix: bool,
+	allocator: runtime.Allocator,
+) -> (
+	string,
+	runtime.Allocator_Error,
+) {
 	builder, build_error := strings.builder_make(allocator)
 	if build_error != nil {return "", build_error}
 	defer strings.builder_destroy(&builder)
@@ -250,11 +275,10 @@ remove_item_text :: proc(
 	if scanner.bom {
 		if err := write_parts(&builder, UTF8_BOM); err != nil {return "", err}
 	}
-	key_prefix := fmt.tprintf("%s%s.", prefix, id)
 	for {
 		line, ok := line_next(&scanner)
 		if !ok {break}
-		if line.split && strings.has_prefix(line.key, key_prefix) {continue}
+		if line.split && (prefix ? strings.has_prefix(line.key, key) : line.key == key) {continue}
 		if err := write_parts(&builder, line.raw); err != nil {return "", err}
 	}
 	return strings.clone(strings.to_string(builder), allocator)

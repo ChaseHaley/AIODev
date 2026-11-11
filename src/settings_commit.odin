@@ -74,6 +74,9 @@ Factory_Reset :: struct {}
 Settings_Base :: union #no_nil {
 	// The page's own text. The page is publication's origin and keeps its saved field.
 	Settings_Page,
+	// The page's own text, saving a field the user moved off. Its selected row is another, so the
+	// page keeps its selection and pending work as the other pages do.
+	Settings_Kept,
 	// The file as it is now. Without a settings file, the running settings.
 	Settings_Current,
 	// The text a confirmation was asked against.
@@ -81,6 +84,10 @@ Settings_Base :: union #no_nil {
 }
 
 Settings_Page :: struct {
+	page: ^ui.Editor,
+}
+
+Settings_Kept :: struct {
 	page: ^ui.Editor,
 }
 
@@ -234,6 +241,8 @@ settings_change :: proc(app: ^App, edit: Settings_Edit, base: Settings_Base) -> 
 	switch b in base {
 	case Settings_Page:
 		source, origin = ui.editor_source(b.page), b.page
+	case Settings_Kept:
+		source = ui.editor_source(b.page)
 	case Settings_Current:
 		data, read_error := os.read_entire_file(app.settings_path, context.temp_allocator)
 		if read_error != nil {return {status = .Failed}}

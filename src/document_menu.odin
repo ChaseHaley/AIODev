@@ -206,7 +206,7 @@ link_choices :: proc(app: ^App, document: Document) -> []Maybe(Link_Choice) {
 		count := settings.openers_in_order(&app.settings.openers, indices[:])
 		for i in 0 ..< count {
 			offers := app.settings.openers.items[indices[i]].offers
-			if offers == (document.folder ? .Files : .Folders) {continue}
+			if (document.folder ? settings.Opener_Link.Folders : .Files) not_in offers {continue}
 			append(&rows, Link_Choice{action = .Program, program = u8(i)})
 		}
 	}

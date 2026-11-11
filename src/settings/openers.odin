@@ -11,12 +11,15 @@ OPENER_ID_MAX_LENGTH :: PROFILE_ID_MAX_LENGTH
 OPENER_LIMIT :: 32
 #assert(OPENER_LIMIT <= ORDER_LIMIT)
 
-// Which links a program is offered for.
-Opener_Offers :: enum u8 {
-	Files_And_Folders,
+// The kinds of link a program can be offered for.
+Opener_Link :: enum u8 {
 	Files,
 	Folders,
 }
+
+// Which links a program is offered for; never empty.
+Opener_Offers :: bit_set[Opener_Link;u8]
+OPENER_OFFERS_ALL :: Opener_Offers{.Files, .Folders}
 
 // Where a program opens.
 Opener_Placement :: enum u8 {
@@ -93,7 +96,8 @@ openers_add :: proc(o: ^Openers, id: string, line: int) -> (^Opener, runtime.All
 	if len(o.items) >= OPENER_LIMIT {return nil, nil}
 	owned, clone_error := strings.clone(id, o.allocator)
 	if clone_error != nil {return nil, clone_error}
-	if _, append_error := append(&o.items, Opener{id = owned, line = line}); append_error != nil {
+	if _, append_error := append(&o.items, Opener{id = owned, offers = OPENER_OFFERS_ALL, line = line});
+	   append_error != nil {
 		delete(owned, o.allocator)
 		return nil, append_error
 	}
@@ -166,7 +170,7 @@ parse_opener_key :: proc(
 	case .Command:
 		profile_own(&opener.command, text, o.allocator) or_return
 	case .Offers:
-		opener.offers, _ = opener_offers_from_name(text)
+		opener.offers, _ = opener_offers_parse(text)
 	case .Placement:
 		opener.placement, _ = opener_placement_from_name(text)
 	}
