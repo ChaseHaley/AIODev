@@ -1,0 +1,237 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Chase Haley <chasehaley33@gmail.com>
+Date: Wed, 11 Nov 2026 11:30:33 -0600
+Subject: [PATCH 4/4] PageList: remember several style mappings during reflow
+
+Reflow maps each source style id into the destination page through
+a set lookup, memoized for the latest style only. Colored output
+alternates between a handful of styles, so the memo missed on almost
+every run: with 10,000 rows of text changing among eight colors every
+eight characters, the lookups took about a third of each reflowing
+resize. The memo is now a 64-slot table indexed by source id, cleared
+when the source page changes and reset with the destination page as
+before.
+---
+ src/terminal/PageList.zig | 153 ++++++++++++++++++++++++++++++--------
+ 1 file changed, 122 insertions(+), 31 deletions(-)
+
+diff --git a/src/terminal/PageList.zig b/src/terminal/PageList.zig
+index 86127ed..9f23218 100644
+--- a/src/terminal/PageList.zig
++++ b/src/terminal/PageList.zig
+@@ -1626,12 +1626,14 @@ const ReflowCursor = struct {
+     /// This is the final row count of the reflowed pages.
+     total_rows: usize,
+ 
+-    /// Memoizes the most recent source-to-destination style id
+-    /// mapping. Styled cells come in long runs sharing the same style
+-    /// so this lets writeCell bump the destination ref count directly
+-    /// instead of performing a set lookup for every styled cell.
++    /// Memoizes recent source-to-destination style id mappings, so
++    /// writeCell and copyRun can bump the destination ref count
++    /// directly instead of performing a set lookup for every styled
++    /// run. Colored output usually alternates between a handful of
++    /// styles, so this keeps one mapping per slot of a small
++    /// direct-mapped table rather than only the latest one.
+     ///
+-    /// The destination id is only valid for the current destination
++    /// The destination ids are only valid for the current destination
+     /// page, which is why this lives on the cursor: every destination
+     /// page change goes through init() which resets this.
+     style_cache: StyleCache,
+@@ -1646,15 +1648,59 @@ const ReflowCursor = struct {
+     },
+ 
+     const StyleCache = struct {
++        /// The source page every slot maps from. Source ids from
++        /// another page mean other styles, so changing it clears the
++        /// slots.
+         src_page: ?*const Page,
+-        src_id: stylepkg.Id,
+-        dst_id: stylepkg.Id,
++
++        /// Indexed by the low bits of the source id. A slot whose
++        /// src_id is the default id is empty: the default style is
++        /// never mapped.
++        slots: [slot_count]Slot,
++
++        const slot_count = 64;
++
++        const Slot = struct {
++            src_id: stylepkg.Id,
++            dst_id: stylepkg.Id,
++        };
+ 
+         const invalid: StyleCache = .{
+             .src_page = null,
+-            .src_id = stylepkg.default_id,
+-            .dst_id = stylepkg.default_id,
++            .slots = @splat(.{
++                .src_id = stylepkg.default_id,
++                .dst_id = stylepkg.default_id,
++            }),
+         };
++
++        /// The destination id src_id from src_page was mapped to, if
++        /// it is remembered.
++        fn get(
++            self: *const StyleCache,
++            src_page: *const Page,
++            src_id: stylepkg.Id,
++        ) ?stylepkg.Id {
++            if (self.src_page != src_page) return null;
++            const slot = self.slots[src_id % slot_count];
++            return if (slot.src_id == src_id) slot.dst_id else null;
++        }
++
++        fn put(
++            self: *StyleCache,
++            src_page: *const Page,
++            src_id: stylepkg.Id,
++            dst_id: stylepkg.Id,
++        ) void {
++            assert(src_id != stylepkg.default_id);
++            if (self.src_page != src_page) self.* = .{
++                .src_page = src_page,
++                .slots = invalid.slots,
++            };
++            self.slots[src_id % slot_count] = .{
++                .src_id = src_id,
++                .dst_id = dst_id,
++            };
++        }
+     };
+ 
+     fn init(node: *List.Node) ReflowCursor {
+@@ -2085,10 +2131,7 @@ const ReflowCursor = struct {
+         const dst_style_id: stylepkg.Id = if (style_id == stylepkg.default_id)
+             stylepkg.default_id
+         else dst: {
+-            if (self.style_cache.src_page == @as(?*const Page, src_page) and
+-                self.style_cache.src_id == style_id)
+-            {
+-                const id = self.style_cache.dst_id;
++            if (self.style_cache.get(src_page, style_id)) |id| {
+                 self.page.styles.useMultiple(self.page.memory, id, n);
+                 break :dst id;
+             }
+@@ -2114,11 +2157,7 @@ const ReflowCursor = struct {
+                 n - 1,
+             );
+ 
+-            self.style_cache = .{
+-                .src_page = src_page,
+-                .src_id = style_id,
+-                .dst_id = id,
+-            };
++            self.style_cache.put(src_page, style_id, id);
+ 
+             break :dst id;
+         };
+@@ -2470,17 +2509,13 @@ const ReflowCursor = struct {
+ 
+         // Copy style data.
+         if (cell.hasStyling()) style: {
+-            // Fast path: styled cells come in long runs sharing the
+-            // same style. If this source style was just mapped into
++            // Fast path: if this source style was already mapped into
+             // the current destination page, bump the ref count
+             // directly and skip the set lookup. The destination id is
+             // guaranteed alive because a previously written cell in
+             // this page holds a reference, and the cache is reset
+             // whenever the destination page changes (see init).
+-            if (self.style_cache.src_page == src_page and
+-                self.style_cache.src_id == cell.style_id)
+-            {
+-                const id = self.style_cache.dst_id;
++            if (self.style_cache.get(src_page, cell.style_id)) |id| {
+                 self.page.styles.use(self.page.memory, id);
+                 self.page_row.styled = true;
+                 self.page_cell.style_id = id;
+@@ -2530,13 +2565,9 @@ const ReflowCursor = struct {
+                 };
+             } orelse cell.style_id;
+ 
+-            // Update our style cache with the latest style set so runs
+-            // of cells with the same style are faster to write.
+-            self.style_cache = .{
+-                .src_page = src_page,
+-                .src_id = cell.style_id,
+-                .dst_id = id,
+-            };
++            // Remember the mapping so later cells in this style are
++            // faster to write.
++            self.style_cache.put(src_page, cell.style_id, id);
+ 
+             self.page_row.styled = true;
+             self.page_cell.style_id = id;
+@@ -19539,6 +19570,66 @@ test "PageList resize reflow less cols copy style" {
+     }
+ }
+ 
++test "PageList resize reflow less cols alternating styles sharing a cache slot" {
++    const testing = std.testing;
++    const alloc = testing.allocator;
++
++    var s = try init(alloc, .{ .cols = 12, .rows = 2, .max_size = 0 });
++    defer s.deinit();
++
++    // Enough styles that two ids fall in the same slot of the reflow
++    // style cache, then a row cycling through three of them.
++    var ids: [70]stylepkg.Id = undefined;
++    const page = s.pages.first.?.page();
++    for (&ids, 0..) |*id, i| {
++        id.* = try page.styles.add(page.memory, .{
++            .fg_color = .palette(@intCast(i)),
++        });
++    }
++    const pattern = [_]usize{ 1, 65, 2 };
++    try testing.expectEqual(ids[1] % 64, ids[65] % 64);
++    for (0..s.cols) |x| {
++        const rac = page.getRowAndCell(x, 0);
++        const id = ids[pattern[x % pattern.len]];
++        rac.cell.* = .{
++            .content_tag = .codepoint,
++            .content = .{ .codepoint = .{ .data = 'a' } },
++            .style_id = id,
++        };
++        rac.row.styled = true;
++        page.styles.use(page.memory, id);
++    }
++    // `add` implies `use`, so every style is over-counted by one.
++    for (ids) |id| page.styles.release(page.memory, id);
++
++    try s.resize(.{ .cols = 4, .reflow = true });
++    try testing.expectEqual(@as(usize, 4), s.cols);
++
++    var x_total: usize = 0;
++    var it = s.rowIterator(.right_down, .{ .screen = .{} }, null);
++    while (it.next()) |offset| {
++        const row_page = offset.node.page();
++        for (0..s.cols) |x| {
++            if (x_total == 12) break;
++            var at = offset;
++            at.x = @intCast(x);
++            const cell = at.rowAndCell().cell;
++            const style = row_page.styles.get(row_page.memory, cell.style_id);
++            const expected: u8 = @intCast(pattern[x_total % pattern.len]);
++            try testing.expectEqual(
++                stylepkg.Style.Color.palette(expected),
++                style.fg_color,
++            );
++            try testing.expectEqual(
++                @as(usize, 4),
++                row_page.styles.refCount(row_page.memory, cell.style_id),
++            );
++            x_total += 1;
++        }
++    }
++    try testing.expectEqual(@as(usize, 12), x_total);
++}
++
+ test "PageList resize reflow less cols to eliminate a wide char" {
+     const testing = std.testing;
+     const alloc = testing.allocator;
+-- 
+2.55.0.windows.3
+
