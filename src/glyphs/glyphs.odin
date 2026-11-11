@@ -27,9 +27,22 @@ Cache :: struct {
 	device:     ^render.Device,
 	glyphs:     map[Glyph_Key]Entry,
 	sprites:    map[Sprite_Key]Entry,
+	// Recent glyphs by key hash, checked before the map: a frame looks a glyph up once per drawn
+	// cell, and a map probe per cell cost more than the rest of placing it.
+	front:      [FRONT_SLOTS]Front_Slot,
 	generation: u64,
 	hits:       u64,
 	misses:     u64,
+}
+
+@(private)
+FRONT_SLOTS :: 1024
+
+@(private)
+Front_Slot :: struct {
+	key:   Glyph_Key,
+	entry: Entry,
+	used:  bool,
 }
 
 @(private)
@@ -44,6 +57,13 @@ Glyph_Key :: struct {
 Sprite_Key :: struct {
 	sprite:                   Sprite,
 	width, height, thickness: u16,
+}
+
+@(private)
+front_slot :: proc(c: ^Cache, key: Glyph_Key) -> ^Front_Slot {
+	h := (u64(key.face) << 48 | u64(key.index) << 32 | u64(key.size_q) << 1 | u64(key.color)) *
+		0x9E3779B97F4A7C15
+	return &c.front[h >> 54]
 }
 
 init :: proc(
@@ -78,6 +98,7 @@ reset_device :: proc(c: ^Cache, device: ^render.Device) {
 forget :: proc(c: ^Cache) {
 	clear(&c.glyphs)
 	clear(&c.sprites)
+	c.front = {}
 	c.generation = render.atlas_generation(c.device)
 }
 
@@ -112,8 +133,14 @@ upload :: proc(
 glyph :: proc(c: ^Cache, g: font.Glyph, size_px: f32, color := false) -> (Entry, render.Build_Status) {
 	validate(c)
 	key := Glyph_Key{g.face, g.index, u32(math.round(size_px * g.scale * 64)), color}
+	slot := front_slot(c, key)
+	if slot.used && slot.key == key {
+		c.hits += 1
+		return slot.entry, .Ok
+	}
 	if entry, found := c.glyphs[key]; found {
 		c.hits += 1
+		slot^ = {key, entry, true}
 		return entry, .Ok
 	}
 	c.misses += 1
@@ -138,6 +165,7 @@ glyph :: proc(c: ^Cache, g: font.Glyph, size_px: f32, color := false) -> (Entry,
 		}
 	}
 	c.glyphs[key] = entry
+	front_slot(c, key)^ = {key, entry, true}
 	return entry, .Ok
 }
 

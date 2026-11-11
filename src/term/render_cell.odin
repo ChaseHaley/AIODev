@@ -10,6 +10,11 @@ Render_Cell :: struct {
 	style:                  ghostty.Style,
 	width:                  ghostty.Cell_Wide,
 	foreground, background: Maybe(ghostty.Color_Rgb),
+	// Set by read_render_cell_after only: the raw cell's content, style and codepoint, decoded.
+	decoded:                bool,
+	content:                ghostty.Cell_Content_Tag,
+	style_id:               u16,
+	codepoint:              u32,
 }
 
 @(require_results)
@@ -23,6 +28,41 @@ read_render_cell :: proc(cells: ghostty.Render_State_Row_Cells) -> Render_Cell {
 			cell.width = width
 		}
 	}
+	read_render_cell_colors(cells, &cell)
+	return cell
+}
+
+// read_render_cell for the cells of a row in order, which also decodes the raw cell. A text cell in
+// the same style as `previous` takes its style and colours from it: they follow from the style
+// alone, and resolving them cost several calls into libghostty per cell.
+@(require_results)
+read_render_cell_after :: proc(
+	cells: ghostty.Render_State_Row_Cells,
+	previous: ^Render_Cell,
+) -> Render_Cell {
+	cell := Render_Cell {
+		width = .Narrow,
+	}
+	if ghostty.render_state_row_cells_get(cells, .Raw, &cell.raw) != .Success {
+		read_render_cell_colors(cells, &cell)
+		return cell
+	}
+	// Wide comes first, so a failure leaves the width read or still narrow, as read_render_cell does.
+	keys := [?]ghostty.Cell_Data{.Wide, .Content_Tag, .Style_Id, .Codepoint}
+	values := [len(keys)]rawptr{&cell.width, &cell.content, &cell.style_id, &cell.codepoint}
+	cell.decoded = ghostty.cell_get_multi(cell.raw, len(keys), &keys[0], &values[0], nil) == .Success
+	if cell.decoded && previous != nil && previous.decoded && cell.content == .Codepoint &&
+	   previous.content == .Codepoint && cell.style_id == previous.style_id {
+		cell.style = previous.style
+		cell.foreground, cell.background = previous.foreground, previous.background
+		return cell
+	}
+	read_render_cell_colors(cells, &cell)
+	return cell
+}
+
+@(private)
+read_render_cell_colors :: proc(cells: ghostty.Render_State_Row_Cells, cell: ^Render_Cell) {
 	styled: bool
 	if ghostty.render_state_row_cells_get(cells, .Has_Styling, &styled) == .Success && styled {
 		if ghostty.render_state_row_cells_get(cells, .Style, &cell.style) != .Success {
@@ -37,7 +77,6 @@ read_render_cell :: proc(cells: ghostty.Render_State_Row_Cells) -> Render_Cell {
 	if ghostty.render_state_row_cells_get(cells, .Bg_Color, &background) == .Success {
 		cell.background = background
 	}
-	return cell
 }
 
 // Appends the selected cell's grapheme cluster to buffer and returns the new span, as

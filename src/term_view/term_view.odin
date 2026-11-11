@@ -326,6 +326,9 @@ Cell_Paint :: struct {
 	has_background:         bool,
 	style:                  ghostty.Style,
 	width:                  ghostty.Cell_Wide,
+	// A plain text cell's codepoint, zero for no text; graphemes and undecoded cells are read at draw.
+	codepoint:              u32,
+	plain:                  bool,
 }
 
 @(private)
@@ -336,12 +339,20 @@ paint_cell :: proc(
 	selection: ghostty.Render_State_Row_Selection,
 	selected: bool,
 	mark: Search_Mark,
+	previous: ^term.Render_Cell,
 ) -> Cell_Paint {
-	cell := term.read_render_cell(v.cells)
+	cell := term.read_render_cell_after(v.cells, previous)
+	previous^ = cell
 	p := Cell_Paint {
 		foreground = color(b.colors.foreground),
 		style      = cell.style,
 		width      = cell.width,
+	}
+	if cell.decoded && cell.content != .Codepoint_Grapheme {
+		p.plain = true
+		if cell.content == .Codepoint && cell.width != .Spacer_Tail && cell.width != .Spacer_Head {
+			p.codepoint = cell.codepoint
+		}
 	}
 	if rgb, ok := cell.foreground.?; ok {
 		p.foreground = color(rgb)
@@ -415,9 +426,10 @@ row_paints :: proc(v: ^View, b: ^Builder, y: int) {
 		return
 	}
 	clear(&v.paints)
+	previous: term.Render_Cell
 	for x := 0; ghostty.render_state_row_cells_next(v.cells); x += 1 {
 		mark := x < len(v.marks) ? v.marks[x] : .None
-		p := paint_cell(v, b, x, y, selection, selected, mark)
+		p := paint_cell(v, b, x, y, selection, selected, mark, &previous)
 		if _, err := append(&v.paints, p); err != nil {
 			b.list.error = .Out_Of_Memory
 			return
@@ -522,9 +534,11 @@ build_row :: proc(v: ^View, b: ^Builder, y: int) -> render.Build_Status {
 	if cursor.visible && cursor.viewport_has_value && int(cursor.viewport_y) == y {
 		cursor_x = int(cursor.viewport_x)
 	}
-	for p, x in v.paints {
+	for &p, x in v.paints {
 		span: []u32
-		if !p.style.flags.invisible {
+		if p.plain && !p.style.flags.invisible {
+			if p.codepoint != 0 {span = ([^]u32)(&p.codepoint)[:1]}
+		} else if !p.style.flags.invisible {
 			if ghostty.render_state_row_cells_select(v.cells, u16(x)) != .Success {
 				b.list.error = .Construction_Failed
 				return .Ok
