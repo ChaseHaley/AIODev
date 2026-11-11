@@ -12,10 +12,12 @@ import "aio:render"
 import "aio:settings"
 import "aio:term"
 import "aio:ui"
+import "base:runtime"
 import "core:fmt"
 import "core:log"
 import "core:os"
 import "core:strings"
+import "core:thread"
 import "core:time"
 // Only the headless build reads the bundled test fonts; other builds compile none of them in.
 @(require) import test_fonts "../tests/fixtures/fonts"
@@ -108,9 +110,62 @@ App :: struct {
 	closed:                [dynamic]Closed_Item,
 }
 
+// Creates the graphics device on a thread of its own. The driver takes longer to create one than
+// app_init takes for settings, fonts and everything else before it needs the device.
+@(private)
+Device_Start :: struct {
+	driver: render.Driver,
+	device: ^render.Device,
+	err:    render.Error,
+	thread: ^thread.Thread,
+}
+
+@(private)
+device_start :: proc(s: ^Device_Start, driver: render.Driver) {
+	s.driver = driver
+	s.thread = thread.create_and_start_with_poly_data(s, device_start_thread, context)
+}
+
+@(private)
+device_start_thread :: proc(s: ^Device_Start) {
+	defer if context.temp_allocator.procedure == runtime.default_temp_allocator_proc {
+		runtime.default_temp_allocator_destroy(cast(^runtime.Default_Temp_Allocator)context.temp_allocator.data)
+	}
+	s.device, s.err = render.device_create(s.driver)
+}
+
+// The device device_start began, which the caller now owns; made here when no thread could start.
+@(private, require_results)
+device_finish :: proc(s: ^Device_Start) -> (device: ^render.Device, err: render.Error) {
+	if s.thread != nil {
+		thread.join(s.thread)
+		thread.destroy(s.thread)
+		s.thread = nil
+	} else if s.device == nil && s.err == .None {
+		s.device, s.err = render.device_create(s.driver)
+	}
+	device, err = s.device, s.err
+	s.device = nil
+	return
+}
+
+// Ends a start nobody finished, as when app_init fails before it needs the device.
+@(private)
+device_abandon :: proc(s: ^Device_Start) {
+	if s.thread == nil && s.device == nil {return}
+	if device, _ := device_finish(s); device != nil {render.device_destroy(device)}
+}
+
 @(require_results)
 app_init :: proc(app: ^App) -> bool {
 	when FRAME_STATS {perf.start(&app.perf)}
+	when platform_api.AIO_HEADLESS {
+		// The same pixels on every machine: WARP (WORK-350).
+		app.render_driver = .Warp
+	}
+	starting: Device_Start
+	device_start(&starting, app.render_driver)
+	defer device_abandon(&starting)
 	paths, paths_error := instance.paths(app.options)
 	if paths_error != nil {
 		log.errorf("locating the instance files failed: %v", paths_error)
@@ -149,9 +204,8 @@ app_init :: proc(app: ^App) -> bool {
 	if !load_settings(app) {return false}
 	font_error: font.Error
 	when platform_api.AIO_HEADLESS {
-		// The same pixels on every machine: bundled fonts (WORK-351) on WARP (WORK-350).
+		// The same pixels on every machine: bundled fonts (WORK-351).
 		app.fonts, font_error = font.system_create_private(test_fonts.files())
-		app.render_driver = .Warp
 	} else {
 		app.fonts, font_error = font.system_create()
 	}
@@ -160,7 +214,7 @@ app_init :: proc(app: ^App) -> bool {
 		return false
 	}
 	render_error: render.Error
-	app.device, render_error = render.device_create(app.render_driver)
+	app.device, render_error = device_finish(&starting)
 	if render_error != .None {
 		log.errorf("graphics device creation failed: %v", render_error)
 		return false

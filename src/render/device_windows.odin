@@ -3,6 +3,7 @@ package render
 import "base:runtime"
 import "core:log"
 import "core:strconv"
+import "core:thread"
 import win "core:sys/windows"
 import d3d "vendor:directx/d3d11"
 import compiler "vendor:directx/d3d_compiler"
@@ -189,13 +190,62 @@ compile_shader :: proc(entry, target: cstring) -> (^compiler.ID3DBlob, Error) {
 	return code, .None
 }
 
-@(private, require_results)
-vertex_shader :: proc(d: ^Device, entry: cstring) -> (^d3d.IVertexShader, Error) {
-	blob, err := compile_shader(entry, "vs_5_0")
-	if err != .None {
-		return nil, err
+// The shaders device_create builds, by entry point and target.
+@(private)
+Shader_Entry :: enum {
+	Rect_VS,
+	Glyph_VS,
+	Rect_PS,
+	Glyph_PS,
+	Image_VS,
+	Image_PS,
+}
+
+@(private, rodata)
+SHADER_ENTRIES := [Shader_Entry]struct {
+	entry, target: cstring,
+} {
+	.Rect_VS  = {"rect_vs", "vs_5_0"},
+	.Glyph_VS = {"glyph_vs", "vs_5_0"},
+	.Rect_PS  = {"rect_ps", "ps_5_0"},
+	.Glyph_PS = {"glyph_ps", "ps_5_0"},
+	.Image_VS = {"image_vs", "vs_5_0"},
+	.Image_PS = {"image_ps", "ps_5_0"},
+}
+
+// Compiled shaders. Compiling needs no device and takes about a third as long as the driver
+// takes to create one, so device_create compiles on a thread of its own meanwhile.
+@(private)
+Shader_Code :: struct {
+	blobs: [Shader_Entry]^compiler.ID3DBlob,
+	err:   Error,
+}
+
+@(private)
+shader_code_compile :: proc(code: ^Shader_Code) {
+	for &blob, entry in code.blobs {
+		blob, code.err = compile_shader(SHADER_ENTRIES[entry].entry, SHADER_ENTRIES[entry].target)
+		if code.err != .None {return}
 	}
-	defer release(blob)
+}
+
+// shader_code_compile on a thread of its own, whose temporary memory a logged failure may use.
+@(private)
+shader_code_thread :: proc(code: ^Shader_Code) {
+	defer if context.temp_allocator.procedure == runtime.default_temp_allocator_proc {
+		runtime.default_temp_allocator_destroy(cast(^runtime.Default_Temp_Allocator)context.temp_allocator.data)
+	}
+	shader_code_compile(code)
+}
+
+@(private)
+shader_code_release :: proc(code: ^Shader_Code) {
+	for blob in code.blobs {release(blob)}
+	code.blobs = {}
+}
+
+@(private, require_results)
+vertex_shader :: proc(d: ^Device, blob: ^compiler.ID3DBlob) -> (^d3d.IVertexShader, Error) {
 	shader: ^d3d.IVertexShader
 	hr := d.native->CreateVertexShader(
 		blob->GetBufferPointer(),
@@ -207,12 +257,7 @@ vertex_shader :: proc(d: ^Device, entry: cstring) -> (^d3d.IVertexShader, Error)
 }
 
 @(private, require_results)
-pixel_shader :: proc(d: ^Device, entry: cstring) -> (^d3d.IPixelShader, Error) {
-	blob, err := compile_shader(entry, "ps_5_0")
-	if err != .None {
-		return nil, err
-	}
-	defer release(blob)
+pixel_shader :: proc(d: ^Device, blob: ^compiler.ID3DBlob) -> (^d3d.IPixelShader, Error) {
 	shader: ^d3d.IPixelShader
 	hr := d.native->CreatePixelShader(
 		blob->GetBufferPointer(),
@@ -285,6 +330,15 @@ device_create :: proc(driver: Driver, allocator := context.allocator) -> (^Devic
 	defer if !ok {
 		device_destroy(d)
 	}
+	code: Shader_Code
+	compiling := thread.create_and_start_with_poly_data(&code, shader_code_thread, context)
+	defer {
+		if compiling != nil {
+			thread.join(compiling)
+			thread.destroy(compiling)
+		}
+		shader_code_release(&code)
+	}
 	if err := checked(d, create_native_device(d, driver), "D3D11CreateDevice"); err != .None {
 		return nil, err
 	}
@@ -316,23 +370,34 @@ device_create :: proc(driver: Driver, allocator := context.allocator) -> (^Devic
 	if err := checked(d, hr, "GetParent IDXGIFactory2"); err != .None {
 		return nil, err
 	}
+	if compiling != nil {
+		thread.join(compiling)
+		thread.destroy(compiling)
+		compiling = nil
+	} else {
+		// Without a thread of their own, the shaders compile now.
+		shader_code_compile(&code)
+	}
+	if code.err != .None {
+		return nil, code.err
+	}
 	err: Error
-	if d.rect_vs, err = vertex_shader(d, "rect_vs"); err != .None {
+	if d.rect_vs, err = vertex_shader(d, code.blobs[.Rect_VS]); err != .None {
 		return nil, err
 	}
-	if d.glyph_vs, err = vertex_shader(d, "glyph_vs"); err != .None {
+	if d.glyph_vs, err = vertex_shader(d, code.blobs[.Glyph_VS]); err != .None {
 		return nil, err
 	}
-	if d.rect_ps, err = pixel_shader(d, "rect_ps"); err != .None {
+	if d.rect_ps, err = pixel_shader(d, code.blobs[.Rect_PS]); err != .None {
 		return nil, err
 	}
-	if d.glyph_ps, err = pixel_shader(d, "glyph_ps"); err != .None {
+	if d.glyph_ps, err = pixel_shader(d, code.blobs[.Glyph_PS]); err != .None {
 		return nil, err
 	}
-	if d.image_vs, err = vertex_shader(d, "image_vs"); err != .None {
+	if d.image_vs, err = vertex_shader(d, code.blobs[.Image_VS]); err != .None {
 		return nil, err
 	}
-	if d.image_ps, err = pixel_shader(d, "image_ps"); err != .None {
+	if d.image_ps, err = pixel_shader(d, code.blobs[.Image_PS]); err != .None {
 		return nil, err
 	}
 	sampler := d3d.SAMPLER_DESC {
