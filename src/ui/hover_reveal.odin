@@ -13,6 +13,11 @@ import "core:time"
 // every HOVER_AIM_PATIENCE the pointer gets closer to the surface; leaving the safe area, or pausing in it,
 // hides it.
 //
+// The safe area spans whatever lies between, such as the rows of the menu a submenu hangs from. Over one of
+// those, something else wants the hover, so as in jQuery-menu-aim it waits only while the pointer is
+// heading for the surface: closer to it than HOVER_AIM_TRAIL moves ago. A move straight down to the next row
+// gets no closer, and that row takes the hover at once.
+//
 // The owner reports every pointer move with hover_reveal_move, schedules a wake for hover_reveal_deadline
 // and passes it to hover_reveal_tick, and calls hover_reveal_close when its surface must go regardless.
 Hover_Reveal :: struct {
@@ -22,7 +27,14 @@ Hover_Reveal :: struct {
 	aiming:   bool,
 	closest:  f32,
 	deadline: time.Tick,
+	// The latest pointer positions, oldest first, which tell where it is heading over a competitor.
+	trail:    [HOVER_AIM_TRAIL][2]f32,
+	trailed:  int,
 }
+
+// How many recent positions a heading is measured over, as in jQuery-menu-aim, so one jittery step of a
+// diagonal move does not read as a turn.
+HOVER_AIM_TRAIL :: 3
 
 // Kamens's delay for a pointer that has stopped short of its submenu.
 HOVER_AIM_PATIENCE :: 300 * time.Millisecond
@@ -30,12 +42,13 @@ HOVER_AIM_PATIENCE :: 300 * time.Millisecond
 HOVER_AIM_SLACK :: f32(16)
 
 // Follows one pointer move: `on_trigger` and `on_surface` say whether the pointer is over either, and
+// `on_other` whether it is over something else that would take the hover, such as another row of the menu.
 // `trigger` and `surface` are where they are, the surface where it is or would show. `slack` is
 // HOVER_AIM_SLACK in the caller's pixels. True when `open` changed.
 hover_reveal_move :: proc(
 	r: ^Hover_Reveal,
 	pointer: [2]f32,
-	on_trigger, on_surface: bool,
+	on_trigger, on_surface, on_other: bool,
 	trigger, surface: render.Rect,
 	slack: f32,
 	now: time.Tick,
@@ -49,6 +62,8 @@ hover_reveal_move :: proc(
 		r.aiming = false
 	case !hover_aim_safe(rect_grown(trigger, slack), rect_grown(surface, slack), pointer):
 		hover_reveal_close(r)
+	case on_other && r.trailed > 0 && rect_distance(surface, pointer) >= rect_distance(surface, r.trail[0]):
+		hover_reveal_close(r)
 	case:
 		distance := rect_distance(surface, pointer)
 		if !r.aiming || distance < r.closest {
@@ -57,7 +72,18 @@ hover_reveal_move :: proc(
 			hover_reveal_close(r)
 		}
 	}
+	if r.open {hover_trail_push(r, pointer)}
 	return r.open != was
+}
+
+@(private = "file")
+hover_trail_push :: proc(r: ^Hover_Reveal, pointer: [2]f32) {
+	if r.trailed == HOVER_AIM_TRAIL {
+		copy(r.trail[:], r.trail[1:])
+		r.trailed -= 1
+	}
+	r.trail[r.trailed] = pointer
+	r.trailed += 1
 }
 
 // Hides the surface once an aim has lapsed. True when `open` changed.

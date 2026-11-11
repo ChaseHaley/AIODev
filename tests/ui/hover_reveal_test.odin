@@ -20,7 +20,7 @@ at :: proc(start: time.Tick, ms: int) -> time.Tick {
 move :: proc(r: ^ui.Hover_Reveal, p: [2]f32, now: time.Tick) {
 	on_trigger := render.rect_contains(TRIGGER, p.x, p.y)
 	on_surface := r.open && render.rect_contains(SURFACE, p.x, p.y)
-	_ = ui.hover_reveal_move(r, p, on_trigger, on_surface, TRIGGER, SURFACE, 0, now)
+	_ = ui.hover_reveal_move(r, p, on_trigger, on_surface, false, TRIGGER, SURFACE, 0, now)
 }
 
 // Leaving the trigger toward the surface keeps it, across the gap and diagonally over whatever lies between;
@@ -55,7 +55,7 @@ hover_reveal_keeps_a_wide_surface_for_a_level_start :: proc(t: ^testing.T) {
 		on_trigger := render.rect_contains(glyph, p.x, p.y)
 		on_surface := render.rect_contains(surface, p.x, p.y)
 		slack := ui.HOVER_AIM_SLACK
-		_ = ui.hover_reveal_move(&r, p, on_trigger, on_surface, glyph, surface, slack, at(start, 16 * i))
+		_ = ui.hover_reveal_move(&r, p, on_trigger, on_surface, false, glyph, surface, slack, at(start, 16 * i))
 		testing.expectf(t, r.open, "kept at %v", p)
 	}
 	testing.expect(t, !ui.hover_aim_safe(glyph, surface, {200, 50}), "the wobble is outside the bare hull")
@@ -95,6 +95,35 @@ hover_reveal_hides_the_surface_when_the_pointer_stops_short :: proc(t: ^testing.
 	testing.expect(t, !ui.hover_reveal_tick(&r, at(start, 10 + patience - 1)))
 	testing.expect(t, ui.hover_reveal_tick(&r, at(start, 10 + patience)), "the timer hides it")
 	testing.expect(t, !r.open)
+}
+
+// A submenu beside its row, with the menu's next rows below the row. Over one of them the submenu stays only
+// while the pointer heads for it, measured over the last few moves so one jittery step does not count.
+@(test)
+hover_reveal_gives_way_to_a_competitor_unless_heading_for_the_surface :: proc(t: ^testing.T) {
+	row := render.Rect{0, 0, 200, 30}
+	submenu := render.Rect{200, 0, 160, 150}
+	start := time.tick_now()
+	step :: proc(r: ^ui.Hover_Reveal, row, submenu: render.Rect, p: [2]f32, now: time.Tick) {
+		on_row, on_submenu := render.rect_contains(row, p.x, p.y), render.rect_contains(submenu, p.x, p.y)
+		_ = ui.hover_reveal_move(r, p, on_row, on_submenu, !on_row && !on_submenu, row, submenu, 16, now)
+	}
+	r: ui.Hover_Reveal
+	step(&r, row, submenu, {40, 15}, start)
+	step(&r, row, submenu, {40, 45}, at(start, 16))
+	testing.expect(t, !r.open, "straight down to the next row hides it at once")
+
+	r = {}
+	step(&r, row, submenu, {120, 15}, start)
+	step(&r, row, submenu, {140, 35}, at(start, 16))
+	step(&r, row, submenu, {140, 36}, at(start, 32))
+	testing.expect(t, r.open, "a jittery step while crossing diagonally keeps it")
+	step(&r, row, submenu, {165, 50}, at(start, 48))
+	testing.expect(t, r.open && r.aiming, "still heading for it")
+	step(&r, row, submenu, {165, 70}, at(start, 64))
+	step(&r, row, submenu, {165, 90}, at(start, 80))
+	step(&r, row, submenu, {165, 110}, at(start, 96))
+	testing.expect(t, !r.open, "turning down the menu hides it")
 }
 
 // The safe area is the hull of the trigger and the surface: it reaches past the trigger's whole box, not

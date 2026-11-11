@@ -1015,6 +1015,11 @@ link_programs_open_links_in_panes_and_in_their_own_windows :: proc(t: ^testing.T
 	if !menu_on_path(t, &f, terminal, {.Shift}) {return}
 	point_at(s, w, &w.document_menu.menu, labelled_row(w, "Open in Echo"))
 	testing.expect_value(t, w.document_menu.submenu.items[placement_row(w, .Split_Down)].shortcut, "Default")
+	// Moving straight down to the next row is not heading for the submenu: that row takes the hover at once.
+	point_at(s, w, &w.document_menu.menu, labelled_row(w, "Open in Viewer"))
+	testing.expect_value(t, ui.menu_selected(&w.document_menu.menu), labelled_row(w, "Open in Viewer"))
+	testing.expect(t, !app.document_submenu_shown(w), "the submenu gives way")
+	point_at(s, w, &w.document_menu.menu, labelled_row(w, "Open in Echo"))
 	choose_placement(s, w, &w.document_menu.menu, labelled_row(w, "Open in Echo"), .Float)
 	testing.expect_value(t, len(app.floating_rects(w)), 1)
 

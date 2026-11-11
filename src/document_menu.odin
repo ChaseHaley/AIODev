@@ -656,19 +656,24 @@ document_submenu_hover :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {
 	menu := &w.document_menu
 	width, height := f32(w.width), f32(w.height)
 	slack, now := ui.HOVER_AIM_SLACK * w.scale, clock_now(&app.clock)
+	hit := ui.menu_hit(parent, x, y, width, height, w.scale)
 	if row, shown := menu.submenu_row.?; shown {
 		trigger := ui.menu_row_rect(parent, row, width, height, w.scale)
 		surface, _ := ui.menu_layout(&menu.submenu, width, height, w.scale)
 		on_trigger, on_surface := render.rect_contains(trigger, x, y), render.rect_contains(surface, x, y)
-		ui.hover_reveal_move(&menu.reveal, {x, y}, on_trigger, on_surface, trigger, surface, slack, now)
+		// Another row of the menu wants the hover unless the pointer is heading for the submenu.
+		on_other := !on_trigger && !on_surface && hit >= 0 && hit != row
+		ui.hover_reveal_move(&menu.reveal, {x, y}, on_trigger, on_surface, on_other, trigger, surface, slack, now)
 		if on_surface {
-			hit := ui.menu_hit(&menu.submenu, x, y, width, height, w.scale)
-			if hit >= 0 && hit != ui.menu_selected(&menu.submenu) {ui.menu_select(&menu.submenu, hit); w.dirty = true}
+			place := ui.menu_hit(&menu.submenu, x, y, width, height, w.scale)
+			if place >= 0 && place != ui.menu_selected(&menu.submenu) {
+				ui.menu_select(&menu.submenu, place)
+				w.dirty = true
+			}
 			return true
 		}
 		if menu.reveal.open && !on_trigger {return true}
 	}
-	hit := ui.menu_hit(parent, x, y, width, height, w.scale)
 	if hit < 0 {return false}
 	if !parent.items[hit].submenu {
 		document_submenu_close(w)
@@ -677,7 +682,7 @@ document_submenu_hover :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {
 	document_submenu_open(app, w, hit, false)
 	trigger := ui.menu_row_rect(parent, hit, width, height, w.scale)
 	surface, _ := ui.menu_layout(&menu.submenu, width, height, w.scale)
-	ui.hover_reveal_move(&menu.reveal, {x, y}, true, false, trigger, surface, slack, now)
+	ui.hover_reveal_move(&menu.reveal, {x, y}, true, false, false, trigger, surface, slack, now)
 	return false
 }
 
