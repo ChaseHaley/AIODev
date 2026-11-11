@@ -89,7 +89,7 @@ hover_reveal_move :: proc(
 			hover_reveal_close(r)
 			break
 		}
-		r.aiming, r.deadline = true, grace
+		r.aiming, r.closest, r.deadline = true, rect_distance(surface, pointer), grace
 	case !hover_aim_safe(rect_grown(trigger, slack), rect_grown(surface, slack), pointer):
 		hover_reveal_close(r)
 	case:

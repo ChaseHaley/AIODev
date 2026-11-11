@@ -98,11 +98,17 @@ settings_pane_draw :: proc(app: ^App, w: ^Window, pane: layout.Pane_Rect) -> ren
 	)
 }
 
-// Gives each link program's line and Icon row the program's icon once it is ready.
+// Gives each shown link program line and Icon row the program's icon once it is ready. Rows scrolled
+// away or filtered out ask nothing, so they hold no slot in the program icon cache.
 @(private = "file", require_results)
 settings_page_icons :: proc(app: ^App, p: ^ui.Editor, scale: f32) -> render.Build_Status {
 	for &row in p.rows {
-		row.icon_atlas = {}
+		if row.opener != "" {row.icon_atlas = {}}
+	}
+	last := min(len(p.items), p.scroll + max(1, p.visible_rows) + 1)
+	for item in p.items[min(p.scroll, last):last] {
+		if item.row < 0 {continue}
+		row := &p.rows[item.row]
 		if row.opener == "" {continue}
 		field, is_field := row.opener_field.?
 		if row.kind != .Opener && !(is_field && field == .Icon) {continue}

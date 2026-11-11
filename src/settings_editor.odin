@@ -486,8 +486,11 @@ editor_kept_save :: proc(app: ^App, w: ^Window, kept: ^ui.Editor_Kept) {
 		ui.editor_kept_put(p, kept)
 		return
 	}
-	// Back on the same row, its own field is the newer value.
-	if row := ui.editor_row(p); row != nil && row.key == kept.key {return}
+	// Back on the same row with new text in its field, that text is the newer value. Leaving by Tab or
+	// the search box keeps the row selected with its saved text, and the kept value saves.
+	if row := ui.editor_row(p); row != nil && row.key == kept.key && ui.field_string(&p.value) != row.value {
+		return
+	}
 	w.dirty = true
 	for &row in p.rows {
 		if row.key != kept.key {continue}

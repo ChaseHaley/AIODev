@@ -650,6 +650,8 @@ editor_adopt :: proc(p, next: ^Editor, adoption: Editor_Adoption) -> Editor_Adop
 	next.fit_layout, next.visible_rows = p.fit_layout, p.visible_rows
 	next.scroll = clamp(p.scroll, 0, max(0, len(next.items) - max(1, p.visible_rows)))
 	if selected {editor_carry(next, p, draft)}
+	// A field left mid-gesture waits on the page to be saved; the rebuilt page keeps it.
+	next.kept, p.kept = p.kept, {}
 	editor_destroy(p)
 	p^, next^ = next^, {}
 	return .Adopted

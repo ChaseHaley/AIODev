@@ -240,10 +240,31 @@ Program :: struct {
 }
 
 // Resolves a link program as resolve_command resolves a shell, except that a bare name may also be a
-// .com, .bat or .cmd file, tried in Windows' default PATHEXT order: VS Code's `code` is code.cmd. An
-// explicit path is kept as written.
+// .com, .bat or .cmd file: each directory in turn is tried in Windows' default PATHEXT order, as a
+// shell searches, so VS Code's `code` is the first directory's code.cmd. An explicit path is kept as
+// written.
 @(require_results)
 resolve_program :: proc(command_line: string, allocator := context.allocator) -> (Program, Spawn_Error) {
+	directories, directories_error := search_directories(allocator)
+	if directories_error != nil {return {}, {.Out_Of_Memory, 0}}
+	defer {
+		for directory in directories {delete(directory, allocator)}
+		delete(directories, allocator)
+	}
+	return resolve_program_in(command_line, directories, allocator)
+}
+
+// resolve_program over `directories` from search_directories, so a caller resolving several programs
+// reads the search directories once.
+@(require_results)
+resolve_program_in :: proc(
+	command_line: string,
+	directories: []string,
+	allocator := context.allocator,
+) -> (
+	Program,
+	Spawn_Error,
+) {
 	token := executable_token(command_line)
 	if token == "" {return {}, {.Invalid_Argument, 0}}
 	if is_explicit_path(token) {
@@ -251,18 +272,13 @@ resolve_program :: proc(command_line: string, allocator := context.allocator) ->
 		if err != nil {return {}, {.Out_Of_Memory, 0}}
 		return {path, is_batch(path)}, {}
 	}
-	directories, directories_error := search_directories(allocator)
-	if directories_error != nil {return {}, {.Out_Of_Memory, 0}}
-	defer {
-		for directory in directories {delete(directory, allocator)}
-		delete(directories, allocator)
-	}
-	if len(directories) == 0 {return {}, {.Start_Process, w.ERROR_FILE_NOT_FOUND}}
-	for extension in ([?]string{".com", ".exe", ".bat", ".cmd"}) {
-		path, err := search_path(token, directories, extension, allocator)
-		if err.kind == .Start_Process {continue}
-		if err.kind != .None {return {}, err}
-		return {path, is_batch(path)}, {}
+	for directory in directories {
+		for extension in ([?]string{".com", ".exe", ".bat", ".cmd"}) {
+			path, err := search_path(token, {directory}, extension, allocator)
+			if err.kind == .Start_Process {continue}
+			if err.kind != .None {return {}, err}
+			return {path, is_batch(path)}, {}
+		}
 	}
 	return {}, {.Start_Process, w.ERROR_FILE_NOT_FOUND}
 }

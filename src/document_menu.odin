@@ -658,12 +658,18 @@ document_link_choose :: proc(app: ^App, w: ^Window, choice: Link_Choice) {
 	link_choice_run(app, w, content, document, choice)
 }
 
-// The submenu's keys while it shows: it moves and chooses, and Left or Escape closes it. False while it is
-// closed, leaving the key to the menu it hangs from.
+// The submenu's keys while it shows with a row selected: it moves and chooses, and Left or Escape closes
+// it. A submenu the pointer opened has no selection yet, so the keys stay with the highlighted row of the
+// menu it hangs from, as in Radix UI, except that Left still closes it. False when the key is the parent's.
 @(private = "file")
 document_submenu_key :: proc(app: ^App, w: ^Window, logical: input.Key_Event) -> bool {
 	if !document_submenu_shown(w) {return false}
 	submenu := &w.document_menu.submenu
+	if ui.menu_selected(submenu) < 0 {
+		if logical.key != .Arrow_Left {return false}
+		document_submenu_close(w)
+		return true
+	}
 	switch ui.menu_key(submenu, logical) {
 	case .None, .Submenu:
 		if logical.key == .Arrow_Left {document_submenu_close(w)}
@@ -1665,11 +1671,14 @@ document_menu_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 	menu := &w.document_menu
 	s := w.scale
 	width, height := f32(w.width), f32(w.height)
+	// Program rows name Link Programs by their place in settings' order, found once per draw.
+	order: [settings.OPENER_LIMIT]int
+	programs := order[:settings.openers_in_order(&app.settings.openers, order[:])]
 	for &item, row in menu.menu.items {
 		item.icon_atlas = {}
 		entry, listed := document_menu_entry(menu, row)
 		if !listed || entry.action != .Link {continue}
-		if result := link_choice_icon(app, w, &item, entry.link); result != .Ok {return result}
+		if result := link_choice_icon(app, w, &item, entry.link, programs); result != .Ok {return result}
 	}
 	if result := ui.menu_draw(&menu.menu, &w.list, &w.ui_text, app.theme, width, height, s, w.pointer);
 	   result != .Ok {return result}
@@ -1694,9 +1703,8 @@ document_menu_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 		for &item in menu.actions.items {
 			item.icon_atlas = {}
 			if item.separator {continue}
-			if result := link_choice_icon(app, w, &item, transmute(Link_Choice)item.payload); result != .Ok {
-				return result
-			}
+			choice := transmute(Link_Choice)item.payload
+			if result := link_choice_icon(app, w, &item, choice, programs); result != .Ok {return result}
 		}
 		if result := ui.menu_draw(&menu.actions, &w.list, &w.ui_text, app.theme, width, height, s, w.pointer);
 		   result != .Ok {return result}
@@ -1726,17 +1734,17 @@ document_menu_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 }
 
 // Gives a program's row the program's icon once it is ready; until then, and for other rows, the row
-// keeps its glyph.
+// keeps its glyph. `programs` holds indices into the Link Programs list in settings' order.
 @(private = "file")
 link_choice_icon :: proc(
 	app: ^App,
 	w: ^Window,
 	item: ^ui.Menu_Item,
 	choice: Link_Choice,
+	programs: []int,
 ) -> render.Build_Status {
-	if choice.action != .Program {return .Ok}
-	program, found := link_program(app, int(choice.program))
-	if !found {return .Ok}
+	if choice.action != .Program || int(choice.program) >= len(programs) {return .Ok}
+	program := &app.settings.openers.items[programs[choice.program]]
 	atlas, result := link_program_icon(app, program, 16 * w.scale)
 	item.icon_atlas = atlas
 	return result
