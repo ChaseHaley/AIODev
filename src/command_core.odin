@@ -233,9 +233,9 @@ pane_target_session :: proc(app: ^App, id: u32) -> (Pane_Target, bool) {
 	return {workspace, pane}, found
 }
 
-// Every terminal pane in workspace and tab order, or only `only`'s, from one process snapshot taken
-// the first time a running pane needs it. A pane's rect comes from laying out its tab as the split
-// view would in its workspace's window.
+// Every terminal pane in workspace and tab order, or only `only`'s, from one read of the panes'
+// processes the first time a running pane needs it. A pane's rect comes from laying out its tab as
+// the split view would in its workspace's window.
 @(private)
 pane_reports :: proc(app: ^App, only: ^Pane_Target) -> []cli_protocol.Pane_Report {
 	reports := make([dynamic]cli_protocol.Pane_Report, context.temp_allocator)
@@ -274,7 +274,7 @@ pane_reports :: proc(app: ^App, only: ^Pane_Target) -> []cli_protocol.Pane_Repor
 			}
 			if status.kind == .Running {
 				if !snapped {
-					processes, _ = procinfo.process_snapshot(context.temp_allocator)
+					processes = session_processes(app)
 					snapped = true
 				}
 				if index := pane_process(entry, processes); index >= 0 {

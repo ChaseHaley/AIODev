@@ -1,8 +1,58 @@
 package procinfo_test
 
+import "core:strings"
 import "core:testing"
+import "core:time"
 import w "core:sys/windows"
 import "aio:procinfo"
+
+// The tree of a running shell lists what a full snapshot lists below it, in the same order.
+@(test)
+process_tree_matches_the_snapshot_below_its_roots :: proc(t: ^testing.T) {
+	testing.set_fail_timeout(t, 30 * time.Second)
+	command := w.utf8_to_wstring(`C:\Windows\System32\cmd.exe /d /c "ping -n 6 127.0.0.1 >nul"`)
+	startup := w.STARTUPINFOW{cb = size_of(w.STARTUPINFOW)}
+	info: w.PROCESS_INFORMATION
+	flags := u32(w.CREATE_NO_WINDOW)
+	created := w.CreateProcessW(nil, command, nil, nil, false, flags, nil, nil, &startup, &info)
+	if !testing.expect(t, bool(created)) {return}
+	defer {
+		w.TerminateProcess(info.hProcess, 1)
+		w.CloseHandle(info.hProcess)
+		w.CloseHandle(info.hThread)
+	}
+	shell := info.dwProcessId
+	// Once ping runs, the processes below the shell stay put until it ends five seconds later.
+	pinging := false
+	for started := time.tick_now(); !pinging && time.tick_since(started) < 10 * time.Second; {
+		listed, err := procinfo.process_tree({shell}, context.temp_allocator)
+		if !testing.expect_value(t, err, procinfo.Error.None) {return}
+		for p in listed {pinging ||= strings.equal_fold(p.executable, "PING.EXE")}
+		if !pinging {time.sleep(10 * time.Millisecond)}
+	}
+	if !testing.expect(t, pinging, "the shell started ping") {return}
+	snapshot, err := procinfo.process_snapshot(context.temp_allocator)
+	if !testing.expect_value(t, err, procinfo.Error.None) {return}
+	tree, tree_err := procinfo.process_tree({shell}, context.temp_allocator)
+	if !testing.expect_value(t, tree_err, procinfo.Error.None) {return}
+	below := make([dynamic]procinfo.Process_Info, context.temp_allocator)
+	for p in snapshot {
+		current := p.id
+		for _ in 0 ..< 16 {
+			if current == shell {append(&below, p); break}
+			parent := current
+			for q in snapshot {if q.id == current {parent = q.parent; break}}
+			if parent == current || parent == 0 {break}
+			current = parent
+		}
+	}
+	if !testing.expect_value(t, len(tree), len(below)) {return}
+	for p, i in tree {
+		testing.expect_value(t, p.id, below[i].id)
+		testing.expect_value(t, p.parent, below[i].parent)
+		testing.expect(t, strings.equal_fold(p.executable, below[i].executable), p.executable)
+	}
+}
 
 @(test)
 process_snapshot_contains_current_process :: proc(t: ^testing.T) {

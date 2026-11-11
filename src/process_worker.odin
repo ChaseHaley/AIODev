@@ -8,9 +8,9 @@ import "core:sync"
 import "core:thread"
 
 // Process work that must not stall a frame: the process snapshot behind padding groups and
-// program icons (about 10 ms with a few hundred processes), and reading or drawing their icons.
-// The main thread asks, the worker answers and wakes it, and the main thread adopts the answer.
-// Program_Icon_Cache owns the icons; the worker only runs their jobs.
+// program icons, and reading or drawing their icons. The main thread asks, the worker answers and
+// wakes it, and the main thread adopts the answer. Program_Icon_Cache owns the icons; the worker
+// only runs their jobs.
 Process_Worker :: struct {
 	// Guards everything below except worker, platform and allocator, which are set before the thread
 	// starts. jobs and done reserve PROGRAM_ICON_LIMIT jobs up front, the most icons that can be
@@ -20,6 +20,8 @@ Process_Worker :: struct {
 	jobs:      [dynamic]Program_Icon_Job,
 	done:      [dynamic]Program_Icon_Job,
 	snapshot:  Process_Snapshot,
+	// The shells whose processes the requested snapshot lists.
+	roots:     [dynamic]u32,
 	stop:      bool,
 	worker:    ^thread.Thread,
 	platform:  ^platform_api.Platform,
@@ -85,6 +87,7 @@ process_worker_destroy :: proc(pw: ^Process_Worker) {
 	}
 	delete(pw.jobs)
 	delete(pw.done)
+	delete(pw.roots)
 	pw^ = {}
 }
 
@@ -114,6 +117,8 @@ process_worker_start :: proc(pw: ^Process_Worker, platform: ^platform_api.Platfo
 @(private)
 process_worker_main :: proc(t: ^thread.Thread) {
 	pw := (^Process_Worker)(t.data)
+	roots := make([dynamic]u32, pw.allocator)
+	defer delete(roots)
 	for {
 		sync.mutex_lock(&pw.mutex)
 		for len(pw.jobs) == 0 && !pw.stop {
@@ -122,8 +127,11 @@ process_worker_main :: proc(t: ^thread.Thread) {
 		}
 		if pw.stop {sync.mutex_unlock(&pw.mutex); return}
 		if process_snapshot_begin(&pw.snapshot) {
+			clear(&roots)
+			_, roots_err := append(&roots, ..pw.roots[:])
 			sync.mutex_unlock(&pw.mutex)
-			snapshot, err := procinfo.process_snapshot(pw.allocator)
+			snapshot, err := procinfo.process_tree(roots[:], pw.allocator)
+			if roots_err != nil {err = .Out_Of_Memory}
 			if err != .None {log.errorf("process snapshot failed: %v", err)}
 			sync.mutex_lock(&pw.mutex)
 			process_snapshot_finish(&pw.snapshot, snapshot)
@@ -142,10 +150,13 @@ process_worker_main :: proc(t: ^thread.Thread) {
 	}
 }
 
-process_snapshot_request :: proc(pw: ^Process_Worker, platform: ^platform_api.Platform) {
+// Asks for the processes of the shells `roots` names and everything below them.
+process_snapshot_request :: proc(pw: ^Process_Worker, platform: ^platform_api.Platform, roots: []u32) {
 	if !process_worker_start(pw, platform) {return}
 	sync.mutex_lock(&pw.mutex)
 	defer sync.mutex_unlock(&pw.mutex)
+	clear(&pw.roots)
+	if _, err := append(&pw.roots, ..roots); err != nil {log.error("process snapshot: out of memory"); return}
 	if process_snapshot_ask(&pw.snapshot) {sync.cond_signal(&pw.cond)}
 }
 

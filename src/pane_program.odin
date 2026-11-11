@@ -293,24 +293,23 @@ program_forget :: proc(entry: ^Session_Entry) -> bool {
 }
 
 // The pane's running program. Polling already tracks it, including one seen once but not yet
-// adopted; without polling it is chosen the same way from a snapshot taken now (about 10 ms).
+// adopted; without polling it is chosen the same way from the panes' processes read now.
 @(private)
 pane_program :: proc(app: ^App, entry: ^Session_Entry) -> u32 {
 	if program_polling(app) {
 		return program_polled(entry)
 	}
-	processes, err := procinfo.process_snapshot(context.temp_allocator)
-	if err != .None {return 0}
+	processes := session_processes(app)
+	if processes == nil {return 0}
 	program, _ := pane_running(app, entry, processes)
 	return program
 }
 
 // The processes to read running programs from when a pane is remembered: nil while polling
-// tracks them, otherwise one snapshot taken now, in temporary memory.
+// tracks them, otherwise the panes' processes read now, in temporary memory.
 pane_processes :: proc(app: ^App) -> []procinfo.Process_Info {
 	if program_polling(app) || len(app.sessions) == 0 {return nil}
-	processes, err := procinfo.process_snapshot(context.temp_allocator)
-	return err == .None ? processes : nil
+	return session_processes(app)
 }
 
 // The pane's running program and how it was started, in temporary memory: polling's choice, or the

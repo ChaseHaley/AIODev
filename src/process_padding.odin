@@ -35,7 +35,7 @@ update_processes :: proc(app: ^App) {
 	now := clock_now(&app.clock)
 	if app.process_deadline == {} || time.tick_diff(now, app.process_deadline) <= 0 {
 		app.process_deadline = time.tick_add(now, PROCESS_INTERVAL)
-		process_snapshot_request(&app.processes, process_worker_platform(app))
+		process_snapshot_request(&app.processes, process_worker_platform(app), session_roots(app))
 	}
 	if len(processes) == 0 {return}
 	relayout, redraw := false, false
@@ -48,6 +48,22 @@ update_processes :: proc(app: ^App) {
 	if relayout {
 		for window in app.windows {window_relayout(app, window); window.dirty = true}
 	} else if redraw {mark_all_dirty(app)}
+}
+
+// The running panes' shells, in temporary memory.
+session_roots :: proc(app: ^App) -> []u32 {
+	roots := make([dynamic]u32, 0, len(app.sessions), context.temp_allocator)
+	for &entry in app.sessions {
+		if entry.status == .Running {append(&roots, term.process_id(entry.session))}
+	}
+	return roots[:]
+}
+
+// The running panes' shells and every process below them, read now into temporary memory; nil
+// when that fails.
+session_processes :: proc(app: ^App) -> []procinfo.Process_Info {
+	processes, err := procinfo.process_tree(session_roots(app), context.temp_allocator)
+	return err == .None ? processes : nil
 }
 
 // When update_processes next asks for a snapshot; false while nothing polls.

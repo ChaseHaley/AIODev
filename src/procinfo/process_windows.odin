@@ -5,6 +5,7 @@ import w "core:sys/windows"
 import "core:time"
 
 foreign import kernel32 "system:kernel32.lib"
+foreign import ntdll "system:ntdll.lib"
 
 @(private, default_calling_convention = "system")
 foreign kernel32 {
@@ -14,6 +15,92 @@ foreign kernel32 {
 		lpExeName: w.LPWSTR,
 		lpdwSize: ^w.DWORD,
 	) -> w.BOOL ---
+}
+
+@(private, default_calling_convention = "system")
+foreign ntdll {
+	NtGetNextProcess :: proc(
+		ProcessHandle: w.HANDLE,
+		DesiredAccess: w.ACCESS_MASK,
+		HandleAttributes: w.ULONG,
+		Flags: w.ULONG,
+		NewProcessHandle: ^w.HANDLE,
+	) -> w.NTSTATUS ---
+}
+
+// The processes in `roots` and every process below them, in the order process_snapshot lists them
+// (the order the system created them). The snapshot gathers every thread of every process and takes
+// several milliseconds; this visits only the processes this one may query, which those a pane
+// starts are, reading each one's parent, and names only the ones below the roots.
+@(require_results)
+process_tree :: proc(roots: []u32, allocator := context.allocator) -> ([]Process_Info, Error) {
+	Visited :: struct {
+		id, parent: u32,
+	}
+	visited := make([dynamic]Visited, allocator)
+	defer delete(visited)
+	current: w.HANDLE
+	for {
+		next: w.HANDLE
+		if NtGetNextProcess(current, w.PROCESS_QUERY_LIMITED_INFORMATION, 0, 0, &next) != 0 {break}
+		if current != nil {close_process(current)}
+		current = next
+		basic: w.PROCESS_BASIC_INFORMATION
+		size: u32
+		if w.NtQueryInformationProcess(current, .ProcessBasicInformation, &basic, size_of(basic), &size) != 0 {
+			continue
+		}
+		info := Visited{u32(basic.UniqueProcessId), u32(basic.InheritedFromUniqueProcessId)}
+		if _, err := append(&visited, info); err != nil {close_process(current); return nil, .Out_Of_Memory}
+	}
+	if current != nil {close_process(current)}
+	parents := make(map[u32]u32, len(visited), allocator)
+	defer delete(parents)
+	for p in visited {parents[p.id] = p.parent}
+	list := make([dynamic]Process_Info, allocator)
+	success := false
+	defer if !success {
+		for p in list {delete(p.executable, allocator)}
+		delete(list)
+	}
+	for p in visited {
+		if !process_below(parents, p.id, roots, len(visited)) {continue}
+		process := w.OpenProcess(w.PROCESS_QUERY_LIMITED_INFORMATION, false, p.id)
+		if process == nil {continue}
+		buffer: [4096]u16
+		length := w.DWORD(len(buffer))
+		named := bool(QueryFullProcessImageNameW(process, 0, raw_data(buffer[:]), &length))
+		close_process(process)
+		if !named {continue}
+		path := buffer[:length]
+		name := path
+		for c, i in path {if c == '\\' {name = path[i + 1:]}}
+		executable, conversion_error := w.utf16_to_utf8(name, allocator)
+		if conversion_error != nil {return nil, .Out_Of_Memory}
+		if _, err := append(&list, Process_Info{p.id, p.parent, executable}); err != nil {
+			delete(executable, allocator)
+			return nil, .Out_Of_Memory
+		}
+	}
+	tree, err := make([]Process_Info, len(list), allocator)
+	if err != nil {return nil, .Out_Of_Memory}
+	copy(tree, list[:])
+	delete(list)
+	success = true
+	return tree, .None
+}
+
+// Whether `id` is one of `roots` or below one, following at most `limit` parents.
+@(private)
+process_below :: proc(parents: map[u32]u32, id: u32, roots: []u32, limit: int) -> bool {
+	current := id
+	for _ in 0 ..= limit {
+		for root in roots {if current == root {return true}}
+		parent, found := parents[current]
+		if !found || parent == 0 || parent == current {return false}
+		current = parent
+	}
+	return false
 }
 
 @(require_results)
