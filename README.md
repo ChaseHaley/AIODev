@@ -64,7 +64,13 @@ Requirements:
 
 `vendor/ghostty` holds a prebuilt libghostty-vt release pinned by version and SHA256 in
 `vendor/ghostty/VERSION`, with local patches in `vendor/ghostty/patches`. Rebuilding it needs Zig
-0.17: `tools/build_ghostty.ps1 -Zig <path to zig.exe>`.
+0.17: `tools/build_ghostty.ps1 -Zig <path to zig.exe>`. `tools/toolchain.ps1 -Destination <dir>`
+downloads the pinned Odin and Zig and checks their SHA256.
+
+Releases are built on GitHub Actions by `.github/workflows/release.yml`, which rebuilds libghostty-vt
+for `x86_64_v2` from the pinned source before packaging. Every pushed commit's run offers its unsigned
+package as a download; `tools/release.ps1 <version>` runs `build.ps1 check`, then tags and pushes,
+and the tag's run publishes the release.
 
 Floating UI surfaces use `ui.Presence` transitions for opening, closing and releasing their
 payloads. Toasts live in one list with entering, timed, sticky or fading state; fading a toast
