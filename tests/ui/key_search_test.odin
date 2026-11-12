@@ -301,3 +301,27 @@ settings_search_records_keys_and_returns_to_text :: proc(t: ^testing.T) {
 	testing.expect_value(t, p.keys.state, ui.Key_Search_State.Off)
 	testing.expect_value(t, ui.field_string(&p.filter), "copy")
 }
+
+@(private = "file")
+copy_unavailable :: proc(_: rawptr, id: commands.Command_Id) -> bool {return id != 2}
+
+@(test)
+palette_lists_unavailable_commands_only_for_their_shortcut :: proc(t: ^testing.T) {
+	r := search_registry(t)
+	defer commands.destroy(&r)
+	p: ui.Palette
+	testing.expect_value(t, ui.palette_init(&p, nil), nil)
+	defer ui.palette_destroy(&p)
+	ui.palette_set_availability(&p, {available = copy_unavailable})
+	ui.palette_open_mode(&p, &r, .Commands)
+	ui.palette_text(&p, &r, "copy")
+	for result in p.results {testing.expect(t, ui.palette_result_name(&p, result) != "edit.copy")}
+	ui.field_set(&p.query, "")
+	ui.palette_text(&p, &r, "ctrl+shift+c")
+	if !testing.expect(t, len(p.results) > 0) {return}
+	testing.expect_value(t, ui.palette_result_name(&p, p.results[0]), "edit.copy")
+	testing.expect(t, p.results[0].unavailable)
+	outcome, _ := ui.palette_key(&p, &r, down(.Enter))
+	testing.expect_value(t, outcome, ui.Outcome.None)
+	testing.expect(t, ui.presence_is_open(p.presence))
+}

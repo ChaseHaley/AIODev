@@ -3938,7 +3938,7 @@ editor_draw :: proc(
 		if chord, free := p.free.?; free {
 			buffer: [commands.SHORTCUT_TEXT_CAP]u8
 			label := commands.shortcut_text(chord, buffer[:])
-			empty = fmt.tprintf("No command uses %s. Press Enter to assign it to a command.", label)
+			empty = fmt.tprintf("No command uses %s. Enter to assign.", label)
 		} else if p.keys.state != .Off {
 			empty = p.keys.press.state == .Chord ? KEY_SEARCH_NO_MATCH : KEY_SEARCH_EMPTY_HINT
 		}

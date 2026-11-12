@@ -187,6 +187,8 @@ Palette_Result :: struct {
 	title_match: bool,
 	shortcut:    Shortcut_Highlight,
 	chord:       commands.Shortcut,
+	// A command that cannot run now, listed because a shortcut search matched it; drawn disabled.
+	unavailable: bool,
 }
 
 // The identity activation needs, independent of the current result ordering.
@@ -899,7 +901,9 @@ refresh :: proc(p: ^Palette, registry: ^commands.Registry) {
 				continue
 			}
 			match := command_shortcut_match(p, &shortcuts, &command)
-			if match.hit.match == .None && !palette_available(p, &command) {continue}
+			available := palette_available(p, &command)
+			if match.hit.match == .None && !available {continue}
+			before := len(p.ordered)
 			consider_item(
 				p,
 				.Command,
@@ -914,6 +918,7 @@ refresh :: proc(p: ^Palette, registry: ^commands.Registry) {
 				true,
 				match,
 			)
+			if len(p.ordered) > before {p.ordered[before].unavailable = !available}
 		}
 		spans[.Command] = {start, len(p.ordered)}
 	}
@@ -951,7 +956,7 @@ refresh_keys :: proc(p: ^Palette, registry: ^commands.Registry) {
 			match := command_shortcut_match(p, nil, &command)
 			if match.hit.match == .None {continue}
 			append(&p.results, Palette_Result{kind = .Command, command = &command, setting = -1, source = -1,
-				shortcut = match})
+				shortcut = match, unavailable = !palette_available(p, &command)})
 		}
 	}
 	p.selected = clamp(p.selected, 0, max(0, len(p.results) - 1))
@@ -1821,7 +1826,7 @@ palette_draw :: proc(
 				title,
 				title_x,
 				row_baseline,
-				theme.text,
+				item.unavailable ? theme.faint : theme.text,
 				title_width,
 				item.positions,
 				theme.accent,
