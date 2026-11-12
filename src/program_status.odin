@@ -448,6 +448,12 @@ status_scope_records_next :: proc(
 		}
 		if len(records) == 0 {continue}
 		place := status_pane_of(app, workspace, walk.scope.next - 1, pane.tab, entry)
+		// A program still working has printed more than the user saw unless its pane is in view.
+		if !place.watched {
+			for &record in records {
+				if record.state == .Working {record.read = false}
+			}
+		}
 		return {entry.id, records[:], place}, true
 	}
 	return

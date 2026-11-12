@@ -411,7 +411,9 @@ activity_rows_hit_and_explain_themselves_in_both_views :: proc(t: ^testing.T) {
 			receipt := app.status_panel_receipt_rect(s, w, rect, row)
 			rx, ry := receipt.x + receipt.width / 2, receipt.y + receipt.height / 2
 			testing.expect(t, render.rect_contains(rect, rx, ry))
-			testing.expect(t, strings.contains(app.status_panel_row_tooltip(s, w, rx, ry), "click to mark"))
+			// WORK-424: a working row out of view has nothing to mark; the fixture window is unfocused.
+			mark := row.item.record.state == .Working && !w.focused ? "Working · " : "click to mark"
+			testing.expect(t, strings.contains(app.status_panel_row_tooltip(s, w, rx, ry), mark))
 			if row.item.record.state == .Done {
 				close := app.status_panel_dismiss_rect(s, w, rect)
 				cx, cy := close.x + close.width / 2, close.y + close.height / 2
@@ -529,4 +531,50 @@ activity_inbox_u_reads_and_unreads_the_selected_pane :: proc(t: ^testing.T) {
 	entry.statuses[0].read = true
 	inbox_press(s, w, .U)
 	testing.expect(t, entry.status_unread)
+}
+
+// WORK-424: a working program out of view always has output the user has not seen, so its row is
+// unread whatever the pane's last read, and U leaves it be; in view it reads as before.
+@(test)
+activity_working_rows_stay_unread_out_of_view :: proc(t: ^testing.T) {
+	f: Palette_Fixture
+	defer palette_fixture_destroy(t, &f)
+	if !palette_fixture_create(t, &f, "activity-working-unread", second_window = false) {return}
+	s, w := &f.state, f.state.windows[0]
+	s.settings.status.enabled = true
+	entry := app.focused_session(s, w)
+	if !testing.expect(t, entry != nil) {return}
+	previous := entry.statuses
+	defer {
+		delete(entry.statuses)
+		entry.statuses = previous
+	}
+	entry.statuses = make([]term.Program_Status, 2)
+	entry.statuses[0] = {id = "a", state = .Working, progress = -1, read = true, updated_at = time.now()}
+	entry.statuses[1] = {id = "b", state = .Done, progress = -1, read = true, updated_at = time.now()}
+	read_of :: proc(s: ^app.App, w: ^app.Window, id: string) -> (read, found: bool) {
+		for report in app.status_reports(s, w) {
+			if report.item.record.id == id {return report.item.record.read, true}
+		}
+		return
+	}
+	w.focused = true
+	working, found := read_of(s, w, "a")
+	testing.expect(t, found && working)
+	w.focused = false
+	working, found = read_of(s, w, "a")
+	testing.expect(t, found && !working)
+	done, _ := read_of(s, w, "b")
+	testing.expect(t, done)
+	app.run_action(s, w, .Status_Inbox)
+	if !testing.expect(t, app.status_inbox_shown(w)) {return}
+	rows, _ := app.status_rows_project(s.settings.status.group_by, app.status_reports(s, w), {48, 48}, w.scale)
+	for row, i in rows {
+		if row.report && row.item.record.id == "a" {w.status.inbox = app.Status_Inbox{selected = i}}
+	}
+	inbox, _ := w.status.inbox.?
+	if !testing.expect(t, rows[inbox.selected].item.record.id == "a") {return}
+	read_at := entry.status_read_at
+	inbox_press(s, w, .U)
+	testing.expect(t, !entry.status_unread && entry.status_read_at == read_at)
 }

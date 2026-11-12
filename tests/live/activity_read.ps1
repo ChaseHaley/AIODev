@@ -119,4 +119,23 @@ try {
     while ((Row 'Status roster') -and (Get-Date) -lt $deadline) { Start-Sleep -Milliseconds 100 }
     if (Row 'Status roster') { throw 'read finished work of an ended program stayed' }
     Write-Output 'PASS read finished work leaves once its program has ended'
+
+    # WORK-424: a working program is read only while its pane is in view; out of view it has output
+    # the user has not seen, and its receipt goes to the pane instead of marking it.
+    $worker = "$data/worker.ps1"
+    Set-Content -LiteralPath $worker -Value @(
+        "[Console]::Write([char]27 + ']7501;state=working:id=worker:app=claude:msg=QnVzeSB3b3JrZXI=' + [char]7)"
+        'Start-Sleep -Seconds 900'
+    )
+    Aio run "pwsh -NoProfile -File '$worker'" | Out-Null
+    Await-Row 'Busy worker' 'true' 'a working pane in view is read' | Out-Null
+    Aio command pane.focus_up | Out-Null
+    $row = Await-Row 'Busy worker' 'false' 'leaving a working pane leaves it unread'
+    if ($row.Text -notmatch '^\d+s$') { throw "working receipt after leaving shows $($row.Text)" }
+    Write-Output "PASS the working receipt still shows when it was read ($($row.Text))"
+    Aio capture --out "$data/working.png" | Out-Null
+    Aio mouse click (Middle $row.Receipt) --px | Out-Null
+    Equal (State)['panes.focused'] $bottom 'the working receipt goes to its pane'
+    Await-Row 'Busy worker' 'true' 'going to it reads it' | Out-Null
+    Aio key Ctrl+C | Out-Null
 } finally { & $ctl --name $name stop | Out-Null }

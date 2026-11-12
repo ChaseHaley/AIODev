@@ -26,7 +26,8 @@ activity_row_menu_shown :: proc(w: ^Window) -> bool {
 	return shown
 }
 
-// Offers going to the row's pane, and reading it or marking it unread, whichever the row is not.
+// Offers going to the row's pane, and reading it or marking it unread, whichever the row is not,
+// unless the row is working out of view and so always unread.
 activity_row_menu_open :: proc(app: ^App, w: ^Window, item: Status_Item, x, y: f32) {
 	if !gesture_cancel(app, w) {return}
 	overlay_open(app, w, Overlay_Activity_Row_Menu{session = item.session})
@@ -34,7 +35,8 @@ activity_row_menu_open :: proc(app: ^App, w: ^Window, item: Status_Item, x, y: f
 	ui.menu_clear(menu)
 	ui.menu_anchor(menu, x, y)
 	mark: Activity_Row_Choice = item.record.read ? .Mark_Unread : .Mark_Read
-	for choice in ([2]Activity_Row_Choice{.Go_To_Pane, mark}) {
+	choices := [2]Activity_Row_Choice{.Go_To_Pane, mark}
+	for choice in choices[:status_item_markable(item) ? 2 : 1] {
 		row := ui.Menu_Item{label = ACTIVITY_ROW_LABELS[choice], enabled = true, payload = u32(choice)}
 		if added, err := ui.menu_add(menu, row); !added {
 			log.errorf("adding an Activity row menu row failed: %v", err)
