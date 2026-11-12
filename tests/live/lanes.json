@@ -63,6 +63,12 @@
     "hover_rim": {
       "lane": "headless"
     },
+    "keybinding_conflicts": {
+      "lane": "headless"
+    },
+    "keybinding_search": {
+      "lane": "headless"
+    },
     "kitty_graphics": {
       "lane": "headless"
     },

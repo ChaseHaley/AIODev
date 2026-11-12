@@ -7,23 +7,41 @@ import "core:fmt"
 SHORTCUT_FIELD_WIDTH :: f32(176)
 
 // The field borrows the first label; the complete alternatives remain in its owner's value. Labels come
-// from the shortcut grammar, so a comma can itself be a key ("Ctrl+,").
+// from the shortcut grammar, so a comma can itself be a key ("Ctrl+,"). A search shows the alternative
+// it matched instead, with `highlights` on the matched parts' bytes.
 Shortcut_Summary :: struct {
 	first:      string,
 	additional: int,
+	highlights: []int,
+}
+
+// The alternative a search matched in a shortcut field, and which parts of it.
+Shortcut_Highlight :: struct {
+	alternative: int,
+	hit:         commands.Shortcut_Hit,
 }
 
 shortcut_summary :: proc(value: string) -> Shortcut_Summary {
+	return shortcut_summary_match(value, {}, nil)
+}
+
+// The summary showing the matched alternative, its matched parts written to `positions`.
+shortcut_summary_match :: proc(
+	value: string, match: Shortcut_Highlight, positions: []int,
+) -> Shortcut_Summary {
 	result: Shortcut_Summary
 	count := 0
 	alternatives := commands.shortcut_alternatives_begin(value)
 	for part, ok := commands.shortcut_alternatives_next(&alternatives); ok;
 	    part, ok = commands.shortcut_alternatives_next(&alternatives) {
 		if part == "" {continue}
-		if count == 0 {result.first = part}
+		if count == 0 || (match.hit.match != .None && count == match.alternative) {result.first = part}
 		count += 1
 	}
 	result.additional = max(0, count - 1)
+	if match.hit.match != .None {
+		result.highlights = commands.shortcut_hit_positions(result.first, match.hit, positions)
+	}
 	return result
 }
 
@@ -47,8 +65,9 @@ shortcut_parts :: proc(parts: ^Row_Parts, scale: f32, selected: bool) {
 	}
 }
 
+// `clash`: the recording holds a chord another command uses, which turns the field red.
 Shortcut_Field_State :: struct {
-	capturing, focused, positions_focused, physical: bool,
+	capturing, focused, positions_focused, physical, clash: bool,
 	empty_label: string,
 }
 
@@ -64,7 +83,8 @@ shortcut_field_draw :: proc(
 	box_draw(list, parts.field, theme, state.focused && !state.capturing, scale)
 	if state.capturing {
 		radius := RADIUS_CONTROL * scale
-		draw_rect(list, {rect = parts.field, color = theme.accent, radius = radius, stroke = 2 * scale})
+		ring := state.clash ? theme.error : theme.accent
+		draw_rect(list, {rect = parts.field, color = ring, radius = radius, stroke = 2 * scale})
 	}
 	scope, opened := clip_scope_open(list, parts.field, RADIUS_CONTROL * scale)
 	if !opened {return .Ok}
@@ -80,7 +100,8 @@ shortcut_field_draw :: proc(
 	room := max(1, parts.field.width - 2 * CONTROL_INSET * scale - suffix_width)
 	x := parts.field.x + CONTROL_INSET * scale
 	ink := summary.first == "" ? theme.muted : theme.text
-	if result := draw_fading_text(&input, list, first, x, baseline, ink, room); result != .Ok {return result}
+	if result := draw_fading_text(&input, list, first, x, baseline, ink, room, summary.highlights, theme.accent);
+	   result != .Ok {return result}
 	if suffix != "" {
 		if result := draw_text(&input, list, suffix, x + min(room, text_width(&input, first)), baseline, ink);
 		   result != .Ok {return result}

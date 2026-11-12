@@ -36,8 +36,9 @@ notice_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: input.Mous
 	// Only the window holding the notices has their hover to change.
 	if app.notice_window != w.id {return}
 	hit := owner == .Notice ? notice_hit(app, w, f32(e.x), f32(e.y)) : ui.Notice_Hit{}
-	if ui.notices_hover(&app.notices, hit.close ? hit.id : 0) {w.dirty = true}
-	if owner == .Notice {pointer_set(app, w, hit.close ? .Hand : .Arrow)}
+	button := ui.notice_hit_button(hit)
+	if ui.notices_hover(&app.notices, button) {w.dirty = true}
+	if owner == .Notice {pointer_set(app, w, button.id != 0 ? .Hand : .Arrow)}
 }
 
 @(private)
@@ -49,7 +50,7 @@ notice_tooltip :: proc(app: ^App, w: ^Window, x, y: f32) -> string {
 notice_press :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) {
 	if e.button != .Left {return}
 	hit := notice_hit(app, w, f32(e.x), f32(e.y))
-	ui.notices_press(&app.notices, hit.close ? hit.id : 0)
+	ui.notices_press(&app.notices, ui.notice_hit_button(hit))
 }
 
 // A notice press ends here even after the notices moved to another window, which cancelled it there.
@@ -58,11 +59,13 @@ notice_release :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) -> bo
 	if app.notice_window != w.id {return true}
 	if e.button == .Left {
 		hit := notice_hit(app, w, f32(e.x), f32(e.y))
-		if ui.notices_release(&app.notices, hit.close ? hit.id : 0, app.animations) {
+		dismissed, acted := ui.notices_release(&app.notices, ui.notice_hit_button(hit), app.animations)
+		if dismissed {
 			for window in app.windows {window.dirty = true}
 		}
+		if acted == u32(Notice_Key.Shortcut_Undo) {shortcut_undo(app)}
 	}
-	_ = ui.notices_hover(&app.notices, 0)
+	_ = ui.notices_hover(&app.notices, {})
 	w.dirty = true
 	return true
 }
@@ -74,5 +77,5 @@ notice_cancel :: proc(app: ^App, w: ^Window) {
 
 @(private)
 notice_leave :: proc(app: ^App, w: ^Window) {
-	if app.notice_window == w.id {_ = ui.notices_hover(&app.notices, 0)}
+	if app.notice_window == w.id {_ = ui.notices_hover(&app.notices, {})}
 }

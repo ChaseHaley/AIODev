@@ -520,7 +520,7 @@ palette_scope_and_query_never_overlap :: proc(t: ^testing.T) {
 
 @(private)
 hint_labels :: proc(p: ^ui.Palette) -> []string {
-	hints: [5]ui.Palette_Key_Hint
+	hints: [6]ui.Palette_Key_Hint
 	count := ui.palette_key_hints(p, &hints)
 	labels := make([]string, count, context.temp_allocator)
 	for hint, i in hints[:count] {labels[i] = hint.label}
@@ -551,18 +551,23 @@ palette_footer_states_only_the_selected_results_keys :: proc(t: ^testing.T) {
 		commands.Error.None) {return}
 	ui.palette_open_mode(&p, &registry, .Commands)
 	ui.palette_text(&p, &registry, "gap")
-	expect_hints(t, &p, {"Navigate", "Run command", "Edit shortcut", "Close"})
+	expect_hints(t, &p, {"Navigate", "Run command", "Edit shortcut", "Search by keys", "Close"})
 	ui.palette_set_mode(&p, &registry, .Settings)
-	expect_hints(t, &p, {"Navigate", "Go to setting", "Change", "Adjust", "Close"})
+	expect_hints(t, &p, {"Navigate", "Go to setting", "Change", "Adjust", "Search by keys", "Close"})
 	ui.palette_key(&p, &registry, key({key = .N, modifiers = {.Control}}))
 	// Typed values have no step, so Alt+arrows are not offered.
-	expect_hints(t, &p, {"Navigate", "Go to setting", "Change", "Close"})
+	expect_hints(t, &p, {"Navigate", "Go to setting", "Change", "Search by keys", "Close"})
 	ui.palette_key(&p, &registry, key({key = .N, modifiers = {.Control}}))
-	expect_hints(t, &p, {"Navigate", "Go to setting", "Close"})
+	expect_hints(t, &p, {"Navigate", "Go to setting", "Search by keys", "Close"})
 	ui.palette_set_mode(&p, &registry, .Tabs)
-	expect_hints(t, &p, {"Navigate", "Switch tab", "Close"})
+	expect_hints(t, &p, {"Navigate", "Switch tab", "Search by keys", "Close"})
 	ui.palette_set_mode(&p, &registry, .Workspaces)
-	expect_hints(t, &p, {"Navigate", "Switch workspace", "Close"})
+	expect_hints(t, &p, {"Navigate", "Switch workspace", "Search by keys", "Close"})
 	ui.palette_text(&p, &registry, "zzz")
-	expect_hints(t, &p, {"Close"})
+	expect_hints(t, &p, {"Search by keys", "Close"})
+	ui.palette_set_mode(&p, &registry, .Commands)
+	ui.palette_key(&p, &registry, key({key = .K, modifiers = {.Alt}}))
+	expect_hints(t, &p, {"Clear", "Search by text"})
+	ui.palette_key(&p, &registry, key({key = .Escape}))
+	expect_hints(t, &p, {"Search by keys", "Close"})
 }

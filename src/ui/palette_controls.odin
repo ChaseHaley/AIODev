@@ -49,14 +49,16 @@ Palette_Edit_Kind :: enum {
 	Choice,
 	Text,
 	Shortcut,
+	Chain,
 }
 
-// The one control open in place: a setting's choice list or text entry, or a command's shortcut
-// row. nil when none is. edit_set is the only writer.
+// The one control open in place: a setting's choice list or text entry, a command's shortcut row,
+// or the conflict chain its shortcut opened. nil when none is. edit_set is the only writer.
 Palette_Edit :: union {
 	Choice_Edit,
 	Text_Edit,
 	Shortcut_Edit,
+	Chain_Edit,
 }
 
 // `list` holds the highlighted match and the first match shown; `hover` is the match under the
@@ -160,6 +162,8 @@ palette_editing :: proc(p: ^Palette) -> Palette_Edit_Kind {
 		return .Text
 	case Shortcut_Edit:
 		return .Shortcut
+	case Chain_Edit:
+		return .Chain
 	}
 	return .None
 }
@@ -205,6 +209,8 @@ edit_set :: proc(p: ^Palette, next: Palette_Edit) {
 		delete(e.saved)
 		delete(e.defaults)
 		delete(e.draft.bytes)
+	case Chain_Edit:
+		shortcut_chain_destroy(&e.chain)
 	}
 	#partial switch _ in p.drag {
 	case Field_Drag, Filter_Drag:
@@ -545,11 +551,14 @@ slider_number_rect :: proc(control: render.Rect, scale: f32) -> render.Rect {
 	return {control.x + control.width - w, control.y, w, control.height}
 }
 
-// The rectangle of result `index` when it is on screen.
+// The rectangle of result `index` when it is on screen. Rows after one with a "Used by" line sit
+// below its band.
 @(private)
 row_rect :: proc(p: ^Palette, l: Palette_Layout, index: int) -> (render.Rect, bool) {
 	if index < p.scroll || index >= len(p.results) || index - p.scroll >= l.rows {return {}, false}
-	return {l.list.x, l.list.y + f32(index - p.scroll) * l.row_height, l.list.width, l.row_height}, true
+	y := l.list.y + f32(index - p.scroll) * l.row_height
+	if note, _ := palette_note(p); note >= p.scroll && index > note {y += PALETTE_NOTE_HEIGHT * l.scale}
+	return {l.list.x, y, l.list.width, l.row_height}, true
 }
 
 @(private)
@@ -673,7 +682,7 @@ palette_pointer_move :: proc(
 	x, y: f32,
 	held: bool,
 ) -> Outcome {
-	if !held {return palette_mouse_move(p, l, x, y)}
+	if !held {return palette_mouse_move(p, l, x, y, text)}
 	switch _ in p.drag {
 	case Query_Drag:
 		return palette_input_drag(p, l, text, x, l.scale)
@@ -692,7 +701,7 @@ palette_pointer_move :: proc(
 	case Slider_Drag:
 		return palette_slider_drag(p, l, x)
 	}
-	return palette_mouse_move(p, l, x, y)
+	return palette_mouse_move(p, l, x, y, text)
 }
 
 // Ends a pointer gesture: a released slider saves the value it shows.
@@ -777,6 +786,9 @@ control_pointer :: proc(p: ^Palette, l: Palette_Layout, x, y: f32) -> (platform.
 		}
 	case Text_Edit:
 		if render.rect_contains(edit_control(p, l, edit.setting), x, y) {return .Text, true}
+	case Chain_Edit:
+		// The query keeps its text while a chain shows, so it takes no caret.
+		return edit.chain.hover.part != .None ? .Hand : .Arrow, true
 	}
 	index := row_at(p, l, x, y)
 	s := result_setting(p, index)

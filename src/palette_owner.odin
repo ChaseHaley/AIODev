@@ -130,8 +130,9 @@ when AIO_CONTROL {
 		owns := w != nil && owner == w.id
 		p := &app.palette
 		layout: ui.Palette_Layout
-		item, value := "", ""
+		item, value, match := "", "", ""
 		edit := ui.Palette_Edit_Kind.None
+		buffer, value_buffer, assign_buffer: [commands.SHORTCUT_TEXT_CAP]u8
 		if owns {
 			layout = ui.palette_layout(p, f32(w.width), f32(w.height), w.scale)
 			edit = ui.palette_editing(p)
@@ -142,9 +143,25 @@ when AIO_CONTROL {
 				if selected.kind == .Setting {value, _ = palette_setting_value(app, item)}
 				if selected.command != nil {
 					value = commands.shortcut_set_text(selected.command.shortcuts, context.temp_allocator)
+					shortcuts := commands.active_shortcuts(selected.command)
+					if hit := selected.shortcut; hit.hit.match != .None && hit.alternative < len(shortcuts) {
+						label := commands.shortcut_text(shortcuts[hit.alternative], buffer[:])
+						match = shortcut_hit_text(label, hit.hit)
+					}
 				}
+				if selected.kind == .Unassigned {value = commands.shortcut_text(selected.chord, value_buffer[:])}
 			}
 		}
+		assign := ""
+		if chord, assigning := p.assign.?; owns && assigning {
+			assign = commands.shortcut_text(chord, assign_buffer[:])
+		}
+		state_text(r, "palette.match", match)
+		state_value(r, "palette.keys", owns ? p.keys.state : ui.Key_Search_State.Off)
+		// Reports keep their strings past this frame, so text written to a local buffer is copied.
+		state_valuef(r, "palette.keys.text", "%s", owns ? commands.key_press_text(p.keys.press, buffer[:]) : "")
+		state_rect(r, "palette.keys.button", layout.keys)
+		state_valuef(r, "palette.assign", "%s", assign)
 		state_value(r, "palette.window", owner)
 		state_value(r, "palette.open", palette_active(app, w))
 		state_text(r, "palette.query", owns ? ui.palette_query(p) : "")
@@ -155,7 +172,7 @@ when AIO_CONTROL {
 		state_text(r, "palette.item", item)
 		state_value(r, "palette.scroll", owns ? p.scroll : 0)
 		state_value(r, "palette.edit", edit)
-		state_text(r, "palette.value", value)
+		state_valuef(r, "palette.value", "%s", value)
 		state_value(r, "palette.rows", layout.rows)
 		state_valuef(r, "palette.row_height", "%g", layout.row_height)
 		state_rect(r, "palette.panel", layout.panel)
@@ -164,6 +181,15 @@ when AIO_CONTROL {
 		for mode in ui.Palette_Mode {
 			state_rect(r, state_key("palette.mode.%s", ui.palette_mode_word(mode)), layout.modes[mode])
 		}
+		chain := owns ? ui.palette_chain(p) : nil
+		chain_rows: []Chain_Report_Row
+		if chain != nil {
+			chain_rows = make([]Chain_Report_Row, len(chain.members), context.temp_allocator)
+			for &row, member in chain_rows {row.row, row.right, row.shown = ui.palette_chain_row(p, layout, member)}
+		}
+		scale := w != nil ? w.scale : 1
+		shortcut_chain_state_report(r, "palette", chain, chain_rows, w != nil ? &w.ui_text : nil, scale)
+		state_text(r, "palette.used_by", owns ? ui.palette_used_by(p) : "")
 	}
 }
 
@@ -185,6 +211,7 @@ palette_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: input.Mou
 @(private)
 palette_tooltip :: proc(app: ^App, _: ^Window, _, _: f32) -> string {
 	p := &app.palette
+	if p.keys_hover {return ui.key_search_tooltip(&p.keys)}
 	return p.reset_hover >= 0 && ui.palette_editing(p) == .None ? "Reset setting" : ""
 }
 
@@ -207,18 +234,20 @@ palette_pointer_cancel :: proc(app: ^App, w: ^Window) {
 	if palette_active(app, w) {ui.palette_drag_cancel(&app.palette)}
 }
 
-// Keys while the palette shows: a shortcut field records them, text fields keep their clipboard chords,
-// and the rest navigate by the layout's letters.
+// Keys while the palette shows: a shortcut field, conflict chain or search by keys records them, text
+// fields keep their clipboard chords, and the rest navigate by the layout's letters. Ctrl+Z undoes a
+// chain save while its notice shows.
 @(private)
 palette_key_input :: proc(app: ^App, w: ^Window, e, logical: input.Key_Event) {
 	pane_header_cancel(w)
 	key_suppress(w, e)
 	p := &app.palette
-	if ui.palette_editing(p) == .Shortcut {
+	if editing := ui.palette_editing(p); editing == .Shortcut || editing == .Chain || ui.palette_recording(p) {
 		outcome, id := ui.palette_key(p, &app.registry, e)
 		on_palette_outcome(app, w, outcome, id)
 		return
 	}
+	if shortcut_undo_key(app, logical) {return}
 	switch clipboard_chord(logical) {
 	case .Copy:
 		clipboard_copy(app, ui.palette_selection(p))
@@ -272,6 +301,12 @@ on_palette_outcome :: proc(app: ^App, w: ^Window, outcome: ui.Outcome, id: comma
 		w.dirty = true
 		if workspace, ok := chosen.(ui.Chosen_Workspace); ok {
 			palette_activate_workspace(app, pane_link_acting_window(app, w), u32(workspace.id))
+		}
+	case .Save_Chain:
+		w.dirty = true
+		// The chain stays open until its revision applied, so a refused save can still be fixed.
+		if shortcut_chain_save(app, ui.palette_chain_changes(&app.palette), Settings_Current{}) {
+			ui.palette_chain_close(&app.palette, &app.registry)
 		}
 	}
 }

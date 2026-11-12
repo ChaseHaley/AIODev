@@ -39,6 +39,7 @@ Notice_Key :: enum u32 {
 	Copy,
 	Paste,
 	Build_Info,
+	Shortcut_Undo,
 }
 
 // What every window shares. Each feature's own state is a struct declared beside that feature's procs
@@ -87,6 +88,8 @@ App :: struct {
 	palette_owner:         Maybe(input.Window_Id),
 	notices:               ui.Notices,
 	notice_window:         input.Window_Id,
+	// The last conflict chain save, which its notice's Undo or Ctrl+Z puts back.
+	shortcut_undo:         Shortcut_Undo,
 	// Counts window activations; see window_focus_note.
 	window_focus_order:    u64,
 	sessions:              [dynamic]Session_Entry,
@@ -295,6 +298,7 @@ app_destroy :: proc(app: ^App) {
 	file_dialogs_destroy(app)
 	markdown_app_destroy(&app.markdown_state)
 	ui.notices_destroy(&app.notices)
+	shortcut_undo_destroy(&app.shortcut_undo)
 	commands.destroy(&app.registry)
 	settings.destroy(&app.settings)
 	settings.inputs_destroy(&app.settings_inputs)

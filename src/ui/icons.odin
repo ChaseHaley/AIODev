@@ -58,6 +58,7 @@ Icon :: enum {
 	Globe,
 	Link,
 	Minimize,
+	Keyboard,
 }
 
 ICON_STROKE :: f32(1.25)
@@ -142,6 +143,10 @@ icon_draw :: proc(
 	}
 	switch icon {
 	case .None:
+	case .Keyboard:
+		pen_box(p, 1, 3.5, 14, 9, 2)
+		for x in ([?]f32{4, 6.67, 9.33, 12}) {pen_dot(p, x, 6.5)}
+		pen_path(p, {5, 9.5}, {11, 9.5})
 	case .Minimize:
 		pen_path(p, {3, 12}, {13, 12})
 	case .Float_Pane:
