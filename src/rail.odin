@@ -384,7 +384,7 @@ rail_row_draw :: proc(
 	has_badge := ui.tab_badge_shown(t.badge)
 	close := rail_tab_close_rect(w, layout, index)
 	show_close := hover || pressed || ui.armed_is(w.tab_close_armed, index)
-	leading := has_badge ? (ui.ICON_BUTTON + ui.SPACE_2) * s : 0
+	leading := has_badge ? (ui.tab_badge_width(t) + ui.SPACE_2) * s : 0
 	trailing := show_close ? tile.x + tile.width - close.x - 4 * s : 0
 	// Status sits at the right, before Close when it shows, with its place kept while tab status is on.
 	status_right := show_close ? close.x : tile.x + tile.width - 4 * s

@@ -101,3 +101,70 @@ tab_draw_keeps_the_program_icon_left_and_status_before_close :: proc(t: ^testing
 		}
 	}
 }
+
+// A tab with several panes stacks its focused pane's mark over the one behind; the mark behind
+// stays clear of a gap around the front one, and the title starts after the wider stack.
+@(test)
+tab_draw_stacks_the_focused_mark_over_the_one_behind :: proc(t: ^testing.T) {
+	fonts, err := font.system_create()
+	if !testing.expect_value(t, err, font.Error.None) {return}
+	defer font.system_destroy(fonts)
+	device, device_error := render.device_create(.Warp)
+	if !testing.expect_value(t, device_error, render.Error.None) {return}
+	defer render.device_destroy(device)
+	cache: glyphs.Cache
+	glyphs.init(&cache, fonts, device)
+	defer glyphs.destroy(&cache)
+	text: ui.Text
+	if !testing.expect(t, ui.text_init(&text, fonts, &cache, 14)) {return}
+	list := render.draw_list_init()
+	defer render.draw_list_destroy(&list)
+	resolved, ok := fixtures.shipped_theme_file(fixtures.SHIPPED_THEMES[0])
+	if !testing.expect(t, ok) {return}
+	theme := ui.theme_from(resolved, fixtures.default_interface())
+	for scale in ([?]f32{1, 1.5, 2}) {
+		ui.text_set_size(&text, 14 * scale)
+		mark := ui.TAB_STACK_MARK * scale
+		front_atlas := render.Rect{0, 0, mark, mark}
+		back_atlas := render.Rect{64, 0, mark, mark}
+		bar := ui.tab_bar_layout(0, 400 * scale, scale, 2)
+		render.draw_list_reset(&list)
+		testing.expect_value(t, ui.tab_draw(&list, &text, theme, bar, 0, 0,
+			{title = "Title", badge = {atlas = front_atlas}, behind = {atlas = back_atlas}, selected = true},
+			0, 0, scale), render.Build_Status.Ok)
+		front: render.Rect
+		backs, title_x := 0, f32(-1)
+		for g in list.glyphs {
+			if g.flags & render.GLYPH_COLOR == 0 {
+				if title_x < 0 {title_x = g.rect.x}
+				continue
+			}
+			if g.atlas == front_atlas {front = g.rect}
+		}
+		if !testing.expect(t, front.width > 0) {continue}
+		testing.expect_value(t, front.width, mark)
+		cut := render.Rect {
+			front.x - ui.TAB_STACK_GAP * scale + 0.01,
+			front.y - ui.TAB_STACK_GAP * scale + 0.01,
+			front.width + 2 * ui.TAB_STACK_GAP * scale - 0.02,
+			front.height + 2 * ui.TAB_STACK_GAP * scale - 0.02,
+		}
+		for layer in list.layers {
+			for g in list.glyphs[layer.glyph_start:][:layer.glyph_count] {
+				if g.atlas != back_atlas {continue}
+				backs += 1
+				// The back mark draws only where its clip leaves the cut-out alone.
+				visible := layer.clip
+				x := max(visible.x, g.rect.x, cut.x)
+				y := max(visible.y, g.rect.y, cut.y)
+				right := min(visible.x + visible.width, g.rect.x + g.rect.width, cut.x + cut.width)
+				bottom := min(visible.y + visible.height, g.rect.y + g.rect.height, cut.y + cut.height)
+				testing.expectf(t, right <= x || bottom <= y, "scale %v: back mark shows in the cut-out", scale)
+				testing.expect(t, g.rect.x < front.x && g.rect.y < front.y)
+			}
+		}
+		testing.expect(t, backs > 0)
+		left := bar.x + ui.CONTROL_INSET * scale
+		testing.expect(t, title_x >= left + (ui.TAB_STACK_OFFSET.x + ui.TAB_STACK_MARK + ui.SPACE_2) * scale - 1)
+	}
+}
