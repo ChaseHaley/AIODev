@@ -152,7 +152,7 @@ STATUS_PANEL_VIEW_LABELS :: []string {
 	STATUS_PANEL_VIEW_LABEL[Status_Panel_View(1)],
 }
 // How Activity and the status inbox group and order reports (WORK-412). Within a group, reports
-// with the same status sort by pane name; the view only sets row size.
+// with the same status sort newest first by when they entered it; the view only sets row size.
 Status_Group :: enum int {
 	Status,
 	Workspace,
@@ -923,7 +923,7 @@ SCHEMA :: [?]Schema_Entry {
 		names = STATUS_GROUP_NAMES,
 		labels = STATUS_GROUP_LABELS,
 		description = "Group Activity and the status inbox by status, or by workspace and then status. " +
-			"Programs with the same status sort by pane name.",
+			"Programs with the same status show the newest to reach it first.",
 	},
 	{
 		key = "status.row_name",

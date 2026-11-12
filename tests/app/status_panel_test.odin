@@ -108,28 +108,39 @@ activity_sections_follow_urgency_and_keep_trees_whole :: proc(t: ^testing.T) {
 	testing.expect_value(t, rows[5].y, rows[4].y + rows[4].height + 8)
 }
 
-// WORK-412: ties within a section sort by pane name, without case and after a title's leading
-// symbols, and keep pane order when names match. Workspaces do not matter when grouping by status.
+// Ties within a section sort newest first by when the report giving the tree its section entered its
+// state, and keep pane order when times match. Pane titles, which programs such as omp animate, play
+// no part, nor do workspaces when grouping by status.
 @(test)
-activity_status_grouping_sorts_by_pane_name_across_workspaces :: proc(t: ^testing.T) {
+activity_status_grouping_sorts_by_status_time_across_workspaces :: proc(t: ^testing.T) {
+	base := time.now()
+	at :: proc(base: time.Time, seconds: int) -> time.Time {
+		return time.time_add(base, time.Duration(seconds) * time.Second)
+	}
 	reports := make([dynamic]app.Status_Report, context.temp_allocator)
 	panes := [?]struct {
 		workspace, pane, id: string,
-		order:               int,
+		order, since:        int,
 		state:               term.Program_Status_State,
 	} {
-		{"One", "✳ zeta", "z", 0, .Working},
-		{"One", "Beta", "b1", 0, .Working},
-		{"Two", "alpha", "a", 1, .Working},
-		{"Two", "beta", "b2", 1, .Working},
-		{"Two", "✳ Gamma", "g", 1, .Blocked},
+		{"One", "⠋ alpha", "a", 0, 1, .Working},
+		{"One", "zeta", "z", 0, 3, .Working},
+		{"Two", "beta", "b1", 1, 2, .Working},
+		{"Two", "beta", "b2", 1, 2, .Working},
+		{"Two", "omega", "e", 1, 5, .Blocked},
 	}
 	for p in panes {
-		more := pane_reports(p.workspace, p.pane, p.order, {id = p.id, state = p.state})
+		record := term.Program_Status{id = p.id, state = p.state, since = at(base, p.since)}
+		more := pane_reports(p.workspace, p.pane, p.order, record)
 		append(&reports, ..more[:])
 	}
+	// A finished tree that needs you through an older child ranks by the child's time.
+	more := pane_reports("One", "aardvark", 0,
+		{id = "d", state = .Done, since = at(base, 9)},
+		{id = "d/ask", state = .Blocked, since = at(base, 0)})
+	append(&reports, ..more[:])
 	rows, _ := app.status_rows_project(.Status, reports[:], {56, 56}, 1)
-	expect_rows(t, rows, {"[Needs you 1]", "g", "[Working 4]", "a", "b1", "b2", "z"})
+	expect_rows(t, rows, {"[Needs you 2]", "e", "d", "d/ask", "[Working 4]", "z", "b1", "b2", "a"})
 }
 
 @(test)
