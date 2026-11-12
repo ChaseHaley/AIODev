@@ -68,19 +68,35 @@ process_ancestor :: proc(processes: []Process_Info, index: int) -> int {
 
 // The program a pane's icon names. A process whose executable matches a reporting app wins, in the
 // order given, at any depth below the shell, so a reporter started through a launcher still counts.
-// Otherwise the shell's direct child is chosen; `current` keeps a sibling choice stable, and the
-// last in snapshot order is taken when none is current. Console hosts are not programs.
-process_program :: proc(processes: []Process_Info, root: u32, apps: []string, current: u32) -> int {
+// When `root_program`, the pane started a program in place of a shell: it may match a reporter
+// itself, and otherwise names the pane, so the helpers it starts never do. Otherwise the shell's
+// direct child is chosen; `current` keeps a sibling choice stable, and the last in snapshot order is
+// taken when none is current. Console hosts are not programs.
+process_program :: proc(
+	processes: []Process_Info,
+	root: u32,
+	apps: []string,
+	current: u32,
+	root_program: bool,
+) -> int {
 	parents := make(map[u32]u32, len(processes), context.temp_allocator)
 	for p in processes {parents[p.id] = p.parent}
 	for app in apps {
 		best, best_depth := -1, len(processes) + 1
 		for p, index in processes {
-			if p.id == root || !process_stem_is(p.executable, app) {continue}
+			if !process_stem_is(p.executable, app) {continue}
+			if p.id == root {
+				if root_program {best, best_depth = index, 0}
+				continue
+			}
 			depth := process_depth(parents, p.id, root, len(processes))
 			if depth > 0 && depth < best_depth {best, best_depth = index, depth}
 		}
 		if best >= 0 {return best}
+	}
+	if root_program {
+		for p, index in processes {if p.id == root {return index}}
+		return -1
 	}
 	child := -1
 	for p, index in processes {

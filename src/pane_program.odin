@@ -102,7 +102,9 @@ program_update :: proc(
 	root: u32,
 ) -> bool {
 	apps := program_reporters(entry)
-	index := procinfo.process_program(processes, root, apps, program_polled(entry))
+	index := procinfo.process_program(
+		processes, root, apps, program_polled(entry), program_at_root(app, processes, root),
+	)
 	if index < 0 {
 		// A program seen once never showed, so its end changes nothing drawn or saved.
 		if _, seen := entry.program.(Program_Seen); seen {entry.program = nil; return false}
@@ -144,6 +146,19 @@ program_update :: proc(
 	if strings.equal_fold(name, program.name) {return adopted}
 	program_name_set(app, program, name)
 	return true
+}
+
+// Whether the pane's started process is itself its program, as when `aio pane.split -- claude` runs
+// Claude Code in place of a shell: a program known by name (bundled artwork or the user's PNG) that
+// is not a known shell. Its own helpers, such as the cmd.exe running a hook, never name the pane. A
+// shell, or an unknown program such as a custom shell, has its direct child named instead.
+program_at_root :: proc(app: ^App, processes: []procinfo.Process_Info, root: u32) -> bool {
+	for p in processes {
+		if p.id != root {continue}
+		stem := procinfo.executable_stem(p.executable)
+		return settings.shell_kind(stem) == .Other && program_known(app, stem)
+	}
+	return false
 }
 
 // What a program confirmed by a second poll shows: its image, name and command.
@@ -327,7 +342,9 @@ pane_running :: proc(
 		return program_polled(entry), command
 	}
 	root := term.process_id(entry.session)
-	index := procinfo.process_program(processes, root, program_reporters(entry), 0)
+	index := procinfo.process_program(
+		processes, root, program_reporters(entry), 0, program_at_root(app, processes, root),
+	)
 	if index < 0 {return}
 	program = processes[index].id
 	arguments, _ := procinfo.process_arguments(program, root, context.temp_allocator)

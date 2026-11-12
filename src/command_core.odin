@@ -277,7 +277,7 @@ pane_reports :: proc(app: ^App, only: ^Pane_Target) -> []cli_protocol.Pane_Repor
 					processes = session_processes(app)
 					snapped = true
 				}
-				if index := pane_process(entry, processes); index >= 0 {
+				if index := pane_process(app, entry, processes); index >= 0 {
 					report.process, report.pid = processes[index].executable, processes[index].id
 				}
 			}
@@ -301,9 +301,11 @@ pane_reports :: proc(app: ^App, only: ^Pane_Target) -> []cli_protocol.Pane_Repor
 // The snapshot index of the process a pane report names: the program the pane's icon names, chosen
 // as polling chooses it, else the shell itself while it waits at its prompt; -1 when neither runs.
 @(private)
-pane_process :: proc(entry: ^Session_Entry, processes: []procinfo.Process_Info) -> int {
+pane_process :: proc(app: ^App, entry: ^Session_Entry, processes: []procinfo.Process_Info) -> int {
 	root := term.process_id(entry.session)
-	program := procinfo.process_program(processes, root, program_reporters(entry), program_polled(entry))
+	program := procinfo.process_program(
+		processes, root, program_reporters(entry), program_polled(entry), program_at_root(app, processes, root),
+	)
 	if program >= 0 {return program}
 	for p, index in processes {if p.id == root {return index}}
 	return -1
