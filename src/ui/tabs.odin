@@ -56,10 +56,9 @@ TAB_STACK_OFFSET :: [2]f32{7, 3}
 // The space cut from the mark behind around the one in front.
 TAB_STACK_GAP :: f32(1.5)
 
-// The width of a tile's leading badge column, without the gap after it.
-tab_badge_width :: proc(t: Tab_Tile) -> f32 {
-	return tab_badge_shown(t.behind) ? TAB_STACK_OFFSET.x + TAB_STACK_MARK : ICON_BUTTON
-}
+// Every tab's leading badge column fits a stack, so titles line up whether a tab stacks or not.
+// A single mark sits at the column's left, where the mark behind a stack sits.
+TAB_BADGE_COLUMN :: TAB_STACK_OFFSET[0] + TAB_STACK_MARK
 
 // What a tab shows in the strip and the rail. Each orientation lays it out with its own geometry.
 Tab_Tile :: struct {
@@ -234,7 +233,7 @@ tab_draw :: proc(
 	}
 	// A tab too narrow for both drops the program icon before the status.
 	if width >= 72 * scale + status_width && tab_badge_shown(t.badge) {
-		icon_width = (tab_badge_width(t) + SPACE_2) * scale
+		icon_width = (TAB_BADGE_COLUMN + SPACE_2) * scale
 		if result := tab_badge_draw(list, text, theme, tile, t, scale); result != .Ok {return result}
 	}
 	if result := draw_fading_text(

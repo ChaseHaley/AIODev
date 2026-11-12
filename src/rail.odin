@@ -384,7 +384,8 @@ rail_row_draw :: proc(
 	has_badge := ui.tab_badge_shown(t.badge)
 	close := rail_tab_close_rect(w, layout, index)
 	show_close := hover || pressed || ui.armed_is(w.tab_close_armed, index)
-	leading := has_badge ? (ui.tab_badge_width(t) + ui.SPACE_2) * s : 0
+	// Every row keeps the badge column, so titles line up whatever each row's badge is.
+	leading := (ui.TAB_BADGE_COLUMN + ui.SPACE_2) * s
 	trailing := show_close ? tile.x + tile.width - close.x - 4 * s : 0
 	// Status sits at the right, before Close when it shows, with its place kept while tab status is on.
 	status_right := show_close ? close.x : tile.x + tile.width - 4 * s
@@ -462,14 +463,15 @@ rail_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 		fill := pressed ? app.theme.pressed : app.theme.hover
 		ui.draw_rect(&w.list, {rect = tile, color = fill, radius = ui.RADIUS_CONTROL * w.scale})
 	}
-	// The plus takes a leading icon's column so its label lines up with the tab titles.
+	// The plus sits where a tab's single mark does, and its label after the badge column, where the
+	// tab titles start.
 	plus := render.Rect{tile.x + ui.CONTROL_INSET * w.scale, tile.y, ui.ICON_BUTTON * w.scale, tile.height}
 	ui.icon_draw(&w.list, .Add, plus, app.theme.muted, ui.ICON_INDICATOR, w.scale)
 	if result := ui.draw_fading_text(
 		&w.ui_text,
 		&w.list,
 		"New tab",
-		plus.x + plus.width + ui.SPACE_2 * w.scale,
+		plus.x + (ui.TAB_BADGE_COLUMN + ui.SPACE_2) * w.scale,
 		rail_text_baseline(w, tile),
 		app.theme.muted,
 		max(0, tile.width - 40 * w.scale),

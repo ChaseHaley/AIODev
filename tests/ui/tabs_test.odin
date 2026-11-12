@@ -103,7 +103,7 @@ tab_draw_keeps_the_program_icon_left_and_status_before_close :: proc(t: ^testing
 }
 
 // A tab with several panes stacks its focused pane's mark over the one behind; the mark behind
-// stays clear of a gap around the front one, and the title starts after the wider stack.
+// stays clear of a gap around the front one, and the title starts where a one-pane tab's does.
 @(test)
 tab_draw_stacks_the_focused_mark_over_the_one_behind :: proc(t: ^testing.T) {
 	fonts, err := font.system_create()
@@ -164,7 +164,17 @@ tab_draw_stacks_the_focused_mark_over_the_one_behind :: proc(t: ^testing.T) {
 			}
 		}
 		testing.expect(t, backs > 0)
+		// The title starts where a one-pane tab's does.
+		render.draw_list_reset(&list)
+		testing.expect_value(t, ui.tab_draw(&list, &text, theme, bar, 0, 0,
+			{title = "Title", badge = {atlas = front_atlas}, selected = true}, 0, 0, scale),
+			render.Build_Status.Ok)
+		single_x := f32(-1)
+		for g in list.glyphs {
+			if g.flags & render.GLYPH_COLOR == 0 {single_x = g.rect.x; break}
+		}
+		testing.expect_value(t, single_x, title_x)
 		left := bar.x + ui.CONTROL_INSET * scale
-		testing.expect(t, title_x >= left + (ui.TAB_STACK_OFFSET.x + ui.TAB_STACK_MARK + ui.SPACE_2) * scale - 1)
+		testing.expect(t, title_x >= left + (ui.TAB_BADGE_COLUMN + ui.SPACE_2) * scale - 1)
 	}
 }
