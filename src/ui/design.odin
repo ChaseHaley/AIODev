@@ -41,8 +41,9 @@ CHECKBOX_SIZE :: f32(16)
 RISE_DIALOG :: f32(4)
 RISE_NOTICE :: f32(6)
 
-// The text inset on each side of a keycap.
+// The text inset on each side of a keycap, and its height.
 KEYCAP_PADDING :: SPACE_1
+KEYCAP_HEIGHT :: f32(20)
 // The text inset inside a field, button or row.
 CONTROL_INSET :: SPACE_2
 // The padding between an overlay's edge and its rows. Row text therefore sits SPACE_3 from the edge.

@@ -2368,10 +2368,24 @@ editor_clear_rect :: proc(p: ^Editor, l: Editor_Layout) -> render.Rect {
 	}
 }
 
+// The key that returns to the search, as a keycap at the field's right end while the keyboard is
+// elsewhere on the page. Its slot is fixed so the field's text and hit area do not depend on fonts.
+SEARCH_KEY_LABEL :: "Ctrl+F"
+@(private) SEARCH_KEY_SLOT :: f32(56)
+
+editor_search_key_rect :: proc(p: ^Editor, l: Editor_Layout) -> render.Rect {
+	s := l.scale
+	if editor_focus(p) == .Search || l.filter.width < 3 * SEARCH_KEY_SLOT * s {return {}}
+	right := l.filter.x + l.filter.width - SPACE_2 * s
+	if clear := editor_clear_rect(p, l); clear.width > 0 {right = clear.x - SPACE_1 * s}
+	return {right - SEARCH_KEY_SLOT * s, l.filter.y, SEARCH_KEY_SLOT * s, l.filter.height}
+}
+
 @(private)
 filter_text_rect :: proc(p: ^Editor, l: Editor_Layout) -> render.Rect {
 	r := l.filter
 	if clear := editor_clear_rect(p, l); clear.width > 0 {r.width = clear.x - r.x}
+	if key := editor_search_key_rect(p, l); key.width > 0 {r.width = key.x - r.x}
 	return r
 }
 
@@ -3717,6 +3731,16 @@ filter_draw :: proc(
 	if result := field_box_draw(box, list, theme, field_box_baseline(box), focused, placeholder);
 	   result != .Ok {
 		return result
+	}
+	if key := editor_search_key_rect(p, l); key.width > 0 {
+		keycap := text_styled(text, .Detail)
+		width := text_width(&keycap, SEARCH_KEY_LABEL) + 2 * KEYCAP_PADDING * s
+		height := min(KEYCAP_HEIGHT * s, key.height)
+		chip := render.Rect{key.x + key.width - width, key.y + (key.height - height) / 2, width, height}
+		draw_rect(list, {rect = chip, color = theme.border, radius = RADIUS_CONTROL * s, stroke = s})
+		baseline := chip.y + (chip.height - keycap.line_height) / 2 + keycap.ascent
+		if result := draw_text(&keycap, list, SEARCH_KEY_LABEL, chip.x + KEYCAP_PADDING * s, baseline,
+			   theme.muted, key.width); result != .Ok {return result}
 	}
 	clear := editor_clear_rect(p, l)
 	if clear.width == 0 {return .Ok}

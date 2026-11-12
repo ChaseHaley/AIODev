@@ -337,10 +337,17 @@ editor_tab_walks_the_page_like_a_browser :: proc(t: ^testing.T) {
 	testing.expect(t, ui.editor_select_key(&p, "pane.show_headers"))
 	before := ui.editor_row(&p).value
 	first := p.selected
+	// The search shows its Ctrl+F keycap only while the keyboard is elsewhere, beside its text.
+	l := page(&p)
+	testing.expect_value(t, ui.editor_search_key_rect(&p, l).width, 0)
 	// Landing on a switch focuses it without flipping it; the next Tab moves to the next row.
 	ui.editor_key(&p, key({key = .Tab}))
 	testing.expect_value(t, ui.editor_focus(&p), ui.Editor_Focus.Control)
 	testing.expect_value(t, ui.field_string(&p.value), before)
+	search_key := ui.editor_search_key_rect(&p, l)
+	testing.expect(t, search_key.width > 0)
+	testing.expect(t, search_key.x + search_key.width <= l.filter.x + l.filter.width)
+	testing.expect(t, !ui.editor_over_text(&p, l, search_key.x + search_key.width / 2, search_key.y + 2))
 	ui.editor_key(&p, key({key = .Tab}))
 	testing.expect(t, p.selected > first)
 	testing.expect_value(t, ui.editor_focus(&p), ui.Editor_Focus.Control)

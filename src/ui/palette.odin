@@ -20,7 +20,6 @@ import "core:unicode/utf8"
 @(private) PALETTE_PADDING :: 8
 @(private) PALETTE_TEXT_INSET :: DIALOG_PADDING
 @(private) PALETTE_SETTING_SUFFIX :: " SETTING"
-@(private) PALETTE_KEYCAP_HEIGHT :: 20
 // A leading icon and the gap after it.
 @(private) PALETTE_GLYPH_WIDTH :: ICON_BUTTON + SPACE_2
 @(private) PALETTE_NO_RANK :: 99
@@ -1359,7 +1358,7 @@ draw_key_hint :: proc(
 	scale: f32,
 ) -> render.Build_Status {
 	pen := x
-	height := min(PALETTE_KEYCAP_HEIGHT * scale, footer.height)
+	height := min(KEYCAP_HEIGHT * scale, footer.height)
 	top := footer.y + (footer.height - height) / 2
 	for key, i in hint.keys {
 		if key == "" {continue}
