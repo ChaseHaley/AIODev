@@ -73,7 +73,7 @@ try {
     Assert-Value (Read-State)['settings.key'] 'keys.pane.split_right' 'Settings finds the same shortcut'
     Assert-Value (Read-State)['settings.value'] 'Ctrl+Alt+F9, Ctrl+Alt+F10' 'Settings retains the full value'
     Invoke-Aio capture --out (Join-Path $repo 'build/shortcut-summary-settings.png') | Out-Null
-    Invoke-Aio key Tab | Out-Null
+    Invoke-Aio key Tab Enter | Out-Null
     Assert-Value (Read-State)['settings.popup'] 'Shortcuts' 'Settings opens the full alternatives list'
     Invoke-Aio capture --out (Join-Path $repo 'build/shortcut-summary-settings-menu.png') | Out-Null
     Invoke-Aio key Esc | Out-Null

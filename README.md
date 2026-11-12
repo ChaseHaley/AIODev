@@ -30,9 +30,16 @@ time, including while it fades out.
 
 ## Install
 
-1. Download the latest `AIODev-<version>-windows-x64.zip` from
-   [Releases](https://github.com/ChaseHaley/AIODev/releases) and check it against the `.sha256` file.
-2. Extract it and run `AIODev\install.ps1` in PowerShell.
+Quit AIODev if it is running, then in PowerShell, to install or upgrade:
+
+```powershell
+irm https://github.com/ChaseHaley/AIODev/releases/latest/download/install.ps1 | iex
+```
+
+Each release's `install.ps1` downloads that release's zip and refuses it unless its SHA256 matches.
+To install from the zip instead, download `AIODev-<version>-windows-x64.zip` from
+[Releases](https://github.com/ChaseHaley/AIODev/releases), extract it and run
+`powershell -ExecutionPolicy Bypass -File AIODev\install.ps1`; the policy applies to that run only.
 
 The installer is per user: it copies AIODev to `%LOCALAPPDATA%\Programs\AIODev`, adds `aio` to your
 PATH and creates a Start menu shortcut. Settings live in `%LOCALAPPDATA%\AIODev`.

@@ -153,7 +153,7 @@ try {
     Invoke-Aio expect state tabs.count=2
     Open-Shortcut
     $beforeCancel = [IO.File]::ReadAllText($path)
-    Invoke-Aio key Tab
+    Invoke-Aio key Tab Enter
     Invoke-Aio expect state settings.popup=Shortcuts
     Invoke-Aio key Enter Ctrl+Alt+Y
     Assert-Value (Read-State)['settings.value'].Trim('"') 'Ctrl+Alt+Y, Ctrl+Shift+T' 'capture replaces only the chosen alternative'
@@ -163,7 +163,7 @@ try {
     Close-Settings
     Assert-Value ([IO.File]::ReadAllText($path)) $beforeCancel 'cancel leaves shortcut file unchanged'
     Open-Shortcut
-    Invoke-Aio key Shift+Tab Space Tab Tab
+    Invoke-Aio key Tab Tab Space Shift+Tab Enter
     Invoke-Aio expect state settings.popup=Shortcuts
     Invoke-Aio key Enter
     Invoke-Aio expect state settings.capturing=true
@@ -199,7 +199,7 @@ try {
     Invoke-Aio command settings.open
     Invoke-Aio key Ctrl+A
     Invoke-Aio type input.leader
-    Invoke-Aio key Tab
+    Invoke-Aio key Tab Enter
     if ((Read-State)['settings.popup'] -eq 'Shortcuts') { Invoke-Aio key Enter }
     Invoke-Aio key Ctrl+Shift+P Enter
     Invoke-Aio expect state settings.error=false

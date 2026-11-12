@@ -96,15 +96,16 @@ opener_fields_save_when_left_and_offers_files_and_folders_separately :: proc(t: 
 	testing.expect(t, profile_file_has(f.path, `opener.program-1.name = "Neovim"`))
 	testing.expect_value(t, ui.editor_row(e).key, "opener.program-1.command")
 	testing.expect(t, !e.error)
-	// Tab and Shift+Tab leave the field but keep its row selected; the typed text still saves.
+	// Tab and Shift+Tab move to the next or previous row; the text typed into the field still saves.
 	if !testing.expect(t, ui.editor_select_key(e, "opener.program-1.name")) {return}
 	ui.editor_focus_row(e)
 	ui.field_set(&e.value, "Neovim Tab")
 	profile_press(&f, {key = .Tab})
 	testing.expect(t, profile_file_has(f.path, `opener.program-1.name = "Neovim Tab"`))
+	testing.expect_value(t, ui.editor_row(e).key, "opener.program-1.command")
+	profile_press(&f, {key = .Tab, modifiers = {.Shift}})
 	testing.expect_value(t, ui.editor_row(e).key, "opener.program-1.name")
 	testing.expect_value(t, ui.field_string(&e.value), "Neovim Tab")
-	ui.editor_focus_row(e)
 	ui.field_set(&e.value, "Neovim")
 	profile_press(&f, {key = .Tab, modifiers = {.Shift}})
 	testing.expect(t, profile_file_has(f.path, `opener.program-1.name = "Neovim"`))

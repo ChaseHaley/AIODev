@@ -67,9 +67,9 @@ try {
             Invoke-Aio key Esc
             Invoke-Aio key 'Ctrl+,'
             Invoke-Aio type theme.name
-            Invoke-Aio key Tab
+            Invoke-Aio key Tab Enter
             Shot "$theme-$mode-settings"
-            Invoke-Aio key Tab
+            Invoke-Aio key Ctrl+F
             Shot "$theme-$mode-search-focus"
             Assert-Idle
             Invoke-Aio command tab.close

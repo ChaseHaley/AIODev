@@ -28,7 +28,7 @@ try {
     Invoke-Aio command settings.open
     Invoke-Aio type theme.export
     Invoke-Aio expect state settings.key=theme.export
-    Invoke-Aio key Tab
+    Invoke-Aio key Tab Enter
     Invoke-Aio expect state settings.error=false
     $exports = @(Get-ChildItem -LiteralPath $themes -Filter "export-$id-*.theme.json")
     if ($exports.Count -ne 1) { throw 'Export did not create one file.' }
