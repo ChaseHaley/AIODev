@@ -42,14 +42,25 @@ To install from the zip instead, download `AIODev-<version>-windows-x64.zip` fro
 `powershell -ExecutionPolicy Bypass -File AIODev\install.ps1`; the policy applies to that run only.
 
 The installer is per user: it copies AIODev to `%LOCALAPPDATA%\Programs\AIODev`, adds `aio` to your
-PATH and creates a Start menu shortcut. Settings live in `%LOCALAPPDATA%\AIODev`.
+PATH and creates a Start menu shortcut. Settings live in `%APPDATA%\AIODev`; saved layouts and logs
+live in `%LOCALAPPDATA%\AIODev`.
+
+To uninstall, quit AIODev and run:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File "$env:LOCALAPPDATA\Programs\AIODev\uninstall.ps1"
+```
+
+It removes the installed files, the PATH entry, the Start menu shortcut and AIODev's notification
+registration. It keeps your settings, layouts and logs, and says where they are.
 
 Reload Settings refreshes open settings pages while keeping pending fields whose rows still exist.
 A save refuses to overwrite an external file edit; reload before saving that draft again. Delete Theme
 asks for a second press on the same theme; navigation, Escape, a settings revision or closing Settings
 ends that prompt.
 
-Releases are not code signed yet, so Windows SmartScreen may warn on first launch.
+Releases are not code signed yet, so Windows SmartScreen may warn on first launch. See the
+[code signing policy](#code-signing-policy).
 
 ## Build from source
 
@@ -88,6 +99,22 @@ Pane focus changes are bracketed in `src/focus_bracket.odin`: each window record
 entered, so repeating an enter or leave does not repeat a terminal focus report. Layout saving
 uses Disabled, Idle and Scheduled states in `src/layout_state.odin`; disabling it drops any
 pending save and releases its path.
+
+## Code signing policy
+
+Windows releases are to be signed with a free code signing certificate from
+[SignPath Foundation](https://signpath.org), through [SignPath.io](https://about.signpath.io), once
+the project's application is accepted. Until then releases are unsigned.
+
+- Only release builds made by `.github/workflows/release.yml` on GitHub-hosted runners, from a
+  tagged commit of this repository, are submitted for signing. The bundled Microsoft ConPTY files keep
+  Microsoft's own signatures and are not re-signed.
+- Committers and reviewers: [Chase Haley](https://github.com/ChaseHaley)
+- Approvers: [Chase Haley](https://github.com/ChaseHaley)
+
+Privacy: AIODev does not transfer any information to other networked systems unless specifically
+requested by the user or the person installing or operating it. Programs you run inside AIODev
+follow their own privacy policies.
 
 ## License
 

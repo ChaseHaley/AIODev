@@ -1,0 +1,32 @@
+// The version resource aiodev.rc and aio.rc share; they define AIO_FILE_DESCRIPTION and
+// AIO_ORIGINAL_FILENAME first. build.ps1 writes build/version.h with this build's version before each build.
+#include "../build/version.h"
+
+1 VERSIONINFO
+FILEVERSION AIO_VERSION_NUMBER
+PRODUCTVERSION AIO_VERSION_NUMBER
+FILEFLAGSMASK 0x3FL
+FILEFLAGS 0x0L
+FILEOS 0x40004L
+FILETYPE 0x1L
+FILESUBTYPE 0x0L
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "040904B0"
+        BEGIN
+            VALUE "CompanyName", "AIODev"
+            VALUE "FileDescription", AIO_FILE_DESCRIPTION
+            VALUE "FileVersion", AIO_VERSION_TEXT
+            VALUE "InternalName", AIO_ORIGINAL_FILENAME
+            VALUE "LegalCopyright", "Copyright (c) 2026 Chase Haley. MIT License."
+            VALUE "OriginalFilename", AIO_ORIGINAL_FILENAME
+            VALUE "ProductName", "AIODev"
+            VALUE "ProductVersion", AIO_VERSION_TEXT
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x409, 1200
+    END
+END

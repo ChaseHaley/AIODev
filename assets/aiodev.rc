@@ -1,3 +1,7 @@
 1 ICON "aiodev.ico"
 2 RCDATA "aiodev-notification.png"
 1 24 "aiodev.manifest"
+
+#define AIO_FILE_DESCRIPTION "AIODev"
+#define AIO_ORIGINAL_FILENAME "aiodev.exe"
+#include "version.rc"
