@@ -391,6 +391,12 @@ editor_outcome :: proc(app: ^App, w: ^Window, outcome: ui.Editor_Outcome) {
 	case .Font_Filter:
 		editor_font_filter(app, w)
 		return
+	case .Shortcut_Chain:
+		// Publication rebuilds the page with the chain still open; it closes once the save applied.
+		if shortcut_chain_save(app, ui.editor_chain_changes(p), Settings_Page{p}) {
+			ui.editor_chain_close(p)
+		}
+		return
 	case .Process_Remove:
 		if remove, ok := request.(ui.Process_Remove_Request); ok {
 			editor_process_remove_ask(app, w, remove.group)
@@ -939,6 +945,7 @@ settings_key :: proc(app: ^App, w: ^Window, e: input.Key_Event) {
 	}
 	key, consumed := content_key_prelude(app, w, e, false)
 	if consumed {return}
+	if shortcut_undo_key(app, key.logical) {return}
 	switch key.clipboard {
 	case .Copy:
 		clipboard_copy(app, ui.editor_selection(p))
@@ -1150,6 +1157,14 @@ when AIO_CONTROL {
 		state_rect(r, "settings.search_rect", page.filter)
 		state_rect(r, "settings.outline_rect", page.outline)
 		state_rect(r, "settings.list_rect", page.list)
+		chain_rows := make([]Chain_Report_Row, len(p.chain.members), context.temp_allocator)
+		if settings_active(w) {
+			for &row, member in chain_rows {row.row, row.right, row.shown = ui.editor_chain_row(p, page, member)}
+		}
+		shortcut_chain_state_report(r, "settings", &p.chain, chain_rows, &w.ui_text, w.scale)
+		used_by := ui.shortcut_capture_used_by(&p.capture)
+		if ui.editor_chained(p) {used_by = ui.shortcut_chain_used_by(&p.chain)}
+		state_text(r, "settings.used_by", used_by)
 	}
 
 	// Current pages report draft while they hold pending work, derived rather than stored.

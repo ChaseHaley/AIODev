@@ -24,6 +24,8 @@ import "core:unicode/utf8"
 // A leading icon and the gap after it.
 @(private) PALETTE_GLYPH_WIDTH :: ICON_BUTTON + SPACE_2
 @(private) PALETTE_NO_RANK :: 99
+// The band a "Used by" line opens under the row whose chord another command holds.
+@(private) PALETTE_NOTE_HEIGHT :: 16
 
 // What activating a result does.
 Outcome :: enum {
@@ -36,6 +38,8 @@ Outcome :: enum {
 	Set_Setting,
 	Open_Tab,
 	Open_Workspace,
+	// A conflict chain resolved: the owner saves palette_chain_changes, then palette_chain_close.
+	Save_Chain,
 }
 
 // The kind a result belongs to. A row names it only when another result shares its title.
@@ -241,14 +245,35 @@ Chosen_Workspace :: struct {
 	id: u64,
 }
 
+// `lead` is the band above the rows that a conflict chain's line takes, empty otherwise.
 Palette_Layout :: struct {
-	panel, mode_bar, input, list, footer:     render.Rect,
-	modes:                                  [Palette_Mode]render.Rect,
-	viewport:                               render.Rect,
-	row_height, scale:                      f32,
-	rows:                                   int,
-	bar:                                    Scrollbar,
-	bar_visible:                            bool,
+	panel, mode_bar, input, list, footer, lead: render.Rect,
+	modes:                                    [Palette_Mode]render.Rect,
+	viewport:                                 render.Rect,
+	row_height, scale:                        f32,
+	rows:                                     int,
+	bar:                                      Scrollbar,
+	bar_visible:                              bool,
+}
+
+// Lines above the rows: a conflict chain's line.
+@(private)
+palette_lead_rows :: proc(p: ^Palette) -> int {
+	_, chained := p.edit.(Chain_Edit)
+	return chained ? 1 : 0
+}
+
+// The result whose recording chord another command holds, and its "Used by" line; -1 when none.
+@(private)
+palette_note :: proc(p: ^Palette) -> (index: int, line: string) {
+	#partial switch &edit in p.edit {
+	case Shortcut_Edit:
+		if shortcut_capture_recording(&edit.capture) {line = shortcut_capture_used_by(&edit.capture)}
+		if line != "" {return edit.result, line}
+	case Chain_Edit:
+		if line = shortcut_chain_used_by(&edit.chain); line != "" {return edit.chain.recording, line}
+	}
+	return -1, ""
 }
 
 @(require_results)
@@ -884,7 +909,9 @@ palette_key :: proc(
 	}
 	switch &edit in p.edit {
 	case Shortcut_Edit:
-		return palette_binding_key(p, &edit, e), 0
+		return palette_binding_key(p, registry, &edit, e), 0
+	case Chain_Edit:
+		return palette_chain_result(p, registry, &edit, shortcut_chain_key(&edit.chain, e)), 0
 	case Choice_Edit, Text_Edit:
 		return edit_key(p, e), 0
 	}
@@ -1006,7 +1033,7 @@ palette_frame :: proc(viewport_width, viewport_height, viewport_scale: f32) -> P
 // Owners fit whenever the viewport may have changed; palette_draw fits before it draws.
 palette_fit :: proc(p: ^Palette, viewport_width, viewport_height, viewport_scale: f32) {
 	frame := palette_frame(viewport_width, viewport_height, viewport_scale)
-	p.visible_rows = frame.rows
+	p.visible_rows = max(0, frame.rows - palette_lead_rows(p))
 	p.fit_page = {0, 0, frame.width, frame.height}
 	p.fit_scale = frame.scale
 	keep_selection_visible(p)
@@ -1020,9 +1047,14 @@ palette_layout :: proc(p: ^Palette, viewport_width, viewport_height, viewport_sc
 	panel_width, row_height, padding := f.panel_width, f.row_height, f.padding
 	footer_height, input_height := f.footer_height, f.input_height
 	mode_height, separator := f.mode_height, f.separator
-	rows := clamp(len(p.results) - p.scroll, 0, f.rows)
+	lead := palette_lead_rows(p)
+	rows := clamp(len(p.results) - p.scroll, 0, max(0, f.rows - lead))
 	if len(p.results) == 0 && f.rows > 0 {rows = 1}
-	used := f32(rows) * row_height
+	note_height: f32
+	if note, _ := palette_note(p); note >= p.scroll && note < p.scroll + rows {
+		note_height = PALETTE_NOTE_HEIGHT * scale
+	}
+	used := f32(rows + lead) * row_height + note_height
 	list_padding := min(padding, panel_width / 2)
 	panel := render.Rect {
 		x      = (width - panel_width) / 2,
@@ -1032,12 +1064,15 @@ palette_layout :: proc(p: ^Palette, viewport_width, viewport_height, viewport_sc
 	}
 	mode_bar := render.Rect{panel.x, panel.y, panel.width, mode_height}
 	input := render.Rect{panel.x, panel.y + mode_height, panel.width, input_height}
+	top := input.y + input_height + separator + padding
+	lead_height := f32(lead) * row_height
+	inner := panel.width - 2 * list_padding
 	l := Palette_Layout {
 		panel      = panel,
 		mode_bar   = mode_bar,
 		input      = input,
-		list       = {panel.x + list_padding, input.y + input_height + separator + padding,
-			panel.width - 2 * list_padding, used},
+		lead       = {panel.x + list_padding, top, inner, lead_height},
+		list       = {panel.x + list_padding, top + lead_height, inner, used - lead_height},
 		viewport   = {0, 0, width, height},
 		row_height = row_height,
 		scale      = scale,
@@ -1055,11 +1090,11 @@ palette_layout :: proc(p: ^Palette, viewport_width, viewport_height, viewport_sc
 		l.modes[mode] = {mode_x, panel.y, mode_width, mode_height}
 		mode_x += mode_width
 	}
-	if footer_height > 0 {l.footer = {panel.x, l.list.y + used + padding, panel.width, footer_height}}
+	if footer_height > 0 {l.footer = {panel.x, top + used + padding, panel.width, footer_height}}
 	// The track replaces the list's right padding, inside the panel border.
-	extent := Scroll_Extent{len(p.results), f.rows, p.scroll}
+	extent := Scroll_Extent{len(p.results), max(0, f.rows - lead), p.scroll}
 	gutter := SCROLLBAR_TRACK * scale + border
-	area := render.Rect{panel.x + panel.width - gutter, l.list.y, SCROLLBAR_TRACK * scale, used}
+	area := render.Rect{panel.x + panel.width - gutter, l.list.y, SCROLLBAR_TRACK * scale, l.list.height}
 	state := palette_scrollbar_state(p)
 	if l.bar, l.bar_visible = scrollbar_layout(area, extent, state, scale); l.bar_visible {
 		l.list.width = max(0, area.x - l.list.x)
@@ -1067,13 +1102,22 @@ palette_layout :: proc(p: ^Palette, viewport_width, viewport_height, viewport_sc
 	return l
 }
 
+// The result under a point. The "Used by" band under a row belongs to that row.
 @(private)
 row_at :: proc(p: ^Palette, l: Palette_Layout, x, y: f32) -> int {
 	r := l.list
 	if !render.rect_contains(r, x, y) || l.row_height <= 0 {
 		return -1
 	}
-	index := p.scroll + int((y - r.y) / l.row_height)
+	offset := y - r.y
+	if note, _ := palette_note(p); note >= p.scroll {
+		below := f32(note - p.scroll + 1) * l.row_height
+		if offset >= below {
+			if offset < below + PALETTE_NOTE_HEIGHT * l.scale {return note}
+			offset -= PALETTE_NOTE_HEIGHT * l.scale
+		}
+	}
+	index := p.scroll + int(offset / l.row_height)
 	return index < len(p.results) && index - p.scroll < l.rows ? index : -1
 }
 
@@ -1085,11 +1129,14 @@ mode_at :: proc(l: Palette_Layout, x, y: f32) -> int {
 	return -1
 }
 
-palette_mouse_move :: proc(p: ^Palette, l: Palette_Layout, x, y: f32) -> Outcome {
+// `text` measures a conflict chain's chips.
+palette_mouse_move :: proc(p: ^Palette, l: Palette_Layout, x, y: f32, text: ^Text = nil) -> Outcome {
 	if _, sliding := p.drag.(Slider_Drag); sliding {return .None}
 	switch &edit in p.edit {
 	case Shortcut_Edit:
 		return palette_binding_hover(p, &edit, l, x, y)
+	case Chain_Edit:
+		return palette_chain_hover(p, &edit, l, text, x, y)
 	case Choice_Edit:
 		hover := popup_row_at(p, &edit, l, x, y)
 		if hover == edit.hover {return .None}
@@ -1125,6 +1172,10 @@ palette_mouse_press :: proc(
 	Outcome,
 	commands.Command_Id,
 ) {
+	if edit, chained := &p.edit.(Chain_Edit); chained {
+		if l.bar_visible && scrollbar_contains(l.bar, x, y) {return palette_bar_press(p, l, y), 0}
+		return palette_chain_press(p, registry, edit, l, text, x, y), 0
+	}
 	if index := mode_at(l, x, y); index >= 0 && !palette_popup_contains(p, l, x, y) {
 		edit_set(p, nil)
 		drag_set(p, nil)
@@ -1135,13 +1186,7 @@ palette_mouse_press :: proc(
 		return palette_binding_press(p, binding, l, x, y), 0
 	}
 	if outcome, handled := edit_press(p, l, text, x, y); handled {return outcome, 0}
-	if l.bar_visible && scrollbar_contains(l.bar, x, y) {
-		drag: Scroll_Drag
-		offset := scrollbar_press(&drag, l.bar, y)
-		if drag.active {drag_set(p, Scrollbar_Drag{drag.grab})}
-		palette_scroll_to(p, offset)
-		return .Changed, 0
-	}
+	if l.bar_visible && scrollbar_contains(l.bar, x, y) {return palette_bar_press(p, l, y), 0}
 	if index := row_at(p, l, x, y); index >= 0 {
 		if p.results[index].kind == .Command {
 			row, _ := row_rect(p, l, index)
@@ -1158,6 +1203,16 @@ palette_mouse_press :: proc(
 		return .Closed, 0
 	}
 	return .None, 0
+}
+
+// A press on the results' scrollbar: the track jumps, the thumb starts a drag.
+@(private)
+palette_bar_press :: proc(p: ^Palette, l: Palette_Layout, y: f32) -> Outcome {
+	drag: Scroll_Drag
+	offset := scrollbar_press(&drag, l.bar, y)
+	if drag.active {drag_set(p, Scrollbar_Drag{drag.grab})}
+	palette_scroll_to(p, offset)
+	return .Changed
 }
 
 palette_query_box :: proc(p: ^Palette, l: Palette_Layout, text: ^Text, scale: f32) -> Field_Box {
@@ -1203,6 +1258,8 @@ palette_input_press :: proc(
 	x, y, scale: f32,
 	extend: bool,
 ) -> Outcome {
+	// A conflict chain keeps the query as it was until the chain ends.
+	if _, chained := p.edit.(Chain_Edit); chained {return .None}
 	edit_set(p, nil)
 	at := field_box_offset(palette_query_box(p, l, text, scale), x)
 	drag_set(p, Query_Drag{})
@@ -1220,6 +1277,7 @@ palette_scroll :: proc(p: ^Palette, rows: int) -> Outcome {
 	switch &edit in p.edit {
 	case Shortcut_Edit:
 		return .None
+	case Chain_Edit:
 	case Choice_Edit:
 		return popup_wheel(p, &edit, rows)
 	case Text_Edit:
@@ -1236,6 +1294,7 @@ palette_scroll_to :: proc(p: ^Palette, offset: int) -> Outcome {
 	if scroll == p.scroll {return .None}
 	p.scroll = scroll
 	p.selected = clamp(p.selected, p.scroll, min(len(p.results), p.scroll + p.visible_rows) - 1)
+	if edit, chained := &p.edit.(Chain_Edit); chained {edit.chain.selected = p.selected}
 	return .Changed
 }
 
@@ -1267,6 +1326,19 @@ draw_footer :: proc(
 		rect  = {l.footer.x, l.footer.y, l.footer.width, scale},
 		color = theme.border,
 	})
+	// A conflict chain's footer is Cancel · Esc, after a recording's key hints.
+	if edit, chained := &p.edit.(Chain_Edit); chained {
+		cancel := palette_chain_cancel_rect(l, text)
+		if shortcut_chain_recording(&edit.chain) {
+			hint_text := text_styled(text, .Detail)
+			message, error := shortcut_capture_footer(&edit.chain.capture)
+			if result := draw_text(&hint_text, list, message, l.footer.x + 12 * scale,
+			                       l.footer.y + (l.footer.height - hint_text.line_height) / 2 + hint_text.ascent,
+			                       error ? theme.error : theme.muted, max(1, cancel.x - l.footer.x - 24 * scale));
+			   result != .Ok {return result}
+		}
+		return chain_cancel_draw(list, text, theme, cancel, edit.chain.hover.part == .Cancel, scale)
+	}
 	if binding, open := &p.edit.(Shortcut_Edit); open {
 		hint_text := text_styled(text, .Detail)
 		message, error := shortcut_capture_footer(&binding.capture)
@@ -1473,7 +1545,11 @@ palette_draw :: proc(
 			PALETTE_MODES[p.mode].placeholder); result != .Ok { return result }
 	}
 	title_text := text^
-	if l.rows > 0 && l.list.width > 0 {
+	edit, chained := &p.edit.(Chain_Edit)
+	if chained {
+		if result := palette_chain_draw(p, edit, list, text, theme, l, pointer); result != .Ok {return result}
+	}
+	if l.rows > 0 && l.list.width > 0 && !chained {
 		if render.push_layer(list, l.list) != .None { return .Ok }
 		if len(p.results) == 0 {
 			row_baseline := l.list.y + (l.row_height - title_text.line_height) / 2 + title_text.ascent
@@ -1481,7 +1557,7 @@ palette_draw :: proc(
 				theme.muted); result != .Ok {return result}
 		}
 	}
-	if len(p.results) > 0 && l.rows > 0 && l.list.width > 0 {
+	if len(p.results) > 0 && l.rows > 0 && l.list.width > 0 && !chained {
 		small := text_styled(text, .Detail)
 		kind_text := text_styled(text, .Detail)
 		row_padding := PALETTE_PADDING * scale
@@ -1489,7 +1565,7 @@ palette_draw :: proc(
 			index := p.scroll + rows
 			if index >= len(p.results) {break}
 			item := p.results[index]
-			row := render.Rect{l.list.x, l.list.y + f32(rows) * l.row_height, l.list.width, l.row_height}
+			row, _ := row_rect(p, l, index)
 			if index == p.selected {
 				draw_rect(list, {rect = row, color = theme.selection, radius = RADIUS_CONTROL * scale})
 				if render.rect_contains(row, pointer.x, pointer.y) {
@@ -1561,6 +1637,14 @@ palette_draw :: proc(
 					row_baseline, theme.faint, max(0, room - title_width - SPACE_2 * scale)); kind_result != .Ok {
 					return kind_result
 				}
+			}
+		}
+		// The line under a recording field whose chord another command holds.
+		if note, line := palette_note(p); note >= 0 {
+			if row, shown := row_rect(p, l, note); shown {
+				field := palette_binding_parts(row, scale).field
+				if result := used_by_draw(list, text, theme, line, field.x + field.width, row.y + row.height);
+				   result != .Ok {return result}
 			}
 		}
 	}

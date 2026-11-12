@@ -40,14 +40,21 @@ palette_keybindings_capture_clipboard_chords_reject_conflicts_and_apply_without_
 	if !testing.expect(t, b != nil) {return}
 	testing.expect_value(t, ui.field_string(&b.draft), "Ctrl+C")
 	palette_binding_press_key(s, {key = .C, modifiers = {.Control, .Shift}})
-	palette_binding_press_key(s, {key = .Enter})
 	b = palette_binding_edit(s)
-	testing.expect(t, b != nil && ui.shortcut_capture_recording(&b.capture),
-	               "a conflicting binding remains editable")
-	testing.expect(t, ui.palette_chosen_take(&s.palette) == nil, "handling the outcome took its value")
+	if !testing.expect(t, b != nil) {return}
+	testing.expect_value(t, ui.shortcut_capture_used_by(&b.capture), "Used by Copy")
+	palette_binding_press_key(s, {key = .Enter})
+	testing.expect_value(t, ui.palette_editing(&s.palette), ui.Palette_Edit_Kind.Chain)
+	testing.expect(t, ui.palette_chosen_take(&s.palette) == nil, "a conflict chooses nothing to save")
 	after, after_error := os.read_entire_file(f.path, context.temp_allocator)
 	testing.expect_value(t, after_error, nil)
 	testing.expect_value(t, string(after), string(before))
+	palette_binding_press_key(s, {key = .Escape})
+	testing.expect_value(t, ui.palette_editing(&s.palette), ui.Palette_Edit_Kind.None)
+	testing.expect_value(t, ui.palette_result_name(&s.palette, s.palette.results[s.palette.selected]),
+	                     "pane.split_right")
+	palette_binding_press_key(s, {key = .Enter, modifiers = {.Control}})
+	palette_binding_press_key(s, {key = .Enter})
 	palette_binding_press_key(s, {key = .F9, modifiers = {.Control, .Alt}})
 	palette_binding_press_key(s, {key = .Enter})
 	testing.expect_value(t, ui.palette_editing(&s.palette), ui.Palette_Edit_Kind.None)

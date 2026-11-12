@@ -43,7 +43,16 @@ Shortcut_Capture :: struct {
 	// The latest hint, static text; an error when `error`.
 	hint:         string,
 	error:        bool,
+	// The chord recorded last, and the "Used by" line naming the other commands that hold it, which
+	// the owner writes with shortcut_capture_check. Both are empty while nothing new is recorded.
+	chord:        Maybe(commands.Shortcut),
+	used_by:      [CAPTURE_USED_BY_CAP]u8,
+	used_by_len:  int,
 }
+
+// Room for the "Used by" line: several titles. A longer list stops at the last title that fits.
+@(private)
+CAPTURE_USED_BY_CAP :: 256
 
 Shortcut_Capture_Outcome :: enum u8 {
 	None,
@@ -62,12 +71,39 @@ Shortcut_Capture_Outcome :: enum u8 {
 shortcut_capture_open :: proc(c: ^Shortcut_Capture) {
 	c.state, c.alternatives = .Alternatives, {}
 	c.hint, c.error = ALTERNATIVES_HINT, false
+	capture_forget(c)
 }
 
 // Records the next chord into alternative `index`; the alternative count adds one.
 shortcut_capture_start :: proc(c: ^Shortcut_Capture, index: int = 0) {
 	c.state, c.replace = .Capturing, index
 	c.hint, c.error = c.leader == nil ? CAPTURE_NO_LEADER_HINT : CAPTURE_HINT, false
+	capture_forget(c)
+}
+
+@(private = "file")
+capture_forget :: proc(c: ^Shortcut_Capture) {
+	c.chord, c.used_by_len = nil, 0
+}
+
+// Writes the "Used by" line for the chord `c` recorded last: the commands in `book` other than the
+// one with settings key `except` that hold it. A free chord, or none, leaves the line empty.
+shortcut_capture_check :: proc(c: ^Shortcut_Capture, book: []Shortcut_Command, except: string) {
+	c.used_by_len = 0
+	chord, recorded := c.chord.?
+	if !recorded {return}
+	for command in book {
+		if command.key == except || !shortcuts_hold(command.shortcuts, chord) {continue}
+		lead := c.used_by_len == 0 ? "Used by " : ", "
+		if c.used_by_len + len(lead) + len(command.title) > CAPTURE_USED_BY_CAP {break}
+		c.used_by_len += copy(c.used_by[c.used_by_len:], lead)
+		c.used_by_len += copy(c.used_by[c.used_by_len:], command.title)
+	}
+}
+
+// "Used by" and the titles of the other commands holding the recorded chord, or empty.
+shortcut_capture_used_by :: proc(c: ^Shortcut_Capture) -> string {
+	return string(c.used_by[:c.used_by_len])
 }
 
 // A refused save records into the same alternative again, keeping the hint.
@@ -187,6 +223,7 @@ capture_key :: proc(
 			return .Save
 		case .Backspace, .Delete:
 			if mode == .Alternatives {capture_replace(c, draft, saved, "")} else {field_set(draft, "")}
+			capture_forget(c)
 			return .Changed
 		case .Tab:
 			c.state = .Idle
@@ -201,6 +238,7 @@ capture_key :: proc(
 	   ok && binding && !leader_pending &&
 	   commands.shortcut_matches(leader, e.key, modifiers, e.unshifted) {
 		c.state = .Leader_Pending
+		capture_forget(c)
 		return capture_note(c, CAPTURE_LEADER_HINT, false)
 	}
 	if leader_pending {
@@ -212,6 +250,7 @@ capture_key :: proc(
 	buffer: [commands.SHORTCUT_TEXT_CAP]u8
 	label := commands.shortcut_text(chord, buffer[:])
 	if binding {capture_replace(c, draft, saved, label)} else {field_set(draft, label)}
+	c.chord = chord
 	return capture_note(c, CAPTURE_HINT, false)
 }
 

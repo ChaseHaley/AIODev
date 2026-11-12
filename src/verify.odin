@@ -740,6 +740,7 @@ when AIO_CONTROL {
 
 	verify_notices_report :: proc(r: ^State_Report, app: ^App) {
 		state_value(r, "notices.window", app.notice_window)
+		holder := window_find(app, app.notice_window)
 		for n in ui.notices_live(&app.notices) {
 			left := "sticky"
 			if expires, timed := ui.notice_expiry(n).?; timed {
@@ -748,8 +749,12 @@ when AIO_CONTROL {
 			}
 			key, identity := verify_notice_entry(n)
 			state_valuef(r, key, "%s%s)", identity, left)
+			if n.action != "" && holder != nil {
+				rect := ui.notices_action_rect(&app.notices, &holder.ui_text, f32(holder.width), f32(holder.height),
+				                               holder.scale, n.id)
+				state_rect(r, state_key("%s.action", key), rect)
+			}
 		}
-
 	}
 
 	verify_workspace_index :: proc(app: ^App, w: ^Window) -> int {

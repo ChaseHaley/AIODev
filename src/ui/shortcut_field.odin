@@ -47,8 +47,9 @@ shortcut_parts :: proc(parts: ^Row_Parts, scale: f32, selected: bool) {
 	}
 }
 
+// `clash`: the recording holds a chord another command uses, which turns the field red.
 Shortcut_Field_State :: struct {
-	capturing, focused, positions_focused, physical: bool,
+	capturing, focused, positions_focused, physical, clash: bool,
 	empty_label: string,
 }
 
@@ -64,7 +65,8 @@ shortcut_field_draw :: proc(
 	box_draw(list, parts.field, theme, state.focused && !state.capturing, scale)
 	if state.capturing {
 		radius := RADIUS_CONTROL * scale
-		draw_rect(list, {rect = parts.field, color = theme.accent, radius = radius, stroke = 2 * scale})
+		ring := state.clash ? theme.error : theme.accent
+		draw_rect(list, {rect = parts.field, color = ring, radius = radius, stroke = 2 * scale})
 	}
 	scope, opened := clip_scope_open(list, parts.field, RADIUS_CONTROL * scale)
 	if !opened {return .Ok}

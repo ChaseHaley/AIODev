@@ -71,6 +71,8 @@ settings_reveal :: proc(app: ^App, w: ^Window, reveal: Settings_Reveal) {
 // The order is the invariant: the search is settled before the filter rebuilds the page, and the
 // target is selected after it, since a rebuild would otherwise select the first row.
 settings_reveal_page :: proc(p: ^ui.Editor, reveal: Settings_Reveal) {
+	// Going to another setting leaves a conflict chain, dropping what it did not save.
+	ui.editor_chain_close(p)
 	scroll := p.scroll
 	query, search := reveal.query, reveal.search
 	// A section with a query shows only its rows.
