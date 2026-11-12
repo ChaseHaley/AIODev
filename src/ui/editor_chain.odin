@@ -64,11 +64,11 @@ editor_chain_open :: proc(p: ^Editor, row: ^Editor_Row) {
 @(private)
 editor_chain_items :: proc(p: ^Editor) {
 	clear(&p.items)
-	append(&p.items, Editor_Item{-1, -1, 0})
+	append(&p.items, Editor_Item{group = -1, row = -1})
 	for member in 0 ..< len(p.chain.members) {
 		key := shortcut_chain_member_key(&p.chain, member)
 		for row, i in p.rows {
-			if row.key == key {append(&p.items, Editor_Item{row.group, i, 0}); break}
+			if row.key == key {append(&p.items, Editor_Item{group = row.group, row = i}); break}
 		}
 	}
 	p.selected = p.chain.selected + 1

@@ -119,8 +119,10 @@ Editor_Group :: struct {
 }
 
 // One page line: a group header, with its matching row count, when row is -1. Headers are never selected.
+// A shortcut row a search matched carries the matched alternative and parts.
 Editor_Item :: struct {
 	group, row, count: int,
+	shortcut:          Shortcut_Highlight,
 }
 
 // Keyboard focus as readers see it: the search field, the selected row's control, its key-position
@@ -450,6 +452,11 @@ Editor :: struct {
 	kept:                                                              Editor_Kept,
 	order:                                                             Editor_Order,
 	profile_positions:                                                 [dynamic]Profile_Position,
+	// The search field's record mode, and the pointer over its keyboard button.
+	keys:                                                              Key_Search,
+	keys_hover:                                                        bool,
+	// A complete chord the search names that no shortcut row uses, which Enter offers to assign.
+	free:                                                              Maybe(commands.Shortcut),
 }
 Editor_Outcome :: enum {
 	None,
@@ -465,6 +472,8 @@ Editor_Outcome :: enum {
 	Font_Filter,
 	// A conflict chain resolved: the owner saves editor_chain_changes as one revision.
 	Shortcut_Chain,
+	// The page owner lets the user pick a command for editor_free_chord.
+	Assign_Shortcut,
 }
 
 // A field the user typed into and then left: its row's key and the typed text. Owned.
@@ -1050,6 +1059,11 @@ editor_mode_set :: proc(p: ^Editor, next: Editor_Mode) {
 	if _, shortcut := next.(Editor_Shortcut); !shortcut {p.capture.state = .Idle}
 	// An unsaved curve edit lives only in its popover.
 	if _, curve := next.(Editor_Curve_Popup); !curve {p.motion_curve_edited = false}
+	// Record mode belongs to the search field. Its keys stay as typed text, which keeps the same rows.
+	if _, browsing := next.(Editor_Browsing); !browsing && p.keys.state != .Off {
+		key_search_leave(&p.keys, &p.filter)
+		editor_rebuild(p)
+	}
 }
 
 @(private)
@@ -1080,7 +1094,9 @@ focus_mode :: proc(focus: Editor_Focus) -> Editor_Mode {
 }
 
 @(private)
-filtering :: proc(p: ^Editor) -> bool {return strings.trim_space(field_string(&p.filter)) != ""}
+filtering :: proc(p: ^Editor) -> bool {
+	return p.keys.state != .Off || strings.trim_space(field_string(&p.filter)) != ""
+}
 
 // A swatch shows a translucent color as it blends over the row.
 @(private)
@@ -1259,22 +1275,67 @@ row_available :: proc(p: ^Editor, row: Editor_Row) -> bool {
 	return row.profile == "" || row.profile == p.expanded
 }
 
+// The alternative of a shortcut row that answers the search best: the recorded keys in record mode,
+// otherwise the typed query. The leader's own row answers a pressed leader.
+@(private)
+row_shortcut_match :: proc(p: ^Editor, q: ^commands.Shortcut_Query, row: Editor_Row) -> Shortcut_Highlight {
+	storage := make([]commands.Shortcut, len(row.value) + 1, context.temp_allocator)
+	count, err := commands.parse_shortcuts(row.value, storage)
+	if err != .None {return {}}
+	best: Shortcut_Highlight
+	leader, has_leader := p.capture.leader.?
+	for shortcut, i in storage[:count] {
+		hit: commands.Shortcut_Hit
+		switch {
+		case p.keys.state == .Off:
+			hit = commands.shortcut_query_match(q, shortcut)
+		case p.keys.press.state == .Leader && row.shortcut_mode == .Single:
+			if has_leader && commands.shortcut_equal(shortcut, leader) {hit = {.Exact, leader.modifiers, true}}
+		case:
+			hit = key_search_match(&p.keys, shortcut)
+		}
+		if hit.match > best.hit.match {best = {i, hit}}
+	}
+	return best
+}
+
 // Rebuilds the visible lines, keeping the current selection when it stays visible. A conflict chain
-// shows only its own rows.
+// shows only its own rows. Otherwise only the best match class is listed: words in a row's text or a
+// chord its shortcut holds, then a shortcut label's letters, then fuzzy title and row text. A query in
+// the shortcut grammar compares shortcuts by the grammar only, and record mode lists the shortcuts the
+// recorded keys run.
 editor_rebuild :: proc(p: ^Editor) {
 	if editor_chained(p) {
+		p.free = nil
 		editor_chain_items(p)
 		return
 	}
-	selected := Editor_Item{-1, -1, 0}
+	selected := Editor_Item{group = -1, row = -1}
 	if p.selected >= 0 && p.selected < len(p.items) {selected = p.items[p.selected]}
 	clear(&p.items)
+	p.free = nil
 	query := strings.to_lower(strings.trim_space(field_string(&p.filter)), context.temp_allocator)
 	words := strings.fields(query, context.temp_allocator)
+	recording := p.keys.state != .Off
+	shortcuts: commands.Shortcut_Query
+	if !recording && query != "" {shortcuts = commands.shortcut_query(query)}
+	searching := recording || query != ""
 	ranks := make([]u8, len(p.rows), context.temp_allocator)
+	matches := make([]Shortcut_Highlight, len(p.rows), context.temp_allocator)
+	used := false
 	best: u8
 	for row, i in p.rows {
 		if !row_available(p, row) {continue}
+		if searching && row.kind == .Shortcut {
+			matches[i] = row_shortcut_match(p, &shortcuts, row)
+			used ||= matches[i].hit.match == .Exact
+		}
+		match := matches[i].hit.match
+		if recording {
+			if match != .None {ranks[i] = 4}
+			best = max(best, ranks[i])
+			continue
+		}
 		haystack := strings.to_lower(
 			fmt.tprintf(
 				"%s %s %s %s %s %s %s",
@@ -1284,20 +1345,26 @@ editor_rebuild :: proc(p: ^Editor) {
 				row.description,
 				row.detail,
 				row.badge,
-				row.kind == .Shortcut ? row.value : "",
+				row.kind == .Shortcut && !shortcuts.chord ? row.value : "",
 			),
 			context.temp_allocator,
 		)
-		if row_matches(words, haystack) {
+		switch {
+		case row_matches(words, haystack) || match >= .Modifiers:
 			ranks[i] = 4
-		} else if row.kind == .Shortcut &&
-		   row_matches(words, strings.to_lower(row.value, context.temp_allocator), true) {
+		case match == .Label:
 			ranks[i] = 3
-		} else if row_matches(words, strings.to_lower(row.title, context.temp_allocator), true) {
+		case shortcuts.chord:
+		case row_matches(words, strings.to_lower(row.title, context.temp_allocator), true):
 			ranks[i] = 2
-		} else if row_matches(words, haystack, true) {ranks[i] = 1}
+		case row_matches(words, haystack, true):
+			ranks[i] = 1
+		}
 		best = max(best, ranks[i])
 	}
+	chord, named := commands.shortcut_query_chord(&shortcuts)
+	if recording {chord, named = commands.key_press_chord(p.keys.press)}
+	if named && !used && (.Leader not_in chord.modifiers || p.capture.leader != nil) {p.free = chord}
 	matched := make([dynamic]int, context.temp_allocator)
 	for _, g in p.groups {
 		clear(&matched)
@@ -1306,8 +1373,8 @@ editor_rebuild :: proc(p: ^Editor) {
 			if best > 0 && ranks[i] == best {append(&matched, i)}
 		}
 		if len(matched) == 0 {continue}
-		append(&p.items, Editor_Item{g, -1, len(matched)})
-		for i in matched {append(&p.items, Editor_Item{g, i, 0})}
+		append(&p.items, Editor_Item{group = g, row = -1, count = len(matched)})
+		for i in matched {append(&p.items, Editor_Item{group = g, row = i, shortcut = matches[i]})}
 	}
 	p.selected = 0
 	for item, index in p.items {
@@ -2128,6 +2195,10 @@ editor_key :: proc(p: ^Editor, raw: input.Key_Event) -> Editor_Outcome {
 		if outcome == .Hinted || outcome == .Changed {editor_shortcut_check(p, row)}
 		return shortcut_outcome(p, outcome)
 	}
+	// Recording takes every key, app shortcuts included; a recorded search keeps its own few.
+	if p.keys.state == .Recording {
+		return editor_key_search_step(p, key_search_record(&p.keys, raw, p.capture.leader))
+	}
 	e := raw
 	e.key = commands.logical_key(raw.key, raw.unshifted)
 	// Escape drops a reorder drag before anything else, and the block eases back to its place.
@@ -2146,6 +2217,10 @@ editor_key :: proc(p: ^Editor, raw: input.Key_Event) -> Editor_Outcome {
 		if focus != .Search {editor_keep(p); stop_editing(p)}
 		field_select_all(&p.filter)
 		return .Changed
+	}
+	if focus == .Search && key_search_toggles(raw) {return editor_key_search_toggle(p)}
+	if focus == .Search && p.keys.state == .Recorded {
+		if step, handled := key_search_recorded_key(&p.keys, e); handled {return editor_key_search_step(p, step)}
 	}
 	if focus == .Reset_All {
 		if e.key == .Enter || e.key == .Numpad_Enter || e.key == .Space {return .Reset_All}
@@ -2210,7 +2285,7 @@ editor_key :: proc(p: ^Editor, raw: input.Key_Event) -> Editor_Outcome {
 	case .Page_Down:
 		editor_step(p, max(1, p.visible_rows)); return .Changed
 	case .Enter, .Numpad_Enter:
-		if row == nil {return .None}
+		if row == nil {return focus == .Search && p.free != nil ? .Assign_Shortcut : .None}
 		if focus == .Positions {p.capture.physical = !p.capture.physical; return .Changed}
 		if focus == .Control && text_kind(row.kind) {
 			editor_mode_set(p, Editor_Editing{})
@@ -2267,12 +2342,54 @@ editor_key :: proc(p: ^Editor, raw: input.Key_Event) -> Editor_Outcome {
 		return .None
 	case .Search:
 	}
+	// The hidden text of a recorded search is not edited; typing returns through editor_text.
+	if p.keys.state != .Off {return .None}
 	if field_key(&p.filter, e) == .Edited {editor_filter(p)}
 	return .Changed
 }
 
+// Turns the search field's record mode on or off; turning it on moves the keyboard to the search.
+editor_key_search_toggle :: proc(p: ^Editor) -> Editor_Outcome {
+	if p.keys.state != .Off {
+		key_search_leave(&p.keys, &p.filter)
+	} else {
+		if editor_focus(p) != .Search {editor_keep(p); stop_editing(p)}
+		key_search_start(&p.keys)
+	}
+	editor_filter(p)
+	return .Changed
+}
+
+@(private)
+editor_key_search_step :: proc(p: ^Editor, step: Key_Search_Step) -> Editor_Outcome {
+	switch step {
+	case .None:
+		return .None
+	case .Changed:
+	case .Leave:
+		key_search_leave(&p.keys, &p.filter)
+	}
+	editor_filter(p)
+	return .Changed
+}
+
+// Whether the page records raw keys for its search, which then come before app shortcuts.
+editor_recording :: proc(p: ^Editor) -> bool {return p.keys.state == .Recording}
+
+// The chord the empty search offers to assign, which Assign_Shortcut hands to the page owner.
+editor_free_chord :: proc(p: ^Editor) -> Maybe(commands.Shortcut) {return p.free}
+
 editor_text :: proc(p: ^Editor, text: string) {
 	if editor_capturing(p) || editor_chained(p) {return}
+	switch p.keys.state {
+	case .Off:
+	case .Recording:
+		return
+	case .Recorded:
+		// Typing over recorded keys starts a new text search.
+		p.keys = {}
+		field_set(&p.filter, "")
+	}
 	#partial switch _ in p.mode {
 	case Editor_Positions, Editor_Reset_All:
 		return
@@ -2314,7 +2431,8 @@ editor_selection :: proc(p: ^Editor) -> string {
 	}
 	switch editor_focus(p) {
 	case .Search:
-		return field_selected_text(&p.filter)
+		// Recorded keys are drawn as keycaps; the text behind them is not on screen to copy.
+		return p.keys.state != .Off ? "" : field_selected_text(&p.filter)
 	case .Control:
 		if !editor_capturing(p) {return field_selected_text(&p.value)}
 	case .Positions, .Reset_All, .Page:
@@ -2407,9 +2525,8 @@ editor_fit :: proc(p: ^Editor, l: Editor_Layout) {
 	}
 }
 
-// The clear button inside the search field, shown while the field has text.
-editor_clear_rect :: proc(p: ^Editor, l: Editor_Layout) -> render.Rect {
-	if len(p.filter.bytes) == 0 {return {}}
+// The keyboard button that closes the search field, which turns record mode on and off.
+editor_keys_rect :: proc(l: Editor_Layout) -> render.Rect {
 	s := l.scale
 	return {
 		l.filter.x + l.filter.width - (SPACE_1 + HEIGHT_COMPACT) * s,
@@ -2417,6 +2534,15 @@ editor_clear_rect :: proc(p: ^Editor, l: Editor_Layout) -> render.Rect {
 		HEIGHT_COMPACT * s,
 		HEIGHT_COMPACT * s,
 	}
+}
+
+// The clear button inside the search field, before the keyboard button, shown while the field has
+// typed text.
+editor_clear_rect :: proc(p: ^Editor, l: Editor_Layout) -> render.Rect {
+	if len(p.filter.bytes) == 0 || p.keys.state != .Off {return {}}
+	r := editor_keys_rect(l)
+	r.x -= r.width
+	return r
 }
 
 // The key that returns to the search, as a keycap at the field's right end while the keyboard is
@@ -2427,7 +2553,7 @@ SEARCH_KEY_LABEL :: "Ctrl+F"
 editor_search_key_rect :: proc(p: ^Editor, l: Editor_Layout) -> render.Rect {
 	s := l.scale
 	if editor_focus(p) == .Search || l.filter.width < 3 * SEARCH_KEY_SLOT * s {return {}}
-	right := l.filter.x + l.filter.width - SPACE_2 * s
+	right := editor_keys_rect(l).x - SPACE_1 * s
 	if clear := editor_clear_rect(p, l); clear.width > 0 {right = clear.x - SPACE_1 * s}
 	return {right - SEARCH_KEY_SLOT * s, l.filter.y, SEARCH_KEY_SLOT * s, l.filter.height}
 }
@@ -2435,6 +2561,7 @@ editor_search_key_rect :: proc(p: ^Editor, l: Editor_Layout) -> render.Rect {
 @(private)
 filter_text_rect :: proc(p: ^Editor, l: Editor_Layout) -> render.Rect {
 	r := l.filter
+	r.width = editor_keys_rect(l).x - r.x
 	if clear := editor_clear_rect(p, l); clear.width > 0 {r.width = clear.x - r.x}
 	if key := editor_search_key_rect(p, l); key.width > 0 {r.width = key.x - r.x}
 	return r
@@ -2747,9 +2874,17 @@ editor_press :: proc(
 		pick_color(p, c, drag, x, y)
 		return .Changed
 	}
+	if render.rect_contains(editor_keys_rect(l), x, y) {return editor_key_search_toggle(p)}
 	if render.rect_contains(editor_clear_rect(p, l), x, y) {
 		if editor_focus(p) != .Search {editor_keep(p); stop_editing(p)}
 		field_set(&p.filter, "")
+		editor_filter(p)
+		return .Changed
+	}
+	if render.rect_contains(l.filter, x, y) && p.keys.state != .Off {
+		// The recorded keys hide the text, so a press there records again.
+		if editor_focus(p) != .Search {editor_keep(p); stop_editing(p)}
+		key_search_start(&p.keys)
 		editor_filter(p)
 		return .Changed
 	}
@@ -3081,15 +3216,18 @@ editor_hover :: proc(p: ^Editor, l: Editor_Layout, x, y: f32, text: ^Text = nil)
 		if entry < len(outline_entries(p)) {outline = entry}
 	}
 	clear := render.rect_contains(editor_clear_rect(p, l), x, y)
+	keys := render.rect_contains(editor_keys_rect(l), x, y)
 	if item == p.hover_item &&
 	   reset == p.hover_reset &&
 	   outline == p.hover_outline &&
 	   clear == p.hover_clear &&
+	   keys == p.keys_hover &&
 	   profile_item == p.hover_profile_item &&
 	   profile_control == p.hover_profile_control {
 		return bar_changed
 	}
 	p.hover_item, p.hover_reset, p.hover_outline, p.hover_clear = item, reset, outline, clear
+	p.keys_hover = keys
 	p.hover_profile_item, p.hover_profile_control = profile_item, profile_control
 	return true
 }
@@ -3098,8 +3236,9 @@ editor_hover :: proc(p: ^Editor, l: Editor_Layout, x, y: f32, text: ^Text = nil)
 editor_hover_clear :: proc(p: ^Editor) -> (changed: bool) {
 	changed =
 		p.hover_item >= 0 || p.hover_reset >= 0 || p.hover_outline >= 0 || p.hover_clear ||
-		p.hover_profile_item >= 0 || p.popup_bar_hover
+		p.hover_profile_item >= 0 || p.popup_bar_hover || p.keys_hover
 	p.hover_item, p.hover_reset, p.hover_outline, p.hover_clear = -1, -1, -1, false
+	p.keys_hover = false
 	p.popup_bar_hover = false
 	p.hover_profile_item, p.hover_profile_control = -1, .Radio
 	changed = shortcut_chain_hover(&p.chain, {}) || changed
@@ -3157,6 +3296,7 @@ editor_pointer :: proc(p: ^Editor, l: Editor_Layout, x, y: f32, text: ^Text = ni
 	}
 	if render.rect_contains(editor_reset_all_rect(l), x, y) {return .Hand}
 	if render.rect_contains(editor_clear_rect(p, l), x, y) {return .Hand}
+	if render.rect_contains(editor_keys_rect(l), x, y) {return .Hand}
 	if render.rect_contains(filter_text_rect(p, l), x, y) {return .Text}
 	if render.rect_contains(l.outline, x, y) {
 		entry := p.outline_scroll + int((y - l.outline.y) / l.outline_row_height)
@@ -3492,7 +3632,8 @@ profile_add_draw :: proc(
 	)
 }
 
-// Draws a control's resting value, or for the selected row its pending value and focus.
+// Draws a control's resting value, or for the selected row its pending value and focus. A shortcut a
+// search matched shows the matched alternative with its matched keys lit.
 @(private)
 control_draw :: proc(
 	p: ^Editor,
@@ -3504,6 +3645,7 @@ control_draw :: proc(
 	theme: Theme,
 	page: render.Rect,
 	scale: f32,
+	match: Shortcut_Highlight = {},
 ) -> render.Build_Status {
 	value := selected ? field_string(&p.value) : row.value
 	focused := selected && editor_editing(p)
@@ -3567,7 +3709,10 @@ control_draw :: proc(
 	case .Shortcut:
 		capturing := selected && editor_capturing(p)
 		clash := capturing && shortcut_capture_used_by(&p.capture) != ""
-		return shortcut_field_draw(list, text, theme, parts, shortcut_summary(value), {
+		positions: [commands.SHORTCUT_TEXT_CAP]int
+		summary := shortcut_summary(value)
+		if value == row.value && !capturing {summary = shortcut_summary_match(value, match, positions[:])}
+		return shortcut_field_draw(list, text, theme, parts, summary, {
 			capturing = capturing, focused = focused, clash = clash,
 			positions_focused = selected && editor_focus(p) == .Positions, physical = p.capture.physical,
 			empty_label = row.shortcut_mode == .Alternatives ? "Add shortcut" : "None",
@@ -3795,11 +3940,22 @@ filter_draw :: proc(
 	s := l.scale
 	box := filter_box(p, l, text)
 	box_draw(list, l.filter, theme, focused, s)
-	placeholder :=
-		l.outline.width > 0 ? "Search settings" : "Search settings, groups, and shortcuts"
-	if result := field_box_draw(box, list, theme, field_box_baseline(box), focused, placeholder);
-	   result != .Ok {
-		return result
+	if p.keys.state != .Off {
+		area := filter_text_rect(p, l)
+		area.x += CONTROL_INSET * s
+		area.width = max(0, area.width - CONTROL_INSET * s)
+		if result := key_search_draw(&p.keys, list, text, theme, area, s); result != .Ok {return result}
+	} else {
+		placeholder :=
+			l.outline.width > 0 ? "Search settings" : "Search settings, groups, and shortcuts"
+		if result := field_box_draw(box, list, theme, field_box_baseline(box), focused, placeholder);
+		   result != .Ok {
+			return result
+		}
+	}
+	if render.push_layer(list, l.page) != .None {return .Ok}
+	if key_search_button_draw(list, theme, editor_keys_rect(l), p.keys.state != .Off, s, pointer) != .None {
+		return .Ok
 	}
 	if key := editor_search_key_rect(p, l); key.width > 0 {
 		keycap := text_styled(text, .Detail)
@@ -3813,7 +3969,6 @@ filter_draw :: proc(
 	}
 	clear := editor_clear_rect(p, l)
 	if clear.width == 0 {return .Ok}
-	if render.push_layer(list, l.page) != .None {return .Ok}
 	if p.hover_clear {
 		draw_rect(list, {rect = clear, color = theme.hover, radius = RADIUS_CONTROL * s})
 		if result := hover_rim_draw(list, theme, clear, RADIUS_CONTROL * s, 1, s, pointer);
@@ -3889,10 +4044,18 @@ editor_draw :: proc(
 	matches := 0
 	for item in p.items {matches += item.count}
 	if status == "" {
-		status = fmt.tprintf(
-			"%d settings and shortcuts · Alt+↑/↓ groups · Esc clears search",
-			matches,
-		)
+		switch p.keys.state {
+		case .Off:
+			status = fmt.tprintf(
+				"%d settings and shortcuts · Alt+↑/↓ groups · Esc clears search · Alt+K searches by keys",
+				matches,
+			)
+		case .Recording:
+			status = "Recording keys · Backspace clears · Esc or Alt+K searches by text"
+		case .Recorded:
+			noun := matches == 1 ? "shortcut" : "shortcuts"
+			status = fmt.tprintf("%d %s · Backspace records again · Esc searches by text", matches, noun)
+		}
 	}
 	status_x := x + text_width(&heading, "Settings") + 16 * s
 	status_right := l.filter.x + l.filter.width
@@ -3916,13 +4079,22 @@ editor_draw :: proc(
 	if r := outline_draw(p, l, list, text, theme, pointer); r != .Ok {return r}
 	if len(p.items) == 0 && filtering(p) {
 		if render.push_layer(list, l.page) != .None {return .Ok}
+		empty := "No matching settings or shortcuts"
+		if chord, free := p.free.?; free {
+			buffer: [commands.SHORTCUT_TEXT_CAP]u8
+			label := commands.shortcut_text(chord, buffer[:])
+			empty = fmt.tprintf("No command uses %s. Enter to assign.", label)
+		} else if p.keys.state != .Off {
+			empty = p.keys.press.state == .Chord ? KEY_SEARCH_NO_MATCH : KEY_SEARCH_EMPTY_HINT
+		}
 		return draw_text(
 			text,
 			list,
-			"No matching settings or shortcuts",
+			empty,
 			l.list.x + ITEM_INSET * s,
 			l.list.y + (l.row_height - text.line_height) / 2 + text.ascent,
 			theme.muted,
+			max(1, l.list.width - 2 * ITEM_INSET * s),
 		)
 	}
 	if render.push_layer(list, l.list) != .None {return .Ok}
@@ -4045,7 +4217,7 @@ editor_draw :: proc(
 			theme.muted,
 			text_width_limit,
 		); result != .Ok {return result}
-		if result := control_draw(p, row, parts, selected, list, text, theme, l.list, s);
+		if result := control_draw(p, row, parts, selected, list, text, theme, l.list, s, item.shortcut);
 		   result != .Ok {
 			return result
 		}

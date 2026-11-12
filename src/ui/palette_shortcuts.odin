@@ -38,6 +38,8 @@ palette_binding_open :: proc(p: ^Palette, index: int) -> Outcome {
 	if index < 0 || index >= len(p.results) || p.results[index].command == nil {return .None}
 	command := p.results[index].command
 	edit_set(p, nil)
+	// The shortcut field owns the keys now; a search still waiting for keys keeps what it has.
+	if p.keys.state == .Recording {p.keys.state = .Recorded}
 	binding := Shortcut_Edit {
 		key      = strings.clone(settings.binding_key(command.name)),
 		saved    = commands.shortcut_set_text(command.shortcuts),
@@ -186,13 +188,34 @@ palette_binding_draw :: proc(
 		return shortcut_field_draw(list, text, theme, parts, summary, state, l.viewport, l.scale)
 	}
 	buffer: [commands.SHORTCUT_TEXT_CAP]u8
+	positions: [commands.SHORTCUT_TEXT_CAP]int
 	summary := Shortcut_Summary{additional = max(0, command.shortcuts.count - 1)}
+	// A search shows the alternative it matched, with its matched keys lit.
+	match := p.results[index].shortcut
 	if shortcuts := commands.active_shortcuts(command); len(shortcuts) > 0 {
-		summary.first = commands.shortcut_text(shortcuts[0], buffer[:])
+		alternative := clamp(match.alternative, 0, len(shortcuts) - 1)
+		summary.first = commands.shortcut_text(shortcuts[alternative], buffer[:])
+		if match.hit.match != .None {
+			summary.highlights = commands.shortcut_hit_positions(summary.first, match.hit, positions[:])
+		}
 	}
 	parts.positions = {}
 	focused := render.rect_contains(parts.field, pointer.x, pointer.y)
 	return shortcut_field_draw(list, text, theme, parts, summary, {focused = focused}, l.viewport, l.scale)
+}
+
+// Opens the command's shortcut editor recording the chord the Unassigned row offered, as though it had
+// just been pressed after its alternatives; Enter saves it as one more.
+@(private)
+palette_binding_assign :: proc(p: ^Palette, registry: ^commands.Registry, index: int) -> Outcome {
+	chord, assigning := p.assign.?
+	if !assigning || palette_binding_open(p, index) == .None {return .None}
+	p.assign = nil
+	binding := &p.edit.(Shortcut_Edit)
+	shortcut_capture_add(&binding.capture, &binding.draft, binding.saved, chord)
+	// A chord bound since the row offered it names its holder, and Enter opens the conflict chain.
+	shortcut_capture_check(&binding.capture, palette_shortcut_book(registry), binding.key)
+	return .Changed
 }
 
 // The open row's alternatives list, over everything else in the palette.

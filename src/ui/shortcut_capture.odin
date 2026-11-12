@@ -109,6 +109,17 @@ shortcut_capture_used_by :: proc(c: ^Shortcut_Capture) -> string {
 // A refused save records into the same alternative again, keeping the hint.
 shortcut_capture_resume :: proc(c: ^Shortcut_Capture) {c.state = .Capturing}
 
+// Records `chord` after the saved alternatives, as a press would, so the owner's conflict check reads
+// it; Enter saves it, Esc discards it.
+shortcut_capture_add :: proc(
+	c: ^Shortcut_Capture, draft: ^Text_Field, saved: string, chord: commands.Shortcut,
+) {
+	shortcut_capture_start(c, len(commands.shortcut_alternatives(saved, context.temp_allocator)))
+	buffer: [commands.SHORTCUT_TEXT_CAP]u8
+	capture_replace(c, draft, saved, commands.shortcut_text(chord, buffer[:]))
+	c.chord = chord
+}
+
 shortcut_capture_recording :: proc(c: ^Shortcut_Capture) -> bool {
 	return c.state == .Capturing || c.state == .Leader_Pending
 }

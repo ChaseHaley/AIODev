@@ -52,8 +52,9 @@ pointer_palette_scope_tabs_use_hand_query_uses_text :: proc(t: ^testing.T) {
 	for mode in ui.Palette_Mode {
 		ui.palette_set_mode(&s.palette, &s.registry, mode)
 		l := ui.palette_layout(&s.palette, f32(w.width), f32(w.height), w.scale)
-		pointer_expect_move(t, s, w, l.input.x + l.input.width - 20 * w.scale,
-			l.input.y + l.input.height / 2, .Text)
+		// The query's text ends at the keyboard button, which takes the hand.
+		pointer_expect_move(t, s, w, l.keys.x - 20 * w.scale, l.input.y + l.input.height / 2, .Text)
+		pointer_expect_move(t, s, w, l.keys.x + l.keys.width / 2, l.keys.y + l.keys.height / 2, .Hand)
 		r := l.modes[mode]
 		pointer_expect_move(t, s, w, r.x + r.width / 2, r.y + r.height / 2, .Hand)
 		gesture_button(s, w, .Left, true, r.x + r.width / 2, r.y + r.height / 2)
