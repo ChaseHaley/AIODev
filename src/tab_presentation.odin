@@ -6,7 +6,8 @@ import "aio:ui"
 import "core:log"
 
 // What tab `index` of the window's workspace shows in the strip and in the rail: its title, the
-// focused pane's content icon or program badge, and its program status.
+// focused pane's content icon or program badge with the most telling other pane's stacked behind it,
+// and its program status.
 tab_tile :: proc(app: ^App, w: ^Window, index: int) -> (ui.Tab_Tile, render.Build_Status) {
 	tab := w.workspace.tabs[index]
 	status := status_tab_mark(app, w, w.workspace, index)
@@ -18,13 +19,68 @@ tab_tile :: proc(app: ^App, w: ^Window, index: int) -> (ui.Tab_Tile, render.Buil
 		selected     = index == w.workspace.selected,
 		marked       = tab_marked_shown(w, index),
 	}
-	if pane, terminal := workspace_focused_session_pane(app, w.workspace, index); terminal {
-		result: render.Build_Status
-		t.badge.shell, t.badge.atlas, result = pane_icon(app, pane.session, ui.ICON_BUTTON * w.scale)
-		if result != .Ok {return t, result}
+	front, has_front := layout.focused_content(&tab.tree)
+	if !has_front {return t, .Ok}
+	behind, stacked := tab_pane_behind(app, tab, index)
+	size := (stacked ? ui.TAB_STACK_MARK : ui.ICON_BUTTON) * w.scale
+	result: render.Build_Status
+	t.badge, result = tab_content_badge(app, front, size)
+	if result == .Ok && stacked {t.behind, result = tab_content_badge(app, behind.content, size)}
+	return t, result
+}
+
+@(private = "file")
+tab_content_badge :: proc(
+	app: ^App,
+	content: layout.Content,
+	size: f32,
+) -> (
+	ui.Tab_Badge,
+	render.Build_Status,
+) {
+	badge, result := content_badge(app, workspace_session_for_content(app, content), content.kind, size)
+	return {icon = badge.icon, shell = badge.glyph, atlas = badge.atlas}, result
+}
+
+// How much a pane says about what its tab is for, least first.
+Pane_Interest :: enum u8 {
+	Shell,
+	Document,
+	Program,
+	// A coding agent, or any program reporting its status.
+	Agent,
+}
+
+@(private = "file")
+pane_interest :: proc(app: ^App, pane: Workspace_Pane) -> Pane_Interest {
+	entry := pane.session
+	if !pane_owns_session(pane.content.kind) {return .Document}
+	if entry == nil {return .Shell}
+	for record in entry.statuses {if status_shown(app, record) {return .Agent}}
+	program := program_adopted(entry)
+	if program == nil {return .Shell}
+	return program.launch.harness != .None ? .Agent : .Program
+}
+
+// The pane a tab with several panes stacks behind its focused one: the most telling of the others,
+// then the one whose status comes first, then the first in the layout. False for a tab of one pane.
+tab_pane_behind :: proc(app: ^App, tab: ^Tab, index: int) -> (best: Workspace_Pane, found: bool) {
+	best_interest: Pane_Interest
+	best_status: Status_Summary
+	walk := workspace_tab_panes(app, &tab.tree, index)
+	for pane, ok := workspace_pane_next(&walk); ok; pane, ok = workspace_pane_next(&walk) {
+		if pane.node == tab.tree.focus {continue}
+		interest := pane_interest(app, pane)
+		status: Status_Summary
+		status_summary_add(app, &status, pane.session)
+		if found {
+			if interest < best_interest {continue}
+			if interest == best_interest &&
+			   !(status.found && (!best_status.found || status_before(status.top, best_status.top))) {continue}
+		}
+		best, best_interest, best_status, found = pane, interest, status, true
 	}
-	if content, ok := layout.focused_content(&tab.tree); ok {t.badge.icon = CONTENT_POLICY[content.kind].icon}
-	return t, .Ok
+	return
 }
 
 // Tab presentation indexed by tab position: both arrays stay aligned with the workspace tab list. The

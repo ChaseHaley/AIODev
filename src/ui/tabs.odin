@@ -49,10 +49,23 @@ tab_badge_shown :: proc(b: Tab_Badge) -> bool {
 	return b.icon != .None || b.shell != "" || b.atlas.width > 0
 }
 
+// A tab with several panes stacks two smaller marks: its focused pane's in front, offset right and
+// down from the mark behind, which stands for the tab's most telling other pane.
+TAB_STACK_MARK :: f32(13)
+TAB_STACK_OFFSET :: [2]f32{7, 3}
+// The space cut from the mark behind around the one in front.
+TAB_STACK_GAP :: f32(1.5)
+
+// Every tab's leading badge column fits a stack, so titles line up whether a tab stacks or not.
+// A single mark sits at the column's left, where the mark behind a stack sits.
+TAB_BADGE_COLUMN :: TAB_STACK_OFFSET[0] + TAB_STACK_MARK
+
 // What a tab shows in the strip and the rail. Each orientation lays it out with its own geometry.
 Tab_Tile :: struct {
 	title:        string,
 	badge:        Tab_Badge,
+	// The mark stacked behind the badge for a tab with several panes; none for a single pane.
+	behind:       Tab_Badge,
 	status:       Status_Mark,
 	status_phase: f32,
 	// Tab status indicators are on: the status keeps its place, so titles do not reflow as
@@ -62,7 +75,9 @@ Tab_Tile :: struct {
 	marked:       bool,
 }
 
-// Draws the badge in the leading icon column of `tile`.
+// Draws the badge in the leading icon column of `tile`, stacked over the mark behind it when the tab
+// has one. The mark behind is clipped short of the front mark, so the gap shows whatever lies under
+// the tab: its hover, selection or marked fill.
 tab_badge_draw :: proc(
 	list: ^render.Draw_List,
 	text: ^Text,
@@ -71,14 +86,58 @@ tab_badge_draw :: proc(
 	t: Tab_Tile,
 	scale: f32,
 ) -> render.Build_Status {
-	size := ICON_BUTTON * scale
-	area := render.Rect{tile.x + CONTROL_INSET * scale, tile.y + (tile.height - size) / 2, size, size}
-	if t.badge.icon != .None {
-		ink := t.selected ? theme.tab_active_text : theme.tab_text
-		icon_draw(list, t.badge.icon, area, ink, ICON_BUTTON, scale)
+	ink := t.selected ? theme.tab_active_text : theme.tab_text
+	left := tile.x + CONTROL_INSET * scale
+	top := tile.y + (tile.height - ICON_BUTTON * scale) / 2
+	if !tab_badge_shown(t.behind) {
+		size := ICON_BUTTON * scale
+		return tab_mark_draw(list, text, theme, {left, top, size, size}, t.badge, ink, ICON_BUTTON, scale)
+	}
+	size := TAB_STACK_MARK * scale
+	back := render.Rect{left, top, size, size}
+	front := render.Rect{left + TAB_STACK_OFFSET.x * scale, top + TAB_STACK_OFFSET.y * scale, size, size}
+	cut_x := front.x - TAB_STACK_GAP * scale
+	cut_y := front.y - TAB_STACK_GAP * scale
+	current := list.layers[len(list.layers) - 1]
+	// Left of the cut-out, then above it.
+	clips := [2]render.Rect {
+		{back.x, back.y, cut_x - back.x, back.height},
+		{cut_x, back.y, back.x + back.width - cut_x, cut_y - back.y},
+	}
+	for clip in clips {
+		if render.push_layer(list, rect_within(clip, current.clip)) != .None {return .Ok}
+		if result := tab_mark_draw(list, text, theme, back, t.behind, ink, TAB_STACK_MARK, scale);
+		   result != .Ok {return result}
+	}
+	if render.push_layer(list, current.clip, current.radius) != .None {return .Ok}
+	return tab_mark_draw(list, text, theme, front, t.badge, ink, TAB_STACK_MARK, scale)
+}
+
+@(private = "file")
+tab_mark_draw :: proc(
+	list: ^render.Draw_List,
+	text: ^Text,
+	theme: Theme,
+	area: render.Rect,
+	badge: Tab_Badge,
+	ink: render.Color,
+	size, scale: f32,
+) -> render.Build_Status {
+	if badge.icon != .None {
+		icon_draw(list, badge.icon, area, ink, size, scale)
 		return .Ok
 	}
-	return shell_badge_draw(list, text, theme, area, t.badge.shell, scale, t.badge.atlas)
+	return shell_badge_draw(list, text, theme, area, badge.shell, scale, badge.atlas)
+}
+
+// The part of `r` inside `bounds`, empty when they do not overlap.
+@(private = "file")
+rect_within :: proc(r, bounds: render.Rect) -> render.Rect {
+	x := clamp(r.x, bounds.x, bounds.x + bounds.width)
+	y := clamp(r.y, bounds.y, bounds.y + bounds.height)
+	right := clamp(r.x + r.width, bounds.x, bounds.x + bounds.width)
+	bottom := clamp(r.y + r.height, bounds.y, bounds.y + bounds.height)
+	return {x, y, right - x, bottom - y}
 }
 
 // Draws the status progress along the bottom of `band`, inset from the tile's rounded ends.
@@ -174,7 +233,7 @@ tab_draw :: proc(
 	}
 	// A tab too narrow for both drops the program icon before the status.
 	if width >= 72 * scale + status_width && tab_badge_shown(t.badge) {
-		icon_width = (ICON_BUTTON + SPACE_2) * scale
+		icon_width = (TAB_BADGE_COLUMN + SPACE_2) * scale
 		if result := tab_badge_draw(list, text, theme, tile, t, scale); result != .Ok {return result}
 	}
 	if result := draw_fading_text(
