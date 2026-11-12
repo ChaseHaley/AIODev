@@ -42,8 +42,16 @@ foreach ($section in $sections.GetEnumerator()) {
 $notes.AddRange([string[]] @(
     '## Install',
     '',
-    "Download ``$(Split-Path $Archive -Leaf)``, extract it, and run ``AIODev\install.ps1`` in PowerShell.",
-    'It installs per user to `%LOCALAPPDATA%\Programs\AIODev`, adds `aio` to your PATH and creates a Start menu shortcut.',
+    'Quit AIODev, then in PowerShell, to install or upgrade:',
+    '',
+    '```powershell',
+    'irm https://github.com/ChaseHaley/AIODev/releases/latest/download/install.ps1 | iex',
+    '```',
+    '',
+    "Or download ``$(Split-Path $Archive -Leaf)``, extract it, and run",
+    '`powershell -ExecutionPolicy Bypass -File AIODev\install.ps1`.',
+    'Either way it installs per user to `%LOCALAPPDATA%\Programs\AIODev`, adds `aio` to your PATH and creates a',
+    'Start menu shortcut.',
     '',
     "SHA256: ``$hash``"
 ))
