@@ -30,7 +30,7 @@ reveal_fixture_create :: proc(t: ^testing.T, f: ^Reveal_Fixture, text: string) -
 	rows := [?]ui.Editor_Row {
 		{key = "font.size", title = "Font Size", value = "12", kind = .Integer},
 		{key = "pane.gap", title = "Pane Gap", value = "8", kind = .Integer},
-		{key = "tab.confirm_close", title = "Confirm Close", value = "true", kind = .Toggle},
+		{key = "interface.confirm", title = "Confirm Before", value = "Closing Split Tabs", kind = .Choice},
 		{key = "keys.pane.split_right", title = "Split Right", value = "Alt+Shift+R", kind = .Shortcut},
 		{key = "keys.tab.new", title = "New Tab", value = "Ctrl+T", kind = .Shortcut},
 	}
@@ -108,15 +108,15 @@ settings_reveal_shortcut_scopes_the_search_to_key_bindings :: proc(t: ^testing.T
 // The tab action clears the search, then selects its own row, so the selection survives the filter
 // that showed the whole page again.
 @(test)
-settings_reveal_tab_selects_the_confirm_close_row :: proc(t: ^testing.T) {
+settings_reveal_tab_selects_the_confirm_before_row :: proc(t: ^testing.T) {
 	f: Reveal_Fixture
 	defer reveal_fixture_destroy(t, &f)
 	if !reveal_fixture_create(t, &f, "font.size = 12\n") {return}
 	e := &f.editor
 	app.settings_reveal_page(e, {query = "font", search = .Scope})
-	app.settings_reveal_page(e, {key = "tab.confirm_close", search = .Clear})
+	app.settings_reveal_page(e, {key = "interface.confirm", search = .Clear})
 	testing.expect_value(t, ui.field_string(&e.filter), "")
-	testing.expect_value(t, reveal_row_key(e), "tab.confirm_close")
+	testing.expect_value(t, reveal_row_key(e), "interface.confirm")
 	testing.expect_value(t, ui.editor_focus(e), ui.Editor_Focus.Search)
 	testing.expect_value(t, e.message, "")
 }

@@ -303,7 +303,7 @@ find_headless_blur_keeps_matches_and_close_keeps_viewport :: proc(t: ^testing.T)
 	testing.expect_value(t, up(session), scrolled)
 
 	// The kept search reopens and runs; the close button closes without resetting the view either.
-	state.settings.terminal.find_keep_query = true
+	state.settings.terminal.find_reopen = .Last
 	app.find_toggle(&state, &w, entry)
 	testing.expect_value(t, ui.field_string(&w.find.query), "line_7$")
 	testing.expect(t, term.search_summary(session).progress != .Off)

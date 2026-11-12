@@ -52,15 +52,15 @@ try {
     Invoke-Aio expect state palette.item=terminal.copy_on_select
     Invoke-Aio key Ctrl+N
     Invoke-Aio expect state palette.selected=1
-    Invoke-Aio expect state palette.item=terminal.confirm_multiline_paste
+    Invoke-Aio expect state palette.item=terminal.find_reopen
     Invoke-Aio key Ctrl+N
     Invoke-Aio expect state palette.item=terminal.minimum_contrast
     Invoke-Aio key Ctrl+P
-    Invoke-Aio expect state palette.item=terminal.confirm_multiline_paste
+    Invoke-Aio expect state palette.item=terminal.find_reopen
     Invoke-Aio key Enter
     Invoke-Aio expect state palette.open=false
     Invoke-Aio expect state 'settings.filter='
-    Invoke-Aio expect state settings.key=terminal.confirm_multiline_paste
+    Invoke-Aio expect state settings.key=terminal.find_reopen
     Invoke-Aio expect state settings.editing=true
     Shot 'target-setting-focused'
 

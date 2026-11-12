@@ -14,7 +14,7 @@ tab_tile :: proc(app: ^App, w: ^Window, index: int) -> (ui.Tab_Tile, render.Buil
 		title        = tab_display_title(tab, index + 1),
 		status       = status,
 		status_phase = status_phase(app, w, status),
-		status_slot  = app.settings.status.enabled && app.settings.status.tab_indicators,
+		status_slot  = app.settings.status.enabled && .Tabs in app.settings.status.surfaces,
 		selected     = index == w.workspace.selected,
 		marked       = tab_marked_shown(w, index),
 	}

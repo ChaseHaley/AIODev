@@ -357,7 +357,7 @@ activity_rows_hit_and_explain_themselves_in_both_views :: proc(t: ^testing.T) {
 	s, w := &f.state, f.state.windows[0]
 	s.settings.status.panel = true
 	s.settings.status.enabled = true
-	s.settings.status.show_done = true
+	s.settings.status.show += {.Done}
 	entry := app.focused_session(s, w)
 	if !testing.expect(t, entry != nil) {return}
 	previous := entry.statuses

@@ -125,7 +125,7 @@ pending_close_text :: proc(
 			text.title = pc.tabs > 1 ? "Close tabs with ongoing work?" : "Close tab with ongoing work?"
 			text.body = "Closing will interrupt this work."
 		} else {
-			setting := settings.schema_find("tab.confirm_close")
+			setting := settings.schema_find("interface.confirm")
 			text.note = fmt.tprintf("Turn this off with %s in Settings.", setting.title)
 		}
 	case Close_Workspace:

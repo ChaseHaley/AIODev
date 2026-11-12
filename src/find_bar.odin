@@ -108,13 +108,13 @@ find_tick :: proc(app: ^App) {
 
 // Opens find, gives an open bar back the keyboard, or closes a bar that has it.
 find_toggle :: proc(app: ^App, w: ^Window, target: Find_Target) {
-	t := app.settings.terminal
+	reopen := app.settings.terminal.find_reopen
 	switch {
 	case !ui.find_is_open(&w.find):
-		ui.find_open(&w.find, &app.find_history, t.find_keep_query, t.find_select_query)
+		ui.find_open(&w.find, &app.find_history, reopen != .Empty, reopen == .Last_Selected)
 		on_find_outcome(app, w, target, ui.Find_Change.Changed)
 	case !ui.find_has_keyboard(&w.find):
-		ui.find_focus(&w.find, t.find_select_query)
+		ui.find_focus(&w.find, reopen == .Last_Selected)
 	case:
 		find_close(app, w, target)
 	}
