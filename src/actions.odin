@@ -127,6 +127,8 @@ Action :: enum u32 {
 	Status_Inbox,
 	Status_Panel,
 	Status_Dismiss_Finished,
+	Status_Panel_Next,
+	Status_Panel_Previous,
 	Move_Pane_Workspace,
 	Move_Pane_New_Workspace,
 	Move_Tab_Workspace,
@@ -521,6 +523,12 @@ ACTIONS :: [Action]Command_Descriptor {
 	},
 	.Status_Dismiss_Finished = {
 		"status.dismiss_finished", "Dismiss Finished Program Status", nil, .Host, {},
+	},
+	.Status_Panel_Next = {
+		"status.panel_next", "Go to the Next Activity Item", nil, .Host, {},
+	},
+	.Status_Panel_Previous = {
+		"status.panel_previous", "Go to the Previous Activity Item", nil, .Host, {},
 	},
 	.Move_Pane_Workspace = {
 		"pane.move_workspace", "Move Pane to Workspace…", nil, .Refuse, {accepted = {.Workspace}},
@@ -1217,6 +1225,10 @@ command_execute :: proc(app: ^App, ctx: Command_Context, invocation: commands.In
 		settings_save_value(app, "status.panel", panel, "Could not save the setting.")
 	case .Status_Dismiss_Finished:
 		status_dismiss_finished(app, w)
+	case .Status_Panel_Next:
+		status_panel_step(app, w, 1)
+	case .Status_Panel_Previous:
+		status_panel_step(app, w, -1)
 	}
 	return {}
 }

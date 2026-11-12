@@ -8,6 +8,7 @@ import "aio:term"
 import "aio:ui"
 import "core:fmt"
 import "core:math"
+import "core:slice"
 import "core:strings"
 
 // Sizes in DIPs. The logos sit left and the state mark right in both views.
@@ -197,6 +198,56 @@ status_panel_layout :: proc(app: ^App, w: ^Window) -> (rows: []Status_Row, total
 status_panel_rows :: proc(app: ^App, w: ^Window) -> (rows: []Status_Row, total: f32) {
 	rows, total, w.status.panel_scroll = status_panel_layout(app, w)
 	return
+}
+
+// Goes to the pane `step` places after the focused one in the order the panel lists its rows, wrapping
+// at either end; with the focused pane not listed, Next starts at the first and Previous at the last.
+// A pane several rows report from counts once, at its first row.
+status_panel_step :: proc(app: ^App, w: ^Window, step: int) {
+	rows, _, _ := status_panel_layout(app, w)
+	focused := focused_session(app, w)
+	sessions := make([dynamic]u32, 0, len(rows), context.temp_allocator)
+	current := -1
+	for row in rows {
+		if !row.report || slice.contains(sessions[:], row.item.session) {continue}
+		if focused != nil && row.item.session == focused.id {current = len(sessions)}
+		append(&sessions, row.item.session)
+	}
+	if len(sessions) == 0 {
+		notify(app, .Info, STATUS_EMPTY_TEXT)
+		return
+	}
+	next := step > 0 ? 0 : len(sessions) - 1
+	if current >= 0 {next = (current + step) %% len(sessions)}
+	if session_show(app, w, sessions[next]) {status_panel_reveal(app, w, sessions[next])}
+}
+
+// Scrolls the panel the least that brings the first row `session` reports from wholly into view.
+@(private)
+status_panel_reveal :: proc(app: ^App, w: ^Window, session: u32) {
+	if !status_panel_visible(app, w) {return}
+	rows, _ := status_panel_rows(app, w)
+	list := status_panel_list(w, status_panel_rect(app, w))
+	for row in rows {
+		if !row.report || row.item.session != session {continue}
+		scroll := w.status.panel_scroll
+		if row.y < scroll {
+			scroll = row.y
+		} else if row.y + row.height > scroll + list.height {
+			scroll = row.y + row.height - list.height
+		}
+		if scroll != w.status.panel_scroll {
+			w.status.panel_scroll = scroll
+			w.dirty = true
+		}
+		return
+	}
+}
+
+// Rows from the focused pane are drawn as the selected tab is.
+@(private)
+status_panel_row_selected :: proc(focused: ^Session_Entry, row: Status_Row) -> bool {
+	return row.report && focused != nil && row.item.session == focused.id
 }
 
 @(private)
@@ -477,6 +528,8 @@ status_panel_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 	}
 	dense := app.settings.status.panel_view == .Dense
 	hovered, any_hovered := w.status.panel_hover.?
+	// Rows from the focused pane take the selected tab's look, so Next and Previous have a visible start.
+	focused := focused_session(app, w)
 	for row, i in rows {
 		r := status_panel_row_rect(list, row, w.status.panel_scroll)
 		if r.y + r.height < list.y || r.y > list.y + list.height {continue}
@@ -484,8 +537,9 @@ status_panel_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 		highlighted := any_hovered && hovered == i
 		if row.report {
 			box := status_panel_row_box(w, r, row)
-			if ui.navigation_row_surface_draw(&w.list, app.theme, box, {hovered = highlighted}, s,
-				w.pointer) != .None {return .Ok}
+			selected := status_panel_row_selected(focused, row)
+			if ui.navigation_row_surface_draw(&w.list, app.theme, box,
+				{selected = selected, hovered = highlighted}, s, w.pointer) != .None {return .Ok}
 		}
 		switch {
 		case !row.report:
@@ -698,11 +752,13 @@ when AIO_CONTROL {
 		rows, _, scroll := status_panel_layout(app, w)
 		list := status_panel_list(w, area)
 		status_rows_state_report(r, app, "activity.row", rows, list, scroll)
+		focused := focused_session(app, w)
 		for row, i in rows {
 			if !row.report {continue}
 			rect := render.Rect{list.x, list.y + row.y - scroll, list.width, row.height}
 			receipt := status_panel_receipt_rect(app, w, rect, row)
 			state_rect(r, state_key("activity.row.%d.receipt_rect", i), receipt)
+			state_value(r, state_key("activity.row.%d.selected", i), status_panel_row_selected(focused, row))
 		}
 	}
 }
