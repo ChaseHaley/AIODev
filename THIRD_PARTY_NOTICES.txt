@@ -6,9 +6,9 @@ reproduced here. Where a component offers a choice of licenses, the license
 AIODev elects is noted.
 
 ================================================================================
-libghostty-vt 1.0.0 (Ghostty)
-https://github.com/ghostty-org/ghostty, release libghostty-vt-1.0.0.tar.gz from
-https://release.files.ghostty.org/libghostty-vt/1.0.0/, plus the local patches in vendor/ghostty/patches.
+libghostty-vt 1.0.1 (Ghostty)
+https://github.com/ghostty-org/ghostty, release libghostty-vt-1.0.1.tar.gz from
+https://release.files.ghostty.org/libghostty-vt/1.0.1/, plus the local patches in vendor/ghostty/patches.
 Statically linked.
 --------------------------------------------------------------------------------
 

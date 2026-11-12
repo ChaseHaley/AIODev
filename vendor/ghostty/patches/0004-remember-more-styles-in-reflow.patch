@@ -16,10 +16,10 @@ before.
  1 file changed, 122 insertions(+), 31 deletions(-)
 
 diff --git a/src/terminal/PageList.zig b/src/terminal/PageList.zig
-index 86127ed..9f23218 100644
+index 1335d63..5cb4cf3 100644
 --- a/src/terminal/PageList.zig
 +++ b/src/terminal/PageList.zig
-@@ -1626,12 +1626,14 @@ const ReflowCursor = struct {
+@@ -1693,12 +1693,14 @@ const ReflowCursor = struct {
      /// This is the final row count of the reflowed pages.
      total_rows: usize,
  
@@ -39,7 +39,7 @@ index 86127ed..9f23218 100644
      /// page, which is why this lives on the cursor: every destination
      /// page change goes through init() which resets this.
      style_cache: StyleCache,
-@@ -1646,15 +1648,59 @@ const ReflowCursor = struct {
+@@ -1713,15 +1715,59 @@ const ReflowCursor = struct {
      },
  
      const StyleCache = struct {
@@ -103,7 +103,7 @@ index 86127ed..9f23218 100644
      };
  
      fn init(node: *List.Node) ReflowCursor {
-@@ -2085,10 +2131,7 @@ const ReflowCursor = struct {
+@@ -2239,10 +2285,7 @@ const ReflowCursor = struct {
          const dst_style_id: stylepkg.Id = if (style_id == stylepkg.default_id)
              stylepkg.default_id
          else dst: {
@@ -115,7 +115,7 @@ index 86127ed..9f23218 100644
                  self.page.styles.useMultiple(self.page.memory, id, n);
                  break :dst id;
              }
-@@ -2114,11 +2157,7 @@ const ReflowCursor = struct {
+@@ -2268,11 +2311,7 @@ const ReflowCursor = struct {
                  n - 1,
              );
  
@@ -128,7 +128,7 @@ index 86127ed..9f23218 100644
  
              break :dst id;
          };
-@@ -2470,17 +2509,13 @@ const ReflowCursor = struct {
+@@ -2624,17 +2663,13 @@ const ReflowCursor = struct {
  
          // Copy style data.
          if (cell.hasStyling()) style: {
@@ -148,7 +148,7 @@ index 86127ed..9f23218 100644
                  self.page.styles.use(self.page.memory, id);
                  self.page_row.styled = true;
                  self.page_cell.style_id = id;
-@@ -2530,13 +2565,9 @@ const ReflowCursor = struct {
+@@ -2684,13 +2719,9 @@ const ReflowCursor = struct {
                  };
              } orelse cell.style_id;
  
@@ -165,7 +165,7 @@ index 86127ed..9f23218 100644
  
              self.page_row.styled = true;
              self.page_cell.style_id = id;
-@@ -19539,6 +19570,66 @@ test "PageList resize reflow less cols copy style" {
+@@ -19781,6 +19812,66 @@ test "PageList resize reflow less cols copy style" {
      }
  }
  
@@ -232,6 +232,3 @@ index 86127ed..9f23218 100644
  test "PageList resize reflow less cols to eliminate a wide char" {
      const testing = std.testing;
      const alloc = testing.allocator;
--- 
-2.55.0.windows.3
-
