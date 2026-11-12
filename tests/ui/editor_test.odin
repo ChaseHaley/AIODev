@@ -121,17 +121,40 @@ editor_sections_scope_browsing_and_search_spans_them :: proc(t: ^testing.T) {
 	// A search lists every section; each tab counts its matches.
 	ui.field_set(&p.filter, "cursor")
 	ui.editor_filter(&p)
+	testing.expect_value(t, len(visible_keys(&p)), 4)
+	l := ui.editor_layout({0, 40, 1200, 1400}, 1, true)
+	ui.editor_fit(&p, l)
+	press_tab :: proc(p: ^ui.Editor, l: ui.Editor_Layout, section: int) {
+		x, y := center(ui.editor_section_rect(p, l, section))
+		_ = ui.editor_press(p, l, nil, x, y, false)
+	}
+
+	// A tab narrows the search to its section and keeps counting every section; the same tab
+	// again lists them all, and so does editing the search.
+	press_tab(&p, l, 1)
+	testing.expect_value(t, ui.field_string(&p.filter), "cursor")
+	keys = visible_keys(&p)
+	if testing.expect_value(t, len(keys), 2) {testing.expect_value(t, keys[1], "colors.cursor")}
 	counts := ui.editor_section_counts(&p)
 	testing.expect_value(t, counts[0], 1)
 	testing.expect_value(t, counts[1], 1)
 	testing.expect_value(t, counts[2], 0)
+	press_tab(&p, l, 1)
+	testing.expect_value(t, len(visible_keys(&p)), 4)
+	press_tab(&p, l, 0)
+	testing.expect_value(t, len(visible_keys(&p)), 2)
+	ui.editor_filter(&p)
+	testing.expect_value(t, len(visible_keys(&p)), 4)
 
-	// A tab leaves the search and lists its groups in rank order, not the order they were added in.
-	l := ui.editor_layout({0, 40, 1200, 1400}, 1, true)
-	ui.editor_fit(&p, l)
-	x, y := center(ui.editor_section_rect(&p, l, 2))
-	testing.expect_value(t, ui.editor_press(&p, l, nil, x, y, false), ui.Editor_Outcome.Changed)
-	testing.expect_value(t, len(p.filter.bytes), 0)
+	// A row in a section the search is not narrowed to is still reachable by key.
+	press_tab(&p, l, 0)
+	testing.expect(t, ui.editor_select_key(&p, "colors.cursor"))
+	testing.expect_value(t, len(visible_keys(&p)), 4)
+
+	// Without a search a tab shows its groups in rank order, not the order they were added in.
+	ui.field_set(&p.filter, "")
+	ui.editor_filter(&p)
+	press_tab(&p, l, 2)
 	keys = visible_keys(&p)
 	if testing.expect_value(t, len(keys), 4) {
 		testing.expect_value(t, keys[0], "Input")

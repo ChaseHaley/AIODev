@@ -438,6 +438,11 @@ Editor :: struct {
 	// Without a search the page lists only the groups of `section`; a search lists every section.
 	sections:                                                          []string,
 	section, hover_section:                                            int,
+	// The section a search is narrowed to, plus one; zero lists every section. Each search starts
+	// at zero, and choosing the narrowed section's tab again returns to zero.
+	search_scope:                                                      int,
+	// Each section's matching rows under the search, whichever section it is narrowed to.
+	section_matches:                                                   [EDITOR_SECTION_LIMIT]int,
 	// The page's own scrollbar: its thumb drag and whether the pointer is over its track.
 	page_drag:                                                         Scroll_Drag,
 	page_bar_hover:                                                    bool,
@@ -541,6 +546,8 @@ OUTLINE_WIDTH :: 220
 OUTLINE_MIN_PAGE :: 720
 @(private)
 SECTION_TAB_WIDTH :: 112
+// The most sections a page can have.
+EDITOR_SECTION_LIMIT :: 8
 
 // Every string a row owns, in one place for editor_add's copies and editor_row_destroy's frees.
 @(private)
@@ -678,6 +685,10 @@ editor_adopt :: proc(p, next: ^Editor, adoption: Editor_Adoption) -> Editor_Adop
 	next.section = len(next.sections) > 0 ? clamp(p.section, 0, len(next.sections) - 1) : 0
 	field_set(&next.filter, field_string(&p.filter))
 	editor_filter(next)
+	if p.search_scope != 0 {
+		next.search_scope = p.search_scope
+		editor_rebuild(next)
+	}
 	// A conflict chain is the page's whole draft: it rides along as it is, with the view it returns to.
 	chained := editor_chained(p)
 	row := chained ? nil : editor_row(p)
@@ -1385,14 +1396,19 @@ editor_rebuild :: proc(p: ^Editor) {
 	if recording {chord, named = commands.key_press_chord(p.keys.press)}
 	if named && !used && (.Leader not_in chord.modifiers || p.capture.leader != nil) {p.free = chord}
 	matched := make([dynamic]int, context.temp_allocator)
+	p.section_matches = {}
 	for g in editor_group_order(p) {
-		if !searching && len(p.sections) > 0 && p.groups[g].section != p.section {continue}
+		section := p.groups[g].section
+		shown := searching ? p.search_scope - 1 : p.section
+		if !searching && len(p.sections) > 0 && section != shown {continue}
 		clear(&matched)
 		for row, i in p.rows {
 			if row.group != g {continue}
 			if best > 0 && ranks[i] == best {append(&matched, i)}
 		}
 		if len(matched) == 0 {continue}
+		if section >= 0 && section < EDITOR_SECTION_LIMIT {p.section_matches[section] += len(matched)}
+		if len(p.sections) > 0 && shown >= 0 && section != shown {continue}
 		append(&p.items, Editor_Item{group = g, row = -1, count = len(matched)})
 		for i in matched {append(&p.items, Editor_Item{group = g, row = i, shortcut = matches[i]})}
 	}
@@ -1420,7 +1436,14 @@ editor_group_order :: proc(p: ^Editor) -> []int {
 	return order
 }
 
+// Lists the search's matches across every section, from the top.
 editor_filter :: proc(p: ^Editor) {
+	p.search_scope = 0
+	editor_list_top(p)
+}
+
+@(private)
+editor_list_top :: proc(p: ^Editor) {
 	clear(&p.items)
 	editor_rebuild(p)
 	first := 0
@@ -1429,7 +1452,7 @@ editor_filter :: proc(p: ^Editor) {
 	editor_select(p, first)
 }
 
-// Shows one section from its top, leaving any search, as choosing its tab does.
+// Shows one section from its top, leaving any search, as Change Shortcut and Customize Colors do.
 editor_section_show :: proc(p: ^Editor, section: int) {
 	if section < 0 || section >= len(p.sections) {return}
 	if editor_focus(p) != .Search {editor_keep(p); stop_editing(p)}
@@ -1439,24 +1462,35 @@ editor_section_show :: proc(p: ^Editor, section: int) {
 	editor_filter(p)
 }
 
-// Switches the unsearched page to `section` so a row of it can be selected; a search already lists
-// every section.
+// Choosing a section's tab: without a search it shows the section; with one it narrows the
+// matches to the section, or, chosen again, lists every section's matches again.
+editor_section_choose :: proc(p: ^Editor, section: int) {
+	if section < 0 || section >= len(p.sections) {return}
+	if !filtering(p) {editor_section_show(p, section); return}
+	if editor_focus(p) != .Search && editor_focus(p) != .Page {editor_keep(p); stop_editing(p)}
+	p.search_scope = p.search_scope == section + 1 ? 0 : section + 1
+	editor_list_top(p)
+}
+
+// Makes a row of `section` listable before it is selected: switches the unsearched page to it,
+// or widens a search narrowed to another section.
 @(private)
 editor_section_reach :: proc(p: ^Editor, section: int) {
-	if len(p.sections) == 0 || filtering(p) || section == p.section {return}
-	p.section = section
+	if len(p.sections) == 0 {return}
+	if filtering(p) {
+		if p.search_scope == 0 || p.search_scope == section + 1 {return}
+		p.search_scope = 0
+	} else {
+		if section == p.section {return}
+		p.section = section
+	}
 	p.scroll, p.outline_scroll = 0, 0
 	editor_rebuild(p)
 }
 
-// Each section's matching rows while a search lists them all.
+// Each section's matching rows under the search.
 editor_section_counts :: proc(p: ^Editor) -> []int {
-	counts := make([]int, len(p.sections), context.temp_allocator)
-	for item in p.items {
-		section := p.groups[item.group].section
-		if item.row < 0 && section >= 0 && section < len(counts) {counts[section] += item.count}
-	}
-	return counts
+	return p.section_matches[:min(len(p.sections), EDITOR_SECTION_LIMIT)]
 }
 
 // Sets the one profile whose inline editor is open, "" for none; only a reload's view writes it
@@ -2303,9 +2337,16 @@ editor_key :: proc(p: ^Editor, raw: input.Key_Event) -> Editor_Outcome {
 	}
 	control := .Control in e.modifiers && .Alt not_in e.modifiers
 	// Ctrl+Page Up and Down move between sections, wrapping, as they move between a browser's tabs.
+	// Under a search they step through every section's matches, then each section's alone.
 	if control && (e.key == .Page_Up || e.key == .Page_Down) && len(p.sections) > 0 {
 		step := e.key == .Page_Up ? -1 : 1
-		editor_section_show(p, (p.section + step + len(p.sections)) %% len(p.sections))
+		if filtering(p) {
+			stops := len(p.sections) + 1
+			p.search_scope = (p.search_scope + step + stops) %% stops
+			editor_list_top(p)
+		} else {
+			editor_section_show(p, (p.section + step + len(p.sections)) %% len(p.sections))
+		}
 		return .Changed
 	}
 	if .Alt in e.modifiers && (e.key == .Arrow_Up || e.key == .Arrow_Down) {
@@ -2982,8 +3023,10 @@ editor_press :: proc(
 		return .Changed
 	}
 	if section := editor_section_at(p, l, x, y); section >= 0 {
-		editor_section_show(p, section)
-		editor_blur(p)
+		// Narrowing a search leaves the keyboard in it, so typing goes on refining the query.
+		searching := filtering(p)
+		editor_section_choose(p, section)
+		if !searching {editor_blur(p)}
 		return .Changed
 	}
 	if bar, visible := editor_page_scrollbar(p, l); visible && scrollbar_contains(bar, x, y) {
@@ -4177,13 +4220,13 @@ sections_draw :: proc(
 		color = theme.border,
 	})
 	searching := filtering(p)
-	counts := searching ? editor_section_counts(p) : nil
+	counts := editor_section_counts(p)
 	label_text := text_styled(text, .Body)
 	small := text_styled(text, .Detail)
 	for title, i in p.sections {
 		tab := editor_section_rect(p, l, i)
 		inset := min(CONTROL_INSET * s, tab.width / 2)
-		selected := !searching && i == p.section
+		selected := searching ? i + 1 == p.search_scope : i == p.section
 		if i == p.hover_section {
 			hover := render.Rect{tab.x, tab.y + SPACE_1 * s, tab.width, max(0, tab.height - 2 * SPACE_1 * s)}
 			draw_rect(list, {rect = hover, color = theme.hover, radius = RADIUS_CONTROL * s})

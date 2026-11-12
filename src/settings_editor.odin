@@ -187,6 +187,7 @@ SETTINGS_GROUP_AREAS := [?]struct {
 	title: string,
 	area:  Settings_Area,
 } {
+	{"Theme", .General},
 	{"Font", .General},
 	{"Interface", .General},
 	{"Window", .General},
@@ -203,7 +204,7 @@ SETTINGS_GROUP_AREAS := [?]struct {
 	{"Processes", .Advanced},
 	{"Command Line", .Advanced},
 	{"Input", .Shortcuts},
-	{"Theme", .Colors},
+	{THEME_MANAGE_GROUP, .Colors},
 	{"Interface Colors", .Colors},
 	{"Terminal Colors", .Colors},
 }
@@ -862,6 +863,10 @@ settings_theme_choices :: proc(s: ^settings.Settings) -> (choices, labels: []str
 	return ids[:], names[:]
 }
 
+// The Colors section's group of actions on the active theme; choosing a theme is General's first row.
+@(private)
+THEME_MANAGE_GROUP :: "Manage Theme"
+
 // The active theme's management rows and one row per theme color. Every color shows the value in
 // effect; a custom theme's Reset returns a color to its base theme.
 @(private)
@@ -913,9 +918,9 @@ settings_add_theme_rows :: proc(p: ^ui.Editor, s: ^settings.Settings) -> bool {
 			},
 		}
 		for row in rows {
-			if ui.editor_add(p, row, settings.group_title("theme.name")) != nil {return false}
+			if ui.editor_add(p, row, THEME_MANAGE_GROUP) != nil {return false}
 		}
-	} else if ui.editor_add(p, duplicate, settings.group_title("theme.name")) != nil {return false}
+	} else if ui.editor_add(p, duplicate, THEME_MANAGE_GROUP) != nil {return false}
 	if ui.editor_add(p, {
 		key = "theme.export",
 		title = "Export Theme File",
@@ -923,7 +928,7 @@ settings_add_theme_rows :: proc(p: ^ui.Editor, s: ^settings.Settings) -> bool {
 		kind = .Action,
 		value = "Export",
 		action = .Theme_Export,
-	}, settings.group_title("theme.name")) != nil {return false}
+	}, THEME_MANAGE_GROUP) != nil {return false}
 	base := settings.theme_base(s)
 	tokens := settings.THEME_TOKENS
 	for token in settings.Theme_Token {
