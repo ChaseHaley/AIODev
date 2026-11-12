@@ -1,0 +1,3 @@
+#define AIO_FILE_DESCRIPTION "AIODev command line"
+#define AIO_ORIGINAL_FILENAME "aio.exe"
+#include "version.rc"

@@ -10,8 +10,8 @@ import "core:math"
 import "core:slice"
 import "core:time"
 
-// The title-bar pill and the inbox it opens, which orders program status by urgency. The Activity
-// panel (status_panel.odin) groups the same reports by location.
+// The title-bar pill and the inbox it opens, which lists program status in the rows the Activity panel
+// (status_panel.odin) shows, grouped, ordered and named the same way (status_rows.odin).
 
 @(private)
 STATUS_ROW_HEIGHT :: f32(48)
@@ -24,7 +24,8 @@ STATUS_FOOTER_HEIGHT :: ui.HEIGHT_STANDARD
 @(private)
 STATUS_INBOX_WHEEL_ROWS :: 3
 
-// The inbox while it is open. The pointer moves its keyboard selection, so it keeps no hover.
+// The inbox while it is open. The pointer moves its keyboard selection, so it keeps no hover. The
+// selection is the index of a report row; -1 when there is none.
 Status_Inbox :: struct {
 	selected: int,
 	scroll:   f32,
@@ -35,40 +36,6 @@ Status_Overview :: struct {
 	using panel: Status_Panel,
 	inbox:       Maybe(Status_Inbox),
 	pill_hover:  bool,
-}
-
-// One report in an overview. The record's strings borrow from the session's snapshot, so items live
-// for one frame or event at most.
-Status_Item :: struct {
-	session:   u32,
-	record:    term.Program_Status,
-	crumb:     string,
-	workspace: string,
-	receipt:   Status_Receipt,
-}
-
-@(private)
-status_item_less :: proc(a, b: Status_Item) -> bool {
-	return status_before(a.record, b.record)
-}
-
-@(private)
-status_record_id_less :: proc(a, b: term.Program_Status) -> bool {
-	return a.id < b.id
-}
-
-// Every shown record in the window's scope, by urgency.
-status_items :: proc(app: ^App, w: ^Window) -> []Status_Item {
-	items := make([dynamic]Status_Item, context.temp_allocator)
-	walk := status_scope_records(app, w)
-	for shown, ok := status_scope_records_next(&walk); ok; shown, ok = status_scope_records_next(&walk) {
-		slice.sort_by(shown.records, status_record_id_less)
-		for record in shown.records {
-			append(&items, Status_Item{shown.session, record, shown.crumb, shown.workspace, shown.receipt})
-		}
-	}
-	slice.sort_by(items[:], status_item_less)
-	return items[:]
 }
 
 @(private)
@@ -101,17 +68,17 @@ status_state_age :: proc(app: ^App, record: term.Program_Status) -> string {
 // change, or a ring when the pane was never read; then how long ago, or "now" while it is in view.
 @(private)
 status_receipt :: proc(app: ^App, item: Status_Item) -> (icon: ui.Icon, text: string) {
-	receipt := item.receipt
+	pane := item.pane
 	switch {
 	case item.record.read:
 		icon = .Check_Double
-	case receipt.read_at == {} && !receipt.watched:
+	case pane.read_at == {} && !pane.watched:
 		return .Circle, "never"
 	case:
 		icon = .Check
 	}
-	if receipt.watched {return icon, "now"}
-	return icon, status_age(receipt.read_at, clock_wall(&app.clock))
+	if pane.watched {return icon, "now"}
+	return icon, status_age(pane.read_at, clock_wall(&app.clock))
 }
 
 // What a receipt means and what a click on it does.
@@ -119,16 +86,24 @@ status_receipt :: proc(app: ^App, item: Status_Item) -> (icon: ui.Icon, text: st
 status_receipt_tooltip :: proc(app: ^App, item: Status_Item) -> string {
 	_, ago := status_receipt(app, item)
 	switch {
-	case item.record.read && item.receipt.watched:
+	case item.record.read && item.pane.watched:
 		return "Read now · click to mark unread"
 	case item.record.read:
 		return fmt.tprintf("Read %s ago · click to mark unread", ago)
-	case item.receipt.read_at == {} && !item.receipt.watched:
+	case item.pane.read_at == {} && !item.pane.watched:
 		return "Never read · click to mark read"
-	case item.receipt.watched:
+	case item.pane.watched:
 		return "Marked unread · click to mark read"
 	}
 	return fmt.tprintf("Not read since it changed, last read %s ago · click to mark read", ago)
+}
+
+// When the pane was last read, in words, for a row's tooltip.
+@(private)
+status_read_words :: proc(app: ^App, item: Status_Item) -> string {
+	if item.pane.watched {return "read now"}
+	if item.pane.read_at == {} {return "never read"}
+	return fmt.tprintf("read %s ago", status_age(item.pane.read_at, clock_wall(&app.clock)))
 }
 
 // The receipt's place: its icon and time, ending at `right`, centred on `middle`.
@@ -166,12 +141,6 @@ status_receipt_toggle :: proc(app: ^App, item: Status_Item) {
 }
 
 @(private)
-status_item_name :: proc(app: ^App, item: Status_Item) -> string {
-	if entry := session_find(app, item.session); entry != nil {return status_record_name(entry, item.record)}
-	return item.record.app
-}
-
-@(private)
 status_dismiss_rect :: proc(w: ^Window, row: render.Rect) -> render.Rect {
 	s := w.scale
 	size := ui.HEIGHT_COMPACT * s
@@ -200,24 +169,26 @@ status_row_receipt_rect :: proc(
 	return status_receipt_rect(app, w, item, right, line_two - small.ascent + small.line_height / 2)
 }
 
-// Two lines: name, state and how long it has held; then where it came from, the message and the
-// receipt.
+// Two lines: name, state and how long it has held; then the row's terms and the receipt. Reports
+// under another sit indented.
 @(private)
 status_row_draw :: proc(
 	app: ^App,
 	w: ^Window,
 	r: render.Rect,
-	item: Status_Item,
+	row: Status_Row,
 	highlighted: bool,
 ) -> render.Build_Status {
 	s := w.scale
+	item := row.item
 	if highlighted {
 		ui.draw_rect(&w.list, {rect = r, color = app.theme.selection, radius = ui.RADIUS_CONTROL * s})
 	}
 	quiet := status_item_quiet(item)
 	mark := status_presentation(item.record).mark
 	mark.dim = quiet
-	left := r.x + ui.CONTROL_INSET * s
+	indent := f32(min(row.depth, STATUS_PANEL_DEPTH_MAX)) * STATUS_PANEL_INDENT * s
+	left := r.x + indent + ui.CONTROL_INSET * s
 	strong := ui.text_styled(&w.ui_text, .Strong)
 	small := ui.text_styled(&w.ui_text, .Detail)
 	line_one, line_two := ui.stacked_baselines(r, &strong, &small, s)
@@ -237,7 +208,7 @@ status_row_draw :: proc(
 			return result
 		}
 	}
-	name := status_item_name(app, item)
+	name := status_report_name(&app.settings.status, item, row.depth)
 	name_room := max(0, right - age_width - ui.SPACE_2 * s - text_x)
 	name_width := min(ui.text_width(&strong, name), name_room * 0.6)
 	if result := ui.draw_fading_text(
@@ -263,11 +234,10 @@ status_row_draw :: proc(
 	); result != .Ok {return result}
 	receipt := status_row_receipt_rect(app, w, r, item, highlighted)
 	if result := status_receipt_draw(app, w, item, receipt, line_two); result != .Ok {return result}
-	detail := item.record.message == "" ? item.crumb : fmt.tprintf("%s · %s", item.crumb, item.record.message)
 	if result := ui.draw_fading_text(
 		&small,
 		&w.list,
-		detail,
+		status_report_terms(&app.settings.status, item, name),
 		text_x,
 		line_two,
 		app.theme.faint,
@@ -406,7 +376,7 @@ status_inbox_close :: proc(w: ^Window) {
 status_inbox_layout :: proc(
 	app: ^App,
 	w: ^Window,
-	items: []Status_Item,
+	total: f32,
 ) -> (
 	surface, list: render.Rect,
 	footer_y: f32,
@@ -417,7 +387,7 @@ status_inbox_layout :: proc(
 	if anchor.width == 0 {anchor = workspace_button_rect(app, w)}
 	x := clamp(anchor.x, 8 * s, max(8 * s, f32(w.width) - width - 8 * s))
 	y := (ui.TITLE_BAR_HEIGHT + ui.SPACE_1) * s
-	content := f32(max(1, len(items))) * STATUS_ROW_HEIGHT * s
+	content := max(total, STATUS_ROW_HEIGHT * s)
 	room := max(STATUS_ROW_HEIGHT * s, f32(w.height) - y - 8 * s - 2 * STATUS_HEADER_HEIGHT * s)
 	height := min(content, room)
 	surface = {x, y, width, STATUS_HEADER_HEIGHT * s + height + STATUS_FOOTER_HEIGHT * s}
@@ -435,26 +405,42 @@ status_dismiss_all_rect :: proc(w: ^Window, surface: render.Rect) -> render.Rect
 }
 
 @(private)
-status_inbox_row_rect :: proc(w: ^Window, list: render.Rect, scroll: f32, index: int) -> render.Rect {
-	height := STATUS_ROW_HEIGHT * w.scale
-	return {list.x, list.y + f32(index) * height - scroll, list.width, height}
+status_inbox_row_rect :: proc(list: render.Rect, row: Status_Row, scroll: f32) -> render.Rect {
+	return {list.x, list.y + row.y - scroll, list.width, row.height}
 }
 
+// The first report row from `index` on in `direction`, or -1.
 @(private)
-status_inbox_clamp :: proc(w: ^Window, inbox: ^Status_Inbox, list: render.Rect, count: int) {
-	height := STATUS_ROW_HEIGHT * w.scale
-	limit := max(0, f32(count) * height - list.height)
-	inbox.selected = clamp(inbox.selected, 0, max(0, count - 1))
-	top := f32(inbox.selected) * height
-	if top < inbox.scroll {inbox.scroll = top}
-	if top + height > inbox.scroll + list.height {inbox.scroll = top + height - list.height}
-	inbox.scroll = clamp(inbox.scroll, 0, limit)
+status_inbox_report :: proc(rows: []Status_Row, index, direction: int) -> int {
+	for i := index; i >= 0 && i < len(rows); i += direction {
+		if rows[i].report {return i}
+	}
+	return -1
 }
 
-// The open inbox as this frame or event lays it out. Items borrow from session snapshots.
+// Keeps the selection on a report, the nearest one at or after it, else before it, and scrolls it into
+// view with the label right above it.
+@(private)
+status_inbox_clamp :: proc(inbox: ^Status_Inbox, list: render.Rect, rows: []Status_Row, total: f32) {
+	index := clamp(inbox.selected, 0, max(0, len(rows) - 1))
+	selected := status_inbox_report(rows, index, 1)
+	if selected < 0 {selected = status_inbox_report(rows, index, -1)}
+	inbox.selected = selected
+	if selected >= 0 {
+		row := rows[selected]
+		top := row.y
+		if selected > 0 && !rows[selected - 1].report {top = rows[selected - 1].y}
+		if top < inbox.scroll {inbox.scroll = top}
+		if row.y + row.height > inbox.scroll + list.height {inbox.scroll = row.y + row.height - list.height}
+	}
+	inbox.scroll = clamp(inbox.scroll, 0, max(0, total - list.height))
+}
+
+// The open inbox as this frame or event lays it out. Rows borrow from session snapshots.
 @(private)
 Status_Inbox_View :: struct {
-	items:         []Status_Item,
+	rows:          []Status_Row,
+	total:         f32,
 	surface, list: render.Rect,
 	footer_y:      f32,
 }
@@ -463,9 +449,11 @@ Status_Inbox_View :: struct {
 // and every event see the same rows.
 @(private)
 status_inbox_view :: proc(app: ^App, w: ^Window, inbox: ^Status_Inbox) -> (view: Status_Inbox_View) {
-	view.items = status_items(app, w)
-	view.surface, view.list, view.footer_y = status_inbox_layout(app, w, view.items)
-	status_inbox_clamp(w, inbox, view.list, len(view.items))
+	heights := Status_Row_Heights{STATUS_ROW_HEIGHT, STATUS_ROW_HEIGHT}
+	group := app.settings.status.group_by
+	view.rows, view.total = status_rows_project(group, status_reports(app, w), heights, w.scale)
+	view.surface, view.list, view.footer_y = status_inbox_layout(app, w, view.total)
+	status_inbox_clamp(inbox, view.list, view.rows, view.total)
 	return
 }
 
@@ -483,7 +471,7 @@ status_inbox_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 	inbox, open := &w.status.inbox.?
 	if !open {return .Ok}
 	view := status_inbox_view(app, w, inbox)
-	items, surface, list, footer_y := view.items, view.surface, view.list, view.footer_y
+	rows, surface, list, footer_y := view.rows, view.surface, view.list, view.footer_y
 	s := w.scale
 	if !ui.popover_open(&w.list, surface, app.theme, f32(w.width), f32(w.height), s) {return .Ok}
 	strong := ui.text_styled(&w.ui_text, .Strong)
@@ -516,7 +504,7 @@ status_inbox_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 		app.theme.accent,
 	); result != .Ok {return result}
 	if render.push_layer(&w.list, list) != .None {return .Ok}
-	if len(items) == 0 {
+	if len(rows) == 0 {
 		if result := ui.draw_text(
 			&small,
 			&w.list,
@@ -526,11 +514,16 @@ status_inbox_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 			app.theme.faint,
 		); result != .Ok {return result}
 	}
-	for item, i in items {
-		r := status_inbox_row_rect(w, list, inbox.scroll, i)
+	for row, i in rows {
+		r := status_inbox_row_rect(list, row, inbox.scroll)
 		if r.y + r.height < list.y || r.y > list.y + list.height {continue}
-		highlighted := i == inbox.selected
-		if result := status_row_draw(app, w, r, item, highlighted); result != .Ok {return result}
+		result: render.Build_Status
+		if row.report {
+			result = status_row_draw(app, w, r, row, i == inbox.selected)
+		} else {
+			result = status_label_draw(app, w, r, row)
+		}
+		if result != .Ok {return result}
 	}
 	if render.push_layer(&w.list, surface, ui.RADIUS_OVERLAY * s) != .None {return .Ok}
 	ui.draw_rect(&w.list, {rect = {surface.x, footer_y, surface.width, s}, color = app.theme.border})
@@ -545,11 +538,14 @@ status_inbox_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 	)
 }
 
+// The report row under the point, or -1.
 @(private)
-status_inbox_hit :: proc(w: ^Window, view: Status_Inbox_View, scroll, x, y: f32) -> int {
+status_inbox_hit :: proc(view: Status_Inbox_View, scroll, x, y: f32) -> int {
 	if !render.rect_contains(view.list, x, y) {return -1}
-	index := int(math.floor((y - view.list.y + scroll) / (STATUS_ROW_HEIGHT * w.scale)))
-	return index >= 0 && index < len(view.items) ? index : -1
+	for row, i in view.rows {
+		if row.report && render.rect_contains(status_inbox_row_rect(view.list, row, scroll), x, y) {return i}
+	}
+	return -1
 }
 
 status_inbox_button :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) {
@@ -568,46 +564,56 @@ status_inbox_button :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) 
 		status_dismiss_finished(app, w)
 		return
 	}
-	index := status_inbox_hit(w, view, inbox.scroll, x, y)
+	index := status_inbox_hit(view, inbox.scroll, x, y)
 	if index < 0 {return}
-	row := status_inbox_row_rect(w, view.list, inbox.scroll, index)
-	item := view.items[index]
-	if term.program_status_finished(item.record.state) &&
-	   render.rect_contains(status_dismiss_rect(w, row), x, y) {
-		status_dismiss_item(app, item)
+	row := view.rows[index]
+	r := status_inbox_row_rect(view.list, row, inbox.scroll)
+	if term.program_status_finished(row.item.record.state) &&
+	   render.rect_contains(status_dismiss_rect(w, r), x, y) {
+		status_dismiss_item(app, row.item)
 		return
 	}
-	if render.rect_contains(status_row_receipt_rect(app, w, row, item, index == inbox.selected), x, y) {
-		status_receipt_toggle(app, item)
+	if render.rect_contains(status_row_receipt_rect(app, w, r, row.item, index == inbox.selected), x, y) {
+		status_receipt_toggle(app, row.item)
 		return
 	}
-	status_open_item(app, w, item)
+	status_open_item(app, w, row.item)
 }
 
 status_inbox_move :: proc(app: ^App, w: ^Window, x, y: f32) {
 	inbox, open := &w.status.inbox.?
 	if !open {return}
 	view := status_inbox_view(app, w, inbox)
-	index := status_inbox_hit(w, view, inbox.scroll, x, y)
+	index := status_inbox_hit(view, inbox.scroll, x, y)
 	if index >= 0 && index != inbox.selected {
 		inbox.selected, w.dirty = index, true
-		status_inbox_clamp(w, inbox, view.list, len(view.items))
+		status_inbox_clamp(inbox, view.list, view.rows, view.total)
 	}
 	dismiss_all := render.rect_contains(status_dismiss_all_rect(w, view.surface), x, y)
 	pointer_set(app, w, index >= 0 || dismiss_all ? .Hand : .Arrow)
 }
 
-// Scrolls a fixed number of rows per notch, then keeps the selection among the rows in view.
+// Scrolls a fixed number of report rows per notch, then keeps the selection among the rows in view.
 status_inbox_wheel :: proc(app: ^App, w: ^Window, delta: f32) {
 	inbox, open := &w.status.inbox.?
 	if !open {return}
 	view := status_inbox_view(app, w, inbox)
-	height := STATUS_ROW_HEIGHT * w.scale
-	inbox.scroll -= f32(math.sign(delta)) * STATUS_INBOX_WHEEL_ROWS * height
-	inbox.scroll = clamp(inbox.scroll, 0, max(0, f32(len(view.items)) * height - view.list.height))
-	first := int(math.ceil(inbox.scroll / height))
-	last := int(math.floor((inbox.scroll + view.list.height) / height)) - 1
-	inbox.selected = clamp(inbox.selected, first, max(first, last))
+	step := f32(math.sign(delta)) * STATUS_INBOX_WHEEL_ROWS * STATUS_ROW_HEIGHT * w.scale
+	inbox.scroll = clamp(inbox.scroll - step, 0, max(0, view.total - view.list.height))
+	if inbox.selected >= 0 {
+		row := view.rows[inbox.selected]
+		top, bottom := inbox.scroll, inbox.scroll + view.list.height
+		if row.y < top || row.y + row.height > bottom {
+			// The first report wholly in view, else the last one that is.
+			first, last := -1, -1
+			for candidate, i in view.rows {
+				if !candidate.report || candidate.y < top || candidate.y + candidate.height > bottom {continue}
+				if first < 0 {first = i}
+				last = i
+			}
+			if first >= 0 {inbox.selected = row.y < top ? first : last}
+		}
+	}
 	w.dirty = true
 }
 
@@ -618,24 +624,25 @@ status_inbox_key :: proc(app: ^App, w: ^Window, e, logical: input.Key_Event) -> 
 	inbox, open := &w.status.inbox.?
 	if !e.pressed || !open {return false}
 	view := status_inbox_view(app, w, inbox)
-	items := view.items
+	rows := view.rows
 	if step := ui.list_step(logical); step != 0 {
-		inbox.selected = clamp(inbox.selected + step, 0, max(0, len(items) - 1))
-		status_inbox_clamp(w, inbox, view.list, len(items))
+		// Labels are passed over; the selection stops at the first and last report.
+		if next := status_inbox_report(rows, inbox.selected + step, step); next >= 0 {inbox.selected = next}
+		status_inbox_clamp(inbox, view.list, rows, view.total)
 		w.dirty = true
 		return true
 	}
-	selected := inbox.selected >= 0 && inbox.selected < len(items)
+	selected := inbox.selected >= 0 && inbox.selected < len(rows)
 	#partial switch logical.key {
 	case .Escape:
 		status_inbox_close(w)
 	case .Enter, .Numpad_Enter:
-		if selected {status_open_item(app, w, items[inbox.selected])}
+		if selected {status_open_item(app, w, rows[inbox.selected].item)}
 	case .Delete:
-		if selected {status_dismiss_item(app, items[inbox.selected])}
+		if selected {status_dismiss_item(app, rows[inbox.selected].item)}
 	case .U:
 		if logical.modifiers != {} {return false}
-		if selected {status_receipt_toggle(app, items[inbox.selected])}
+		if selected {status_receipt_toggle(app, rows[inbox.selected].item)}
 	case:
 		action, found := shortcut_action(app, e)
 		if !found || action != .Status_Next {return false}
@@ -655,6 +662,18 @@ status_overview_cancel :: proc(w: ^Window) {
 	status_inbox_close(w)
 	status_panel_hover_clear(w)
 	w.status.pill_hover = false
+}
+
+when AIO_CONTROL {
+	// The open inbox's verification keys: its rows as the panel reports its own, and the selection.
+	status_inbox_state_report :: proc(r: ^State_Report, app: ^App, w: ^Window) {
+		inbox, open := &w.status.inbox.?
+		state_value(r, "inbox.open", open)
+		if !open {return}
+		view := status_inbox_view(app, w, inbox)
+		state_value(r, "inbox.selected", inbox.selected)
+		status_rows_state_report(r, app, "inbox.row", view.rows, view.list, inbox.scroll)
+	}
 }
 
 // Activity inbox pointer surface

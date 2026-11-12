@@ -151,6 +151,106 @@ STATUS_PANEL_VIEW_LABELS :: []string {
 	STATUS_PANEL_VIEW_LABEL[Status_Panel_View(0)],
 	STATUS_PANEL_VIEW_LABEL[Status_Panel_View(1)],
 }
+// How Activity and the status inbox group and order reports (WORK-412). Within a group, reports
+// with the same status sort by pane name; the view only sets row size.
+Status_Group :: enum int {
+	Status,
+	Workspace,
+}
+STATUS_GROUP_NAME :: [Status_Group]string {
+	.Status    = "status",
+	.Workspace = "workspace",
+}
+STATUS_GROUP_LABEL :: [Status_Group]string {
+	.Status    = "Status",
+	.Workspace = "Workspace, then status",
+}
+#assert(len(Status_Group) == 2)
+STATUS_GROUP_NAMES :: []string{STATUS_GROUP_NAME[Status_Group(0)], STATUS_GROUP_NAME[Status_Group(1)]}
+STATUS_GROUP_LABELS :: []string{STATUS_GROUP_LABEL[Status_Group(0)], STATUS_GROUP_LABEL[Status_Group(1)]}
+// What names a program's row in Activity and the inbox (WORK-406). A subagent's report keeps its
+// own title.
+Status_Row_Name :: enum int {
+	Pane,
+	Program,
+	Tab,
+	Folder,
+}
+STATUS_ROW_NAME_NAME :: [Status_Row_Name]string {
+	.Pane    = "pane",
+	.Program = "program",
+	.Tab     = "tab",
+	.Folder  = "folder",
+}
+STATUS_ROW_NAME_LABEL :: [Status_Row_Name]string {
+	.Pane    = "Pane title",
+	.Program = "Program",
+	.Tab     = "Tab",
+	.Folder  = "Folder",
+}
+#assert(len(Status_Row_Name) == 4)
+STATUS_ROW_NAME_NAMES :: []string {
+	STATUS_ROW_NAME_NAME[Status_Row_Name(0)],
+	STATUS_ROW_NAME_NAME[Status_Row_Name(1)],
+	STATUS_ROW_NAME_NAME[Status_Row_Name(2)],
+	STATUS_ROW_NAME_NAME[Status_Row_Name(3)],
+}
+STATUS_ROW_NAME_LABELS :: []string {
+	STATUS_ROW_NAME_LABEL[Status_Row_Name(0)],
+	STATUS_ROW_NAME_LABEL[Status_Row_Name(1)],
+	STATUS_ROW_NAME_LABEL[Status_Row_Name(2)],
+	STATUS_ROW_NAME_LABEL[Status_Row_Name(3)],
+}
+// The details a row shows after its name, always in this order. Title is the report's own title,
+// which tells apart several reports from one pane.
+Status_Row_Term :: enum u8 {
+	Title,
+	Message,
+	Pane,
+	Program,
+	Tab,
+	Workspace,
+	Folder,
+}
+Status_Row_Terms :: bit_set[Status_Row_Term;u32]
+// Saved names; bit i of a saved set is Status_Row_Term(i).
+STATUS_ROW_TERM_NAME :: [Status_Row_Term]string {
+	.Title     = "title",
+	.Message   = "message",
+	.Pane      = "pane",
+	.Program   = "program",
+	.Tab       = "tab",
+	.Workspace = "workspace",
+	.Folder    = "folder",
+}
+STATUS_ROW_TERM_LABEL :: [Status_Row_Term]string {
+	.Title     = "Report title",
+	.Message   = "Message",
+	.Pane      = "Pane title",
+	.Program   = "Program",
+	.Tab       = "Tab",
+	.Workspace = "Workspace",
+	.Folder    = "Folder",
+}
+#assert(len(Status_Row_Term) == 7)
+STATUS_ROW_TERM_NAMES :: []string {
+	STATUS_ROW_TERM_NAME[Status_Row_Term(0)],
+	STATUS_ROW_TERM_NAME[Status_Row_Term(1)],
+	STATUS_ROW_TERM_NAME[Status_Row_Term(2)],
+	STATUS_ROW_TERM_NAME[Status_Row_Term(3)],
+	STATUS_ROW_TERM_NAME[Status_Row_Term(4)],
+	STATUS_ROW_TERM_NAME[Status_Row_Term(5)],
+	STATUS_ROW_TERM_NAME[Status_Row_Term(6)],
+}
+STATUS_ROW_TERM_LABELS :: []string {
+	STATUS_ROW_TERM_LABEL[Status_Row_Term(0)],
+	STATUS_ROW_TERM_LABEL[Status_Row_Term(1)],
+	STATUS_ROW_TERM_LABEL[Status_Row_Term(2)],
+	STATUS_ROW_TERM_LABEL[Status_Row_Term(3)],
+	STATUS_ROW_TERM_LABEL[Status_Row_Term(4)],
+	STATUS_ROW_TERM_LABEL[Status_Row_Term(5)],
+	STATUS_ROW_TERM_LABEL[Status_Row_Term(6)],
+}
 // When finished work you have read leaves the lists.
 Status_Keep :: enum int {
 	Program,
@@ -225,6 +325,9 @@ Status_Settings :: struct {
 
 	panel_side: Status_Panel_Side,
 	panel_view: Status_Panel_View,
+	group_by:   Status_Group,
+	row_name:   Status_Row_Name,
+	row_terms:  Status_Row_Terms,
 	panel_width, panel_height: int,
 	enabled, tab_indicators, active_tab_indicator, pane_headers, workspace_picker: bool,
 	inbox, panel, taskbar:                                                        bool,
@@ -782,7 +885,7 @@ SCHEMA :: [?]Schema_Entry {
 		offset = offset_of(Settings, status) + offset_of(Status_Settings, inbox),
 		default_value = "true",
 		description = "Show a title-bar button whose ring shows each program's status and opens a list of " +
-			"programs ordered by what needs you first.",
+			"programs grouped as Activity groups them.",
 	},
 	{
 		key = "status.panel",
@@ -810,6 +913,38 @@ SCHEMA :: [?]Schema_Entry {
 		names = STATUS_PANEL_VIEW_NAMES,
 		labels = STATUS_PANEL_VIEW_LABELS,
 		description = "Comfy shows each task with its message. Dense fits more programs in compact rows.",
+	},
+	{
+		key = "status.group_by",
+		title = "Activity Grouping",
+		kind = .Enum,
+		offset = offset_of(Settings, status) + offset_of(Status_Settings, group_by),
+		default_value = "status",
+		names = STATUS_GROUP_NAMES,
+		labels = STATUS_GROUP_LABELS,
+		description = "Group Activity and the status inbox by status, or by workspace and then status. " +
+			"Programs with the same status sort by pane name.",
+	},
+	{
+		key = "status.row_name",
+		title = "Activity Row Name",
+		kind = .Enum,
+		offset = offset_of(Settings, status) + offset_of(Status_Settings, row_name),
+		default_value = "pane",
+		names = STATUS_ROW_NAME_NAMES,
+		labels = STATUS_ROW_NAME_LABELS,
+		description = "What names each program in Activity and the status inbox. A subagent's report " +
+			"keeps its own title.",
+	},
+	{
+		key = "status.row_terms",
+		title = "Activity Row Details",
+		kind = .Set,
+		offset = offset_of(Settings, status) + offset_of(Status_Settings, row_terms),
+		default_value = "message, workspace",
+		names = STATUS_ROW_TERM_NAMES,
+		labels = STATUS_ROW_TERM_LABELS,
+		description = "What each row in Activity and the status inbox shows after its name.",
 	},
 	{
 		key = "status.panel_width",
@@ -1558,6 +1693,7 @@ assign :: proc(
 }
 
 #assert(size_of(Status_Channels) == size_of(u32))
+#assert(size_of(Status_Row_Terms) == size_of(u32))
 
 // Reads `none` or comma-separated names; bit i is names[i]. On failure `unknown` is the bad part.
 set_parse :: proc(names: []string, value: string) -> (mask: u32, unknown: string, ok: bool) {

@@ -23,11 +23,12 @@ function Equal($actual, $expected, $label) {
     if ("$actual" -ne "$expected") { throw "$label expected $expected, observed $actual" }
     Write-Output "PASS $label"
 }
-# The Activity row a report named `title` has, or none.
-function Row($title) {
+# The Activity row whose report says `message`, or none. Rows are named by their pane; the message is
+# one of the terms after the name.
+function Row($message) {
     $s = State
     for ($i = 0; $s.ContainsKey("activity.row.$i.rect"); $i++) {
-        if ($s["activity.row.$i.report"] -eq 'true' -and $s["activity.row.$i.text"] -eq $title) {
+        if ($s["activity.row.$i.report"] -eq 'true' -and $s["activity.row.$i.terms"] -like "*$message*") {
             return [pscustomobject]@{
                 Rect = Rect $s "activity.row.$i.rect"; Receipt = Rect $s "activity.row.$i.receipt_rect"
                 Read = $s["activity.row.$i.read"]; Text = $s["activity.row.$i.receipt"]
@@ -58,7 +59,7 @@ try {
     $agent = "$data/agent.ps1"
     Set-Content -LiteralPath $agent -Value @(
         'Start-Sleep -Seconds 3'
-        "[Console]::Write([char]27 + ']7501;state=done:id=claude:app=claude:title=U3RhdHVzIHJvc3Rlcg==' + [char]7)"
+        "[Console]::Write([char]27 + ']7501;state=done:id=claude:app=claude:msg=U3RhdHVzIHJvc3Rlcg==' + [char]7)"
         'Start-Sleep -Seconds 900'
     )
     Aio run "pwsh -NoProfile -File '$agent'" | Out-Null
@@ -90,7 +91,7 @@ try {
 
     # The row's menu does the same.
     Aio mouse click (Middle $row.Rect) --px --button right | Out-Null
-    Equal (State)['overlay'] 'status_menu' 'right click opens the row menu'
+    Equal (State)['overlay'] 'activity_row_menu' 'right click opens the row menu'
     Aio capture --out "$data/menu.png" | Out-Null
     Aio key Down Enter | Out-Null
     $row = Await-Row 'Status roster' 'false' 'the menu marks it unread'

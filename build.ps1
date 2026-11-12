@@ -60,6 +60,21 @@ $flags = @(
 
 $resource = @()
 if (Test-Path 'assets/aiodev.rc') { $resource = @('-resource:assets/aiodev.rc') }
+$cliResource = @()
+if (Test-Path 'assets/aio.rc') { $cliResource = @('-resource:assets/aio.rc') }
+
+# assets/version.rc gives aiodev.exe and aio.exe a version resource from this header. A release tag such
+# as v1.2.3-beta.1 gives 1,2,3,0 and its own text; any other build is 0,0,0,0, named by its build ID.
+function Write-VersionHeader([string] $BuildId, [string] $Version) {
+    $number = '0,0,0,0'
+    $text = "dev $BuildId"
+    if ($Version -match '^(\d+)\.(\d+)\.(\d+)') {
+        $number = "$($Matches[1]),$($Matches[2]),$($Matches[3]),0"
+        $text = $Version
+    }
+    $header = "#define AIO_VERSION_NUMBER $number`r`n#define AIO_VERSION_TEXT `"$text`"`r`n"
+    [IO.File]::WriteAllText((Join-Path $PSScriptRoot 'build/version.h'), $header)
+}
 
 New-Item -ItemType Directory -Force build | Out-Null
 
@@ -108,6 +123,7 @@ function Build-App([string[]] $Mode, [string] $Output = 'build/aiodev.exe', [str
     $kind = if ($Mode -contains '-define:AIO_CONTROL=true') { 'verify' }
         elseif ($Mode -contains '-o:speed') { 'release' } else { 'debug' }
     $version = (Get-ReleaseTag $buildId) -replace '^v', ''
+    Write-VersionHeader $buildId $version
     # Literal single quotes keep a numeric Git hash a string in Odin. aio.exe gets the same identity,
     # so aio can tell when it talks to an AIODev from another build.
     $identity = @("-define:AIO_BUILD_ID='$buildId'", "-define:AIO_BUILD_KIND='$kind'",
@@ -156,7 +172,7 @@ function Build-App([string[]] $Mode, [string] $Output = 'build/aiodev.exe', [str
     $serverName = Split-Path $Output -Leaf
     [string[]] $alternate = if ($AlternateServer) { @("-define:AIO_SERVER_ALTERNATE='$AlternateServer'") } else { @() }
     Invoke-Odin build src/cli "-out:$(Join-Path (Split-Path $Output) 'aio.exe')" @cliMode `
-        '-subsystem:console' "-define:AIO_SERVER_NAME='$serverName'" @identity @alternate @flags
+        '-subsystem:console' "-define:AIO_SERVER_NAME='$serverName'" @identity @alternate @flags @cliResource
 }
 
 function Build-Release([string] $Destination = 'build/release/aiodev.exe') {
@@ -236,6 +252,7 @@ switch ($Task) {
         Copy-Item -LiteralPath 'build/release/aiodev.exe' -Destination "$stage/aiodev.exe"
         Copy-Item -LiteralPath 'build/release/aio.exe' -Destination "$stage/aio.exe"
         Copy-Item -LiteralPath 'tools/install.ps1' -Destination "$stage/install.ps1"
+        Copy-Item -LiteralPath 'tools/uninstall.ps1' -Destination "$stage/uninstall.ps1"
         Copy-Item -LiteralPath 'LICENSE' -Destination "$stage/LICENSE.txt"
         Copy-Item -LiteralPath 'THIRD_PARTY_NOTICES.txt' -Destination "$stage/THIRD_PARTY_NOTICES.txt"
         Copy-Conpty $stage

@@ -82,7 +82,9 @@ jobs:
         run: |
           $archive = "dist/AIODev-$env:TAG-windows-x64.zip"
           ./tools/release-notes.ps1 $env:TAG $archive dist/notes.md
+          # The web installer, releases/latest/download/install.ps1, is this copy pinned to this archive.
+          ./tools/release-installer.ps1 $env:TAG $archive dist/install.ps1
           # Versions with a suffix, such as v1.0.0-beta.1, are prereleases.
           $prerelease = @(if ($env:TAG -match '-') { '--prerelease' })
-          gh release create $env:TAG $archive "$archive.sha256" --verify-tag --title "AIODev $env:TAG" `
-            --notes-file dist/notes.md @prerelease
+          gh release create $env:TAG $archive "$archive.sha256" dist/install.ps1 --verify-tag `
+            --title "AIODev $env:TAG" --notes-file dist/notes.md @prerelease

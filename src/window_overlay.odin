@@ -7,21 +7,23 @@ import "aio:ui"
 // What a window's surfaces keep: the one showing, and the storage the menus and name fields reuse while
 // one shows. Window embeds it; overlay_surfaces_init and overlay_surfaces_destroy are its lifetime.
 Overlay_Surfaces :: struct {
-	overlay:       Window_Overlay,
-	tab_menu:      Tab_Menu,
-	divider_menu:  ui.Menu,
-	status_menu:   ui.Menu,
-	profile_menu:  Profile_Menu,
-	document_menu: Document_Menu,
+	overlay:           Window_Overlay,
+	tab_menu:          Tab_Menu,
+	divider_menu:      ui.Menu,
+	activity_menu:     ui.Menu,
+	activity_row_menu: ui.Menu,
+	profile_menu:      Profile_Menu,
+	document_menu:     Document_Menu,
 	// The name Overlay_Rename, Overlay_Chip_Name or the picker's rename mode edits. They share it because
 	// they exclude each other: opening one closes the others, and each releases the text when it ends.
-	rename:        ui.Text_Field,
+	rename:            ui.Text_Field,
 }
 
 overlay_surfaces_init :: proc(s: ^Overlay_Surfaces) {
 	tab_menu_init(&s.tab_menu)
 	ui.menu_init(&s.divider_menu)
-	ui.menu_init(&s.status_menu)
+	ui.menu_init(&s.activity_menu)
+	ui.menu_init(&s.activity_row_menu)
 	profile_menu_init(&s.profile_menu)
 	document_menu_init(&s.document_menu)
 }
@@ -30,7 +32,8 @@ overlay_surfaces_init :: proc(s: ^Overlay_Surfaces) {
 overlay_surfaces_destroy :: proc(w: ^Window) {
 	tab_menu_destroy(&w.tab_menu)
 	ui.menu_destroy(&w.divider_menu)
-	ui.menu_destroy(&w.status_menu)
+	ui.menu_destroy(&w.activity_menu)
+	ui.menu_destroy(&w.activity_row_menu)
 	profile_menu_destroy(&w.profile_menu)
 	document_menu_destroy(w)
 	delete(w.rename.bytes)
@@ -50,7 +53,8 @@ Window_Overlay :: union {
 	Overlay_Chip_Name,
 	Overlay_Tab_Menu,
 	Overlay_Divider_Menu,
-	Overlay_Status_Menu,
+	Overlay_Activity_Menu,
+	Overlay_Activity_Row_Menu,
 	Overlay_Profile_Menu,
 	Overlay_Document_Menu,
 }
@@ -77,8 +81,13 @@ Overlay_Divider_Menu :: struct {
 	edge: Dock_Edge,
 }
 
-// An Activity row's menu, which acts on the pane the row came from. Its rows are w.status_menu.
-Overlay_Status_Menu :: struct {
+// One of the Activity header's menus. Its rows are w.activity_menu.
+Overlay_Activity_Menu :: struct {
+	kind: Activity_Menu_Kind,
+}
+
+// An Activity row's menu, which acts on the pane the row came from. Its rows are w.activity_row_menu.
+Overlay_Activity_Row_Menu :: struct {
 	session: u32,
 }
 
@@ -101,7 +110,8 @@ Overlay_Kind :: enum u8 {
 	Chip_Name,
 	Tab_Menu,
 	Divider_Menu,
-	Status_Menu,
+	Activity_Menu,
+	Activity_Row_Menu,
 	Profile_Menu,
 	Document_Menu,
 	Confirmation,
@@ -115,7 +125,8 @@ overlay_kind :: proc(app: ^App, w: ^Window) -> Overlay_Kind {
 	case Overlay_Chip_Name: return .Chip_Name
 	case Overlay_Tab_Menu: return .Tab_Menu
 	case Overlay_Divider_Menu: return .Divider_Menu
-	case Overlay_Status_Menu: return .Status_Menu
+	case Overlay_Activity_Menu: return .Activity_Menu
+	case Overlay_Activity_Row_Menu: return .Activity_Row_Menu
 	case Overlay_Profile_Menu: return .Profile_Menu
 	case Overlay_Document_Menu: return .Document_Menu
 	}
@@ -165,7 +176,8 @@ overlay_close :: proc(app: ^App, w: ^Window, exit := Overlay_Exit.Cancel) {
 		ui.field_release(&w.rename)
 	case Overlay_Document_Menu:
 		document_menu_close(&w.document_menu, current.mode)
-	case Overlay_Tab_Menu, Overlay_Divider_Menu, Overlay_Status_Menu, Overlay_Profile_Menu:
+	case Overlay_Tab_Menu, Overlay_Divider_Menu, Overlay_Activity_Menu, Overlay_Activity_Row_Menu,
+	     Overlay_Profile_Menu:
 	}
 	w.overlay, w.dirty = nil, true
 }
@@ -184,8 +196,10 @@ overlay_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 		menu = tab_menu_draw(app, w)
 	case Overlay_Divider_Menu:
 		menu = dock_divider_menu_draw(app, w)
-	case Overlay_Status_Menu:
-		menu = status_menu_draw(app, w)
+	case Overlay_Activity_Menu:
+		menu = activity_menu_draw(app, w)
+	case Overlay_Activity_Row_Menu:
+		menu = activity_row_menu_draw(app, w)
 	case Overlay_Profile_Menu:
 		menu = profile_menu_draw(app, w)
 	case Overlay_Document_Menu:

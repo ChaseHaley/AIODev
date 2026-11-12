@@ -451,6 +451,7 @@ when AIO_CONTROL {
 			tab_strip_state_report(&r, app, w)
 			rail_state_report(&r, w)
 			status_panel_state_report(&r, app, w)
+			status_inbox_state_report(&r, app, w)
 			divider_state_report(&r, w)
 			title_state_report(&r, app, w)
 			workspace_picker_state_report(&r, app, w)

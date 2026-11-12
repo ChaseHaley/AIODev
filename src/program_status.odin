@@ -7,6 +7,7 @@ import "aio:term"
 import "aio:ui"
 import "core:fmt"
 import "core:log"
+import "core:strings"
 import "core:time"
 
 // Program status (OSC 7501) as AIODev presents it. Each session's records are copied when they
@@ -358,22 +359,63 @@ status_scope_next :: proc(
 	}
 }
 
-// When the user last read a pane, for an overview's receipt: zero if never, and whether it is in view
-// now, which reads it as it goes.
-Status_Receipt :: struct {
-	read_at: time.Time,
-	watched: bool,
+// Where a report's pane is and what it is called, which overview rows are named, described and ordered
+// by, and when the user last read it. The strings borrow from the session and the app, so they live
+// for one frame or event at most.
+Status_Pane :: struct {
+	workspace:       string,
+	// The workspace's position in the app's workspace order.
+	workspace_order: int,
+	// Workspace, tab and, in a split tab, pane: session_location_at.
+	crumb:           string,
+	tab:             string,
+	// session_display_title.
+	title:           string,
+	// The last part of the directory the pane's header shows.
+	folder:          string,
+	// The program polling adopted, else the pane's executable; a report's own app comes first.
+	program:         string,
+	// When the user last read the pane, zero if never, and whether it is in view now, which reads it
+	// as it goes.
+	read_at:         time.Time,
+	watched:         bool,
+}
+
+status_pane_of :: proc(
+	app: ^App,
+	workspace: ^Workspace,
+	order, tab: int,
+	entry: ^Session_Entry,
+) -> Status_Pane {
+	program := entry.header.executable
+	if adopted := program_adopted(entry); adopted != nil && adopted.name != "" {program = adopted.name}
+	return {
+		workspace = workspace.name,
+		workspace_order = order,
+		crumb = session_location_at(workspace, tab, entry),
+		tab = tab_display_title(workspace.tabs[tab], tab + 1),
+		title = session_display_title(entry),
+		folder = status_folder_name(entry.header.directory),
+		program = program,
+		read_at = entry.status_read_at,
+		watched = status_watched(app, entry),
+	}
+}
+
+// "AIODev" for `C:\Users\chale\Projects\AIODev\`; a drive root stays whole.
+status_folder_name :: proc(directory: string) -> string {
+	path := strings.trim_right(directory, `\/`)
+	if index := strings.last_index_any(path, `\/`); index >= 0 {return path[index + 1:]}
+	return path != "" ? path : directory
 }
 
 // One pane's records that settings show, with what an overview names and places them by. The
 // records are a temp copy in the session's order, so an overview may sort them; their strings borrow
 // from the session's snapshot, so the projection lives for one frame or event at most.
 Status_Scope_Records :: struct {
-	session:   u32,
-	records:   []term.Program_Status,
-	crumb:     string,
-	workspace: string,
-	receipt:   Status_Receipt,
+	session: u32,
+	records: []term.Program_Status,
+	pane:    Status_Pane,
 }
 
 Status_Scope_Records_Walk :: struct {
@@ -405,9 +447,8 @@ status_scope_records_next :: proc(
 			if status_shown(app, record) {append(&records, record)}
 		}
 		if len(records) == 0 {continue}
-		crumb := session_location_at(workspace, pane.tab, entry)
-		receipt := Status_Receipt{entry.status_read_at, status_watched(app, entry)}
-		return {entry.id, records[:], crumb, workspace.name, receipt}, true
+		place := status_pane_of(app, workspace, walk.scope.next - 1, pane.tab, entry)
+		return {entry.id, records[:], place}, true
 	}
 	return
 }

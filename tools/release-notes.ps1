@@ -42,9 +42,23 @@ foreach ($section in $sections.GetEnumerator()) {
 $notes.AddRange([string[]] @(
     '## Install',
     '',
-    "Download ``$(Split-Path $Archive -Leaf)``, extract it, and run ``AIODev\install.ps1`` in PowerShell.",
-    'It installs per user to `%LOCALAPPDATA%\Programs\AIODev`, adds `aio` to your PATH and creates a Start menu shortcut.',
+    'Quit AIODev, then in PowerShell, to install or upgrade:',
     '',
-    "SHA256: ``$hash``"
+    '```powershell',
+    'irm https://github.com/ChaseHaley/AIODev/releases/latest/download/install.ps1 | iex',
+    '```',
+    '',
+    "Or download ``$(Split-Path $Archive -Leaf)``, extract it, and run",
+    '`powershell -ExecutionPolicy Bypass -File AIODev\install.ps1`.',
+    'Either way it installs per user to `%LOCALAPPDATA%\Programs\AIODev`, adds `aio` to your PATH and creates a',
+    'Start menu shortcut. To uninstall, run',
+    '`powershell -ExecutionPolicy Bypass -File "$env:LOCALAPPDATA\Programs\AIODev\uninstall.ps1"`.',
+    '',
+    "SHA256: ``$hash``",
+    '',
+    '## Code signing policy',
+    '',
+    'See the [code signing policy](https://github.com/ChaseHaley/AIODev#code-signing-policy) for how releases are signed,',
+    'who approves them, and the privacy statement.'
 ))
 [IO.File]::WriteAllLines($ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($Path), $notes)
