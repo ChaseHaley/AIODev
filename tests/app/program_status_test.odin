@@ -232,8 +232,8 @@ program_status_scope_records_share_filtering_and_borrow_no_sortable_snapshot :: 
 	testing.expect_value(t, len(first.records), 2)
 	testing.expect_value(t, first.records[0].id, "")
 	testing.expect_value(t, first.records[1].id, "test")
-	testing.expect_value(t, first.workspace, f.workspace.name)
-	testing.expect_value(t, first.crumb,
+	testing.expect_value(t, first.pane.workspace, f.workspace.name)
+	testing.expect_value(t, first.pane.crumb,
 		app.session_location_at(f.workspace, 0, &f.state.sessions[0]))
 	// Each overview can reorder its copy without changing the next overview's input.
 	first.records[0], first.records[1] = first.records[1], first.records[0]

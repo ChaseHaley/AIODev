@@ -10,6 +10,7 @@ Overlay_Surfaces :: struct {
 	overlay:       Window_Overlay,
 	tab_menu:      Tab_Menu,
 	divider_menu:  ui.Menu,
+	activity_menu: ui.Menu,
 	profile_menu:  Profile_Menu,
 	document_menu: Document_Menu,
 	// The name Overlay_Rename, Overlay_Chip_Name or the picker's rename mode edits. They share it because
@@ -20,6 +21,7 @@ Overlay_Surfaces :: struct {
 overlay_surfaces_init :: proc(s: ^Overlay_Surfaces) {
 	tab_menu_init(&s.tab_menu)
 	ui.menu_init(&s.divider_menu)
+	ui.menu_init(&s.activity_menu)
 	profile_menu_init(&s.profile_menu)
 	document_menu_init(&s.document_menu)
 }
@@ -28,6 +30,7 @@ overlay_surfaces_init :: proc(s: ^Overlay_Surfaces) {
 overlay_surfaces_destroy :: proc(w: ^Window) {
 	tab_menu_destroy(&w.tab_menu)
 	ui.menu_destroy(&w.divider_menu)
+	ui.menu_destroy(&w.activity_menu)
 	profile_menu_destroy(&w.profile_menu)
 	document_menu_destroy(w)
 	delete(w.rename.bytes)
@@ -47,6 +50,7 @@ Window_Overlay :: union {
 	Overlay_Chip_Name,
 	Overlay_Tab_Menu,
 	Overlay_Divider_Menu,
+	Overlay_Activity_Menu,
 	Overlay_Profile_Menu,
 	Overlay_Document_Menu,
 }
@@ -73,6 +77,11 @@ Overlay_Divider_Menu :: struct {
 	edge: Dock_Edge,
 }
 
+// One of the Activity header's menus. Its rows are w.activity_menu.
+Overlay_Activity_Menu :: struct {
+	kind: Activity_Menu_Kind,
+}
+
 Overlay_Profile_Menu :: struct {
 	mode: Profile_Menu_Mode,
 }
@@ -92,6 +101,7 @@ Overlay_Kind :: enum u8 {
 	Chip_Name,
 	Tab_Menu,
 	Divider_Menu,
+	Activity_Menu,
 	Profile_Menu,
 	Document_Menu,
 	Confirmation,
@@ -105,6 +115,7 @@ overlay_kind :: proc(app: ^App, w: ^Window) -> Overlay_Kind {
 	case Overlay_Chip_Name: return .Chip_Name
 	case Overlay_Tab_Menu: return .Tab_Menu
 	case Overlay_Divider_Menu: return .Divider_Menu
+	case Overlay_Activity_Menu: return .Activity_Menu
 	case Overlay_Profile_Menu: return .Profile_Menu
 	case Overlay_Document_Menu: return .Document_Menu
 	}
@@ -154,7 +165,7 @@ overlay_close :: proc(app: ^App, w: ^Window, exit := Overlay_Exit.Cancel) {
 		ui.field_release(&w.rename)
 	case Overlay_Document_Menu:
 		document_menu_close(&w.document_menu, current.mode)
-	case Overlay_Tab_Menu, Overlay_Divider_Menu, Overlay_Profile_Menu:
+	case Overlay_Tab_Menu, Overlay_Divider_Menu, Overlay_Activity_Menu, Overlay_Profile_Menu:
 	}
 	w.overlay, w.dirty = nil, true
 }
@@ -173,6 +184,8 @@ overlay_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 		menu = tab_menu_draw(app, w)
 	case Overlay_Divider_Menu:
 		menu = dock_divider_menu_draw(app, w)
+	case Overlay_Activity_Menu:
+		menu = activity_menu_draw(app, w)
 	case Overlay_Profile_Menu:
 		menu = profile_menu_draw(app, w)
 	case Overlay_Document_Menu:

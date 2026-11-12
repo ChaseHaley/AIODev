@@ -6,21 +6,49 @@ import "aio:platform"
 import "aio:settings"
 import "aio:term"
 import "aio:ui"
+import "core:fmt"
 import "core:os"
 import "core:strings"
 import "core:testing"
 import "core:time"
 
 @(private = "file")
-reports_of :: proc(
-	workspace: string,
+pane_reports :: proc(
+	workspace, pane: string,
+	order: int,
 	records: ..term.Program_Status,
-) -> [dynamic]app.Status_Panel_Report {
-	reports := make([dynamic]app.Status_Panel_Report, context.temp_allocator)
+) -> [dynamic]app.Status_Report {
+	reports := make([dynamic]app.Status_Report, context.temp_allocator)
 	copied := make([]term.Program_Status, len(records), context.temp_allocator)
 	copy(copied, records)
-	app.status_panel_tree_append(&reports, copied, 1, "crumb", workspace)
+	place := app.Status_Pane{workspace = workspace, workspace_order = order, crumb = "crumb", title = pane}
+	app.status_tree_append(&reports, copied, 1, place)
 	return reports
+}
+
+@(private = "file")
+reports_of :: proc(workspace: string, records: ..term.Program_Status) -> [dynamic]app.Status_Report {
+	return pane_reports(workspace, "pane", 0, ..records)
+}
+
+// What each row shows in tests: a report's id, or a label with its count.
+@(private = "file")
+row_texts :: proc(rows: []app.Status_Row) -> []string {
+	texts := make([]string, len(rows), context.temp_allocator)
+	for row, i in rows {
+		texts[i] = row.report ? row.item.record.id : fmt.tprintf("[%s %d]", row.label, row.count)
+	}
+	return texts
+}
+
+@(private = "file")
+expect_rows :: proc(t: ^testing.T, rows: []app.Status_Row, expected: []string, loc := #caller_location) {
+	texts := row_texts(rows)
+	testing.expect_value(t, len(texts), len(expected), loc)
+	for text, i in expected {
+		if i >= len(texts) {return}
+		testing.expect_value(t, texts[i], text, loc)
+	}
 }
 
 @(test)
@@ -49,26 +77,7 @@ activity_tree_keeps_children_with_parents_and_treats_orphans_as_roots :: proc(t:
 }
 
 @(test)
-activity_comfy_groups_by_workspace_with_fixed_row_heights :: proc(t: ^testing.T) {
-	reports := reports_of("One", {id = "a", state = .Working}, {id = "a/b", state = .Blocked})
-	more := reports_of("Two", {id = "c", state = .Done})
-	append(&reports, ..more[:])
-	rows, total := app.status_panel_project(.Comfy, reports[:], 1.5)
-	testing.expect_value(t, len(rows), 5)
-	testing.expect_value(t, rows[0].label, "One")
-	testing.expect(t, rows[1].report && rows[2].report && !rows[3].report && rows[4].report)
-	testing.expect_value(t, rows[2].depth, 1)
-	testing.expect_value(t, rows[3].label, "Two")
-	testing.expect_value(t, rows[0].height, 28 * 1.5)
-	testing.expect_value(t, rows[1].height, 56 * 1.5)
-	testing.expect_value(t, rows[0].y, 4 * 1.5)
-	// Later groups stand 8 DIPs from the row above them.
-	testing.expect_value(t, rows[3].y, rows[2].y + rows[2].height + 8 * 1.5)
-	testing.expect_value(t, total, rows[4].y + rows[4].height + 4 * 1.5)
-}
-
-@(test)
-activity_dense_sections_follow_urgency_and_keep_trees_whole :: proc(t: ^testing.T) {
+activity_sections_follow_urgency_and_keep_trees_whole :: proc(t: ^testing.T) {
 	reports := reports_of(
 		"W",
 		{id = "idle", state = .Idle},
@@ -80,45 +89,127 @@ activity_dense_sections_follow_urgency_and_keep_trees_whole :: proc(t: ^testing.
 		{id = "done", state = .Done},
 		{id = "plain", state = .Working},
 	)
-	rows, _ := app.status_panel_project(.Dense, reports[:], 1)
-	expected := [?]struct {
-		text:  string,
-		count: int,
-	} {
-		{"Needs you", 2},
-		{"unseen", 0},
-		{"working", 0},
-		{"working/ask", 0},
-		{"working/ask/run", 0},
-		{"Working", 1},
-		{"plain", 0},
-		{"Finished", 2},
-		{"done", 0},
-		{"seen", 0},
-		{"Idle", 1},
-		{"idle", 0},
-	}
-	testing.expect_value(t, len(rows), len(expected))
-	if len(rows) != len(expected) {return}
-	for e, i in expected {
-		row := rows[i]
-		testing.expect_value(t, row.report ? row.item.record.id : row.label, e.text)
-		testing.expect_value(t, row.count, e.count)
-	}
+	rows, _ := app.status_rows_project(.Status, reports[:], {32, 28}, 1)
+	expect_rows(t, rows, {
+		"[Needs you 2]", "unseen", "working", "working/ask", "working/ask/run",
+		"[Working 1]", "plain",
+		"[Finished 2]", "done", "seen",
+		"[Idle 1]", "idle",
+	})
+	if len(rows) < 6 {return}
 	testing.expect(t, rows[0].attention)
 	testing.expect(t, !rows[5].attention)
 	testing.expect_value(t, rows[1].height, 32)
 	testing.expect_value(t, rows[3].height, 28)
 	testing.expect_value(t, rows[0].height, 28)
+	testing.expect_value(t, rows[0].y, 4)
+	// Later sections stand 8 DIPs from the row above them.
+	testing.expect_value(t, rows[5].y, rows[4].y + rows[4].height + 8)
+}
+
+// WORK-412: ties within a section sort by pane name, without case and after a title's leading
+// symbols, and keep pane order when names match. Workspaces do not matter when grouping by status.
+@(test)
+activity_status_grouping_sorts_by_pane_name_across_workspaces :: proc(t: ^testing.T) {
+	reports := make([dynamic]app.Status_Report, context.temp_allocator)
+	panes := [?]struct {
+		workspace, pane, id: string,
+		order:               int,
+		state:               term.Program_Status_State,
+	} {
+		{"One", "✳ zeta", "z", 0, .Working},
+		{"One", "Beta", "b1", 0, .Working},
+		{"Two", "alpha", "a", 1, .Working},
+		{"Two", "beta", "b2", 1, .Working},
+		{"Two", "✳ Gamma", "g", 1, .Blocked},
+	}
+	for p in panes {
+		more := pane_reports(p.workspace, p.pane, p.order, {id = p.id, state = p.state})
+		append(&reports, ..more[:])
+	}
+	rows, _ := app.status_rows_project(.Status, reports[:], {56, 56}, 1)
+	expect_rows(t, rows, {"[Needs you 1]", "g", "[Working 4]", "a", "b1", "b2", "z"})
 }
 
 @(test)
-activity_views_project_nothing_without_reports :: proc(t: ^testing.T) {
-	for view in settings.Status_Panel_View {
-		rows, total := app.status_panel_project(view, nil, 1)
+activity_workspace_grouping_nests_sections_under_each_workspace :: proc(t: ^testing.T) {
+	reports := pane_reports("Two", "b", 1, {id = "late", state = .Working})
+	more := pane_reports("One", "a", 0, {id = "done", state = .Done}, {id = "done/ask", state = .Blocked})
+	append(&reports, ..more[:])
+	more = pane_reports("One", "c", 0, {id = "run", state = .Working})
+	append(&reports, ..more[:])
+	rows, total := app.status_rows_project(.Workspace, reports[:], {56, 56}, 1.5)
+	expect_rows(t, rows, {
+		"[One 2]", "[Needs you 1]", "done", "done/ask", "[Working 1]", "run",
+		"[Two 1]", "[Working 1]", "late",
+	})
+	if len(rows) != 9 {return}
+	testing.expect(t, !rows[0].nested && rows[1].nested && rows[1].attention)
+	testing.expect_value(t, rows[0].height, 28 * 1.5)
+	// A nested label is shorter and sits right under the row above it.
+	testing.expect_value(t, rows[1].height, 24 * 1.5)
+	testing.expect_value(t, rows[1].y, rows[0].y + rows[0].height)
+	testing.expect_value(t, rows[6].y, rows[5].y + rows[5].height + 8 * 1.5)
+	testing.expect_value(t, total, rows[8].y + rows[8].height + 4 * 1.5)
+}
+
+@(test)
+activity_groupings_project_nothing_without_reports :: proc(t: ^testing.T) {
+	for group in settings.Status_Group {
+		rows, total := app.status_rows_project(group, nil, {56, 56}, 1)
 		testing.expect_value(t, len(rows), 0)
 		testing.expect_value(t, total, 0)
 	}
+}
+
+// WORK-406: rows take the chosen name, falling back when that term is empty; a subagent keeps its
+// own title.
+@(test)
+activity_row_names_follow_the_setting_and_subagents_keep_their_titles :: proc(t: ^testing.T) {
+	s: settings.Status_Settings
+	item := app.Status_Item {
+		record = {id = "a", app = "claude", title = "Long task"},
+		pane = {title = "✳ Fix inbox", tab = "status", folder = "AIODev", program = "node"},
+	}
+	expected := [settings.Status_Row_Name]string {
+		.Pane    = "✳ Fix inbox",
+		.Program = "claude",
+		.Tab     = "status",
+		.Folder  = "AIODev",
+	}
+	for name in settings.Status_Row_Name {
+		s.row_name = name
+		testing.expect_value(t, app.status_report_name(&s, item, 0), expected[name])
+		testing.expect_value(t, app.status_report_name(&s, item, 1), "Long task")
+	}
+	s.row_name = .Folder
+	bare := item
+	bare.pane.folder = ""
+	testing.expect_value(t, app.status_report_name(&s, bare, 0), "Long task")
+	bare.record.title, bare.record.app = "", ""
+	testing.expect_value(t, app.status_report_name(&s, bare, 0), "✳ Fix inbox")
+	testing.expect_value(t, app.status_report_name(&s, bare, 1), "✳ Fix inbox")
+	s.row_name = .Program
+	testing.expect_value(t, app.status_report_name(&s, bare, 0), "node")
+}
+
+@(test)
+activity_row_terms_keep_their_order_and_skip_what_the_row_already_says :: proc(t: ^testing.T) {
+	s := settings.Status_Settings {
+		row_terms = {.Folder, .Workspace, .Message, .Tab, .Pane},
+	}
+	item := app.Status_Item {
+		record = {state = .Working, progress = -1, message = "Editing"},
+		pane = {workspace = "AIODev", title = "status", tab = "status", folder = ""},
+	}
+	testing.expect_value(t, app.status_report_terms(&s, item, "Session"), "Editing · status · status · AIODev")
+	testing.expect_value(t, app.status_report_terms(&s, item, "status"), "Editing · AIODev")
+	s.group_by = .Workspace
+	testing.expect_value(t, app.status_report_terms(&s, item, "status"), "Editing")
+	item.record.message = ""
+	testing.expect_value(t, app.status_report_terms(&s, item, "status"), "Working")
+	s.row_terms = {}
+	testing.expect_value(t, app.status_report_terms(&s, item, "status"), "")
 }
 
 @(test)
@@ -130,8 +221,8 @@ activity_view_button_saves_one_preference_and_cancels_outside_or_on_capture_loss
 	saved := app.settings_save_value(s, "status.panel", "true", "enable panel")
 	if !testing.expect(t, saved) {return}
 	testing.expect_value(t, s.settings.status.panel_view, settings.Status_Panel_View.Comfy)
-	r := app.status_panel_view_rect(s, w)
-	side := app.status_panel_side_rect(s, w)
+	r := app.status_panel_button_rect(s, w, .View)
+	side := app.status_panel_button_rect(s, w, .Side)
 	testing.expect(t, r.width > 0 && r.x + r.width <= side.x)
 	x, y := r.x + r.width / 2, r.y + r.height / 2
 	gesture_button(s, w, .Left, true, x, y)
@@ -154,6 +245,73 @@ activity_view_button_saves_one_preference_and_cancels_outside_or_on_capture_loss
 	saved = app.settings_save_value(s, "status.panel_view", "dense", "set view")
 	testing.expect(t, saved)
 	testing.expect_value(t, s.settings.status.panel_view, settings.Status_Panel_View.Dense)
+}
+
+@(private = "file")
+click_at :: proc(s: ^app.App, w: ^app.Window, x, y: f32) {
+	gesture_button(s, w, .Left, true, x, y)
+	gesture_button(s, w, .Left, false, x, y)
+}
+
+// The menu row with `label`, counting from the row after `after` when given.
+@(private = "file")
+menu_click :: proc(t: ^testing.T, s: ^app.App, w: ^app.Window, label: string, after := "") -> bool {
+	menu := &w.activity_menu
+	searching := after == ""
+	for item, i in menu.items {
+		if !searching {
+			searching = item.label == after
+			continue
+		}
+		if item.label != label {continue}
+		r := ui.menu_row_rect(menu, i, f32(w.width), f32(w.height), w.scale)
+		click_at(s, w, r.x + r.width / 2, r.y + r.height / 2)
+		return true
+	}
+	testing.expectf(t, false, "no %q row in the Activity menu", label)
+	return false
+}
+
+// WORK-406, WORK-412: Show and Group by sit left of the view button and open their menus, whose
+// choices save the settings Settings shows. Show stays open while terms toggle and greys out the term
+// that names the rows; Group by closes on a choice.
+@(test)
+activity_menus_save_row_names_terms_and_grouping :: proc(t: ^testing.T) {
+	f: Palette_Fixture
+	defer palette_fixture_destroy(t, &f)
+	if !palette_fixture_create(t, &f, "activity-menus", second_window = false) {return}
+	s, w := &f.state, f.state.windows[0]
+	if !testing.expect(t, app.settings_save_value(s, "status.panel", "true", "enable panel")) {return}
+	show := app.status_panel_button_rect(s, w, .Show)
+	group := app.status_panel_button_rect(s, w, .Group)
+	view := app.status_panel_button_rect(s, w, .View)
+	testing.expect(t, show.width > 0 && show.x + show.width <= group.x && group.x + group.width <= view.x)
+	saved :: proc(t: ^testing.T, f: ^Palette_Fixture, line: string, loc := #caller_location) {
+		text, err := os.read_entire_file(f.path, context.temp_allocator)
+		testing.expect_value(t, err, nil, loc)
+		testing.expectf(t, strings.contains(string(text), line), "settings lack %q", line, loc = loc)
+	}
+	click_at(s, w, show.x + show.width / 2, show.y + show.height / 2)
+	if !testing.expect(t, app.activity_menu_shown(w, .Show)) {return}
+	if !menu_click(t, s, w, "Tab") {return}
+	testing.expect_value(t, s.settings.status.row_name, settings.Status_Row_Name.Tab)
+	saved(t, &f, "status.row_name = tab")
+	testing.expect(t, app.activity_menu_shown(w, .Show))
+	if !menu_click(t, s, w, "Message", after = "Also show") {return}
+	testing.expect_value(t, s.settings.status.row_terms, settings.Status_Row_Terms{.Workspace})
+	saved(t, &f, "status.row_terms = workspace")
+	// Tab names the rows, so it cannot also follow the name.
+	if !menu_click(t, s, w, "Tab", after = "Also show") {return}
+	testing.expect_value(t, s.settings.status.row_terms, settings.Status_Row_Terms{.Workspace})
+	// The button that opened the menu closes it.
+	click_at(s, w, show.x + show.width / 2, show.y + show.height / 2)
+	testing.expect(t, !app.activity_menu_shown(w))
+	click_at(s, w, group.x + group.width / 2, group.y + group.height / 2)
+	if !testing.expect(t, app.activity_menu_shown(w, .Group)) {return}
+	if !menu_click(t, s, w, "Workspace, then status") {return}
+	testing.expect_value(t, s.settings.status.group_by, settings.Status_Group.Workspace)
+	saved(t, &f, "status.group_by = workspace")
+	testing.expect(t, !app.activity_menu_shown(w))
 }
 
 @(test)
@@ -234,7 +392,7 @@ activity_rows_hit_and_explain_themselves_in_both_views :: proc(t: ^testing.T) {
 			w.status.panel_scroll = 0
 			tip := app.status_panel_row_tooltip(s, w, x, y)
 			testing.expect(t, strings.contains(tip, row.item.record.title))
-			testing.expect(t, strings.contains(tip, row.item.crumb))
+			testing.expect(t, strings.contains(tip, row.item.pane.crumb))
 			testing.expect(t, strings.contains(tip, row.item.record.app))
 			testing.expect_value(t, strings.count(tip, "\n"), 2)
 			if row.item.record.state == .Done {
@@ -289,4 +447,41 @@ activity_inbox_passes_keys_it_does_not_use :: proc(t: ^testing.T) {
 	app.run_action(s, w, .Status_Inbox)
 	inbox_press(s, w, .F10, {.Shift})
 	testing.expect(t, app.tab_menu_shown(w) && !app.status_inbox_shown(w))
+}
+
+// WORK-412: the inbox lists the panel's groups in the panel's order, and its selection passes over
+// the labels between them.
+@(test)
+activity_inbox_groups_like_the_panel_and_skips_labels :: proc(t: ^testing.T) {
+	f: Palette_Fixture
+	defer palette_fixture_destroy(t, &f)
+	if !palette_fixture_create(t, &f, "activity-inbox-groups", second_window = false) {return}
+	s, w := &f.state, f.state.windows[0]
+	s.settings.status.enabled = true
+	entry := app.focused_session(s, w)
+	if !testing.expect(t, entry != nil) {return}
+	previous := entry.statuses
+	defer {
+		delete(entry.statuses)
+		entry.statuses = previous
+	}
+	entry.statuses = make([]term.Program_Status, 2)
+	entry.statuses[0] = {id = "a", state = .Working, progress = -1, updated_at = time.now()}
+	entry.statuses[1] = {id = "b", state = .Blocked, progress = -1, updated_at = time.now()}
+	app.run_action(s, w, .Status_Inbox)
+	if !testing.expect(t, app.status_inbox_shown(w)) {return}
+	rows, _ := app.status_rows_project(s.settings.status.group_by, app.status_reports(s, w), {48, 48}, w.scale)
+	expect_rows(t, rows, {"[Needs you 1]", "b", "[Working 1]", "a"})
+	selected :: proc(w: ^app.Window) -> int {
+		inbox, _ := w.status.inbox.?
+		return inbox.selected
+	}
+	inbox_press(s, w, .Arrow_Up)
+	testing.expect_value(t, selected(w), 1)
+	inbox_press(s, w, .Arrow_Down)
+	testing.expect_value(t, selected(w), 3)
+	inbox_press(s, w, .Arrow_Down)
+	testing.expect_value(t, selected(w), 3)
+	inbox_press(s, w, .Arrow_Up)
+	testing.expect_value(t, selected(w), 1)
 }

@@ -456,6 +456,35 @@ activity_panel_view_defaults_to_comfy_and_refuses_unknown_values :: proc(t: ^tes
 	testing.expect_value(t, bad.status.panel_view, settings.Status_Panel_View.Comfy)
 }
 
+// WORK-406, WORK-412: rows default to pane titles with the message and workspace, grouped by status;
+// an unknown value keeps the default.
+@(test)
+activity_rows_default_to_pane_titles_grouped_by_status :: proc(t: ^testing.T) {
+	s, d, err := settings.parse("")
+	defer settings.destroy(&s)
+	defer settings.diagnostics_destroy(&d)
+	testing.expect_value(t, err, nil)
+	testing.expect_value(t, s.status.group_by, settings.Status_Group.Status)
+	testing.expect_value(t, s.status.row_name, settings.Status_Row_Name.Pane)
+	testing.expect_value(t, s.status.row_terms, settings.Status_Row_Terms{.Message, .Workspace})
+	text := "status.group_by = workspace\nstatus.row_name = folder\nstatus.row_terms = tab, program\n"
+	set, set_issues, set_err := settings.parse(text)
+	defer settings.destroy(&set)
+	defer settings.diagnostics_destroy(&set_issues)
+	testing.expect_value(t, set_err, nil)
+	testing.expect_value(t, len(set_issues), 0)
+	testing.expect_value(t, set.status.group_by, settings.Status_Group.Workspace)
+	testing.expect_value(t, set.status.row_name, settings.Status_Row_Name.Folder)
+	testing.expect_value(t, set.status.row_terms, settings.Status_Row_Terms{.Program, .Tab})
+	bad, issues, bad_err := settings.parse("status.group_by = app\nstatus.row_terms = message, colour\n")
+	defer settings.destroy(&bad)
+	defer settings.diagnostics_destroy(&issues)
+	testing.expect_value(t, bad_err, nil)
+	testing.expect_value(t, len(issues), 2)
+	testing.expect_value(t, bad.status.group_by, settings.Status_Group.Status)
+	testing.expect_value(t, bad.status.row_terms, settings.Status_Row_Terms{.Message, .Workspace})
+}
+
 @(test)
 dock_size_settings_default_to_the_previous_sizes_and_clamp :: proc(t: ^testing.T) {
 	s, d, err := settings.parse("")

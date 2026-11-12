@@ -11,6 +11,7 @@ Pointer_Target :: enum u8 {
 	Workspace_Picker,
 	Tab_Menu,
 	Divider_Menu,
+	Activity_Menu,
 	Profile_Menu,
 	Document_Menu,
 	Status_Inbox,
@@ -115,6 +116,9 @@ pointer_surfaces := [Pointer_Target]Pointer_Surface {
 	},
 	.Divider_Menu     = {
 		claims = divider_menu_claims, hover = divider_menu_hover, press = divider_menu_button, modal = true,
+	},
+	.Activity_Menu    = {
+		claims = activity_menu_claims, hover = activity_menu_hover, press = activity_menu_button, modal = true,
 	},
 	.Profile_Menu     = {
 		claims = profile_menu_claims, hover = profile_menu_hover, press = profile_menu_button, modal = true,

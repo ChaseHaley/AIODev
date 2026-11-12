@@ -46,6 +46,10 @@ Icon :: enum {
 	Terminal,
 	View_Comfy,
 	View_Dense,
+	// Activity grouped by status: a state mark before each row.
+	Group_Status,
+	// Activity grouped by workspace: a workspace with rows under it.
+	Group_Workspace,
 	Markdown,
 	Document,
 	Folder,
@@ -227,6 +231,17 @@ icon_draw :: proc(
 		pen_box(p, 2, 9, 12, 5, 1)
 	case .View_Dense:
 		for y in ([?]f32{3, 6.5, 10, 13.5}) {pen_path(p, {2, y}, {14, y})}
+	case .Group_Status:
+		for y in ([?]f32{3.5, 8, 12.5}) {
+			pen_arc(p, 3.5, y, 1.5, 0, 2 * math.PI)
+			pen_path(p, {7, y}, {14, y})
+		}
+	case .Group_Workspace:
+		pen_box(p, 1.5, 1.5, 5, 4, 1)
+		pen_path(p, {4, 5.5}, {4, 12}, {7, 12})
+		pen_path(p, {4, 8.5}, {7, 8.5})
+		pen_path(p, {9, 8.5}, {14.5, 8.5})
+		pen_path(p, {9, 12}, {14.5, 12})
 	case .More:
 		for x in ([?]f32{3, 8, 13}) {pen_dot(p, x, 8)}
 	case .More_Vertical:

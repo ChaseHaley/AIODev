@@ -25,20 +25,36 @@ function Equal($actual, $expected, $label) {
 }
 function Middle($r) { return "$([int]($r[0]+$r[2]/2)),$([int]($r[1]+$r[3]/2))" }
 function Click($s, $key) { Aio mouse click (Middle (Rect $s $key)) --px | Out-Null }
-function Rows($s) {
+function Rows($s, $prefix = 'activity.row') {
     $rows = @()
-    for ($i = 0; $s.ContainsKey("activity.row.$i.rect"); $i++) {
+    for ($i = 0; $s.ContainsKey("$prefix.$i.rect"); $i++) {
         $rows += [pscustomobject]@{
-            Index = $i; Text = $s["activity.row.$i.text"]; Report = $s["activity.row.$i.report"] -eq 'true'
-            Depth = [int]$s["activity.row.$i.depth"]; Rect = Rect $s "activity.row.$i.rect"
+            Index = $i; Text = $s["$prefix.$i.text"]; Report = $s["$prefix.$i.report"] -eq 'true'
+            Depth = [int]$s["$prefix.$i.depth"]; Rect = Rect $s "$prefix.$i.rect"
+            Terms = $s["$prefix.$i.terms"]; Nested = $s["$prefix.$i.nested"] -eq 'true'
         }
     }
     return $rows
 }
+# Rows are named by pane title; this journey also shows each report's title first among the terms.
 function Find-Row($s, $text) {
-    $row = Rows $s | Where-Object { $_.Report -and $_.Text -eq $text } | Select-Object -First 1
+    $row = Rows $s | Where-Object {
+        $_.Report -and ($_.Text -eq $text -or $_.Terms -eq $text -or "$($_.Terms)".StartsWith("$text "))
+    } | Select-Object -First 1
     if (-not $row) { throw "no Activity row named $text" }
     return $row
+}
+function Report-Order($s, $prefix = 'activity.row') {
+    return (@(Rows $s $prefix | Where-Object Report) | ForEach-Object { "$($_.Text)|$($_.Terms)" }) -join "`n"
+}
+function Choose-Menu($s, $label) {
+    for ($i = 1; $s.ContainsKey("activity.menu.row.$i.label"); $i++) {
+        if ($s["activity.menu.row.$i.label"] -eq $label -and $s["activity.menu.row.$i.enabled"] -eq 'true') {
+            Click $s "activity.menu.row.$i.rect"
+            return
+        }
+    }
+    throw "no Activity menu row $label"
 }
 function Encode($text) { return [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($text)) }
 function Report-Script($file, $reports) {
@@ -140,7 +156,8 @@ $others = @(
 
 Aio launch --fresh --size 150x46 | Out-Null
 try {
-    Add-Content -LiteralPath $settings -Value "`nstatus.panel = true`nstatus.show_idle = true`nstatus.show_done = true"
+    Add-Content -LiteralPath $settings -Value ("`nstatus.panel = true`nstatus.show_idle = true`nstatus.show_done = true" +
+        "`nstatus.row_terms = title, message, workspace")
     Aio command settings.reload | Out-Null
     $s = State
     Equal $s['activity.view'] 'comfy' 'no saved value opens Comfy'
@@ -157,7 +174,7 @@ try {
     $rows = Rows $s
     Equal (@($rows | Where-Object Report).Count) 9 'every report has a row'
     Equal (Find-Row $s 'Review layout').Depth 1 'child report keeps its parent'
-    Equal ($rows[0].Report) $false 'Comfy starts with a workspace label'
+    Equal ($rows[0].Report) $false 'Comfy starts with a status label'
     Equal ([int]((Find-Row $s 'Activity panel').Rect[3])) ([int](56 * [double]$s['window.scale'])) 'Comfy row height'
 
     # Settings and the header change one saved value.
@@ -193,6 +210,54 @@ try {
     Aio mouse down (Middle $button) --px | Out-Null
     Aio mouse up "$([int]($button[0]-120)),$([int]($button[1]+200))" --px | Out-Null
     Equal (State)['activity.view'] 'comfy' 'release outside cancels'
+
+    # WORK-412: grouping is its own choice, and both views list reports in the same order.
+    Set-View-Button 'comfy'
+    $comfy = Report-Order (State)
+    Set-View-Button 'dense'
+    Equal (Report-Order (State)) $comfy 'Dense keeps the Comfy order'
+    $s = State
+    Equal $s['activity.group'] 'status' 'Activity groups by status by default'
+    Click $s 'activity.group_button'
+    $s = State
+    Equal $s['activity.menu'] 'group' 'Group by opens its menu'
+    Aio capture --out "$data/group-menu.png" | Out-Null
+    Choose-Menu $s 'Workspace, then status'
+    $s = State
+    Equal $s['activity.group'] 'workspace' 'Group by saves workspace grouping'
+    Equal $s['activity.menu'] '' 'Group by closes on a choice'
+    $rows = Rows $s
+    Equal $rows[0].Report $false 'workspace grouping starts with a workspace label'
+    Equal $rows[1].Nested $true 'status labels sit under the workspace'
+    if (-not (Select-String -LiteralPath $settings -SimpleMatch 'status.group_by = workspace' -Quiet)) {
+        throw 'Group by did not save the grouping'
+    }
+    Write-Output 'PASS Group by saves the grouping'
+    Aio capture --out "$data/group-workspace.png" | Out-Null
+    # The status inbox lists the panel's rows in the panel's order.
+    Aio key 'Ctrl+Shift+I' | Out-Null
+    $s = State
+    Equal $s['inbox.open'] 'true' 'inbox opens'
+    Equal (Report-Order $s 'inbox.row') (Report-Order $s) 'inbox follows the panel grouping'
+    Aio capture --out "$data/inbox-workspace.png" | Out-Null
+    Aio key Esc | Out-Null
+
+    # WORK-406: Show names the rows and stays open while choices change.
+    Click (State) 'activity.show_button'
+    $s = State
+    Equal $s['activity.menu'] 'show' 'Show opens its menu'
+    Choose-Menu $s 'Tab'
+    $s = State
+    Equal $s['activity.row_name'] 'tab' 'Show names rows by tab'
+    Equal $s['activity.menu'] 'show' 'Show stays open after a choice'
+    Aio capture --out "$data/show-menu.png" | Out-Null
+    Choose-Menu $s 'Pane title'
+    Equal (State)['activity.row_name'] 'pane' 'Show returns to pane titles'
+    Aio key Esc | Out-Null
+    Equal (State)['activity.menu'] '' 'Escape closes Show'
+    Click (State) 'activity.group_button'
+    Choose-Menu (State) 'Status'
+    Equal (State)['activity.group'] 'status' 'Group by returns to status'
 
     # Both views go to the pane and dismiss finished work.
     foreach ($view in 'comfy', 'dense') {

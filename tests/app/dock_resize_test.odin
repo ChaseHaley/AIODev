@@ -77,7 +77,7 @@ activity_side_button_persists_setting_and_cancels_outside_or_on_capture_loss :: 
 	saved := app.settings_save_value(s, "status.panel", "true", "enable panel")
 	if !testing.expect(t, saved) {return}
 	for side in ([?]settings.Status_Panel_Side{.Left, .Right}) {
-		r := app.status_panel_side_rect(s, w)
+		r := app.status_panel_button_rect(s, w, .Side)
 		x, y := r.x + r.width / 2, r.y + r.height / 2
 		gesture_button(s, w, .Left, true, x, y)
 		gesture_button(s, w, .Left, false, 0, 0)
