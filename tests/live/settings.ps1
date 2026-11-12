@@ -146,8 +146,11 @@ try {
     Open-Field keys.tab.new
     $beforeConflict = [IO.File]::ReadAllText($path)
     Capture-Keys Ctrl+Shift+P
-    Assert-Value (Read-State)['settings.error'] 'true' 'conflicting shortcut rejected'
+    Assert-Value (Read-State)['settings.chain'].Trim('"') 'keys.tab.new,keys.app.command_palette' 'conflicting shortcut opens the chain'
     Assert-Value ([IO.File]::ReadAllText($path)) $beforeConflict 'conflict preserves shortcut file'
+    Invoke-Aio key Esc
+    Assert-Value (Read-State)['settings.chain'].Trim('"') '' 'Escape drops the chain'
+    Assert-Value (Read-State)['settings.key'] 'keys.tab.new' 'Escape returns to the edited row'
     Invoke-Aio key Enter Enter Shift+A
     Assert-Value (Read-State)['settings.error'] 'true' 'typing key without a modifier refused'
     $recorded = (Read-State)['settings.value']

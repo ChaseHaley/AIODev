@@ -2307,8 +2307,7 @@ editor_layout :: proc(area: render.Rect, scale: f32) -> Editor_Layout {
 // neither drawing once nor drawing the selected profile row is a prerequisite for keyboard use.
 editor_fit :: proc(p: ^Editor, l: Editor_Layout) {
 	p.fit_layout = l
-	// A conflict chain keeps its last line for Cancel · Esc.
-	p.visible_rows = editor_chained(p) ? max(1, l.rows - 1) : l.rows
+	p.visible_rows = l.rows
 	p.profile_menu.bounds = l.page
 	p.scroll = clamp(p.scroll, 0, max_scroll(p))
 	entries := outline_entries(p)

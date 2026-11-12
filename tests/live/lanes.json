@@ -60,6 +60,9 @@
     "hover_rim": {
       "lane": "headless"
     },
+    "keybinding_conflicts": {
+      "lane": "headless"
+    },
     "kitty_graphics": {
       "lane": "headless"
     },

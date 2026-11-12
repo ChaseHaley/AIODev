@@ -74,12 +74,12 @@ editor_chain_items :: proc(p: ^Editor) {
 	p.selected = p.chain.selected + 1
 }
 
-// Follows the chain's selection, keeping it on the page; a row the chain just appended is brought
-// into view.
+// Lists the chain's rows and follows its selection, keeping it on the page; a row the chain just
+// appended is brought into view.
 @(private)
 editor_chain_sync :: proc(p: ^Editor) {
+	editor_chain_items(p)
 	visible := max(1, p.visible_rows)
-	p.selected = p.chain.selected + 1
 	if p.selected == 1 {p.scroll = 0}
 	if p.selected < p.scroll {p.scroll = p.selected}
 	if p.selected >= p.scroll + visible {p.scroll = p.selected - visible + 1}
@@ -143,17 +143,22 @@ editor_chain_row :: proc(
 	return row, editor_chain_right(row, l.scale), true
 }
 
-// Cancel · Esc, in the line under the chain's rows.
+// Cancel · Esc, a ghost button whose label sits where the page's summary line does.
 @(private)
-editor_chain_cancel_rect :: proc(p: ^Editor, l: Editor_Layout, text: ^Text) -> render.Rect {
-	if text == nil || p.visible_rows >= l.rows {return {}}
-	cy := l.list.y + (f32(p.visible_rows) + 0.5) * l.row_height
-	return chain_cancel_rect(text, l.list.x + l.list.width - SPACE_2 * l.scale, cy, l.scale)
+editor_chain_cancel_rect :: proc(l: Editor_Layout, text: ^Text) -> render.Rect {
+	if text == nil {return {}}
+	s := l.scale
+	heading := text_styled(text, .Display)
+	x := l.outline.width > 0 ? l.status_x : l.filter.x + text_width(&heading, "Settings") + SPACE_4 * s
+	small := text_styled(text, .Detail)
+	width := text_width(&small, CHAIN_CANCEL_LABEL) + 2 * CONTROL_INSET * s
+	height := HEIGHT_COMPACT * s
+	return {x - CONTROL_INSET * s, l.page.y + HEADER_CENTER * s - height / 2, width, height}
 }
 
 @(private)
 editor_chain_hit :: proc(p: ^Editor, l: Editor_Layout, text: ^Text, x, y: f32) -> Chain_Hit {
-	if render.rect_contains(editor_chain_cancel_rect(p, l, text), x, y) {return {member = -1, part = .Cancel}}
+	if render.rect_contains(editor_chain_cancel_rect(l, text), x, y) {return {member = -1, part = .Cancel}}
 	if !render.rect_contains(l.list, x, y) {return {}}
 	member := p.scroll + int((y - l.list.y) / l.row_height) - 1
 	if member < 0 || member >= len(p.chain.members) {return {}}
@@ -185,8 +190,8 @@ editor_chain_pointer :: proc(p: ^Editor, l: Editor_Layout, text: ^Text, x, y: f3
 	return false
 }
 
-// The page while chained: the context line, each member's row with its chips, the "Used by" line
-// under a recording chip and Cancel · Esc under the rows.
+// The page while chained: Cancel · Esc in place of the summary, the context line, each member's row
+// with its chips and the "Used by" line under a recording chip.
 @(private)
 editor_chain_draw :: proc(
 	p: ^Editor,
@@ -197,8 +202,12 @@ editor_chain_draw :: proc(
 	pointer: [2]f32,
 ) -> render.Build_Status {
 	s := l.scale
-	if render.push_layer(list, l.list) != .None {return .Ok}
 	chain := &p.chain
+	cancel := editor_chain_cancel_rect(l, text)
+	if result := chain_cancel_draw(list, text, theme, cancel, chain.hover.part == .Cancel, s); result != .Ok {
+		return result
+	}
+	if render.push_layer(list, l.list) != .None {return .Ok}
 	for index in p.scroll ..< min(len(p.items), p.scroll + p.visible_rows) {
 		r := editor_row_parts(p, l, index).row
 		if index == 0 {
@@ -234,7 +243,5 @@ editor_chain_draw :: proc(
 			}
 		}
 	}
-	cancel := editor_chain_cancel_rect(p, l, text)
-	if cancel.width == 0 {return .Ok}
-	return chain_cancel_draw(list, text, theme, cancel, chain.hover.part == .Cancel, s)
+	return .Ok
 }
