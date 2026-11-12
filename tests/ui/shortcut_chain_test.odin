@@ -129,7 +129,8 @@ chain_resolves_a_swap :: proc(t: ^testing.T) {
 	if !chain_find_takes_palette(t, &chain) {return}
 	ui.shortcut_chain_record(&chain, 1, 0)
 	chain_key(&chain, .F, {.Control, .Shift})
-	testing.expect_value(t, ui.shortcut_chain_used_by(&chain), "", "Find no longer holds Ctrl+Shift+F")
+	// Find no longer holds Ctrl+Shift+F once its draft took Ctrl+Shift+P.
+	testing.expect_value(t, ui.shortcut_chain_used_by(&chain), "")
 	testing.expect_value(t, chain_key(&chain, .Enter), ui.Chain_Outcome.Resolved)
 	testing.expect_value(t, len(chain.members), 2)
 	find_value, _ := chain_change(&chain, "keys.terminal.find")
