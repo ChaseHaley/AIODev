@@ -61,7 +61,7 @@ settings_pane_rect :: proc(w: ^Window) -> layout.Pane_Rect {
 @(require_results)
 // Composition fits the editor before input/drawing; ui.editor_layout remains a pure geometry query.
 settings_layout_for :: proc(w: ^Window, pane: layout.Pane_Rect) -> ui.Editor_Layout {
-	l := ui.editor_layout(pane_body_rect(w, pane), w.scale)
+	l := ui.editor_layout(pane_body_rect(w, pane), w.scale, len(w.editor.sections) > 0)
 	ui.editor_fit(&w.editor, l)
 	return l
 }
@@ -211,6 +211,7 @@ settings_pointer_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: 
 		// A held scrollbar follows the pointer anywhere, as it does on every other surface, and
 		// collapses on release because the pointer is no longer over it.
 		if w.editor.popup_bar_hover {w.editor.popup_bar_hover, w.dirty = false, true}
+		if w.editor.page_bar_hover {w.editor.page_bar_hover, w.dirty = false, true}
 		if ui.editor_scrollbar_dragging(&w.editor) && .Left in e.buttons &&
 		   ui.editor_drag(&w.editor, settings_layout(w), &w.ui_text, x, y) {w.dirty = true}
 		pointer_set(app, w, .Arrow)

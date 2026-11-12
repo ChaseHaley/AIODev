@@ -129,6 +129,7 @@ settings_page_build :: proc(app: ^App, source: string, view: ^ui.Editor_View) ->
 		return
 	}
 	p.capture.leader = app.leader
+	settings_page_sections(p)
 	if view != nil {ui.editor_view_restore(p, view)}
 	ui.editor_hover_clear(p)
 	ui.editor_filter(p)
@@ -165,6 +166,63 @@ settings_page_setting_rows :: proc(p: ^ui.Editor, s: ^settings.Settings, fonts: 
 		if ui.editor_add(p, row, settings.group_title(entry.key)) != nil {return false}
 	}
 	return true
+}
+
+// The page's top sections: the tabs above its list. The left outline lists the shown section's groups.
+Settings_Area :: enum {
+	General,
+	Advanced,
+	Shortcuts,
+	Colors,
+}
+
+// Indexed by Settings_Area. A global, so the page's slice of it outlives the call that sets it.
+@(rodata)
+SETTINGS_AREA_TITLES := [len(Settings_Area)]string{"General", "Advanced", "Shortcuts", "Colors"}
+
+// Each named group's section, in page order. Command shortcut groups are not listed: they follow
+// these in Shortcuts, in the order the registry adds them.
+@(private, rodata)
+SETTINGS_GROUP_AREAS := [?]struct {
+	title: string,
+	area:  Settings_Area,
+} {
+	{"Font", .General},
+	{"Interface", .General},
+	{"Window", .General},
+	{"Tabs", .General},
+	{"Panes", .General},
+	{"Terminal", .General},
+	{"Cursor", .General},
+	{"Scrollback", .General},
+	{"Shell", .General},
+	{"Program Status", .General},
+	{"Motion", .Advanced},
+	{"Profiles", .Advanced},
+	{"Link Programs", .Advanced},
+	{"Processes", .Advanced},
+	{"Command Line", .Advanced},
+	{"Input", .Shortcuts},
+	{"Theme", .Colors},
+	{"Interface Colors", .Colors},
+	{"Terminal Colors", .Colors},
+}
+
+// The section a group's title belongs to and its place there.
+settings_group_area :: proc(title: string) -> (area: Settings_Area, rank: int) {
+	for entry, i in SETTINGS_GROUP_AREAS {
+		if entry.title == title {return entry.area, i}
+	}
+	return .Shortcuts, len(SETTINGS_GROUP_AREAS)
+}
+
+@(private)
+settings_page_sections :: proc(p: ^ui.Editor) {
+	p.sections = SETTINGS_AREA_TITLES[:]
+	for &group in p.groups {
+		area, rank := settings_group_area(group.title)
+		group.section, group.rank = int(area), rank
+	}
 }
 
 @(private, require_results)
@@ -929,7 +987,7 @@ editor_owns :: proc(e: input.Key_Event) -> bool {
 	#partial switch e.key {
 	case .Arrow_Left, .Arrow_Right, .Home, .End:
 		return modifiers - {.Shift} == {.Control}
-	case .A, .N, .P, .R, .Backspace, .Delete:
+	case .A, .N, .P, .R, .Backspace, .Delete, .Page_Up, .Page_Down:
 		return modifiers == {.Control}
 	}
 	return false
@@ -1120,6 +1178,9 @@ when AIO_CONTROL {
 		state_text(r, "settings.revision", settings_page_revision_word(p))
 		state_value(r, "settings.theme_delete_armed", p.delete_armed)
 		state_text(r, "settings.filter", string(p.filter.bytes[:]))
+		if p.section >= 0 && p.section < len(p.sections) {
+			state_text(r, "settings.section", p.sections[p.section])
+		}
 		state_value(r, "settings.scroll", p.scroll)
 		state_value(r, "settings.group", ui.editor_active_group(p))
 		state_text(r, "settings.key", key)

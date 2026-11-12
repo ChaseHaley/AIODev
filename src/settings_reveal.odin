@@ -21,18 +21,19 @@ Reveal_Focus :: enum {
 }
 
 // Parts of the page a command or the palette jumps to by name rather than by row. A section with
-// a query shows only its rows; one with a palette key is listed in the palette's settings.
+// an area shows that page section from its top; one with a palette key is listed in the palette's
+// settings.
 Settings_Section :: enum {
 	None,
 	Profiles,
 	Link_Programs,
 	Shortcuts,
 	Colors,
-	Motion,
 }
 
 Settings_Section_Info :: struct {
-	title, palette_key, query: string,
+	title, palette_key: string,
+	area:               Maybe(Settings_Area),
 }
 
 @(rodata)
@@ -40,9 +41,8 @@ SETTINGS_SECTIONS := [Settings_Section]Settings_Section_Info {
 	.None          = {},
 	.Profiles      = {title = "Profiles", palette_key = "profiles"},
 	.Link_Programs = {title = "Link Programs", palette_key = "link_programs"},
-	.Shortcuts     = {query = settings.KEY_BINDING_PREFIX},
-	.Colors        = {query = SETTINGS_COLOR_PREFIX},
-	.Motion        = {title = "Motion", query = settings.MOTION_PREFIX},
+	.Shortcuts     = {area = .Shortcuts},
+	.Colors        = {area = .Colors},
 }
 
 // The key prefix of the active theme's color rows.
@@ -75,8 +75,6 @@ settings_reveal_page :: proc(p: ^ui.Editor, reveal: Settings_Reveal) {
 	ui.editor_chain_close(p)
 	scroll := p.scroll
 	query, search := reveal.query, reveal.search
-	// A section with a query shows only its rows.
-	if section := SETTINGS_SECTIONS[reveal.section]; section.query != "" {query, search = section.query, .Scope}
 	if search == .Clear {
 		query = ""
 	} else if search == .Preserve {
@@ -84,6 +82,9 @@ settings_reveal_page :: proc(p: ^ui.Editor, reveal: Settings_Reveal) {
 	}
 	ui.field_set(&p.filter, query)
 	ui.editor_filter(p)
+	if area, shown := SETTINGS_SECTIONS[reveal.section].area.?; shown {
+		ui.editor_section_show(p, int(area))
+	}
 	target := settings_reveal_target(reveal)
 	selected := target != nil && ui.editor_reveal(p, target.?)
 	if reveal.focus == .Control && selected {

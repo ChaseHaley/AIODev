@@ -94,6 +94,74 @@ editor_binding_search_and_positions_reserve_description_space :: proc(t: ^testin
 	}
 }
 
+@(rodata, private)
+section_titles := [?]string{"General", "Colors", "Shortcuts"}
+
+@(test)
+editor_sections_scope_browsing_and_search_spans_them :: proc(t: ^testing.T) {
+	p: ui.Editor
+	defer ui.editor_destroy(&p)
+	editor_fixture(t, &p)
+	p.sections = section_titles[:]
+	for &group in p.groups {
+		switch group.title {
+		case "Colors":
+			group.section = 1
+		case "Input":
+			group.section, group.rank = 2, 0
+		case "Pane Shortcuts":
+			group.section, group.rank = 2, 1
+		}
+	}
+	ui.editor_filter(&p)
+	keys := visible_keys(&p)
+	testing.expect_value(t, len(keys), 9)
+	for key in keys {testing.expect(t, !strings.has_prefix(key, "colors.") && !strings.has_prefix(key, "keys."))}
+
+	// A search lists every section; each tab counts its matches.
+	ui.field_set(&p.filter, "cursor")
+	ui.editor_filter(&p)
+	counts := ui.editor_section_counts(&p)
+	testing.expect_value(t, counts[0], 1)
+	testing.expect_value(t, counts[1], 1)
+	testing.expect_value(t, counts[2], 0)
+
+	// A tab leaves the search and lists its groups in rank order, not the order they were added in.
+	l := ui.editor_layout({0, 40, 1200, 1400}, 1, true)
+	ui.editor_fit(&p, l)
+	x, y := center(ui.editor_section_rect(&p, l, 2))
+	testing.expect_value(t, ui.editor_press(&p, l, nil, x, y, false), ui.Editor_Outcome.Changed)
+	testing.expect_value(t, len(p.filter.bytes), 0)
+	keys = visible_keys(&p)
+	if testing.expect_value(t, len(keys), 4) {
+		testing.expect_value(t, keys[0], "Input")
+		testing.expect_value(t, keys[2], "Pane Shortcuts")
+	}
+
+	// Selecting a row by key reaches its section, as a palette jump does.
+	testing.expect(t, ui.editor_select_key(&p, "colors.cursor"))
+	testing.expect_value(t, p.section, 1)
+	testing.expect_value(t, ui.editor_row(&p).key, "colors.cursor")
+}
+
+@(test)
+editor_page_scrollbar_drags_to_the_last_line :: proc(t: ^testing.T) {
+	p: ui.Editor
+	defer ui.editor_destroy(&p)
+	editor_fixture(t, &p)
+	l := ui.editor_layout({0, 40, 1200, 400}, 1)
+	ui.editor_fit(&p, l)
+	bar, visible := ui.editor_page_scrollbar(&p, l)
+	if !testing.expect(t, visible) {return}
+	x, y := center(bar.thumb)
+	_ = ui.editor_press(&p, l, nil, x, y, false)
+	testing.expect(t, ui.editor_scrollbar_dragging(&p))
+	testing.expect(t, ui.editor_drag(&p, l, nil, x, bar.track.y + bar.track.height + 100))
+	testing.expect_value(t, p.scroll, len(p.items) - l.rows)
+	testing.expect_value(t, ui.editor_release(&p), ui.Editor_Outcome.Changed)
+	testing.expect(t, !ui.editor_scrollbar_dragging(&p))
+}
+
 @(test)
 editor_outline_jumps_without_filtering_and_tracks_scroll :: proc(t: ^testing.T) {
 	p: ui.Editor

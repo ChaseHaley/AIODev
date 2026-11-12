@@ -116,6 +116,9 @@ Editor_Group :: struct {
 	title: string,
 	// The Profiles group draws column captions on its header line.
 	table: bool,
+	// The page section the group belongs to, and its place among that section's groups; groups of
+	// equal rank keep the order they were added in.
+	section, rank: int,
 }
 
 // One page line: a group header, with its matching row count, when row is -1. Headers are never selected.
@@ -431,6 +434,13 @@ Editor :: struct {
 	// The group last chosen in the outline stays highlighted until the page scrolls or the selection moves,
 	// since the final groups can be shown without reaching the top of the page.
 	jump_group, outline_scroll, outline_active:                        int,
+	// The page's top-level sections, static titles in tab order; empty for a page of one section.
+	// Without a search the page lists only the groups of `section`; a search lists every section.
+	sections:                                                          []string,
+	section, hover_section:                                            int,
+	// The page's own scrollbar: its thumb drag and whether the pointer is over its track.
+	page_drag:                                                         Scroll_Drag,
+	page_bar_hover:                                                    bool,
 	rows:                                                              [dynamic]Editor_Row,
 	groups:                                                            [dynamic]Editor_Group,
 	items:                                                             [dynamic]Editor_Item,
@@ -488,13 +498,15 @@ Editor_View :: struct {
 	motion_expanded:   bit_set[settings.Motion_Context],
 	expanded:          string,
 	opener_expanded:   string,
+	section:           int,
 	order:             Order_Kind,
 	profile_positions: [dynamic]Profile_Position,
 }
 
 // Wide pages put the search field and a group outline in a left column; narrow ones have no outline.
+// A page with sections puts their tabs above the list.
 Editor_Layout :: struct {
-	page, filter, list, outline:                     render.Rect,
+	page, filter, list, outline, sections:           render.Rect,
 	row_height, outline_row_height, status_x, scale: f32,
 	rows:                                            int,
 }
@@ -527,6 +539,8 @@ OUTLINE_ROW_HEIGHT :: RAIL_ROW_HEIGHT
 OUTLINE_WIDTH :: 220
 @(private)
 OUTLINE_MIN_PAGE :: 720
+@(private)
+SECTION_TAB_WIDTH :: 112
 
 // Every string a row owns, in one place for editor_add's copies and editor_row_destroy's frees.
 @(private)
@@ -589,6 +603,7 @@ editor_view_take :: proc(p: ^Editor) -> (view: Editor_View, alloc_error: runtime
 	view.motion_expanded = p.motion_expanded
 	view.expanded = strings.clone(p.expanded) or_return
 	view.opener_expanded = strings.clone(p.opener_expanded) or_return
+	view.section = p.section
 	view.order, _ = order_kind(p)
 	view.profile_positions, p.profile_positions = p.profile_positions, {}
 	if _, settling := p.order.(Order_Settling); settling {order_settle(p, view.order)}
@@ -608,6 +623,7 @@ editor_view_destroy :: proc(view: ^Editor_View) {
 editor_view_restore :: proc(p: ^Editor, view: ^Editor_View) {
 	p.process_expanded = view.process_expanded
 	p.motion_expanded = view.motion_expanded
+	p.section = len(p.sections) > 0 ? clamp(view.section, 0, len(p.sections) - 1) : 0
 	delete(p.expanded)
 	p.expanded, view.expanded = view.expanded, ""
 	delete(p.opener_expanded)
@@ -659,6 +675,7 @@ editor_adopt :: proc(p, next: ^Editor, adoption: Editor_Adoption) -> Editor_Adop
 			return .Draft_Copy_Failed
 		}
 	}
+	next.section = len(next.sections) > 0 ? clamp(p.section, 0, len(next.sections) - 1) : 0
 	field_set(&next.filter, field_string(&p.filter))
 	editor_filter(next)
 	// A conflict chain is the page's whole draft: it rides along as it is, with the view it returns to.
@@ -1008,7 +1025,7 @@ editor_choice_toggle_focused :: proc(p: ^Editor) -> bool {
 // Whether the pointer holds anything on the page: a selection, a slider, a picker, a scrollbar thumb
 // or a reordering block.
 editor_dragging :: proc(p: ^Editor) -> bool {
-	if _, reordering := p.order.(Order_Dragging); reordering {return true}
+	if _, reordering := p.order.(Order_Dragging); reordering || p.page_drag.active {return true}
 	switch m in p.mode {
 	case Editor_Browsing:
 		return m.selecting
@@ -1025,8 +1042,9 @@ editor_dragging :: proc(p: ^Editor) -> bool {
 	return false
 }
 
-// Whether the pointer holds the choice list's scrollbar thumb.
+// Whether the pointer holds the page's or the choice list's scrollbar thumb.
 editor_scrollbar_dragging :: proc(p: ^Editor) -> bool {
+	if p.page_drag.active {return true}
 	choice, open := p.mode.(Editor_Choice_Popup)
 	if !open {return false}
 	_, holding := choice.drag.(Scroll_Drag)
@@ -1167,6 +1185,7 @@ editor_select :: proc(p: ^Editor, index: int) {
 editor_select_key :: proc(p: ^Editor, key: string) -> bool {
 	for row, i in p.rows {
 		if row.key != key {continue}
+		editor_section_reach(p, p.groups[row.group].section)
 		for item, index in p.items {
 			if item.row == i {editor_select(p, index); return true}
 		}
@@ -1366,7 +1385,8 @@ editor_rebuild :: proc(p: ^Editor) {
 	if recording {chord, named = commands.key_press_chord(p.keys.press)}
 	if named && !used && (.Leader not_in chord.modifiers || p.capture.leader != nil) {p.free = chord}
 	matched := make([dynamic]int, context.temp_allocator)
-	for _, g in p.groups {
+	for g in editor_group_order(p) {
+		if !searching && len(p.sections) > 0 && p.groups[g].section != p.section {continue}
 		clear(&matched)
 		for row, i in p.rows {
 			if row.group != g {continue}
@@ -1382,6 +1402,24 @@ editor_rebuild :: proc(p: ^Editor) {
 	}
 }
 
+// Group indices in page order: by section, then rank, then the order they were added in.
+@(private)
+editor_group_order :: proc(p: ^Editor) -> []int {
+	order := make([]int, len(p.groups), context.temp_allocator)
+	before :: proc(a, b: Editor_Group) -> bool {
+		return a.section < b.section || (a.section == b.section && a.rank < b.rank)
+	}
+	for i in 0 ..< len(order) {
+		j := i
+		for j > 0 && before(p.groups[i], p.groups[order[j - 1]]) {
+			order[j] = order[j - 1]
+			j -= 1
+		}
+		order[j] = i
+	}
+	return order
+}
+
 editor_filter :: proc(p: ^Editor) {
 	clear(&p.items)
 	editor_rebuild(p)
@@ -1389,6 +1427,36 @@ editor_filter :: proc(p: ^Editor) {
 	for item, index in p.items {if item.row >= 0 {first = index; break}}
 	p.scroll, p.outline_scroll = 0, 0
 	editor_select(p, first)
+}
+
+// Shows one section from its top, leaving any search, as choosing its tab does.
+editor_section_show :: proc(p: ^Editor, section: int) {
+	if section < 0 || section >= len(p.sections) {return}
+	if editor_focus(p) != .Search {editor_keep(p); stop_editing(p)}
+	p.keys = {}
+	field_set(&p.filter, "")
+	p.section = section
+	editor_filter(p)
+}
+
+// Switches the unsearched page to `section` so a row of it can be selected; a search already lists
+// every section.
+@(private)
+editor_section_reach :: proc(p: ^Editor, section: int) {
+	if len(p.sections) == 0 || filtering(p) || section == p.section {return}
+	p.section = section
+	p.scroll, p.outline_scroll = 0, 0
+	editor_rebuild(p)
+}
+
+// Each section's matching rows while a search lists them all.
+editor_section_counts :: proc(p: ^Editor) -> []int {
+	counts := make([]int, len(p.sections), context.temp_allocator)
+	for item in p.items {
+		section := p.groups[item.group].section
+		if item.row < 0 && section >= 0 && section < len(counts) {counts[section] += item.count}
+	}
+	return counts
 }
 
 // Sets the one profile whose inline editor is open, "" for none; only a reload's view writes it
@@ -2234,6 +2302,12 @@ editor_key :: proc(p: ^Editor, raw: input.Key_Event) -> Editor_Outcome {
 		if outcome, handled := popup_key(p, row, e); handled {return outcome}
 	}
 	control := .Control in e.modifiers && .Alt not_in e.modifiers
+	// Ctrl+Page Up and Down move between sections, wrapping, as they move between a browser's tabs.
+	if control && (e.key == .Page_Up || e.key == .Page_Down) && len(p.sections) > 0 {
+		step := e.key == .Page_Up ? -1 : 1
+		editor_section_show(p, (p.section + step + len(p.sections)) %% len(p.sections))
+		return .Changed
+	}
 	if .Alt in e.modifiers && (e.key == .Arrow_Up || e.key == .Arrow_Down) {
 		entries := outline_entries(p)
 		for header, entry in entries {
@@ -2459,8 +2533,9 @@ editor_cut :: proc(p: ^Editor) {
 	}
 }
 
-// Lays the page out inside a settings tab's card.
-editor_layout :: proc(area: render.Rect, scale: f32) -> Editor_Layout {
+// Lays the page out inside a settings tab's card. A page with `sections` puts their tabs at the top
+// of the list column, beside the search on a wide page and under it on a narrow one.
+editor_layout :: proc(area: render.Rect, scale: f32, sections := false) -> Editor_Layout {
 	s := scale
 	pad := 24 * s
 	bottom := area.y + area.height - pad / 2
@@ -2474,6 +2549,10 @@ editor_layout :: proc(area: render.Rect, scale: f32) -> Editor_Layout {
 		x := area.x + max(pad, (area.width - width) / 2)
 		l.filter = {x, area.y + 52 * s, width, HEIGHT_STANDARD * s}
 		top := l.filter.y + l.filter.height + 12 * s
+		if sections {
+			l.sections = {x, top, width, HEIGHT_STANDARD * s}
+			top += l.sections.height + 12 * s
+		}
 		l.rows = max(0, int((bottom - top) / l.row_height))
 		l.list = {x, top, width, f32(l.rows) * l.row_height}
 		return l
@@ -2488,10 +2567,38 @@ editor_layout :: proc(area: render.Rect, scale: f32) -> Editor_Layout {
 	l.outline = {outline_x, outline_top, OUTLINE_WIDTH * s, max(0, bottom - outline_top)}
 	x := outline_x + OUTLINE_WIDTH * s + gutter
 	top := l.filter.y
+	if sections {
+		l.sections = {x, top, width, HEIGHT_STANDARD * s}
+		top = outline_top
+	}
 	l.rows = max(0, int((bottom - top) / l.row_height))
 	l.list = {x, top, width, f32(l.rows) * l.row_height}
 	l.status_x = x
 	return l
+}
+
+// One section tab, left to right along the tab bar; they share the bar once it is too narrow.
+editor_section_rect :: proc(p: ^Editor, l: Editor_Layout, section: int) -> render.Rect {
+	if l.sections.width <= 0 || section < 0 || section >= len(p.sections) {return {}}
+	width := min(SECTION_TAB_WIDTH * l.scale, l.sections.width / f32(len(p.sections)))
+	return {l.sections.x + f32(section) * width, l.sections.y, width, l.sections.height}
+}
+
+@(private)
+editor_section_at :: proc(p: ^Editor, l: Editor_Layout, x, y: f32) -> int {
+	for _, i in p.sections {if render.rect_contains(editor_section_rect(p, l, i), x, y) {return i}}
+	return -1
+}
+
+// The page's scrollbar, in the gutter right of the list; nothing when every line fits.
+editor_page_scrollbar :: proc(p: ^Editor, l: Editor_Layout) -> (bar: Scrollbar, visible: bool) {
+	if editor_chained(p) {return}
+	s := l.scale
+	width := SCROLLBAR_TRACK * s
+	x := min(l.list.x + l.list.width + SPACE_1 * s, l.page.x + l.page.width - width)
+	area := render.Rect{x, l.list.y, width, l.list.height}
+	extent := Scroll_Extent{len(p.items), l.rows, p.scroll}
+	return scrollbar_layout(area, extent, scrollbar_state(p.page_bar_hover, p.page_drag), s)
 }
 
 // Applies viewport-dependent navigation state before input or drawing. Layout and draw are queries;
@@ -2874,6 +2981,16 @@ editor_press :: proc(
 		pick_color(p, c, drag, x, y)
 		return .Changed
 	}
+	if section := editor_section_at(p, l, x, y); section >= 0 {
+		editor_section_show(p, section)
+		editor_blur(p)
+		return .Changed
+	}
+	if bar, visible := editor_page_scrollbar(p, l); visible && scrollbar_contains(bar, x, y) {
+		p.jump_group = -1
+		p.scroll = scrollbar_press(&p.page_drag, bar, y)
+		return .Changed
+	}
 	if render.rect_contains(editor_keys_rect(l), x, y) {return editor_key_search_toggle(p)}
 	if render.rect_contains(editor_clear_rect(p, l), x, y) {
 		if editor_focus(p) != .Search {editor_keep(p); stop_editing(p)}
@@ -3018,6 +3135,14 @@ editor_press :: proc(
 
 // Continues a pointer drag; returns whether anything changed.
 editor_drag :: proc(p: ^Editor, l: Editor_Layout, text: ^Text, x, y: f32) -> bool {
+	if p.page_drag.active {
+		bar, visible := editor_page_scrollbar(p, l)
+		if !visible {return false}
+		p.page_bar_hover = scrollbar_contains(bar, x, y)
+		before := p.scroll
+		p.scroll = clamp(scrollbar_drag(p.page_drag, bar, y), 0, max_scroll(p))
+		return p.scroll != before
+	}
 	if browsing, ok := p.mode.(Editor_Browsing); ok && browsing.selecting {
 		return field_pointer(&p.filter, field_box_offset(filter_box(p, l, text), x), false, true) != .None
 	}
@@ -3073,6 +3198,10 @@ editor_release :: proc(p: ^Editor) -> Editor_Outcome {
 	field_release(&p.filter)
 	field_release(&p.value)
 	field_release(&p.choice_search)
+	if p.page_drag.active {
+		p.page_drag = {}
+		return .Changed
+	}
 	if _, reordering := p.order.(Order_Dragging); reordering {return order_drop(p)}
 	settled := false
 	switch m in p.mode {
@@ -3217,17 +3346,23 @@ editor_hover :: proc(p: ^Editor, l: Editor_Layout, x, y: f32, text: ^Text = nil)
 	}
 	clear := render.rect_contains(editor_clear_rect(p, l), x, y)
 	keys := render.rect_contains(editor_keys_rect(l), x, y)
+	section := popup_open == .None ? editor_section_at(p, l, x, y) : -1
+	page_bar, page_bar_visible := editor_page_scrollbar(p, l)
+	over_page_bar := popup_open == .None && page_bar_visible && scrollbar_contains(page_bar, x, y)
 	if item == p.hover_item &&
 	   reset == p.hover_reset &&
 	   outline == p.hover_outline &&
 	   clear == p.hover_clear &&
 	   keys == p.keys_hover &&
+	   section == p.hover_section &&
+	   over_page_bar == p.page_bar_hover &&
 	   profile_item == p.hover_profile_item &&
 	   profile_control == p.hover_profile_control {
 		return bar_changed
 	}
 	p.hover_item, p.hover_reset, p.hover_outline, p.hover_clear = item, reset, outline, clear
 	p.keys_hover = keys
+	p.hover_section, p.page_bar_hover = section, over_page_bar
 	p.hover_profile_item, p.hover_profile_control = profile_item, profile_control
 	return true
 }
@@ -3236,10 +3371,12 @@ editor_hover :: proc(p: ^Editor, l: Editor_Layout, x, y: f32, text: ^Text = nil)
 editor_hover_clear :: proc(p: ^Editor) -> (changed: bool) {
 	changed =
 		p.hover_item >= 0 || p.hover_reset >= 0 || p.hover_outline >= 0 || p.hover_clear ||
-		p.hover_profile_item >= 0 || p.popup_bar_hover || p.keys_hover
+		p.hover_profile_item >= 0 || p.popup_bar_hover || p.keys_hover || p.hover_section >= 0 ||
+		p.page_bar_hover
 	p.hover_item, p.hover_reset, p.hover_outline, p.hover_clear = -1, -1, -1, false
 	p.keys_hover = false
 	p.popup_bar_hover = false
+	p.hover_section, p.page_bar_hover = -1, false
 	p.hover_profile_item, p.hover_profile_control = -1, .Radio
 	changed = shortcut_chain_hover(&p.chain, {}) || changed
 	return
@@ -3297,6 +3434,7 @@ editor_pointer :: proc(p: ^Editor, l: Editor_Layout, x, y: f32, text: ^Text = ni
 	if render.rect_contains(editor_reset_all_rect(l), x, y) {return .Hand}
 	if render.rect_contains(editor_clear_rect(p, l), x, y) {return .Hand}
 	if render.rect_contains(editor_keys_rect(l), x, y) {return .Hand}
+	if editor_section_at(p, l, x, y) >= 0 {return .Hand}
 	if render.rect_contains(filter_text_rect(p, l), x, y) {return .Text}
 	if render.rect_contains(l.outline, x, y) {
 		entry := p.outline_scroll + int((y - l.outline.y) / l.outline_row_height)
@@ -4021,6 +4159,59 @@ outline_draw :: proc(
 	return .Ok
 }
 
+// The section tabs, underlined as the palette's scope tabs are. While a search lists every section
+// none is selected, and each names how many of its rows match.
+@(private)
+sections_draw :: proc(
+	p: ^Editor,
+	l: Editor_Layout,
+	list: ^render.Draw_List,
+	text: ^Text,
+	theme: Theme,
+) -> render.Build_Status {
+	if l.sections.width <= 0 || len(p.sections) == 0 {return .Ok}
+	s := l.scale
+	if render.push_layer(list, l.sections) != .None {return .Ok}
+	draw_rect(list, {
+		rect = {l.sections.x, l.sections.y + l.sections.height - s, l.sections.width, s},
+		color = theme.border,
+	})
+	searching := filtering(p)
+	counts := searching ? editor_section_counts(p) : nil
+	label_text := text_styled(text, .Body)
+	small := text_styled(text, .Detail)
+	for title, i in p.sections {
+		tab := editor_section_rect(p, l, i)
+		inset := min(CONTROL_INSET * s, tab.width / 2)
+		selected := !searching && i == p.section
+		if i == p.hover_section {
+			hover := render.Rect{tab.x, tab.y + SPACE_1 * s, tab.width, max(0, tab.height - 2 * SPACE_1 * s)}
+			draw_rect(list, {rect = hover, color = theme.hover, radius = RADIUS_CONTROL * s})
+		}
+		if selected {
+			line_height := min(2 * s, tab.height)
+			line := render.Rect{tab.x + inset, tab.y + tab.height - line_height,
+				max(0, tab.width - 2 * inset), line_height}
+			draw_rect(list, {rect = line, color = theme.accent, radius = pill_radius(line)})
+		}
+		room := max(0, tab.width - 2 * inset)
+		if room <= 0 {continue}
+		count := searching ? fmt.tprintf("%d", counts[i]) : ""
+		count_width := count == "" ? 0 : text_width(&small, count) + SPACE_2 * s
+		width := min(text_width(&label_text, title) + count_width, room)
+		x := tab.x + (tab.width - width) / 2
+		baseline := tab.y + (tab.height - label_text.line_height) / 2 + label_text.ascent
+		ink := selected || i == p.hover_section ? theme.text : theme.muted
+		if searching && counts[i] == 0 {ink = theme.faint}
+		if result := draw_text(&label_text, list, title, x, baseline, ink, max(1, room - count_width));
+		   result != .Ok {return result}
+		if count == "" {continue}
+		if result := draw_text(&small, list, count, x + width - text_width(&small, count), baseline,
+			theme.faint); result != .Ok {return result}
+	}
+	return .Ok
+}
+
 editor_draw :: proc(
 	p: ^Editor,
 	l: Editor_Layout,
@@ -4047,8 +4238,9 @@ editor_draw :: proc(
 		switch p.keys.state {
 		case .Off:
 			status = fmt.tprintf(
-				"%d settings and shortcuts · Alt+↑/↓ groups · Esc clears search · Alt+K searches by keys",
+				"%d settings and shortcuts · Alt+↑/↓ groups%s · Esc clears search · Alt+K searches by keys",
 				matches,
+				len(p.sections) > 0 ? " · Ctrl+PgUp/PgDn sections" : "",
 			)
 		case .Recording:
 			status = "Recording keys · Backspace clears · Esc or Alt+K searches by text"
@@ -4077,6 +4269,7 @@ editor_draw :: proc(
 	if r := filter_draw(p, l, list, text, theme, focused && editor_focus(p) == .Search, pointer);
 	   r != .Ok {return r}
 	if r := outline_draw(p, l, list, text, theme, pointer); r != .Ok {return r}
+	if r := sections_draw(p, l, list, text, theme); r != .Ok {return r}
 	if len(p.items) == 0 && filtering(p) {
 		if render.push_layer(list, l.page) != .None {return .Ok}
 		empty := "No matching settings or shortcuts"
@@ -4241,6 +4434,9 @@ editor_draw :: proc(
 		modified := row.value != row.default_value
 		if reset_button_draw(list, theme, parts.reset, modified, index == p.hover_reset, selected, pointer, s) !=
 		   .None {return .Ok}
+	}
+	if bar, visible := editor_page_scrollbar(p, l); visible {
+		scrollbar_draw(list, theme, bar, scrollbar_state(p.page_bar_hover, p.page_drag))
 	}
 	// The line under a recording field is drawn over the next row's top margin, after every row.
 	if row := editor_row(p); row != nil && row.kind == .Shortcut && editor_capturing(p) &&

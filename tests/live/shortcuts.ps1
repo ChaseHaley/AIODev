@@ -70,7 +70,8 @@ function Open-Shortcut {
     Invoke-Aio expect state palette.item=settings.change_shortcut
     Invoke-Aio key Enter
     Invoke-Aio expect state settings.open=true
-    Invoke-Aio expect state settings.filter=keys.
+    Invoke-Aio expect state settings.section=Shortcuts
+    Invoke-Aio expect state settings.filter=
     Invoke-Aio key Ctrl+A
     Invoke-Aio type keys.tab.new
     Invoke-Aio expect state settings.key=keys.tab.new
