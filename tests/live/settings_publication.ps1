@@ -82,7 +82,7 @@ try {
     Invoke-Aio key Esc
     Invoke-Aio key Ctrl+A
     Invoke-Aio type theme.name
-    Invoke-Aio key Tab Down Enter
+    Invoke-Aio key Tab Enter Down Enter
     Assert-Value (Read-State)['settings.error'] false 'the page saves again after the first save'
     Assert-Value (Read-State)['theme.name'] studio-light 'the light theme applies to both windows'
     Invoke-Aio key Esc

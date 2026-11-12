@@ -16,7 +16,7 @@ try {
  Configure "keys.tab.new = Ctrl+[`ninput.leader = Ctrl+B"
  A command settings.open
  A type input.leader
- A key Tab 'Ctrl+[' Enter
+ A key Tab Enter 'Ctrl+[' Enter
  $inline=State
  Check ($inline['settings.error'] -eq 'false') 'bracket leader inline save remains nonfatal'
  Check ($inline['settings.message'].Contains('Ctrl+[') -and $inline['settings.message'].Contains('tab.new') -and $inline['settings.message'].Contains('input.leader wins')) 'bracket leader inline warning preserves action and winner'
