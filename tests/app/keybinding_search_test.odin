@@ -53,7 +53,7 @@ keybinding_search_records_app_chords_and_assigns_free_ones :: proc(t: ^testing.T
 	testing.expect_value(t, ui.field_string(&p.filter), "Ctrl+Shift+C")
 
 	ui.field_set(&p.filter, "")
-	app.handle_event(s, input.Text_Event{w.id, "ctrl shift g"})
+	app.handle_event(s, input.Text_Event{w.id, "ctrl alt y"})
 	testing.expect_value(t, len(p.items), 0)
 	press(s, w, .Enter)
 	if !testing.expect(t, app.palette_active(s, w)) {return}
@@ -66,9 +66,9 @@ keybinding_search_records_app_chords_and_assigns_free_ones :: proc(t: ^testing.T
 	testing.expect_value(t, ui.palette_editing(&s.palette), ui.Palette_Edit_Kind.Shortcut)
 	press(s, w, .Enter)
 	testing.expect_value(t, ui.palette_editing(&s.palette), ui.Palette_Edit_Kind.None)
-	bound := commands.find_by_shortcut(&s.registry, {.G, {.Control, .Shift}})
+	bound := commands.find_by_shortcut(&s.registry, {.Y, {.Control, .Alt}})
 	if testing.expect(t, bound != nil) {testing.expect_value(t, bound.name, "pane.split_right")}
 	saved, err := os.read_entire_file(f.path, context.temp_allocator)
 	testing.expect_value(t, err, nil)
-	testing.expect(t, strings.contains(string(saved), "keys.pane.split_right = Ctrl+Shift+O, Ctrl+Shift+G"))
+	testing.expect(t, strings.contains(string(saved), "keys.pane.split_right = Ctrl+Shift+O, Ctrl+Alt+Y"))
 }
