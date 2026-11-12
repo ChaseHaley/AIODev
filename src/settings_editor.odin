@@ -391,6 +391,12 @@ editor_outcome :: proc(app: ^App, w: ^Window, outcome: ui.Editor_Outcome) {
 	case .Font_Filter:
 		editor_font_filter(app, w)
 		return
+	case .Assign_Shortcut:
+		if chord, free := ui.editor_free_chord(p).?; free {
+			palette_open_mode(app, w, .Commands)
+			ui.palette_assign(&app.palette, &app.registry, chord)
+		}
+		return
 	case .Process_Remove:
 		if remove, ok := request.(ui.Process_Remove_Request); ok {
 			editor_process_remove_ask(app, w, remove.group)
@@ -923,8 +929,9 @@ editor_owns :: proc(e: input.Key_Event) -> bool {
 	return false
 }
 
-// Keys on the settings tab. Recording a shortcut keeps every key; otherwise text fields keep their
-// clipboard and editing chords and other app shortcuts still run, so tabs can be switched or closed.
+// Keys on the settings tab. Recording a shortcut or a search by keys keeps every key; otherwise text
+// fields keep their clipboard and editing chords and other app shortcuts still run, so tabs can be
+// switched or closed. The search field keeps Alt+K, which records keys for it.
 settings_key :: proc(app: ^App, w: ^Window, e: input.Key_Event) {
 	pane_header_cancel(w)
 	p := &w.editor
@@ -933,7 +940,7 @@ settings_key :: proc(app: ^App, w: ^Window, e: input.Key_Event) {
 	key_suppress(w, e)
 	// Escape backs out of a delete prompt even when the page has nothing else to leave.
 	if e.pressed && e.key == .Escape {ui.editor_theme_delete_disarm(p)}
-	if ui.editor_capturing(p) {
+	if ui.editor_capturing(p) || ui.editor_recording(p) {
 		editor_outcome(app, w, ui.editor_key(p, e))
 		return
 	}
@@ -952,7 +959,8 @@ settings_key :: proc(app: ^App, w: ^Window, e: input.Key_Event) {
 		return
 	case .None:
 	}
-	if key.found && !editor_owns(key.logical) && action_available(app, w, key.action) {
+	search_owns := ui.editor_focus(p) == .Search && ui.key_search_toggles(e)
+	if key.found && !editor_owns(key.logical) && !search_owns && action_available(app, w, key.action) {
 		run_action(app, w, key.action)
 		return
 	}
@@ -1081,6 +1089,26 @@ when AIO_CONTROL {
 			if strings.builder_len(opener_icons) > 0 {strings.write_byte(&opener_icons, ',')}
 			strings.write_string(&opener_icons, row.opener)
 		}
+		match, free := "", ""
+		rows := 0
+		for item in p.items {if item.row >= 0 {rows += 1}}
+		if p.selected >= 0 && p.selected < len(p.items) && p.items[p.selected].row >= 0 {
+			item := p.items[p.selected]
+			labels := commands.shortcut_alternatives(p.rows[item.row].value, context.temp_allocator)
+			if item.shortcut.hit.match != .None && item.shortcut.alternative < len(labels) {
+				match = shortcut_hit_text(labels[item.shortcut.alternative], item.shortcut.hit)
+			}
+		}
+		key_buffer: [commands.SHORTCUT_TEXT_CAP]u8
+		if chord, offered := ui.editor_free_chord(p).?; offered {
+			free = strings.clone(commands.shortcut_text(chord, key_buffer[:]), context.temp_allocator)
+		}
+		state_text(r, "settings.match", match)
+		state_text(r, "settings.free", free)
+		state_value(r, "settings.rows", rows)
+		state_value(r, "settings.keys", p.keys.state)
+		state_valuef(r, "settings.keys.text", "%s", commands.key_press_text(p.keys.press, key_buffer[:]))
+		state_rect(r, "settings.keys.button", ui.editor_keys_rect(page))
 		state_value(r, "settings.open", ui.editor_loaded(p))
 		state_text(r, "settings.revision", settings_page_revision_word(p))
 		state_value(r, "settings.theme_delete_armed", p.delete_armed)
@@ -1207,6 +1235,21 @@ when AIO_CONTROL {
 			if !first {strings.write_byte(&builder, ';')}
 			first = false
 			fmt.sbprintf(&builder, "%s@%g,%g,%g,%g", name, rect.x, rect.y, rect.width, rect.height)
+		}
+		return strings.to_string(builder)
+	}
+
+	// A shortcut label with the parts a search matched in brackets, such as [Alt]+[8], which the
+	// palette and Settings report for the selected row.
+	shortcut_hit_text :: proc(label: string, hit: commands.Shortcut_Hit) -> string {
+		builder := strings.builder_make(context.temp_allocator)
+		rest := label
+		for part in commands.shortcut_label_next(&rest) {
+			if strings.builder_len(builder) > 0 {strings.write_byte(&builder, '+')}
+			lit := part.is_modifier ? part.modifier in hit.modifiers : hit.key
+			if lit {strings.write_byte(&builder, '[')}
+			strings.write_string(&builder, part.text)
+			if lit {strings.write_byte(&builder, ']')}
 		}
 		return strings.to_string(builder)
 	}

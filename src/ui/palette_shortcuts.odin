@@ -172,13 +172,34 @@ palette_binding_draw :: proc(
 		return shortcut_field_draw(list, text, theme, parts, summary, state, l.viewport, l.scale)
 	}
 	buffer: [commands.SHORTCUT_TEXT_CAP]u8
+	positions: [commands.SHORTCUT_TEXT_CAP]int
 	summary := Shortcut_Summary{additional = max(0, command.shortcuts.count - 1)}
+	// A search shows the alternative it matched, with its matched keys lit.
+	match := p.results[index].shortcut
 	if shortcuts := commands.active_shortcuts(command); len(shortcuts) > 0 {
-		summary.first = commands.shortcut_text(shortcuts[0], buffer[:])
+		alternative := clamp(match.alternative, 0, len(shortcuts) - 1)
+		summary.first = commands.shortcut_text(shortcuts[alternative], buffer[:])
+		if match.hit.match != .None {
+			summary.highlights = commands.shortcut_hit_positions(summary.first, match.hit, positions[:])
+		}
 	}
 	parts.positions = {}
 	focused := render.rect_contains(parts.field, pointer.x, pointer.y)
 	return shortcut_field_draw(list, text, theme, parts, summary, {focused = focused}, l.viewport, l.scale)
+}
+
+// Opens the command's shortcut editor recording the chord the Unassigned row offered, as though it had
+// just been pressed after its alternatives; Enter saves it as one more.
+@(private)
+palette_binding_assign :: proc(p: ^Palette, index: int) -> Outcome {
+	chord, assigning := p.assign.?
+	if !assigning || palette_binding_open(p, index) == .None {return .None}
+	p.assign = nil
+	binding := &p.edit.(Shortcut_Edit)
+	buffer: [commands.SHORTCUT_TEXT_CAP]u8
+	label := commands.shortcut_text(chord, buffer[:])
+	shortcut_capture_add(&binding.capture, &binding.draft, binding.saved, label)
+	return .Changed
 }
 
 // The open row's alternatives list, over everything else in the palette.

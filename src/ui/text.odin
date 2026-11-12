@@ -288,6 +288,8 @@ text_styled :: proc(t: ^Text, style: Text_Style) -> Text {
 	return copy
 }
 
+// Draws one line that fades out over its last fifth when wider than `width`. Runes whose byte offsets
+// appear in `highlights` use `highlight`, as draw_text's do.
 draw_fading_text :: proc(
 	t: ^Text,
 	list: ^render.Draw_List,
@@ -295,16 +297,22 @@ draw_fading_text :: proc(
 	x, baseline: f32,
 	color: render.Color,
 	width: f32,
+	highlights: []int = nil,
+	highlight: render.Color = {},
 ) -> render.Build_Status {
 	if width <= 0 {return .Ok}
 	pen := x
 	clipped := text_width(t, s) > width
-	for r in s {
+	next := 0
+	for r, offset in s {
 		if pen >= x + width {break}
 		g, found := font.glyph_lookup(t.fonts, t.family, .Regular, r)
 		if !found {continue}
 		start := len(list.glyphs)
-		if result := draw_glyph(t, list, g, pen, baseline, color); result != .Ok {return result}
+		c := color
+		for next < len(highlights) && highlights[next] < offset {next += 1}
+		if next < len(highlights) && highlights[next] == offset {c = highlight}
+		if result := draw_glyph(t, list, g, pen, baseline, c); result != .Ok {return result}
 		if clipped && len(list.glyphs) > start {
 			glyph := &list.glyphs[start]
 			glyph.flags |= render.GLYPH_FADE

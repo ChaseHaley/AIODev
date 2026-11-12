@@ -6,6 +6,7 @@ import "aio:input"
 import "aio:platform"
 import "aio:render"
 import "base:runtime"
+import "core:fmt"
 import "core:log"
 import "core:slice"
 import "core:strings"
@@ -24,6 +25,14 @@ import "core:unicode/utf8"
 // A leading icon and the gap after it.
 @(private) PALETTE_GLYPH_WIDTH :: ICON_BUTTON + SPACE_2
 @(private) PALETTE_NO_RANK :: 99
+// Shortcut matches rank after label matches (exact, prefix, substring) and before a label's scattered
+// letters: an exact chord, then a partial one, then letters through a shortcut's parts ("al8"); other
+// fields follow.
+@(private) PALETTE_RANK_CHORD :: 3
+@(private) PALETTE_RANK_PARTIAL :: 4
+@(private) PALETTE_RANK_LABEL :: 5
+@(private) PALETTE_RANK_FUZZY :: 6
+@(private) PALETTE_RANK_FIELDS :: 7
 
 // What activating a result does.
 Outcome :: enum {
@@ -38,12 +47,14 @@ Outcome :: enum {
 	Open_Workspace,
 }
 
-// The kind a result belongs to. A row names it only when another result shares its title.
+// The kind a result belongs to. A row names it only when another result shares its title. Unassigned
+// is the one row offering a chord the search named that no command uses.
 Palette_Kind :: enum {
 	Command,
 	Setting,
 	Tab,
 	Workspace,
+	Unassigned,
 }
 
 Palette_Mode :: enum {
@@ -92,6 +103,7 @@ Palette_Mode_Info :: struct {
 	.Setting = "Setting",
 	.Tab = "Tab",
 	.Workspace = "Workspace",
+	.Unassigned = "Shortcut",
 }
 
 // The mode listing only one kind; its icon marks that kind's rows. Identity never relies on colour:
@@ -101,6 +113,7 @@ Palette_Mode_Info :: struct {
 	.Setting = .Settings,
 	.Tab = .Tabs,
 	.Workspace = .Workspaces,
+	.Unassigned = .Commands,
 }
 
 // One footer entry: its keycaps, joined by a slash, and what they do.
@@ -109,8 +122,8 @@ Palette_Key_Hint :: struct {
 	label: string,
 }
 
-// At most navigate, three selection actions, and close.
-@(private) PALETTE_HINT_CAP :: 5
+// At most navigate, three selection actions, keyboard search, and close.
+@(private) PALETTE_HINT_CAP :: 6
 
 // The palette's chords beyond list_key_step, each beside the keycap the footer shows for it. palette_key
 // and edit_key match these, so changing a chord changes its hint. Enter and Numpad Enter both accept.
@@ -160,7 +173,8 @@ Palette_Availability :: struct {
 	available: proc(user: rawptr, id: commands.Command_Id) -> bool,
 }
 
-// A command result, a setting result, or a tab/workspace result.
+// A command result, a setting result, a tab/workspace result, or the Unassigned row for `chord`.
+// `shortcut` is the command alternative a search matched.
 Palette_Result :: struct {
 	kind:        Palette_Kind,
 	command:     ^commands.Command,
@@ -171,6 +185,8 @@ Palette_Result :: struct {
 	score:       f64,
 	positions:   []int,
 	title_match: bool,
+	shortcut:    Shortcut_Highlight,
+	chord:       commands.Shortcut,
 }
 
 // The identity activation needs, independent of the current result ordering.
@@ -211,6 +227,11 @@ Palette :: struct {
 	availability: Palette_Availability,
 	reset_hover:  int,
 	scroll_hover: bool,
+	// The query's record mode, and the pointer over its keyboard button.
+	keys:         Key_Search,
+	keys_hover:   bool,
+	// The chord the Unassigned row offered: the next command chosen opens its shortcut editor with it.
+	assign:       Maybe(commands.Shortcut),
 }
 
 // What the last outcome names for the owner: the setting to reveal (Open_Setting), the value to save
@@ -245,6 +266,8 @@ Palette_Layout :: struct {
 	panel, mode_bar, input, list, footer:     render.Rect,
 	modes:                                  [Palette_Mode]render.Rect,
 	viewport:                               render.Rect,
+	// The keyboard button at the right of the query.
+	keys:                                   render.Rect,
 	row_height, scale:                      f32,
 	rows:                                   int,
 	bar:                                    Scrollbar,
@@ -315,6 +338,7 @@ palette_open_mode :: proc(p: ^Palette, registry: ^commands.Registry, mode: Palet
 	p.mode_hover = -1
 	p.reset_hover = -1
 	p.scroll_hover = false
+	p.keys, p.keys_hover, p.assign = {}, false, nil
 	drag_set(p, nil)
 	palette_choose(p, nil)
 	refresh(p, registry)
@@ -326,6 +350,7 @@ palette_close :: proc(p: ^Palette) {
 
 	p.mode_hover = -1
 	p.scroll_hover = false
+	p.keys, p.keys_hover, p.assign = {}, false, nil
 	drag_set(p, nil)
 	palette_choose(p, nil)
 }
@@ -385,9 +410,12 @@ palette_next_mode :: proc(mode: Palette_Mode, reverse: bool = false) -> Palette_
 	return .All
 }
 
-// A mode change is a new search: the old selection has no meaning in the new domain.
+// A mode change is a new search: the old selection has no meaning in the new domain. Recorded keys
+// become typed text, which every mode can search, and a pending assignment ends.
 palette_set_mode :: proc(p: ^Palette, registry: ^commands.Registry, mode: Palette_Mode) {
 	if p.mode == mode {return}
+	if p.keys.state != .Off {key_search_leave(&p.keys, &p.query)}
+	p.assign = nil
 	p.mode = mode
 	p.selected, p.scroll = 0, 0
 	refresh(p, registry)
@@ -397,10 +425,56 @@ palette_cycle_mode :: proc(p: ^Palette, registry: ^commands.Registry, reverse: b
 	palette_set_mode(p, registry, palette_next_mode(p.mode, reverse))
 }
 
-// Whether the palette lists a command: hidden ones serve scripts, and an unavailable one cannot run.
+// Whether the query takes raw keys: record mode waits for a chord.
+palette_recording :: proc(p: ^Palette) -> bool {return p.keys.state == .Recording}
+
+// Turns the query's record mode on or off; on, it searches commands, so other scopes show Commands.
+palette_key_search_toggle :: proc(p: ^Palette, registry: ^commands.Registry) -> Outcome {
+	edit_set(p, nil)
+	drag_set(p, nil)
+	if p.keys.state != .Off {
+		key_search_leave(&p.keys, &p.query)
+	} else {
+		if p.mode != .All && p.mode != .Commands {p.mode = .Commands}
+		key_search_start(&p.keys)
+	}
+	p.selected, p.scroll = 0, 0
+	refresh(p, registry)
+	return .Changed
+}
+
 @(private)
-palette_lists :: proc(p: ^Palette, command: ^commands.Command) -> bool {
-	if command.hidden {return false}
+palette_key_search_step :: proc(p: ^Palette, registry: ^commands.Registry, step: Key_Search_Step) -> Outcome {
+	switch step {
+	case .None:
+		return .None
+	case .Changed:
+	case .Leave:
+		key_search_leave(&p.keys, &p.query)
+	}
+	p.selected, p.scroll = 0, 0
+	refresh(p, registry)
+	return .Changed
+}
+
+// Lists commands for picking one to take `chord`, which the Unassigned row offered: choosing one opens
+// its shortcut editor with the chord added, and Enter there saves it.
+palette_assign :: proc(p: ^Palette, registry: ^commands.Registry, chord: commands.Shortcut) -> Outcome {
+	edit_set(p, nil)
+	p.keys = {}
+	field_set(&p.query, "")
+	p.mode = .Commands
+	p.assign = chord
+	p.selected, p.scroll = 0, 0
+	refresh(p, registry)
+	return .Changed
+}
+
+// Whether a command can run now. The palette leaves out unavailable commands unless a shortcut search
+// matched them, since that answers what the keys do; run leaves them be. Hidden commands serve scripts
+// and are never listed.
+@(private)
+palette_available :: proc(p: ^Palette, command: ^commands.Command) -> bool {
 	a := p.availability
 	return a.available == nil || a.available(a.user, command.id)
 }
@@ -421,6 +495,8 @@ palette_result_name :: proc(p: ^Palette, r: Palette_Result) -> string {
 		return source_item(p.tabs, r.source).label
 	case .Workspace:
 		return source_item(p.workspaces, r.source).label
+	case .Unassigned:
+		return "unassigned"
 	}
 	return ""
 }
@@ -435,6 +511,8 @@ palette_result_title :: proc(p: ^Palette, r: Palette_Result) -> string {
 		return source_item(p.tabs, r.source).label
 	case .Workspace:
 		return source_item(p.workspaces, r.source).label
+	case .Unassigned:
+		return "Unassigned"
 	}
 	return ""
 }
@@ -468,6 +546,8 @@ palette_target :: proc(p: ^Palette, r: Palette_Result) -> Palette_Target {
 		return {kind = .Tab, id = r.id}
 	case .Workspace:
 		return {kind = .Workspace, id = r.id}
+	case .Unassigned:
+		return {kind = .Unassigned}
 	}
 	return {}
 }
@@ -556,7 +636,7 @@ rank_fields :: proc(
 	if by_primary.matched {
 		class := match_class(query, primary)
 		if class < 3 {return class, by_primary.score, true, true}
-		if fuzzy_matches {return 3, by_primary.score, true, true}
+		if fuzzy_matches {return PALETTE_RANK_FUZZY, by_primary.score, true, true}
 	}
 	for field, i in secondary {
 		by_field, field_error := fuzzy.score(query, field, scratch)
@@ -564,10 +644,44 @@ rank_fields :: proc(
 		if !by_field.matched {continue}
 		class := match_class(query, field)
 		if class == 3 && !fuzzy_matches {continue}
-		base := 4 + 3 * i
+		base := PALETTE_RANK_FIELDS + 3 * i
 		return base + class, by_field.score, true, false
 	}
 	return 0, 0, false, false
+}
+
+@(private)
+shortcut_rank :: proc(match: commands.Shortcut_Match) -> int {
+	switch match {
+	case .None:
+		return -1
+	case .Exact:
+		return PALETTE_RANK_CHORD
+	case .Partial, .Modifiers:
+		return PALETTE_RANK_PARTIAL
+	case .Label:
+		return PALETTE_RANK_LABEL
+	}
+	return -1
+}
+
+// The command alternative that answers the search best: the recorded keys in record mode, otherwise
+// the typed query.
+@(private)
+command_shortcut_match :: proc(
+	p: ^Palette, q: ^commands.Shortcut_Query, command: ^commands.Command,
+) -> Shortcut_Highlight {
+	best: Shortcut_Highlight
+	for shortcut, i in commands.active_shortcuts(command) {
+		hit := commands.Shortcut_Hit{}
+		if p.keys.state != .Off {
+			hit = key_search_match(&p.keys, shortcut)
+		} else {
+			hit = commands.shortcut_query_match(q, shortcut)
+		}
+		if hit.match > best.hit.match {best = {i, hit}}
+	}
+	return best
 }
 
 @(private)
@@ -603,6 +717,7 @@ consider_item :: proc(
 	width: int,
 	secondary: []string,
 	fuzzy_matches: bool,
+	shortcut: Shortcut_Highlight = {},
 ) {
 	rank, score, matched, title_match := rank_fields(
 		query,
@@ -611,6 +726,9 @@ consider_item :: proc(
 		p.scratch,
 		fuzzy_matches,
 	)
+	if by_shortcut := shortcut_rank(shortcut.hit.match); by_shortcut >= 0 && (!matched || by_shortcut < rank) {
+		rank, matched = by_shortcut, true
+	}
 	if !matched {return}
 	result := Palette_Result {
 		kind        = kind,
@@ -621,6 +739,7 @@ consider_item :: proc(
 		rank        = rank,
 		score       = score,
 		title_match = title_match,
+		shortcut    = shortcut,
 	}
 	append_result(p, result, width, query, title, title_match)
 }
@@ -671,8 +790,9 @@ less_result :: proc(a, b: Palette_Result) -> bool {
 }
 
 // Rebuilds the visible result list for the active mode as one flat ranking. An empty query lists
-// each domain in natural order; otherwise label matches rank first, then secondary fields, by match
-// class and score, with the palette's domain order and then insertion order breaking ties.
+// each domain in natural order; otherwise label matches rank first, then shortcut and secondary fields,
+// by match class and score, with the palette's domain order and then insertion order breaking ties. A
+// complete chord no command uses leads the list as the Unassigned row.
 @(private)
 refresh :: proc(p: ^Palette, registry: ^commands.Registry) {
 	query := palette_query(p)
@@ -680,6 +800,10 @@ refresh :: proc(p: ^Palette, registry: ^commands.Registry) {
 	edit_set(p, nil)
 	clear(&p.results)
 	clear(&p.ordered)
+	if p.keys.state != .Off {
+		refresh_keys(p, registry)
+		return
+	}
 	if !utf8.valid_string(query) {query = ""}
 	empty := strings.trim_space(query) == ""
 	width := empty ? 0 : utf8.rune_count(query)
@@ -687,18 +811,20 @@ refresh :: proc(p: ^Palette, registry: ^commands.Registry) {
 	workspaces := (p.mode == .All || p.mode == .Workspaces) ? count_of(p.workspaces) : 0
 	enabled_commands := 0
 	if p.mode == .All || p.mode == .Commands {
-		for &command in registry.items {if palette_lists(p, &command) {enabled_commands += 1}}
+		for &command in registry.items {if !command.hidden {enabled_commands += 1}}
 	}
 	setting_count := (p.mode == .All || p.mode == .Settings) ? len(p.settings) : 0
 	candidates := tabs + workspaces + setting_count + enabled_commands
 	// Every candidate's storage is in place before ranking, so the appends below cannot fail and the
 	// published list is complete. Without room the palette lists nothing rather than a partial list.
-	if reserve(&p.ordered, candidates) != nil || reserve(&p.results, candidates) != nil ||
+	if reserve(&p.ordered, candidates) != nil || reserve(&p.results, candidates + 1) != nil ||
 	   (width > 0 && resize(&p.positions, candidates * width) != nil) {
 		log.errorf("palette: no room for %d results", candidates)
 		p.selected, p.scroll = 0, 0
 		return
 	}
+	shortcuts: commands.Shortcut_Query
+	if !empty {shortcuts = commands.shortcut_query(query)}
 	spans: [Palette_Kind][2]int
 	if p.mode == .All || p.mode == .Tabs {
 		start := len(p.ordered)
@@ -765,36 +891,82 @@ refresh :: proc(p: ^Palette, registry: ^commands.Registry) {
 	if p.mode == .All || p.mode == .Commands {
 		start := len(p.ordered)
 		for &command in registry.items {
-			if !palette_lists(p, &command) {continue}
+			if command.hidden {continue}
 			if empty {
+				if !palette_available(p, &command) {continue}
 				append(&p.ordered, Palette_Result{kind = .Command, command = &command, setting = -1,
 					rank = PALETTE_NO_RANK})
-			} else {
-				consider_item(
-					p,
-					.Command,
-					&command,
-					-1,
-					-1,
-					0,
-					command.title,
-					query,
-					width,
-					[]string{commands.category(command.name).title},
-					true,
-				)
+				continue
 			}
+			match := command_shortcut_match(p, &shortcuts, &command)
+			if match.hit.match == .None && !palette_available(p, &command) {continue}
+			consider_item(
+				p,
+				.Command,
+				&command,
+				-1,
+				-1,
+				0,
+				command.title,
+				query,
+				width,
+				[]string{commands.category(command.name).title},
+				true,
+				match,
+			)
 		}
 		spans[.Command] = {start, len(p.ordered)}
 	}
+	if chord, named := commands.shortcut_query_chord(&shortcuts);
+	   named && enabled_commands > 0 && (.Leader not_in chord.modifiers || p.leader != nil) &&
+	   commands.shortcut_free(registry, chord, p.leader) {
+		append(&p.results, Palette_Result{kind = .Unassigned, setting = -1, source = -1, chord = chord})
+	}
+	first := len(p.results)
 	if len(p.ordered) > 0 {
 		for kind in PALETTE_DOMAIN_ORDER {
 			append(&p.results, ..p.ordered[spans[kind][0]:spans[kind][1]])
 		}
-		if !empty {slice.stable_sort_by(p.results[:], less_result)}
+		if !empty {slice.stable_sort_by(p.results[first:], less_result)}
 	}
 	p.selected = clamp(p.selected, 0, max(0, len(p.results) - 1))
 	keep_selection_visible(p)
+}
+
+// Record mode lists the commands the recorded keys run, in registry order, after the Unassigned row
+// for a complete chord that runs nothing.
+@(private)
+refresh_keys :: proc(p: ^Palette, registry: ^commands.Registry) {
+	if reserve(&p.results, len(registry.items) + 1) != nil {
+		log.errorf("palette: no room for %d results", len(registry.items) + 1)
+		p.selected, p.scroll = 0, 0
+		return
+	}
+	if chord, bindable := commands.key_press_chord(p.keys.press); bindable && keys_unbound(p, registry) {
+		append(&p.results, Palette_Result{kind = .Unassigned, setting = -1, source = -1, chord = chord})
+	}
+	if p.mode == .All || p.mode == .Commands {
+		for &command in registry.items {
+			if command.hidden {continue}
+			match := command_shortcut_match(p, nil, &command)
+			if match.hit.match == .None {continue}
+			append(&p.results, Palette_Result{kind = .Command, command = &command, setting = -1, source = -1,
+				shortcut = match})
+		}
+	}
+	p.selected = clamp(p.selected, 0, max(0, len(p.results) - 1))
+	keep_selection_visible(p)
+}
+
+// Whether no command, listed or not, runs the recorded chord.
+@(private)
+keys_unbound :: proc(p: ^Palette, registry: ^commands.Registry) -> bool {
+	for &command in registry.items {
+		for shortcut in commands.active_shortcuts(&command) {
+			if key_search_match(&p.keys, shortcut).match == .Exact {return false}
+		}
+	}
+	return true
 }
 
 @(private)
@@ -820,11 +992,16 @@ move :: proc(p: ^Palette, delta: int) -> Outcome {
 }
 
 @(private)
-run :: proc(p: ^Palette, index: int) -> (Outcome, commands.Command_Id) {
+run :: proc(p: ^Palette, registry: ^commands.Registry, index: int) -> (Outcome, commands.Command_Id) {
 	if p.visible_rows == 0 || index < 0 || index >= len(p.results) {
 		return .None, 0
 	}
 	result := p.results[index]
+	if result.kind == .Unassigned {return palette_assign(p, registry, result.chord), 0}
+	if _, assigning := p.assign.?; assigning && result.kind == .Command {
+		return palette_binding_assign(p, index), 0
+	}
+	if result.kind == .Command && !palette_available(p, result.command) {return .None, 0}
 	palette_close(p)
 	switch result.kind {
 	case .Command:
@@ -838,6 +1015,7 @@ run :: proc(p: ^Palette, index: int) -> (Outcome, commands.Command_Id) {
 	case .Workspace:
 		palette_choose(p, Chosen_Workspace{result.id})
 		return .Open_Workspace, 0
+	case .Unassigned:
 	}
 	return .None, 0
 }
@@ -889,6 +1067,16 @@ palette_key :: proc(
 		return edit_key(p, e), 0
 	}
 	if _, sliding := p.drag.(Slider_Drag); sliding {return .None, 0}
+	// Recording takes every key, app shortcuts included; a recorded search keeps its own few.
+	if p.keys.state == .Recording {
+		return palette_key_search_step(p, registry, key_search_record(&p.keys, e, p.leader)), 0
+	}
+	if key_search_toggles(e) {return palette_key_search_toggle(p, registry), 0}
+	if p.keys.state == .Recorded {
+		if step, handled := key_search_recorded_key(&p.keys, e); handled {
+			return palette_key_search_step(p, registry, step), 0
+		}
+	}
 	#partial switch e.key {
 	case .Tab:
 		palette_cycle_mode(p, registry, .Shift in e.modifiers)
@@ -900,8 +1088,14 @@ palette_key :: proc(
 		}
 	}
 	if (e.key == .Enter || e.key == .Numpad_Enter) && PALETTE_OPERATE in e.modifiers &&
-	   p.selected >= 0 && p.selected < len(p.results) && p.results[p.selected].kind == .Command {
-		return palette_binding_open(p, p.selected), 0
+	   p.selected >= 0 && p.selected < len(p.results) {
+		#partial switch p.results[p.selected].kind {
+		case .Command:
+			if p.assign != nil {return palette_binding_assign(p, p.selected), 0}
+			return palette_binding_open(p, p.selected), 0
+		case .Unassigned:
+			return run(p, registry, p.selected)
+		}
 	}
 	// The adjust chord steps the selected setting; the operate chord operates its control.
 	if s := result_setting(p, p.selected); s != nil && s.control != .None {
@@ -922,13 +1116,24 @@ palette_key :: proc(
 		palette_close(p)
 		return .Closed, 0
 	case .Enter, .Numpad_Enter:
-		return run(p, p.selected)
+		return run(p, registry, p.selected)
 	}
+	// The hidden text of a recorded search is not edited; typing returns through palette_text.
+	if p.keys.state != .Off {return .None, 0}
 	return edited(p, registry, field_key(&p.query, e)), 0
 }
 
 palette_text :: proc(p: ^Palette, registry: ^commands.Registry, text: string) -> Outcome {
 	if palette_editing(p) != .None {return edit_text(p, text)}
+	switch p.keys.state {
+	case .Off:
+	case .Recording:
+		return .None
+	case .Recorded:
+		// Typing over recorded keys starts a new text search.
+		p.keys = {}
+		field_set(&p.query, "")
+	}
 	return edited(p, registry, field_text(&p.query, text))
 }
 
@@ -941,6 +1146,8 @@ palette_paste :: proc(p: ^Palette, registry: ^commands.Registry, text: string) -
 
 palette_selection :: proc(p: ^Palette) -> string {
 	if field := edit_field(p); field != nil {return field_selected_text(field)}
+	// Recorded keys are drawn as keycaps; the text behind them is not on screen to copy.
+	if p.keys.state != .Off {return ""}
 	return field_selected_text(&p.query)
 }
 
@@ -1056,6 +1263,13 @@ palette_layout :: proc(p: ^Palette, viewport_width, viewport_height, viewport_sc
 		mode_x += mode_width
 	}
 	if footer_height > 0 {l.footer = {panel.x, l.list.y + used + padding, panel.width, footer_height}}
+	// The keyboard button closes the query row; a row too narrow for it and some text has none.
+	button := min(HEIGHT_TOOLBAR * scale, input.height)
+	needed := (2 * PALETTE_TEXT_INSET + ICON_BUTTON + SPACE_3 + HEIGHT_TOOLBAR + 3 * SPACE_6) * scale
+	if input.width >= needed {
+		right := input.x + input.width - (PALETTE_TEXT_INSET - SPACE_2) * scale
+		l.keys = {right - button, input.y + (input.height - button) / 2, button, button}
+	}
 	// The track replaces the list's right padding, inside the panel border.
 	extent := Scroll_Extent{len(p.results), f.rows, p.scroll}
 	gutter := SCROLLBAR_TRACK * scale + border
@@ -1102,10 +1316,13 @@ palette_mouse_move :: proc(p: ^Palette, l: Palette_Layout, x, y: f32) -> Outcome
 	mode_changed := hover != p.mode_hover
 	p.mode_hover = hover
 	over_bar := l.bar_visible && scrollbar_contains(l.bar, x, y)
-	// The scrollbar and reset button light only under the pointer, so entering or leaving them redraws.
+	over_keys := render.rect_contains(l.keys, x, y)
+	// The scrollbar, keyboard and reset buttons light only under the pointer, so entering or leaving
+	// them redraws.
 	reset := reset_at(p, l, x, y)
-	reset_changed := reset != p.reset_hover || over_bar != p.scroll_hover
+	reset_changed := reset != p.reset_hover || over_bar != p.scroll_hover || over_keys != p.keys_hover
 	p.scroll_hover = over_bar
+	p.keys_hover = over_keys
 	p.reset_hover = reset
 	index := row_at(p, l, x, y)
 	if index < 0 || index == p.selected {
@@ -1131,6 +1348,9 @@ palette_mouse_press :: proc(
 		palette_set_mode(p, registry, PALETTE_CYCLE[index])
 		return .Changed, 0
 	}
+	if render.rect_contains(l.keys, x, y) && !palette_popup_contains(p, l, x, y) {
+		return palette_key_search_toggle(p, registry), 0
+	}
 	if binding, open := &p.edit.(Shortcut_Edit); open {
 		return palette_binding_press(p, binding, l, x, y), 0
 	}
@@ -1147,11 +1367,14 @@ palette_mouse_press :: proc(
 			row, _ := row_rect(p, l, index)
 			parts := palette_binding_parts(row, l.scale)
 			if render.rect_contains(parts.reset, x, y) {return palette_binding_reset(p, index), 0}
-			if render.rect_contains(parts.field, x, y) {return palette_binding_open(p, index), 0}
+			if render.rect_contains(parts.field, x, y) {
+				if p.assign != nil {return palette_binding_assign(p, index), 0}
+				return palette_binding_open(p, index), 0
+			}
 		}
 		if outcome, handled := reset_press(p, l, index, x, y); handled {return outcome, 0}
 		if outcome, handled := control_press(p, l, index, x, y); handled {return outcome, 0}
-		return run(p, index)
+		return run(p, registry, index)
 	}
 	if !render.rect_contains(l.panel, x, y) {
 		palette_close(p)
@@ -1172,14 +1395,17 @@ palette_query_box :: proc(p: ^Palette, l: Palette_Layout, text: ^Text, scale: f3
 		scale = scale,
 	}
 	left := min(box.rect.width, (PALETTE_TEXT_INSET + ICON_BUTTON + SPACE_3) * scale)
+	right := l.input.x + l.input.width - PALETTE_TEXT_INSET * scale
+	if l.keys.width > 0 {right = l.keys.x - SPACE_2 * scale}
 	box.rect.x += left
-	box.rect.width = max(0, box.rect.width - left - PALETTE_TEXT_INSET * scale)
+	box.rect.width = max(0, right - box.rect.x)
 	box.inset = 0
 	return box
 }
 
+// The query row, apart from its keyboard button.
 palette_input_contains :: proc(l: Palette_Layout, x, y: f32) -> bool {
-	return render.rect_contains(l.input, x, y)
+	return render.rect_contains(l.input, x, y) && !render.rect_contains(l.keys, x, y)
 }
 
 palette_over_text :: proc(l: Palette_Layout, x, y: f32) -> bool {
@@ -1188,7 +1414,7 @@ palette_over_text :: proc(l: Palette_Layout, x, y: f32) -> bool {
 
 palette_pointer :: proc(p: ^Palette, l: Palette_Layout, x, y: f32) -> platform.Cursor_Shape {
 	if shape, ok := control_pointer(p, l, x, y); ok {return shape}
-	if mode_at(l, x, y) >= 0 {return .Hand}
+	if mode_at(l, x, y) >= 0 || render.rect_contains(l.keys, x, y) {return .Hand}
 	if palette_over_text(l, x, y) {return .Text}
 	if l.bar_visible && scrollbar_contains(l.bar, x, y) {return .Arrow}
 	if row_at(p, l, x, y) >= 0 {return .Hand}
@@ -1204,6 +1430,8 @@ palette_input_press :: proc(
 	extend: bool,
 ) -> Outcome {
 	edit_set(p, nil)
+	// Recorded keys hide the text, so there is no caret to place.
+	if p.keys.state != .Off {return .None}
 	at := field_box_offset(palette_query_box(p, l, text, scale), x)
 	drag_set(p, Query_Drag{})
 	return field_move(&p.query, at, extend) == .None ? .None : .Changed
@@ -1315,12 +1543,21 @@ palette_key_hints :: proc(p: ^Palette, out: ^[PALETTE_HINT_CAP]Palette_Key_Hint)
 		add(out, &count, PALETTE_CANCEL_LABEL, "", "Cancel")
 		return count
 	}
+	if p.keys.state == .Recording {
+		add(out, &count, KEY_SEARCH_CLEAR_LABEL, "", "Clear")
+		add(out, &count, PALETTE_CANCEL_LABEL, KEY_SEARCH_LABEL, "Search by text")
+		return count
+	}
 	if p.selected >= 0 && p.selected < len(p.results) {
 		add(out, &count, LIST_NEXT_LABEL, LIST_PREVIOUS_LABEL, "Navigate")
 		switch p.results[p.selected].kind {
 		case .Command:
-			add(out, &count, PALETTE_ACCEPT_LABEL, "", "Run command")
-			add(out, &count, PALETTE_OPERATE_LABEL, "", "Edit shortcut")
+			if p.assign != nil {
+				add(out, &count, PALETTE_ACCEPT_LABEL, "", "Assign shortcut")
+			} else {
+				add(out, &count, PALETTE_ACCEPT_LABEL, "", "Run command")
+				add(out, &count, PALETTE_OPERATE_LABEL, "", "Edit shortcut")
+			}
 		case .Setting:
 			add(out, &count, PALETTE_ACCEPT_LABEL, "", "Go to setting")
 			if s := result_setting(p, p.selected); s != nil && s.control != .None {
@@ -1331,8 +1568,16 @@ palette_key_hints :: proc(p: ^Palette, out: ^[PALETTE_HINT_CAP]Palette_Key_Hint)
 			add(out, &count, PALETTE_ACCEPT_LABEL, "", "Switch tab")
 		case .Workspace:
 			add(out, &count, PALETTE_ACCEPT_LABEL, "", "Switch workspace")
+		case .Unassigned:
+			add(out, &count, PALETTE_ACCEPT_LABEL, "", "Assign to a command")
 		}
 	}
+	if p.keys.state == .Recorded {
+		add(out, &count, KEY_SEARCH_CLEAR_LABEL, "", "Record again")
+		add(out, &count, PALETTE_CANCEL_LABEL, "", "Search by text")
+		return count
+	}
+	add(out, &count, KEY_SEARCH_LABEL, "", "Search by keys")
 	add(out, &count, PALETTE_CANCEL_LABEL, "", "Close")
 	return count
 }
@@ -1467,18 +1712,33 @@ palette_draw :: proc(
 	icon_draw(list, .Search, search, theme.muted, ICON_BUTTON, scale)
 	box := palette_query_box(p, l, text, scale)
 	query_text := text_styled(text, .Display)
-	if box.rect.width > 1 {
+	if box.rect.width > 1 && p.keys.state != .Off {
+		keycap_text := text_styled(text, .Body)
+		if result := key_search_draw(&p.keys, list, &keycap_text, theme, box.rect, scale); result != .Ok {
+			return result
+		}
+	} else if box.rect.width > 1 {
+		placeholder := PALETTE_MODES[p.mode].placeholder
+		buffer: [128]u8
+		if chord, assigning := p.assign.?; assigning {
+			label: [commands.SHORTCUT_TEXT_CAP]u8
+			placeholder = fmt.bprintf(buffer[:], "Choose a command for %s", commands.shortcut_text(chord, label[:]))
+		}
 		baseline := l.input.y + (l.input.height - query_text.line_height) / 2 + query_text.ascent
-		if result := field_box_draw(box, list, theme, baseline, true,
-			PALETTE_MODES[p.mode].placeholder); result != .Ok { return result }
+		if result := field_box_draw(box, list, theme, baseline, true, placeholder); result != .Ok { return result }
 	}
+	if key_search_button_draw(list, theme, l.keys, p.keys.state != .Off, scale, pointer) != .None {return .Ok}
 	title_text := text^
 	if l.rows > 0 && l.list.width > 0 {
 		if render.push_layer(list, l.list) != .None { return .Ok }
 		if len(p.results) == 0 {
+			empty := "No results"
+			if p.keys.state != .Off {
+				empty = p.keys.press.state == .Chord ? KEY_SEARCH_NO_MATCH : KEY_SEARCH_EMPTY_HINT
+			}
 			row_baseline := l.list.y + (l.row_height - title_text.line_height) / 2 + title_text.ascent
-			if result := draw_text(&title_text, list, "No results", l.list.x + padding, row_baseline,
-				theme.muted); result != .Ok {return result}
+			if result := draw_text(&title_text, list, empty, l.list.x + padding, row_baseline,
+				theme.muted, max(1, l.list.width - 2 * padding)); result != .Ok {return result}
 		}
 	}
 	if len(p.results) > 0 && l.rows > 0 && l.list.width > 0 {
@@ -1510,6 +1770,19 @@ palette_draw :: proc(
 				if result := palette_binding_draw(p, item.command, index, row, list, text, theme, l, pointer);
 				   result != .Ok {return result}
 			}
+			if item.kind == .Unassigned {
+				parts := palette_binding_parts(row, scale)
+				parts.positions = {}
+				side = parts.field.x
+				buffer: [commands.SHORTCUT_TEXT_CAP]u8
+				positions: [commands.SHORTCUT_TEXT_CAP]int
+				label := commands.shortcut_text(item.chord, buffer[:])
+				lit := commands.Shortcut_Hit{.Exact, item.chord.modifiers, true}
+				summary := Shortcut_Summary{first = label}
+				summary.highlights = commands.shortcut_hit_positions(label, lit, positions[:])
+				if result := shortcut_field_draw(list, text, theme, parts, summary, {}, l.viewport, scale);
+				   result != .Ok {return result}
+			}
 			if s := result_setting(p, index); s != nil {
 				if s.control != .None {side = min(side, control_rect(s, row, scale).x)}
 				if s.resettable {side = min(side, reset_rect(s, row, scale).x)}
@@ -1529,7 +1802,7 @@ palette_draw :: proc(
 			icon_size := ICON_BUTTON * scale
 			icon_y := row.y + (row.height - icon_size) / 2
 			kind_icon := render.Rect{row.x + row_padding, icon_y, icon_size, icon_size}
-			kind_mark := PALETTE_MODES[PALETTE_KIND_MODES[item.kind]].icon
+			kind_mark := item.kind == .Unassigned ? Icon.Add : PALETTE_MODES[PALETTE_KIND_MODES[item.kind]].icon
 			icon_draw(list, kind_mark, kind_icon, theme.muted, ICON_BUTTON, scale)
 			title := palette_result_title(p, item)
 			title_x := row.x + row_padding + PALETTE_GLYPH_WIDTH * scale

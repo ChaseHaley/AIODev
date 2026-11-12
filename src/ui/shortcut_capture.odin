@@ -73,6 +73,12 @@ shortcut_capture_start :: proc(c: ^Shortcut_Capture, index: int = 0) {
 // A refused save records into the same alternative again, keeping the hint.
 shortcut_capture_resume :: proc(c: ^Shortcut_Capture) {c.state = .Capturing}
 
+// Records `label` after the saved alternatives, as a press would; Enter saves it, Esc discards it.
+shortcut_capture_add :: proc(c: ^Shortcut_Capture, draft: ^Text_Field, saved, label: string) {
+	shortcut_capture_start(c, len(commands.shortcut_alternatives(saved, context.temp_allocator)))
+	capture_replace(c, draft, saved, label)
+}
+
 shortcut_capture_recording :: proc(c: ^Shortcut_Capture) -> bool {
 	return c.state == .Capturing || c.state == .Leader_Pending
 }
