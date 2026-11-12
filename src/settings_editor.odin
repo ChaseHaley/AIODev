@@ -1090,6 +1090,7 @@ when AIO_CONTROL {
 		state_text(r, "settings.key", key)
 		state_text(r, "settings.value", string(p.value.bytes[:]))
 		state_value(r, "settings.editing", ui.editor_editing(p))
+		state_value(r, "settings.focus", ui.editor_focus(p))
 		state_value(r, "settings.active", settings_active(w))
 		state_value(r, "settings.popup", ui.editor_popup(p))
 		state_value(r, "settings.choice_count", choice_count)

@@ -373,6 +373,40 @@ editor_tab_walks_the_page_like_a_browser :: proc(t: ^testing.T) {
 }
 
 @(test)
+editor_press_off_the_search_takes_its_keyboard :: proc(t: ^testing.T) {
+	p: ui.Editor
+	defer ui.editor_destroy(&p)
+	editor_fixture(t, &p)
+	l := page(&p)
+	testing.expect(t, ui.editor_select_key(&p, "pane.show_headers"))
+	before := ui.editor_row(&p).value
+	// A press on a row, away from its switch, focuses the switch without flipping it.
+	row := ui.editor_row_parts(&p, l, p.selected).row
+	testing.expect_value(t, ui.editor_press(&p, l, nil, row.x + 4, row.y + row.height / 2, false),
+		ui.Editor_Outcome.Changed)
+	testing.expect_value(t, ui.editor_focus(&p), ui.Editor_Focus.Control)
+	testing.expect_value(t, ui.field_string(&p.value), before)
+	ui.editor_text(&p, "zz")
+	testing.expect_value(t, ui.field_string(&p.filter), "")
+	// A press on the page outside any control leaves nothing focused: typing goes nowhere, the
+	// search shows its Ctrl+F keycap, Tab resumes at the selected row and Ctrl+F returns.
+	ui.editor_key(&p, key({key = .F, modifiers = {.Control}}))
+	ui.editor_text(&p, "pane")
+	ui.editor_press(&p, l, nil, l.page.x + 2, l.page.y + 2, false)
+	testing.expect_value(t, ui.editor_focus(&p), ui.Editor_Focus.Page)
+	ui.editor_text(&p, "y")
+	testing.expect_value(t, ui.field_string(&p.filter), "pane")
+	testing.expect(t, ui.editor_search_key_rect(&p, l).width > 0)
+	selected := p.selected
+	ui.editor_key(&p, key({key = .Tab}))
+	testing.expect_value(t, p.selected, selected)
+	testing.expect_value(t, ui.editor_focus(&p), ui.Editor_Focus.Control)
+	ui.editor_press(&p, l, nil, l.page.x + 2, l.page.y + 2, false)
+	ui.editor_key(&p, key({key = .F, modifiers = {.Control}}))
+	testing.expect_value(t, ui.editor_focus(&p), ui.Editor_Focus.Search)
+}
+
+@(test)
 editor_captures_shortcut_keys :: proc(t: ^testing.T) {
 	p: ui.Editor
 	defer ui.editor_destroy(&p)

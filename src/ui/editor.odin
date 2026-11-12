@@ -124,12 +124,14 @@ Editor_Item :: struct {
 }
 
 // Keyboard focus as readers see it: the search field, the selected row's control, its key-position
-// switch, or Reset to Defaults. It is derived from Editor_Mode by editor_focus.
+// switch, Reset to Defaults, or nothing in particular after a click on the page itself, as a browser
+// leaves the page focused. It is derived from Editor_Mode by editor_focus.
 Editor_Focus :: enum {
 	Search,
 	Control,
 	Positions,
 	Reset_All,
+	Page,
 }
 
 Editor_Popup :: enum {
@@ -148,6 +150,7 @@ Editor_Mode :: union #no_nil {
 	Editor_Editing,
 	Editor_Positions,
 	Editor_Reset_All,
+	Editor_Page,
 	Editor_Shortcut,
 	Editor_Choice_Popup,
 	Editor_Color_Popup,
@@ -175,6 +178,10 @@ Editing_Drag :: enum {
 Editor_Positions :: struct {}
 
 Editor_Reset_All :: struct {}
+
+// Nothing on the page has the keyboard: typing goes nowhere, Tab resumes from the selected row and
+// Ctrl+F returns to the search.
+Editor_Page :: struct {}
 
 // A shortcut row's field has the keyboard; `capture` records chords or lists the alternatives.
 Editor_Shortcut :: struct {}
@@ -851,7 +858,7 @@ editor_resting :: proc(p: ^Editor) -> bool {
 		return !m.selecting
 	case Editor_Editing:
 		return m.drag == .None
-	case Editor_Positions, Editor_Reset_All, Editor_Shortcut:
+	case Editor_Positions, Editor_Reset_All, Editor_Page, Editor_Shortcut:
 		return true
 	case Editor_Choice_Popup, Editor_Color_Popup, Editor_Curve_Popup, Editor_Profile_Menu:
 	}
@@ -944,6 +951,8 @@ editor_focus :: proc(p: ^Editor) -> Editor_Focus {
 		return .Positions
 	case Editor_Reset_All:
 		return .Reset_All
+	case Editor_Page:
+		return .Page
 	}
 	return .Control
 }
@@ -985,7 +994,7 @@ editor_dragging :: proc(p: ^Editor) -> bool {
 		return m.drag != .None
 	case Editor_Curve_Popup:
 		return m.drag != .None
-	case Editor_Positions, Editor_Reset_All, Editor_Shortcut, Editor_Profile_Menu:
+	case Editor_Positions, Editor_Reset_All, Editor_Page, Editor_Shortcut, Editor_Profile_Menu:
 	}
 	return false
 }
@@ -1003,6 +1012,16 @@ editor_browse :: proc(p: ^Editor) {editor_mode_set(p, Editor_Browsing{})}
 
 // Moves the keyboard to the selected row's control.
 editor_focus_row :: proc(p: ^Editor) {editor_mode_set(p, Editor_Editing{})}
+
+// Takes the keyboard off the search and any control, keeping what was typed into a field, as a
+// press on the page outside its controls does in a browser.
+@(private)
+editor_blur :: proc(p: ^Editor) {
+	if editor_focus(p) == .Page {return}
+	editor_keep(p)
+	stop_editing(p)
+	editor_mode_set(p, Editor_Page{})
+}
 
 // The only writer of p.mode, which is also what shows the profile menu. A capture's or the alternatives
 // list's hint is cleared by the moves that dismiss them, not by every exit: saving keeps it, so a
@@ -1037,6 +1056,8 @@ focus_mode :: proc(focus: Editor_Focus) -> Editor_Mode {
 		return Editor_Positions{}
 	case .Reset_All:
 		return Editor_Reset_All{}
+	case .Page:
+		return Editor_Page{}
 	}
 	return Editor_Browsing{}
 }
@@ -1958,7 +1979,7 @@ editor_tab :: proc(p: ^Editor, row: ^Editor_Row, back: bool) -> Editor_Outcome {
 	}
 	target := -1
 	switch focus {
-	case .Search:
+	case .Search, .Page:
 		if !back && row != nil {target = p.selected}
 	case .Reset_All:
 		if back {target = editor_tab_row(p, len(p.items), -1)}
@@ -1969,7 +1990,7 @@ editor_tab :: proc(p: ^Editor, row: ^Editor_Row, back: bool) -> Editor_Outcome {
 		// Past the last row lies Reset to Defaults, and before the first the search.
 		if focus == .Control {editor_keep(p)}
 		if focus != .Search {stop_editing(p)}
-		if focus == .Search || (focus != .Reset_All && !back) {
+		if focus == .Search || focus == .Page || (focus != .Reset_All && !back) {
 			editor_mode_set(p, Editor_Reset_All{})
 		} else {
 			editor_mode_set(p, Editor_Browsing{})
@@ -2206,7 +2227,7 @@ editor_key :: proc(p: ^Editor, raw: input.Key_Event) -> Editor_Outcome {
 		if control {return row == nil ? .None : .Reset}
 	}
 	switch focus {
-	case .Positions, .Reset_All:
+	case .Positions, .Reset_All, .Page:
 		return .None
 	case .Control:
 		if row != nil && text_kind(row.kind) {
@@ -2266,7 +2287,7 @@ editor_selection :: proc(p: ^Editor) -> string {
 		return field_selected_text(&p.filter)
 	case .Control:
 		if !editor_capturing(p) {return field_selected_text(&p.value)}
-	case .Positions, .Reset_All:
+	case .Positions, .Reset_All, .Page:
 	}
 	return ""
 }
@@ -2632,7 +2653,11 @@ editor_press :: proc(
 		return .Changed
 	}
 	popup := editor_popup(p)
-	if popup == .None && render.rect_contains(editor_reset_all_rect(l), x, y) {return .Reset_All}
+	if popup == .None && render.rect_contains(editor_reset_all_rect(l), x, y) {
+		editor_blur(p)
+		editor_mode_set(p, Editor_Reset_All{})
+		return .Reset_All
+	}
 	if popup != .None {
 		r := editor_popup_rect(p, l)
 		row := editor_row(p)
@@ -2705,14 +2730,19 @@ editor_press :: proc(
 	}
 	if render.rect_contains(l.outline, x, y) {
 		entry := p.outline_scroll + int((y - l.outline.y) / l.outline_row_height)
-		if entry >= len(outline_entries(p)) {return .None}
-		editor_jump(p, entry)
+		if entry < len(outline_entries(p)) {editor_jump(p, entry)}
+		editor_blur(p)
 		return .Changed
 	}
-	if !render.rect_contains(l.list, x, y) {return .None}
+	// As in a browser, a press anywhere else on the page takes the keyboard from the search.
 	index := p.scroll + int((y - l.list.y) / l.row_height)
-	if index >= len(p.items) || p.items[index].row < 0 {return .None}
+	if !render.rect_contains(l.list, x, y) || index >= len(p.items) || p.items[index].row < 0 {
+		editor_blur(p)
+		return .Changed
+	}
 	if index != p.selected {editor_select(p, index)}
+	// A row is its control's label: pressing it gives the control the keyboard without acting on it.
+	if focus := editor_focus(p); focus == .Search || focus == .Page {editor_mode_set(p, Editor_Editing{})}
 	row := editor_row(p)
 	parts := editor_row_parts(p, l, index)
 	if row.process_field != .None {
@@ -2781,6 +2811,7 @@ editor_press :: proc(
 		return flip_toggle(p)
 	case render.rect_contains(parts.positions, x, y):
 		p.capture.physical = !p.capture.physical
+		editor_mode_set(p, Editor_Positions{})
 		return .Changed
 	case render.rect_contains(parts.swatch, x, y) && row.kind != .Icon_File:
 		editor_mode_set(p, Editor_Color_Popup{})
@@ -2865,7 +2896,7 @@ editor_drag :: proc(p: ^Editor, l: Editor_Layout, text: ^Text, x, y: f32) -> boo
 		return true
 	case Editor_Curve_Popup:
 		return editor_motion_popup_drag(p, editor_popup_rect(p, l), m.drag, x, y, l.scale)
-	case Editor_Browsing, Editor_Positions, Editor_Reset_All, Editor_Shortcut, Editor_Profile_Menu:
+	case Editor_Browsing, Editor_Positions, Editor_Reset_All, Editor_Page, Editor_Shortcut, Editor_Profile_Menu:
 	}
 	return false
 }
@@ -2896,7 +2927,7 @@ editor_release :: proc(p: ^Editor) -> Editor_Outcome {
 		editor_mode_set(p, Editor_Curve_Popup{})
 		// A drag that changed the curve saves it; the popover stays open on the saved curve.
 		return p.motion_curve_edited ? .Save : .Changed
-	case Editor_Positions, Editor_Reset_All, Editor_Shortcut, Editor_Profile_Menu:
+	case Editor_Positions, Editor_Reset_All, Editor_Page, Editor_Shortcut, Editor_Profile_Menu:
 	}
 	row := editor_row(p)
 	if row == nil || !settled {return .None}
