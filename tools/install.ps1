@@ -12,7 +12,8 @@
     $releaseSha256 = ''
 
     # Installs exactly the files build.ps1's package stage lists in files.txt, refusing a package that lacks
-    # any of them. Themes the user may have edited are kept; the theme schema is the app's and is replaced.
+    # any of them, and keeps files.txt beside them so uninstall.ps1 removes exactly those. Themes the user may
+    # have edited are kept; the theme schema is the app's and is replaced.
     function Install-PackageFiles([string] $Source, [string] $Destination) {
         $manifest = Join-Path $Source 'files.txt'
         if (-not (Test-Path -LiteralPath $manifest -PathType Leaf)) { throw "The package has no files.txt." }
@@ -28,6 +29,7 @@
             New-Item -ItemType Directory -Force (Split-Path $target) | Out-Null
             Copy-Item -LiteralPath (Join-Path $Source $name) -Destination $target
         }
+        Copy-Item -LiteralPath $manifest -Destination (Join-Path $Destination 'files.txt')
         # Earlier packages shipped per-component license files; THIRD_PARTY_NOTICES.txt now holds them all.
         foreach ($name in @('Ghostty-LICENSE.txt', 'ConPTY-LICENSE.txt')) {
             Remove-Item -LiteralPath (Join-Path $Destination $name) -ErrorAction SilentlyContinue
@@ -129,4 +131,5 @@ public static extern IntPtr SendMessageTimeout(IntPtr hWnd, uint msg, UIntPtr wP
     } else {
         Write-Output "aio is on your PATH: $destination"
     }
+    Write-Output "To uninstall: powershell -ExecutionPolicy Bypass -File `"$destination\uninstall.ps1`""
 }
