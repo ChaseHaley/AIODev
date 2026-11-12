@@ -43,8 +43,8 @@ Status_Presentation :: struct {
 	section:   Status_Section,
 	// Next-attention walks these, and the pill and picker count them as needing the user.
 	attention: bool,
-	// Finished work the user has looked at, as term.program_status_seen says, not set in the table.
-	// Tab and pill marks leave it to the lists.
+	// Finished work the user has read, as the record says, not set in the table. Tab and pill marks
+	// leave it to the lists.
 	seen:      bool,
 	notice:    ui.Notice_Kind,
 	taskbar:   Status_Taskbar_Role,
@@ -86,18 +86,6 @@ STATUS_PRESENTATIONS := [term.Program_Status_State]Status_Presentation {
 		taskbar = .Failed,
 		mark = {glyph = .Error, urgent = true},
 	},
-	.Done_Seen  = {
-		rank = .Done_Seen,
-		section = .Finished,
-		notice = .Success,
-		mark = {glyph = .Done},
-	},
-	.Error_Seen = {
-		rank = .Failed_Seen,
-		section = .Finished,
-		notice = .Error,
-		mark = {glyph = .Error, urgent = true},
-	},
 }
 
 // A blocked program's mark says what it needs.
@@ -122,14 +110,18 @@ status_section_names := [Status_Section]string {
 status_presentation :: proc(record: term.Program_Status) -> Status_Presentation {
 	p := STATUS_PRESENTATIONS[record.state]
 	if record.state == .Blocked {p.mark.glyph = STATUS_BLOCKED_GLYPHS[record.kind]}
-	p.seen = term.program_status_seen(record.state)
+	p.seen = record.read && term.program_status_finished(record.state)
+	if p.seen {
+		p.rank = record.state == .Done ? .Done_Seen : .Failed_Seen
+		p.section, p.attention = .Finished, false
+	}
 	p.mark.progress, p.mark.dim = record.progress, p.seen
 	return p
 }
 
 // More urgent first, then newer first.
 status_before :: proc(a, b: term.Program_Status) -> bool {
-	ra, rb := STATUS_PRESENTATIONS[a.state].rank, STATUS_PRESENTATIONS[b.state].rank
+	ra, rb := status_presentation(a).rank, status_presentation(b).rank
 	if ra != rb {return ra < rb}
 	return time.diff(b.updated_at, a.updated_at) > 0
 }
@@ -140,7 +132,7 @@ Status_State_Policy :: struct {
 	channels:       settings.Status_Channels,
 }
 
-// The settings that govern a state, the same for finished work whether seen or not. Idle and
+// The settings that govern a state, the same for finished work whether read or not. Idle and
 // finished work have no taskbar setting; their presentation gives them no taskbar role.
 @(private)
 status_state_settings :: proc(
@@ -154,9 +146,9 @@ status_state_settings :: proc(
 		return {s.show_working, s.taskbar_working, s.notify_working}
 	case .Blocked:
 		return {s.show_blocked, s.taskbar_blocked, s.notify_blocked}
-	case .Done, .Done_Seen:
+	case .Done:
 		return {shown = s.show_done, channels = s.notify_done}
-	case .Error, .Error_Seen:
+	case .Error:
 		return {s.show_error, s.taskbar_error, s.notify_error}
 	}
 	return {}

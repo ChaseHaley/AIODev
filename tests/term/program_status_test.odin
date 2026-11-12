@@ -2,6 +2,7 @@ package term_test
 
 import "base:runtime"
 import "core:mem"
+import "core:sync"
 import "core:testing"
 import "core:time"
 import "aio:term"
@@ -145,6 +146,7 @@ program_status_hierarchy_lifecycle_and_bound :: proc(t: ^testing.T) {
 	defer term.destroy_program_status(five)
 	testing.expect_value(t, len(five), 2)
 	testing.expect(t, find_status(five, "done") != nil && find_status(five, "error") != nil)
+	for record in five {testing.expect(t, record.ended)}
 	six := status_step(t, s, "STATUS_SIX")
 	defer term.destroy_program_status(six)
 	testing.expect_value(t, len(six), 0)
@@ -179,7 +181,7 @@ program_status_hierarchy_lifecycle_and_bound :: proc(t: ^testing.T) {
 }
 
 @(test)
-program_status_kind_progress_seen_and_switch :: proc(t: ^testing.T) {
+program_status_kind_progress_read_and_switch :: proc(t: ^testing.T) {
 	wakes: Wakes
 	script :: "\"$e = [char]27; function Report($v) { [Console]::Write($e + ']7501;' + $v + [char]7) }; " +
 		"Report 'state=blocked:kind=auth:progress=40:app=deploy'; Report 'state=working:id=w:progress=101'; " +
@@ -208,18 +210,29 @@ program_status_kind_progress_seen_and_switch :: proc(t: ^testing.T) {
 	}
 	testing.expect_value(t, find_status(one, "d").state, term.Program_Status_State.Done)
 	_ = term.take_program_status_change(s)
-	term.program_status_acknowledge(s)
+	testing.expect(t, !find_status(one, "d").read)
+	term.program_status_read(s, time.now())
 	testing.expect(t, term.take_program_status_change(s))
-	term.program_status_acknowledge(s)
+	term.program_status_read(s, time.now())
 	testing.expect(t, !term.take_program_status_change(s))
-	acknowledged := term.program_status(s)
-	defer term.destroy_program_status(acknowledged)
-	testing.expect_value(t, find_status(acknowledged, "d").state, term.Program_Status_State.Done_Seen)
-	testing.expect_value(t, find_status(acknowledged, "x").state, term.Program_Status_State.Error_Seen)
-	testing.expect_value(t, find_status(acknowledged, "").state, term.Program_Status_State.Blocked)
+	read := term.program_status(s)
+	defer term.destroy_program_status(read)
+	testing.expect(t, find_status(read, "d").read && find_status(read, "x").read && find_status(read, "").read)
+	testing.expect_value(t, find_status(read, "d").state, term.Program_Status_State.Done)
+	term.program_status_mark_unread(s)
+	testing.expect(t, term.take_program_status_change(s))
+	term.program_status_read(s, time.now())
+	held := term.program_status(s)
+	defer term.destroy_program_status(held)
+	testing.expect(t, !find_status(held, "d").read)
+	term.program_status_read(s, time.now(), mark = true)
 	term.program_status_dismiss(s, "w")
 	term.program_status_dismiss(s, "x")
-	term.program_status_dismiss_finished(s)
+	term.program_status_dismiss_read(s, ended_only = true)
+	kept := term.program_status(s)
+	defer term.destroy_program_status(kept)
+	testing.expect(t, find_status(kept, "d") != nil)
+	term.program_status_dismiss_read(s, ended_only = false)
 	remaining := term.program_status(s)
 	defer term.destroy_program_status(remaining)
 	testing.expect_value(t, len(remaining), 2)
@@ -237,4 +250,71 @@ program_status_kind_progress_seen_and_switch :: proc(t: ^testing.T) {
 	if testing.expect_value(t, len(three), 1) {
 		testing.expect_value(t, three[0].id, "back")
 	}
+}
+
+Fake_Wall :: struct {
+	nanoseconds: i64,
+}
+
+fake_wall_now :: proc(user: rawptr) -> time.Time {
+	return {_nsec = sync.atomic_load(&(^Fake_Wall)(user).nanoseconds)}
+}
+
+fake_wall_set :: proc(wall: ^Fake_Wall, seconds: i64) {
+	sync.atomic_store(&wall.nanoseconds, seconds * i64(time.Second))
+}
+
+// A record keeps the time it entered its state through reports that repeat it, until its program
+// ends; work reported after that is new, and unread.
+@(test)
+program_status_since_ended_and_read :: proc(t: ^testing.T) {
+	wakes: Wakes
+	wall: Fake_Wall
+	fake_wall_set(&wall, 100)
+	script :: "\"$e = [char]27; function Report($v) { [Console]::Write($e + ']7501;' + $v + [char]7) }; " +
+		"Report 'state=working:id=a'; [Console]::WriteLine('SINCE_ONE'); $null = [Console]::ReadLine(); " +
+		"Report 'state=working:id=a:msg=c3RpbGw='; Report 'state=done:id=d'; " +
+		"[Console]::WriteLine('SINCE_TWO'); $null = [Console]::ReadLine(); " +
+		"[Console]::Write($e + ']133;A' + [char]7); [Console]::WriteLine('SINCE_THREE'); " +
+		"$null = [Console]::ReadLine(); Report 'state=done:id=d'; [Console]::WriteLine('SINCE_FOUR'); " +
+		"$null = [Console]::ReadLine()\""
+	cfg := config(POWERSHELL + script)
+	cfg.wall_clock = {fake_wall_now, &wall}
+	testing.set_fail_timeout(t, 60 * time.Second)
+	s, err := term.create(cfg, {on_wake, &wakes})
+	if !testing.expect_value(t, err, term.Error.None) {return}
+	defer term.destroy(s)
+	if !await(t, s, shows, "SINCE_ONE") {return}
+	fake_wall_set(&wall, 200)
+	two := status_step(t, s, "SINCE_TWO")
+	defer term.destroy_program_status(two)
+	if a := find_status(two, "a"); testing.expect(t, a != nil) {
+		testing.expect_value(t, time.to_unix_seconds(a.since), 100)
+		testing.expect_value(t, time.to_unix_seconds(a.updated_at), 200)
+		testing.expect_value(t, a.message, "still")
+	}
+	if d := find_status(two, "d"); testing.expect(t, d != nil) {
+		testing.expect(t, !d.ended && !d.read)
+		testing.expect_value(t, time.to_unix_seconds(d.since), 200)
+	}
+	three := status_step(t, s, "SINCE_THREE")
+	defer term.destroy_program_status(three)
+	if testing.expect_value(t, len(three), 1) {testing.expect(t, three[0].id == "d" && three[0].ended)}
+	term.program_status_dismiss_read(s, ended_only = true)
+	unread := term.program_status(s)
+	defer term.destroy_program_status(unread)
+	testing.expect_value(t, len(unread), 1)
+	term.program_status_read(s, {_nsec = 250 * i64(time.Second)})
+	fake_wall_set(&wall, 300)
+	four := status_step(t, s, "SINCE_FOUR")
+	defer term.destroy_program_status(four)
+	if d := find_status(four, "d"); testing.expect(t, d != nil) {
+		testing.expect(t, !d.ended && !d.read)
+		testing.expect_value(t, time.to_unix_seconds(d.since), 300)
+	}
+	term.program_status_read(s, {_nsec = 350 * i64(time.Second)})
+	term.program_status_dismiss_read(s, ended_only = true)
+	running := term.program_status(s)
+	defer term.destroy_program_status(running)
+	testing.expect_value(t, len(running), 1)
 }

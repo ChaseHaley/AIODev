@@ -9,16 +9,13 @@ import "core:time"
 import "core:unicode"
 import "core:unicode/utf8"
 
-// The first five mirror ghostty.Program_Status_State, which reports convert from. Looking at a
-// done or error record moves it to its seen state, so only finished work can be seen.
+// Mirrors ghostty.Program_Status_State, which reports convert from.
 Program_Status_State :: enum i32 {
 	Idle,
 	Working,
 	Done,
 	Blocked,
 	Error,
-	Done_Seen,
-	Error_Seen,
 }
 
 Program_Status_Kind :: enum i32 {
@@ -34,7 +31,13 @@ Program_Status :: struct {
 	state:                   Program_Status_State,
 	kind:                    Program_Status_Kind,
 	progress:                i8,
+	// The shell prompt has returned since this finished, so the program that reported it has ended.
+	ended:                   bool,
+	// The user has read the pane since the record entered its state. Only snapshots fill it in.
+	read:                    bool,
 	updated_at:              time.Time,
+	// When the record entered its state and kind; reports that repeat both keep it.
+	since:                   time.Time,
 }
 
 @(private)
@@ -62,7 +65,10 @@ Status_Removal :: enum {
 	All,
 	Transient,
 	Finished,
-	Seen,
+	// Finished records the user has read.
+	Read,
+	// Finished records the user has read whose program has ended.
+	Read_Ended,
 	// The record `id` and its descendants, which the program cleared.
 	Subtree,
 	// The record `id`, which a new report replaces.
@@ -82,28 +88,39 @@ remove_program_status :: proc(s: ^Session, index: int) {
 	sync.atomic_store(&s.program_status_changed, true)
 }
 
+// Whether the user has read a record: they looked at the pane after it entered its state, and have
+// not marked the pane unread since. The caller holds the session mutex.
+@(private = "file")
+program_status_is_read :: proc(s: ^Session, record: Program_Status) -> bool {
+	if s.program_status_unread || s.program_status_read_at == {} {return false}
+	return time.diff(record.since, s.program_status_read_at) >= 0
+}
+
 // Every removal but eviction at the limit comes through here, from the reader thread and the main
 // thread alike, so the caller holds the session mutex unless no thread can still reach the session.
 @(private)
 clear_program_status :: proc(s: ^Session, which: Status_Removal, id := "") {
 	for i := s.program_status_count - 1; i >= 0; i -= 1 {
 		record := s.program_statuses[i].value
+		finished := program_status_finished(record.state)
 		removed: bool
 		switch which {
 		case .All:
 			removed = true
 		case .Transient:
-			removed = !program_status_finished(record.state)
+			removed = !finished
 		case .Finished:
-			removed = program_status_finished(record.state)
-		case .Seen:
-			removed = program_status_seen(record.state)
+			removed = finished
+		case .Read:
+			removed = finished && program_status_is_read(s, record)
+		case .Read_Ended:
+			removed = finished && record.ended && program_status_is_read(s, record)
 		case .Subtree:
 			removed = status_descendant(record.id, id)
 		case .Replaced:
 			removed = record.id == id
 		case .Dismissed:
-			removed = record.id == id && program_status_finished(record.state)
+			removed = record.id == id && finished
 		}
 		if removed {remove_program_status(s, i)}
 	}
@@ -155,6 +172,12 @@ on_program_status :: proc "c" (
 		progress   = report.progress,
 		updated_at = wall_now(s),
 	}
+	// A report from a program started since the old record ended is new work, however alike.
+	p.since = p.updated_at
+	for stored in s.program_statuses[:s.program_status_count] {
+		old := stored.value
+		if old.id == id && !old.ended && old.state == p.state && old.kind == p.kind {p.since = old.since}
+	}
 	fields := [?]^string{&p.id, &p.app, &p.title, &p.message}
 	offset := 0
 	for part, i in parts {
@@ -186,7 +209,27 @@ on_semantic_prompt :: proc "c" (
 ) {
 	s := (^Session)(userdata)
 	context = s.callback_context
-	if event.kind == .Prompt_Start {clear_program_status(s, .Transient)}
+	if event.kind == .Prompt_Start {program_status_end(s)}
+}
+
+// The program that reported has ended: its running reports go, and its finished work is marked so.
+// The caller holds the session mutex.
+@(private = "file")
+program_status_end :: proc(s: ^Session) {
+	clear_program_status(s, .Transient)
+	for &stored in s.program_statuses[:s.program_status_count] {
+		if stored.value.ended {continue}
+		stored.value.ended = true
+		sync.atomic_store(&s.program_status_changed, true)
+	}
+}
+
+// The pane's program ended as process polling saw it, which a shell without prompt marks reports in
+// no other way. The same as a new prompt.
+program_status_program_ended :: proc(s: ^Session) {
+	sync.mutex_lock(&s.mutex)
+	defer sync.mutex_unlock(&s.mutex)
+	program_status_end(s)
 }
 
 @(private)
@@ -227,7 +270,8 @@ program_status :: proc(
 	for &p, i in result {
 		source := s.program_statuses[s.program_status_count - 1 - i].value
 		p.state, p.kind, p.progress = source.state, source.kind, source.progress
-		p.updated_at = source.updated_at
+		p.updated_at, p.since, p.ended = source.updated_at, source.since, source.ended
+		p.read = program_status_is_read(s, source)
 		parts := [?]string{source.id, inherited_app(s, source), source.title, source.message}
 		fields := [?]^string{&p.id, &p.app, &p.title, &p.message}
 		for part, j in parts {
@@ -256,49 +300,59 @@ take_program_status_change :: proc(s: ^Session) -> bool {
 	return sync.atomic_exchange(&s.program_status_changed, false)
 }
 
-// Done and error work, seen or not. Everything else is transient: the program is still on it.
+// Done and error work. Everything else is transient: the program is still on it.
 program_status_finished :: proc(state: Program_Status_State) -> bool {
-	return state == .Done || state == .Error || state == .Done_Seen || state == .Error_Seen
+	return state == .Done || state == .Error
 }
 
-program_status_seen :: proc(state: Program_Status_State) -> bool {
-	return state == .Done_Seen || state == .Error_Seen
-}
-
-// The state as the program reported it. Seeing finished work is not a new report, so settings and
-// notifications route by this.
-program_status_reported :: proc(state: Program_Status_State) -> Program_Status_State {
-	#partial switch state {
-	case .Done_Seen:
-		return .Done
-	case .Error_Seen:
-		return .Error
-	}
-	return state
-}
-
-// Marks every done and error record seen, which is how the user acknowledges finished work.
-program_status_acknowledge :: proc(s: ^Session) {
+// When the user last read the pane, zero if never, and whether they marked it unread since.
+program_status_read_state :: proc(s: ^Session) -> (read_at: time.Time, unread: bool) {
 	sync.mutex_lock(&s.mutex)
 	defer sync.mutex_unlock(&s.mutex)
-	for &record in s.program_statuses[:s.program_status_count] {
-		#partial switch record.value.state {
-		case .Done:
-			record.value.state = .Done_Seen
-		case .Error:
-			record.value.state = .Error_Seen
-		case:
-			continue
-		}
-		sync.atomic_store(&s.program_status_changed, true)
-	}
+	return s.program_status_read_at, s.program_status_unread
 }
 
-// Removes done and error records, only the seen ones unless `all` is set.
-program_status_dismiss_finished :: proc(s: ^Session, all := false) {
+// The user read the pane at `at`. Looking keeps a mark the user set by hand; `mark` sets the pane read
+// as a choice, which clears it. Reading only ever adds read records, so a change in their count is
+// the change to report.
+program_status_read :: proc(s: ^Session, at: time.Time, mark := false) {
 	sync.mutex_lock(&s.mutex)
 	defer sync.mutex_unlock(&s.mutex)
-	clear_program_status(s, all ? .Finished : .Seen)
+	before := program_status_read_count(s)
+	s.program_status_read_at = at
+	if mark {s.program_status_unread = false}
+	if program_status_read_count(s) != before {sync.atomic_store(&s.program_status_changed, true)}
+}
+
+// Marks the pane unread until the user next looks at it or marks it read.
+program_status_mark_unread :: proc(s: ^Session) {
+	sync.mutex_lock(&s.mutex)
+	defer sync.mutex_unlock(&s.mutex)
+	if s.program_status_unread {return}
+	s.program_status_unread = true
+	sync.atomic_store(&s.program_status_changed, true)
+}
+
+@(private = "file")
+program_status_read_count :: proc(s: ^Session) -> (count: int) {
+	for stored in s.program_statuses[:s.program_status_count] {
+		if program_status_is_read(s, stored.value) {count += 1}
+	}
+	return
+}
+
+// Removes finished records the user has read; with `ended_only`, only those whose program has ended.
+program_status_dismiss_read :: proc(s: ^Session, ended_only: bool) {
+	sync.mutex_lock(&s.mutex)
+	defer sync.mutex_unlock(&s.mutex)
+	clear_program_status(s, ended_only ? .Read_Ended : .Read)
+}
+
+// Removes every done and error record.
+program_status_dismiss_finished :: proc(s: ^Session) {
+	sync.mutex_lock(&s.mutex)
+	defer sync.mutex_unlock(&s.mutex)
+	clear_program_status(s, .Finished)
 }
 
 // Removes one done or error record. Running and blocked records belong to the program, not the user.

@@ -227,6 +227,9 @@ Session :: struct {
 	program_statuses:                                         [PROGRAM_STATUS_LIMIT]Stored_Status,
 	program_status_count:                                     int,
 	program_status_enabled:                                   bool,
+	// When the user last read the pane, and whether they marked it unread since.
+	program_status_read_at:                                   time.Time,
+	program_status_unread:                                    bool,
 	read_buffer:                                              [READ_CHUNK]u8,
 	// The mutex guards the capture: the reader thread appends, the main thread starts and stops.
 	recording:                                                Recording,

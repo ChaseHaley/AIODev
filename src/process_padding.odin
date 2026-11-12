@@ -43,7 +43,11 @@ update_processes :: proc(app: ^App) {
 		if entry.status != .Running {continue}
 		root := term.process_id(entry.session)
 		if padding {relayout ||= padding_update(app, &entry, processes, root)}
-		if polling {redraw ||= program_update(app, &entry, processes, root)}
+		if !polling {continue}
+		// The adopted program going away returns the pane to its shell, which ends what it reported.
+		had_program := program_adopted(&entry) != nil
+		if program_update(app, &entry, processes, root) {redraw = true}
+		if had_program && entry.program == nil {term.program_status_program_ended(entry.session)}
 	}
 	if relayout {
 		for window in app.windows {window_relayout(app, window); window.dirty = true}

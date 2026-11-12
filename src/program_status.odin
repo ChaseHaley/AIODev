@@ -159,16 +159,70 @@ status_watched :: proc(app: ^App, entry: ^Session_Entry) -> bool {
 	return false
 }
 
-// Looking at a pane acknowledges its finished work.
-status_focus_enter :: proc(app: ^App, w: ^Window) {
-	if !w.focused {return}
-	if entry := focused_session(app, w); entry != nil {term.program_status_acknowledge(entry.session)}
+// Records `entry` read at `at`, here and in its session, which decides which records that covers.
+// `mark` is the user's choice to read it, which ends a mark to keep it unread.
+@(private = "file")
+status_read_stamp :: proc(app: ^App, entry: ^Session_Entry, mark := false) {
+	at := clock_wall(&app.clock)
+	term.program_status_read(entry.session, at, mark)
+	entry.status_read_at = at
+	if mark {entry.status_unread = false}
+	mark_all_dirty(app)
 }
 
-// Leaving a pane removes the finished work the user saw there, unless it waits for a dismissal.
-status_focus_leave :: proc(app: ^App, entry: ^Session_Entry) {
-	if app.settings.status.keep_finished != .Focus {return}
-	term.program_status_dismiss_finished(entry.session)
+// Looking at a pane reads it, as choosing to read it does.
+status_focus_enter :: proc(app: ^App, w: ^Window) {
+	if !w.focused {return}
+	if entry := focused_session(app, w); entry != nil {status_read_stamp(app, entry, mark = true)}
+}
+
+// Leaving a pane the user was looking at reads it up to then; read finished work then leaves as
+// status.keep_finished says.
+status_focus_leave :: proc(app: ^App, w: ^Window, entry: ^Session_Entry) {
+	if w.focused {status_read_stamp(app, entry)}
+	status_sweep(app, entry)
+}
+
+// The window stops being looked at, so its pane has been read up to now.
+status_focus_lost :: proc(app: ^App, entry: ^Session_Entry) {
+	status_read_stamp(app, entry)
+}
+
+// A pane's records changed: a pane in view reads them as they come; under .Program, read finished
+// work leaves another pane once its program ends.
+status_settle :: proc(app: ^App, entry: ^Session_Entry) {
+	if status_watched(app, entry) {
+		status_read_stamp(app, entry)
+	} else if app.settings.status.keep_finished == .Program {
+		status_sweep(app, entry)
+	}
+}
+
+// Removes the finished work status.keep_finished no longer keeps from a pane out of view.
+@(private = "file")
+status_sweep :: proc(app: ^App, entry: ^Session_Entry) {
+	if status_watched(app, entry) {return}
+	switch app.settings.status.keep_finished {
+	case .Program:
+		term.program_status_dismiss_read(entry.session, ended_only = true)
+	case .Focus:
+		term.program_status_dismiss_read(entry.session, ended_only = false)
+	case .Dismiss:
+	}
+}
+
+// Marks a pane read or unread from an overview without going to it.
+status_mark :: proc(app: ^App, session: u32, read: bool) {
+	entry := session_find(app, session)
+	if entry == nil {return}
+	if !read {
+		term.program_status_mark_unread(entry.session)
+		entry.status_unread = true
+		mark_all_dirty(app)
+		return
+	}
+	status_read_stamp(app, entry, mark = true)
+	status_sweep(app, entry)
 }
 
 // A pure routing policy shared by transition eligibility and delivery.
@@ -187,8 +241,8 @@ status_notify_wanted :: proc(app: ^App, record: term.Program_Status) -> bool {
 
 // A pane notifies at most once an interval, for the newest change that wants a notification. Once
 // it has, the throttle drops every other change in the interval, those in the same refresh included:
-// they are not queued, and the overviews still show each record. Seeing finished work changes no
-// report, so it never notifies.
+// they are not queued, and the overviews still show each record. Reading a pane changes no report, so
+// it never notifies.
 @(private)
 status_notify_changes :: proc(app: ^App, entry: ^Session_Entry, previous: []term.Program_Status) {
 	if !app.settings.status.enabled {return}
@@ -199,11 +253,10 @@ status_notify_changes :: proc(app: ^App, entry: ^Session_Entry, previous: []term
 	}
 	for record in entry.statuses {
 		if !status_notify_wanted(app, record) || !status_shown(app, record) {continue}
-		reported := term.program_status_reported(record.state)
 		changed := true
 		for old in previous {
 			if old.id == record.id {
-				changed = term.program_status_reported(old.state) != reported || old.kind != record.kind
+				changed = old.state != record.state || old.kind != record.kind
 				break
 			}
 		}
@@ -305,6 +358,13 @@ status_scope_next :: proc(
 	}
 }
 
+// When the user last read a pane, for an overview's receipt: zero if never, and whether it is in view
+// now, which reads it as it goes.
+Status_Receipt :: struct {
+	read_at: time.Time,
+	watched: bool,
+}
+
 // One pane's records that settings show, with what an overview names and places them by. The
 // records are a temp copy in the session's order, so an overview may sort them; their strings borrow
 // from the session's snapshot, so the projection lives for one frame or event at most.
@@ -313,6 +373,7 @@ Status_Scope_Records :: struct {
 	records:   []term.Program_Status,
 	crumb:     string,
 	workspace: string,
+	receipt:   Status_Receipt,
 }
 
 Status_Scope_Records_Walk :: struct {
@@ -345,7 +406,8 @@ status_scope_records_next :: proc(
 		}
 		if len(records) == 0 {continue}
 		crumb := session_location_at(workspace, pane.tab, entry)
-		return {entry.id, records[:], crumb, workspace.name}, true
+		receipt := Status_Receipt{entry.status_read_at, status_watched(app, entry)}
+		return {entry.id, records[:], crumb, workspace.name, receipt}, true
 	}
 	return
 }
@@ -380,7 +442,7 @@ status_next_attention :: proc(app: ^App, w: ^Window) {
 status_dismiss_finished :: proc(app: ^App, w: ^Window) {
 	walk := status_scope_walk(app, w, eligible_only = false)
 	for pane, _, ok := status_scope_next(&walk); ok; pane, _, ok = status_scope_next(&walk) {
-		term.program_status_dismiss_finished(pane.session.session, true)
+		term.program_status_dismiss_finished(pane.session.session)
 	}
 }
 

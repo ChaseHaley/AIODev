@@ -151,16 +151,33 @@ STATUS_PANEL_VIEW_LABELS :: []string {
 	STATUS_PANEL_VIEW_LABEL[Status_Panel_View(0)],
 	STATUS_PANEL_VIEW_LABEL[Status_Panel_View(1)],
 }
+// When finished work you have read leaves the lists.
 Status_Keep :: enum int {
+	Program,
 	Focus,
 	Dismiss,
 }
 STATUS_KEEP_NAME :: [Status_Keep]string {
+	.Program = "program",
 	.Focus   = "focus",
 	.Dismiss = "dismiss",
 }
-#assert(len(Status_Keep) == 2)
-STATUS_KEEP_NAMES :: []string{STATUS_KEEP_NAME[Status_Keep(0)], STATUS_KEEP_NAME[Status_Keep(1)]}
+STATUS_KEEP_LABEL :: [Status_Keep]string {
+	.Program = "Until the program ends",
+	.Focus   = "When you leave the pane",
+	.Dismiss = "Until dismissed",
+}
+#assert(len(Status_Keep) == 3)
+STATUS_KEEP_NAMES :: []string {
+	STATUS_KEEP_NAME[Status_Keep(0)],
+	STATUS_KEEP_NAME[Status_Keep(1)],
+	STATUS_KEEP_NAME[Status_Keep(2)],
+}
+STATUS_KEEP_LABELS :: []string {
+	STATUS_KEEP_LABEL[Status_Keep(0)],
+	STATUS_KEEP_LABEL[Status_Keep(1)],
+	STATUS_KEEP_LABEL[Status_Keep(2)],
+}
 // How one program status reaches you. Each state chooses any combination; none means silence.
 Status_Channel :: enum u8 {
 	Banner,
@@ -859,7 +876,7 @@ SCHEMA :: [?]Schema_Entry {
 		title = "Show Idle",
 		kind = .Bool,
 		offset = offset_of(Settings, status) + offset_of(Status_Settings, show_idle),
-		default_value = "false",
+		default_value = "true",
 		description = "Show programs waiting at their own prompt.",
 	},
 	{
@@ -958,10 +975,11 @@ SCHEMA :: [?]Schema_Entry {
 		title = "Keep Finished Status",
 		kind = .Enum,
 		offset = offset_of(Settings, status) + offset_of(Status_Settings, keep_finished),
-		default_value = "focus",
+		default_value = "program",
 		names = STATUS_KEEP_NAMES,
-		description = "Remove done and error status once you leave the pane you looked at, or keep it until you " +
-			"dismiss it.",
+		labels = STATUS_KEEP_LABELS,
+		description = "When done and error status you have read leaves the lists: once the program that " +
+			"reported it ends, as soon as you leave the pane, or only when you dismiss it.",
 	},
 	{
 		key = "status.ignore_apps",

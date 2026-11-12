@@ -35,11 +35,6 @@ status_channels_round_trip_and_route_independently_for_every_state :: proc(t: ^t
 			testing.expect_value(t, len(diagnostics), 0)
 			c := app.status_notification_channels(&s.status, state)
 			testing.expect_value(t, c, settings.Status_Channels{settings.Status_Channel(selected)})
-			// Seeing finished work does not change how it is routed.
-			for seen in ([2]term.Program_Status_State{.Done_Seen, .Error_Seen}) {
-				if term.program_status_reported(seen) != state {continue}
-				testing.expect_value(t, app.status_notification_channels(&s.status, seen), c)
-			}
 			entry := settings.schema_find(fmt.tprintf("status.notify_%s", names[i]))
 			testing.expect_value(t, settings.value_text(&s, entry^), channel)
 			settings.diagnostics_destroy(&diagnostics)

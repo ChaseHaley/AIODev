@@ -31,6 +31,8 @@ Icon :: enum {
 	Trash,
 	Undo,
 	Check,
+	Check_Double,
+	Circle,
 	Info,
 	Warning,
 	Error,
@@ -263,6 +265,11 @@ icon_draw :: proc(
 		pen_path(p, {8, 4}, {8, 8}, {12, 8})
 	case .Check:
 		pen_path(p, {3, 8.5}, {6.5, 12}, {13, 4.5})
+	case .Check_Double:
+		pen_path(p, {1, 8.5}, {4.5, 12}, {10.5, 4.5})
+		pen_path(p, {8, 11}, {9, 12}, {15, 4.5})
+	case .Circle:
+		pen_arc(p, 8, 8, 5, 0, 2 * math.PI)
 	case .Info:
 		pen_arc(p, 8, 8, 6.5, 0, 2 * math.PI)
 		pen_path(p, {8, 7.5}, {8, 11.5})

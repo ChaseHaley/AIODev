@@ -78,6 +78,7 @@ status_fixture_init :: proc(t: ^testing.T, f: ^Status_Fixture) -> bool {
 	defaults, err := settings.defaults()
 	if !testing.expect_value(t, err, nil) {return false}
 	f.state.settings = defaults
+	f.state.settings.status.show_idle = false
 	f.workspace = app.workspace_create_empty(&f.state)
 	if !testing.expect(t, f.workspace != nil) {return false}
 	if !status_tab(t, f.workspace, 1) || !status_tab(t, f.workspace, 2) {return false}
@@ -89,7 +90,7 @@ status_fixture_init :: proc(t: ^testing.T, f: ^Status_Fixture) -> bool {
 	}
 	f.second = {
 		{id = "", app = "codex", state = .Blocked, kind = .Permission, progress = -1, updated_at = now},
-		{id = "old", app = "codex", state = .Error_Seen, progress = -1, updated_at = now},
+		{id = "old", app = "codex", state = .Error, read = true, progress = -1, updated_at = now},
 	}
 	entries := [2]app.Session_Entry{{id = 1, statuses = f.first[:]}, {id = 2, statuses = f.second[:]}}
 	for entry in entries {
@@ -131,34 +132,40 @@ program_status_close_scope_protects_work_independent_of_presentation :: proc(t: 
 
 @(test)
 program_status_ranks_attention_first :: proc(t: ^testing.T) {
-	rank :: proc(state: term.Program_Status_State) -> app.Status_Rank {
-		return app.status_presentation({state = state}).rank
+	rank :: proc(state: term.Program_Status_State, read := false) -> app.Status_Rank {
+		return app.status_presentation({state = state, read = read}).rank
 	}
 	testing.expect(t, rank(.Blocked) < rank(.Error))
 	testing.expect(t, rank(.Error) < rank(.Done))
 	testing.expect(t, rank(.Done) < rank(.Working))
 	testing.expect(t, rank(.Working) < rank(.Idle))
-	testing.expect(t, rank(.Idle) < rank(.Error_Seen))
-	done, seen_failed := app.status_presentation({state = .Done}), app.status_presentation({state = .Error_Seen})
-	testing.expect(t, done.attention && !seen_failed.attention && seen_failed.seen)
+	testing.expect(t, rank(.Idle) < rank(.Error, read = true))
+	// Reading live work changes nothing about its urgency; blocked work still needs the user.
+	testing.expect_value(t, rank(.Blocked, read = true), rank(.Blocked))
+	testing.expect(t, app.status_presentation({state = .Blocked, read = true}).attention)
+	done, read_failed := app.status_presentation({state = .Done}), app.status_presentation({state = .Error, read = true})
+	testing.expect(t, done.attention && !read_failed.attention && read_failed.seen)
 	// The Activity panel's Needs you leaves finished work to Finished, unlike next-attention.
 	testing.expect_value(t, done.section, app.Status_Section.Finished)
 	testing.expect_value(t, app.status_presentation({state = .Error}).section, app.Status_Section.Needs_You)
+	testing.expect_value(t, read_failed.section, app.Status_Section.Finished)
 }
 
 @(test)
 program_status_marks_follow_state_and_kind :: proc(t: ^testing.T) {
 	for state in term.Program_Status_State {
-		p := app.status_presentation({state = state})
-		testing.expect_value(t, p.seen, term.program_status_seen(state))
-		testing.expect_value(t, p.mark.dim, p.seen)
+		for read in ([2]bool{false, true}) {
+			p := app.status_presentation({state = state, read = read})
+			testing.expect_value(t, p.seen, read && term.program_status_finished(state))
+			testing.expect_value(t, p.mark.dim, p.seen)
+		}
 	}
 	question := app.status_presentation({state = .Blocked, kind = .Question, progress = 10}).mark
 	testing.expect_value(t, question.glyph, ui.Status_Glyph.Question)
 	testing.expect_value(t, question.progress, i8(10))
 	auth := app.status_presentation({state = .Blocked, kind = .Auth, progress = -1}).mark
 	testing.expect_value(t, auth.glyph, ui.Status_Glyph.Auth)
-	seen := app.status_presentation({state = .Done_Seen, progress = -1}).mark
+	seen := app.status_presentation({state = .Done, read = true, progress = -1}).mark
 	testing.expect(t, seen.glyph == .Done && seen.dim)
 	buffer: [8]u8
 	testing.expect_value(t, app.status_headline({glyph = .Working, progress = 7}, buffer[:]), "7%")

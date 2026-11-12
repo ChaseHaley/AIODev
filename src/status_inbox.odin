@@ -44,6 +44,7 @@ Status_Item :: struct {
 	record:    term.Program_Status,
 	crumb:     string,
 	workspace: string,
+	receipt:   Status_Receipt,
 }
 
 @(private)
@@ -63,7 +64,7 @@ status_items :: proc(app: ^App, w: ^Window) -> []Status_Item {
 	for shown, ok := status_scope_records_next(&walk); ok; shown, ok = status_scope_records_next(&walk) {
 		slice.sort_by(shown.records, status_record_id_less)
 		for record in shown.records {
-			append(&items, Status_Item{shown.session, record, shown.crumb, shown.workspace})
+			append(&items, Status_Item{shown.session, record, shown.crumb, shown.workspace, shown.receipt})
 		}
 	}
 	slice.sort_by(items[:], status_item_less)
@@ -84,6 +85,86 @@ status_age :: proc(at, now: time.Time) -> string {
 	return fmt.tprintf("%dd", seconds / 86400)
 }
 
+// Rows the user has read go quiet, except blocked work, which still waits for them.
+@(private)
+status_item_quiet :: proc(item: Status_Item) -> bool {
+	return item.record.read && item.record.state != .Blocked
+}
+
+// How long a record has held its state.
+@(private)
+status_state_age :: proc(app: ^App, record: term.Program_Status) -> string {
+	return status_age(record.since, clock_wall(&app.clock))
+}
+
+// A row's receipt: two checks once read, one check when the last read came before the latest
+// change, or a ring when the pane was never read; then how long ago, or "now" while it is in view.
+@(private)
+status_receipt :: proc(app: ^App, item: Status_Item) -> (icon: ui.Icon, text: string) {
+	receipt := item.receipt
+	switch {
+	case item.record.read:
+		icon = .Check_Double
+	case receipt.read_at == {} && !receipt.watched:
+		return .Circle, "never"
+	case:
+		icon = .Check
+	}
+	if receipt.watched {return icon, "now"}
+	return icon, status_age(receipt.read_at, clock_wall(&app.clock))
+}
+
+// What a receipt means and what a click on it does.
+@(private)
+status_receipt_tooltip :: proc(app: ^App, item: Status_Item) -> string {
+	_, ago := status_receipt(app, item)
+	switch {
+	case item.record.read && item.receipt.watched:
+		return "Read now · click to mark unread"
+	case item.record.read:
+		return fmt.tprintf("Read %s ago · click to mark unread", ago)
+	case item.receipt.read_at == {} && !item.receipt.watched:
+		return "Never read · click to mark read"
+	case item.receipt.watched:
+		return "Marked unread · click to mark read"
+	}
+	return fmt.tprintf("Not read since it changed, last read %s ago · click to mark read", ago)
+}
+
+// The receipt's place: its icon and time, ending at `right`, centred on `middle`.
+@(private)
+status_receipt_rect :: proc(app: ^App, w: ^Window, item: Status_Item, right, middle: f32) -> render.Rect {
+	_, text := status_receipt(app, item)
+	small := ui.text_styled(&w.ui_text, .Detail)
+	width := (ui.ICON_INDICATOR + ui.SPACE_1) * w.scale + ui.text_width(&small, text)
+	height := ui.ICON_BUTTON * w.scale
+	return {right - width, math.round(middle - height / 2), width, height}
+}
+
+// Unread receipts take the accent, so a row that changed since the user looked stands out.
+@(private)
+status_receipt_draw :: proc(
+	app: ^App,
+	w: ^Window,
+	item: Status_Item,
+	area: render.Rect,
+	baseline: f32,
+) -> render.Build_Status {
+	icon, text := status_receipt(app, item)
+	ink := item.record.read ? app.theme.faint : app.theme.accent
+	size := ui.ICON_INDICATOR * w.scale
+	glyph := render.Rect{area.x, area.y + (area.height - size) / 2, size, size}
+	ui.icon_draw(&w.list, icon, glyph, ink, ui.ICON_INDICATOR, w.scale)
+	small := ui.text_styled(&w.ui_text, .Detail)
+	return ui.draw_text(&small, &w.list, text, area.x + area.width - ui.text_width(&small, text), baseline, ink)
+}
+
+// Reads or unreads the pane a row came from, whichever the row is not.
+@(private)
+status_receipt_toggle :: proc(app: ^App, item: Status_Item) {
+	status_mark(app, item.session, !item.record.read)
+}
+
 @(private)
 status_item_name :: proc(app: ^App, item: Status_Item) -> string {
 	if entry := session_find(app, item.session); entry != nil {return status_record_name(entry, item.record)}
@@ -97,7 +178,30 @@ status_dismiss_rect :: proc(w: ^Window, row: render.Rect) -> render.Rect {
 	return {row.x + row.width - ui.SPACE_1 * s - size, row.y + (row.height - size) / 2, size, size}
 }
 
-// Two lines: name, state and age; then where it came from and the message.
+// Where an inbox row's text ends: before Dismiss while the highlighted row offers it.
+@(private)
+status_row_right :: proc(w: ^Window, r: render.Rect, item: Status_Item, highlighted: bool) -> f32 {
+	dismiss := highlighted && term.program_status_finished(item.record.state)
+	return r.x + r.width - (dismiss ? ui.SPACE_1 + ui.HEIGHT_COMPACT + ui.SPACE_1 : ui.CONTROL_INSET) * w.scale
+}
+
+@(private)
+status_row_receipt_rect :: proc(
+	app: ^App,
+	w: ^Window,
+	r: render.Rect,
+	item: Status_Item,
+	highlighted: bool,
+) -> render.Rect {
+	strong := ui.text_styled(&w.ui_text, .Strong)
+	small := ui.text_styled(&w.ui_text, .Detail)
+	_, line_two := ui.stacked_baselines(r, &strong, &small, w.scale)
+	right := status_row_right(w, r, item, highlighted)
+	return status_receipt_rect(app, w, item, right, line_two - small.ascent + small.line_height / 2)
+}
+
+// Two lines: name, state and how long it has held; then where it came from, the message and the
+// receipt.
 @(private)
 status_row_draw :: proc(
 	app: ^App,
@@ -110,8 +214,9 @@ status_row_draw :: proc(
 	if highlighted {
 		ui.draw_rect(&w.list, {rect = r, color = app.theme.selection, radius = ui.RADIUS_CONTROL * s})
 	}
-	presentation := status_presentation(item.record)
-	mark := presentation.mark
+	quiet := status_item_quiet(item)
+	mark := status_presentation(item.record).mark
+	mark.dim = quiet
 	left := r.x + ui.CONTROL_INSET * s
 	strong := ui.text_styled(&w.ui_text, .Strong)
 	small := ui.text_styled(&w.ui_text, .Detail)
@@ -121,15 +226,16 @@ status_row_draw :: proc(
 	if result := status_mark_draw(app, w, {left, icon_y, icon, icon}, mark); result != .Ok {
 		return result
 	}
-	quiet := presentation.seen
 	text_x := left + icon + ui.SPACE_2 * s
 	show_dismiss := highlighted && term.program_status_finished(item.record.state)
-	right := r.x + r.width - (show_dismiss ? ui.SPACE_1 + ui.HEIGHT_COMPACT + ui.SPACE_1 : ui.CONTROL_INSET) * s
-	age := status_age(item.record.updated_at, clock_wall(&app.clock))
+	right := status_row_right(w, r, item, highlighted)
+	age := status_state_age(app, item.record)
 	age_width := ui.text_width(&small, age)
 	if !show_dismiss {
-		if result := ui.draw_text(&small, &w.list, age, right - age_width, line_one, app.theme.faint);
-		   result != .Ok {return result}
+		ink := quiet ? app.theme.faint : ui.status_color(app.theme, mark.glyph)
+		if result := ui.draw_text(&small, &w.list, age, right - age_width, line_one, ink); result != .Ok {
+			return result
+		}
 	}
 	name := status_item_name(app, item)
 	name_room := max(0, right - age_width - ui.SPACE_2 * s - text_x)
@@ -145,7 +251,7 @@ status_row_draw :: proc(
 	); result != .Ok {return result}
 	buffer: [8]u8
 	headline := status_headline(mark, buffer[:])
-	headline_color := mark.urgent ? ui.status_color(app.theme, mark.glyph) : app.theme.muted
+	headline_color := mark.urgent && !quiet ? ui.status_color(app.theme, mark.glyph) : app.theme.muted
 	if result := ui.draw_fading_text(
 		&small,
 		&w.list,
@@ -155,6 +261,8 @@ status_row_draw :: proc(
 		headline_color,
 		max(0, name_room - name_width - ui.SPACE_2 * s),
 	); result != .Ok {return result}
+	receipt := status_row_receipt_rect(app, w, r, item, highlighted)
+	if result := status_receipt_draw(app, w, item, receipt, line_two); result != .Ok {return result}
 	detail := item.record.message == "" ? item.crumb : fmt.tprintf("%s · %s", item.crumb, item.record.message)
 	if result := ui.draw_fading_text(
 		&small,
@@ -163,7 +271,7 @@ status_row_draw :: proc(
 		text_x,
 		line_two,
 		app.theme.faint,
-		max(0, right - text_x),
+		max(0, receipt.x - ui.SPACE_2 * s - text_x),
 	); result != .Ok {return result}
 	ui.status_progress_draw(
 		&w.list,
@@ -364,7 +472,7 @@ status_inbox_view :: proc(app: ^App, w: ^Window, inbox: ^Status_Inbox) -> (view:
 // The footer names the chord bound to status.next, if any.
 @(private)
 status_inbox_hint :: proc(app: ^App) -> string {
-	actions :: "Enter go to pane · Delete dismiss"
+	actions :: "Enter go to pane · U read or unread · Delete dismiss"
 	buffer: [commands.SHORTCUT_TEXT_CAP]u8
 	chord := action_shortcut_text(app, .Status_Next, buffer[:])
 	if chord == "" {return actions}
@@ -469,6 +577,10 @@ status_inbox_button :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) 
 		status_dismiss_item(app, item)
 		return
 	}
+	if render.rect_contains(status_row_receipt_rect(app, w, row, item, index == inbox.selected), x, y) {
+		status_receipt_toggle(app, item)
+		return
+	}
 	status_open_item(app, w, item)
 }
 
@@ -499,7 +611,7 @@ status_inbox_wheel :: proc(app: ^App, w: ^Window, delta: f32) {
 	w.dirty = true
 }
 
-// The keys the open inbox keeps: list navigation, Enter, Delete, Escape and the chord bound to
+// The keys the open inbox keeps: list navigation, Enter, U, Delete, Escape and the chord bound to
 // status.next. It reports whether it kept the key; every other key, and every release, goes on to the
 // shortcuts and the focused pane.
 status_inbox_key :: proc(app: ^App, w: ^Window, e, logical: input.Key_Event) -> bool {
@@ -521,6 +633,9 @@ status_inbox_key :: proc(app: ^App, w: ^Window, e, logical: input.Key_Event) -> 
 		if selected {status_open_item(app, w, items[inbox.selected])}
 	case .Delete:
 		if selected {status_dismiss_item(app, items[inbox.selected])}
+	case .U:
+		if logical.modifiers != {} {return false}
+		if selected {status_receipt_toggle(app, items[inbox.selected])}
 	case:
 		action, found := shortcut_action(app, e)
 		if !found || action != .Status_Next {return false}

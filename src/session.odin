@@ -34,6 +34,10 @@ Session_Entry :: struct {
 	// The program status records last copied from the session, and the last notice they raised.
 	statuses:            []term.Program_Status,
 	status_notified:     time.Tick,
+	// When the user last read the pane, zero if never, and whether they marked it unread since. The
+	// session holds the same; only status_read_stamp and status_mark write either.
+	status_read_at:      time.Time,
+	status_unread:       bool,
 	// The program its icon names and a reopened pane remembers, as process polling sees it.
 	program:             Program,
 	documents:           Document_List,
@@ -308,7 +312,7 @@ update_sessions :: proc(app: ^App) {
 		if term.take_program_status_change(s) {
 			workspace_status_changed = true
 			status_refresh(app, entry)
-			if status_watched(app, entry) {term.program_status_acknowledge(s)}
+			status_settle(app, entry)
 			mark_all_dirty(app)
 		}
 		if term.take_bell(s) {

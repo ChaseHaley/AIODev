@@ -16,8 +16,8 @@ Status_Glyph :: enum u8 {
 	Error,
 }
 
-// Progress is -1 when the program reported none. Dim marks finished work the user has seen. Urgent
-// inks the state's words in its colour rather than muted.
+// Progress is -1 when the program reported none. Dim marks work the user has read, in the muted ink
+// rather than the state's colour. Urgent inks the state's words in its colour rather than muted.
 Status_Mark :: struct {
 	glyph:    Status_Glyph,
 	progress: i8,
@@ -59,8 +59,7 @@ status_glyph_draw :: proc(
 	size := min(area.width, area.height)
 	if size <= 2 * scale {return .Ok}
 	r := render.Rect{area.x + (area.width - size) / 2, area.y + (area.height - size) / 2, size, size}
-	ink := status_color(theme, mark.glyph)
-	if mark.dim {ink.a *= 0.55}
+	ink := mark.dim ? theme.muted : status_color(theme, mark.glyph)
 	stroke := max(1, math.round(1.5 * scale))
 	switch mark.glyph {
 	case .None:

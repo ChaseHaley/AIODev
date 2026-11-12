@@ -3,6 +3,7 @@ package app_test
 import app "../../src"
 import "aio:input"
 import "aio:platform"
+import "aio:render"
 import "aio:settings"
 import "aio:term"
 import "aio:ui"
@@ -19,7 +20,7 @@ reports_of :: proc(
 	reports := make([dynamic]app.Status_Panel_Report, context.temp_allocator)
 	copied := make([]term.Program_Status, len(records), context.temp_allocator)
 	copy(copied, records)
-	app.status_panel_tree_append(&reports, copied, 1, "crumb", workspace)
+	app.status_panel_tree_append(&reports, {session = 1, records = copied, crumb = "crumb", workspace = workspace})
 	return reports
 }
 
@@ -72,7 +73,7 @@ activity_dense_sections_follow_urgency_and_keep_trees_whole :: proc(t: ^testing.
 	reports := reports_of(
 		"W",
 		{id = "idle", state = .Idle},
-		{id = "seen", state = .Error_Seen},
+		{id = "seen", state = .Error, read = true},
 		{id = "unseen", state = .Error},
 		{id = "working", state = .Working},
 		{id = "working/ask", state = .Blocked},
@@ -236,7 +237,12 @@ activity_rows_hit_and_explain_themselves_in_both_views :: proc(t: ^testing.T) {
 			testing.expect(t, strings.contains(tip, row.item.record.title))
 			testing.expect(t, strings.contains(tip, row.item.crumb))
 			testing.expect(t, strings.contains(tip, row.item.record.app))
-			testing.expect_value(t, strings.count(tip, "\n"), 2)
+			testing.expect(t, strings.contains(tip, " for ") && strings.contains(tip, "read"))
+			testing.expect_value(t, strings.count(tip, "\n"), row.item.record.message != "" ? 3 : 2)
+			receipt := app.status_panel_receipt_rect(s, w, rect, row)
+			rx, ry := receipt.x + receipt.width / 2, receipt.y + receipt.height / 2
+			testing.expect(t, render.rect_contains(rect, rx, ry))
+			testing.expect(t, strings.contains(app.status_panel_row_tooltip(s, w, rx, ry), "click to mark"))
 			if row.item.record.state == .Done {
 				close := app.status_panel_dismiss_rect(s, w, rect)
 				cx, cy := close.x + close.width / 2, close.y + close.height / 2
@@ -289,4 +295,32 @@ activity_inbox_passes_keys_it_does_not_use :: proc(t: ^testing.T) {
 	app.run_action(s, w, .Status_Inbox)
 	inbox_press(s, w, .F10, {.Shift})
 	testing.expect(t, app.tab_menu_shown(w) && !app.status_inbox_shown(w))
+}
+
+// U in the open inbox reads the selected row's pane, or marks it unread once read, and keeps the key.
+@(test)
+activity_inbox_u_reads_and_unreads_the_selected_pane :: proc(t: ^testing.T) {
+	f: Palette_Fixture
+	defer palette_fixture_destroy(t, &f)
+	if !palette_fixture_create(t, &f, "activity-inbox-read", second_window = false) {return}
+	s, w := &f.state, f.state.windows[0]
+	s.settings.status.enabled = true
+	entry := app.focused_session(s, w)
+	if !testing.expect(t, entry != nil) {return}
+	previous := entry.statuses
+	defer {
+		delete(entry.statuses)
+		entry.statuses = previous
+	}
+	entry.statuses = make([]term.Program_Status, 1)
+	entry.statuses[0] = {id = "a", app = "claude", state = .Done, progress = -1, updated_at = time.now()}
+	app.run_action(s, w, .Status_Inbox)
+	if !testing.expect(t, app.status_inbox_shown(w)) {return}
+	entry.status_unread = true
+	inbox_press(s, w, .U)
+	testing.expect(t, app.status_inbox_shown(w))
+	testing.expect(t, !entry.status_unread && entry.status_read_at != {})
+	entry.statuses[0].read = true
+	inbox_press(s, w, .U)
+	testing.expect(t, entry.status_unread)
 }

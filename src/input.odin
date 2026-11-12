@@ -133,6 +133,7 @@ OVERLAY_FIRST :: bit_set[Overlay_Kind] {
 	.Chip_Name,
 	.Tab_Menu,
 	.Divider_Menu,
+	.Status_Menu,
 	.Profile_Menu,
 	.Document_Menu,
 }
@@ -176,6 +177,14 @@ overlay_input :: proc(app: ^App, w: ^Window, kind: Overlay_Kind, event: Overlay_
 			dock_divider_menu_key(app, w, e.logical)
 		case Overlay_Text:
 		case Overlay_Wheel: dock_divider_menu_wheel(w, int(math.sign(e.delta)))
+		}
+	case .Status_Menu:
+		switch e in event {
+		case Overlay_Key:
+			key_suppress(w, e.event)
+			status_menu_key(app, w, e.logical)
+		case Overlay_Text:
+		case Overlay_Wheel: status_menu_wheel(w, int(math.sign(e.delta)))
 		}
 	case .Profile_Menu:
 		switch e in event {
@@ -442,7 +451,10 @@ on_focus :: proc(app: ^App, w: ^Window, focused: bool) {
 		if !gesture_cancel(app, w) {return}
 		window_overlays_cancel(app, w, true)
 	}
-	if entry := focus_session(app, w); entry != nil {term.send_focus(entry.session, focused)}
+	if entry := focus_session(app, w); entry != nil {
+		term.send_focus(entry.session, focused)
+		if !focused {status_focus_lost(app, entry)}
+	}
 	if focused {status_focus_enter(app, w)}
 }
 

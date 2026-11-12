@@ -210,19 +210,20 @@ status_panel_id_within :: proc(id, ancestor: string) -> bool {
 
 // Sorts one pane's shown records into tree order and appends them with their depth. Depth counts
 // ancestors among these records, so a report whose parent is not shown is a root.
-status_panel_tree_append :: proc(
-	reports: ^[dynamic]Status_Panel_Report,
-	records: []term.Program_Status,
-	session: u32,
-	crumb, workspace: string,
-) {
-	slice.sort_by(records, status_panel_id_less)
+status_panel_tree_append :: proc(reports: ^[dynamic]Status_Panel_Report, shown: Status_Scope_Records) {
+	slice.sort_by(shown.records, status_panel_id_less)
 	ancestors := make([dynamic]string, 0, 8, context.temp_allocator)
-	for record in records {
+	for record in shown.records {
 		for len(ancestors) > 0 && !status_panel_id_within(record.id, ancestors[len(ancestors) - 1]) {
 			pop(&ancestors)
 		}
-		item := Status_Item{session = session, record = record, crumb = crumb, workspace = workspace}
+		item := Status_Item {
+			session   = shown.session,
+			record    = record,
+			crumb     = shown.crumb,
+			workspace = shown.workspace,
+			receipt   = shown.receipt,
+		}
 		append(reports, Status_Panel_Report{item, len(ancestors)})
 		append(&ancestors, record.id)
 	}
@@ -233,7 +234,7 @@ status_panel_reports :: proc(app: ^App, w: ^Window) -> []Status_Panel_Report {
 	reports := make([dynamic]Status_Panel_Report, context.temp_allocator)
 	walk := status_scope_records(app, w)
 	for shown, ok := status_scope_records_next(&walk); ok; shown, ok = status_scope_records_next(&walk) {
-		status_panel_tree_append(&reports, shown.records, shown.session, shown.crumb, shown.workspace)
+		status_panel_tree_append(&reports, shown)
 	}
 	return reports[:]
 }
@@ -391,27 +392,77 @@ status_panel_logo_draw :: proc(
 	return .Ok
 }
 
-// The right end every row shares: the state mark, or Dismiss while a finished row is hovered.
+// Where a row's state pair starts: its mark at `right`, and before it `text`, how long the record has
+// held its state.
+@(private)
+status_panel_state_left :: proc(w: ^Window, right: f32, text: string) -> f32 {
+	small := ui.text_styled(&w.ui_text, .Detail)
+	return right - (ui.ICON_INDICATOR + ui.SPACE_1) * w.scale - ui.text_width(&small, text)
+}
+
+// A Dense row's state text: its progress while it reports one, else how long it has held its state.
+@(private)
+status_panel_dense_state :: proc(app: ^App, item: Status_Item, buffer: []u8) -> string {
+	if item.record.progress >= 0 && item.record.state == .Working {
+		return status_progress_text(item.record.progress, buffer)
+	}
+	return status_state_age(app, item.record)
+}
+
+// Where a report row's receipt sits, for drawing and for the press that toggles it: under the state
+// pair in Comfy, before it in Dense.
+status_panel_receipt_rect :: proc(
+	app: ^App,
+	w: ^Window,
+	r: render.Rect,
+	row: Status_Panel_Row,
+) -> render.Rect {
+	s := w.scale
+	box := status_panel_row_box(w, r, row)
+	right := box.x + box.width - ui.CONTROL_INSET * s
+	small := ui.text_styled(&w.ui_text, .Detail)
+	if app.settings.status.panel_view == .Comfy {
+		strong := ui.text_styled(&w.ui_text, .Strong)
+		_, line_two := ui.stacked_baselines(r, &strong, &small, s)
+		return status_receipt_rect(app, w, row.item, right, line_two - small.ascent + small.line_height / 2)
+	}
+	buffer: [8]u8
+	left := status_panel_state_left(w, right, status_panel_dense_state(app, row.item, buffer[:]))
+	return status_receipt_rect(app, w, row.item, left - ui.SPACE_2 * s, r.y + r.height / 2)
+}
+
+// The right end of a row's first line: the state's mark with `text` before it, or Dismiss while a
+// finished row is hovered. Returns where the text before it must end.
 @(private)
 status_panel_end_draw :: proc(
 	app: ^App,
 	w: ^Window,
 	r: render.Rect,
-	middle, right: f32,
+	middle, right, baseline: f32,
 	item: Status_Item,
 	mark: ui.Status_Mark,
+	text: string,
 	highlighted: bool,
-) -> render.Build_Status {
+) -> (
+	left: f32,
+	result: render.Build_Status,
+) {
 	if highlighted && term.program_status_finished(item.record.state) {
 		close := status_panel_dismiss_rect(app, w, r)
 		ui.icon_draw(&w.list, .Close, close, app.theme.muted, ui.ICON_INDICATOR, w.scale)
-		return .Ok
+		return close.x, .Ok
 	}
 	size := ui.ICON_INDICATOR * w.scale
-	return status_mark_draw(app, w, {right - size, math.round(middle - size / 2), size, size}, mark)
+	area := render.Rect{right - size, math.round(middle - size / 2), size, size}
+	if result = status_mark_draw(app, w, area, mark); result != .Ok {return}
+	left = status_panel_state_left(w, right, text)
+	small := ui.text_styled(&w.ui_text, .Detail)
+	ink := mark.dim ? app.theme.faint : ui.status_color(app.theme, mark.glyph)
+	return left, ui.draw_text(&small, &w.list, text, left, baseline, ink)
 }
 
-// Comfy: logo, title and state; then the message or state and the age; then any progress.
+// Comfy: logo, title, then the state's mark and how long it has held; then the message and the
+// receipt; then any progress.
 @(private)
 status_panel_comfy_draw :: proc(
 	app: ^App,
@@ -433,29 +484,30 @@ status_panel_comfy_draw :: proc(
 	line_one, line_two := ui.stacked_baselines(r, &strong, &small, s)
 	text_x := left + (logo + ui.SPACE_2) * s
 	right := box.x + box.width - ui.CONTROL_INSET * s
-	title_room := max(0, right - (ui.ICON_INDICATOR + ui.SPACE_2) * s - text_x)
-	presentation := status_presentation(item.record)
-	quiet := presentation.seen
+	quiet := status_item_quiet(item)
+	mark := status_presentation(item.record).mark
+	mark.dim = quiet
+	state := status_state_age(app, item.record)
+	state_left, drawn := status_panel_end_draw(
+		app, w, r, middle, right, line_one, item, mark, state, highlighted,
+	)
+	if drawn != .Ok {return drawn}
 	if result := ui.draw_fading_text(&strong, &w.list, status_item_name(app, item), text_x, line_one,
-		quiet ? app.theme.muted : app.theme.text, title_room); result != .Ok {return result}
-	mark := presentation.mark
-	if result := status_panel_end_draw(app, w, r, middle, right, item, mark, highlighted); result != .Ok {
-		return result
-	}
-	age := status_age(item.record.updated_at, clock_wall(&app.clock))
-	age_width := ui.text_width(&small, age)
-	if result := ui.draw_text(&small, &w.list, age, right - age_width, line_two, app.theme.faint);
+		quiet ? app.theme.muted : app.theme.text, max(0, state_left - ui.SPACE_2 * s - text_x));
 	   result != .Ok {return result}
+	receipt := status_panel_receipt_rect(app, w, r, row)
+	if result := status_receipt_draw(app, w, item, receipt, line_two); result != .Ok {return result}
 	buffer: [8]u8
 	detail := item.record.message != "" ? item.record.message : status_headline(mark, buffer[:])
 	if result := ui.draw_fading_text(&small, &w.list, detail, text_x, line_two, app.theme.faint,
-		max(0, right - age_width - ui.SPACE_2 * s - text_x)); result != .Ok {return result}
+		max(0, receipt.x - ui.SPACE_2 * s - text_x)); result != .Ok {return result}
 	bar := render.Rect{text_x, r.y, max(0, right - text_x), r.height - ui.SPACE_1 * s}
 	ui.status_progress_draw(&w.list, app.theme, bar, mark, s)
 	return .Ok
 }
 
-// Dense: logo, then workspace and title, or a child's title, then age or progress and state.
+// Dense: logo, then workspace and title, or a child's title, then the receipt, then progress or how
+// long it has held its state, and the state's mark.
 @(private)
 status_panel_dense_draw :: proc(
 	app: ^App,
@@ -476,20 +528,17 @@ status_panel_dense_draw :: proc(
 	small := ui.text_styled(&w.ui_text, .Detail)
 	baseline := middle - body.line_height / 2 + body.ascent
 	right := box.x + box.width - ui.CONTROL_INSET * s
-	presentation := status_presentation(item.record)
-	mark := presentation.mark
-	if result := status_panel_end_draw(app, w, r, middle, right, item, mark, highlighted); result != .Ok {
-		return result
-	}
+	quiet := status_item_quiet(item)
+	mark := status_presentation(item.record).mark
+	mark.dim = quiet
 	buffer: [8]u8
-	progress_or_age := status_age(item.record.updated_at, clock_wall(&app.clock))
-	if mark.progress >= 0 {progress_or_age = status_progress_text(mark.progress, buffer[:])}
-	age_x := right - (ui.ICON_INDICATOR + ui.SPACE_2) * s - ui.text_width(&small, progress_or_age)
-	if result := ui.draw_text(&small, &w.list, progress_or_age, age_x, baseline, app.theme.faint);
+	state := status_panel_dense_state(app, item, buffer[:])
+	if _, result := status_panel_end_draw(app, w, r, middle, right, baseline, item, mark, state, highlighted);
 	   result != .Ok {return result}
+	receipt := status_panel_receipt_rect(app, w, r, row)
+	if result := status_receipt_draw(app, w, item, receipt, baseline); result != .Ok {return result}
 	text_x := left + (logo + ui.SPACE_2) * s
-	room := max(0, age_x - ui.SPACE_2 * s - text_x)
-	quiet := presentation.seen || item.record.state == .Idle
+	room := max(0, receipt.x - ui.SPACE_2 * s - text_x)
 	ink := quiet ? app.theme.muted : app.theme.text
 	name := status_item_name(app, item)
 	if row.depth > 0 {return ui.draw_fading_text(&body, &w.list, name, text_x, baseline, ink, room)}
@@ -623,27 +672,39 @@ status_panel_hit :: proc(
 	return -1, {}
 }
 
-// Who reported, what it says and exactly where, for rows too narrow or alike to tell apart.
+// Who reported, what it says, how long it has said it, when the user last read it and exactly where,
+// for rows too narrow or alike to tell apart.
 status_panel_row_tooltip :: proc(app: ^App, w: ^Window, x, y: f32) -> string {
 	rows, _ := status_panel_rows(app, w)
 	index, rect := status_panel_hit(app, w, rows, x, y)
 	if index < 0 {return ""}
-	item := rows[index].item
+	row := rows[index]
+	item := row.item
 	if term.program_status_finished(item.record.state) &&
 	   render.rect_contains(status_panel_dismiss_rect(app, w, rect), x, y) {
 		return "Dismiss"
+	}
+	if render.rect_contains(status_panel_receipt_rect(app, w, rect, row), x, y) {
+		return status_receipt_tooltip(app, item)
 	}
 	name := status_item_name(app, item)
 	who := name
 	if item.record.app != "" && item.record.app != name {who = fmt.tprintf("%s · %s", item.record.app, name)}
 	buffer: [8]u8
 	state := status_headline(status_presentation(item.record).mark, buffer[:])
+	read := "never read"
+	if item.receipt.watched {
+		read = "read now"
+	} else if item.receipt.read_at != {} {
+		read = fmt.tprintf("read %s ago", status_age(item.receipt.read_at, clock_wall(&app.clock)))
+	}
+	times := fmt.tprintf("%s for %s · %s", state, status_state_age(app, item.record), read)
 	if item.record.message != "" {
 		// Half the tooltip at most, so a long message never pushes the location out of it.
 		message := tooltip_clip(item.record.message, TOOLTIP_LIMIT / 2)
-		return fmt.tprintf("%s\n%s: %s\n%s", who, state, message, item.crumb)
+		return fmt.tprintf("%s\n%s: %s\n%s\n%s", who, state, message, times, item.crumb)
 	}
-	return fmt.tprintf("%s\n%s\n%s", who, state, item.crumb)
+	return fmt.tprintf("%s\n%s\n%s", who, times, item.crumb)
 }
 
 status_panel_button_at :: proc(app: ^App, w: ^Window, x, y: f32) -> Status_Panel_Button {
@@ -700,24 +761,35 @@ status_panel_tooltip :: proc(app: ^App, w: ^Window, x, y: f32) -> string {
 }
 
 // A press on the panel, which owns the pointer: header buttons arm, rows open the pane they came
-// from, and a finished row's Dismiss removes it.
+// from, a finished row's Dismiss removes it, a receipt reads or unreads the pane, and a right click
+// opens the row's menu.
 status_panel_press :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) {
 	if !e.pressed {return}
 	x, y := f32(e.x), f32(e.y)
 	gesture_swallow(w, e.button, .Status_Panel)
-	if e.button != .Left {return}
-	if button := status_panel_button_at(app, w, x, y); button != .None {
-		ui.armed_press(&w.status.panel_button_armed, button)
-		return
+	if e.button != .Left && e.button != .Right {return}
+	if e.button == .Left {
+		if button := status_panel_button_at(app, w, x, y); button != .None {
+			ui.armed_press(&w.status.panel_button_armed, button)
+			return
+		}
 	}
 	rows, _ := status_panel_rows(app, w)
 	index, rect := status_panel_hit(app, w, rows, x, y)
 	if index < 0 {return}
 	item := rows[index].item
+	if e.button == .Right {
+		status_menu_open(app, w, item, x, y)
+		return
+	}
 	if term.program_status_finished(item.record.state) &&
 	   render.rect_contains(status_panel_dismiss_rect(app, w, rect), x, y) {
 		status_dismiss_item(app, item)
 		w.dirty = true
+		return
+	}
+	if render.rect_contains(status_panel_receipt_rect(app, w, rect, rows[index]), x, y) {
+		status_receipt_toggle(app, item)
 		return
 	}
 	status_open_item(app, w, item)
@@ -764,11 +836,20 @@ when AIO_CONTROL {
 		rows, _, scroll := status_panel_layout(app, w)
 		list := status_panel_list(w, area)
 		for row, i in rows {
-			state_rect(r, state_key("activity.row.%d.rect", i), status_panel_row_rect(list, row, scroll))
+			rect := status_panel_row_rect(list, row, scroll)
+			state_rect(r, state_key("activity.row.%d.rect", i), rect)
 			state_value(r, state_key("activity.row.%d.report", i), row.report)
 			text := row.report ? status_item_name(app, row.item) : row.label
 			state_text(r, state_key("activity.row.%d.text", i), text)
 			state_value(r, state_key("activity.row.%d.depth", i), row.depth)
+			if !row.report {continue}
+			_, receipt := status_receipt(app, row.item)
+			state_value(r, state_key("activity.row.%d.read", i), row.item.record.read)
+			state_value(r, state_key("activity.row.%d.ended", i), row.item.record.ended)
+			state_text(r, state_key("activity.row.%d.receipt", i), receipt)
+			state_text(r, state_key("activity.row.%d.state_age", i), status_state_age(app, row.item.record))
+			receipt_rect := status_panel_receipt_rect(app, w, rect, row)
+			state_rect(r, state_key("activity.row.%d.receipt_rect", i), receipt_rect)
 		}
 	}
 }
