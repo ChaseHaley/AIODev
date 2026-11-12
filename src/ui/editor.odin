@@ -1945,6 +1945,67 @@ activate :: proc(p: ^Editor, row: ^Editor_Row) -> Editor_Outcome {
 	return .Changed
 }
 
+// Tab and Shift+Tab walk the page as a browser walks a form: the search, then each row's control
+// in page order (a shortcut row's Key positions switch after its field), then Reset to Defaults,
+// and round again. Landing on a control only focuses it; Enter or Space acts on it.
+@(private)
+editor_tab :: proc(p: ^Editor, row: ^Editor_Row, back: bool) -> Editor_Outcome {
+	focus := editor_focus(p)
+	if editor_popup(p) != .None {editor_mode_set(p, Editor_Editing{})}
+	if row != nil && row.kind == .Shortcut {
+		if focus == .Control && !back {editor_mode_set(p, Editor_Positions{}); return .Changed}
+		if focus == .Positions && back {editor_mode_set(p, Editor_Editing{}); return .Changed}
+	}
+	target := -1
+	switch focus {
+	case .Search:
+		if !back && row != nil {target = p.selected}
+	case .Reset_All:
+		if back {target = editor_tab_row(p, len(p.items), -1)}
+	case .Control, .Positions:
+		target = editor_tab_row(p, p.selected, back ? -1 : 1)
+	}
+	if target < 0 {
+		// Past the last row lies Reset to Defaults, and before the first the search.
+		if focus == .Control {editor_keep(p)}
+		if focus != .Search {stop_editing(p)}
+		if focus == .Search || (focus != .Reset_All && !back) {
+			editor_mode_set(p, Editor_Reset_All{})
+		} else {
+			editor_mode_set(p, Editor_Browsing{})
+		}
+		return .Changed
+	}
+	if target != p.selected {
+		before := p.selected
+		editor_select(p, target)
+		if p.selected == before {return .Changed}
+	}
+	next := editor_row(p)
+	switch {
+	case next.kind == .Shortcut && back:
+		editor_mode_set(p, Editor_Positions{})
+	case next.kind == .Profile:
+		editor_mode_set(p, Editor_Editing{})
+		p.profile_control = .Radio
+	case text_kind(next.kind):
+		editor_mode_set(p, Editor_Editing{})
+		field_select_all(&p.value)
+	case:
+		editor_mode_set(p, Editor_Editing{})
+	}
+	return .Changed
+}
+
+// The next page line holding a row from `from` in `step`'s direction, or -1 when none is left.
+@(private)
+editor_tab_row :: proc(p: ^Editor, from, step: int) -> int {
+	for index := from + step; index >= 0 && index < len(p.items); index += step {
+		if p.items[index].row >= 0 {return index}
+	}
+	return -1
+}
+
 @(private)
 popup_key :: proc(p: ^Editor, row: ^Editor_Row, e: input.Key_Event) -> (Editor_Outcome, bool) {
 	popup := editor_popup(p)
@@ -2029,6 +2090,13 @@ editor_key :: proc(p: ^Editor, raw: input.Key_Event) -> Editor_Outcome {
 		return .Changed
 	}
 	focus := editor_focus(p)
+	// Ctrl+F is the one key that takes the keyboard to the search, as in a browser, from any control
+	// or open list.
+	if e.key == .F && .Control in e.modifiers && .Alt not_in e.modifiers {
+		if focus != .Search {editor_keep(p); stop_editing(p)}
+		field_select_all(&p.filter)
+		return .Changed
+	}
 	if focus == .Reset_All {
 		if e.key == .Enter || e.key == .Numpad_Enter || e.key == .Space {return .Reset_All}
 		if e.key == .Escape {editor_mode_set(p, Editor_Browsing{}); return .Changed}
@@ -2077,25 +2145,7 @@ editor_key :: proc(p: ^Editor, raw: input.Key_Event) -> Editor_Outcome {
 		editor_filter(p)
 		return .Changed
 	case .Tab:
-		stops := 2
-		if row == nil || row.kind == .Profile_Add {stops = 1}
-		if row != nil && row.kind == .Shortcut {stops = 3}
-		current := focus == .Reset_All ? stops : int(focus)
-		if focus == .Control {editor_keep(p)}
-		next := Editor_Focus((current + (.Shift in e.modifiers ? stops : 1)) % (stops + 1))
-		if int(next) == stops {editor_mode_set(p, Editor_Reset_All{}); return .Changed}
-		if editor_popup(p) != .None {editor_mode_set(p, Editor_Editing{})}
-		if next == .Control && row != nil {
-			if row.kind == .Profile {
-				editor_mode_set(p, Editor_Editing{})
-				p.profile_control = .Radio
-				return .Changed
-			}
-			return activate(p, row)
-		}
-		if focus == .Control {stop_editing(p)}
-		editor_mode_set(p, focus_mode(next))
-		return .Changed
+		return editor_tab(p, row, .Shift in e.modifiers)
 	case .Arrow_Up:
 		editor_step(p, -1); return .Changed
 	case .Arrow_Down:
@@ -2124,7 +2174,8 @@ editor_key :: proc(p: ^Editor, raw: input.Key_Event) -> Editor_Outcome {
 		if focus == .Control && row.kind == .Profile {
 			return profile_activate(p, row)
 		}
-		if focus == .Control && row.kind == .Toggle {return flip_toggle(p)}
+		// As in a browser, Space presses the focused switch, list or button.
+		if focus == .Control && !text_kind(row.kind) {return activate(p, row)}
 	case .Arrow_Left, .Arrow_Right:
 		left := e.key == .Arrow_Left
 		if row != nil && row.kind == .Profile {
@@ -2162,7 +2213,8 @@ editor_key :: proc(p: ^Editor, raw: input.Key_Event) -> Editor_Outcome {
 			if field_key(&p.value, e) == .Edited {sync_color(p)}
 			return .Changed
 		}
-		editor_mode_set(p, Editor_Browsing{})
+		// A focused switch, list or button keeps the keyboard; Ctrl+F reaches the search.
+		return .None
 	case .Search:
 	}
 	if field_key(&p.filter, e) == .Edited {editor_filter(p)}
@@ -2190,8 +2242,8 @@ editor_text :: proc(p: ^Editor, text: string) {
 		if field_text(&p.value, text) == .Edited {sync_color(p)}
 		return
 	}
-	if focus == .Control && row != nil && (row.kind == .Profile || row.kind == .Profile_Add) {return}
-	if focus != .Search {editor_mode_set(p, Editor_Browsing{})}
+	// Only a focused text field or the search takes typing; Ctrl+F moves to the search.
+	if focus != .Search {return}
 	if field_text(&p.filter, text) == .Edited {
 		editor_filter(p)
 	}
@@ -2316,10 +2368,24 @@ editor_clear_rect :: proc(p: ^Editor, l: Editor_Layout) -> render.Rect {
 	}
 }
 
+// The key that returns to the search, as a keycap at the field's right end while the keyboard is
+// elsewhere on the page. Its slot is fixed so the field's text and hit area do not depend on fonts.
+SEARCH_KEY_LABEL :: "Ctrl+F"
+@(private) SEARCH_KEY_SLOT :: f32(56)
+
+editor_search_key_rect :: proc(p: ^Editor, l: Editor_Layout) -> render.Rect {
+	s := l.scale
+	if editor_focus(p) == .Search || l.filter.width < 3 * SEARCH_KEY_SLOT * s {return {}}
+	right := l.filter.x + l.filter.width - SPACE_2 * s
+	if clear := editor_clear_rect(p, l); clear.width > 0 {right = clear.x - SPACE_1 * s}
+	return {right - SEARCH_KEY_SLOT * s, l.filter.y, SEARCH_KEY_SLOT * s, l.filter.height}
+}
+
 @(private)
 filter_text_rect :: proc(p: ^Editor, l: Editor_Layout) -> render.Rect {
 	r := l.filter
 	if clear := editor_clear_rect(p, l); clear.width > 0 {r.width = clear.x - r.x}
+	if key := editor_search_key_rect(p, l); key.width > 0 {r.width = key.x - r.x}
 	return r
 }
 
@@ -3665,6 +3731,16 @@ filter_draw :: proc(
 	if result := field_box_draw(box, list, theme, field_box_baseline(box), focused, placeholder);
 	   result != .Ok {
 		return result
+	}
+	if key := editor_search_key_rect(p, l); key.width > 0 {
+		keycap := text_styled(text, .Detail)
+		width := text_width(&keycap, SEARCH_KEY_LABEL) + 2 * KEYCAP_PADDING * s
+		height := min(KEYCAP_HEIGHT * s, key.height)
+		chip := render.Rect{key.x + key.width - width, key.y + (key.height - height) / 2, width, height}
+		draw_rect(list, {rect = chip, color = theme.border, radius = RADIUS_CONTROL * s, stroke = s})
+		baseline := chip.y + (chip.height - keycap.line_height) / 2 + keycap.ascent
+		if result := draw_text(&keycap, list, SEARCH_KEY_LABEL, chip.x + KEYCAP_PADDING * s, baseline,
+			   theme.muted, key.width); result != .Ok {return result}
 	}
 	clear := editor_clear_rect(p, l)
 	if clear.width == 0 {return .Ok}

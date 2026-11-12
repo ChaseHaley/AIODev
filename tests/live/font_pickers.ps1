@@ -29,7 +29,7 @@ function Open-Field([string]$Key) {
     Invoke-Aio command settings.open
     Invoke-Aio type $Key
     if ((Read-State)['settings.key'] -ne $Key) {throw "Could not select $Key"}
-    Invoke-Aio key Tab
+    Invoke-Aio key Tab Enter
 }
 function Shot([string]$Label) {
     & "$repo/tools/win32.ps1" -Name $name -Shot "$repo/build/verify/$name/$Label.png" -Frame | Out-Null

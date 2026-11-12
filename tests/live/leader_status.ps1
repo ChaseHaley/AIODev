@@ -83,7 +83,7 @@ try {
     Invoke-Aio command settings.open
     Invoke-Aio type 'input.leader'
     Assert-Value (Read-State)['settings.key'] 'input.leader' 'search selects the leader row'
-    Invoke-Aio key Tab
+    Invoke-Aio key Tab Enter
     Assert-Value (Read-State)['settings.capturing'] true 'leader field records keys'
     Invoke-Aio key Ctrl+B
     $state = Read-State

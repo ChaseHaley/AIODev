@@ -312,11 +312,64 @@ editor_text_field_selects_and_replaces :: proc(t: ^testing.T) {
 	testing.expect(t, !ui.editor_editing(&p))
 	testing.expect_value(t, ui.field_string(&p.value), "Mono")
 	testing.expect(t, ui.editor_select_key(&p, "cursor.style"))
+	// Tab focuses a list without opening it, and typing does not leave it for the search.
 	ui.editor_key(&p, key({key = .Tab}))
-	testing.expect_value(t, ui.editor_popup(&p), ui.Editor_Popup.Choice)
+	testing.expect(t, ui.editor_editing(&p))
+	testing.expect_value(t, ui.editor_popup(&p), ui.Editor_Popup.None)
 	ui.editor_text(&p, "gap")
-	testing.expect(t, !ui.editor_editing(&p))
+	testing.expect(t, ui.editor_editing(&p))
+	testing.expect_value(t, ui.field_string(&p.filter), "")
+	ui.editor_key(&p, key({key = .Space, text = " "}))
+	testing.expect_value(t, ui.editor_popup(&p), ui.Editor_Popup.Choice)
+	// Ctrl+F takes the keyboard to the search, even from an open list.
+	ui.editor_key(&p, key({key = .F, modifiers = {.Control}}))
+	testing.expect_value(t, ui.editor_focus(&p), ui.Editor_Focus.Search)
+	testing.expect_value(t, ui.editor_popup(&p), ui.Editor_Popup.None)
+	ui.editor_text(&p, "gap")
 	testing.expect_value(t, ui.field_string(&p.filter), "gap")
+}
+
+@(test)
+editor_tab_walks_the_page_like_a_browser :: proc(t: ^testing.T) {
+	p: ui.Editor
+	defer ui.editor_destroy(&p)
+	editor_fixture(t, &p)
+	testing.expect(t, ui.editor_select_key(&p, "pane.show_headers"))
+	before := ui.editor_row(&p).value
+	first := p.selected
+	// The search shows its Ctrl+F keycap only while the keyboard is elsewhere, beside its text.
+	l := page(&p)
+	testing.expect_value(t, ui.editor_search_key_rect(&p, l).width, 0)
+	// Landing on a switch focuses it without flipping it; the next Tab moves to the next row.
+	ui.editor_key(&p, key({key = .Tab}))
+	testing.expect_value(t, ui.editor_focus(&p), ui.Editor_Focus.Control)
+	testing.expect_value(t, ui.field_string(&p.value), before)
+	search_key := ui.editor_search_key_rect(&p, l)
+	testing.expect(t, search_key.width > 0)
+	testing.expect(t, search_key.x + search_key.width <= l.filter.x + l.filter.width)
+	testing.expect(t, !ui.editor_over_text(&p, l, search_key.x + search_key.width / 2, search_key.y + 2))
+	ui.editor_key(&p, key({key = .Tab}))
+	testing.expect(t, p.selected > first)
+	testing.expect_value(t, ui.editor_focus(&p), ui.Editor_Focus.Control)
+	ui.editor_key(&p, key({key = .Tab, modifiers = {.Shift}}))
+	testing.expect_value(t, p.selected, first)
+	testing.expect_value(t, ui.editor_focus(&p), ui.Editor_Focus.Control)
+	// Before the first row lies the search, past the last Reset to Defaults, and round again.
+	ui.editor_key(&p, key({key = .F, modifiers = {.Control}}))
+	ui.editor_key(&p, key({key = .Tab, modifiers = {.Shift}}))
+	testing.expect_value(t, ui.editor_focus(&p), ui.Editor_Focus.Reset_All)
+	ui.editor_key(&p, key({key = .Tab, modifiers = {.Shift}}))
+	last := len(p.items) - 1
+	for last >= 0 && p.items[last].row < 0 {last -= 1}
+	testing.expect_value(t, p.selected, last)
+	testing.expect(t, ui.editor_focus(&p) != ui.Editor_Focus.Search)
+	ui.editor_key(&p, key({key = .Tab}))
+	testing.expect_value(t, ui.editor_focus(&p), ui.Editor_Focus.Reset_All)
+	ui.editor_key(&p, key({key = .Tab}))
+	testing.expect_value(t, ui.editor_focus(&p), ui.Editor_Focus.Search)
+	ui.editor_key(&p, key({key = .Tab}))
+	testing.expect_value(t, p.selected, last)
+	testing.expect_value(t, ui.editor_focus(&p), ui.Editor_Focus.Control)
 }
 
 @(test)
@@ -455,17 +508,23 @@ editor_records_physical_key_positions :: proc(t: ^testing.T) {
 	editor_fixture(t, &p)
 	l := page(&p)
 	testing.expect(t, ui.editor_select_key(&p, "keys.pane.split_right"))
-	ui.editor_key(&p, key({key = .Tab, modifiers = {.Shift}}))
-	testing.expect_value(t, ui.editor_focus(&p), ui.Editor_Focus.Reset_All)
-	ui.editor_key(&p, key({key = .Tab, modifiers = {.Shift}}))
+	shortcut := p.selected
+	ui.editor_key(&p, key({key = .Tab}))
+	testing.expect_value(t, ui.editor_focus(&p), ui.Editor_Focus.Control)
+	ui.editor_key(&p, key({key = .Tab}))
 	testing.expect_value(t, ui.editor_focus(&p), ui.Editor_Focus.Positions)
 	ui.editor_key(&p, key({key = .Space, text = " "}))
 	testing.expect(t, p.capture.physical)
+	// Shift+Tab from the next row comes back to the switch, then to the field.
 	ui.editor_key(&p, key({key = .Tab}))
-	testing.expect_value(t, ui.editor_focus(&p), ui.Editor_Focus.Reset_All)
-	ui.editor_key(&p, key({key = .Tab}))
-	testing.expect_value(t, ui.editor_focus(&p), ui.Editor_Focus.Search)
-	ui.editor_key(&p, key({key = .Tab}))
+	testing.expect(t, p.selected != shortcut)
+	ui.editor_key(&p, key({key = .Tab, modifiers = {.Shift}}))
+	testing.expect_value(t, p.selected, shortcut)
+	testing.expect_value(t, ui.editor_focus(&p), ui.Editor_Focus.Positions)
+	ui.editor_key(&p, key({key = .Tab, modifiers = {.Shift}}))
+	testing.expect_value(t, ui.editor_focus(&p), ui.Editor_Focus.Control)
+	ui.editor_key(&p, key({key = .Enter}))
+	testing.expect_value(t, ui.editor_popup(&p), ui.Editor_Popup.Shortcuts)
 	ui.editor_key(&p, key({key = .Enter}))
 	testing.expect(t, ui.editor_capturing(&p))
 	ui.editor_key(&p, key({key = .Z, unshifted = 'y', modifiers = {.Control}}))

@@ -195,7 +195,7 @@ try {
     Invoke-Aio dpi 96
     Invoke-Aio key Esc
     Invoke-Aio type keys.tab.new
-    Invoke-Aio key Tab Enter Ctrl+Shift+P Enter
+    Invoke-Aio key Tab Enter Enter Ctrl+Shift+P Enter
     Invoke-Aio expect state settings.error=true
     Shot shortcut-conflict
     Invoke-Aio key Esc

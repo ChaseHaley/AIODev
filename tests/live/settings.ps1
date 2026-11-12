@@ -57,6 +57,9 @@ function Open-Profile-Directory {
 }
 
 function Capture-Keys([string[]] $Chords) {
+    # Tab only focuses the shortcut field; Enter opens it.
+    $state = Read-State
+    if ($state['settings.popup'] -ne 'Shortcuts' -and $state['settings.capturing'] -ne 'true') { Invoke-Aio key Enter }
     if ((Read-State)['settings.popup'] -eq 'Shortcuts') { Invoke-Aio key Enter }
     Assert-Value (Read-State)['settings.capturing'] 'true' 'shortcut field records keys'
     Invoke-Aio key @Chords
