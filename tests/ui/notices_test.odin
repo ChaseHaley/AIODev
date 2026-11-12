@@ -123,20 +123,49 @@ notices_fading_notice_drops_its_hover_and_armed_press :: proc(t: ^testing.T) {
 	ui.notices_put(&n, 0, .Info, "sticky", 0, true, now)
 	// Drawn once, so each close has a fade to run.
 	ui.notices_animate(&n, true, test_frame(now))
-	timed, sticky := n.items[0].id, n.items[1].id
+	timed := ui.Notice_Button{n.items[0].id, false}
+	sticky := ui.Notice_Button{n.items[1].id, false}
 	testing.expect(t, ui.notices_hover(&n, timed))
 	ui.notices_press(&n, timed)
 	testing.expect(t, ui.notices_expire(&n, true, time.tick_add(now, time.Second)))
-	if !testing.expect_value(t, n.items[1].id, timed) {return}
+	if !testing.expect_value(t, n.items[1].id, timed.id) {return}
 	testing.expect(t, ui.notice_fading(n.items[1]))
-	testing.expect_value(t, n.hover, u64(0))
+	testing.expect_value(t, n.hover, ui.Notice_Button{})
 	testing.expect(t, !ui.armed_is(n.armed, timed), "a press must not stay armed on a fading notice")
-	testing.expect(t, !ui.notices_release(&n, timed, true))
+	dismissed, _ := ui.notices_release(&n, timed, true)
+	testing.expect(t, !dismissed)
 	// Another notice's pointer state survives that fade.
 	testing.expect(t, ui.notices_hover(&n, sticky))
 	ui.notices_press(&n, sticky)
-	testing.expect(t, ui.notices_release(&n, sticky, true))
+	dismissed, _ = ui.notices_release(&n, sticky, true)
+	testing.expect(t, dismissed)
 	testing.expect_value(t, len(ui.notices_live(&n)), 0)
+}
+
+// An action button reports its notice's key once a press and release both land on it, and the notice
+// leaves; the close button only dismisses.
+@(test)
+notices_action_button_reports_its_key_and_dismisses :: proc(t: ^testing.T) {
+	n: ui.Notices
+	ui.notices_init(&n)
+	defer ui.notices_destroy(&n)
+	now := time.tick_now()
+	ui.notices_put(&n, 7, .Success, "Saved", time.Hour, false, now, "Undo", "Ctrl+Z")
+	ui.notices_put(&n, 9, .Success, "Saved", time.Hour, false, now, "Undo", "Ctrl+Z")
+	first, second := n.items[0].id, n.items[1].id
+	testing.expect(t, ui.notices_showing(&n, 7))
+	ui.notices_press(&n, {first, true})
+	dismissed, acted := ui.notices_release(&n, {first, false}, false)
+	testing.expect(t, !dismissed && acted == 0, "a release on another button fires nothing")
+	ui.notices_press(&n, {first, true})
+	dismissed, acted = ui.notices_release(&n, {first, true}, false)
+	testing.expect(t, dismissed)
+	testing.expect_value(t, acted, u32(7))
+	testing.expect(t, !ui.notices_showing(&n, 7))
+	ui.notices_press(&n, {second, false})
+	dismissed, acted = ui.notices_release(&n, {second, false}, false)
+	testing.expect(t, dismissed)
+	testing.expect_value(t, acted, u32(0))
 }
 
 @(test)

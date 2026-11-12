@@ -73,12 +73,21 @@ Notice_State :: union #no_nil {
 	Notice_Fading,
 }
 
+// `action`, static text, labels a button that acts on the notice, such as Undo; empty for none.
+// `action_key` names its keyboard chord beside it, also static.
 Notice :: struct {
-	id:    u64,
-	key:   u32,
-	kind:  Notice_Kind,
-	text:  string,
-	state: Notice_State,
+	id:                 u64,
+	key:                u32,
+	kind:               Notice_Kind,
+	text:               string,
+	action, action_key: string,
+	state:              Notice_State,
+}
+
+// A notice's button: its close button, or its action button when `action`.
+Notice_Button :: struct {
+	id:     u64,
+	action: bool,
 }
 
 Notices :: struct {
@@ -86,10 +95,10 @@ Notices :: struct {
 	// The live notices in the order they arrived, then the fading ones in the order they began to
 	// fade, so a notice leaves from the bottom of the stack. notice_fade keeps that order.
 	items:   [dynamic]Notice,
-	// The close button under the pointer and the one a press armed, in the window that holds the
-	// notices. A fade drops either when it names the fading notice.
-	hover:   u64,
-	armed:   Armed(u64),
+	// The button under the pointer and the one a press armed, in the window that holds the notices.
+	// A fade drops either when it names the fading notice.
+	hover:   Notice_Button,
+	armed:   Armed(Notice_Button),
 	// Scratch storage for the lines notice_layout wraps; only the layout's returned slice is read.
 	lines:   [dynamic]string,
 }
@@ -142,6 +151,7 @@ notices_live :: proc(n: ^Notices) -> []Notice {
 
 // Shows a notice. A nonzero key replaces the notice already shown under it; a zero duration is sticky.
 // `enabled` is the caller's animation policy, as for every notice transition; `now` dates the expiry.
+// A nonempty `action` adds a button whose release notices_release reports with the notice's key.
 notices_put :: proc(
 	n: ^Notices,
 	key: u32,
@@ -150,6 +160,8 @@ notices_put :: proc(
 	duration: time.Duration,
 	enabled: bool,
 	now: time.Tick,
+	action := "",
+	action_key := "",
 ) {
 	// The new notice's storage is in place before a keyed notice it replaces starts to fade, so a
 	// notice that cannot be stored leaves the current one showing.
@@ -166,10 +178,12 @@ notices_put :: proc(
 	}
 	n.next_id += 1
 	notice := Notice {
-		id   = n.next_id,
-		key  = key,
-		kind = kind,
-		text = owned,
+		id         = n.next_id,
+		key        = key,
+		kind       = kind,
+		text       = owned,
+		action     = action,
+		action_key = action_key,
 	}
 	entering: Notice_Entering
 	presence_open(&entering.presence, NOTICE_PRESENCE)
@@ -198,37 +212,55 @@ notices_dismiss :: proc(n: ^Notices, id: u64, enabled: bool) -> bool {
 	return false
 }
 
-// Reports whether the hovered close button changed, so the caller redraws only then.
-notices_hover :: proc(n: ^Notices, id: u64) -> bool {
-	if n.hover == id {return false}
-	n.hover = id
+// Whether a notice under `key` is still shown, so its action can still be taken.
+notices_showing :: proc(n: ^Notices, key: u32) -> bool {
+	for item in notices_live(n) {if item.key == key {return true}}
+	return false
+}
+
+// Reports whether the hovered button changed, so the caller redraws only then.
+notices_hover :: proc(n: ^Notices, button: Notice_Button) -> bool {
+	if n.hover == button {return false}
+	n.hover = button
 	return true
 }
 
-notices_press :: proc(n: ^Notices, id: u64) {
-	armed_press(&n.armed, id)
+notices_press :: proc(n: ^Notices, button: Notice_Button) {
+	armed_press(&n.armed, button)
 }
 
-// Dismisses the notice whose close button both the press and this release landed on.
-notices_release :: proc(n: ^Notices, id: u64, enabled: bool) -> (dismissed: bool) {
-	fired, ok := armed_release(&n.armed, id)
-	return ok && fired != 0 && notices_dismiss(n, fired, enabled)
+// Fires the button both the press and this release landed on. Either button dismisses its notice;
+// an action also returns the notice's key for the owner to act on.
+notices_release :: proc(n: ^Notices, button: Notice_Button, enabled: bool) -> (dismissed: bool, acted: u32) {
+	fired, ok := armed_release(&n.armed, button)
+	if !ok || fired.id == 0 {return}
+	if fired.action {
+		for item in notices_live(n) {if item.id == fired.id {acted = item.key}}
+	}
+	return notices_dismiss(n, fired.id, enabled), acted
 }
 
 notices_pointer_cancel :: proc(n: ^Notices) {
-	n.hover = 0
+	n.hover = {}
 	armed_cancel(&n.armed)
 }
 
+// The notice under a point, and which of its buttons, if any.
 Notice_Hit :: struct {
-	id: u64,
-	close, contains: bool,
+	id:                       u64,
+	close, action, contains: bool,
+}
+
+// The button a hit lands on, or none.
+notice_hit_button :: proc(hit: Notice_Hit) -> Notice_Button {
+	if !hit.close && !hit.action {return {}}
+	return {hit.id, hit.action}
 }
 
 // `lines` are every wrapped line of the text; the first `shown` fit the notice.
 @(private)
 Notice_Layout :: struct {
-	box, close:                    render.Rect,
+	box, close, action:            render.Rect,
 	content_width, heading_height: f32,
 	lines:                         []string,
 	shown:                         int,
@@ -243,6 +275,13 @@ notice_layout :: proc(
 	max_width := min(NOTICE_WIDTH * scale, max(0, width - 2 * NOTICE_MARGIN * scale))
 	leading := (4 + ICON_BUTTON + SPACE_2) * scale
 	trailing := (HEIGHT_COMPACT + SPACE_2) * scale
+	action_width: f32
+	if item.action != "" {
+		action_width = text_width(text, item.action) + 2 * CONTROL_INSET * scale
+		small := text_styled(text, .Detail)
+		trailing += action_width + SPACE_2 * scale
+		if item.action_key != "" {trailing += text_width(&small, item.action_key) + SPACE_2 * scale}
+	}
 	content_width := max(scale, max_width - 2 * padding - leading - trailing)
 	wrap(text, item.text, content_width, scratch)
 	lines := scratch[:]
@@ -257,7 +296,9 @@ notice_layout :: proc(
 	box := render.Rect{width - NOTICE_MARGIN * scale - box_width, bottom - box_height, box_width, box_height}
 	size := HEIGHT_COMPACT * scale
 	close := render.Rect{box.x + box.width - padding - size, box.y + padding, size, size}
-	return {box, close, content_width, heading_height, lines, shown}
+	action: render.Rect
+	if action_width > 0 {action = {close.x - SPACE_2 * scale - action_width, close.y, action_width, size}}
+	return {box, close, action, content_width, heading_height, lines, shown}
 }
 
 notices_hit :: proc(
@@ -269,11 +310,32 @@ notices_hit :: proc(
 		item := n.items[i]
 		l := notice_layout(item, text, width, bottom, scale, &n.lines)
 		rise := notice_fade_of(item, RISE_NOTICE * scale).rise
-		box, close := l.box, l.close
+		box, close, action := l.box, l.close, l.action
 		box.y += rise
 		close.y += rise
+		action.y += rise
 		if render.rect_contains(box, x, y) {
-			return {item.id, !notice_fading(item) && render.rect_contains(close, x, y), true}
+			live := !notice_fading(item)
+			on_close, on_action := render.rect_contains(close, x, y), render.rect_contains(action, x, y)
+			return {item.id, live && on_close, live && on_action, true}
+		}
+		bottom = l.box.y - SPACE_2 * scale
+		if bottom < NOTICE_MARGIN * scale {break}
+	}
+	return {}
+}
+
+// Where notice `id` draws its action button, or nothing when it has none or is not shown.
+notices_action_rect :: proc(n: ^Notices, text: ^Text, width, height, scale: f32, id: u64) -> render.Rect {
+	if text.fonts == nil || width <= 2 * NOTICE_MARGIN * scale {return {}}
+	bottom := height - NOTICE_MARGIN * scale
+	for i := len(n.items) - 1; i >= 0; i -= 1 {
+		item := n.items[i]
+		l := notice_layout(item, text, width, bottom, scale, &n.lines)
+		if item.id == id {
+			action := l.action
+			action.y += notice_fade_of(item, RISE_NOTICE * scale).rise
+			return action
 		}
 		bottom = l.box.y - SPACE_2 * scale
 		if bottom < NOTICE_MARGIN * scale {break}
@@ -335,10 +397,20 @@ notices_draw :: proc(
 		icon_y := box.y + padding + (l.heading_height - icon) / 2
 		badge := render.Rect{bar.x + bar.width + padding, icon_y, icon, icon}
 		icon_draw(list, symbol, badge, accent, ICON_BUTTON, scale)
-		if icon_button_draw(
-			list, theme, l.close, .Close, f32(int(hover == item.id)), f32(int(pressed == item.id)),
-			scale, pointer, radius = RADIUS_CONTROL,
-		) != .None {return .Ok}
+		closing := Notice_Button{item.id, false}
+		close_hover, close_press := f32(int(hover == closing)), f32(int(pressed == closing))
+		if icon_button_draw(list, theme, l.close, .Close, close_hover, close_press, scale, pointer,
+		                    radius = RADIUS_CONTROL) != .None {return .Ok}
+		if l.action.width > 0 {
+			if result := text_button_draw(list, text, theme, l.action, item.action, false, scale, pointer);
+			   result != .Ok {return result}
+			small := text_styled(text, .Detail)
+			key_x := l.action.x - SPACE_2 * scale - text_width(&small, item.action_key)
+			baseline := l.action.y + (l.action.height - small.line_height) / 2 + small.ascent
+			if result := draw_text(&small, list, item.action_key, key_x, baseline, theme.faint); result != .Ok {
+				return result
+			}
+		}
 		x := badge.x + icon + SPACE_2 * scale
 		if result := draw_text(
 			&strong,
@@ -373,8 +445,8 @@ notices_draw :: proc(
 @(private)
 notice_fade :: proc(n: ^Notices, index: int, enabled: bool) {
 	item := n.items[index]
-	if n.hover == item.id {n.hover = 0}
-	if armed_is(n.armed, item.id) {armed_cancel(&n.armed)}
+	if n.hover.id == item.id {n.hover = {}}
+	if armed_target(n.armed).id == item.id {armed_cancel(&n.armed)}
 	entering, is_entering := item.state.(Notice_Entering)
 	p := is_entering ? entering.presence : presence_shown(NOTICE_PRESENCE)
 	presence_close(&p)

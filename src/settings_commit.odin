@@ -13,6 +13,8 @@ import "core:strings"
 Settings_Edit :: union #no_nil {
 	// One key: a schema setting, a shortcut or a custom theme field.
 	Setting_Value,
+	Setting_Values,
+	Settings_Restore,
 	Profile_Field_Value,
 	settings.Profile_Mutation,
 	Opener_Field_Value,
@@ -24,6 +26,16 @@ Settings_Edit :: union #no_nil {
 
 Setting_Value :: struct {
 	key, value: string,
+}
+
+// Several keys saved as one revision, such as the shortcuts of a resolved conflict chain.
+Setting_Values :: struct {
+	values: []Setting_Value,
+}
+
+// The whole text of an earlier revision, put back as an undo puts it back.
+Settings_Restore :: struct {
+	source: string,
 }
 
 // One inline profile field, checked as the page checks typing. Hidden takes the file's value.
@@ -112,11 +124,13 @@ Settings_Status :: enum {
 }
 
 Settings_Result :: struct {
-	status:  Settings_Status,
+	status:             Settings_Status,
 	// Refused: why. Applied: a shortcut warning, or empty. Temporary.
-	message: string,
+	message:            string,
 	// The profile, link program or theme the change created, renamed to or selected. Temporary.
-	id:      string,
+	id:                 string,
+	// Applied: the file's text before and after the change. Temporary.
+	previous, revision: string,
 }
 
 // Which surface asked, which picks the wording of a failure.
@@ -263,7 +277,7 @@ settings_change :: proc(app: ^App, edit: Settings_Edit, base: Settings_Base) -> 
 	defer settings.diagnostics_destroy(&diagnostics)
 	if parse_error != nil {return {status = .Failed}}
 	result := built.result
-	if value, ok := edit.(Setting_Value); ok && settings.setting_affects_bindings(value.key) {
+	if settings_edit_affects_bindings(edit) {
 		problem, warning := settings_bindings_check(&loaded, app.settings_path)
 		if problem != "" {return {status = .Refused, message = problem}}
 		result.message = warning
@@ -283,7 +297,22 @@ settings_change :: proc(app: ^App, edit: Settings_Edit, base: Settings_Base) -> 
 	if _, reset := edit.(Factory_Reset); reset {publication = Publish_Reset{revision}}
 	settings_revision_apply(app, loaded, &diagnostics, nil, publication)
 	loaded = {}
+	result.previous, result.revision = previous, revision
 	return result
+}
+
+// Whether `edit` can change a shortcut or the leader, so its revision must pass the shortcut check.
+@(private)
+settings_edit_affects_bindings :: proc(edit: Settings_Edit) -> bool {
+	#partial switch e in edit {
+	case Setting_Value:
+		return settings.setting_affects_bindings(e.key)
+	case Setting_Values:
+		for value in e.values {if settings.setting_affects_bindings(value.key) {return true}}
+	case Settings_Restore:
+		return true
+	}
+	return false
 }
 
 // A built revision: owned `revision` when the result is Applied.
@@ -300,6 +329,12 @@ settings_edit_build :: proc(app: ^App, edit: Settings_Edit, source: string) -> (
 	switch e in edit {
 	case Setting_Value:
 		return settings_text_edit(source, e.key, e.value)
+	case Setting_Values:
+		return settings_values_edit(source, e.values)
+	case Settings_Restore:
+		restored, err := strings.clone(e.source)
+		if err != nil {return {result = {status = .Unprepared}}}
+		return {revision = restored}
 	case Factory_Reset:
 		defaults, err := settings.default_text()
 		if err != nil {return {result = {status = .Unprepared}}}
@@ -340,6 +375,20 @@ settings_text_edit :: proc(source, key, value: string) -> Settings_Built {
 		return refused
 	}
 	return {revision = updated}
+}
+
+// Each value in turn over the revision the one before it made; the first refusal refuses them all.
+@(private, require_results)
+settings_values_edit :: proc(source: string, values: []Setting_Value) -> Settings_Built {
+	revision, err := strings.clone(source)
+	if err != nil {return {result = {status = .Unprepared}}}
+	for value in values {
+		step := settings_text_edit(revision, value.key, value.value)
+		delete(revision)
+		if step.result.status != .Applied {return step}
+		revision = step.revision
+	}
+	return {revision = revision}
 }
 
 // Empty names and commands, duplicate names and a command line whose executable cannot be found are

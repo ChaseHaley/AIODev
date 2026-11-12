@@ -217,10 +217,10 @@ settings_pointer_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: 
 		return
 	}
 	l := settings_layout_for(w, pane)
-	changed := ui.editor_hover(&w.editor, l, x, y)
+	changed := ui.editor_hover(&w.editor, l, x, y, &w.ui_text)
 	if .Left in e.buttons && ui.editor_drag(&w.editor, l, &w.ui_text, x, y) {changed = true}
 	if changed {w.dirty = true}
-	pointer_set(app, w, ui.editor_pointer(&w.editor, l, x, y))
+	pointer_set(app, w, ui.editor_pointer(&w.editor, l, x, y, &w.ui_text))
 }
 
 @(private)

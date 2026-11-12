@@ -46,12 +46,16 @@ try {
 
     Invoke-Aio key Ctrl+Enter Enter Ctrl+C | Out-Null
     Invoke-Aio capture --out (Join-Path $repo 'build/palette-shortcut-capture.png') | Out-Null
-    # Ctrl+Shift+C belongs to Copy; a conflict must leave the file unchanged and capture open.
+    # Ctrl+Shift+C belongs to Copy: recording names it, and Enter opens the conflict chain.
     $before = [IO.File]::ReadAllText($path)
-    Invoke-Aio key Ctrl+Shift+C Enter | Out-Null
-    Assert-Value (Read-State)['palette.edit'] 'Shortcut' 'conflicting shortcut remains editable'
+    Invoke-Aio key Ctrl+Shift+C | Out-Null
+    Assert-Value (Read-State)['palette.used_by'] 'Used by Copy' 'recording names the owner'
+    Invoke-Aio key Enter | Out-Null
+    Assert-Value (Read-State)['palette.edit'] 'Chain' 'conflicting shortcut opens the chain'
     Assert-Value ([IO.File]::ReadAllText($path)) $before 'conflict preserves the settings file'
-    Invoke-Aio key Ctrl+Alt+F9 Enter | Out-Null
+    Invoke-Aio key Esc | Out-Null
+    Assert-Value (Read-State)['palette.edit'] 'None' 'Escape drops the chain'
+    Invoke-Aio key Ctrl+Enter Enter Ctrl+Alt+F9 Enter | Out-Null
     Assert-Value (Read-State)['palette.value'] 'Ctrl+Alt+F9' 'shortcut saves and applies live'
     Assert-Value (Read-State)['palette.edit'] 'None' 'saving ends capture'
     Assert-Value (Read-State)['settings.open'] 'false' 'editing never opens Settings'

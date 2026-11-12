@@ -418,6 +418,9 @@ Editor :: struct {
 	hover_clear:                                                       bool,
 	// The shortcut field's capture, alternatives list and key-positions choice.
 	capture:                                                           Shortcut_Capture,
+	// A conflict chain the page shows instead of its rows, and where the page returns once it ends.
+	chain:                                                             Shortcut_Chain,
+	chain_view:                                                        Editor_Chain_View,
 	mode:                                                              Editor_Mode,
 	hover_item, hover_reset, hover_outline:                            int,
 	choice_list:                                                       Choice_List,
@@ -460,6 +463,8 @@ Editor_Outcome :: enum {
 	// The page owner performs the request for a link program: remove or reorder.
 	Opener_Action,
 	Font_Filter,
+	// A conflict chain resolved: the owner saves editor_chain_changes as one revision.
+	Shortcut_Chain,
 }
 
 // A field the user typed into and then left: its row's key and the typed text. Owned.
@@ -558,6 +563,8 @@ editor_destroy :: proc(p: ^Editor) {
 	delete(p.theme)
 	editor_request_destroy(&p.request)
 	editor_kept_destroy(&p.kept)
+	shortcut_chain_destroy(&p.chain)
+	delete(p.chain_view.key)
 	if drag, dragging := p.order.(Order_Dragging); dragging {order_block_free(drag.block)}
 	profile_positions_clear(&p.profile_positions)
 	delete(p.profile_positions)
@@ -645,7 +652,9 @@ editor_adopt :: proc(p, next: ^Editor, adoption: Editor_Adoption) -> Editor_Adop
 	}
 	field_set(&next.filter, field_string(&p.filter))
 	editor_filter(next)
-	row := editor_row(p)
+	// A conflict chain is the page's whole draft: it rides along as it is, with the view it returns to.
+	chained := editor_chained(p)
+	row := chained ? nil : editor_row(p)
 	selected := row != nil && editor_reveal(next, Reveal_Row{row.key})
 	// Program drafts already rode along above; only a draft on a selected row can be orphaned.
 	draft := preserve_draft && row != nil && editor_draft(p)
@@ -657,6 +666,12 @@ editor_adopt :: proc(p, next: ^Editor, adoption: Editor_Adoption) -> Editor_Adop
 	next.fit_layout, next.visible_rows = p.fit_layout, p.visible_rows
 	next.scroll = clamp(p.scroll, 0, max(0, len(next.items) - max(1, p.visible_rows)))
 	if selected {editor_carry(next, p, draft)}
+	if chained {
+		next.chain, p.chain = p.chain, {}
+		next.chain_view, p.chain_view = p.chain_view, {}
+		editor_rebuild(next)
+		next.scroll = clamp(p.scroll, 0, max_scroll(next))
+	}
 	// A field left mid-gesture waits on the page to be saved; the rebuilt page keeps it.
 	next.kept, p.kept = p.kept, {}
 	editor_destroy(p)
@@ -938,7 +953,9 @@ editor_row :: proc(p: ^Editor) -> ^Editor_Row {
 	return &p.rows[p.items[p.selected].row]
 }
 
+// Whether a shortcut field, or a conflict chain's chip, records every key.
 editor_capturing :: proc(p: ^Editor) -> bool {
+	if editor_chained(p) {return shortcut_chain_recording(&p.chain)}
 	_, shortcut := p.mode.(Editor_Shortcut)
 	return shortcut && shortcut_capture_recording(&p.capture)
 }
@@ -1242,8 +1259,13 @@ row_available :: proc(p: ^Editor, row: Editor_Row) -> bool {
 	return row.profile == "" || row.profile == p.expanded
 }
 
-// Rebuilds the visible lines, keeping the current selection when it stays visible.
+// Rebuilds the visible lines, keeping the current selection when it stays visible. A conflict chain
+// shows only its own rows.
 editor_rebuild :: proc(p: ^Editor) {
+	if editor_chained(p) {
+		editor_chain_items(p)
+		return
+	}
 	selected := Editor_Item{-1, -1, 0}
 	if p.selected >= 0 && p.selected < len(p.items) {selected = p.items[p.selected]}
 	clear(&p.items)
@@ -1746,7 +1768,7 @@ editor_wheel :: proc(p: ^Editor, l: Editor_Layout, x, y: f32, rows: int) {
 		editor_motion_wheel(p, rows)
 		return
 	}
-	if render.rect_contains(l.outline, x, y) {
+	if render.rect_contains(l.outline, x, y) && !editor_chained(p) {
 		p.outline_scroll = clamp(
 			p.outline_scroll - rows,
 			0,
@@ -2082,8 +2104,10 @@ popup_key :: proc(p: ^Editor, row: ^Editor_Row, e: input.Key_Event) -> (Editor_O
 }
 
 // Takes the raw key event: capture needs the physical key, and navigation uses the layout's key.
+// Enter on a recorded chord another command holds opens a conflict chain instead of saving it.
 editor_key :: proc(p: ^Editor, raw: input.Key_Event) -> Editor_Outcome {
 	if !raw.pressed {return .None}
+	if editor_chained(p) {return editor_chain_result(p, shortcut_chain_key(&p.chain, raw))}
 	if profile_menu_shown(p) {
 		switch menu_key(&p.profile_menu, raw) {
 		case .Chosen: return editor_profile_menu_choose(p)
@@ -2097,6 +2121,11 @@ editor_key :: proc(p: ^Editor, raw: input.Key_Event) -> Editor_Outcome {
 	if _, shortcut := p.mode.(Editor_Shortcut); shortcut && row != nil {
 		visible := shortcut_capture_popup_rows(row.value, p.fit_layout.page, p.fit_layout.scale)
 		outcome := shortcut_capture_key(&p.capture, &p.value, row.value, row.shortcut_mode, raw, visible)
+		if outcome == .Save && shortcut_capture_used_by(&p.capture) != "" {
+			editor_chain_open(p, row)
+			return .Changed
+		}
+		if outcome == .Hinted || outcome == .Changed {editor_shortcut_check(p, row)}
 		return shortcut_outcome(p, outcome)
 	}
 	e := raw
@@ -2243,7 +2272,7 @@ editor_key :: proc(p: ^Editor, raw: input.Key_Event) -> Editor_Outcome {
 }
 
 editor_text :: proc(p: ^Editor, text: string) {
-	if editor_capturing(p) {return}
+	if editor_capturing(p) || editor_chained(p) {return}
 	#partial switch _ in p.mode {
 	case Editor_Positions, Editor_Reset_All:
 		return
@@ -2279,6 +2308,7 @@ editor_paste :: proc(p: ^Editor, text: string) {
 
 // The selected text of the focused field, for copying.
 editor_selection :: proc(p: ^Editor) -> string {
+	if editor_chained(p) {return ""}
 	if editor_popup(p) == .Choice && choice_searchable(editor_row(p)) {
 		return field_selected_text(&p.choice_search)
 	}
@@ -2643,6 +2673,7 @@ editor_press :: proc(
 ) -> Editor_Outcome {
 	s := l.scale
 	p.profile_menu.bounds = l.page
+	if editor_chained(p) {return editor_chain_press(p, l, text, x, y)}
 	if profile_menu_shown(p) {
 		hit := menu_hit(&p.profile_menu, x, y, l.page.x + l.page.width, l.page.y + l.page.height, s)
 		if hit >= 0 {
@@ -2972,8 +3003,10 @@ order_drop :: proc(p: ^Editor) -> Editor_Outcome {
 	return .None
 }
 
-// Hover state for row highlights and reset buttons; returns whether the page must redraw.
-editor_hover :: proc(p: ^Editor, l: Editor_Layout, x, y: f32) -> bool {
+// Hover state for row highlights and reset buttons; returns whether the page must redraw. `text`
+// measures a conflict chain's chips.
+editor_hover :: proc(p: ^Editor, l: Editor_Layout, x, y: f32, text: ^Text = nil) -> bool {
+	if editor_chained(p) {return editor_chain_hover(p, l, text, x, y)}
 	if profile_menu_shown(p) {
 		hit := menu_hit(&p.profile_menu, x, y, l.page.x + l.page.width, l.page.y + l.page.height, l.scale)
 		if hit < 0 || hit == menu_selected(&p.profile_menu) {return false}
@@ -3069,12 +3102,13 @@ editor_hover_clear :: proc(p: ^Editor) -> (changed: bool) {
 	p.hover_item, p.hover_reset, p.hover_outline, p.hover_clear = -1, -1, -1, false
 	p.popup_bar_hover = false
 	p.hover_profile_item, p.hover_profile_control = -1, .Radio
+	changed = shortcut_chain_hover(&p.chain, {}) || changed
 	return
 }
 
 // Whether the pointer is over editable text, which shows a text cursor.
 editor_over_text :: proc(p: ^Editor, l: Editor_Layout, x, y: f32) -> bool {
-	if profile_menu_shown(p) {return false}
+	if profile_menu_shown(p) || editor_chained(p) {return false}
 	if render.rect_contains(editor_popup_rect(p, l), x, y) {return false}
 	if render.rect_contains(filter_text_rect(p, l), x, y) {return true}
 	if !render.rect_contains(l.list, x, y) {return false}
@@ -3084,8 +3118,10 @@ editor_over_text :: proc(p: ^Editor, l: Editor_Layout, x, y: f32) -> bool {
 	return text_kind(kind) && render.rect_contains(editor_row_parts(p, l, index).field, x, y)
 }
 
-// The pointer for the page: text over editable text, a hand over anything a click changes.
-editor_pointer :: proc(p: ^Editor, l: Editor_Layout, x, y: f32) -> platform.Cursor_Shape {
+// The pointer for the page: text over editable text, a hand over anything a click changes. `text`
+// measures a conflict chain's chips.
+editor_pointer :: proc(p: ^Editor, l: Editor_Layout, x, y: f32, text: ^Text = nil) -> platform.Cursor_Shape {
+	if editor_chained(p) {return editor_chain_pointer(p, l, text, x, y) ? .Hand : .Arrow}
 	if profile_menu_shown(p) {return .Hand}
 	s := l.scale
 	if popup := editor_popup_rect(p, l); render.rect_contains(popup, x, y) {
@@ -3529,8 +3565,10 @@ control_draw :: proc(
 		)
 		if selected && editor_popup(p) == .Color {focus_ring_draw(list, parts.swatch, theme, scale)}
 	case .Shortcut:
+		capturing := selected && editor_capturing(p)
+		clash := capturing && shortcut_capture_used_by(&p.capture) != ""
 		return shortcut_field_draw(list, text, theme, parts, shortcut_summary(value), {
-			capturing = selected && editor_capturing(p), focused = focused,
+			capturing = capturing, focused = focused, clash = clash,
 			positions_focused = selected && editor_focus(p) == .Positions, physical = p.capture.physical,
 			empty_label = row.shortcut_mode == .Alternatives ? "Add shortcut" : "None",
 		}, page, scale)
@@ -3846,6 +3884,7 @@ editor_draw :: proc(
 	// The summary shares the title's baseline.
 	header_baseline := l.page.y + HEADER_CENTER * s - heading.line_height / 2 + heading.ascent
 	if r := draw_text(&heading, list, "Settings", x, header_baseline, theme.text); r != .Ok {return r}
+	if editor_chained(p) {return editor_chain_draw(p, l, list, text, theme, pointer)}
 	status := p.message
 	matches := 0
 	for item in p.items {matches += item.count}
@@ -4030,6 +4069,14 @@ editor_draw :: proc(
 		modified := row.value != row.default_value
 		if reset_button_draw(list, theme, parts.reset, modified, index == p.hover_reset, selected, pointer, s) !=
 		   .None {return .Ok}
+	}
+	// The line under a recording field is drawn over the next row's top margin, after every row.
+	if row := editor_row(p); row != nil && row.kind == .Shortcut && editor_capturing(p) &&
+	   p.selected >= p.scroll && p.selected < p.scroll + l.rows {
+		field := editor_row_parts(p, l, p.selected).field
+		line := shortcut_capture_used_by(&p.capture)
+		if result := used_by_draw(list, text, theme, line, field.x + field.width, field.y + field.height);
+		   result != .Ok {return result}
 	}
 	if profile_menu_shown(p) {
 		return menu_draw(&p.profile_menu, list, text, theme,

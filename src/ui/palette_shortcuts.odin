@@ -76,14 +76,26 @@ palette_binding_saved :: proc(p: ^Palette, saved: bool) {
 }
 
 // The row stays open while its capture records, lists alternatives, or leaves the keyboard on the
-// Key positions switch, which takes keys as on the Settings page.
+// Key positions switch, which takes keys as on the Settings page. Enter on a recorded chord another
+// command holds opens a conflict chain instead of saving it.
 @(private)
-palette_binding_key :: proc(p: ^Palette, binding: ^Shortcut_Edit, raw: input.Key_Event) -> Outcome {
+palette_binding_key :: proc(
+	p: ^Palette,
+	registry: ^commands.Registry,
+	binding: ^Shortcut_Edit,
+	raw: input.Key_Event,
+) -> Outcome {
 	c := &binding.capture
 	if c.state != .Idle {
 		visible := shortcut_capture_popup_rows(binding.saved, p.fit_page, p.fit_scale)
-		return palette_binding_outcome(p, binding, shortcut_capture_key(c, &binding.draft, binding.saved,
-		                               .Alternatives, raw, visible))
+		outcome := shortcut_capture_key(c, &binding.draft, binding.saved, .Alternatives, raw, visible)
+		if outcome == .Save && shortcut_capture_used_by(c) != "" {
+			return palette_chain_open(p, registry, binding)
+		}
+		if outcome == .Hinted || outcome == .Changed {
+			shortcut_capture_check(c, palette_shortcut_book(registry), binding.key)
+		}
+		return palette_binding_outcome(p, binding, outcome)
 	}
 	e := raw
 	e.key = commands.logical_key(raw.key, raw.unshifted)
@@ -164,8 +176,10 @@ palette_binding_draw :: proc(
 	if binding, open := &p.edit.(Shortcut_Edit); open && binding.result == index {
 		c := &binding.capture
 		if c.state == .Alternatives {parts.positions = {}}
+		recording := shortcut_capture_recording(c)
 		state := Shortcut_Field_State {
-			capturing = shortcut_capture_recording(c), focused = c.state != .Idle,
+			capturing = recording, focused = c.state != .Idle,
+			clash = recording && shortcut_capture_used_by(c) != "",
 			positions_focused = c.state == .Idle, physical = c.physical, empty_label = "Add shortcut",
 		}
 		summary := shortcut_summary(field_string(&binding.draft))
