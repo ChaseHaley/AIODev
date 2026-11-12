@@ -148,7 +148,7 @@ confirmation_both_subjects_cancel_outside_release_capture_and_focus :: proc(t: ^
 		state.animations = false
 		app.update_motion(state)
 		testing.expect(t, app.confirmation_shown(w) == nil)
-		testing.expect(t, state.settings.pane.confirm_shell_switch)
+		testing.expect(t, .Shell_Switch in state.settings.interface.confirm)
 	}
 }
 
@@ -166,10 +166,11 @@ confirmation_accept_keeps_swap_identity_and_retires_last_tab_window :: proc(t: ^
 	entry := app.focused_session(state, w)
 	testing.expect_value(t, entry.id, id)
 	testing.expect_value(t, entry.profile_id, "alternate")
-	testing.expect(t, !state.settings.pane.confirm_shell_switch)
+	prompts := state.settings.interface.confirm
+	testing.expect(t, .Shell_Switch not_in prompts && .Close_Split_Tab in prompts && .Multiline_Paste in prompts)
 	data, err := os.read_entire_file(f.path, context.temp_allocator)
 	testing.expect_value(t, err, nil)
-	testing.expect(t, strings.contains(string(data), "pane.confirm_shell_switch = false"))
+	testing.expect(t, strings.contains(string(data), "interface.confirm = close_split_tab, multiline_paste"))
 	app.update_motion(state)
 	app.pane_split(state, w, .Right)
 	app.tab_close_request(state, w, 0)

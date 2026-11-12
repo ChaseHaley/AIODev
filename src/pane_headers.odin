@@ -255,7 +255,9 @@ pane_header_draw :: proc(
 	if result != .Ok {return result}
 	status: ui.Status_Mark
 	status_text: string
-	if entry != nil && app.settings.status.pane_headers {status, status_text = pane_status_line(app, entry)}
+	if entry != nil && .Pane_Headers in app.settings.status.surfaces {
+		status, status_text = pane_status_line(app, entry)
+	}
 	r := pane.rect
 	result = ui.header_draw(
 		&w.list,

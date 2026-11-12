@@ -34,7 +34,7 @@ function Await-Prompt([string] $Text) {
 $directory = Join-Path $repo "build/verify/$name-work"
 New-Item -ItemType Directory -Force $directory | Out-Null
 $settings = Join-Path $repo "build/verify/$name-settings.ini"
-Set-Content -LiteralPath $settings -Value "cursor.blink = false`ntab.confirm_close = false"
+Set-Content -LiteralPath $settings -Value "cursor.blink = false`ninterface.confirm = shell_switch, multiline_paste"
 
 Invoke-Aio launch --fresh --settings $settings | Out-Null
 try {

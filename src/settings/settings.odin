@@ -74,18 +74,44 @@ Input_Settings :: struct {
 Interface_Settings :: struct {
 	font_family:                      string,
 	font_size, hover_lift, hover_gloss: f64,
+	confirm:                          Confirm_Prompts,
+}
+// What Confirm Before asks about.
+Confirm_Prompt :: enum u8 {
+	Close_Split_Tab,
+	Shell_Switch,
+	Multiline_Paste,
+}
+Confirm_Prompts :: bit_set[Confirm_Prompt;u32]
+// Saved names; bit i of a saved set is Confirm_Prompt(i).
+CONFIRM_PROMPT_NAME :: [Confirm_Prompt]string {
+	.Close_Split_Tab = "close_split_tab",
+	.Shell_Switch    = "shell_switch",
+	.Multiline_Paste = "multiline_paste",
+}
+CONFIRM_PROMPT_LABEL :: [Confirm_Prompt]string {
+	.Close_Split_Tab = "Closing Split Tabs",
+	.Shell_Switch    = "Switching Pane Shells",
+	.Multiline_Paste = "Multiline Paste",
+}
+#assert(len(Confirm_Prompt) == 3)
+CONFIRM_PROMPT_NAMES :: []string {
+	CONFIRM_PROMPT_NAME[Confirm_Prompt(0)],
+	CONFIRM_PROMPT_NAME[Confirm_Prompt(1)],
+	CONFIRM_PROMPT_NAME[Confirm_Prompt(2)],
+}
+CONFIRM_PROMPT_LABELS :: []string {
+	CONFIRM_PROMPT_LABEL[Confirm_Prompt(0)],
+	CONFIRM_PROMPT_LABEL[Confirm_Prompt(1)],
+	CONFIRM_PROMPT_LABEL[Confirm_Prompt(2)],
 }
 Pane_Settings :: struct {
 	gap, corner_radius:            int,
 	show_headers:                  bool,
 	markdown_floating:             bool,
-	confirm_shell_switch:          bool,
 	resume_agents:                 bool,
 	minimum_columns, minimum_rows: int,
 	focus_border, unfocused_dim:   int,
-}
-Tab_Settings :: struct {
-	confirm_close: bool,
 }
 Tabs_Orientation :: enum int {
 	Vertical,
@@ -317,11 +343,115 @@ STATUS_CHANNEL_LABELS :: []string {
 	STATUS_CHANNEL_LABEL[Status_Channel(3)],
 	STATUS_CHANNEL_LABEL[Status_Channel(4)],
 }
+// Where Show Status On draws program status.
+Status_Surface :: enum u8 {
+	Tabs,
+	Active_Tab,
+	Pane_Headers,
+	Workspace_Picker,
+}
+Status_Surfaces :: bit_set[Status_Surface;u32]
+// Saved names; bit i of a saved set is Status_Surface(i).
+STATUS_SURFACE_NAME :: [Status_Surface]string {
+	.Tabs             = "tabs",
+	.Active_Tab       = "active_tab",
+	.Pane_Headers     = "pane_headers",
+	.Workspace_Picker = "workspace_picker",
+}
+STATUS_SURFACE_LABEL :: [Status_Surface]string {
+	.Tabs             = "Tabs",
+	.Active_Tab       = "Active Tab",
+	.Pane_Headers     = "Pane Headers",
+	.Workspace_Picker = "Workspace Picker",
+}
+#assert(len(Status_Surface) == 4)
+STATUS_SURFACE_NAMES :: []string {
+	STATUS_SURFACE_NAME[Status_Surface(0)],
+	STATUS_SURFACE_NAME[Status_Surface(1)],
+	STATUS_SURFACE_NAME[Status_Surface(2)],
+	STATUS_SURFACE_NAME[Status_Surface(3)],
+}
+STATUS_SURFACE_LABELS :: []string {
+	STATUS_SURFACE_LABEL[Status_Surface(0)],
+	STATUS_SURFACE_LABEL[Status_Surface(1)],
+	STATUS_SURFACE_LABEL[Status_Surface(2)],
+	STATUS_SURFACE_LABEL[Status_Surface(3)],
+}
+// The program states Show Statuses lists.
+Status_Show_State :: enum u8 {
+	Working,
+	Blocked,
+	Done,
+	Error,
+	Idle,
+}
+Status_Show_States :: bit_set[Status_Show_State;u32]
+// Saved names; bit i of a saved set is Status_Show_State(i).
+STATUS_SHOW_STATE_NAME :: [Status_Show_State]string {
+	.Working = "working",
+	.Blocked = "blocked",
+	.Done    = "done",
+	.Error   = "error",
+	.Idle    = "idle",
+}
+STATUS_SHOW_STATE_LABEL :: [Status_Show_State]string {
+	.Working = "Working",
+	.Blocked = "Blocked",
+	.Done    = "Done",
+	.Error   = "Error",
+	.Idle    = "Idle",
+}
+#assert(len(Status_Show_State) == 5)
+STATUS_SHOW_STATE_NAMES :: []string {
+	STATUS_SHOW_STATE_NAME[Status_Show_State(0)],
+	STATUS_SHOW_STATE_NAME[Status_Show_State(1)],
+	STATUS_SHOW_STATE_NAME[Status_Show_State(2)],
+	STATUS_SHOW_STATE_NAME[Status_Show_State(3)],
+	STATUS_SHOW_STATE_NAME[Status_Show_State(4)],
+}
+STATUS_SHOW_STATE_LABELS :: []string {
+	STATUS_SHOW_STATE_LABEL[Status_Show_State(0)],
+	STATUS_SHOW_STATE_LABEL[Status_Show_State(1)],
+	STATUS_SHOW_STATE_LABEL[Status_Show_State(2)],
+	STATUS_SHOW_STATE_LABEL[Status_Show_State(3)],
+	STATUS_SHOW_STATE_LABEL[Status_Show_State(4)],
+}
+// The program states Taskbar Progress shows; none turns it off.
+Status_Taskbar_State :: enum u8 {
+	Working,
+	Blocked,
+	Error,
+}
+Status_Taskbar_States :: bit_set[Status_Taskbar_State;u32]
+// Saved names; bit i of a saved set is Status_Taskbar_State(i).
+STATUS_TASKBAR_STATE_NAME :: [Status_Taskbar_State]string {
+	.Working = "working",
+	.Blocked = "blocked",
+	.Error   = "error",
+}
+STATUS_TASKBAR_STATE_LABEL :: [Status_Taskbar_State]string {
+	.Working = "Working",
+	.Blocked = "Blocked",
+	.Error   = "Error",
+}
+#assert(len(Status_Taskbar_State) == 3)
+STATUS_TASKBAR_STATE_NAMES :: []string {
+	STATUS_TASKBAR_STATE_NAME[Status_Taskbar_State(0)],
+	STATUS_TASKBAR_STATE_NAME[Status_Taskbar_State(1)],
+	STATUS_TASKBAR_STATE_NAME[Status_Taskbar_State(2)],
+}
+STATUS_TASKBAR_STATE_LABELS :: []string {
+	STATUS_TASKBAR_STATE_LABEL[Status_Taskbar_State(0)],
+	STATUS_TASKBAR_STATE_LABEL[Status_Taskbar_State(1)],
+	STATUS_TASKBAR_STATE_LABEL[Status_Taskbar_State(2)],
+}
 // Program status (OSC 7501). Each surface and state can be turned off on its own; `enabled` turns
 // the whole protocol off, so programs see the terminal as unsupported.
 Status_Settings :: struct {
 	notify_idle, notify_working, notify_blocked, notify_error, notify_done: Status_Channels,
-	taskbar_working, taskbar_blocked, taskbar_error: bool,
+	surfaces: Status_Surfaces,
+	show:     Status_Show_States,
+	taskbar:  Status_Taskbar_States,
 
 	panel_side: Status_Panel_Side,
 	panel_view: Status_Panel_View,
@@ -329,13 +459,10 @@ Status_Settings :: struct {
 	row_name:   Status_Row_Name,
 	row_terms:  Status_Row_Terms,
 	panel_width, panel_height: int,
-	enabled, tab_indicators, active_tab_indicator, pane_headers, workspace_picker: bool,
-	inbox, panel, taskbar:                                                        bool,
-	show_idle, show_working, show_blocked, show_done, show_error:                 bool,
-	notify_focused:                                                               bool,
-	scope:                                                                        Status_Scope,
-	keep_finished:                                                                Status_Keep,
-	ignore_apps:                                                                  string,
+	enabled, inbox, panel, notify_focused: bool,
+	scope:                                 Status_Scope,
+	keep_finished:                         Status_Keep,
+	ignore_apps:                           string,
 }
 Window_Settings :: struct {
 	columns, rows, padding: int,
@@ -348,12 +475,39 @@ Control_Settings :: struct {
 Scrollback_Settings :: struct {
 	lines: int,
 }
+// What the find bar starts with when it opens.
+Find_Reopen :: enum int {
+	Empty,
+	Last,
+	Last_Selected,
+}
+FIND_REOPEN_NAME :: [Find_Reopen]string {
+	.Empty         = "empty",
+	.Last          = "last",
+	.Last_Selected = "last_selected",
+}
+FIND_REOPEN_LABEL :: [Find_Reopen]string {
+	.Empty         = "Empty",
+	.Last          = "Last Search",
+	.Last_Selected = "Last Search Selected",
+}
+#assert(len(Find_Reopen) == 3)
+FIND_REOPEN_NAMES :: []string {
+	FIND_REOPEN_NAME[Find_Reopen(0)],
+	FIND_REOPEN_NAME[Find_Reopen(1)],
+	FIND_REOPEN_NAME[Find_Reopen(2)],
+}
+FIND_REOPEN_LABELS :: []string {
+	FIND_REOPEN_LABEL[Find_Reopen(0)],
+	FIND_REOPEN_LABEL[Find_Reopen(1)],
+	FIND_REOPEN_LABEL[Find_Reopen(2)],
+}
 Terminal_Settings :: struct {
-	copy_on_select, confirm_multiline_paste: bool,
-	find_keep_query, find_select_query:      bool,
-	minimum_contrast:                        f64,
-	scroll_page_length:                      f64,
-	scrollbar:                               bool,
+	copy_on_select:     bool,
+	find_reopen:        Find_Reopen,
+	minimum_contrast:   f64,
+	scroll_page_length: f64,
+	scrollbar:          bool,
 }
 Cursor_Settings :: struct {
 	style:              Cursor_Style,
@@ -391,7 +545,6 @@ Settings :: struct {
 	active_theme:    Theme,
 	pane:            Pane_Settings,
 	motion:          Motion_Settings,
-	tab:             Tab_Settings,
 	tabs:            Tabs_Settings,
 	status:          Status_Settings,
 	control:         Control_Settings,
@@ -619,14 +772,6 @@ SCHEMA :: [?]Schema_Entry {
 			"so the panes already there keep their size.",
 	},
 	{
-		key = "pane.confirm_shell_switch",
-		title = "Confirm Switching Pane Shells",
-		kind = .Bool,
-		offset = offset_of(Settings, pane) + offset_of(Pane_Settings, confirm_shell_switch),
-		default_value = "true",
-		description = "Ask before a running pane's shell is replaced, losing its session.",
-	},
-	{
 		key = "pane.resume_agents",
 		title = "Resume Agent Sessions",
 		kind = .Bool,
@@ -790,14 +935,6 @@ SCHEMA :: [?]Schema_Entry {
 		description = MOTION_CONTEXT_DESCRIPTION[Motion_Context.Chrome] + MOTION_CHILD_HINT,
 	},
 	{
-		key = "tab.confirm_close",
-		title = "Confirm Closing Split Tabs",
-		kind = .Bool,
-		offset = offset_of(Settings, tab) + offset_of(Tab_Settings, confirm_close),
-		default_value = "true",
-		description = "Ask before closing a tab that has more than one pane.",
-	},
-	{
 		key = "tabs.orientation",
 		title = "Tab Orientation",
 		kind = .Enum,
@@ -846,37 +983,17 @@ SCHEMA :: [?]Schema_Entry {
 			"programs. Off drops reports and tells programs the terminal does not support them.",
 	},
 	{
-		key = "status.tab_indicators",
-		title = "Status on Tabs",
-		kind = .Bool,
-		offset = offset_of(Settings, status) + offset_of(Status_Settings, tab_indicators),
-		default_value = "true",
-		description = "Show a spinner, progress bar or symbol on tabs whose programs are working, blocked, " +
-			"finished or failed.",
-	},
-	{
-		key = "status.active_tab_indicator",
-		title = "Status on the Active Tab",
-		kind = .Bool,
-		offset = offset_of(Settings, status) + offset_of(Status_Settings, active_tab_indicator),
-		default_value = "true",
-		description = "Also show tab status on the tab you are looking at.",
-	},
-	{
-		key = "status.pane_headers",
-		title = "Status in Pane Headers",
-		kind = .Bool,
-		offset = offset_of(Settings, status) + offset_of(Status_Settings, pane_headers),
-		default_value = "true",
-		description = "Show what a pane's program reports in its header. Needs pane headers.",
-	},
-	{
-		key = "status.workspace_picker",
-		title = "Status in Workspace Picker",
-		kind = .Bool,
-		offset = offset_of(Settings, status) + offset_of(Status_Settings, workspace_picker),
-		default_value = "true",
-		description = "Summarize each workspace's program status in the workspace picker.",
+		key = "status.surfaces",
+		title = "Show Status On",
+		kind = .Set,
+		offset = offset_of(Settings, status) + offset_of(Status_Settings, surfaces),
+		default_value = "tabs, active_tab, pane_headers, workspace_picker",
+		names = STATUS_SURFACE_NAMES,
+		labels = STATUS_SURFACE_LABELS,
+		description = "Where program status shows: a spinner, progress bar or symbol on tabs and on the " +
+			"tab you are looking at, what a pane's program reports in its header, and a summary of " +
+			"each workspace in the workspace picker. Active Tab needs Tabs; Pane Headers needs pane " +
+			"headers.",
 	},
 	{
 		key = "status.inbox",
@@ -969,50 +1086,24 @@ SCHEMA :: [?]Schema_Entry {
 	{
 		key = "status.taskbar",
 		title = "Taskbar Progress",
-		kind = .Bool,
+		kind = .Set,
 		offset = offset_of(Settings, status) + offset_of(Status_Settings, taskbar),
-		default_value = "true",
-		description = "Show progress, blocked and failed work on the window's taskbar button.",
+		default_value = "working, blocked, error",
+		names = STATUS_TASKBAR_STATE_NAMES,
+		labels = STATUS_TASKBAR_STATE_LABELS,
+		description = "Which programs show on the window's taskbar button: progress for working ones, " +
+			"and blocked and failed work. None turns taskbar progress off.",
 	},
 	{
-		key = "status.show_working",
-		title = "Show Working",
-		kind = .Bool,
-		offset = offset_of(Settings, status) + offset_of(Status_Settings, show_working),
-		default_value = "true",
-		description = "Show programs that are working.",
-	},
-	{
-		key = "status.show_blocked",
-		title = "Show Blocked",
-		kind = .Bool,
-		offset = offset_of(Settings, status) + offset_of(Status_Settings, show_blocked),
-		default_value = "true",
-		description = "Show programs waiting for permission, an answer or a sign-in.",
-	},
-	{
-		key = "status.show_done",
-		title = "Show Done",
-		kind = .Bool,
-		offset = offset_of(Settings, status) + offset_of(Status_Settings, show_done),
-		default_value = "true",
-		description = "Show programs that finished work for you to look at.",
-	},
-	{
-		key = "status.show_error",
-		title = "Show Errors",
-		kind = .Bool,
-		offset = offset_of(Settings, status) + offset_of(Status_Settings, show_error),
-		default_value = "true",
-		description = "Show programs that failed and stopped.",
-	},
-	{
-		key = "status.show_idle",
-		title = "Show Idle",
-		kind = .Bool,
-		offset = offset_of(Settings, status) + offset_of(Status_Settings, show_idle),
-		default_value = "true",
-		description = "Show programs waiting at their own prompt.",
+		key = "status.show",
+		title = "Show Statuses",
+		kind = .Set,
+		offset = offset_of(Settings, status) + offset_of(Status_Settings, show),
+		default_value = "working, blocked, done, error, idle",
+		names = STATUS_SHOW_STATE_NAMES,
+		labels = STATUS_SHOW_STATE_LABELS,
+		description = "Which programs status shows: working, waiting for you, finished work to look at, " +
+			"failed, or idle at their own prompt.",
 	},
 	{
 		key = "status.notify_blocked",
@@ -1063,30 +1154,6 @@ SCHEMA :: [?]Schema_Entry {
 		names = STATUS_CHANNEL_NAMES,
 		labels = STATUS_CHANNEL_LABELS,
 		description = "How to notify you when a program starts working.",
-	},
-	{
-		key = "status.taskbar_working",
-		title = "Working: Taskbar Progress",
-		kind = .Bool,
-		offset = offset_of(Settings, status) + offset_of(Status_Settings, taskbar_working),
-		default_value = "true",
-		description = "Include this state in the taskbar progress indicator.",
-	},
-	{
-		key = "status.taskbar_blocked",
-		title = "Blocked: Taskbar Progress",
-		kind = .Bool,
-		offset = offset_of(Settings, status) + offset_of(Status_Settings, taskbar_blocked),
-		default_value = "true",
-		description = "Include this state in the taskbar progress indicator.",
-	},
-	{
-		key = "status.taskbar_error",
-		title = "Error: Taskbar Progress",
-		kind = .Bool,
-		offset = offset_of(Settings, status) + offset_of(Status_Settings, taskbar_error),
-		default_value = "true",
-		description = "Include this state in the taskbar progress indicator.",
 	},
 	{
 		key = "status.notify_focused",
@@ -1210,6 +1277,18 @@ SCHEMA :: [?]Schema_Entry {
 			"strength; zero disables it.",
 	},
 	{
+		key = "interface.confirm",
+		title = "Confirm Before",
+		kind = .Set,
+		offset = offset_of(Settings, interface) + offset_of(Interface_Settings, confirm),
+		default_value = "close_split_tab, shell_switch, multiline_paste",
+		names = CONFIRM_PROMPT_NAMES,
+		labels = CONFIRM_PROMPT_LABELS,
+		description = "Ask before closing a tab that has more than one pane, before replacing a running " +
+			"pane's shell and losing its session, and before pasting line breaks the shell would run as " +
+			"separate commands.",
+	},
+	{
 		key = "font.size",
 		title = "Font Size",
 		kind = .Float,
@@ -1317,28 +1396,15 @@ SCHEMA :: [?]Schema_Entry {
 		description = "Copy selected text automatically; otherwise Ctrl+Shift+C copies it.",
 	},
 	{
-		key = "terminal.confirm_multiline_paste",
-		title = "Confirm Multiline Paste",
-		kind = .Bool,
-		offset = offset_of(Settings, terminal) + offset_of(Terminal_Settings, confirm_multiline_paste),
-		default_value = "true",
-		description = "Ask before pasting line breaks the shell would run as separate commands.",
-	},
-	{
-		key = "terminal.find_keep_query",
-		title = "Keep Last Search",
-		kind = .Bool,
-		offset = offset_of(Settings, terminal) + offset_of(Terminal_Settings, find_keep_query),
-		default_value = "false",
-		description = "Start find with the last search filled in.",
-	},
-	{
-		key = "terminal.find_select_query",
-		title = "Select Last Search",
-		kind = .Bool,
-		offset = offset_of(Settings, terminal) + offset_of(Terminal_Settings, find_select_query),
-		default_value = "false",
-		description = "Start find with the last search filled in and selected, so typing replaces it.",
+		key = "terminal.find_reopen",
+		title = "Find Bar Reopens With",
+		kind = .Enum,
+		offset = offset_of(Settings, terminal) + offset_of(Terminal_Settings, find_reopen),
+		default_value = "empty",
+		names = FIND_REOPEN_NAMES,
+		labels = FIND_REOPEN_LABELS,
+		description = "What find starts with: an empty search, the last search, or the last search " +
+			"selected so typing replaces it.",
 	},
 	{
 		key = "terminal.minimum_contrast",
@@ -1693,6 +1759,11 @@ assign :: proc(
 }
 
 #assert(size_of(Status_Channels) == size_of(u32))
+#assert(size_of(Status_Surfaces) == size_of(u32))
+#assert(size_of(Status_Show_States) == size_of(u32))
+#assert(size_of(Status_Taskbar_States) == size_of(u32))
+#assert(size_of(Confirm_Prompts) == size_of(u32))
+#assert(size_of(Find_Reopen) == size_of(int))
 #assert(size_of(Status_Row_Terms) == size_of(u32))
 
 // Reads `none` or comma-separated names; bit i is names[i]. On failure `unknown` is the bad part.
@@ -2168,6 +2239,11 @@ migrate_settings_text :: proc(
 	if status_changed {
 		delete(updated, allocator)
 		updated, changed = status, true
+	}
+	toggles, toggles_changed := migrate_toggle_sets_text(updated, allocator) or_return
+	if toggles_changed {
+		delete(updated, allocator)
+		updated, changed = toggles, true
 	}
 	themes, themes_changed, theme_error := migrate_theme_text(updated, allocator)
 	if theme_error != nil {

@@ -269,7 +269,8 @@ tab_close_has_work :: proc(app: ^App, workspace: ^Workspace, index: int) -> bool
 // is a close subset's replaced marks, which a question takes when it asks.
 tab_close_request :: proc(app: ^App, w: ^Window, index: int, restore: ^[dynamic]u32 = nil) {
 	_, _, split := tab_close_scope(w.workspace, index)
-	if !tab_close_has_work(app, w.workspace, index) && (!split || !app.settings.tab.confirm_close) {
+	confirm := .Close_Split_Tab in app.settings.interface.confirm
+	if !tab_close_has_work(app, w.workspace, index) && (!split || !confirm) {
 		tab_close(app, w, index)
 		return
 	}

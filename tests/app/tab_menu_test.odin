@@ -42,7 +42,7 @@ menu_fixture_init :: proc(t: ^testing.T, f: ^Menu_Fixture, count: int) -> bool {
 	// Commands name a tab by its workspace's id, so the workspace is registered as a shown one always is.
 	f.workspace.id = 1
 	append(&f.state.workspaces, &f.workspace)
-	f.state.settings.tab.confirm_close = true
+	f.state.settings.interface.confirm = {.Close_Split_Tab}
 	f.state.registry = commands.create()
 	return testing.expect_value(t, app.register_actions(&f.state.registry), commands.Error.None)
 }
@@ -384,7 +384,7 @@ tab_menu_group_cancel_and_settings_destination :: proc(t: ^testing.T) {
 	layout.destroy(&settings_tab.tree)
 	testing.expect_value(t, layout.init(&settings_tab.tree, {.Settings, 0}), nil)
 	testing.expect_value(t, ui.editor_add(&w.editor,
-		{key = "tab.confirm_close", title = "Confirm Close", value = "true"}, "Tabs"), nil)
+		{key = "interface.confirm", title = "Confirm Before", value = "Closing Split Tabs"}, "Interface"), nil)
 	ui.field_set(&w.editor.filter, "unrelated query")
 	ui.editor_filter(&w.editor)
 	app.tab_menu_open(&f.state, w, 1, 10, 20)
@@ -393,7 +393,7 @@ tab_menu_group_cancel_and_settings_destination :: proc(t: ^testing.T) {
 	testing.expect(t, app.settings_active(w) && !app.tab_menu_shown(w))
 	testing.expect_value(t, ui.field_string(&w.editor.filter), "")
 	if row := ui.editor_row(&w.editor); testing.expect(t, row != nil) {
-		testing.expect_value(t, row.key, "tab.confirm_close")
+		testing.expect_value(t, row.key, "interface.confirm")
 	}
 }
 

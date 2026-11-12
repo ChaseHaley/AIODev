@@ -78,7 +78,7 @@ status_fixture_init :: proc(t: ^testing.T, f: ^Status_Fixture) -> bool {
 	defaults, err := settings.defaults()
 	if !testing.expect_value(t, err, nil) {return false}
 	f.state.settings = defaults
-	f.state.settings.status.show_idle = false
+	f.state.settings.status.show -= {.Idle}
 	f.workspace = app.workspace_create_empty(&f.state)
 	if !testing.expect(t, f.workspace != nil) {return false}
 	if !status_tab(t, f.workspace, 1) || !status_tab(t, f.workspace, 2) {return false}
@@ -113,9 +113,8 @@ program_status_close_scope_protects_work_independent_of_presentation :: proc(t: 
 	f: Status_Fixture
 	defer status_fixture_destroy(&f)
 	if !status_fixture_init(t, &f) {return}
-	f.state.settings.tab.confirm_close = false
-	f.state.settings.status.show_working = false
-	f.state.settings.status.show_blocked = false
+	f.state.settings.interface.confirm -= {.Close_Split_Tab}
+	f.state.settings.status.show -= {.Working, .Blocked}
 	testing.expect(t, app.tab_close_has_work(&f.state, f.workspace, 0))
 	testing.expect(t, app.tab_close_has_work(&f.state, f.workspace, 1))
 	f.first[0].state = .Idle
@@ -202,7 +201,7 @@ program_status_summaries_respect_settings :: proc(t: ^testing.T) {
 	testing.expect(t, shown && mark.glyph == .Permission)
 	testing.expect_value(t, app.status_picker_text(&f.state, f.workspace), "1 needs you · 1 done · 1 working")
 
-	f.state.settings.status.show_idle = true
+	f.state.settings.status.show += {.Idle}
 	original := f.state.settings.status.ignore_apps
 	f.state.settings.status.ignore_apps = "cargo"
 	tab = app.status_tab_summary(&f.state, f.workspace, 0)
@@ -211,12 +210,12 @@ program_status_summaries_respect_settings :: proc(t: ^testing.T) {
 	testing.expect_value(t, tab.top.app, "vite")
 	f.state.settings.status.ignore_apps = original
 
-	f.state.settings.status.show_blocked = false
+	f.state.settings.status.show -= {.Blocked}
 	whole = app.status_workspace_summary(&f.state, f.workspace)
 	testing.expect_value(t, whole.counts[.Blocked], 0)
 	testing.expect_value(t, whole.top.id, "test")
 
-	f.state.settings.status.workspace_picker = false
+	f.state.settings.status.surfaces -= {.Workspace_Picker}
 	testing.expect_value(t, app.status_picker_text(&f.state, f.workspace), "")
 
 	f.state.settings.status.enabled = false

@@ -1092,7 +1092,7 @@ command_execute :: proc(app: ^App, ctx: Command_Context, invocation: commands.In
 	case .Close_Tab:
 		tab_close_request(app, w, tab_index)
 	case .Tab_Settings:
-		settings_reveal(app, w, {key = "tab.confirm_close", search = .Clear})
+		settings_reveal(app, w, {key = "interface.confirm", search = .Clear})
 	case .Restart_Shell:
 		if entry != nil {
 			session_restart(app, entry)

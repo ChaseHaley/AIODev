@@ -15,7 +15,7 @@ closed_panes_and_tabs_reopen_in_place :: proc(t: ^testing.T) {
 	defer delete(directory)
 	defer testing.expect_value(t, os.remove_all(directory), nil)
 	settings_path := strings.concatenate({directory, "/settings.ini"}, context.temp_allocator)
-	settings := idle_shell_settings(t, "cursor.blink = false\ntab.confirm_close = false\n")
+	settings := idle_shell_settings(t, "cursor.blink = false\ninterface.confirm = shell_switch, multiline_paste\n")
 	if !testing.expect_value(t, os.write_entire_file(settings_path, settings), nil) {return}
 	state: app.App
 	state.options = {data_dir = directory, inactive = true}

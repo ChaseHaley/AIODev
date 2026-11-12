@@ -41,7 +41,7 @@ pane_shell_swap_request :: proc(
 		notify(app, .Error, "That shell profile is not available.")
 		return
 	}
-	if entry.status != .Running || !app.settings.pane.confirm_shell_switch {
+	if entry.status != .Running || .Shell_Switch not_in app.settings.interface.confirm {
 		pane_shell_swap(app, w, node, profile_id)
 		return
 	}
@@ -94,8 +94,11 @@ pane_swap_finish :: proc(app: ^App, w: ^Window, swap: Pane_Swap, opt_out, accept
 @(private)
 pane_swap_opt_out :: proc(app: ^App) {
 	failure :: "Could not save the shell-switch warning preference."
-	if settings_save_value(app, "pane.confirm_shell_switch", "false", failure) {
-		notify(app, .Info, "Won't ask again. Turn it back on in Settings.")
+	prompts := app.settings.interface.confirm - {.Shell_Switch}
+	value := settings.set_text(settings.CONFIRM_PROMPT_NAMES, transmute(u32)prompts)
+	if settings_save_value(app, "interface.confirm", value, failure) {
+		title := settings.schema_find("interface.confirm").title
+		notify(app, .Info, fmt.tprintf("Won't ask again. Turn it back on with %s in Settings.", title))
 	}
 }
 

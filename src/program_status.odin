@@ -131,8 +131,8 @@ status_mark_draw :: proc(
 // The mark a tab shows, or none when tab indicators are off or the tab is the one in view.
 status_tab_mark :: proc(app: ^App, w: ^Window, workspace: ^Workspace, tab: int) -> ui.Status_Mark {
 	s := &app.settings.status
-	if !s.enabled || !s.tab_indicators {return {}}
-	if workspace == w.workspace && tab == workspace.selected && !s.active_tab_indicator {return {}}
+	if !s.enabled || .Tabs not_in s.surfaces {return {}}
+	if workspace == w.workspace && tab == workspace.selected && .Active_Tab not_in s.surfaces {return {}}
 	mark, _ := status_indicator(status_tab_summary(app, workspace, tab))
 	return mark
 }
@@ -501,7 +501,7 @@ status_taskbar_update :: proc(app: ^App, w: ^Window, force := false) {
 	state := platform_api.Progress_State.None
 	percent := 0
 	s := &app.settings.status
-	if s.enabled && s.taskbar && w.workspace != nil {
+	if s.enabled && s.taskbar != {} && w.workspace != nil {
 		failed, blocked, working, indeterminate := false, false, false, false
 		least := 101
 		walk := workspace_session_panes(app, w.workspace)

@@ -67,7 +67,7 @@ try {
     Equal (State)['swap.opacity'] 0 'cancel finishes the shell fade'
     Equal (State)['swap.profile'] '' 'settled shell question releases its profile'
     Equal (State)['session.profile'] default 'cancel preserves the current profile'
-    if ([IO.File]::ReadAllText((Join-Path $directory 'settings.ini')).Contains('pane.confirm_shell_switch = false')) {
+    if ([IO.File]::ReadAllText((Join-Path $directory 'settings.ini')).Contains('interface.confirm = close_split_tab, multiline_paste')) {
         throw 'Cancel persisted the opt-out.'
     }
     Write-Output 'PASS cancel does not persist the opt-out'
@@ -88,7 +88,7 @@ try {
     Shot swap-light
     Aio key Alt+D Enter
     Equal (State)['session.profile'] default 'reverse switch accepts'
-    if (-not [IO.File]::ReadAllText((Join-Path $directory 'settings.ini')).Contains('pane.confirm_shell_switch = false')) {
+    if (-not [IO.File]::ReadAllText((Join-Path $directory 'settings.ini')).Contains('interface.confirm = close_split_tab, multiline_paste')) {
         throw 'Accept did not persist the opt-out.'
     }
     Write-Output 'PASS accept persists the opt-out'

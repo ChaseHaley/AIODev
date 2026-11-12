@@ -123,7 +123,7 @@ try {
     Start-Sleep -Milliseconds 200
     Shot light
     Invoke-Aio key Esc
-    [IO.File]::AppendAllText($path, "`ntab.confirm_close = false`n")
+    [IO.File]::AppendAllText($path, "`ninterface.confirm = shell_switch, multiline_paste`n")
     Invoke-Aio command settings.reload
     Invoke-Aio key Ctrl+Shift+W
     $state = Read-State

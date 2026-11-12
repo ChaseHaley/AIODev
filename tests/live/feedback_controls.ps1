@@ -129,7 +129,7 @@ try {
     Invoke-Aio key Shift+F10
     Invoke-Aio key End Enter
     Invoke-Aio expect state settings.active=true
-    Invoke-Aio expect state settings.key=tab.confirm_close
+    Invoke-Aio expect state settings.key=interface.confirm
     Invoke-Aio expect state settings.filter=
     Invoke-Aio key Menu
     Invoke-Aio expect state tab_menu.count=8
