@@ -354,31 +354,17 @@ workspace_button_indicator_rect :: proc(app: ^App, w: ^Window) -> render.Rect {
 }
 
 workspace_row_ellipsis_draw :: proc(app: ^App, w: ^Window, index: int) {
-	r, s := workspace_picker_menu_button_rect(w, index), w.scale
 	p := &w.workspace_picker
-	hover := p.rows[index].id == p.menu_hover ? p.menu_motion.hover.value : 0
-	// The button sits inside the row, so an opaque paper fill would punch a hole in the row's
-	// selection tint. It takes the light and keeps the tint instead.
-	skip_fill := ui.hover_fill_opaque(app.theme) && index == p.selected
-	if hover > 0 && !skip_fill {
-		fill := app.theme.hover
-		fill.a *= hover
-		if render.push_rect(&w.list, {rect = r, color = fill, radius = ui.RADIUS_CONTROL * s}) != .None { return }
+	b := ui.Button {
+		rect    = workspace_picker_menu_button_rect(w, index),
+		hover   = p.rows[index].id == p.menu_hover ? p.menu_motion.hover.value : 0,
+		radius  = ui.RADIUS_CONTROL,
+		// The button sits inside the row, so the selected row's tint stays under its hover.
+		on_tint = index == p.selected,
 	}
-	ink := hover > 0 ? app.theme.text : app.theme.muted
-	ui.icon_draw(&w.list, .More, r, ink, ui.ICON_BUTTON, s)
-	if hover > 0 {
-		if ui.hover_rim_draw(
-			&w.list,
-			app.theme,
-			r,
-			ui.RADIUS_CONTROL * s,
-			hover,
-			s,
-			w.pointer,
-			!skip_fill,
-		) != .None { return }
-	}
+	face, ink, err := ui.button_draw(&w.list, app.theme, b, w.scale, w.pointer)
+	if err != .None { return }
+	ui.icon_draw(&w.list, .More, face, ink, ui.ICON_BUTTON, w.scale)
 }
 
 workspace_row_rename_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
