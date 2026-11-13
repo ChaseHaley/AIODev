@@ -6,12 +6,15 @@ import "aio:ui"
 import "core:math"
 import "core:strings"
 
-// Deleting the workspace a window shows plays the overview with the deletion in it (WORK-444): the window
-// zooms out onto the deleted workspace's card, whose label is struck through and ring turns the error
-// colour, then the card, its outline, ring and label crumble to dust from the bottom left to the top right,
-// the dust rising over the cards above. Meanwhile the cards below slide up into the gap, and the window
-// zooms into the workspace now in its place. Only drawing moves, as for any switch: the workspace is gone
-// at once. The Switch Workspace motion settings pace it, in proportion to a switch to a neighbour.
+// Deleting a workspace without closing a window plays the deletion in the overview (WORK-444). In a window
+// that showed it, the switch to its replacement becomes the deletion: the window zooms out onto its card,
+// whose label is struck through and ring turns the error colour, then the card, its outline, ring and
+// label crumble to dust from the bottom left to the top right, the dust rising over the cards above.
+// Meanwhile the cards below slide up into the gap, and the window zooms into the workspace now in its
+// place. In the window the deletion was asked from, when it shows another workspace, the window zooms out,
+// looks at the deleted card while it crumbles and the cards below close up, and zooms back into its own.
+// Only drawing moves: the workspace is gone at once. The Switch Workspace motion settings pace it, in
+// proportion to a switch to a neighbour.
 Overview_Deletion :: struct {
 	phase:      Overview_Deletion_Phase,
 	// The deleted workspace, by id, its card in the column and what its label showed; the strings are owned.
@@ -34,8 +37,6 @@ Overview_Deletion :: struct {
 
 Overview_Deletion_Phase :: enum {
 	None,
-	// workspace_delete_commit is replacing the window's workspace; the switch it causes plays the deletion.
-	Pending,
 	Playing,
 }
 
@@ -64,21 +65,54 @@ overview_label_of :: proc(workspace: ^Workspace) -> Overview_Label {
 	return {workspace.icon, workspace.name, len(workspace.tabs), panes}
 }
 
-// The next switch away from `workspace` in w is its deletion; workspace_overview_delete_end closes the
-// window of time that may happen in.
-workspace_overview_delete_begin :: proc(w: ^Window, workspace: ^Workspace) {
-	overview_deletion_end(&w.overview)
+// `workspace` is being deleted, still listed. Each window whose switch away from it is just starting plays
+// that switch as its deletion; `actor`, the window the deletion was asked from, plays it over its own
+// workspace when it shows another.
+workspace_overview_deleted :: proc(app: ^App, workspace: ^Workspace, actor: ^Window) {
+	actor_played := false
+	for w in app.windows {
+		o := &w.overview
+		_, flying := workspace_overview_camera(w)
+		if !flying || o.left != workspace.id || o.deletion.phase != .None {continue}
+		from, to := overview_index(o, workspace.id), overview_index(o, o.shown)
+		if from < 0 || to < 0 {continue}
+		camera, _ := workspace_overview_camera(w)
+		overview_deletion_start(app, w, workspace, camera, from, to)
+		actor_played ||= w == actor
+	}
+	if actor == nil || actor_played || actor.workspace == nil || actor.workspace == workspace {return}
+	if actor.phase == .Preparing || window_minimized(actor) || !app.animations {return}
+	o := &actor.overview
+	camera, flying := workspace_overview_camera(actor)
+	carried := overview_column_rebuild(app, o, flying ? camera.card : -1)
+	from, to := overview_index(o, workspace.id), overview_index(o, actor.workspace.id)
+	if from < 0 || to < 0 {return}
+	if flying && carried >= 0 {camera.card = carried} else {camera = {1, f32(to)}}
+	overview_deletion_start(app, actor, workspace, camera, from, to)
+}
+
+// Plans and starts w's deletion flight of `workspace`, card `from`, landing on card `to`.
+@(private = "file")
+overview_deletion_start :: proc(
+	app: ^App,
+	w: ^Window,
+	workspace: ^Workspace,
+	camera: Overview_Camera,
+	from, to: int,
+) {
+	o := &w.overview
+	overview_deletion_end(o)
 	label := overview_label_of(workspace)
 	name, name_err := strings.clone(label.name)
 	emoji, emoji_err := strings.clone(label.icon.emoji)
 	if name_err != nil || emoji_err != nil {delete(name); delete(emoji); return}
 	label.name, label.icon.emoji = name, emoji
-	w.overview.deletion = {phase = .Pending, workspace = workspace.id, label = label}
-}
-
-// A deletion no switch took up, as when the window could not adopt the replacement, plays nothing later.
-workspace_overview_delete_end :: proc(w: ^Window) {
-	if w.overview.deletion.phase == .Pending {overview_deletion_end(&w.overview)}
+	o.deletion = {workspace = workspace.id, label = label}
+	motion := settings.motion_resolve(&app.settings, .Workspace)
+	if settings.motion_duration(&app.settings, motion) <= 0 {overview_deletion_end(o); return}
+	total := overview_deletion_plan(app, o, camera, from, to, motion.curve)
+	overview_flight_start(app, o, total)
+	w.dirty = true
 }
 
 @(private)
@@ -101,11 +135,11 @@ overview_share :: proc(t, from, to: f32) -> f32 {
 	return to > from ? clamp((t - from) / (to - from), 0, 1) : (t >= to ? 1 : 0)
 }
 
-// Plans the deletion of the card `from` as a flight to card `to` from `camera`: zoom out onto the deleted
-// card, hold while it crumbles, slide the cards below up into its place (travelling instead when the
-// replacement is not the card below), hold until the dust has gone and zoom in. Returns the legs' total
-// in switch units.
-@(private)
+// Plans the deletion of the card `from` as a flight to card `to` from `camera`: zoom out, travel to look at
+// the deleted card (between it and the camera's card when they are neighbours, so both show), hold while
+// it crumbles, then, as the cards below slide up into its place, travel to where card `to` ends up, hold
+// until the dust has gone and zoom in. Returns the legs' total in switch units.
+@(private = "file")
 overview_deletion_plan :: proc(
 	app: ^App,
 	o: ^Workspace_Overview,
@@ -116,22 +150,27 @@ overview_deletion_plan :: proc(
 	smooth, _ := settings.motion_curve_find(&app.settings, "smooth")
 	d := &o.deletion
 	d.phase, d.card, d.slide_curve = .Playing, from, smooth
-	held := Overview_Camera{OVERVIEW_SCALE, f32(from)}
+	out := Overview_Camera{OVERVIEW_SCALE, camera.card}
+	held := out
+	gap := f32(from) - camera.card
+	held.card = abs(gap) > 1.001 ? f32(from) : camera.card + gap / 2
 	slot := f32(to > from ? to - 1 : to)
 	landed := Overview_Camera{OVERVIEW_SCALE, slot}
-	out := max((camera.scale - OVERVIEW_SCALE) / (1 - OVERVIEW_SCALE), 0)
-	zoom_out := OVERVIEW_ZOOM_OUT * out
-	if zoom_out <= 0 && abs(camera.card - held.card) > 0.001 {zoom_out = OVERVIEW_TRAVEL}
+	zoom_out := OVERVIEW_ZOOM_OUT * max((camera.scale - OVERVIEW_SCALE) / (1 - OVERVIEW_SCALE), 0)
+	distance := abs(held.card - out.card)
+	travel := distance > 0.001 ? OVERVIEW_TRAVEL + OVERVIEW_TRAVEL_STEP * min(distance, 3) : 0
 	o.leg_count = 0
-	overview_leg_add(o, zoom_out, camera, held, smooth)
+	overview_leg_add(o, zoom_out, camera, out, smooth)
+	overview_leg_add(o, travel, out, held, smooth)
 	overview_leg_add(o, OVERVIEW_DUST * OVERVIEW_SLIDE_AT, held, held, smooth)
 	overview_leg_add(o, OVERVIEW_SLIDE, held, landed, smooth)
 	overview_leg_add(o, OVERVIEW_DUST * (1 - OVERVIEW_SLIDE_AT) - OVERVIEW_SLIDE, landed, landed, smooth)
 	overview_leg_add(o, OVERVIEW_ZOOM_IN, landed, {1, slot}, curve)
-	total := zoom_out + OVERVIEW_DUST + OVERVIEW_ZOOM_IN
-	d.dust_from = zoom_out / total
-	d.dust_to = (zoom_out + OVERVIEW_DUST) / total
-	d.slide_from = (zoom_out + OVERVIEW_DUST * OVERVIEW_SLIDE_AT) / total
+	before := zoom_out + travel
+	total := before + OVERVIEW_DUST + OVERVIEW_ZOOM_IN
+	d.dust_from = before / total
+	d.dust_to = (before + OVERVIEW_DUST) / total
+	d.slide_from = (before + OVERVIEW_DUST * OVERVIEW_SLIDE_AT) / total
 	d.slide_to = d.slide_from + OVERVIEW_SLIDE / total
 	return total
 }

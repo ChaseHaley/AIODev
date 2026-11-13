@@ -11,15 +11,16 @@ import "core:time"
 // order, travels along the column to the one chosen and zooms back into it, so a workspace change never
 // reads as a tab change. The chosen workspace draws live; the others draw the last frame this window showed
 // of them, or an empty card. Only drawing moves: layout, input and sessions take the new workspace at once.
-// The Switch Workspace motion settings pace it. Deleting the shown workspace plays its own flight; see
+// The Switch Workspace motion settings pace it. Deleting a workspace plays its own flight; see
 // workspace_overview_delete.odin.
 Workspace_Overview :: struct {
 	// Runs from 0 to 1 across the flight, which the legs share out.
 	progress:  ui.Motion,
-	legs:      [5]Overview_Leg,
+	legs:      [6]Overview_Leg,
 	leg_count: int,
-	// The workspace the window placed last, by id.
+	// The workspace the window placed last, and the one the last switch left, by id.
 	shown:     u32,
+	left:      u32,
 	// Where the last frame drew the window's own content, below its overlays, and for which workspace.
 	drawn:     Overview_Drawn,
 	// The last frame of each workspace this window showed, by workspace id, for its card.
@@ -69,7 +70,7 @@ OVERVIEW_GAP :: f32(120)
 OVERVIEW_ZOOM_OUT :: f32(140) / 470
 @(private)
 OVERVIEW_TRAVEL :: f32(80) / 470
-@(private = "file")
+@(private)
 OVERVIEW_TRAVEL_STEP :: f32(70) / 470
 @(private)
 OVERVIEW_ZOOM_IN :: f32(180) / 470
@@ -126,15 +127,14 @@ workspace_overview_shown_card :: proc(w: ^Window) -> int {
 }
 
 // After a relayout: a window that now shows another workspace keeps its last frame of the one it left and
-// flies from wherever the overview looks to the workspace it shows, playing the deletion of the one it
-// left when that is why it changed.
+// flies from wherever the overview looks to the workspace it shows.
 workspace_overview_placed :: proc(app: ^App, w: ^Window) {
 	o := &w.overview
 	before := o.shown
 	o.shown = w.workspace != nil ? w.workspace.id : 0
 	if before == 0 || o.shown == 0 || before == o.shown {return}
-	deleting := o.deletion.phase == .Pending && o.deletion.workspace == before
-	if !deleting {overview_deletion_end(o)}
+	o.left = before
+	overview_deletion_end(o)
 	camera, flying := workspace_overview_camera(w)
 	carried := overview_column_rebuild(app, o, flying ? camera.card : -1)
 	overview_frames_prune(o)
@@ -145,27 +145,30 @@ workspace_overview_placed :: proc(app: ^App, w: ^Window) {
 	if flying && carried >= 0 {camera.card = carried} else {camera = {1, f32(from)}}
 	if !app.animations || duration <= 0 || from < 0 || to < 0 {
 		o.progress, o.leg_count = {}, 0
-		overview_deletion_end(o)
 		return
 	}
-	total: f32
-	if deleting {
-		total = overview_deletion_plan(app, o, camera, from, to, motion.curve)
-	} else {
-		smooth, _ := settings.motion_curve_find(&app.settings, "smooth")
-		// Zoom out from wherever it is, travel to the card, and zoom into it.
-		out := (camera.scale - OVERVIEW_SCALE) / (1 - OVERVIEW_SCALE)
-		distance := abs(f32(to) - camera.card)
-		o.leg_count = 0
-		overview_leg_add(o, OVERVIEW_ZOOM_OUT * max(out, 0), camera, {OVERVIEW_SCALE, camera.card}, smooth)
-		if distance > 0.001 {
-			travel := OVERVIEW_TRAVEL + OVERVIEW_TRAVEL_STEP * min(distance, 3)
-			overview_leg_add(o, travel, {OVERVIEW_SCALE, camera.card}, {OVERVIEW_SCALE, f32(to)}, smooth)
-		}
-		overview_leg_add(o, OVERVIEW_ZOOM_IN, {OVERVIEW_SCALE, f32(to)}, {1, f32(to)}, motion.curve)
-		for leg in o.legs[:o.leg_count] {total += leg.share}
+	smooth, _ := settings.motion_curve_find(&app.settings, "smooth")
+	// Zoom out from wherever it is, travel to the card, and zoom into it.
+	out := (camera.scale - OVERVIEW_SCALE) / (1 - OVERVIEW_SCALE)
+	distance := abs(f32(to) - camera.card)
+	o.leg_count = 0
+	overview_leg_add(o, OVERVIEW_ZOOM_OUT * max(out, 0), camera, {OVERVIEW_SCALE, camera.card}, smooth)
+	if distance > 0.001 {
+		travel := OVERVIEW_TRAVEL + OVERVIEW_TRAVEL_STEP * min(distance, 3)
+		overview_leg_add(o, travel, {OVERVIEW_SCALE, camera.card}, {OVERVIEW_SCALE, f32(to)}, smooth)
 	}
-	// The legs' shares become shares of the whole flight, which lasts the duration in proportion.
+	overview_leg_add(o, OVERVIEW_ZOOM_IN, {OVERVIEW_SCALE, f32(to)}, {1, f32(to)}, motion.curve)
+	total: f32
+	for leg in o.legs[:o.leg_count] {total += leg.share}
+	overview_flight_start(app, o, total)
+}
+
+// Starts the planned legs, whose shares total `total` switch units: they become shares of the whole
+// flight, which lasts the Switch Workspace duration in proportion to a switch to a neighbour.
+@(private)
+overview_flight_start :: proc(app: ^App, o: ^Workspace_Overview, total: f32) {
+	motion := settings.motion_resolve(&app.settings, .Workspace)
+	duration := settings.motion_duration(&app.settings, motion)
 	for &leg in o.legs[:o.leg_count] {leg.share /= total}
 	neighbour := OVERVIEW_ZOOM_OUT + OVERVIEW_TRAVEL + OVERVIEW_TRAVEL_STEP + OVERVIEW_ZOOM_IN
 	o.progress = {}
@@ -188,7 +191,7 @@ overview_leg_add :: proc(
 // Lists the column afresh from the workspace list, counting only listed workspaces, and returns where card
 // `card` of the old column lies in it: as far from the nearest old card still listed as it was; -1 when
 // that card is gone.
-@(private = "file")
+@(private)
 overview_column_rebuild :: proc(app: ^App, o: ^Workspace_Overview, card: f32) -> f32 {
 	nearest := int(math.round(card))
 	kept: u32
@@ -203,7 +206,7 @@ overview_column_rebuild :: proc(app: ^App, o: ^Workspace_Overview, card: f32) ->
 }
 
 // The workspace's place in the column; -1 when it has none.
-@(private = "file")
+@(private)
 overview_index :: proc(o: ^Workspace_Overview, id: u32) -> int {
 	for listed, index in o.column {if listed == id {return index}}
 	return -1
@@ -458,6 +461,8 @@ overview_label_draw :: proc(
 		strike := render.Rect{x, baseline - w.ui_text.ascent * 0.32, min(name_width, right - x), max(1, 1.5 * s)}
 		_ = render.push_rect(&w.list, {rect = strike, color = app.theme.error})
 	}
+	// A workspace deleted because its last tab closed has nothing left to count.
+	if label.tabs == 0 {return .Ok}
 	x += name_width + ui.SPACE_2 * s
 	buffer: [64]u8
 	detail := fmt.bprintf(
