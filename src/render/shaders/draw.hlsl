@@ -236,7 +236,10 @@ float4 dust_ps(Vertex i) : SV_Target {
 float4 glyph_ps(Vertex i) : SV_Target {
     float opacity = i.color.a * clip_coverage(i.position.xy);
     if (i.flags & GLYPH_FADE) {
-        opacity *= saturate((i.extra.z - i.position.x) / max(1, i.extra.z - i.extra.y));
+        // The fade runs from fade_start to fade_end, either way along x, over at least a pixel.
+        float span = i.extra.z - i.extra.y;
+        span = span < 0 ? min(-1, span) : max(1, span);
+        opacity *= saturate((i.extra.z - i.position.x) / span);
     }
     if (i.flags & GLYPH_COLOR) {
         // Color glyphs are premultiplied RGBA; fade them with the instance alpha only.

@@ -66,6 +66,8 @@ Glyph_Instance :: struct {
 #assert(size_of(Glyph_Instance) == 64 && offset_of(Glyph_Instance, flags) == 48)
 
 GLYPH_COLOR :: u32(1)
+// The glyph fades out across x from fade_start to fade_end: rightward when fade_end lies right of the start,
+// leftward when it lies left of it.
 GLYPH_FADE :: u32(2)
 
 // A textured quad. `key` names a texture from image_upload or image_render; `uv` is the part of it to
@@ -256,6 +258,28 @@ draw_scale :: proc(list: ^Draw_List, mark: Draw_Mark, centre: [2]f32, factor: f3
 		image.dust.rise *= factor
 		image.dust.grain *= factor
 	}
+}
+
+// Scales everything drawn since `mark` horizontally about the vertical line at `centre_x` by `factor`, as a
+// card turning about that axis seen edge on at 0: positions, widths and clips along x only. Corner radii and
+// strokes keep their size, so a narrow shape stays crisp; the shader keeps a radius within half its width.
+draw_squeeze :: proc(list: ^Draw_List, mark: Draw_Mark, centre_x, factor: f32) {
+	squeezed :: proc(r: Rect, centre_x, factor: f32) -> Rect {
+		return {centre_x + (r.x - centre_x) * factor, r.y, r.width * factor, r.height}
+	}
+	for &layer in list.layers[mark.layers:] {layer.clip = squeezed(layer.clip, centre_x, factor)}
+	for &rect in list.rects[mark.rects:] {
+		rect.rect = squeezed(rect.rect, centre_x, factor)
+		// The sheen's x values are pixels local to the rect: a segment's two ends, an arc's centre.
+		rect.sheen[0] *= factor
+		if rect.fill != RECT_FILL_ARC {rect.sheen[2] *= factor}
+	}
+	for &glyph in list.glyphs[mark.glyphs:] {
+		glyph.rect = squeezed(glyph.rect, centre_x, factor)
+		glyph.fade_start = centre_x + (glyph.fade_start - centre_x) * factor
+		glyph.fade_end = centre_x + (glyph.fade_end - centre_x) * factor
+	}
+	for &image in list.images[mark.images:] {image.rect = squeezed(image.rect, centre_x, factor)}
 }
 
 // Appends what `source` drew between `from` and `to` to `list`, as a copy that outlives `source`'s next

@@ -632,16 +632,23 @@ when AIO_CONTROL {
 			n := i + 1
 			row_index := -1
 			row_rect, close_rect, strip_rect, strip_close: render.Rect
-			position, hover := f32(i), f32(0)
+			position, hover, turn := f32(i), f32(0), f32(1)
+			toward: [2]f32
 			if w != nil {
 				row_index, row_rect, close_rect = rail_tab_report_rects(w, i)
 				position = tab_position(w, i)
 				hover = tab_motion(w, i).hover.value
 				strip_rect = window_tab_rect(app, w, i)
 				strip_close = window_tab_close_rect(app, w, i)
+				if label := tab_label_find(w, tab.id); label != nil && ui.motion_active(label.turn) {
+					turn, toward = label.turn.value, label.toward
+				}
 			}
 			state_value(r, state_key("tab.%d.id", n), tab.id)
 			state_valuef(r, state_key("tab.%d.hover", n), "%g", hover)
+			// WORK-483: the label's turn to another pane, 1 at rest, and the side the new title enters from.
+			state_valuef(r, state_key("tab.%d.turn", n), "%g", turn)
+			state_valuef(r, state_key("tab.%d.turn_toward", n), "%g,%g", toward.x, toward.y)
 			state_value(r, state_key("tab.%d.marked", n), tab.marked)
 			state_value(r, state_key("tab.%d.group", n), tab.group)
 			state_value(r, state_key("tab.%d.shown", n), tab_shown(workspace, i))

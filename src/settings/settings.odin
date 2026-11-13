@@ -914,6 +914,18 @@ SCHEMA :: [?]Schema_Entry {
 		description = MOTION_CONTEXT_DESCRIPTION[Motion_Context.Workspace] + MOTION_CHILD_HINT,
 	},
 	{
+		key = MOTION_CONTEXT_KEY[Motion_Context.Tab_Label],
+		title = MOTION_CONTEXT_TITLE[Motion_Context.Tab_Label],
+		kind = .String,
+		offset = MOTION_CONTEXTS_OFFSET + uintptr(Motion_Context.Tab_Label) * size_of(string),
+		default_value = "",
+		valid = {0, 128},
+		control = .Group,
+		validator = .Motion,
+		page_description = MOTION_CONTEXT_DESCRIPTION[Motion_Context.Tab_Label],
+		description = MOTION_CONTEXT_DESCRIPTION[Motion_Context.Tab_Label] + MOTION_CHILD_HINT,
+	},
+	{
 		key = MOTION_CONTEXT_KEY[Motion_Context.Resize],
 		title = MOTION_CONTEXT_TITLE[Motion_Context.Resize],
 		kind = .String,
