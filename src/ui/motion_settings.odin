@@ -43,11 +43,14 @@ Motion_Editor_State :: struct {
 	motion_curve_edited: bool,
 	// What the next save of the open popover does with the shown curve instead of saving its points.
 	motion_curve_action: Motion_Curve_Action,
+	// The popover's curve list, and the name field F2 opens over the shown curve.
+	motion_list:         Choice_List,
+	motion_name:         Text_Field,
 }
 
 Motion_Curve_Action :: enum u8 {
 	None,
-	// To the name typed in the popover's name field, which edits `choice_search`.
+	// To the name typed in the popover's name field, `motion_name`.
 	Rename,
 	Delete,
 }
@@ -170,6 +173,7 @@ motion_editor_destroy :: proc(m: ^Motion_Editor_State) {
 	for curve in m.motion_curves {delete(curve.name)}
 	delete(m.motion_curves)
 	delete(m.motion_curve_name)
+	delete(m.motion_name.bytes)
 	m^ = {}
 }
 
@@ -392,7 +396,7 @@ editor_motion_change :: proc(p: ^Editor, reset: bool) -> (change: Motion_Change,
 			p.motion_curve_action = .None
 			from := strings.clone(p.motion_curve_name, context.temp_allocator)
 			if action == .Delete {return settings.Motion_Mutation(settings.Motion_Curve_Remove{name = from}), ""}
-			to := settings.motion_name_from(field_string(&p.choice_search))
+			to := settings.motion_name_from(field_string(&p.motion_name))
 			if to == "" {return nil, "Name the curve with letters or digits."}
 			return settings.Motion_Mutation(settings.Motion_Curve_Rename{from = from, to = to}), ""
 		}
@@ -507,8 +511,8 @@ motion_popover_open :: proc(p: ^Editor, row: ^Editor_Row) {
 	motion_curve_hold(p, named.name, named.curve)
 	p.motion_curve_edited = false
 	count := motion_curve_count(p)
-	p.choice_list = {index = index, scroll = index}
-	choice_list_keep_visible(&p.choice_list, count, min(count, CHOICE_LIST_ROWS))
+	p.motion_list = {index = index, scroll = index}
+	choice_list_keep_visible(&p.motion_list, count, min(count, CHOICE_LIST_ROWS))
 }
 
 // Reopens the popover on a rebuilt page. An edit not yet saved rides along only with the draft.
@@ -525,7 +529,7 @@ motion_popover_carry :: proc(to, from: ^Editor, row: ^Editor_Row, draft: bool) {
 motion_curve_choose :: proc(p: ^Editor, index: int) -> Editor_Outcome {
 	if index < 0 || index >= motion_curve_count(p) {return .None}
 	named := motion_curve_at(p, index)
-	p.choice_list.index = index
+	p.motion_list.index = index
 	motion_curve_hold(p, named.name, named.curve)
 	p.motion_curve_edited = false
 	if named.name == field_string(&p.value) {return .Changed}
@@ -637,7 +641,7 @@ motion_popup_hit :: proc(
 	case render.rect_contains(c.list, x, y):
 		count := motion_curve_count(p)
 		row_height := CHOICE_HEIGHT * scale
-		option = choice_list_at(p.choice_list, c.list.y, row_height, y, count, min(count, CHOICE_LIST_ROWS))
+		option = choice_list_at(p.motion_list, c.list.y, row_height, y, count, min(count, CHOICE_LIST_ROWS))
 		if option >= 0 {target = .Option}
 		return
 	case render.rect_contains(c.new_bezier, x, y):
@@ -706,8 +710,8 @@ editor_motion_popup_press :: proc(p: ^Editor, popup: render.Rect, x, y, scale: f
 @(private = "file")
 motion_curve_naming :: proc(p: ^Editor) {
 	if settings.motion_curve_builtin(p.motion_curve_name) {return}
-	field_set(&p.choice_search, p.motion_curve_name)
-	field_select_all(&p.choice_search)
+	field_set(&p.motion_name, p.motion_curve_name)
+	field_select_all(&p.motion_name)
 	editor_mode_set(p, Editor_Curve_Popup{naming = true})
 }
 
@@ -723,15 +727,15 @@ editor_motion_popup_drag :: proc(p: ^Editor, popup: render.Rect, drag: Curve_Dra
 @(private)
 editor_motion_popup_hover :: proc(p: ^Editor, popup: render.Rect, x, y, scale: f32) -> bool {
 	target, option := motion_popup_hit(p, popup, x, y, scale)
-	if target != .Option || option == p.choice_list.index {return false}
-	p.choice_list.index = option
+	if target != .Option || option == p.motion_list.index {return false}
+	p.motion_list.index = option
 	return true
 }
 
 @(private)
 editor_motion_wheel :: proc(p: ^Editor, rows: int) {
 	count := motion_curve_count(p)
-	_ = choice_list_scroll_to(&p.choice_list, p.choice_list.scroll - rows, count, min(count, CHOICE_LIST_ROWS))
+	_ = choice_list_scroll_to(&p.motion_list, p.motion_list.scroll - rows, count, min(count, CHOICE_LIST_ROWS))
 }
 
 // Headers expand with Enter or Right and collapse with Left; the open popover takes its list keys.
@@ -748,21 +752,21 @@ editor_motion_key :: proc(p: ^Editor, row: ^Editor_Row, e: input.Key_Event) -> (
 				return .Changed, true
 			}
 			// Typed text arrives through editor_text; the field takes every other key.
-			_ = field_key(&p.choice_search, e)
+			_ = field_key(&p.motion_name, e)
 			return .Changed, true
 		}
 		count := motion_curve_count(p)
 		visible := min(count, CHOICE_LIST_ROWS)
-		if choice_list_key(&p.choice_list, e, count, visible) {return .Changed, true}
+		if choice_list_key(&p.motion_list, e, count, visible) {return .Changed, true}
 		#partial switch e.key {
 		case .Home, .End:
-			choice_list_move(&p.choice_list, e.key == .Home ? -count : count, count, visible)
+			choice_list_move(&p.motion_list, e.key == .Home ? -count : count, count, visible)
 			return .Changed, true
 		case .Escape:
 			editor_mode_set(p, Editor_Editing{})
 			return .Changed, true
 		case .Enter, .Numpad_Enter, .Space:
-			return motion_curve_choose(p, p.choice_list.index), true
+			return motion_curve_choose(p, p.motion_list.index), true
 		case .F2:
 			motion_curve_naming(p)
 			return .Changed, true
@@ -960,11 +964,11 @@ editor_motion_popup_draw :: proc(
 	c := motion_curve_parts(popup, curve.spring, s)
 	count := motion_curve_count(p)
 	for shown in 0 ..< min(count, CHOICE_LIST_ROWS) {
-		i := p.choice_list.scroll + shown
+		i := p.motion_list.scroll + shown
 		if i >= count {break}
 		named := motion_curve_at(p, i)
 		option := render.Rect{c.list.x, c.list.y + f32(shown) * CHOICE_HEIGHT * s, c.list.width, CHOICE_HEIGHT * s}
-		if i == p.choice_list.index {
+		if i == p.motion_list.index {
 			draw_rect(list, {rect = option, color = theme.selection, radius = RADIUS_CONTROL * s})
 		}
 		if render.rect_contains(option, pointer.x, pointer.y) {
@@ -1033,7 +1037,7 @@ motion_curve_name_draw :: proc(
 	naming := false
 	if curve, open := p.mode.(Editor_Curve_Popup); open {naming = curve.naming}
 	box_draw(list, c.name, theme, naming, s)
-	box := field_box_standard(&p.choice_search, text, c.name, s)
+	box := field_box_standard(&p.motion_name, text, c.name, s)
 	if naming {return field_box_draw(box, list, theme, field_box_baseline(box), true, "")}
 	builtin := settings.motion_curve_builtin(p.motion_curve_name)
 	buffer: [64]u8

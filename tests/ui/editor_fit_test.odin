@@ -94,7 +94,7 @@ editor_short_dropdown_keyboard_keeps_highlight_in_real_visible_rows :: proc(t: ^
 		testing.expect(t, visible < ui.CHOICE_LIST_ROWS)
 		for _ in 0 ..< 10 {
 			ui.editor_key(&p, key({key = .Arrow_Down}))
-			list := shortcuts ? p.capture.alternatives : p.choice_list
+			list := shortcuts ? p.capture.alternatives : p.dropdown.list
 			testing.expect(t, list.index >= list.scroll && list.index < list.scroll + visible)
 		}
 	}

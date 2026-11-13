@@ -1,69 +1,50 @@
 package ui
 
-import "aio:render"
 import "core:strings"
 
-@(private)
-CHOICE_SEARCH_HEIGHT :: 36
-
-@(private)
-choice_searchable :: proc(row: ^Editor_Row) -> bool {
-	return row != nil && row.kind == .Choice && row.searchable
+// The selected row's choices as the shared dropdown shows them.
+editor_dropdown_choices :: proc(p: ^Editor, row: ^Editor_Row) -> Dropdown_Choices {
+	return {
+		choices = row.choices,
+		labels = row.choice_labels,
+		value = field_string(&p.value),
+		mask = p.choice_set,
+		multiple = row.multiple,
+		searchable = row.kind == .Choice && row.searchable,
+		font_filter = row.font_filter,
+		show_all_fonts = row.show_all_fonts,
+		min_width = row.choice_min_width,
+	}
 }
 
-editor_choice_count :: proc(p: ^Editor, row: ^Editor_Row) -> int {
-	return choice_searchable(row) ? len(p.choice_matches) : len(row.choices)
-}
-
+// The selected row's open dropdown and where it opens: under the row's field, inside the page. It
+// has no field while the row is scrolled out of view. ok is false when no dropdown is open.
 @(private)
-choice_source_index :: proc(p: ^Editor, row: ^Editor_Row, index: int) -> int {
-	return choice_searchable(row) ? p.choice_matches[index] : index
-}
-
-// Keep the installed choices intact; only the popup's index map changes while searching.
-@(private)
-choice_filter :: proc(p: ^Editor, row: ^Editor_Row) {
-	choice_matches_filter(&p.choice_matches, row.choices, row.choice_labels, field_string(&p.choice_search))
-	p.choice_list = {}
-}
-
-@(private)
-choice_choose :: proc(p: ^Editor, row: ^Editor_Row, index: int) -> Editor_Outcome {
-	if index < 0 || index >= editor_choice_count(p, row) {return .None}
-	return choose(p, row, choice_source_index(p, row, index))
-}
-
-@(private)
-choice_search_height :: proc(row: ^Editor_Row, scale: f32) -> f32 {
-	if !choice_searchable(row) {return 0}
-	return (CHOICE_SEARCH_HEIGHT + (row.font_filter ? CHOICE_HEIGHT : 0)) * scale
-}
-
-@(private)
-choice_font_toggle_rect :: proc(p: ^Editor, l: Editor_Layout) -> render.Rect {
+editor_dropdown :: proc(p: ^Editor, l: Editor_Layout) -> (c: Dropdown_Choices, a: Dropdown_Anchor, ok: bool) {
 	row := editor_row(p)
-	if row == nil || !row.font_filter || editor_popup(p) != .Choice {return {}}
-	r := editor_popup_rect(p, l)
-	s := l.scale
-	return {r.x + 4 * s, r.y + (4 + CHOICE_SEARCH_HEIGHT) * s, r.width - 8 * s, CHOICE_HEIGHT * s}
+	if row == nil || editor_popup(p) != .Choice {return}
+	a.bounds = l.page
+	if p.selected >= p.scroll && p.selected < p.scroll + l.rows {
+		parts := editor_row_parts(p, l, p.selected)
+		a.field, a.row = parts.field, parts.row
+	}
+	return editor_dropdown_choices(p, row), a, true
+}
+
+// Saves the highlighted option, or flips it in a multiple choice.
+@(private)
+choice_choose :: proc(p: ^Editor, row: ^Editor_Row) -> Editor_Outcome {
+	index := dropdown_highlighted(&p.dropdown, editor_dropdown_choices(p, row))
+	if index < 0 {return .None}
+	return choose(p, row, index)
 }
 
 // Restore an open font search after its preference is published through Settings.
 editor_font_search_restore :: proc(p: ^Editor, query: string, toggle_focus: bool) {
 	row := editor_row(p)
-	if !choice_searchable(row) {return}
-	editor_mode_set(p, Editor_Choice_Popup{toggle_focus = toggle_focus})
-	field_set(&p.choice_search, query)
-	choice_filter(p, row)
-}
-
-@(private)
-choice_search_box :: proc(p: ^Editor, l: Editor_Layout, text: ^Text) -> Field_Box {
-	r := editor_popup_rect(p, l)
-	s := l.scale
-	pad := OVERLAY_PADDING * s
-	rect := render.Rect{r.x + pad, r.y + pad, r.width - 2 * pad, HEIGHT_STANDARD * s}
-	return field_box_standard(&p.choice_search, text, rect, s)
+	if row == nil || row.kind != .Choice || !row.searchable {return}
+	editor_mode_set(p, Editor_Choice_Popup{})
+	dropdown_restore(&p.dropdown, editor_dropdown_choices(p, row), query, toggle_focus)
 }
 
 // The options a multiple choice has on: the pending bits of the selected row, which its owner saves
@@ -81,7 +62,7 @@ choice_set_has :: proc(mask: u32, index: int) -> bool {
 @(private)
 choice_set_toggle :: proc(p: ^Editor, index: int) -> Editor_Outcome {
 	p.choice_set ~= 1 << u32(index)
-	p.choice_list.index = index
+	p.dropdown.list.index = index
 	return .Save
 }
 
