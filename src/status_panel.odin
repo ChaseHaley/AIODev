@@ -48,6 +48,12 @@ Status_Panel :: struct {
 	panel_hover:        Maybe(int),
 	// Kept within the rows by status_panel_rows, which every draw and event projects through.
 	panel_scroll:       f32,
+	// Where the focused pane's first row sits in the list, in pixels from its top: its accent marks are
+	// drawn `value - target` away from their rows while they slide in from the pane focused before.
+	panel_mark:         ui.Motion,
+	// The pane those marks belong to, zero for none, and whether any row of it was listed.
+	panel_mark_session: u32,
+	panel_mark_shown:   bool,
 }
 
 status_panel_visible :: proc(app: ^App, w: ^Window) -> bool {
@@ -248,6 +254,47 @@ status_panel_reveal :: proc(app: ^App, w: ^Window, session: u32) {
 @(private)
 status_panel_row_selected :: proc(focused: ^Session_Entry, row: Status_Row) -> bool {
 	return row.report && focused != nil && row.item.session == focused.id
+}
+
+// Keeps the accent marks on the focused pane's rows. Focusing another pane slides them from the old
+// pane's first row to the new one's on the rail mark's motion; while one pane stays focused they ride on
+// its first row as the list scrolls, regroups or changes view. With no old row to leave they appear in
+// place.
+@(private = "file")
+status_panel_mark_follow :: proc(app: ^App, w: ^Window, rows: []Status_Row, focused: ^Session_Entry) {
+	mark := &w.status.panel_mark
+	session := focused != nil ? focused.id : 0
+	anchor, shown := f32(0), false
+	for row in rows {
+		if status_panel_row_selected(focused, row) {anchor, shown = row.y, true; break}
+	}
+	switch {
+	case !shown:
+		mark^ = {}
+	case session != w.status.panel_mark_session && w.status.panel_mark_shown:
+		ui.motion_target(mark, anchor, ui.REORDER_DURATION, .Decelerate, app.animations)
+	case session != w.status.panel_mark_session:
+		mark^ = {value = anchor, target = anchor}
+	case:
+		shift := anchor - mark.target
+		mark.from, mark.value, mark.target = mark.from + shift, mark.value + shift, anchor
+	}
+	w.status.panel_mark_session, w.status.panel_mark_shown = session, shown
+}
+
+// Starts the marks' slide when focus moves between frames, then advances it; true when it moved.
+status_panel_mark_animate :: proc(app: ^App, w: ^Window, frame: ui.Frame_Time) -> bool {
+	focused := status_panel_visible(app, w) ? focused_session(app, w) : nil
+	if (focused != nil ? focused.id : 0) != w.status.panel_mark_session {
+		rows: []Status_Row
+		if focused != nil {rows, _ = status_panel_rows(app, w)}
+		status_panel_mark_follow(app, w, rows, focused)
+	}
+	return ui.motion_update(&w.status.panel_mark, frame)
+}
+
+status_panel_mark_animating :: proc(w: ^Window) -> bool {
+	return ui.motion_active(w.status.panel_mark)
 }
 
 @(private)
@@ -479,6 +526,9 @@ status_panel_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 	}
 	pane_motion_region_content(w, &region)
 	rows, _ := status_panel_rows(app, w)
+	// Rows from the focused pane take the selected tab's look, so Next and Previous have a visible start.
+	focused := focused_session(app, w)
+	status_panel_mark_follow(app, w, rows, focused)
 	small := ui.text_styled(&w.ui_text, .Detail)
 	strong := ui.text_styled(&w.ui_text, .Strong)
 	header := STATUS_PANEL_HEADER * s
@@ -528,8 +578,6 @@ status_panel_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 	}
 	dense := app.settings.status.panel_view == .Dense
 	hovered, any_hovered := w.status.panel_hover.?
-	// Rows from the focused pane take the selected tab's look, so Next and Previous have a visible start.
-	focused := focused_session(app, w)
 	for row, i in rows {
 		r := status_panel_row_rect(list, row, w.status.panel_scroll)
 		if r.y + r.height < list.y || r.y > list.y + list.height {continue}
@@ -539,7 +587,9 @@ status_panel_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 			box := status_panel_row_box(w, r, row)
 			selected := status_panel_row_selected(focused, row)
 			if ui.navigation_row_surface_draw(&w.list, app.theme, box,
-				{selected = selected, hovered = highlighted}, s, w.pointer) != .None {return .Ok}
+				{selected = selected, hovered = highlighted, mark_elsewhere = true}, s, w.pointer) != .None {
+				return .Ok
+			}
 		}
 		switch {
 		case !row.report:
@@ -550,6 +600,15 @@ status_panel_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 			result = status_panel_comfy_draw(app, w, r, row, highlighted)
 		}
 		if result != .Ok {return result}
+	}
+	// The marks draw over every row, so one sliding past other rows stays on top of them.
+	offset := w.status.panel_mark.value - w.status.panel_mark.target
+	for row in rows {
+		if !status_panel_row_selected(focused, row) {continue}
+		box := status_panel_row_box(w, status_panel_row_rect(list, row, w.status.panel_scroll), row)
+		box.y += offset
+		mark := ui.navigation_row_mark_rect(box, s)
+		ui.draw_rect(&w.list, {rect = mark, color = app.theme.tab_indicator, radius = ui.pill_radius(mark)})
 	}
 	return .Ok
 }
