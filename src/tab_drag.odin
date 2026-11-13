@@ -10,7 +10,7 @@ tab_press :: proc(app: ^App, w: ^Window, index: int, x, y: f32, modified: bool) 
 	if w.tabs_horizontal {
 		bar := window_tab_bar(app, w)
 		if bar.tab_width <= 0 {return}
-		offset.x = x - (bar.x + tab_position(w, index) * bar.tab_width)
+		offset.x = x - tab_strip_x(w, bar, index)
 	} else {
 		row := rail_row_rect_for_tab(w, index)
 		if row.height <= 0 {return}

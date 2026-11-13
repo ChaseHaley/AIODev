@@ -8,24 +8,26 @@ TAB_HEIGHT :: TITLE_BAR_HEIGHT
 
 Tab_Bar :: struct {
 	x, width, height, tab_width, button_width: f32,
+	// Where the tabs end, which is where the new-tab button starts.
+	end:                                       f32,
 	count:                                     int,
 }
 
 // The strip spans `width` from `x`. Its `count` tabs share their width with `incoming` tabs a drag
 // offers, which hold their space without counting as tabs yet.
 tab_bar_layout :: proc(x, width, scale: f32, count: int, incoming := 0) -> Tab_Bar {
-	bar := Tab_Bar{x = x, height = TAB_HEIGHT * scale}
+	bar := Tab_Bar{x = x, end = x, height = TAB_HEIGHT * scale}
 	slots := count + incoming
 	if slots < 1 {return bar}
 	bar.width, bar.count = width, count
 	bar.button_width = min(width, TITLE_BUTTON_WIDTH * scale)
 	bar.tab_width = min(220 * scale, max(0, width - bar.button_width) / f32(slots))
+	bar.end = x + f32(count) * bar.tab_width
 	return bar
 }
 
 tab_drop_region :: proc(bar: Tab_Bar, width, scale: f32) -> render.Rect {
-	left := bar.x + f32(bar.count) * bar.tab_width
-	return {left, 0, max(0, width - CAPTION_WIDTH * scale - left), bar.height}
+	return {bar.end, 0, max(0, width - CAPTION_WIDTH * scale - bar.end), bar.height}
 }
 
 tab_drop_hit :: proc(bar: Tab_Bar, width, scale, x, y: f32) -> bool {
@@ -35,7 +37,7 @@ tab_drop_hit :: proc(bar: Tab_Bar, width, scale, x, y: f32) -> bool {
 
 // The new-tab button, just after the last tab.
 tab_new_rect :: proc(bar: Tab_Bar) -> render.Rect {
-	return {bar.x + f32(bar.count) * bar.tab_width, 0, bar.button_width, bar.height}
+	return {bar.end, 0, bar.button_width, bar.height}
 }
 
 // The picture at the start of a tab: a content kind's icon, else the session's program badge.
@@ -152,10 +154,9 @@ tab_progress_draw :: proc(
 	status_progress_draw(list, theme, bar, status, scale)
 }
 
-// The selected tab's underline under the tab at slot `position`, raised by the tab's hover `lift`.
-tab_underline_rect :: proc(bar: Tab_Bar, position, lift, scale: f32) -> render.Rect {
-	x := bar.x + position * bar.tab_width + 10 * scale
-	return {x, 30 * scale - lift, max(0, bar.tab_width - 20 * scale), 2 * scale}
+// The selected tab's underline under the tab drawn at `x`, raised by the tab's hover `lift`.
+tab_underline_rect :: proc(bar: Tab_Bar, x, lift, scale: f32) -> render.Rect {
+	return {x + 10 * scale, 30 * scale - lift, max(0, bar.tab_width - 20 * scale), 2 * scale}
 }
 
 // The toolbar-height tile every strip control (tabs, new tab, profiles) draws on, raised by its hover.
@@ -164,19 +165,17 @@ tab_tile_rect :: proc(bar: Tab_Bar, x, width, lift, scale: f32) -> render.Rect {
 	return {x + 2 * scale, (bar.height - tile_height) / 2 - lift, max(0, width - 4 * scale), tile_height}
 }
 
-// Draws tab `index` at slot `position`, which differs from the index while tabs move.
+// Draws a tab at `x`, its place in the strip as it moves.
 tab_draw :: proc(
 	list: ^render.Draw_List,
 	text: ^Text,
 	theme: Theme,
 	bar: Tab_Bar,
-	index: int,
-	position: f32,
+	x: f32,
 	t: Tab_Tile,
 	hover, pressed, scale: f32,
 	pointer: [2]f32 = {},
 ) -> render.Build_Status {
-	x := bar.x + position * bar.tab_width
 	width := bar.tab_width
 	if render.push_layer(list, {x, 0, width, bar.height}) != .None {return .Ok}
 	draw_rect(list, {rect = {x, 0, width, bar.height}, color = theme.tab_bar})
@@ -208,7 +207,7 @@ tab_draw :: proc(
 	fill.a *= pressed
 	draw_rect(list, {rect = tile, color = fill, radius = radius})
 	if width <= 16 * scale {return .Ok}
-	if close := tab_close_rect(bar, index, position, scale); close.width > 0 {
+	if close := tab_close_rect(bar, x, scale); close.width > 0 {
 		close.y -= lift
 		icon_draw(list, .Close, close, theme.tab_text, ICON_INDICATOR, scale)
 	}
@@ -284,11 +283,9 @@ tab_new_draw :: proc(
 	return .Ok
 }
 
-// The close button of tab `index` at slot `position`; none on a tab too narrow to show it.
-tab_close_rect :: proc(bar: Tab_Bar, index: int, position: f32, scale: f32) -> render.Rect {
-	if index < 0 || index >= bar.count || bar.tab_width < 56 * scale {return {}}
+// The close button of the tab drawn at `x`; none on a tab too narrow to show it.
+tab_close_rect :: proc(bar: Tab_Bar, x, scale: f32) -> render.Rect {
+	if bar.count == 0 || bar.tab_width < 56 * scale {return {}}
 	button := HEIGHT_COMPACT * scale
-	x := bar.x + f32(index + 1) * bar.tab_width - 4 * scale - button
-	x += (position - f32(index)) * bar.tab_width
-	return {x, (bar.height - button) / 2, button, button}
+	return {x + bar.tab_width - 4 * scale - button, (bar.height - button) / 2, button, button}
 }

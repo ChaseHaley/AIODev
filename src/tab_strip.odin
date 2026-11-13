@@ -33,15 +33,15 @@ tab_position :: proc(w: ^Window, index: int) -> f32 {
 	return index >= 0 && index < len(w.tab_positions) ? w.tab_positions[index].value : f32(index)
 }
 
+// Where tab `index` draws in the strip, following its motion.
+tab_strip_x :: proc(w: ^Window, bar: ui.Tab_Bar, index: int) -> f32 {
+	return bar.x + tab_position(w, index) * bar.tab_width
+}
+
 window_tab_rect :: proc(app: ^App, w: ^Window, index: int) -> render.Rect {
 	bar := window_tab_bar(app, w)
 	if index < 0 || index >= bar.count {return {}}
-	return {
-		bar.x + tab_position(w, index) * bar.tab_width,
-		0,
-		bar.tab_width,
-		bar.height,
-	}
+	return {tab_strip_x(w, bar, index), 0, bar.tab_width, bar.height}
 }
 
 window_tab_new_rect :: proc(app: ^App, w: ^Window) -> render.Rect {
@@ -49,7 +49,9 @@ window_tab_new_rect :: proc(app: ^App, w: ^Window) -> render.Rect {
 }
 
 window_tab_close_rect :: proc(app: ^App, w: ^Window, index: int) -> render.Rect {
-	return ui.tab_close_rect(window_tab_bar(app, w), index, tab_position(w, index), w.scale)
+	bar := window_tab_bar(app, w)
+	if index < 0 || index >= bar.count {return {}}
+	return ui.tab_close_rect(bar, tab_strip_x(w, bar, index), w.scale)
 }
 
 window_tab_hit :: proc(app: ^App, w: ^Window, bar: ui.Tab_Bar, x, y: f32) -> Tab_Chrome_Target {
@@ -104,8 +106,7 @@ window_title_controls_end :: proc(app: ^App, w: ^Window) -> f32 {
 		return max(left, toggle.x + toggle.width)
 	}
 	bar := window_tab_bar(app, w)
-	if bar.count == 0 {return max(left, bar.x + 2 * bar.button_width)}
-	return max(left, bar.x + f32(bar.count) * bar.tab_width + 2 * bar.button_width)
+	return max(left, bar.end + 2 * bar.button_width)
 }
 
 @(private)
@@ -135,8 +136,7 @@ window_tab_strip_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 				&w.ui_text,
 				app.theme,
 				bar,
-				i,
-				tab_position(w, i),
+				tab_strip_x(w, bar, i),
 				tile,
 				control.hover.value,
 				control.press.value,
@@ -146,17 +146,17 @@ window_tab_strip_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 		}
 	}
 	if render.push_layer(&w.list, {0, 0, f32(w.width), bar.height}) == .None {
-		position := w.tab_underline.value
+		x := bar.x + w.tab_underline.value * bar.tab_width
 		moving := dragging
 		for motion in w.tab_positions {moving ||= ui.motion_active(motion)}
-		if moving {position = tab_position(w, w.workspace.selected)}
+		if moving {x = tab_strip_x(w, bar, w.workspace.selected)}
 		// The selected tab rises with its hover, so its underline rises with it.
 		lift := ui.hover_lift_at(
 			app.theme,
 			tab_control(w, Tab_Chrome_Tab{w.workspace.selected}).hover.value,
 			w.scale,
 		)
-		underline := ui.tab_underline_rect(bar, position, lift, w.scale)
+		underline := ui.tab_underline_rect(bar, x, lift, w.scale)
 		if render.push_rect(
 			   &w.list,
 			   {

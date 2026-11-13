@@ -173,7 +173,7 @@ tab_menu_open_at :: proc(app: ^App, w: ^Window, index: int) {
 	if w.workspace == nil || index < 0 || index >= len(w.workspace.tabs) {return}
 	if w.tabs_horizontal {
 		bar := window_tab_bar(app, w)
-		tab_menu_open(app, w, index, bar.x + tab_position(w, index) * bar.tab_width, bar.height)
+		tab_menu_open(app, w, index, tab_strip_x(w, bar, index), bar.height)
 	} else {
 		row := rail_row_rect_for_tab(w, index)
 		if row.height <= 0 {
