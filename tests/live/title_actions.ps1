@@ -11,9 +11,13 @@ try {
   if ((State)['tabs.orientation'] -ne $mode) { Aio command view.tabs_orientation }
   $s=State
   $layout=$s['tabs.orientation_button'] -split ','
+  $activity=$s['activity.toggle'] -split ','
   $settings=$s['title.settings'] -split ','
   $palette=$s['title.palette'] -split ','
-  if ([double]$settings[0] -ne ([double]$layout[0]+[double]$layout[2])) { throw 'Settings is not after layout' }
+  # Activity is on by default, so its panel toggle sits between the layout button and Settings.
+  if ([double]$activity[2] -le 0) { throw 'no Activity panel toggle' }
+  if ([double]$activity[0] -ne ([double]$layout[0]+[double]$layout[2])) { throw 'Activity panel toggle is not after layout' }
+  if ([double]$settings[0] -ne ([double]$activity[0]+[double]$activity[2])) { throw 'Settings is not after the Activity panel toggle' }
   if ([double]$palette[0] -ne ([double]$settings[0]+[double]$settings[2])) { throw 'Palette is not after Settings' }
   Click $s['title.settings']
   Aio expect state settings.active=true

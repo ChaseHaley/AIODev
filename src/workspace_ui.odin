@@ -146,7 +146,7 @@ workspace_new :: proc(app: ^App, w: ^Window, new_window: bool, name_it := true) 
 // The chip starts right after the inbox button when it shows, else right after the title buttons.
 workspace_button_left :: proc(app: ^App, w: ^Window) -> f32 {
 	pill := status_pill_rect(app, w)
-	return pill.width > 0 ? pill.x + pill.width : title_actions_end(w)
+	return pill.width > 0 ? pill.x + pill.width : title_actions_end(app, w)
 }
 
 // The chip hugs its content: icon, name and the chevron's slot, so the tabs start right after the
