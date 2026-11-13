@@ -81,7 +81,9 @@ window_geometry :: proc(app: ^App, w: ^Window, fill: layout.Pane_Fill) -> layout
 // Draws the pane borders the panes share, then the title bar, which it notes for the panes' motion, so a
 // pane growing over it can keep showing it beneath until covered.
 window_chrome_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
+	borders := render.draw_mark(&w.list)
 	window_shared_borders(app, w)
+	panel_wrap_draw(w, borders)
 	bar_height := window_title_height(w)
 	from := render.draw_mark(&w.list)
 	defer pane_motion_region_drawn(w, PANE_MOTION_TITLE, {0, 0, f32(w.width), bar_height}, from)
@@ -112,6 +114,7 @@ window_chrome_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 	if result := status_pill_draw(app, w); result != .Ok {return result}
 	title_actions_draw(app, w)
 	if result := tab_orientation_button_draw(app, w); result != .Ok {return result}
+	if tab_flip_active(w) {return tab_flip_strip_draw(app, w)}
 	if w.tabs_horizontal {return window_tab_strip_draw(app, w)}
 	return .Ok
 }

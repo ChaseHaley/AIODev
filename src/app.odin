@@ -526,6 +526,7 @@ Window_Timer :: enum u8 {
 	Hidden_Panes,
 	Link_Submenu,
 	Command_Submenu,
+	Tab_Submenu,
 }
 
 @(private = "file")
@@ -549,6 +550,8 @@ window_timer_advance :: proc(app: ^App, w: ^Window, timer: Window_Timer, now: ti
 		document_submenu_tick(app, w, now)
 	case .Command_Submenu:
 		command_submenu_tick(app, w, now)
+	case .Tab_Submenu:
+		tab_submenu_tick(app, w, now)
 	}
 }
 
@@ -573,6 +576,8 @@ window_timer_deadline :: proc(w: ^Window, timer: Window_Timer) -> (time.Tick, bo
 		return document_submenu_deadline(w)
 	case .Command_Submenu:
 		return command_submenu_deadline(w)
+	case .Tab_Submenu:
+		return tab_submenu_deadline(w)
 	}
 	return {}, false
 }

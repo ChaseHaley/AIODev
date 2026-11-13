@@ -355,8 +355,12 @@ node_wrap :: proc(
 ) -> Node_Id {
 	// Before the new split exists: it also holds `node`, and a vacant node can put it first in the scan.
 	parent := parent_of(l, node)
-	// A zoomed floating group gaining a pane must show it, so its zoom ends.
-	if group, in_float := node_float(l, float_root(l, node)); in_float {group.zoomed = false}
+	// A floating group gaining a pane changes nothing the tiling shows, so the tiling keeps its zoom and
+	// fill. The group's zoom ends so it shows the new pane, as does a fill showing one of its panes alone.
+	group_root := float_root(l, node)
+	group, in_float := node_float(l, group_root)
+	if in_float {group.zoomed = false}
+	if !in_float || float_root(l, fill_floating(l)) == group_root {panes_changed(l)}
 	frame: Float
 	floating, was_floating := node_float(l, node)
 	if was_floating {frame = floating^; node_set_float(l, node, false)}
@@ -373,7 +377,6 @@ node_wrap :: proc(
 		},
 	)
 	node_replace(l, parent, node, branch)
-	panes_changed(l)
 	return added
 }
 

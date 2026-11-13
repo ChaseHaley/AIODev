@@ -78,6 +78,31 @@ focus_returns_to_the_tiled_pane_a_floating_pane_was_opened_over :: proc(t: ^test
 }
 
 @(test)
+splitting_a_floating_pane_keeps_the_tiled_zoom :: proc(t: ^testing.T) {
+	l: layout.Layout
+	defer layout.destroy(&l)
+	a, _ := two_tiled(t, &l)
+	l.focus = a
+	f, _ := layout.float_new(&l, pane_of(3), {0.2, 0.2, 0.5, 0.5})
+	testing.expect(t, !layout.focus_set(&l, f))
+	l.zoomed, l.panes_changed = true, false
+	layout.pane_view_set(&l, f, .Zoom)
+	testing.expect(t, layout.float_zoomed(&l, f))
+	_, err := layout.split_direction(&l, f, .Right, 0.5, pane_of(4))
+	testing.expect_value(t, err, nil)
+	testing.expect(t, l.zoomed && !l.panes_changed, "a float gaining a pane is no tiling change")
+	testing.expect(t, !layout.float_zoomed(&l, f), "the float shows its new pane")
+	testing.expect_value(t, shown(&l, true)[0].node, a)
+
+	// A fill showing a floating pane alone cannot show the pane its float gains, so it ends.
+	layout.pane_view_set(&l, f, .Fill)
+	testing.expect_value(t, layout.fill_floating(&l), f)
+	_, fill_error := layout.split_direction(&l, f, .Down, 0.5, pane_of(5))
+	testing.expect_value(t, fill_error, nil)
+	testing.expect(t, l.panes_changed && layout.fill_floating(&l) == layout.INVALID_NODE)
+}
+
+@(test)
 focus_raises_a_floating_pane_above_the_others :: proc(t: ^testing.T) {
 	l: layout.Layout
 	defer layout.destroy(&l)

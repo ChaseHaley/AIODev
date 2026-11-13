@@ -25,11 +25,11 @@ Frame_Time :: render.Frame_Time
 // of the frame that draws it, and starts one refresh before the first frame that moves it, so that
 // frame already moves one step and the last lands exactly on the target. That first frame is never a
 // resuming one (see render.Frame_Time), whose moment on screen is uncertain. `started` stays zero from
-// motion_target until then.
+// motion_target until then. A `delay` holds the value at `from` that long before it starts to ease.
 Motion :: struct {
 	from, value, target: f32,
 	started:             time.Tick,
-	duration:            time.Duration,
+	duration, delay:     time.Duration,
 	curve:               settings.Motion_Curve,
 }
 
@@ -48,7 +48,7 @@ motion_update :: proc(m: ^Motion, frame: Frame_Time) -> bool {
 	if !motion_active(m^) {return false}
 	if m.started == {} {
 		if frame.resuming {return false}
-		m.started = time.tick_add(frame.display, -frame.period)
+		m.started = time.tick_add(frame.display, m.delay - frame.period)
 	}
 	t := clamp(f32(time.tick_diff(m.started, frame.display)) / f32(m.duration), 0, 1)
 	if t >= 1 {m.value = m.target; return true}
@@ -64,17 +64,18 @@ motion_target :: proc(m: ^Motion, target: f32, duration: time.Duration, easing: 
 	motion_target_curve(m, target, duration, curves[easing], enabled)
 }
 
-// As motion_target, along a curve of the user's motion settings.
+// As motion_target, along a curve of the user's motion settings, after holding still for `delay`.
 motion_target_curve :: proc(
 	m: ^Motion,
 	target: f32,
 	duration: time.Duration,
 	curve: settings.Motion_Curve,
 	enabled: bool,
+	delay: time.Duration = 0,
 ) {
 	if !enabled {m.value, m.target = target, target; return}
 	if m.target == target {return}
-	m.from, m.target, m.started, m.duration, m.curve = m.value, target, {}, duration, curve
+	m.from, m.target, m.started, m.duration, m.delay, m.curve = m.value, target, {}, duration, delay, curve
 }
 
 // Applies `fade` to everything drawn since `mark`, so a surface's fade moves and dims only what it drew.

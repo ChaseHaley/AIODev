@@ -31,7 +31,7 @@ chrome_pointer :: proc(app: ^App, w: ^Window, x, y: f32) -> platform.Cursor_Shap
 	hit := tab_chrome_hit(app, w, x, y, .Left)
 	if hit.close {return .Hand}
 	switch target in hit.target {
-	case Tab_Chrome_New, Tab_Chrome_Profiles:
+	case Tab_Chrome_New, Tab_Chrome_Profiles, Tab_Chrome_Group:
 		return .Hand
 	case Tab_Chrome_Tab:
 		if w.workspace != nil && target.index != w.workspace.selected {return .Hand}

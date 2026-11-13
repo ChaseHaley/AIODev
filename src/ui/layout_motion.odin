@@ -92,8 +92,8 @@ layout_motion_rect :: proc(m: ^Layout_Motion, key: u64, target: render.Rect) -> 
 // `leave`: any effect but .Edge keeps them at their target or shown rectangle, and layout_motion_look says
 // how to present them. A leaving item in `stood` takes its edge from the rectangle given there, where it
 // stood in an arrangement that was not drawn, as the split place of a pane a single-pane view showed
-// alone; it has no successor, so the caller draws it on its own. Disabled animations, or nothing to move,
-// end any motion.
+// alone; it has no successor, so the caller draws it on its own. Everything holds where it was drawn for
+// `delay` before it moves. Disabled animations, or nothing to move, end any motion.
 layout_motion_begin :: proc(
 	m: ^Layout_Motion,
 	shown, targets: []Layout_Place,
@@ -104,6 +104,7 @@ layout_motion_begin :: proc(
 	enter: settings.Motion_Effect = .Edge,
 	leave: settings.Motion_Effect = .Edge,
 	stood: []Layout_Hint = nil,
+	delay: time.Duration = 0,
 ) {
 	clear(&m.items)
 	moving := false
@@ -154,7 +155,7 @@ layout_motion_begin :: proc(
 		return
 	}
 	m.progress = {}
-	motion_target_curve(&m.progress, 1, duration, curve, true)
+	motion_target_curve(&m.progress, 1, duration, curve, true, delay)
 }
 
 // How `key` presents itself now: an entering or leaving item with an effect other than .Edge, shown by
