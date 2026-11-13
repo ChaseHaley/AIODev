@@ -21,6 +21,8 @@ Window_Link :: struct {
 	workspace: u32,
 	// Requests the show that next puts the window on screen carries out.
 	activate, maximize: bool,
+	// The window was asked to close; pane_links_sync answers once every event of the tick is handled.
+	close: bool,
 }
 
 window_linked :: proc(w: ^Window) -> bool {

@@ -75,7 +75,7 @@ handle_event :: proc(app: ^App, event: platform.Event) {
 			case w.phase == .Preparing:
 				_ = gesture_cancel(app, w)
 			case window_linked(w):
-				pane_link_return(app, w)
+				pane_link_close_request(w)
 			case:
 				hide_to_tray(app, w)
 			}
