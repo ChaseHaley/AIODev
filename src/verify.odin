@@ -458,6 +458,7 @@ when AIO_CONTROL {
 			link_state_report(&r, w)
 			profile_menu_state_report(&r, w)
 			document_menu_state_report(&r, w)
+			command_menu_state_report(&r, w)
 			find_bar_state_report(&r, app, w)
 		} else {
 			state_text(&r, "window.id", "0")

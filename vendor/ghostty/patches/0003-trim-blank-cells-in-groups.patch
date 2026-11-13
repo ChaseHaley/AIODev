@@ -1,7 +1,7 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Chase Haley <chasehaley33@gmail.com>
 Date: Wed, 11 Nov 2026 08:28:17 -0600
-Subject: [PATCH 3/3] PageList: find a row's trailing blanks a group of cells
+Subject: [PATCH 3/4] PageList: find a row's trailing blanks a group of cells
  at a time
 
 Reflow trims each row's trailing blank cells before copying it, one
@@ -16,10 +16,10 @@ bits, exactly as isEmptyAll does, which brings it to 1.8 ms.
  2 files changed, 24 insertions(+), 6 deletions(-)
 
 diff --git a/src/terminal/PageList.zig b/src/terminal/PageList.zig
-index 2706d0b..86127ed 100644
+index e8fdd33..1335d63 100644
 --- a/src/terminal/PageList.zig
 +++ b/src/terminal/PageList.zig
-@@ -1694,10 +1694,7 @@ const ReflowCursor = struct {
+@@ -1761,10 +1761,7 @@ const ReflowCursor = struct {
          // rightmost blanks.
          var cols_len = src_page.size.cols;
          if (!src_row.wrap) {
@@ -32,10 +32,10 @@ index 2706d0b..86127ed 100644
              // If the row has a semantic prompt then the blank row is meaningful
              // so we just consider pretend the first cell of the row isn't empty.
 diff --git a/src/terminal/page.zig b/src/terminal/page.zig
-index d917047..4622c70 100644
+index 2a66d5b..cbb966e 100644
 --- a/src/terminal/page.zig
 +++ b/src/terminal/page.zig
-@@ -2670,6 +2670,23 @@ pub const Cell = packed struct(u64) {
+@@ -2677,6 +2677,23 @@ pub const Cell = packed struct(u64) {
          return false;
      }
  
@@ -59,7 +59,7 @@ index d917047..4622c70 100644
      /// Returns true if every cell in the set is empty (see `isEmpty`).
      ///
      /// This is the same as calling `isEmpty` on each cell, but is exact
-@@ -3151,7 +3168,7 @@ test "Cell is zero by default" {
+@@ -3158,7 +3175,7 @@ test "Cell is zero by default" {
      try std.testing.expectEqual(Cell.SemanticContent.output, cell.semantic_content);
  }
  
@@ -68,7 +68,7 @@ index d917047..4622c70 100644
      // Each case the bulk checks must tell apart. Every pair is tried at
      // every two positions of every row length up to past two groups, so
      // pairs share a group, sit in different groups, or sit in the tail.
-@@ -3171,6 +3188,7 @@ test "Cell hasTextAny and isEmptyAll match the per-cell checks" {
+@@ -3178,6 +3195,7 @@ test "Cell hasTextAny and isEmptyAll match the per-cell checks" {
  
      try testing.expect(!Cell.hasTextAny(&.{}));
      try testing.expect(Cell.isEmptyAll(&.{}));
@@ -76,7 +76,7 @@ index d917047..4622c70 100644
  
      var row: [19]Cell = undefined;
      for (1..row.len + 1) |len| {
-@@ -3181,12 +3199,15 @@ test "Cell hasTextAny and isEmptyAll match the per-cell checks" {
+@@ -3188,12 +3206,15 @@ test "Cell hasTextAny and isEmptyAll match the per-cell checks" {
  
              var text = false;
              var empty = true;

@@ -61,7 +61,7 @@ document_icons_follow_the_kind_of_target :: proc(t: ^testing.T) {
 }
 
 @(test)
-documents_sort_by_level_then_name_and_show_once_at_the_narrowest :: proc(t: ^testing.T) {
+documents_keep_their_order_within_a_level_and_show_once_at_the_narrowest :: proc(t: ^testing.T) {
 	l: Lists
 	defer lists_destroy(&l)
 	scopes := lists_scopes(&l)
@@ -80,14 +80,27 @@ documents_sort_by_level_then_name_and_show_once_at_the_narrowest :: proc(t: ^tes
 	}
 	// Another pane may have pinned this at the tab; this pane's own copy is the one it shows.
 	app.documents_copy(&l.tab, {{target = `c:\P\ZETA.md`}})
-	rows := app.documents_visible(scopes)
-	expected := [?]string{`C:\p\Apple.md`, `C:\p\zeta.md`, `C:\t\middle.md`, `C:\w\alpha.md`, `C:\w\Beta.md`}
-	levels := [?]app.Document_Level{.Pane, .Pane, .Tab, .Workspace, .Workspace}
-	if !testing.expect_value(t, len(rows), len(expected)) {return}
-	for row, i in rows {
-		testing.expect_value(t, row.document.target, expected[i])
-		testing.expect_value(t, row.level, levels[i])
+	expect_rows :: proc(t: ^testing.T, scopes: app.Document_Scopes, expected: []string, levels: []app.Document_Level) {
+		rows := app.documents_visible(scopes)
+		if !testing.expect_value(t, len(rows), len(expected)) {return}
+		for row, i in rows {
+			testing.expect_value(t, row.document.target, expected[i])
+			testing.expect_value(t, row.level, levels[i])
+		}
 	}
+	levels := []app.Document_Level{.Pane, .Pane, .Tab, .Workspace, .Workspace}
+	expect_rows(t, scopes, {`C:\p\zeta.md`, `C:\p\Apple.md`, `C:\t\middle.md`, `C:\w\Beta.md`, `C:\w\alpha.md`}, levels)
+
+	// Reordering moves a document onto another's place in its level, either way; pinning one already at
+	// its level again keeps its place.
+	testing.expect(t, app.document_reorder(scopes, .Workspace, `C:\w\alpha.md`, `C:\w\Beta.md`))
+	testing.expect(t, app.document_reorder(scopes, .Pane, `C:\p\zeta.md`, `C:\p\Apple.md`))
+	testing.expect_value(t, app.document_pin(scopes, .Pane, {target = `C:\p\Apple.md`}), app.Document_Pin_Result.Pinned)
+	expect_rows(t, scopes, {`C:\p\Apple.md`, `C:\p\zeta.md`, `C:\t\middle.md`, `C:\w\alpha.md`, `C:\w\Beta.md`}, levels)
+	// A document hidden at a narrower level keeps its place among the rest of its list.
+	testing.expect(t, app.document_reorder(scopes, .Tab, `C:\t\middle.md`, `c:\P\ZETA.md`))
+	testing.expect_value(t, l.tab[0].target, `c:\P\ZETA.md`)
+	testing.expect(t, !app.document_reorder(scopes, .Tab, `C:\t\middle.md`, `C:\w\alpha.md`))
 }
 
 @(test)
@@ -286,7 +299,7 @@ choose_placement :: proc(
 @(private = "file")
 point_at :: proc(s: ^app.App, w: ^app.Window, parent: ^ui.Menu, row: int) {
 	pass_over(s, w, parent, row)
-	// Resting there: a row shows its submenu after app.LINK_SUBMENU_DELAY.
+	// Resting there: a row shows its submenu after app.SUBMENU_DELAY.
 	app.document_submenu_tick(s, w, time.tick_add(time.tick_now(), time.Second))
 }
 
@@ -510,6 +523,84 @@ document_menu_lists_opens_moves_and_removes_from_the_pane_header :: proc(t: ^tes
 	open_button(s, w)
 	app.window_overlays_cancel(s, w)
 	testing.expect(t, !app.document_menu_shown(w))
+}
+
+// Dragging a pinned row reorders its level as tabs reorder (D-069): the rows open a gap, a drop stays
+// inside the row's level, Escape puts it back, and a press that never moves still opens the link.
+@(test)
+dragging_a_pinned_link_reorders_it_within_its_level :: proc(t: ^testing.T) {
+	sync.mutex_lock(&Link_Test_Lock)
+	defer sync.mutex_unlock(&Link_Test_Lock)
+	f: Palette_Fixture
+	defer palette_fixture_destroy(t, &f)
+	if !palette_fixture_create(t, &f, "documents-reorder", false) {return}
+	s, w := &f.state, f.state.windows[0]
+	Open_Stub_State = {}
+	s.opener.url = link_open_stub
+	defer s.opener.url = nil
+	menu := &w.document_menu
+	scopes, found := app.document_scopes(s, w.panes[0].content)
+	if !testing.expect(t, found) {return}
+	for target in ([?]string{"https://a.example", "https://b.example", "https://c.example"}) {
+		_ = app.document_pin(scopes, .Tab, {target = target})
+	}
+	_ = app.document_pin(scopes, .Workspace, {target = "https://w.example"})
+	open_button(s, w)
+	button :: proc(s: ^app.App, w: ^app.Window, x, y: f32, pressed: bool) {
+		app.handle_event(s, input.Mouse_Button_Event{window = w.id, button = .Left, pressed = pressed, x = i32(x), y = i32(y)})
+	}
+	move :: proc(s: ^app.App, w: ^app.Window, x, y: f32) {
+		app.handle_event(s, input.Mouse_Move_Event{window = w.id, x = i32(x), y = i32(y), buttons = {.Left}})
+	}
+	tab_order :: proc(t: ^testing.T, scopes: app.Document_Scopes, expected: [3]string) {
+		if !testing.expect_value(t, len(scopes.tab), 3) {return}
+		for target, i in expected {testing.expect_value(t, scopes.tab[i].target, target)}
+	}
+	first := row_of(w, .Open, "https://a.example")
+	r := ui.menu_row_rect(&menu.menu, first, f32(w.width), f32(w.height), w.scale)
+	x, y := r.x + 40 * w.scale, r.y + r.height / 2
+
+	// Lifted two rows down: the row follows the pointer and the rows it passed make room, but nothing
+	// moves in the list until the drop.
+	button(s, w, x, y, true)
+	move(s, w, x, y + 2 * r.height)
+	lift, lifted := menu.order.(app.Document_Order_Lift)
+	testing.expect(t, lifted && lift.row == first && lift.to == first + 2)
+	tab_order(t, scopes, {"https://a.example", "https://b.example", "https://c.example"})
+	button(s, w, x, y + 2 * r.height, false)
+	tab_order(t, scopes, {"https://b.example", "https://c.example", "https://a.example"})
+	testing.expect(t, app.document_menu_shown(w))
+	testing.expect_value(t, row_of(w, .Open, "https://a.example"), first + 2)
+	testing.expect_value(t, ui.menu_selected(&menu.menu), first + 2)
+	testing.expect_value(t, Open_Stub_State.calls, 0)
+
+	// Far past the top of its level, it lands first in its level; the workspace link stays put.
+	r = ui.menu_row_rect(&menu.menu, first + 2, f32(w.width), f32(w.height), w.scale)
+	button(s, w, x, r.y + r.height / 2, true)
+	move(s, w, x, 0)
+	button(s, w, x, 0, false)
+	tab_order(t, scopes, {"https://a.example", "https://b.example", "https://c.example"})
+	testing.expect_value(t, len(scopes.workspace), 1)
+	r = ui.menu_row_rect(&menu.menu, first, f32(w.width), f32(w.height), w.scale)
+	button(s, w, x, r.y + r.height / 2, true)
+	move(s, w, x, f32(w.height))
+	button(s, w, x, f32(w.height), false)
+	tab_order(t, scopes, {"https://b.example", "https://c.example", "https://a.example"})
+	testing.expect(t, app.document_menu_shown(w))
+
+	// Escape lets a lifted row go back to its slot.
+	button(s, w, x, r.y + r.height / 2, true)
+	move(s, w, x, r.y + 2 * r.height)
+	key(s, w, .Escape)
+	button(s, w, x, r.y + 2 * r.height, false)
+	tab_order(t, scopes, {"https://b.example", "https://c.example", "https://a.example"})
+	testing.expect(t, app.document_menu_shown(w))
+
+	// A press that does not move opens the link.
+	click_row(s, w, first)
+	testing.expect(t, !app.document_menu_shown(w))
+	testing.expect_value(t, Open_Stub_State.calls, 1)
+	testing.expect_value(t, Open_Stub_State.uri, "https://b.example")
 }
 
 // Regression: the level popout could open over the address field, which then kept the keyboard while the

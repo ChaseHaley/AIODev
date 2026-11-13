@@ -1053,6 +1053,27 @@ scroll_viewport :: proc(s: ^Session, rows: int) {
 	mark_changed(s)
 }
 
+// Scrolls so the viewport starts `row` rows into the scrollback, in the row space of Scrollbar's
+// offset, so a caller holding a bar captured before its last scroll still lands on `row`. A row at
+// or past the end goes to the bottom, which follows new output again.
+scroll_viewport_to :: proc(s: ^Session, row: int) {
+	sync.mutex_lock(&s.mutex)
+	bar: Scrollbar
+	result := scrollbar_read(s, &bar)
+	moved := false
+	if result == .Success && row != int(bar.offset) {
+		behavior := ghostty.Terminal_Scroll_Viewport{tag = .Row, value = {row = uint(max(row, 0))}}
+		if row + int(bar.len) >= int(bar.total) {behavior = {tag = .Bottom}}
+		result = ghostty.terminal_scroll_viewport(s.terminal, behavior)
+		moved = true
+	}
+	sync.mutex_unlock(&s.mutex)
+	if result != .Success {
+		log.errorf("term: scrolling the viewport failed: %v", result)
+	}
+	if moved {mark_changed(s)}
+}
+
 scroll_to_bottom :: proc(s: ^Session) {
 	sync.mutex_lock(&s.mutex)
 	result := ghostty.terminal_scroll_viewport(s.terminal, {tag = .Bottom})

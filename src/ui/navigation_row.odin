@@ -5,7 +5,14 @@ import "aio:render"
 Navigation_Row :: struct {
 	title: string,
 	selected, marked, hovered, pressed: bool,
+	// The caller draws the selection mark itself, as the tab rail does to slide it between rows.
+	mark_elsewhere: bool,
 	leading, trailing: f32,
+}
+
+// The selected row's accent mark at the row's leading edge.
+navigation_row_mark_rect :: proc(rect: render.Rect, scale: f32) -> render.Rect {
+	return {rect.x + scale, rect.y + 8 * scale, 2 * scale, max(0, rect.height - 16 * scale)}
 }
 
 navigation_row_draw :: proc(
@@ -43,8 +50,10 @@ navigation_row_surface_draw :: proc(
 	tile := render.Rect{rect.x, rect.y + s, rect.width, max(0, rect.height - 2 * s)}
 	if row.selected {
 		draw_rect(list, {rect = tile, color = theme.rail_active, radius = RADIUS_CONTROL * s})
-		mark := render.Rect{rect.x + s, rect.y + 8 * s, 2 * s, rect.height - 16 * s}
-		draw_rect(list, {rect = mark, color = theme.tab_indicator, radius = pill_radius(mark)})
+		if !row.mark_elsewhere {
+			mark := navigation_row_mark_rect(rect, s)
+			draw_rect(list, {rect = mark, color = theme.tab_indicator, radius = pill_radius(mark)})
+		}
 	} else if row.marked {
 		draw_rect(list, {rect = tile, color = theme.selection, radius = RADIUS_CONTROL * s})
 		draw_rect(list, {rect = tile, color = theme.accent, radius = RADIUS_CONTROL * s, stroke = s})

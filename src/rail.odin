@@ -394,7 +394,8 @@ rail_row_draw :: proc(
 	}
 	if result := ui.navigation_row_draw(&w.list, &w.ui_text, app.theme, tile,
 		{title = t.title, selected = t.selected, marked = t.marked, hovered = hover, pressed = pressed,
-		 leading = leading, trailing = trailing}, s, w.pointer); result != .Ok {return result}
+		 mark_elsewhere = true, leading = leading, trailing = trailing}, s, w.pointer);
+	   result != .Ok {return result}
 	if t.status.glyph != .None {
 		band := render.Rect{tile.x, tile.y + s, tile.width, tile.height - 3 * s}
 		ui.tab_progress_draw(&w.list, app.theme, band, t.status, s)
@@ -411,6 +412,19 @@ rail_row_draw :: proc(
 		ui.icon_draw(&w.list, .Close, close, app.theme.tab_text, ui.ICON_INDICATOR, s)
 	}
 	return .Ok
+}
+
+// The selected row's accent mark slides between rows on the selection underline's motion, as the strip's
+// underline does; while tabs move it rides on the selected tab instead.
+@(private)
+rail_selection_mark_draw :: proc(app: ^App, w: ^Window, layout: ui.Rail_Layout, moving: bool) {
+	selected := w.workspace.selected
+	if selected < 0 || selected >= rail_tab_count(w) {return}
+	position := moving ? tab_position(w, selected) : w.tab_underline.value
+	row := ui.rail_row_rect(layout, 0)
+	row.y += position * layout.row_height
+	mark := ui.navigation_row_mark_rect(row, w.scale)
+	ui.draw_rect(&w.list, {rect = mark, color = app.theme.tab_indicator, radius = ui.pill_radius(mark)})
 }
 
 rail_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
@@ -455,6 +469,7 @@ rail_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 			if result := rail_row_draw(app, w, layout, index, moving); result != .Ok {return result}
 		}
 	}
+	rail_selection_mark_draw(app, w, layout, moving)
 	if render.push_layer(&w.list, layout.footer) != .None {return .Ok}
 	tile := ui.rail_new_tab_tile(layout)
 	hover := w.tab_hover == Tab_Chrome_New{}

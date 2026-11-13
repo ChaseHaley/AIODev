@@ -680,6 +680,7 @@ build_frame :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 	if pane, ok := raised.?; ok {
 		if result := pane_draw_noted(app, w, pane, &blinking); result != .Ok {return result}
 	}
+	pane_ghost_raised_draw(app, w)
 	if !over {
 		if result := window_chrome_layers_draw(app, w); result != .Ok {return result}
 	}

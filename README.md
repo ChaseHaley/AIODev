@@ -30,7 +30,7 @@ time, including while it fades out.
 
 ## Install
 
-Quit AIODev if it is running, then in PowerShell, to install or upgrade:
+In PowerShell, to install or upgrade:
 
 ```powershell
 irm https://github.com/ChaseHaley/AIODev/releases/latest/download/install.ps1 | iex
@@ -40,6 +40,11 @@ Each release's `install.ps1` downloads that release's zip and refuses it unless 
 To install from the zip instead, download `AIODev-<version>-windows-x64.zip` from
 [Releases](https://github.com/ChaseHaley/AIODev/releases), extract it and run
 `powershell -ExecutionPolicy Bypass -File AIODev\install.ps1`; the policy applies to that run only.
+
+An installed AIODev updates itself: run Update AIODev from the command palette. It installs the
+latest release while AIODev keeps running, then offers to restart into it. Restarting ends the
+programs running in panes; your layout and agent conversations come back. Installing while AIODev
+runs also works from any terminal; AIODev keeps running the previous version until it restarts.
 
 The installer is per user: it copies AIODev to `%LOCALAPPDATA%\Programs\AIODev`, adds `aio` to your
 PATH and creates a Start menu shortcut. Settings live in `%APPDATA%\AIODev`; saved layouts and logs

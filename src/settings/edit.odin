@@ -122,6 +122,13 @@ edit_text :: proc(
 			return
 		}
 		serialized = opener_serialized
+	} else if strings.has_prefix(key, SAVED_COMMAND_PREFIX) {
+		command_serialized, issue := saved_command_edit_text(key, value)
+		if issue != "" {
+			message, err = strings.clone(issue, allocator)
+			return
+		}
+		serialized = command_serialized
 	} else if strings.has_prefix(key, MOTION_CURVE_PREFIX) || strings.has_prefix(key, MOTION_PRESET_PREFIX) {
 		motion_serialized, issue := motion_line_value(key, value)
 		if issue != "" {

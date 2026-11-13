@@ -23,6 +23,7 @@ Confirmation_Subject :: union {
 	Profile_Remove,
 	Opener_Remove,
 	Settings_Reset,
+	Update_Restart,
 }
 
 Confirmation_Text :: struct {
@@ -101,6 +102,8 @@ confirmation_finish :: proc(app: ^App, w: ^Window, accept: bool) {
 		editor_opener_remove_finish(app, w, subject, accept)
 	case Settings_Reset:
 		settings_reset_finish(app, subject, accept)
+	case Update_Restart:
+		update_restart_finish(app, accept)
 	}
 }
 
@@ -123,6 +126,8 @@ confirmation_clear :: proc(w: ^Window) {
 		editor_opener_remove_destroy(&subject)
 	case Settings_Reset:
 		settings_reset_destroy(&subject)
+	case Update_Restart:
+		update_restart_destroy(&subject)
 	}
 	w.confirmation = nil
 }
@@ -228,6 +233,8 @@ confirmation_text :: proc(app: ^App, w: ^Window, c: ^Confirmation, recount: bool
 		return editor_opener_remove_text(subject)
 	case Settings_Reset:
 		return settings_reset_text()
+	case Update_Restart:
+		return update_restart_text(subject)
 	}
 	return {}
 }

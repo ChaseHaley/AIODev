@@ -330,6 +330,16 @@ when !AIO_HEADLESS {
 		return shell_open(uri)
 	}
 
+	// Lets whichever process next asks take the foreground, until the user's next input; a restarted
+	// AIODev asks after this one's windows have gone, when it would otherwise open behind the others.
+	// Only a process that may take the foreground itself can pass that on.
+	foreground_pass_on :: proc() {
+		ASFW_ANY :: max(w.DWORD)
+		if !bool(AllowSetForegroundWindow(ASFW_ANY)) {
+			log.warnf("AllowSetForegroundWindow failed: %d", w.GetLastError())
+		}
+	}
+
 	// Starts command_line as a process of its own in `directory`: a windowed program opens its window and a
 	// console program a console window, and AIODev keeps no hold on it. The command line names its program
 	// by explicit path, so nothing is searched for.

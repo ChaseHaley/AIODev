@@ -7,8 +7,7 @@ import "aio:ui"
 import "core:fmt"
 import "core:slice"
 import "core:strings"
-import "core:unicode"
-import "core:unicode/utf8"
+import "core:time"
 
 // The rows the Activity panel and the status inbox share (WORK-406, WORK-412): reports in trees,
 // grouped and ordered by status.group_by, named by status.row_name and described by status.row_terms.
@@ -101,30 +100,12 @@ status_reports :: proc(app: ^App, w: ^Window) -> []Status_Report {
 	return reports[:]
 }
 
-// Whether pane name `a` sorts before `b`: letters and digits compared without case, after any
-// symbols a title starts with, such as the spinner Claude Code animates there.
-status_pane_less :: proc(a, b: string) -> bool {
-	key :: proc(s: string) -> string {
-		for r, i in s {
-			if unicode.is_letter(r) || unicode.is_digit(r) {return s[i:]}
-		}
-		return ""
-	}
-	x, y := key(a), key(b)
-	for len(x) > 0 && len(y) > 0 {
-		rx, nx := utf8.decode_rune_in_string(x)
-		ry, ny := utf8.decode_rune_in_string(y)
-		lx, ly := unicode.to_lower(rx), unicode.to_lower(ry)
-		if lx != ly {return lx < ly}
-		x, y = x[nx:], y[ny:]
-	}
-	return len(x) == 0 && len(y) > 0
-}
-
 // Lays reports out in groups. By status: Needs you, Working, Finished and Idle sections. By workspace:
 // each workspace in the app's order, with those sections under it. A report keeps its children under
-// it, and the tree takes the section of its most urgent report. Within a section trees sort by pane
-// name, and keep pane order when names match. Labels count the trees under them.
+// it, and the tree takes the section of its most urgent report. Within a section trees sort by when
+// that report entered its state, newest first, and keep pane order when times match. Pane titles play
+// no part: programs such as omp animate them, which would reorder rows every frame. Labels count the
+// trees under them.
 status_rows_project :: proc(
 	group: settings.Status_Group,
 	reports: []Status_Report,
@@ -140,25 +121,32 @@ status_rows_project :: proc(
 		// Zero unless trees group by workspace, so the sort ignores workspaces otherwise.
 		workspace:  int,
 		section:    Status_Section,
-		pane:       string,
+		// When the report that gives the tree its section entered its state; the latest when several do.
+		since:      time.Time,
 	}
 	trees := make([dynamic]Tree, 0, len(reports), context.temp_allocator)
 	for first := 0; first < len(reports); {
 		end := first + 1
 		item := reports[first].item
 		section := status_presentation(item.record).section
+		since := item.record.since
 		for end < len(reports) && reports[end].depth > 0 {
-			section = min(section, status_presentation(reports[end].item.record).section)
+			record := reports[end].item.record
+			child := status_presentation(record).section
+			if child < section || (child == section && time.diff(since, record.since) > 0) {
+				since = record.since
+			}
+			section = min(section, child)
 			end += 1
 		}
 		workspace := group == .Workspace ? item.pane.workspace_order : 0
-		append(&trees, Tree{first, end, workspace, section, item.pane.title})
+		append(&trees, Tree{first, end, workspace, section, since})
 		first = end
 	}
 	slice.stable_sort_by(trees[:], proc(a, b: Tree) -> bool {
 		if a.workspace != b.workspace {return a.workspace < b.workspace}
 		if a.section != b.section {return a.section < b.section}
-		return status_pane_less(a.pane, b.pane)
+		return time.diff(b.since, a.since) > 0
 	})
 	out := make([dynamic]Status_Row, 0, len(reports) + 16, context.temp_allocator)
 	total = ui.SPACE_1 * scale

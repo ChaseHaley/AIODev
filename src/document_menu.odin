@@ -11,6 +11,7 @@ import "aio:settings"
 import "aio:ui"
 import "core:fmt"
 import "core:log"
+import "core:math"
 import "core:os"
 import "core:path/filepath"
 import "core:strings"
@@ -139,15 +140,35 @@ Document_Menu :: struct {
 	// What the list is filtered by. It has the keyboard while the list shows and no address is typed.
 	search:      ui.Text_Field,
 	actions:     ui.Menu,
-	// The placements of row `submenu_row` of the menu it hangs from: the actions menu while that shows, else
-	// the link menu (D-088). Its rows' payloads are Link_Choices. Any change of mode or rows closes it.
-	submenu:     ui.Menu,
-	submenu_row: Maybe(int),
-	// Keeps the submenu while the pointer heads from its row to it (menu aim).
-	reveal:      ui.Hover_Reveal,
-	// A row the pointer rests on whose submenu shows LINK_SUBMENU_DELAY after `pending_since`.
-	pending_row:   Maybe(int),
-	pending_since: time.Tick,
+	// The placements of a row of the menu it hangs from: the actions menu while that shows, else the link
+	// menu (D-088). Its rows' payloads are Link_Choices. Any change of mode or rows closes it.
+	submenu:     Menu_Submenu,
+	// A pinned row pressed or dragged to reorder it among its level's rows (D-069).
+	order:           Document_Order,
+	// Each row's eased place, in slots, while a row is lifted and while the rows settle after it; only
+	// while order_moving.
+	order_positions: [ui.MENU_MAX_ITEMS]ui.Motion,
+	order_moving:    bool,
+	// The row drawn on top while it settles into its slot after a drop.
+	order_settle:    Maybe(int),
+}
+
+Document_Order :: union {
+	Document_Order_Press,
+	Document_Order_Lift,
+}
+
+// A press on a pinned row, which lifts it once the pointer passes the drag threshold and else opens it on
+// release.
+Document_Order_Press :: struct {
+	row:                    int,
+	start_x, start_y, grab: f32,
+}
+
+// A lifted row follows the pointer between rows first and last, its level's; a drop moves it to slot `to`.
+Document_Order_Lift :: struct {
+	row, first, last, to: int,
+	grab:                 f32,
 }
 
 @(private = "file", rodata)
@@ -373,7 +394,7 @@ link_program_run :: proc(
 	node := layout.find_content(tree, content)
 	if node == layout.INVALID_NODE {node = tree.focus}
 	launch := Pane_Launch{command = line, directory = directory}
-	if !shell_open_placed(app, w, node, launch, pane_placement_of(placement)) {
+	if _, opened := shell_open_placed(app, w, node, launch, pane_placement_of(placement)); !opened {
 		notify(app, .Error, fmt.tprintf("Could not start %s.", name))
 	}
 }
@@ -449,7 +470,7 @@ document_menu_init :: proc(menu: ^Document_Menu) {
 	ui.menu_init(&menu.menu)
 	ui.menu_init(&menu.actions)
 	menu.actions.width = DOCUMENT_ACTIONS_WIDTH
-	ui.menu_init(&menu.submenu)
+	ui.menu_init(&menu.submenu.menu)
 }
 
 @(private = "file")
@@ -475,7 +496,8 @@ document_menu_close :: proc(menu: ^Document_Menu, mode: Document_Menu_Mode) {
 	ui.field_release(&menu.url)
 	ui.field_release(&menu.search)
 	menu.menu.hover_part = .Row
-	document_submenu_reset(menu)
+	submenu_reset(&menu.submenu)
+	document_order_stop(menu)
 }
 
 // Takes w because a menu still showing when its window is freed holds a document in w.overlay.
@@ -488,7 +510,7 @@ document_menu_destroy :: proc(w: ^Window) {
 	delete(menu.search.bytes)
 	ui.menu_destroy(&menu.menu)
 	ui.menu_destroy(&menu.actions)
-	ui.menu_destroy(&menu.submenu)
+	ui.menu_destroy(&menu.submenu.menu)
 }
 
 document_menu_shown :: proc(w: ^Window) -> bool {
@@ -547,8 +569,7 @@ document_submenu_parent :: proc(w: ^Window) -> ^ui.Menu {
 
 // Whether a row's placements show beside it. document_submenu_open and document_submenu_close change it.
 document_submenu_shown :: proc(w: ^Window) -> bool {
-	_, shown := w.document_menu.submenu_row.?
-	return shown && document_submenu_parent(w) != nil
+	return submenu_shown(&w.document_menu.submenu) && document_submenu_parent(w) != nil
 }
 
 // What row `row` of `parent` runs, for a row with placements.
@@ -564,74 +585,37 @@ document_row_choice :: proc(w: ^Window, parent: ^ui.Menu, row: int) -> (Link_Cho
 // placements closes them instead.
 @(private = "file")
 document_submenu_open :: proc(app: ^App, w: ^Window, row: int, select_first: bool) {
-	menu := &w.document_menu
+	sub := &w.document_menu.submenu
 	parent := document_submenu_parent(w)
 	if parent == nil {return}
 	choice, has := document_row_choice(w, parent, row)
 	if !has {
-		document_submenu_close(w)
+		submenu_close(w, sub)
 		return
 	}
-	if current, open := menu.submenu_row.?; open && current == row && !select_first {return}
-	link_submenu_build(app, &menu.submenu, choice)
-	anchor := ui.menu_submenu_anchor(parent, row, LINK_SUBMENU_WIDTH, f32(w.width), f32(w.height), w.scale)
-	ui.menu_anchor(&menu.submenu, anchor.x, anchor.y)
-	ui.menu_select(&menu.submenu, select_first ? 0 : -1)
-	menu.submenu_row, w.dirty = row, true
+	if current, open := sub.row.?; open && current == row && !select_first {return}
+	link_submenu_build(app, &sub.menu, choice)
+	submenu_place(w, sub, parent, row, LINK_SUBMENU_WIDTH, select_first)
 }
 
 @(private = "file")
 document_submenu_close :: proc(w: ^Window) {
-	if w.document_menu.submenu_row != nil {w.dirty = true}
-	document_submenu_reset(&w.document_menu)
-}
-
-@(private = "file")
-document_submenu_reset :: proc(menu: ^Document_Menu) {
-	menu.submenu_row, menu.pending_row = nil, nil
-	ui.hover_reveal_close(&menu.reveal)
-}
-
-// How long the pointer rests on a row before its submenu shows, Radix UI's open delay, so a sweep down the
-// menu does not flash each submenu it crosses. The keyboard opens one at once.
-LINK_SUBMENU_DELAY :: 100 * time.Millisecond
-
-// Shows the submenu of the row the pointer, at `point`, rests on once LINK_SUBMENU_DELAY has passed. True
-// when it did.
-@(private = "file")
-document_submenu_settle :: proc(app: ^App, w: ^Window, point: [2]f32, now: time.Tick) -> bool {
-	menu := &w.document_menu
-	row, pending := menu.pending_row.?
-	if !pending || time.tick_diff(time.tick_add(menu.pending_since, LINK_SUBMENU_DELAY), now) < 0 {return false}
-	menu.pending_row = nil
-	parent := document_submenu_parent(w)
-	if parent == nil {return false}
-	width, height := f32(w.width), f32(w.height)
-	if ui.menu_hit(parent, point.x, point.y, width, height, w.scale) != row {return false}
-	document_submenu_open(app, w, row, false)
-	trigger := ui.menu_row_rect(parent, row, width, height, w.scale)
-	surface, _ := ui.menu_layout(&menu.submenu, width, height, w.scale)
-	slack := ui.HOVER_AIM_SLACK * w.scale
-	ui.hover_reveal_move(&menu.reveal, point, true, false, false, trigger, surface, slack, now)
-	return true
+	submenu_close(w, &w.document_menu.submenu)
 }
 
 // An aim at the submenu that stopped short of it gives the row under the pointer its turn, and a row the
 // pointer has rested on long enough shows its submenu.
 document_submenu_tick :: proc(app: ^App, w: ^Window, now: time.Tick) {
-	if !document_menu_shown(w) {return}
-	if document_submenu_settle(app, w, w.pointer, now) {return}
-	if !ui.hover_reveal_tick(&w.document_menu.reveal, now) {return}
-	document_submenu_close(w)
-	document_menu_hover(app, w, w.pointer.x, w.pointer.y, false)
+	parent := document_submenu_parent(w)
+	if !document_menu_shown(w) || parent == nil {return}
+	if submenu_tick(app, w, &w.document_menu.submenu, parent, document_submenu_open, now) {
+		document_menu_hover(app, w, w.pointer.x, w.pointer.y, false)
+	}
 }
 
 document_submenu_deadline :: proc(w: ^Window) -> (time.Tick, bool) {
 	if !document_menu_shown(w) {return {}, false}
-	if _, pending := w.document_menu.pending_row.?; pending {
-		return time.tick_add(w.document_menu.pending_since, LINK_SUBMENU_DELAY), true
-	}
-	return ui.hover_reveal_deadline(w.document_menu.reveal)
+	return submenu_deadline(&w.document_menu.submenu)
 }
 
 // The link the shared rows act on and the pane they are for: the link menu's link, or the pinned link the
@@ -658,81 +642,27 @@ document_link_choose :: proc(app: ^App, w: ^Window, choice: Link_Choice) {
 	link_choice_run(app, w, content, document, choice)
 }
 
-// The submenu's keys while it shows with a row selected: it moves and chooses, and Left or Escape closes
-// it. A submenu the pointer opened has no selection yet, so the keys stay with the highlighted row of the
-// menu it hangs from, as in Radix UI, except that Left still closes it. False when the key is the parent's.
+// The submenu's keys while it shows. False when the key is the parent's.
 @(private = "file")
 document_submenu_key :: proc(app: ^App, w: ^Window, logical: input.Key_Event) -> bool {
 	if !document_submenu_shown(w) {return false}
-	submenu := &w.document_menu.submenu
-	if ui.menu_selected(submenu) < 0 {
-		if logical.key != .Arrow_Left {return false}
-		document_submenu_close(w)
-		return true
-	}
-	switch ui.menu_key(submenu, logical) {
-	case .None, .Submenu:
-		if logical.key == .Arrow_Left {document_submenu_close(w)}
-	case .Changed:
+	sub := &w.document_menu.submenu
+	switch submenu_key(w, sub, logical) {
+	case .Pass:
+		return false
+	case .Taken:
 	case .Chosen:
-		document_link_choose(app, w, transmute(Link_Choice)submenu.items[ui.menu_selected(submenu)].payload)
-		return true
-	case .Closed:
-		document_submenu_close(w)
+		document_link_choose(app, w, transmute(Link_Choice)sub.items[ui.menu_selected(&sub.menu)].payload)
 	}
-	w.dirty = true
 	return true
 }
 
-// The pointer at x, y over the submenu or the menu it hangs from. On the submenu it selects there. While
-// the pointer heads from a row to its submenu (ui.Hover_Reveal) everything stays as it is; otherwise the
-// parent row under the pointer shows its placements or, having none, closes them. True when the submenu
-// keeps the pointer.
+// The pointer at x, y over the submenu or the menu it hangs from; true when the submenu keeps it.
 @(private = "file")
 document_submenu_hover :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {
 	parent := document_submenu_parent(w)
 	if parent == nil {return false}
-	menu := &w.document_menu
-	width, height := f32(w.width), f32(w.height)
-	slack, now := ui.HOVER_AIM_SLACK * w.scale, clock_now(&app.clock)
-	hit := ui.menu_hit(parent, x, y, width, height, w.scale)
-	if row, shown := menu.submenu_row.?; shown {
-		trigger := ui.menu_row_rect(parent, row, width, height, w.scale)
-		surface, _ := ui.menu_layout(&menu.submenu, width, height, w.scale)
-		on_trigger, on_surface := render.rect_contains(trigger, x, y), render.rect_contains(surface, x, y)
-		// Another row of the menu wants the hover unless the pointer is heading for the submenu.
-		on_other := !on_trigger && !on_surface && hit >= 0 && hit != row
-		ui.hover_reveal_move(&menu.reveal, {x, y}, on_trigger, on_surface, on_other, trigger, surface, slack, now)
-		if on_surface {
-			place := ui.menu_hit(&menu.submenu, x, y, width, height, w.scale)
-			if place >= 0 && place != ui.menu_selected(&menu.submenu) {
-				ui.menu_select(&menu.submenu, place)
-				w.dirty = true
-			}
-			return true
-		}
-		if menu.reveal.open && !on_trigger {return true}
-	}
-	if hit < 0 {
-		menu.pending_row = nil
-		return false
-	}
-	if !parent.items[hit].submenu {
-		document_submenu_close(w)
-		return false
-	}
-	if current, open := menu.submenu_row.?; open && current == hit {
-		trigger := ui.menu_row_rect(parent, hit, width, height, w.scale)
-		surface, _ := ui.menu_layout(&menu.submenu, width, height, w.scale)
-		ui.hover_reveal_move(&menu.reveal, {x, y}, true, false, false, trigger, surface, slack, now)
-		return false
-	}
-	if menu.submenu_row != nil {document_submenu_close(w)}
-	if pending, waiting := menu.pending_row.?; !waiting || pending != hit {
-		menu.pending_row, menu.pending_since = hit, now
-	}
-	_ = document_submenu_settle(app, w, {x, y}, now)
-	return false
+	return submenu_hover(app, w, &w.document_menu.submenu, parent, document_submenu_open, x, y)
 }
 
 // Whether every word of `query` is in one of `texts`, ignoring case.
@@ -768,7 +698,7 @@ document_menu_set :: proc(app: ^App, w: ^Window, next: Document_Menu_Mode, rows:
 	}
 	document_menu_mode_release(state.mode)
 	state.mode, w.dirty = next, true
-	document_submenu_reset(&w.document_menu)
+	submenu_reset(&w.document_menu.submenu)
 	switch rows {
 	case .Keep:
 	case .Rebuild: document_menu_build(app, w)
@@ -954,7 +884,9 @@ document_link_open_in :: proc(
 		}
 		launch := Pane_Launch{directory = document.target}
 		if entry := workspace_session_for_content(app, content); entry != nil {launch.profile = entry.profile_id}
-		if !shell_open_placed(app, w, node, launch, placement) {notify(app, .Error, "Could not open a shell.")}
+		if _, opened := shell_open_placed(app, w, node, launch, placement); !opened {
+			notify(app, .Error, "Could not open a shell.")
+		}
 		return
 	}
 	file, ok := localpath.prepare_open(document.target)
@@ -995,7 +927,9 @@ document_menu_build :: proc(app: ^App, w: ^Window, select_first := false) {
 	menu := &w.document_menu
 	selected, scroll := ui.menu_selected(&menu.menu), menu.menu.scroll
 	ui.menu_clear(&menu.menu)
-	document_submenu_reset(menu)
+	// Rebuilt rows may stand for other documents, so no press or motion carries over.
+	document_order_stop(menu)
+	submenu_reset(&menu.submenu)
 	document_menu_text_clear(menu)
 	menu.count = 0
 	menu.entries = {}
@@ -1046,7 +980,7 @@ document_menu_show :: proc(
 
 document_menu_open_pane :: proc(app: ^App, w: ^Window, pane: layout.Pane_Rect) {
 	if !CONTENT_POLICY[pane.content.kind].documents {return}
-	anchor := pane_header_document_anchor(w, pane)
+	anchor := pane_header_menu_anchor(w, pane, .Links)
 	document_menu_show(app, w, pane.content, Document_Menu_List{}, anchor.x, anchor.y)
 }
 
@@ -1390,6 +1324,11 @@ document_popout_hit :: proc(w: ^Window, x, y: f32) -> (Document_Level, bool) {
 document_menu_key :: proc(app: ^App, w: ^Window, raw, logical: input.Key_Event) {
 	state := document_menu_state(w)
 	if state == nil || !logical.pressed {return}
+	// A lifted row keeps the list still; Escape lets it go back to its slot.
+	if _, lifted := w.document_menu.order.(Document_Order_Lift); lifted {
+		if logical.key == .Escape {document_order_end(app, w)}
+		return
+	}
 	menu := &w.document_menu
 	switch step in document_list_step(w) {
 	case Document_Url_Entry:
@@ -1490,6 +1429,7 @@ document_menu_key :: proc(app: ^App, w: ^Window, raw, logical: input.Key_Event) 
 
 // The wheel moves the selection, which leaves a popout or right-click menu behind.
 document_menu_wheel :: proc(app: ^App, w: ^Window, rows: int) {
+	if _, lifted := w.document_menu.order.(Document_Order_Lift); lifted {return}
 	if document_list_step(w) != nil {
 		if _, entering := document_menu_url_entry(w); !entering {document_popout_close(app, w)}
 	}
@@ -1527,6 +1467,7 @@ document_field_box :: proc(w: ^Window, action: Document_Menu_Action) -> (ui.Fiel
 }
 
 document_menu_hover :: proc(app: ^App, w: ^Window, x, y: f32, left_held: bool) {
+	if document_order_hover(app, w, x, y, left_held) {return}
 	menu := &w.document_menu
 	shape := platform.Cursor_Shape.Arrow
 	if _, popout := document_menu_popout(w); popout {
@@ -1538,7 +1479,7 @@ document_menu_hover :: proc(app: ^App, w: ^Window, x, y: f32, left_held: bool) {
 		return
 	}
 	if document_submenu_hover(app, w, x, y) {
-		over := ui.menu_hit(&menu.submenu, x, y, f32(w.width), f32(w.height), w.scale) >= 0
+		over := ui.menu_hit(&menu.submenu.menu, x, y, f32(w.width), f32(w.height), w.scale) >= 0
 		pointer_set(app, w, over ? .Hand : .Arrow)
 		return
 	}
@@ -1599,6 +1540,173 @@ document_menu_tooltip :: proc(_: ^App, w: ^Window, x, y: f32) -> string {
 	return ""
 }
 
+// Ends any press, lift or settle with the rows standing in their slots.
+@(private = "file")
+document_order_stop :: proc(menu: ^Document_Menu) {
+	menu.order, menu.order_moving, menu.order_settle = nil, false, nil
+}
+
+// The rows a lifted row moves among: the run of pinned rows of its level around it.
+@(private = "file")
+document_order_group :: proc(menu: ^Document_Menu, row: int) -> (first, last: int) {
+	entry, _ := document_menu_entry(menu, row)
+	same :: proc(menu: ^Document_Menu, row: int, level: Document_Level) -> bool {
+		other, listed := document_menu_entry(menu, row)
+		return listed && other.action == .Open && other.level == level
+	}
+	first, last = row, row
+	for same(menu, first - 1, entry.level) {first -= 1}
+	for same(menu, last + 1, entry.level) {last += 1}
+	return
+}
+
+// Follows the pointer at `y` with the lifted row, inside its level, and picks the slot a drop takes.
+@(private = "file")
+document_order_move :: proc(w: ^Window, y: f32) {
+	menu := &w.document_menu
+	lift, lifted := &menu.order.(Document_Order_Lift)
+	if !lifted {return}
+	slot := ui.menu_row_rect(&menu.menu, lift.row, f32(w.width), f32(w.height), w.scale)
+	top := clamp(f32(lift.row) + (y - slot.y) / slot.height - lift.grab, f32(lift.first), f32(lift.last))
+	lift.to = int(math.round(top))
+	ui.motion_target(&menu.order_positions[lift.row], top, 0, .Linear, false)
+}
+
+// Eases every row toward its slot: with a row lifted, the rows between its own slot and `to` open the gap
+// it would drop into (D-069). The settle ends once nothing moves.
+document_order_animate :: proc(menu: ^Document_Menu, enabled: bool, frame: ui.Frame_Time) -> bool {
+	if !menu.order_moving {return false}
+	lift, lifted := menu.order.(Document_Order_Lift)
+	changed, moving := false, false
+	for i in 0 ..< len(menu.menu.items) {
+		position := &menu.order_positions[i]
+		if !lifted || i != lift.row {
+			target := i
+			if lifted && lift.row < lift.to && i > lift.row && i <= lift.to {target -= 1}
+			if lifted && lift.to < lift.row && i >= lift.to && i < lift.row {target += 1}
+			ui.motion_target(position, f32(target), ui.REORDER_DURATION, .Decelerate, enabled)
+		}
+		changed = ui.motion_update(position, frame) || changed
+		moving ||= ui.motion_active(position^)
+	}
+	if !lifted && !moving {
+		menu.order_moving, menu.order_settle, changed = false, nil, true
+	}
+	return changed
+}
+
+document_order_animating :: proc(w: ^Window) -> bool {
+	menu := &w.document_menu
+	if !document_menu_shown(w) || !menu.order_moving {return false}
+	if _, settling := menu.order_settle.?; settling {return true}
+	for i in 0 ..< len(menu.menu.items) {if ui.motion_active(menu.order_positions[i]) {return true}}
+	return false
+}
+
+// Gives each row the offset and lift the menu draws it with.
+@(private = "file")
+document_order_place :: proc(menu: ^Document_Menu) {
+	lift, lifted := menu.order.(Document_Order_Lift)
+	settle, settling := menu.order_settle.?
+	for &item, row in menu.menu.items {
+		item.offset = menu.order_moving ? (menu.order_positions[row].value - f32(row)) * ui.MENU_ROW_HEIGHT : 0
+		item.lifted = lifted && row == lift.row || settling && row == settle
+	}
+}
+
+// A press past the drag threshold lifts its row; a lifted row follows the pointer. True while the press
+// or lift has the pointer.
+@(private = "file")
+document_order_hover :: proc(app: ^App, w: ^Window, x, y: f32, left_held: bool) -> bool {
+	menu := &w.document_menu
+	if menu.order == nil {return false}
+	if !left_held {
+		document_order_end(app, w)
+		return false
+	}
+	if press, pressed := menu.order.(Document_Order_Press); pressed {
+		if math.abs(x - press.start_x) < DRAG_THRESHOLD * w.scale &&
+		   math.abs(y - press.start_y) < DRAG_THRESHOLD * w.scale {
+			pointer_set(app, w, .Hand)
+			return true
+		}
+		// A row lifted while the rows still settle carries on from where they are drawn.
+		if !menu.order_moving {
+			for i in 0 ..< len(menu.menu.items) {menu.order_positions[i] = {value = f32(i), target = f32(i)}}
+		}
+		first, last := document_order_group(menu, press.row)
+		menu.order = Document_Order_Lift{press.row, first, last, press.row, press.grab}
+		menu.order_moving, menu.order_settle = true, nil
+		ui.menu_select(&menu.menu, press.row)
+		submenu_reset(&menu.submenu)
+	}
+	document_order_move(w, y)
+	_ = document_order_animate(menu, app.animations, window_frame_time(app, w))
+	w.dirty = true
+	pointer_set(app, w, .Resize_All)
+	return true
+}
+
+// Lets go of a press or lift without reordering: a lifted row settles back into its slot.
+@(private = "file")
+document_order_end :: proc(app: ^App, w: ^Window) {
+	menu := &w.document_menu
+	lift, lifted := menu.order.(Document_Order_Lift)
+	menu.order = nil
+	if !lifted {return}
+	menu.order_settle = lift.row
+	_ = document_order_animate(menu, app.animations, window_frame_time(app, w))
+	w.dirty = true
+}
+
+// The release of a press on a pinned row: a press that never lifted opens its row if released on it, and a
+// lifted row drops into the slot it opened, moving its document there within its level.
+@(private = "file")
+document_order_release :: proc(app: ^App, w: ^Window, x, y: f32) {
+	menu := &w.document_menu
+	switch order in menu.order {
+	case nil:
+	case Document_Order_Press:
+		menu.order = nil
+		if ui.menu_hit(&menu.menu, x, y, f32(w.width), f32(w.height), w.scale) == order.row {
+			document_menu_activate(app, w, order.row)
+		}
+	case Document_Order_Lift:
+		document_order_move(w, y)
+		lift := menu.order.(Document_Order_Lift)
+		menu.order = nil
+		settle := lift.row
+		if lift.to != lift.row && document_order_commit(app, w, lift) {settle = lift.to}
+		menu.order_settle = settle
+		_ = document_order_animate(menu, app.animations, window_frame_time(app, w))
+		w.dirty = true
+	}
+}
+
+// Moves the lifted row's document onto the slot of row `to` and rebuilds the rows, each carrying on from
+// where it was drawn so the drop settles rather than jumps.
+@(private = "file")
+document_order_commit :: proc(app: ^App, w: ^Window, lift: Document_Order_Lift) -> bool {
+	menu := &w.document_menu
+	state := document_menu_state(w)
+	if state == nil {return false}
+	scopes, found := document_scopes(app, state.content)
+	moved, _ := document_menu_entry(menu, lift.row)
+	onto, _ := document_menu_entry(menu, lift.to)
+	if !found || !document_reorder(scopes, moved.level, moved.target, onto.target) {return false}
+	drawn := menu.order_positions
+	documents_changed(app)
+	document_menu_build(app, w)
+	// The rows between the two slots shifted one place as the list did.
+	from, to := lift.row, lift.to
+	step := from < to ? 1 : -1
+	for i := to; i != from; i -= step {menu.order_positions[i - step] = drawn[i]}
+	menu.order_positions[to] = drawn[from]
+	menu.order_moving = true
+	ui.menu_select(&menu.menu, to)
+	return true
+}
+
 // A left click runs a row; a right click on a pinned document opens its right-click menu there.
 document_menu_button :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) {
 	menu := &w.document_menu
@@ -1606,6 +1714,7 @@ document_menu_button :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event)
 		w.dirty = true
 		ui.field_release(&menu.url)
 		ui.field_release(&menu.search)
+		if e.button == .Left {document_order_release(app, w, f32(e.x), f32(e.y))}
 		return
 	}
 	gesture_swallow(w, e.button, .Document_Menu)
@@ -1619,7 +1728,7 @@ document_menu_button :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event)
 		return
 	}
 	if document_submenu_shown(w) {
-		if hit := ui.menu_hit(&menu.submenu, x, y, f32(w.width), f32(w.height), w.scale); hit >= 0 {
+		if hit := ui.menu_hit(&menu.submenu.menu, x, y, f32(w.width), f32(w.height), w.scale); hit >= 0 {
 			if e.button == .Left {
 				document_link_choose(app, w, transmute(Link_Choice)menu.submenu.items[hit].payload)
 			}
@@ -1657,7 +1766,19 @@ document_menu_button :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event)
 	item := menu.menu.items[hit]
 	if !item.enabled || item.separator {return}
 	ui.menu_select(&menu.menu, hit)
-	switch ui.menu_row_part(&menu.menu, hit, x, y, width, height, w.scale) {
+	part := ui.menu_row_part(&menu.menu, hit, x, y, width, height, w.scale)
+	// A pinned row opens on release, unless the press becomes a drag that reorders it. A filtered list
+	// hides rows a drop would land among, so it only opens.
+	if state := document_menu_state(w); part == .Row && entry.action == .Open && state != nil &&
+	   ui.field_string(&menu.search) == "" {
+		if _, listing := state.mode.(Document_Menu_List); listing {
+			row := ui.menu_row_rect(&menu.menu, hit, width, height, w.scale)
+			menu.order = Document_Order_Press{hit, x, y, (y - row.y) / row.height}
+			w.dirty = true
+			return
+		}
+	}
+	switch part {
 	case .Row:
 		document_menu_activate(app, w, hit)
 	case .Action:
@@ -1671,6 +1792,7 @@ document_menu_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 	menu := &w.document_menu
 	s := w.scale
 	width, height := f32(w.width), f32(w.height)
+	document_order_place(menu)
 	// Program rows name Link Programs by their place in settings' order, found once per draw.
 	order: [settings.OPENER_LIMIT]int
 	programs := order[:settings.openers_in_order(&app.settings.openers, order[:])]
@@ -1710,7 +1832,7 @@ document_menu_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 		   result != .Ok {return result}
 	}
 	if document_submenu_shown(w) {
-		return ui.menu_draw(&menu.submenu, &w.list, &w.ui_text, app.theme, width, height, s, w.pointer)
+		return ui.menu_draw(&menu.submenu.menu, &w.list, &w.ui_text, app.theme, width, height, s, w.pointer)
 	}
 	if actions {return .Ok}
 	popout, shown := document_menu_popout(w)
@@ -1796,9 +1918,10 @@ document_menu_pointer_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target
 }
 
 @(private)
-document_menu_pointer_cancel :: proc(_: ^App, w: ^Window) {
+document_menu_pointer_cancel :: proc(app: ^App, w: ^Window) {
 	ui.field_release(&w.document_menu.url)
 	ui.field_release(&w.document_menu.search)
+	document_order_end(app, w)
 }
 
 @(private)

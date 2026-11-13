@@ -142,6 +142,7 @@ Action :: enum u32 {
 	Reopen_Closed,
 	Linked_Window,
 	Show_Links,
+	Show_Commands,
 	New_Floating,
 	Float_Pane,
 	Minimize_Floating,
@@ -153,6 +154,7 @@ Action :: enum u32 {
 	Workspace_List,
 	App_Version,
 	Install_Agent_Hooks,
+	Update,
 }
 
 // Everything one command is: its name and title, default shortcuts, what it does when a linked window
@@ -562,6 +564,7 @@ ACTIONS :: [Action]Command_Descriptor {
 	},
 	.Linked_Window = {"pane.linked_window", "Toggle Pane in Linked Window", nil, .Local, {}},
 	.Show_Links = {"pane.links", "Show Links", nil, .Local, {}},
+	.Show_Commands = {"pane.commands", "Show Saved Commands", nil, .Local, {}},
 	.New_Floating = {
 		"pane.new_floating", "New Shell Float", {{.Backquote, {.Control, .Shift}}}, .Host,
 		{accepted = {.Focus, .Directory, .Name, .Profile, .Program, .Command_File}, control = .Pane},
@@ -590,6 +593,7 @@ ACTIONS :: [Action]Command_Descriptor {
 		cli_protocol.VERSION_COMMAND, "Show AIODev's Build", nil, .Host, {hidden = true, control = .Unnamed},
 	},
 	.Install_Agent_Hooks = {"app.install_agent_hooks", "Install Agent Session Hooks", nil, .Local, {}},
+	.Update = {"app.update", "Update AIODev", nil, .Local, {}},
 }
 
 // What help says about a command beyond its usage and title: a summary, and the command's own help for
@@ -967,10 +971,14 @@ command_execute :: proc(app: ^App, ctx: Command_Context, invocation: commands.In
 		floating_minimize_all_toggle(app, w)
 	case .Show_Links:
 		document_menu_open_focused(app, w)
+	case .Show_Commands:
+		command_menu_open_focused(app, w)
 	case .Show_Build_Info:
 		show_build_info(app)
 	case .Install_Agent_Hooks:
 		agent_hooks_install(app)
+	case .Update:
+		app_update_start(app)
 	case .Command_Palette:
 		if palette_active(app, w) {
 			palette_close(app, w)

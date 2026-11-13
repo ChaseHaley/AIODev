@@ -19,6 +19,7 @@ Settings_Edit :: union #no_nil {
 	settings.Profile_Mutation,
 	Opener_Field_Value,
 	settings.Opener_Mutation,
+	settings.Saved_Command_Mutation,
 	Theme_Change,
 	settings.Motion_Mutation,
 	Factory_Reset,
@@ -140,6 +141,7 @@ Settings_Workflow :: enum {
 	Profile,
 	Opener_Field,
 	Opener,
+	Saved_Command,
 	Process,
 	Theme,
 	Motion,
@@ -173,6 +175,11 @@ SETTINGS_FAILURE_TEXT := [Settings_Workflow][Settings_Status]string {
 		.Unprepared = "Could not prepare the link program change.",
 		.Conflict = SETTINGS_CONFLICT_TEXT,
 		.Failed = "Could not save the link program. Check the settings path and permissions.",
+	},
+	.Saved_Command = #partial [Settings_Status]string {
+		.Unprepared = "Could not prepare the saved command change.",
+		.Conflict = SETTINGS_CONFLICT_TEXT,
+		.Failed = "Could not save the command. Check the settings path and permissions.",
 	},
 	.Process = #partial [Settings_Status]string {
 		.Unprepared = "Could not prepare program settings.",
@@ -340,7 +347,7 @@ settings_edit_build :: proc(app: ^App, edit: Settings_Edit, source: string) -> (
 		if err != nil {return {result = {status = .Unprepared}}}
 		return {revision = defaults}
 	case Profile_Field_Value, settings.Profile_Mutation, Opener_Field_Value, settings.Opener_Mutation,
-	     Theme_Change, settings.Motion_Mutation:
+	     settings.Saved_Command_Mutation, Theme_Change, settings.Motion_Mutation:
 	}
 	model, diagnostics, parse_error := settings.parse(source, inputs = &app.settings_inputs)
 	settings.diagnostics_destroy(&diagnostics)
@@ -355,6 +362,8 @@ settings_edit_build :: proc(app: ^App, edit: Settings_Edit, source: string) -> (
 		return settings_profile_mutation_edit(&model, source, e)
 	case settings.Opener_Mutation:
 		return settings_opener_mutation_edit(&model, source, e)
+	case settings.Saved_Command_Mutation:
+		return settings_saved_command_edit(&model, source, e)
 	case Theme_Change:
 		return settings_theme_edit(&model, source, e)
 	case settings.Motion_Mutation:
@@ -488,6 +497,37 @@ settings_opener_mutation_edit :: proc(
 		built.result = {
 			status = .Refused, message = "Link program limit reached. Remove one before adding another.",
 		}
+	case .Allocation:
+		built.result.status = .Unprepared
+	}
+	if error != .None {delete(updated)}
+	return
+}
+
+@(private, require_results)
+settings_saved_command_edit :: proc(
+	model: ^settings.Settings,
+	source: string,
+	change: settings.Saved_Command_Mutation,
+) -> (
+	built: Settings_Built,
+) {
+	updated, id, issue, error := settings.saved_command_mutate(source, &model.saved_commands, change)
+	defer delete(id)
+	defer delete(issue)
+	switch error {
+	case .None:
+		built.revision = updated
+		built.result.id, _ = strings.clone(id, context.temp_allocator)
+	case .Unavailable:
+		built.result.status = .Unchanged
+	case .Edit:
+		built.result.status = .Refused
+		built.result.message, _ = strings.clone(issue, context.temp_allocator)
+	case .Limit:
+		limit := settings.SAVED_COMMAND_LIMIT
+		message := fmt.tprintf("AIODev keeps up to %d saved commands. Remove one first.", limit)
+		built.result = {status = .Refused, message = message}
 	case .Allocation:
 		built.result.status = .Unprepared
 	}

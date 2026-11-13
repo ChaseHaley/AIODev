@@ -81,11 +81,21 @@ status_receipt :: proc(app: ^App, item: Status_Item) -> (icon: ui.Icon, text: st
 	return icon, status_age(pane.read_at, clock_wall(&app.clock))
 }
 
+// Whether reading or unreading a row means anything: a working row out of view is always unread.
+@(private)
+status_item_markable :: proc(item: Status_Item) -> bool {
+	return item.record.state != .Working || item.pane.watched
+}
+
 // What a receipt means and what a click on it does.
 @(private)
 status_receipt_tooltip :: proc(app: ^App, item: Status_Item) -> string {
 	_, ago := status_receipt(app, item)
 	switch {
+	case !status_item_markable(item) && item.pane.read_at == {}:
+		return "Working · never read"
+	case !status_item_markable(item):
+		return fmt.tprintf("Working · new output since last read %s ago", ago)
 	case item.record.read && item.pane.watched:
 		return "Read now · click to mark unread"
 	case item.record.read:
@@ -137,6 +147,7 @@ status_receipt_draw :: proc(
 // Reads or unreads the pane a row came from, whichever the row is not.
 @(private)
 status_receipt_toggle :: proc(app: ^App, item: Status_Item) {
+	if !status_item_markable(item) {return}
 	status_mark(app, item.session, !item.record.read)
 }
 
@@ -573,7 +584,8 @@ status_inbox_button :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) 
 		status_dismiss_item(app, row.item)
 		return
 	}
-	if render.rect_contains(status_row_receipt_rect(app, w, r, row.item, index == inbox.selected), x, y) {
+	if status_item_markable(row.item) &&
+	   render.rect_contains(status_row_receipt_rect(app, w, r, row.item, index == inbox.selected), x, y) {
 		status_receipt_toggle(app, row.item)
 		return
 	}

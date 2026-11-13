@@ -69,12 +69,13 @@ pane_header_title :: proc(header: ^Pane_Header_Metadata) -> string {
 	return header.title != "" ? header.title : header.executable
 }
 
-// The pane header's buttons, left to right, in groups by what they do: Links; the splits; the views that
-// make the pane bigger; the moves that take it out of the tiling; Close. A pane in a float keeps its split
-// and view controls; minimizing, docking and moving belong to the float header. Tiled panes add Float and
-// Linked window.
+// The pane header's buttons, left to right, in groups by what they do: Links and Commands; the splits; the
+// views that make the pane bigger; the moves that take it out of the tiling; Close. A pane in a float keeps
+// its split and view controls; minimizing, docking and moving belong to the float header. Tiled panes add
+// Float and Linked window.
 Pane_Header_Button :: enum u8 {
 	Links,
+	Commands,
 	Split_Right,
 	Split_Down,
 	Zoom,
@@ -92,23 +93,23 @@ Pane_Header_Layout :: ui.Header_Layout(Pane_Header_Button)
 
 @(private = "file")
 PANE_HEADER_TILED :: bit_set[Pane_Header_Button] {
-	.Links, .Split_Right, .Split_Down, .Zoom, .Fill_Window, .Linked_Window, .Dock, .Close,
+	.Links, .Commands, .Split_Right, .Split_Down, .Zoom, .Fill_Window, .Linked_Window, .Dock, .Close,
 }
 @(private = "file")
 PANE_HEADER_FLOATING :: bit_set[Pane_Header_Button] {
-	.Links, .Split_Right, .Split_Down, .Zoom, .Fill_Window, .Close,
+	.Links, .Commands, .Split_Right, .Split_Down, .Zoom, .Fill_Window, .Close,
 }
 @(private = "file")
-PANE_HEADER_OVERLAY :: bit_set[Pane_Header_Button]{.Links, .Split_Right, .Split_Down}
+PANE_HEADER_OVERLAY :: bit_set[Pane_Header_Button]{.Links, .Commands, .Split_Right, .Split_Down}
 // The last button of each group, which a divider sets apart from the next group.
 @(private = "file")
-PANE_HEADER_GROUP_ENDS :: bit_set[Pane_Header_Button]{.Links, .Split_Down, .Fill_Window, .Linked_Window}
+PANE_HEADER_GROUP_ENDS :: bit_set[Pane_Header_Button]{.Commands, .Split_Down, .Fill_Window, .Linked_Window}
 
-// The order buttons give way in a narrow header: the Links button first, then the tiled view
+// The order buttons give way in a narrow header: the Links and Commands buttons first, then the tiled view
 // controls, so splitting, floating and closing stay longest.
 @(private = "file", rodata)
 PANE_HEADER_DROP_ORDER := [?]Pane_Header_Button {
-	.Links, .Fill_Window, .Linked_Window, .Zoom, .Split_Down, .Split_Right, .Dock, .Close,
+	.Links, .Commands, .Fill_Window, .Linked_Window, .Zoom, .Split_Down, .Split_Right, .Dock, .Close,
 }
 
 // Whether a pane shows a header row. A tiled pane without one carries its split controls in the split
@@ -125,8 +126,9 @@ pane_in_float :: proc(w: ^Window, pane: layout.Pane_Rect) -> bool {
 }
 
 // The header row or split overlay of a pane, which drawing and hit testing share. Every pane can split,
-// zoom, fill and close; Float and Linked window apply only to the tiled layout, and a pane that takes no
-// pins has no Links button. A pane shown alone by its view carries the hidden panes glyph after its badge.
+// zoom, fill and close; Float and Linked window apply only to the tiled layout, a pane that takes no pins
+// has no Links button and a pane without a shell no Commands button. A pane shown alone by its view
+// carries the hidden panes glyph after its badge.
 pane_header_layout :: proc(w: ^Window, pane: layout.Pane_Rect) -> Pane_Header_Layout {
 	r := pane.rect
 	area := render.Rect{r.x, r.y, r.width, r.height}
@@ -138,9 +140,13 @@ pane_header_layout :: proc(w: ^Window, pane: layout.Pane_Rect) -> Pane_Header_La
 		shown = PANE_HEADER_FLOATING
 	}
 	if !CONTENT_POLICY[pane.content.kind].documents {shown -= {.Links}}
-	if !row {return ui.split_overlay_layout(area, w.scale, shown, PANE_HEADER_GROUP_ENDS)}
+	if !CONTENT_POLICY[pane.content.kind].commands {shown -= {.Commands}}
+	ends := PANE_HEADER_GROUP_ENDS
+	// Without a Commands button, Links ends the first group.
+	if .Commands not_in shown {ends += {.Links}}
+	if !row {return ui.split_overlay_layout(area, w.scale, shown, ends)}
 	widget := hidden_panes_glyph_shown(w, pane) ? ui.HIDDEN_PANES_GLYPH_BOX : [2]f32{}
-	return ui.header_layout(area, w.scale, shown, PANE_HEADER_GROUP_ENDS, PANE_HEADER_DROP_ORDER[:], widget)
+	return ui.header_layout(area, w.scale, shown, ends, PANE_HEADER_DROP_ORDER[:], widget)
 }
 
 // The view of the pane's container, which its Zoom and Fill window buttons show.
@@ -156,6 +162,8 @@ pane_header_icon :: proc(w: ^Window, pane: layout.Pane_Rect, button: Pane_Header
 	switch button {
 	case .Links:
 		return .Link
+	case .Commands:
+		return .Command
 	case .Split_Right:
 		return .Split_Right
 	case .Split_Down:
@@ -175,7 +183,7 @@ pane_header_icon :: proc(w: ^Window, pane: layout.Pane_Rect, button: Pane_Header
 	return .None
 }
 
-// The command a header button runs. Links opens its menu on press instead.
+// The command a header button runs. Links and Commands open their menus on press instead.
 @(private)
 pane_header_command :: proc(button: Pane_Header_Button) -> (Action, bool) {
 	switch button {
@@ -193,7 +201,7 @@ pane_header_command :: proc(button: Pane_Header_Button) -> (Action, bool) {
 		return .Float_Pane, true
 	case .Close:
 		return .Close_Pane, true
-	case .Links:
+	case .Links, .Commands:
 	}
 	return {}, false
 }
@@ -206,6 +214,8 @@ pane_header_tooltip :: proc(w: ^Window, pane: layout.Pane_Rect, target: Pane_Hea
 	switch button {
 	case .Links:
 		return "Links"
+	case .Commands:
+		return "Saved commands"
 	case .Split_Right:
 		return "Split right"
 	case .Split_Down:
@@ -233,6 +243,7 @@ pane_header_draw :: proc(
 ) -> render.Build_Status {
 	l := pane_header_layout(w, pane)
 	open := CONTENT_POLICY[pane.content.kind].documents && document_menu_shown_for(w, pane.content)
+	commands_open := command_menu_shown_for(w, pane.content)
 	buttons: [Pane_Header_Button]ui.Header_Button
 	view := pane_view(w, pane.content)
 	for &face, button in buttons {
@@ -242,7 +253,9 @@ pane_header_draw :: proc(
 		face.disabled = view.header_refused[button] != .None
 	}
 	buttons[.Links].selected = open
+	buttons[.Commands].selected = commands_open
 	buttons[.Close].danger = true
+	open ||= commands_open
 	if !pane_header_row(w, pane) {
 		if !w.split_overlay && !open {return .Ok}
 		return ui.split_overlay_draw(&w.list, app.theme, l, buttons, w.scale, w.pointer)
@@ -300,8 +313,9 @@ pane_status_line :: proc(app: ^App, entry: ^Session_Entry) -> (ui.Status_Mark, s
 	return status, fmt.tprintf("%s · %s", headline, summary.top.message)
 }
 
-// A header row shows its buttons on the focused pane, the pane under the pointer and a pane whose document
-// menu is open. The others keep the buttons' space, so their titles stay put when the buttons appear.
+// A header row shows its buttons on the focused pane, the pane under the pointer and a pane whose Links or
+// Commands menu is open. The others keep the buttons' space, so their titles stay put when the buttons
+// appear.
 @(private = "file")
 pane_header_buttons_shown :: proc(w: ^Window, pane: layout.Pane_Rect, menu_open: bool) -> bool {
 	hovered, found := w.header_pane.?
@@ -335,20 +349,20 @@ pane_header_hit :: proc(w: ^Window, x, y: f32) -> (layout.Pane_Rect, Pane_Header
 	return {}, nil, false
 }
 
-// Where a pane's Links menu hangs from: under its Links button, or inside its corner without one.
+// Where a pane's Links or Commands menu hangs from: under its button, or inside its corner without one.
 // A split pane with headers off shows no controls, so its menu sits in the corner the header would use.
-pane_header_document_anchor :: proc(w: ^Window, pane: layout.Pane_Rect) -> [2]f32 {
+pane_header_menu_anchor :: proc(w: ^Window, pane: layout.Pane_Rect, button: Pane_Header_Button) -> [2]f32 {
 	r := pane.rect
 	s := w.scale
 	width := ui.MENU_WIDTH * s
 	if !pane_header_row(w, pane) && !pane_single_tiled(w) {
 		return {r.x + r.width - width - ui.SPACE_2 * s, r.y + ui.SPACE_2 * s}
 	}
-	button := pane_header_layout(w, pane).buttons[.Links]
-	if button.width == 0 {
+	face := pane_header_layout(w, pane).buttons[button]
+	if face.width == 0 {
 		return {r.x + r.width - width - ui.SPACE_2 * s, r.y + ui.HEADER_HEIGHT * s + ui.SPACE_1 * s}
 	}
-	return {button.x + button.width - width, button.y + button.height + ui.SPACE_1 * s}
+	return {face.x + face.width - width, face.y + face.height + ui.SPACE_1 * s}
 }
 
 // One tiled pane alone, which shows split controls while headers are off. Floating panes follow
@@ -412,6 +426,10 @@ pane_header_press :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) {
 	}
 	if target == Pane_Header_Button.Links {
 		document_menu_open_pane(app, w, pane)
+		return
+	}
+	if target == Pane_Header_Button.Commands {
+		command_menu_open_pane(app, w, pane)
 		return
 	}
 	// A refused button takes the press and does nothing; its tooltip says why.

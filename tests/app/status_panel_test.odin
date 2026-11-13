@@ -108,28 +108,39 @@ activity_sections_follow_urgency_and_keep_trees_whole :: proc(t: ^testing.T) {
 	testing.expect_value(t, rows[5].y, rows[4].y + rows[4].height + 8)
 }
 
-// WORK-412: ties within a section sort by pane name, without case and after a title's leading
-// symbols, and keep pane order when names match. Workspaces do not matter when grouping by status.
+// Ties within a section sort newest first by when the report giving the tree its section entered its
+// state, and keep pane order when times match. Pane titles, which programs such as omp animate, play
+// no part, nor do workspaces when grouping by status.
 @(test)
-activity_status_grouping_sorts_by_pane_name_across_workspaces :: proc(t: ^testing.T) {
+activity_status_grouping_sorts_by_status_time_across_workspaces :: proc(t: ^testing.T) {
+	base := time.now()
+	at :: proc(base: time.Time, seconds: int) -> time.Time {
+		return time.time_add(base, time.Duration(seconds) * time.Second)
+	}
 	reports := make([dynamic]app.Status_Report, context.temp_allocator)
 	panes := [?]struct {
 		workspace, pane, id: string,
-		order:               int,
+		order, since:        int,
 		state:               term.Program_Status_State,
 	} {
-		{"One", "✳ zeta", "z", 0, .Working},
-		{"One", "Beta", "b1", 0, .Working},
-		{"Two", "alpha", "a", 1, .Working},
-		{"Two", "beta", "b2", 1, .Working},
-		{"Two", "✳ Gamma", "g", 1, .Blocked},
+		{"One", "⠋ alpha", "a", 0, 1, .Working},
+		{"One", "zeta", "z", 0, 3, .Working},
+		{"Two", "beta", "b1", 1, 2, .Working},
+		{"Two", "beta", "b2", 1, 2, .Working},
+		{"Two", "omega", "e", 1, 5, .Blocked},
 	}
 	for p in panes {
-		more := pane_reports(p.workspace, p.pane, p.order, {id = p.id, state = p.state})
+		record := term.Program_Status{id = p.id, state = p.state, since = at(base, p.since)}
+		more := pane_reports(p.workspace, p.pane, p.order, record)
 		append(&reports, ..more[:])
 	}
+	// A finished tree that needs you through an older child ranks by the child's time.
+	more := pane_reports("One", "aardvark", 0,
+		{id = "d", state = .Done, since = at(base, 9)},
+		{id = "d/ask", state = .Blocked, since = at(base, 0)})
+	append(&reports, ..more[:])
 	rows, _ := app.status_rows_project(.Status, reports[:], {56, 56}, 1)
-	expect_rows(t, rows, {"[Needs you 1]", "g", "[Working 4]", "a", "b1", "b2", "z"})
+	expect_rows(t, rows, {"[Needs you 2]", "e", "d", "d/ask", "[Working 4]", "z", "b1", "b2", "a"})
 }
 
 @(test)
@@ -400,7 +411,9 @@ activity_rows_hit_and_explain_themselves_in_both_views :: proc(t: ^testing.T) {
 			receipt := app.status_panel_receipt_rect(s, w, rect, row)
 			rx, ry := receipt.x + receipt.width / 2, receipt.y + receipt.height / 2
 			testing.expect(t, render.rect_contains(rect, rx, ry))
-			testing.expect(t, strings.contains(app.status_panel_row_tooltip(s, w, rx, ry), "click to mark"))
+			// WORK-424: a working row out of view has nothing to mark; the fixture window is unfocused.
+			mark := row.item.record.state == .Working && !w.focused ? "Working · " : "click to mark"
+			testing.expect(t, strings.contains(app.status_panel_row_tooltip(s, w, rx, ry), mark))
 			if row.item.record.state == .Done {
 				close := app.status_panel_dismiss_rect(s, w, rect)
 				cx, cy := close.x + close.width / 2, close.y + close.height / 2
@@ -518,4 +531,50 @@ activity_inbox_u_reads_and_unreads_the_selected_pane :: proc(t: ^testing.T) {
 	entry.statuses[0].read = true
 	inbox_press(s, w, .U)
 	testing.expect(t, entry.status_unread)
+}
+
+// WORK-424: a working program out of view always has output the user has not seen, so its row is
+// unread whatever the pane's last read, and U leaves it be; in view it reads as before.
+@(test)
+activity_working_rows_stay_unread_out_of_view :: proc(t: ^testing.T) {
+	f: Palette_Fixture
+	defer palette_fixture_destroy(t, &f)
+	if !palette_fixture_create(t, &f, "activity-working-unread", second_window = false) {return}
+	s, w := &f.state, f.state.windows[0]
+	s.settings.status.enabled = true
+	entry := app.focused_session(s, w)
+	if !testing.expect(t, entry != nil) {return}
+	previous := entry.statuses
+	defer {
+		delete(entry.statuses)
+		entry.statuses = previous
+	}
+	entry.statuses = make([]term.Program_Status, 2)
+	entry.statuses[0] = {id = "a", state = .Working, progress = -1, read = true, updated_at = time.now()}
+	entry.statuses[1] = {id = "b", state = .Done, progress = -1, read = true, updated_at = time.now()}
+	read_of :: proc(s: ^app.App, w: ^app.Window, id: string) -> (read, found: bool) {
+		for report in app.status_reports(s, w) {
+			if report.item.record.id == id {return report.item.record.read, true}
+		}
+		return
+	}
+	w.focused = true
+	working, found := read_of(s, w, "a")
+	testing.expect(t, found && working)
+	w.focused = false
+	working, found = read_of(s, w, "a")
+	testing.expect(t, found && !working)
+	done, _ := read_of(s, w, "b")
+	testing.expect(t, done)
+	app.run_action(s, w, .Status_Inbox)
+	if !testing.expect(t, app.status_inbox_shown(w)) {return}
+	rows, _ := app.status_rows_project(s.settings.status.group_by, app.status_reports(s, w), {48, 48}, w.scale)
+	for row, i in rows {
+		if row.report && row.item.record.id == "a" {w.status.inbox = app.Status_Inbox{selected = i}}
+	}
+	inbox, _ := w.status.inbox.?
+	if !testing.expect(t, rows[inbox.selected].item.record.id == "a") {return}
+	read_at := entry.status_read_at
+	inbox_press(s, w, .U)
+	testing.expect(t, !entry.status_unread && entry.status_read_at == read_at)
 }

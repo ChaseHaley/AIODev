@@ -492,20 +492,25 @@ floating_minimize_toggle :: proc(app: ^App, w: ^Window) {
 
 // Minimizes every shown floating group, or when none is shown, brings every minimized one back.
 floating_minimize_all_toggle :: proc(app: ^App, w: ^Window) {
-	tree := window_tree(w)
-	shown, minimized := layout.float_counts(tree)
+	shown, minimized := layout.float_counts(window_tree(w))
 	if shown == 0 && minimized == 0 {
 		notify(app, .Info, "This tab has no floats.")
 		return
 	}
+	floating_minimize_all(app, w, shown > 0)
+}
+
+// Minimizes every floating group of the window's tab, or brings every one back with focus in the topmost.
+floating_minimize_all :: proc(app: ^App, w: ^Window, minimized: bool) {
+	tree := window_tree(w)
 	focused := layout.is_floating(tree, tree.focus)
 	if focused {focus_leave(app, w)}
 	for _, i in tree.nodes {
 		root := layout.Node_Id(i)
-		if layout.float_is_root(tree, root) {_ = layout.float_minimize(tree, root, shown > 0)}
+		if layout.float_is_root(tree, root) {_ = layout.float_minimize(tree, root, minimized)}
 	}
 	pane_motion_arm(w, .Float)
-	if shown == 0 {
+	if !minimized {
 		// Restored floats appear with the cursor in place, as a single restore does.
 		cursor_crossing_forget(w)
 		latest := layout.float_latest(tree, false)

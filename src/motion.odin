@@ -10,6 +10,7 @@ import "aio:ui"
 @(private = "file")
 Window_Motion :: enum u8 {
 	Workspace_Picker,
+	Document_Menu,
 	Title_Controls,
 	Rail,
 	Tabs,
@@ -31,6 +32,8 @@ window_motion_advance :: proc(app: ^App, w: ^Window, part: Window_Motion, frame:
 	switch part {
 	case .Workspace_Picker:
 		return workspace_picker_animate(app, w, frame)
+	case .Document_Menu:
+		return document_menu_shown(w) && document_order_animate(&w.document_menu, app.animations, frame)
 	case .Title_Controls:
 		return title_controls_animate(app, w, frame)
 	case .Rail:
@@ -69,6 +72,8 @@ window_motion_running :: proc(w: ^Window, part: Window_Motion) -> bool {
 	switch part {
 	case .Workspace_Picker:
 		return workspace_picker_animating(w)
+	case .Document_Menu:
+		return document_order_animating(w)
 	case .Title_Controls:
 		return title_controls_animating(w)
 	case .Rail:

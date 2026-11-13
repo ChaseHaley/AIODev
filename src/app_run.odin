@@ -7,6 +7,8 @@ App_Run :: enum u8 {
 	Draining,
 	// The owner quit: a menu, the tray, or closing the last workspace.
 	Quit,
+	// The owner quits to start AIODev again, as after an update; main starts it once this one has let go.
+	Restart,
 	// The graphics device was lost and could not be recreated.
 	Device_Failed,
 }
@@ -18,6 +20,10 @@ app_running :: proc(app: ^App) -> bool {
 // A quit already being drained stays drained, so its reply still arrives.
 app_quit :: proc(app: ^App) {
 	if app.run == .Running {app.run = .Quit}
+}
+
+app_restart :: proc(app: ^App) {
+	if app.run == .Running {app.run = .Restart}
 }
 
 // Nothing can draw without a device, so no reply is worth waiting for.

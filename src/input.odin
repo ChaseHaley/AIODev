@@ -137,6 +137,7 @@ OVERLAY_FIRST :: bit_set[Overlay_Kind] {
 	.Activity_Row_Menu,
 	.Profile_Menu,
 	.Document_Menu,
+	.Command_Menu,
 }
 
 // Each surface's keys, text and wheel side by side. Keys a surface takes have their release
@@ -210,6 +211,14 @@ overlay_input :: proc(app: ^App, w: ^Window, kind: Overlay_Kind, event: Overlay_
 			document_menu_key(app, w, e.event, e.logical)
 		case Overlay_Text: document_menu_text_input(app, w, e.text)
 		case Overlay_Wheel: document_menu_wheel(app, w, int(math.sign(e.delta)))
+		}
+	case .Command_Menu:
+		switch e in event {
+		case Overlay_Key:
+			key_suppress(w, e.event)
+			command_menu_key(app, w, e.event, e.logical)
+		case Overlay_Text: command_menu_text_input(app, w, e.text)
+		case Overlay_Wheel: command_menu_wheel(app, w, int(math.sign(e.delta)))
 		}
 	case .Confirmation:
 		switch e in event {

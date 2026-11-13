@@ -6,7 +6,6 @@ import "aio:localpath"
 import "aio:ui"
 import "core:log"
 import "core:path/filepath"
-import "core:slice"
 import "core:strings"
 import "core:unicode/utf8"
 
@@ -160,33 +159,48 @@ document_scope_list :: proc(scopes: Document_Scopes, level: Document_Level) -> ^
 	return nil
 }
 
-// Every document the pane can see, sorted by level and then by name. A document pinned at several
-// levels shows at its narrowest. The rows borrow from the lists.
+// Every document the pane can see, by level and then in each level's own order, which pinning appends
+// to and dragging changes. A document pinned at several levels shows at its narrowest. The rows borrow
+// from the lists.
 @(require_results)
 documents_visible :: proc(scopes: Document_Scopes, allocator := context.temp_allocator) -> []Document_Row {
 	rows := make([dynamic]Document_Row, 0, 3 * DOCUMENT_LEVEL_LIMIT, allocator)
 	for level in Document_Level {
 		list := document_scope_list(scopes, level)
 		if list == nil {continue}
-		start := len(rows)
 		next: for document in list {
 			for row in rows {if document_same(row.document.target, document.target) {continue next}}
 			append(&rows, Document_Row{document, level})
 		}
-		group := rows[start:]
-		slice.sort_by(group, proc(a, b: Document_Row) -> bool {
-			first, _ := document_label(a.document, context.temp_allocator)
-			second, _ := document_label(b.document, context.temp_allocator)
-			lower_first := strings.to_lower(first, context.temp_allocator)
-			lower_second := strings.to_lower(second, context.temp_allocator)
-			return lower_first < lower_second
-		})
 	}
 	return rows[:]
 }
 
-// Pins `document` at `level`. One the pane can already see moves there instead of appearing twice. A
-// full level changes nothing.
+// Moves `target` within `level` to where `onto` stands: after it when moving down, before it when moving
+// up, so a row dropped on another's slot takes it. Documents hidden at a narrower level keep their places
+// relative to the rest.
+@(require_results)
+document_reorder :: proc(scopes: Document_Scopes, level: Document_Level, target, onto: string) -> bool {
+	list := document_scope_list(scopes, level)
+	if list == nil {return false}
+	from, to := -1, -1
+	for document, i in list {
+		if document_same(document.target, target) {from = i}
+		if document_same(document.target, onto) {to = i}
+	}
+	if from < 0 || to < 0 || from == to {return false}
+	moved := list[from]
+	if from < to {
+		copy(list[from:to], list[from + 1:to + 1])
+	} else {
+		copy(list[to + 1:from + 1], list[to:from])
+	}
+	list[to] = moved
+	return true
+}
+
+// Pins `document` at `level`. One the pane can already see moves there instead of appearing twice, and one
+// already at `level` keeps its place there. A full level changes nothing.
 @(require_results)
 document_pin :: proc(
 	scopes: Document_Scopes,
@@ -198,7 +212,7 @@ document_pin :: proc(
 	present := document_list_has(destination, document.target)
 	if !present && len(destination) >= DOCUMENT_LEVEL_LIMIT {return .Level_Full}
 	// The caller's document may borrow from a list about to give it up, so the stored copy and the
-	// destination's room exist before any list changes. A target already there frees its own slot.
+	// destination's room exist before any list changes.
 	target, err := strings.clone(document.target)
 	if err != nil {return .Failed}
 	if !present && reserve(destination, len(destination) + 1) != nil {
@@ -207,7 +221,12 @@ document_pin :: proc(
 		return .Failed
 	}
 	for other in Document_Level {
+		if present && other == level {continue}
 		if list := document_scope_list(scopes, other); list != nil {_ = document_list_remove(list, target)}
+	}
+	if present {
+		delete(target)
+		return .Pinned
 	}
 	append(destination, Document{target, document.folder})
 	return .Pinned

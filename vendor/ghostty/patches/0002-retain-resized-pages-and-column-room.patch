@@ -1,0 +1,152 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Chase Haley <chasehaley33@gmail.com>
+Date: Thu, 12 Nov 2026 17:13:02 -0600
+Subject: [PATCH 2/4] PageList: keep the memory of resized-out pages, leave
+ room to grow columns
+
+Column growth without reflow copies each page into a new one, and
+reflow gives up a source page for about every destination page it
+creates. Destroying a pool page decommits it (a memset and
+DiscardVirtualMemory on Windows) and the next page faults the memory
+back in. Both now give the page back with DestroyMode.retain, as line
+pruning in grow does since d0addb9cd.
+
+Pages copied to grow the columns also get a quarter more column
+capacity, so a window widened a column at a time copies its history
+once per quarter instead of once per column.
+---
+ src/terminal/PageList.zig | 82 ++++++++++++++++++++++++++++++++++++---
+ 1 file changed, 76 insertions(+), 6 deletions(-)
+
+diff --git a/src/terminal/PageList.zig b/src/terminal/PageList.zig
+index 3474ae2..e8fdd33 100644
+--- a/src/terminal/PageList.zig
++++ b/src/terminal/PageList.zig
+@@ -1537,10 +1537,11 @@ fn resizeCols(
+ 
+     // Reflowed source pages are stashed for reuse as destination
+     // pages (see recycle_node). Whether we succeed or fail, a stashed
+-    // node must not outlive the reflow.
++    // node must not outlive the reflow. Output usually follows a
++    // resize, so keep its memory for the next page.
+     defer if (self.recycle_node) |node| {
+         self.recycle_node = null;
+-        self.destroyNode(node);
++        destroyNodeExt(&self.pool, node, &self.page_size, .retain);
+     };
+ 
+     // Set our new page as the only page. This orphans the existing pages
+@@ -1587,7 +1588,9 @@ fn resizeCols(
+                     row.node.owned != .pool or
+                     row.node.data != .resident)
+                 {
+-                    self.destroyNode(row.node);
++                    // The reflow allocates its next destination page
++                    // soon, so keep the memory (see DestroyMode.retain).
++                    destroyNodeExt(&self.pool, row.node, &self.page_size, .retain);
+                     break :destroy_node;
+                 }
+ 
+@@ -3175,7 +3178,16 @@ fn resizeWithoutReflowGrowCols(
+     // Try to fit our new column size into our existing page capacity.
+     // If that doesn't work then use a non-standard page with the
+     // given columns.
++    //
++    // A window being widened grows its columns a few at a time, and each
++    // growth past a page's capacity copies the whole page, so a drag
++    // across a wide screen would copy all of history once per column.
++    // Leave room for more columns: growth up to it takes the fast path
++    // above. The extra columns cost bytes per row, so a standard page
++    // holds fewer rows, but only the pages this copies have them.
+     const cap = page.capacity.adjust(
++        .{ .cols = growColsHeadroom(cols) },
++    ) catch page.capacity.adjust(
+         .{ .cols = cols },
+     ) catch |err| err: {
+         comptime assert(@TypeOf(err) == error{OutOfMemory});
+@@ -3301,6 +3313,7 @@ fn resizeWithoutReflowGrowCols(
+     while (copied < page.size.rows) {
+         const new_node = try self.createPage(.{ .cap = cap });
+         const new_page = new_node.page();
++        new_page.size.cols = cols;
+         defer new_page.assertIntegrity();
+ 
+         // Check the page once when it is full, not after every row.
+@@ -3362,10 +3375,18 @@ fn resizeWithoutReflowGrowCols(
+     // we don't have any more errors.
+     errdefer comptime unreachable;
+ 
+-    // Remove the old page.
+-    // Deallocate the old page.
++    // Remove the old page. The next chunk's copy takes its memory
++    // straight back out of the pool, so keep it.
+     self.pages.remove(chunk.node);
+-    self.destroyNode(chunk.node);
++    destroyNodeExt(&self.pool, chunk.node, &self.page_size, .retain);
++}
++
++/// The column capacity resizeWithoutReflowGrowCols gives the pages it
++/// copies when growing to `cols`: a quarter more, and at least 16 more.
++fn growColsHeadroom(cols: size.CellCountInt) size.CellCountInt {
++    const max = std.math.maxInt(size.CellCountInt);
++    const extra = @max(cols / 4, 16);
++    return if (cols > max - extra) max else cols + extra;
+ }
+ 
+ /// Returns the number of trailing blank lines, not to exceed max. Max
+@@ -16682,6 +16703,55 @@ test "PageList resize (no reflow) more cols" {
+     }
+ }
+ 
++test "PageList resize (no reflow) more cols leaves room to grow" {
++    const testing = std.testing;
++    const alloc = testing.allocator;
++
++    var s = try init(alloc, .{ .cols = 80, .rows = 3 });
++    defer s.deinit();
++    try s.growRows(20);
++    {
++        const page = s.pages.first.?.page();
++        const rac = page.getRowAndCell(79, 0);
++        rac.cell.* = .{
++            .content_tag = .codepoint,
++            .content = .{ .codepoint = .{ .data = 'x' } },
++        };
++    }
++
++    // The first growth past the capacity copies the page, with room for
++    // a quarter more columns.
++    const before = s.pages.first.?;
++    try s.resize(.{ .cols = 81, .reflow = false });
++    const copied = s.pages.first.?;
++    try testing.expect(copied != before);
++    try testing.expectEqual(growColsHeadroom(81), copied.page().capacity.cols);
++    try testing.expectEqual(@as(size.CellCountInt, 81), copied.page().size.cols);
++
++    // Growth within that room keeps the page and its content, with blank
++    // new columns.
++    try s.resize(.{ .cols = growColsHeadroom(81), .reflow = false });
++    try testing.expectEqual(copied, s.pages.first.?);
++    try testing.expectEqual(growColsHeadroom(81), s.cols);
++    try testing.expectEqual(@as(usize, 23), s.totalRows());
++    var it = s.rowIterator(.right_down, .{ .screen = .{} }, null);
++    var y: usize = 0;
++    while (it.next()) |offset| : (y += 1) {
++        const cells = offset.node.page().getCells(offset.rowAndCell().row);
++        try testing.expectEqual(@as(usize, s.cols), cells.len);
++        for (cells, 0..) |cell, x| {
++            if (y == 0 and x == 79) {
++                try testing.expectEqual(@as(u21, 'x'), cell.content.codepoint.data);
++            } else try testing.expect(cell.isEmpty());
++        }
++    }
++
++    // Past the room it copies again.
++    try s.resize(.{ .cols = growColsHeadroom(81) + 1, .reflow = false });
++    try testing.expect(s.pages.first.? != copied);
++    try testing.expectEqual(@as(usize, 23), s.totalRows());
++}
++
+ test "PageList resize (no reflow) more cols with spacer head" {
+     const testing = std.testing;
+     const alloc = testing.allocator;
