@@ -69,7 +69,7 @@ pane_scrollbar_geometry :: proc(
 	case .Markdown:
 		page := markdown_find(app, pane.content.id)
 		if page == nil || markdown_document(page) == nil {return}
-		area = pane_scrollbar_area(markdown_geometry_of(w, pane).area, w.scale)
+		area = pane_scrollbar_area(markdown_geometry_of(app, w, pane).area, w.scale)
 		extent = {ui.markdown_total(&page.view), int(area.height), page.view.scroll}
 	case:
 		return
