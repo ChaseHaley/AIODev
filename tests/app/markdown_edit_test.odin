@@ -5,6 +5,7 @@ import "aio:markdown"
 import "aio:platform"
 import "aio:ui"
 import "core:fmt"
+import "core:math"
 import "core:os"
 import "core:strings"
 import "core:sync"
@@ -78,7 +79,7 @@ file_text :: proc(t: ^testing.T, path: string) -> string {
 edit_fitted :: proc(state: ^app.App, w: ^app.Window, pane: ^app.Markdown_Pane) -> (g: ui.Markdown_Geometry) {
 	for shown in w.panes {
 		if shown.content != {.Markdown, pane.id} {continue}
-		g = ui.markdown_geometry(app.pane_body_rect(w, shown), w.scale)
+		g = ui.markdown_geometry(app.pane_body_rect(w, shown), w.scale, state.markdown_style.column)
 		app.markdown_view_fitted(state, w, pane, app.markdown_document(pane), g)
 	}
 	return
@@ -355,4 +356,73 @@ open_in_default_app_hands_over_the_pane_file :: proc(t: ^testing.T) {
 	app.run_action(&f.state, w, .Open_Markdown_Default_App)
 	testing.expect_value(t, Open_Stub_State.calls, 1)
 	testing.expect(t, strings.equal_fold(Open_Stub_State.uri, pane.path), Open_Stub_State.uri)
+}
+
+// Where the caret at source offset `source` stands, in window coordinates, laid out as the pane draws.
+@(private = "file")
+edit_caret_point :: proc(
+	state: ^app.App,
+	w: ^app.Window,
+	pane: ^app.Markdown_Pane,
+	source: int,
+) -> (
+	x, y, height: f32,
+	found: bool,
+) {
+	g := edit_fitted(state, w, pane)
+	document := app.markdown_document(pane)
+	rect, _, shown := ui.markdown_caret_at(&pane.view, document, markdown.live_display(document, source))
+	return g.left + rect.x, g.top - f32(pane.view.scroll) + rect.y, rect.height, shown
+}
+
+// Markdown style settings lay an open pane out again as they change. While editing, the caret still
+// stands on its character: a click where it is drawn puts it back on the same offset, and a heading's
+// fold chevron follows its taller line.
+@(test)
+markdown_style_changes_keep_the_caret_and_folds_mapped :: proc(t: ^testing.T) {
+	f: Edit_Fixture
+	defer edit_fixture_destroy(t, &f)
+	source := "# Title\n\nbody text here\n\n## Next\n\nmore"
+	w, pane := edit_fixture_start(t, &f, "Style", source)
+	if pane == nil {return}
+	app.run_action(&f.state, w, .Edit_Markdown)
+	if !testing.expect(t, app.markdown_editing(pane)) {return}
+	caret := len("# Title\n\nbody te")
+	edit_press(&f.state, w, .End, {.Control})
+	_, before_y, before_height, before_found := edit_caret_point(&f.state, w, pane, caret)
+	if !testing.expect(t, before_found) {return}
+	g := edit_fitted(&f.state, w, pane)
+	before_width := g.width
+	// Half the column, in whole DIPs, whatever the test window's size.
+	half := fmt.tprintf("%d", int(g.width / w.scale / 2))
+
+	changes := [?][2]string {
+		{"markdown.h1_size", "3"},
+		{"markdown.font_size", "15"},
+		{"markdown.line_height", "2"},
+		{"markdown.text_width", half},
+	}
+	for change in changes {
+		if !testing.expect(t, app.settings_save_value(&f.state, change[0], change[1], "set")) {return}
+	}
+	testing.expect_value(t, f.state.markdown_style.headings[0], 3)
+	x, y, height, found := edit_caret_point(&f.state, w, pane, caret)
+	if !testing.expect(t, found) {return}
+	g = edit_fitted(&f.state, w, pane)
+	testing.expect(t, g.width < before_width, "the text width applies")
+	testing.expect(t, y > before_y && height > before_height, "the sizes apply")
+	for pressed in ([?]bool{true, false}) {
+		app.handle_event(&f.state, input.Mouse_Button_Event{window = w.id, x = i32(math.round(x)),
+			y = i32(y + height / 2), button = .Left, pressed = pressed})
+	}
+	testing.expect_value(t, pane.editor.buffer.caret, caret)
+	// The same holds for keys: End lands at the line's end, where the layout says it is.
+	edit_press(&f.state, w, .End)
+	end := len("# Title\n\nbody text here")
+	testing.expect_value(t, pane.editor.buffer.caret, end)
+	end_x, end_y, _, end_found := edit_caret_point(&f.state, w, pane, end)
+	testing.expect(t, end_found && end_x > x && end_y == y)
+
+	chevron_click(t, &f.state, w, pane, strings.index(string(app.markdown_document(pane).text[:]), "Next"))
+	testing.expect_value(t, len(pane.folds.folds), 1)
 }

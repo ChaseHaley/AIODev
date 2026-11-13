@@ -84,7 +84,7 @@ markdown_edit_begin :: proc(app: ^App, w: ^Window, pane: ^Markdown_Pane) {
 	e.goal_x = -1
 	top := 0
 	if shown, found := markdown_pane_rect(w, pane.id); found {
-		g := markdown_geometry_of(w, shown)
+		g := markdown_geometry_of(app, w, shown)
 		top = ui.markdown_offset_at(&pane.view, &loaded.document, g, g.left, g.area.y)
 	}
 	// The properties stay rendered: the caret starts in the text below them.
@@ -282,7 +282,7 @@ markdown_edit_point :: proc(
 markdown_edit_fitted :: proc(app: ^App, w: ^Window, pane: ^Markdown_Pane) -> (ui.Markdown_Geometry, bool) {
 	shown, found := markdown_pane_rect(w, pane.id)
 	if !found {return {}, false}
-	g := markdown_geometry_of(w, shown)
+	g := markdown_geometry_of(app, w, shown)
 	markdown_view_fitted(app, w, pane, &pane.editor.document, g)
 	return g, true
 }

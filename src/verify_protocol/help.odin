@@ -7,7 +7,7 @@ import "core:strings"
 
 HELP_OVERVIEW :: `aioctl <command> [arguments]
 Inspect: ping, screen, cells, state, wait, expect, pixels, diff, draws, perf.
-Drive: type, key, run, mouse, focus, resize, dpi, tray, command, window.
+Drive: type, key, run, mouse, focus, resize, dpi, tray, pick, command, window.
 Record: vt record on|off.
 Use help <command> for grammar, evidence, output, and defaults.
 Coordinates and inclusive ranges are zero-based; quote each text argument in your shell.
@@ -422,6 +422,16 @@ Output is one line: ok; <changes>, e.g. ok; no visible change. Failures start wi
 			`tray open|hide|quit
 Runs tray actions through the app's normal path; quit fully exits and stops managed processes.
 No defaults. Output is one line: ok; <changes>, e.g. ok; no visible change. Failures start with error:.
+`,
+		)
+	case .Pick:
+		put(
+			&w,
+			`pick <path>|--cancel
+Queues what the next file dialog chooses on a headless instance; --cancel closes it unanswered.
+Queued answers are used oldest first; a dialog with none queued cancels. State os.file_pick.*
+records each dialog's window, filter, pattern, starting folder and answer. No defaults.
+Output is one line: ok; <changes>. A desktop instance refuses: its dialog takes real input.
 `,
 		)
 	case .Command:

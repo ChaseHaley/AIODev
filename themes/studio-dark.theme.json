@@ -31,6 +31,7 @@
     "scrollbar": "#ececf14d",
     "scrollbar_hover": "#ececf180",
     "scrollbar_active": "#ececf1b3",
+    "code_background": "#ececf117",
     "foreground": "#ececf1",
     "background": "#121215",
     "cursor": "#ececf1",

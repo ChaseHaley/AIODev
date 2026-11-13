@@ -2,6 +2,7 @@ package main
 
 import "aio:colour"
 import "aio:commands"
+import "aio:font"
 import "aio:input"
 import "aio:layout"
 import "aio:links"
@@ -100,6 +101,34 @@ Markdown_App :: struct {
 	next_markdown_id:  u32,
 	// Zero while no pane is registered, so nothing polls.
 	markdown_deadline: time.Tick,
+	// The markdown.* settings with their fonts loaded; markdown_style_apply sets it.
+	markdown_style:    ui.Markdown_Style,
+}
+
+// Loads the fonts the markdown.* settings name. A family that is not installed follows the interface
+// or shell font instead, as an empty setting does. Panes lay out again on their next fit, which sees
+// the new style.
+markdown_style_apply :: proc(app: ^App) {
+	s := app.settings.markdown
+	family, semibold, code: font.Family
+	if s.font_family != "" {
+		err: font.Error
+		if family, err = font.family_load(app.fonts, s.font_family); err == .None {
+			semibold, err = font.family_load(app.fonts, s.font_family, semibold = true)
+			if err != .None {semibold = family}
+		} else {
+			family = {}
+			log.warnf("markdown: font %q is not available (%v); following the GUI font", s.font_family, err)
+		}
+	}
+	if s.code_font_family != "" {
+		err: font.Error
+		if code, err = font.family_load(app.fonts, s.code_font_family); err != .None {
+			code = {}
+			log.warnf("markdown: font %q is not available (%v); following the shell font", s.code_font_family, err)
+		}
+	}
+	app.markdown_style = ui.markdown_style_from(s, family, semibold, code)
 }
 
 // Owned by App.markdown_panes; panes refer to it by id and the poll frees it once none does.
@@ -332,7 +361,7 @@ markdown_find_select :: proc(w: ^Window, pane: ^Markdown_Pane, upward: bool) {
 	if markdown_document(pane) == nil || !markdown.search_select(&pane.search, upward) {return}
 	match := pane.search.matches[pane.search.selected]
 	if shown, found := markdown_pane_rect(w, pane.id); found {
-		visible := int(markdown_geometry_of(w, shown).area.height)
+		visible := int(pane_body_rect(w, shown).height)
 		ui.markdown_reveal(&pane.view, match.start, match.end, visible)
 	}
 }
@@ -517,8 +546,8 @@ markdown_under_pointer :: proc(app: ^App, w: ^Window, x, y: f32) -> (^Markdown_P
 }
 
 @(private, require_results)
-markdown_geometry_of :: proc(w: ^Window, shown: layout.Pane_Rect) -> ui.Markdown_Geometry {
-	return ui.markdown_geometry(pane_body_rect(w, shown), w.scale)
+markdown_geometry_of :: proc(app: ^App, w: ^Window, shown: layout.Pane_Rect) -> ui.Markdown_Geometry {
+	return ui.markdown_geometry(pane_body_rect(w, shown), w.scale, app.markdown_style.column)
 }
 
 // The link the pointer is over in pane `id`, or -1.
@@ -568,7 +597,7 @@ markdown_outline_under :: proc(
 	heading: int,
 	over: bool,
 ) {
-	g := markdown_geometry_of(w, shown)
+	g := markdown_geometry_of(app, w, shown)
 	column, visible := markdown_outline_of(app, w, pane, g)
 	if !visible {return -1, false}
 	outline := &pane.outline
@@ -594,7 +623,7 @@ markdown_outline_wheel :: proc(
 	rows: int,
 ) -> bool {
 	if !markdown_outline_open(w, pane.id) {return false}
-	g := markdown_geometry_of(w, shown)
+	g := markdown_geometry_of(app, w, shown)
 	column, visible := markdown_outline_of(app, w, pane, g)
 	if !visible {return false}
 	outline := &pane.outline
@@ -649,7 +678,7 @@ markdown_pane_draw :: proc(
 	result: render.Build_Status,
 ) {
 	pane := markdown_find(app, shown.content.id)
-	g := markdown_geometry_of(w, shown)
+	g := markdown_geometry_of(app, w, shown)
 	document := pane != nil ? markdown_document(pane) : nil
 	if document == nil {return false, markdown_message_draw(app, w, pane, g)}
 	view := &pane.view
@@ -700,7 +729,7 @@ markdown_pane_draw :: proc(
 
 @(private)
 markdown_scroll :: proc(w: ^Window, pane: ^Markdown_Pane, shown: layout.Pane_Rect, delta: int) {
-	visible := int(markdown_geometry_of(w, shown).area.height)
+	visible := int(pane_body_rect(w, shown).height)
 	if ui.markdown_scroll_by(&pane.view, delta, visible) {w.dirty = true}
 }
 
@@ -721,7 +750,7 @@ markdown_page :: proc(app: ^App, w: ^Window, pages: f64) {
 	if pane == nil {return}
 	shown, found := markdown_pane_rect(w, pane.id)
 	if !found {return}
-	visible := int(markdown_geometry_of(w, shown).area.height)
+	visible := int(markdown_geometry_of(app, w, shown).area.height)
 	page := max(1, visible - ui.markdown_line(&pane.view))
 	markdown_scroll(w, pane, shown, int(pages * f64(page)))
 }
@@ -840,7 +869,7 @@ markdown_link_menu :: proc(
 ) -> bool {
 	document := markdown_document(pane)
 	if document == nil {return false}
-	link := ui.markdown_link_at(&pane.view, markdown_geometry_of(w, shown), x, y)
+	link := ui.markdown_link_at(&pane.view, markdown_geometry_of(app, w, shown), x, y)
 	if link < 0 {return false}
 	buffer: [links.TARGET_BYTES]u8 = ---
 	target, _ := target_from_link(document.links[link], pane.path, buffer[:])
@@ -910,7 +939,7 @@ markdown_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: input.Mo
 			hover = Markdown_Outline_Hover{pane.id, heading}
 			if heading >= 0 {shape = .Hand}
 		} else if document := markdown_document(pane); document != nil {
-			g := markdown_geometry_of(w, shown)
+			g := markdown_geometry_of(app, w, shown)
 			shape = .Text
 			if link := markdown_link_clicked(pane, document, g, x, y, .Control in e.modifiers); link >= 0 {
 				hover, shape = Markdown_Link_Hover{pane.id, link}, .Hand
@@ -939,7 +968,7 @@ markdown_held_move :: proc(app: ^App, w: ^Window, x, y: f32) {
 		markdown_gesture_clear(app, w)
 		return
 	}
-	g := markdown_geometry_of(w, shown)
+	g := markdown_geometry_of(app, w, shown)
 	if y < g.area.y {markdown_scroll(w, pane, shown, int(y - g.area.y))}
 	if y > g.area.y + g.area.height {markdown_scroll(w, pane, shown, int(y - g.area.y - g.area.height))}
 	if markdown_editing(pane) {
@@ -966,7 +995,7 @@ markdown_press :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) {
 	if document == nil {return}
 	w.dirty = true
 	if pane_scrollbar_press(app, w, shown, x, y) {return}
-	g := markdown_geometry_of(w, shown)
+	g := markdown_geometry_of(app, w, shown)
 	// A press on the outline jumps to a heading and never starts a selection.
 	if heading, over := markdown_outline_under(app, w, pane, shown, x, y); over {
 		if heading >= 0 {
@@ -1047,7 +1076,7 @@ when AIO_CONTROL {
 					editing, unsaved, caret = true, e.save_at != {}, e.buffer.caret
 				}
 				if shown, found := markdown_pane_rect(w, pane.id); found {
-					column, visible := markdown_outline_of(app, w, pane, markdown_geometry_of(w, shown))
+					column, visible := markdown_outline_of(app, w, pane, markdown_geometry_of(app, w, shown))
 					if visible {outline = column.count}
 					current = ui.markdown_outline_current(&pane.outline, &pane.view)
 				}

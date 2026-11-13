@@ -64,6 +64,8 @@ Editor_Row_Flag :: enum {
 	// The choices come from installed themes or fonts, not the schema, so search leaves them out as the
 	// palette does.
 	Live_Choices,
+	// A Browse button beside the field chooses a PNG with the system's file dialog.
+	Browse_Icon,
 }
 
 // Strings, `choices` and `choice_labels` are owned by the editor. `choice_labels`, when present,
@@ -98,8 +100,8 @@ Editor_Row :: struct {
 	opener:                                        string,
 	// The link program field an inline row edits.
 	opener_field:                                  Maybe(settings.Opener_Field),
-	// The image a link program's line and Icon row show, which its owner sets before each draw; empty
-	// draws the row's own glyph or badge.
+	// The image a profile's or link program's line and Icon row show, which its owner sets before each
+	// draw; empty draws the row's own glyph or badge.
 	icon_atlas:                                    render.Rect,
 	flags:                                         bit_set[Editor_Row_Flag],
 	process: int,
@@ -295,6 +297,7 @@ Editor_Request :: union {
 	Process_Remove_Request,
 	Opener_Remove_Request,
 	Opener_Order_Request,
+	Icon_Browse_Request,
 }
 
 Profile_Request :: struct {
@@ -324,6 +327,12 @@ Opener_Remove_Request :: struct {
 Opener_Order_Request :: struct {
 	id:   string,
 	slot: int,
+}
+
+// Choose a PNG for row `key` with the system's file dialog. `value` is the field's text when the
+// button was pressed, which names the dialog's starting folder.
+Icon_Browse_Request :: struct {
+	key, value: string,
 }
 
 // A profile block's drawn first line while rows reorder. Like the tab strip's positions, the grabbed
@@ -421,6 +430,8 @@ Editor :: struct {
 	using themes:                                                      Theme_Page_State,
 	strip:                                                             Theme_Strip,
 	hover_clear:                                                       bool,
+	// The pointer is over the Browse button of the hovered row.
+	hover_browse:                                                      bool,
 	// The shortcut field's capture, alternatives list and key-positions choice.
 	capture:                                                           Shortcut_Capture,
 	// A conflict chain the page shows instead of its rows, and where the page returns once it ends.
@@ -496,6 +507,8 @@ Editor_Outcome :: enum {
 	Assign_Shortcut,
 	// The page owner shows the Colors section for the applied theme.
 	Theme_Customize,
+	// The page owner opens the file dialog editor_request_take names (Icon_Browse_Request).
+	Browse_Icon,
 }
 
 // A field the user typed into and then left: its row's key and the typed text. Owned.
@@ -537,9 +550,9 @@ editor_reset_all_rect :: proc(l: Editor_Layout) -> render.Rect {
 
 // The parts of one setting row; zero-sized parts do not exist for its kind.
 Row_Parts :: struct {
-	row, reset, field, toggle, slider, swatch, positions, clear: render.Rect,
-	text_right:                                                 f32,
-	positions_label_below:                                      bool,
+	row, reset, field, toggle, slider, swatch, positions, clear, browse: render.Rect,
+	text_right:                                                         f32,
+	positions_label_below:                                              bool,
 }
 
 @(private)
@@ -895,6 +908,9 @@ editor_request_destroy :: proc(request: ^Editor_Request) {
 		delete(r.id)
 	case Opener_Order_Request:
 		delete(r.id)
+	case Icon_Browse_Request:
+		delete(r.key)
+		delete(r.value)
 	}
 	request^ = nil
 }
@@ -2916,11 +2932,22 @@ editor_row_parts :: proc(p: ^Editor, l: Editor_Layout, index: int) -> Row_Parts 
 		parts.slider = {parts.field.x - 176 * s, cy - SLIDER_THUMB / 2 * s, 160 * s, SLIDER_THUMB * s}
 		parts.text_right = parts.slider.x - SPACE_3 * s
 	case .Text:
-		parts.field = field(right, cy, min(360, r.width / s * 0.42), s)
+		width := min(360, r.width / s * 0.42)
+		if .Browse_Icon in row.flags {
+			parts.browse = browse_slot(right, cy, s)
+			parts.field = field(parts.browse.x - SPACE_2 * s, cy, width - HEIGHT_COMPACT - SPACE_2, s)
+		} else {
+			parts.field = field(right, cy, width, s)
+		}
 	case .Icon_File:
 		edge := r.x + r.width - SPACE_3 * s
 		parts.clear = {edge - 56 * s, cy - HEIGHT_COMPACT / 2 * s, 56 * s, HEIGHT_COMPACT * s}
-		parts.field = field(parts.clear.x - SPACE_2 * s, cy, min(300, r.width / s * 0.38), s)
+		field_right := parts.clear.x - SPACE_2 * s
+		if .Browse_Icon in row.flags {
+			parts.browse = browse_slot(field_right, cy, s)
+			field_right = parts.browse.x - SPACE_2 * s
+		}
+		parts.field = field(field_right, cy, min(300, r.width / s * 0.38), s)
 		parts.swatch = swatch_slot(parts.field, s)
 		parts.reset = {}
 		parts.text_right = parts.swatch.x - SPACE_3 * s
@@ -2962,6 +2989,13 @@ reset_slot :: proc(row: render.Rect, s: f32) -> render.Rect {
 swatch_slot :: proc(field: render.Rect, s: f32) -> render.Rect {
 	size := HEIGHT_STANDARD * s
 	return {field.x - SPACE_2 * s - size, field.y + (field.height - size) / 2, size, size}
+}
+
+// A field's Browse button, a compact square whose right edge is `right`.
+@(private)
+browse_slot :: proc(right, cy, s: f32) -> render.Rect {
+	size := HEIGHT_COMPACT * s
+	return {right - size, cy - size / 2, size, size}
 }
 
 // The table cells of the item at `index`. The editor's row rect is the only shared part.
@@ -3220,6 +3254,9 @@ editor_press :: proc(
 	case render.rect_contains(parts.clear, x, y):
 		field_set(&p.value, "")
 		return .Save
+	case render.rect_contains(parts.browse, x, y):
+		editor_request_set(p, Icon_Browse_Request{strings.clone(row.key), strings.clone(field_string(&p.value))})
+		return .Browse_Icon
 	case render.rect_contains(parts.toggle, x, y):
 		editor_mode_set(p, Editor_Editing{})
 		return flip_toggle(p)
@@ -3422,6 +3459,7 @@ editor_hover :: proc(p: ^Editor, l: Editor_Layout, x, y: f32, text: ^Text = nil)
 		}
 	}
 	item, reset, outline := -1, -1, -1
+	browse := false
 	profile_item, profile_control := -1, Profile_Control.Radio
 	strip_item := -1
 	if popup_open == .None && !editor_order_dragging(p, .Profiles) && !color_board_shown(p) &&
@@ -3433,6 +3471,7 @@ editor_hover :: proc(p: ^Editor, l: Editor_Layout, x, y: f32, text: ^Text = nil)
 			item = index
 			parts := editor_row_parts(p, l, index)
 			if render.rect_contains(parts.reset, x, y) {reset = index}
+			browse = render.rect_contains(parts.browse, x, y)
 			row := &p.rows[p.items[index].row]
 			if row.kind == .Profile {
 				table := profile_row_parts(row.kind, parts.row, l.scale)
@@ -3471,6 +3510,7 @@ editor_hover :: proc(p: ^Editor, l: Editor_Layout, x, y: f32, text: ^Text = nil)
 	   reset == p.hover_reset &&
 	   outline == p.hover_outline &&
 	   clear == p.hover_clear &&
+	   browse == p.hover_browse &&
 	   keys == p.keys_hover &&
 	   section == p.hover_section &&
 	   over_page_bar == p.page_bar_hover &&
@@ -3479,6 +3519,7 @@ editor_hover :: proc(p: ^Editor, l: Editor_Layout, x, y: f32, text: ^Text = nil)
 		return bar_changed || strip_changed || board_changed
 	}
 	p.hover_item, p.hover_reset, p.hover_outline, p.hover_clear = item, reset, outline, clear
+	p.hover_browse = browse
 	p.keys_hover = keys
 	p.hover_section, p.page_bar_hover = section, over_page_bar
 	p.hover_profile_item, p.hover_profile_control = profile_item, profile_control
@@ -3488,10 +3529,11 @@ editor_hover :: proc(p: ^Editor, l: Editor_Layout, x, y: f32, text: ^Text = nil)
 // Drops every hover; reports whether one was shown.
 editor_hover_clear :: proc(p: ^Editor) -> (changed: bool) {
 	changed =
-		p.hover_item >= 0 || p.hover_reset >= 0 || p.hover_outline >= 0 || p.hover_clear ||
+		p.hover_item >= 0 || p.hover_reset >= 0 || p.hover_outline >= 0 || p.hover_clear || p.hover_browse ||
 		p.hover_profile_item >= 0 || p.dropdown.bar_hover || p.keys_hover || p.hover_section >= 0 ||
 		p.page_bar_hover
 	p.hover_item, p.hover_reset, p.hover_outline, p.hover_clear = -1, -1, -1, false
+	p.hover_browse = false
 	p.keys_hover = false
 	p.dropdown.bar_hover = false
 	p.hover_section, p.page_bar_hover = -1, false
@@ -3595,6 +3637,7 @@ editor_pointer :: proc(p: ^Editor, l: Editor_Layout, x, y: f32, text: ^Text = ni
 	switch {
 	case render.rect_contains(parts.reset, x, y),
 	     render.rect_contains(parts.clear, x, y),
+	     render.rect_contains(parts.browse, x, y),
 	     render.rect_contains(parts.toggle, x, y),
 	     render.rect_contains(parts.positions, x, y),
 	     render.rect_contains(parts.swatch, x, y) && row.kind != .Icon_File,
@@ -3769,7 +3812,16 @@ profile_row_draw :: proc(
 	badge_size := HEIGHT_COMPACT * scale
 	badge := render.Rect {table.icon.x, cy - badge_size / 2, badge_size, badge_size}
 	if table.icon.width > 0 {
-		profile_badge_draw(list, text, row.badge, badge, theme, scale, .Hidden in row.flags)
+		// A profile whose Icon PNG loaded shows it on its badge, as its Icon row does.
+		label := row.icon_atlas.width > 0 ? "" : row.badge
+		profile_badge_draw(list, text, label, badge, theme, scale, .Hidden in row.flags)
+		if row.icon_atlas.width > 0 {
+			side := ICON_BUTTON * scale
+			image := render.Rect{badge.x + (badge.width - side) / 2, badge.y + (badge.height - side) / 2, side, side}
+			if result := shell_badge_draw(list, text, theme, image, "", scale, row.icon_atlas); result != .Ok {
+				return result
+			}
+		}
 	}
 	name_color := strong ? theme.text : theme.muted
 	if .Hidden in row.flags {name_color = theme.muted}
@@ -4481,6 +4533,11 @@ editor_draw :: proc(
 			   item.shortcut);
 		   result != .Ok {
 			return result
+		}
+		if parts.browse.width > 0 {
+			hovered := editor_row_control_hovered(p, row, parts.browse, pointer)
+			if table_button_draw(list, parts.browse, .Folder, ICON_BUTTON, theme, s, false, hovered, selected,
+				   pointer) != .None {return .Ok}
 		}
 		if row.kind == .Icon_File {
 			box_draw(list, parts.clear, theme, false, s)

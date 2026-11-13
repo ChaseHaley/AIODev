@@ -540,40 +540,56 @@ remove :: proc(l: ^Layout, node: Node_Id) -> bool {
 
 @(require_results)
 focus_direction :: proc(rects: []Pane_Rect, focus: Node_Id, direction: Direction) -> Node_Id {
-	origin: Rect
-	found := false
-	for pane in rects {
-		if pane.node == focus {origin, found = pane.rect, true; break}
+	for pane, i in rects {
+		if pane.node != focus {continue}
+		nearest := nearest_toward(rects, i, direction)
+		return nearest < 0 ? focus : rects[nearest].node
 	}
-	if !found {return focus}
-	best := f32(1e30)
-	result := focus
-	x, y := origin.x + origin.width / 2, origin.y + origin.height / 2
-	for pane in rects {
-		if pane.node == focus {continue}
-		r := pane.rect
-		dx, dy := r.x + r.width / 2 - x, r.y + r.height / 2 - y
-		primary, secondary, overlap: f32
-		switch direction {
-		case .Left:
-			primary, secondary = -dx, abs(dy)
-		case .Right:
-			primary, secondary = dx, abs(dy)
-		case .Up:
-			primary, secondary = -dy, abs(dx)
-		case .Down:
-			primary, secondary = dy, abs(dx)
-		}
-		if axis, _ := direction_parts(direction); axis == .Horizontal {
-			overlap = min(origin.y + origin.height, r.y + r.height) - max(origin.y, r.y)
+	return focus
+}
+
+// The index in `rects` of the nearest pane toward `direction` from rects[from], or -1 when none lies that
+// way. The rects may come from several windows, placed in one coordinate space. A pane beside the origin,
+// overlapping it across the direction with its centre further along, wins: the nearest by the centres'
+// distance along the direction plus their offset across it. Only when none is beside it, a pane wholly
+// past the origin's edge is taken: the nearest by the gap along the direction plus the gap across it.
+// Inside one tiling a pane past an edge always has one beside it, so that second rule only reaches panes
+// the tiling does not join, such as another window's. A tie keeps the earlier pane.
+@(require_results)
+nearest_toward :: proc(rects: []Pane_Rect, from: int, direction: Direction) -> int {
+	axis, before := direction_parts(direction)
+	across: Axis = axis == .Horizontal ? .Vertical : .Horizontal
+	origin := rects[from].rect
+	start, end := span(origin, axis)
+	side_start, side_end := span(origin, across)
+	beside, past := -1, -1
+	beside_score, past_score := f32(1e30), f32(1e30)
+	for pane, i in rects {
+		if i == from {continue}
+		s, e := span(pane.rect, axis)
+		a, b := span(pane.rect, across)
+		overlap := min(side_end, b) - max(side_start, a)
+		if overlap > 0 {
+			along := ((s + e) - (start + end)) / 2
+			if before {along = -along}
+			if along <= 0 {continue}
+			score := along + abs((a + b) - (side_start + side_end)) / 2
+			if score < beside_score {beside_score, beside = score, i}
 		} else {
-			overlap = min(origin.x + origin.width, r.x + r.width) - max(origin.x, r.x)
+			gap := before ? start - e : s - end
+			if gap < 0 {continue}
+			score := gap - overlap
+			if score < past_score {past_score, past = score, i}
 		}
-		if primary <= 0 || overlap <= 0 {continue}
-		score := primary + secondary
-		if score < best {best, result = score, pane.node}
 	}
-	return result
+	return beside >= 0 ? beside : past
+}
+
+// Where `r` starts and ends along `axis`.
+@(private, require_results)
+span :: proc(r: Rect, axis: Axis) -> (start, end: f32) {
+	if axis == .Horizontal {return r.x, r.x + r.width}
+	return r.y, r.y + r.height
 }
 
 @(require_results)

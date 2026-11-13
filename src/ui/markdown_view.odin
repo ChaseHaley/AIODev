@@ -3,15 +3,62 @@ package ui
 import "aio:font"
 import "aio:markdown"
 import "aio:render"
+import "aio:settings"
 import "core:log"
 import "core:math"
 
 // A rendered Markdown document: every run measured and placed once per width, then drawn only where
 // the viewport shows it. Positions are DIP-scaled pixels from the top left of the column.
 
-@(private = "file")
-MARKDOWN_COLUMN :: f32(720)
-// Reading text is one step above the interface's body size (D-080).
+// How a view sets its text: the markdown.* settings, with their fonts loaded. A zero family follows
+// the interface font the view is fitted with, or for code the shell font.
+Markdown_Style :: struct {
+	family, semibold, code:     font.Family,
+	// Points; zero follows the interface's body size, one step above it (D-080).
+	size:                       f32,
+	// Body line height as a multiple of its size; the other faces keep their leading in proportion.
+	line_height:                f32,
+	// H1 to H6 and code, as multiples of the body size.
+	headings:                   [6]f32,
+	code_size:                  f32,
+	heading_weight:             settings.Heading_Weight,
+	// The space between blocks while reading, in body lines.
+	paragraph_spacing:          f32,
+	// The reading column's widest, in DIPs; zero fills the pane.
+	column:                     f32,
+}
+
+// The look of D-080, which the markdown.* defaults keep.
+MARKDOWN_STYLE_DEFAULT :: Markdown_Style {
+	line_height       = 1.5,
+	headings          = {1.75, 1.4, 1.15, 1, 1, 1},
+	code_size         = 0.9,
+	heading_weight    = .Bold,
+	paragraph_spacing = 0.7,
+	column            = 720,
+}
+
+// The style the settings describe, with the fonts the app loaded for them.
+markdown_style_from :: proc(
+	s: settings.Markdown_Settings,
+	family, semibold, code: font.Family,
+) -> Markdown_Style {
+	style := Markdown_Style {
+		family            = family,
+		semibold          = semibold,
+		code              = code,
+		size              = f32(s.font_size),
+		line_height       = f32(s.line_height),
+		code_size         = f32(s.code_size),
+		heading_weight    = s.heading_weight,
+		paragraph_spacing = f32(s.paragraph_spacing),
+		column            = f32(s.text_width),
+	}
+	for size, level in s.heading_sizes {style.headings[level] = f32(size)}
+	return style
+}
+
+// Reading text is one step above the interface's body size (D-080), unless a size is set.
 @(private = "file")
 MARKDOWN_BODY_RATIO :: f32(15.0 / 13)
 @(private = "file")
@@ -26,7 +73,10 @@ Markdown_Face :: enum u8 {
 	H1,
 	H2,
 	H3,
-	// The frontmatter's properties, at the interface's body size.
+	H4,
+	H5,
+	H6,
+	// The frontmatter's properties, a step below the body: the interface's body size by default.
 	Small,
 }
 
@@ -36,16 +86,21 @@ Face_Spec :: struct {
 	style:          font.Style,
 }
 
+// A zero ratio comes from the style: headings and code. Headings take their weight from it too. The
+// leadings are those of the default line height and scale with the style's.
 @(private = "file", rodata)
 FACE_SPECS := [Markdown_Face]Face_Spec {
 	.Body            = {1, 1.5, .Regular},
 	.Strong          = {1, 1.5, .Bold},
 	.Emphasis        = {1, 1.5, .Italic},
 	.Strong_Emphasis = {1, 1.5, .Bold_Italic},
-	.Code            = {0.9, 1.5, .Regular},
-	.H1              = {1.75, 1.25, .Bold},
-	.H2              = {1.4, 1.3, .Bold},
-	.H3              = {1.15, 1.35, .Bold},
+	.Code            = {0, 1.5, .Regular},
+	.H1              = {0, 1.25, .Bold},
+	.H2              = {0, 1.3, .Bold},
+	.H3              = {0, 1.35, .Bold},
+	.H4              = {0, 1.5, .Bold},
+	.H5              = {0, 1.5, .Bold},
+	.H6              = {0, 1.5, .Bold},
 	.Small           = {13.0 / 15, 1.45, .Regular},
 }
 
@@ -128,7 +183,9 @@ Markdown_View :: struct {
 	width:      f32,
 	body_px:    f32,
 	family:     font.Family,
+	strong:     font.Family,
 	mono:       font.Family,
+	style:      Markdown_Style,
 	revision:   u64,
 	height:     f32,
 	// Counts the layouts fit has made, so what is measured from the lines (the heading outline) is
@@ -179,10 +236,16 @@ markdown_view_destroy :: proc(v: ^Markdown_View) {
 	v^ = {}
 }
 
-markdown_geometry :: proc(area: render.Rect, scale: f32) -> Markdown_Geometry {
+// `column` is the reading column's widest in DIPs, the markdown.text_width setting; zero fills the pane.
+markdown_geometry :: proc(
+	area: render.Rect,
+	scale: f32,
+	column := MARKDOWN_STYLE_DEFAULT.column,
+) -> Markdown_Geometry {
 	// Both sides keep the outline's margin, so the column stays centred.
 	inset := max(SPACE_6, OUTLINE_MARGIN) * scale
-	width := max(0, min(MARKDOWN_COLUMN * scale, area.width - 2 * inset))
+	room := area.width - 2 * inset
+	width := max(0, column > 0 ? min(column * scale, room) : room)
 	return {
 		area = area,
 		// Rounded up, so the outline's side keeps its whole margin.
@@ -192,9 +255,10 @@ markdown_geometry :: proc(area: render.Rect, scale: f32) -> Markdown_Geometry {
 	}
 }
 
-// Brings the layout up to date for this document revision, width and set of fonts. `folded`, by block,
-// marks the headings whose sections are collapsed: everything up to the next heading of the same level
-// or above is left out. A change to it must come with a new revision.
+// Brings the layout up to date for this document revision, width, style and set of fonts. `folded`, by
+// block, marks the headings whose sections are collapsed: everything up to the next heading of the same
+// level or above is left out. A change to it must come with a new revision. The style's families
+// default to `t`'s and, for code, `mono`.
 markdown_view_fit :: proc(
 	v: ^Markdown_View,
 	doc: ^markdown.Document,
@@ -203,22 +267,42 @@ markdown_view_fit :: proc(
 	mono: font.Family,
 	width, scale: f32,
 	folded: []bool = nil,
+	style := MARKDOWN_STYLE_DEFAULT,
 ) {
 	body_px := math.round(t.size_px * MARKDOWN_BODY_RATIO)
-	if v.width == width && v.body_px == body_px && v.family == t.family && v.mono == mono &&
-	   v.revision == revision && v.scale == scale {return}
-	v.width, v.body_px, v.family, v.mono, v.revision, v.scale = width, body_px, t.family, mono, revision, scale
+	if style.size > 0 {body_px = math.round(style.size * scale * 96 / 72)}
+	if v.width == width && v.body_px == body_px && v.family == t.family && v.strong == t.strong_family &&
+	   v.mono == mono && v.style == style && v.revision == revision && v.scale == scale {return}
+	v.width, v.body_px, v.revision, v.scale = width, body_px, revision, scale
+	v.family, v.strong, v.mono, v.style = t.family, t.strong_family, mono, style
 	v.layouts += 1
 	v.fonts = t.fonts
+	body, semibold, code := t.family, t.strong_family, mono
+	if style.family != {} {body, semibold = style.family, style.semibold}
+	if semibold == {} {semibold = body}
+	if style.code != {} {code = style.code}
+	leading := style.line_height / FACE_SPECS[.Body].leading
 	for spec, face in FACE_SPECS {
-		family := face == .Code ? mono : t.family
-		size := math.round(body_px * spec.ratio)
-		m := font.face_metrics(t.fonts, family.faces[spec.style], size)
+		family, weight, ratio := body, spec.style, spec.ratio
+		#partial switch face {
+		case .Code:
+			family, ratio = code, style.code_size
+		case .H1 ..= .H6:
+			ratio = style.headings[int(face) - int(Markdown_Face.H1)]
+			switch style.heading_weight {
+			case .Regular: weight = .Regular
+			// A semibold family's regular face is its semibold one.
+			case .Semibold: family, weight = semibold, .Regular
+			case .Bold: weight = .Bold
+			}
+		}
+		size := math.round(body_px * ratio)
+		m := font.face_metrics(t.fonts, family.faces[weight], size)
 		natural := m.ascent + m.descent + m.line_gap
-		height := math.round(max(natural, size * spec.leading))
+		height := math.round(max(natural, size * spec.leading * leading))
 		v.faces[face] = {
 			family = family,
-			style = spec.style,
+			style = weight,
 			size_px = size,
 			line_height = height,
 			baseline = math.round((height - (m.ascent + m.descent)) / 2 + m.ascent),
@@ -255,12 +339,7 @@ face_of :: proc(block: markdown.Block, style: markdown.Style) -> Markdown_Face {
 	if block.property {return .Small}
 	if block.kind == .Code || .Code in style {return .Code}
 	if block.kind == .Heading {
-		switch block.level {
-		case 1: return .H1
-		case 2: return .H2
-		case 3: return .H3
-		}
-		return .Strong
+		return Markdown_Face(int(Markdown_Face.H1) + clamp(int(block.level), 1, 6) - 1)
 	}
 	strong := .Strong in style || block.header
 	if strong && .Emphasis in style {return .Strong_Emphasis}
@@ -479,7 +558,7 @@ gap_before :: proc(v: ^Markdown_View, doc: ^markdown.Document, index: int) -> f3
 	if block.kind == .Heading {return math.round(line * (block.level <= 2 ? 1.5 : 1.15))}
 	if previous.kind == .Heading {return math.round(line * 0.4)}
 	if block.tight {return math.round(2 * v.scale)}
-	return math.round(line * 0.7)
+	return math.round(line * v.style.paragraph_spacing)
 }
 
 @(private = "file")
@@ -1012,7 +1091,7 @@ markdown_draw :: proc(
 		if box.rect.y >= visible_bottom || box.rect.y + box.rect.height <= visible_top {continue}
 		rect := box.rect
 		rect.x, rect.y = rect.x + g.left, rect.y + origin_y
-		color := box.kind == .Fill ? theme.pressed : theme.border
+		color := box.kind == .Fill ? theme.code_background : theme.border
 		draw_rect(list, {rect = rect, color = color, radius = box.radius})
 	}
 	colors := [Markdown_Color]render.Color {

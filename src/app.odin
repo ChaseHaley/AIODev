@@ -223,6 +223,7 @@ app_init :: proc(app: ^App) -> bool {
 		return false
 	}
 	apply_fonts(app)
+	markdown_style_apply(app)
 	apply_theme(app)
 	// Each shell takes 30 to 40 ms to start, so the panes start theirs while the graphics device is
 	// still being created; the windows showing them open once it exists.

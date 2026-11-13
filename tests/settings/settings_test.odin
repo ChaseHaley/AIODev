@@ -560,3 +560,54 @@ cursor_animation_starts_off_and_accepts_its_bounds :: proc(t: ^testing.T) {
 		testing.expect_value(t, s.cursor.style, defaults.cursor.style)
 	}
 }
+
+// Markdown style defaults are D-080's look: follow the GUI and shell fonts, at its sizes and spacing.
+@(test)
+markdown_style_defaults_keep_the_original_look_and_clamp :: proc(t: ^testing.T) {
+	defaults, default_error := settings.defaults()
+	if !testing.expect_value(t, default_error, nil) {return}
+	defer settings.destroy(&defaults)
+	m := defaults.markdown
+	testing.expect_value(t, m.font_family, "")
+	testing.expect_value(t, m.code_font_family, "")
+	testing.expect_value(t, m.font_size, 0)
+	testing.expect_value(t, m.line_height, 1.5)
+	testing.expect_value(t, m.heading_sizes, [6]f64{1.75, 1.4, 1.15, 1, 1, 1})
+	testing.expect_value(t, m.heading_weight, settings.Heading_Weight.Bold)
+	testing.expect_value(t, m.paragraph_spacing, 0.7)
+	testing.expect_value(t, m.code_size, 0.9)
+	testing.expect_value(t, m.text_width, 720)
+	testing.expect_value(t, settings.group_title("markdown.h1_size"), "Markdown")
+
+	s, d, err := settings.parse(
+		"markdown.font_family = Georgia\nmarkdown.code_font_family = Consolas\nmarkdown.font_size = 12\n" +
+		"markdown.line_height = 1.8\nmarkdown.h1_size = 2.5\nmarkdown.h6_size = 0.85\n" +
+		"markdown.heading_weight = semibold\nmarkdown.paragraph_spacing = 1.2\nmarkdown.code_size = 1\n" +
+		"markdown.text_width = 0\n",
+	)
+	defer settings.destroy(&s)
+	defer settings.diagnostics_destroy(&d)
+	testing.expect_value(t, err, nil)
+	testing.expect_value(t, len(d), 0)
+	testing.expect_value(t, s.markdown.font_family, "Georgia")
+	testing.expect_value(t, s.markdown.code_font_family, "Consolas")
+	testing.expect_value(t, s.markdown.font_size, 12)
+	testing.expect_value(t, s.markdown.line_height, 1.8)
+	testing.expect_value(t, s.markdown.heading_sizes, [6]f64{2.5, 1.4, 1.15, 1, 1, 0.85})
+	testing.expect_value(t, s.markdown.heading_weight, settings.Heading_Weight.Semibold)
+	testing.expect_value(t, s.markdown.paragraph_spacing, 1.2)
+	testing.expect_value(t, s.markdown.code_size, 1)
+	testing.expect_value(t, s.markdown.text_width, 0)
+	h6 := settings.schema_find("markdown.h6_size")
+	if testing.expect(t, h6 != nil) {testing.expect_value(t, settings.value_text(&s, h6^), "0.85")}
+
+	bad, issues, bad_err := settings.parse(
+		"markdown.h2_size = 9\nmarkdown.line_height = 0.5\nmarkdown.heading_weight = heavy\n" +
+		"markdown.text_width = -5\n",
+	)
+	defer settings.destroy(&bad)
+	defer settings.diagnostics_destroy(&issues)
+	testing.expect_value(t, bad_err, nil)
+	testing.expect_value(t, len(issues), 4)
+	testing.expect_value(t, bad.markdown, defaults.markdown)
+}
