@@ -194,7 +194,7 @@ when AIO_CONTROL {
 	}
 }
 
-// Command palette pointer surface
+// Everything palette pointer surface
 
 @(private)
 palette_claims :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {return palette_active(app, w)}

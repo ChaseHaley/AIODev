@@ -15,7 +15,7 @@ the Vivaldi browser.
 
 - Workspaces, tabs (horizontal or vertical) and nested split panes, with drag to rearrange
   panes and tabs, including across windows
-- A command palette that runs every command and edits settings in place
+- An everything palette that runs every command and edits settings in place
 - A Settings tab, plus a reloadable settings file and JSON themes
 - Find in scrollback, clickable links, ligatures and Unicode-correct rendering through a
   bundled ConPTY
@@ -25,8 +25,8 @@ the Vivaldi browser.
 Menus, naming fields, the workspace picker and confirmation dialogs take turns owning a window's
 input. Opening one dismisses the previous surface without saving an unfinished rename. Leaving a
 workspace's name chip by clicking elsewhere or changing focus keeps the name when it is available;
-Enter leaves a duplicate name open for correction. The command palette belongs to one window at a
-time, including while it fades out.
+Enter leaves a duplicate name open for correction. The everything palette belongs to one window at
+a time, including while it fades out.
 
 ## Install
 
@@ -41,7 +41,7 @@ To install from the zip instead, download `AIODev-<version>-windows-x64.zip` fro
 [Releases](https://github.com/ChaseHaley/AIODev/releases), extract it and run
 `powershell -ExecutionPolicy Bypass -File AIODev\install.ps1`; the policy applies to that run only.
 
-An installed AIODev updates itself: run Update AIODev from the command palette. It installs the
+An installed AIODev updates itself: run Update AIODev from the everything palette. It installs the
 latest release while AIODev keeps running, then offers to restart into it. Restarting ends the
 programs running in panes; your layout and agent conversations come back. Installing while AIODev
 runs also works from any terminal; AIODev keeps running the previous version until it restarts.

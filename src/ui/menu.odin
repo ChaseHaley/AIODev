@@ -9,7 +9,7 @@ MENU_ROW_HEIGHT :: HEIGHT_STANDARD
 // A hairline with SPACE_1 above and below.
 MENU_SEPARATOR_HEIGHT :: 2 * SPACE_1 + 1
 // Enough for the longest owner: a profile menu's settings.PROFILE_LIMIT profiles and its separator,
-// Settings and Command Palette rows.
+// Settings and Everything palette rows.
 MENU_MAX_ITEMS :: 72
 
 Menu_Item :: struct {

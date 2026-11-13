@@ -23,11 +23,11 @@ USAGE_FORMAT :: `Usage: aio [--instance <name>] [--json] <command> [options] [--
        aio version
        aio agent-session (claude | codex)
 
-Runs AIODev commands from scripts and coding agents. Every palette command runs by
-name, such as aio tab.next; aio commands lists AIODev's commands, and aio help <command>
-explains one's options, their defaults and an example of each, for aio's own wait, commands,
-help, version and agent-session too. aio version prints aio's build and the running AIODev's,
-and aio warns on stderr when the two differ.
+Runs AIODev commands from scripts and coding agents. Every command in the everything palette
+runs by name, such as aio tab.next; aio commands lists AIODev's commands, and aio help
+<command> explains one's options, their defaults and an example of each, for aio's own wait,
+commands, help, version and agent-session too. aio version prints aio's build and the running
+AIODev's, and aio warns on stderr when the two differ.
 
 Panes   --pane takes a pane id, a pane name, here or focused. Inside an AIODev pane the
         default is here, the pane aio runs in; elsewhere it is the focused pane.
