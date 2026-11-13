@@ -606,9 +606,9 @@ toggle_tooltip_expect :: proc(
 	testing.expect_value(t, app.tooltip_shortcut(s, w, owner, x, y, buffer[:]), "Ctrl+Shift+Y", loc)
 }
 
-// WORK-476: the header's right-most button hides the panel and the title bar button after the Activity
-// inbox brings it back, on either side. Both name the command's key, cancel a release elsewhere or a
-// lost capture, and save the one visibility setting.
+// WORK-476: the header's right-most button hides the panel and the title bar button beside the tab
+// orientation button brings it back, on either side and in either tab orientation. Both name the
+// command's key, cancel a release elsewhere or a lost capture, and save the one visibility setting.
 @(test)
 activity_hide_button_and_title_toggle_hide_and_show_the_panel :: proc(t: ^testing.T) {
 	f: Palette_Fixture
@@ -618,14 +618,29 @@ activity_hide_button_and_title_toggle_hide_and_show_the_panel :: proc(t: ^testin
 	s.animations = false
 	if !testing.expect(t, app.settings_save_value(s, "status.panel", "true", "enable panel")) {return}
 	names := settings.STATUS_PANEL_SIDE_NAME
-	for side in ([?]settings.Status_Panel_Side{.Left, .Right}) {
+	cases := [?]struct {
+		orientation: string,
+		side:        settings.Status_Panel_Side,
+	}{{"horizontal", .Left}, {"horizontal", .Right}, {"vertical", .Left}, {"vertical", .Right}}
+	for c in cases {
+		orientation, side := c.orientation, c.side
+		if !testing.expect(t, app.settings_save_value(s, "tabs.orientation", orientation, "set tabs")) {return}
 		if !testing.expect(t, app.settings_save_value(s, "status.panel_side", names[side], "set side")) {return}
-		// The title bar button sits after the inbox button, and the workspace chip after it.
+		testing.expect_value(t, w.tabs_horizontal, orientation == "horizontal")
+		// The title bar button sits right after the tab orientation button; Settings, the palette, the
+		// inbox button and the workspace chip follow in their order.
+		tabs := app.tab_orientation_button_rect(w)
 		toggle := app.status_panel_toggle_rect(s, w)
+		settings_button := app.title_action_rect(s, w, .Settings)
+		palette := app.title_action_rect(s, w, .Palette)
 		pill := app.status_pill_rect(s, w)
 		testing.expect(t, toggle.width > 0 && pill.width > 0)
-		testing.expect_value(t, toggle.x, pill.x + pill.width)
-		testing.expect_value(t, app.workspace_button_left(s, w), toggle.x + toggle.width)
+		testing.expect_value(t, toggle.x, tabs.x + tabs.width)
+		testing.expect_value(t, toggle.y, tabs.y)
+		testing.expect_value(t, settings_button.x, toggle.x + toggle.width)
+		testing.expect_value(t, palette.x, settings_button.x + settings_button.width)
+		testing.expect_value(t, pill.x, palette.x + palette.width)
+		testing.expect_value(t, app.workspace_button_left(s, w), pill.x + pill.width)
 		tx, ty := toggle.x + toggle.width / 2, toggle.y + toggle.height / 2
 		toggle_tooltip_expect(t, s, w, .Activity_Toggle, tx, ty, "Hide Activity panel")
 
@@ -660,13 +675,16 @@ activity_hide_button_and_title_toggle_hide_and_show_the_panel :: proc(t: ^testin
 		click_at(s, w, tx, ty)
 		testing.expect(t, s.settings.status.panel)
 		testing.expect_value(t, app.status_panel_rect(s, w), panel)
-		testing.expect_value(t, w.dock_left_width > 0, side == .Left)
+		testing.expect_value(t, w.dock_left_width > 0, side == .Left && orientation == "horizontal")
 		settings_file_has(t, f.path, "status.panel = true")
 		testing.expect_value(t, s.settings.status.panel_side, side)
 	}
-	// Without Activity there is no panel to show, so no button either, and the chip moves up to the inbox.
+	// Without Activity there is no panel to show, so no button either, and Settings moves back beside
+	// the tab orientation button.
 	if !testing.expect(t, app.settings_save_value(s, "status.enabled", "false", "Activity off")) {return}
 	testing.expect_value(t, app.status_panel_toggle_rect(s, w).width, f32(0))
+	tabs := app.tab_orientation_button_rect(w)
+	testing.expect_value(t, app.title_action_rect(s, w, .Settings).x, tabs.x + tabs.width)
 }
 
 // WORK-476: Show or hide the Activity panel is a palette command on Ctrl+Shift+Y. It slides the panel

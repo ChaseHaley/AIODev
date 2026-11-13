@@ -897,16 +897,14 @@ status_panel_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: inpu
 	status_panel_leave(app, w)
 }
 
-// Activity panel toggle pointer surface: the title bar button that shows and hides the panel. It is one
-// more title button, right after the Activity inbox button, or after the title buttons while that is
-// off. It stays while Activity is on, so the panel comes back from where it went.
+// Activity panel toggle pointer surface: the title bar button that shows and hides the panel. It sits
+// right after the tab orientation toggle, the two layout controls side by side, with Settings and the
+// palette after it. It stays while Activity is on, so the panel comes back from where it went.
 
 status_panel_toggle_rect :: proc(app: ^App, w: ^Window) -> render.Rect {
 	if !app.settings.status.enabled || window_linked(w) || window_title_height(w) <= 0 {return {}}
-	palette := title_action_rect(w, .Palette)
-	pill := status_pill_rect(app, w)
-	x := pill.width > 0 ? pill.x + pill.width : palette.x + palette.width
-	return {x, palette.y, ui.TITLE_BUTTON_WIDTH * w.scale, palette.height}
+	tabs := tab_orientation_button_rect(w)
+	return {tabs.x + tabs.width, tabs.y, ui.TITLE_BUTTON_WIDTH * w.scale, tabs.height}
 }
 
 // The icon is the window with the panel's rows on its side, unlike the tab orientation's plain layout.

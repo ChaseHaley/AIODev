@@ -143,12 +143,10 @@ workspace_new :: proc(app: ^App, w: ^Window, new_window: bool, name_it := true) 
 	if target := window_for_workspace(app, workspace); target != nil {workspace_name_begin(app, target)}
 }
 
-// The chip starts right after the Activity panel toggle, else the inbox button when it shows, else right
-// after the title buttons.
+// The chip starts right after the inbox button when it shows, else right after the title buttons.
 workspace_button_left :: proc(app: ^App, w: ^Window) -> f32 {
-	if toggle := status_panel_toggle_rect(app, w); toggle.width > 0 {return toggle.x + toggle.width}
 	pill := status_pill_rect(app, w)
-	return pill.width > 0 ? pill.x + pill.width : title_actions_end(w)
+	return pill.width > 0 ? pill.x + pill.width : title_actions_end(app, w)
 }
 
 // The chip hugs its content: icon, name and the chevron's slot, so the tabs start right after the
