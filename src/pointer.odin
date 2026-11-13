@@ -34,7 +34,7 @@ chrome_pointer :: proc(app: ^App, w: ^Window, x, y: f32) -> platform.Cursor_Shap
 	case Tab_Chrome_New, Tab_Chrome_Profiles, Tab_Chrome_Group:
 		return .Hand
 	case Tab_Chrome_Tab:
-		if w.workspace != nil && target.index != w.workspace.selected {return .Hand}
+		if w.workspace != nil && tab_index_by_id(w.workspace, target.id) != w.workspace.selected {return .Hand}
 	}
 	return .Arrow
 }

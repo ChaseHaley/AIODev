@@ -3,8 +3,8 @@ package main
 import "aio:input"
 import "aio:ui"
 
-// A control on the tab strip or rail: a tab by index, a tab group's chip, the new-tab button or the
-// profile chevron. Nil is none: empty chrome or outside it.
+// A control on the tab strip or rail: a tab, a tab group's chip, the new-tab button or the profile
+// chevron. Nil is none: empty chrome or outside it.
 Tab_Chrome_Target :: union {
 	Tab_Chrome_Tab,
 	Tab_Chrome_Group,
@@ -12,8 +12,10 @@ Tab_Chrome_Target :: union {
 	Tab_Chrome_Profiles,
 }
 
+// A tab by its id in the window's workspace, never by its place: the hover, press and Close press a target
+// names stay on the tab when a reorder, insert or close moves it to another slot.
 Tab_Chrome_Tab :: struct {
-	index: int,
+	id: u32,
 }
 
 // A group's chip, by the group's id in the window's workspace.
@@ -32,6 +34,21 @@ Tab_Interaction_Hit :: struct {
 	inside:      bool,
 	close:       bool,
 	menu_anchor: [2]f32,
+}
+
+// The target naming tab `index` of the window's workspace.
+tab_chrome_tab :: proc(w: ^Window, index: int) -> Tab_Chrome_Tab {
+	return {w.workspace.tabs[index].id}
+}
+
+// Whether tab `index` of the window's workspace draws hovered: the pointer is over that tab.
+tab_hovered :: proc(w: ^Window, index: int) -> bool {
+	return w.tab_hover == tab_chrome_tab(w, index)
+}
+
+// Whether tab `index` draws pressed: a Left press on it is held.
+tab_pressed :: proc(w: ^Window, index: int) -> bool {
+	return gesture_tab_pressed(w) == tab_chrome_tab(w, index)
 }
 
 tab_chrome_hit :: proc(
@@ -81,21 +98,23 @@ tab_interaction_press :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event
 			rail_overlay_dismiss(app, w)
 		}
 	case Tab_Chrome_Tab:
+		index := tab_index_by_id(w.workspace, target.id)
+		if index < 0 {return}
 		if e.button == .Left && hit.close {
-			ui.armed_press(&w.tab_close_armed, target.index)
+			ui.armed_press(&w.tab_close_armed, target.id)
 			return
 		}
 		#partial switch e.button {
 		case .Right:
-			tab_menu_open(app, w, target.index, x, y)
+			tab_menu_open(app, w, index, x, y)
 			rail_overlay_dismiss(app, w)
 		case .Middle:
-			tab_interaction_close(app, w, target.index)
+			tab_interaction_close(app, w, index)
 		case .Left:
-			tab_pointer_select(app, w, target.index, .Control in e.modifiers, .Shift in e.modifiers)
+			tab_pointer_select(app, w, index, .Control in e.modifiers, .Shift in e.modifiers)
 			// Overlay selection dismisses its rows; only a stable surface can start reordering.
 			if w.tabs_horizontal || rail_docked(w) {
-				tab_press(app, w, target.index, x, y, e.modifiers & {.Control, .Shift} != {})
+				tab_press(app, w, index, x, y, e.modifiers & {.Control, .Shift} != {})
 			}
 		case:
 		}
@@ -114,10 +133,11 @@ tab_interaction_close :: proc(app: ^App, w: ^Window, index: int) {
 tab_interaction_release :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {
 	if !ui.armed_down(w.tab_close_armed) {return false}
 	hit := tab_chrome_hit(app, w, x, y, .Left)
-	index := -1
-	if tab, on_tab := hit.target.(Tab_Chrome_Tab); on_tab && hit.close {index = tab.index}
-	fired, ok := ui.armed_release(&w.tab_close_armed, index)
-	tab_interaction_close(app, w, ok ? fired : -1)
+	// Tab ids start at 1, so 0 is no Close button under the release.
+	released: u32
+	if tab, on_tab := hit.target.(Tab_Chrome_Tab); on_tab && hit.close {released = tab.id}
+	fired, ok := ui.armed_release(&w.tab_close_armed, released)
+	tab_interaction_close(app, w, ok ? tab_index_by_id(w.workspace, fired) : -1)
 	return true
 }
 
