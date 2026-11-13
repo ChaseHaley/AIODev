@@ -203,6 +203,8 @@ when AIO_CONTROL {
 		names := settings.TABS_ORIENTATION_NAME
 		orientation: settings.Tabs_Orientation = w.tabs_horizontal ? .Horizontal : .Vertical
 		state_text(r, "tabs.orientation", names[orientation])
+		// How far the tabs have gone over to the strip while the orientation changes: 0 rail, 1 strip.
+		state_valuef(r, "tabs.flip", "%g", w.flip.value)
 		state_valuef(r, "tabs.width", "%g", bar.tab_width)
 		state_valuef(r, "tabs.x", "%g", bar.x)
 		state_valuef(r, "tabs.height", "%g", bar.height)

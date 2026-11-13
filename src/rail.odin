@@ -419,7 +419,7 @@ rail_row_draw :: proc(
 @(private)
 rail_selection_mark_draw :: proc(app: ^App, w: ^Window, layout: ui.Rail_Layout, moving: bool) {
 	selected := w.workspace.selected
-	if selected < 0 || selected >= rail_tab_count(w) {return}
+	if selected < 0 || selected >= len(w.workspace.tabs) {return}
 	position := moving ? tab_position(w, selected) : w.tab_underline.value
 	row := ui.rail_row_rect(layout, 0)
 	row.y += position * layout.row_height
@@ -428,7 +428,8 @@ rail_selection_mark_draw :: proc(app: ^App, w: ^Window, layout: ui.Rail_Layout, 
 }
 
 rail_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
-	if w.tabs_horizontal {return .Ok}
+	// The rail the strip just replaced keeps drawing while its tabs rise into the title bar.
+	if w.tabs_horizontal {return tab_flip_rail_draw(app, w)}
 	// An overlay draws while open or sliding; a docked rail only in its own presentation.
 	overlay, draw_overlay := w.rail.(Rail_Overlay)
 	draw_overlay &&= rail_overlay(w) || overlay.slide.value > 0
@@ -458,6 +459,19 @@ rail_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 		ui.draw_rect(&w.list, {rect = region.shown, color = app.theme.tab_bar})
 	}
 	pane_motion_region_content(w, &region)
+	return rail_body_draw(app, w, layout)
+}
+
+// The rail's rows, selection mark and footer as `laid` places them, risen together into the title bar
+// by as much as the tabs have gone over to the strip while the tab orientation changes; see tab_flip.odin.
+@(private)
+rail_body_draw :: proc(app: ^App, w: ^Window, laid: ui.Rail_Layout) -> render.Build_Status {
+	layout := laid
+	rise := tab_flip_rise(w, layout)
+	layout.list.y -= rise
+	layout.footer.y -= rise
+	body := render.draw_mark(&w.list)
+	defer if rise != 0 {render.draw_translate(&w.list, body, {}, laid.area)}
 	if render.push_layer(&w.list, layout.list) != .None {return .Ok}
 	dragging := tab_drag_active(w)
 	moving := dragging
