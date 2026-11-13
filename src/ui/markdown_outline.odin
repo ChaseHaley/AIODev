@@ -4,7 +4,7 @@ import "aio:markdown"
 import "aio:render"
 import "core:math"
 
-// The heading outline at a Markdown page's right edge (WORK-439): a short bar per heading, longer for
+// The heading outline at a Markdown page's left edge (WORK-439): a short bar per heading, longer for
 // shallower levels, with the section being read in the accent. Hovering the bars opens a panel naming
 // every heading, and a bar or a row scrolls its heading to the top. The headings are collected once per
 // layout of the view; a frame only places them.
@@ -26,11 +26,10 @@ BAR_THICKNESS :: f32(2)
 BAR_PITCH :: f32(8)
 @(private = "file")
 BAR_PITCH_MIN :: f32(4)
-// The bars end this far from the page's right edge, clear of the overlay scrollbar's track.
+// The bars start this far from the page's left edge.
 @(private = "file")
 OUTLINE_INSET :: SPACE_4
-// The strip that opens the panel: wider than the bars so the pointer finds them easily, and ending where
-// the scrollbar's track begins.
+// The strip that opens the panel: wider than the bars so the pointer finds them easily.
 @(private = "file")
 OUTLINE_STRIP :: f32(24)
 @(private = "file")
@@ -67,11 +66,11 @@ Markdown_Outline :: struct {
 	scroll:      f32,
 }
 
-// Where the bars sit: `count` bars `pitch` apart down from `top`, ending at `right`, inside the strip
+// Where the bars sit: `count` bars `pitch` apart down from `top`, starting at `left`, inside the strip
 // that opens the panel.
 Markdown_Outline_Column :: struct {
 	strip:      render.Rect,
-	right, top: f32,
+	left, top:  f32,
 	pitch:      f32,
 	count:      int,
 }
@@ -147,8 +146,8 @@ markdown_outline_column :: proc(
 	count := len(o.headings)
 	if count == 0 {return}
 	area := g.area
-	right := area.x + area.width - OUTLINE_INSET * scale
-	if right - BAR_LENGTHS[0] * scale < g.left + g.width + SPACE_2 * scale {return}
+	left := area.x + OUTLINE_INSET * scale
+	if left + BAR_LENGTHS[0] * scale > g.left - SPACE_2 * scale {return}
 	room := area.height - 2 * SPACE_4 * scale
 	pitch := BAR_PITCH * scale
 	if f32(count) * pitch > room {
@@ -163,12 +162,12 @@ markdown_outline_column :: proc(
 	top := math.round(area.y + (area.height - height) / 2)
 	strip_width := OUTLINE_STRIP * scale
 	strip := render.Rect {
-		right + SPACE_1 * scale - strip_width,
+		left - SPACE_1 * scale,
 		top - SPACE_2 * scale,
 		strip_width,
 		height + 2 * SPACE_2 * scale,
 	}
-	return {strip, right, top, pitch, count}, true
+	return {strip, left, top, pitch, count}, true
 }
 
 // The heading bar `bar` stands for. With fewer bars than headings, the bars sample them evenly.
@@ -195,7 +194,7 @@ markdown_outline_bar_rect :: proc(
 	length := BAR_LENGTHS[clamp(level - o.top_level, 0, len(BAR_LENGTHS) - 1)] * scale
 	thickness := max(1, math.round(BAR_THICKNESS * scale))
 	y := math.round(column.top + f32(bar) * column.pitch + (column.pitch - thickness) / 2)
-	return {column.right - length, y, length, thickness}
+	return {column.left, y, length, thickness}
 }
 
 // The bar nearest a point on the strip, or -1 off it.
@@ -214,7 +213,7 @@ heading_indent :: proc(o: ^Markdown_Outline, heading: Markdown_Outline_Heading, 
 	return f32(max(0, heading.level - o.top_level)) * PANEL_INDENT * scale
 }
 
-// The panel hanging left of the strip in `area`, centred on the bars and kept inside the area. Its
+// The panel hanging right of the strip in `area`, centred on the bars and kept inside the area. Its
 // width fits the widest heading, measured the first time after a layout.
 markdown_outline_panel :: proc(
 	o: ^Markdown_Outline,
@@ -236,15 +235,15 @@ markdown_outline_panel :: proc(
 		o.panel_width = clamp(widest + frame, PANEL_WIDTH_MIN * scale, PANEL_WIDTH_MAX * scale)
 	}
 	margin := SPACE_2 * scale
-	right := column.strip.x
-	width := min(o.panel_width, max(0, right - area.x - margin))
+	left := column.strip.x + column.strip.width
+	width := min(o.panel_width, max(0, area.x + area.width - margin - left))
 	content := f32(len(o.headings)) * PANEL_ROW * scale + 2 * padding
 	height := min(content, max(0, area.height - 2 * margin))
 	middle := column.top + f32(column.count) * column.pitch / 2
 	lowest := area.y + margin
 	y := clamp(math.round(middle - height / 2), lowest, max(lowest, area.y + area.height - margin - height))
 	o.scroll = clamp(o.scroll, 0, content - height)
-	return {{right - width, y, width, height}, content}
+	return {{left, y, width, height}, content}
 }
 
 markdown_outline_row_rect :: proc(

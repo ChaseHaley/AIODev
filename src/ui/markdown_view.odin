@@ -185,7 +185,8 @@ markdown_geometry :: proc(area: render.Rect, scale: f32) -> Markdown_Geometry {
 	width := max(0, min(MARKDOWN_COLUMN * scale, area.width - 2 * inset))
 	return {
 		area = area,
-		left = math.floor(area.x + (area.width - width) / 2),
+		// Rounded up, so the outline's side keeps its whole margin.
+		left = math.ceil(area.x + (area.width - width) / 2),
 		top = area.y + SPACE_4 * scale,
 		width = width,
 	}

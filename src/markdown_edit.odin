@@ -209,15 +209,23 @@ markdown_edit_reloaded :: proc(pane: ^Markdown_Pane) {
 	markdown_editor_sync(pane)
 }
 
-// Typed text goes in at the caret. Control characters arrive as their keys instead.
+// Typed text goes in at the caret: a key's text from Windows, or text with no key of its own, such as an
+// input method's. Control characters arrive as their keys instead.
 markdown_text :: proc(app: ^App, w: ^Window, text: string) {
 	pane := markdown_focused(app, w)
 	if !markdown_editing(pane) {return}
+	_ = markdown_type(app, pane, text)
+	w.dirty = true
+}
+
+@(private = "file", require_results)
+markdown_type :: proc(app: ^App, pane: ^Markdown_Pane, text: string) -> bool {
+	if text == "" {return false}
 	for r in text {
-		if r < 0x20 || r == 0x7f {return}
+		if r < 0x20 || r == 0x7f {return false}
 	}
 	if markdown.edit_insert(&pane.editor.buffer, text, true) {markdown_edited(app, pane)}
-	w.dirty = true
+	return true
 }
 
 // Ticks or clears the task whose mark is at file offset `mark`: an undoable edit while editing, else
@@ -323,6 +331,12 @@ markdown_edit_key :: proc(app: ^App, w: ^Window, pane: ^Markdown_Pane, key: Cont
 	b := &e.buffer
 	logical := key.logical
 	modifiers := logical.modifiers & {.Control, .Shift, .Alt, .Super}
+	// A character key types its text; Ctrl+Alt is AltGr, which types too. Ctrl and Alt alone make chords.
+	typing := modifiers & {.Control, .Alt} == {} || modifiers & {.Control, .Alt} == {.Control, .Alt}
+	if typing && .Super not_in modifiers && markdown_type(app, pane, logical.text) {
+		w.dirty = true
+		return true
+	}
 	if .Alt in modifiers || .Super in modifiers {return false}
 	control, shift := .Control in modifiers, .Shift in modifiers
 	switch key.clipboard {

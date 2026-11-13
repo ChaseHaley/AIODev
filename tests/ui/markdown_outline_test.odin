@@ -68,10 +68,10 @@ bars_shorten_with_depth_below_the_shallowest_heading :: proc(t: ^testing.T) {
 	testing.expect_value(t, widths, [6]f32{14, 11, 8, 5, 5, 14})
 	first := ui.markdown_outline_bar_rect(&f.outline, column, 0, 1)
 	second := ui.markdown_outline_bar_rect(&f.outline, column, 1, 1)
-	testing.expect_value(t, first.x + first.width, second.x + second.width)
+	testing.expect_value(t, first.x, second.x)
 	testing.expect_value(t, second.y - first.y, f32(8))
 	testing.expect_value(t, first.height, f32(2))
-	testing.expect(t, first.x > f.g.left + f.g.width, "the bars stay clear of the text column")
+	testing.expect(t, first.x + first.width < f.g.left, "the bars stay clear of the text column")
 }
 
 @(test)
@@ -90,7 +90,7 @@ the_outline_hides_without_headings_and_stays_clear_of_the_column :: proc(t: ^tes
 		if !fixture_init(t, &f, sections(3), {0, 0, 760, 800}) {return}
 		column, shown := ui.markdown_outline_column(&f.outline, f.g, 1)
 		testing.expect(t, shown, "a narrow page keeps its outline")
-		testing.expect(t, column.right - 14 >= f.g.left + f.g.width, "the bars stand clear of the text")
+		testing.expect(t, column.left + 14 <= f.g.left, "the bars stand clear of the text")
 	}
 }
 
@@ -139,12 +139,12 @@ the_strip_and_panel_rows_hit_what_they_show :: proc(t: ^testing.T) {
 	column, shown := ui.markdown_outline_column(&f.outline, f.g, 1)
 	if !testing.expect(t, shown) {return}
 	third := ui.markdown_outline_bar_rect(&f.outline, column, 2, 1)
-	// The strip is wider than the bars, so a point left of a short bar still finds it.
-	testing.expect_value(t, ui.markdown_outline_bar_at(column, third.x - 5, third.y + 1), 2)
+	// The strip is wider than the bars, so a point right of a short bar still finds it.
+	testing.expect_value(t, ui.markdown_outline_bar_at(column, third.x + third.width + 5, third.y + 1), 2)
 	testing.expect_value(t, ui.markdown_outline_bar_at(column, column.strip.x - 1, third.y + 1), -1)
 
 	panel := ui.markdown_outline_panel(&f.outline, &f.doc, column, f.g.area, &f.text, 1)
-	testing.expect_value(t, panel.rect.x + panel.rect.width, column.strip.x)
+	testing.expect_value(t, panel.rect.x, column.strip.x + column.strip.width)
 	testing.expect(t, !ui.markdown_outline_scrollable(panel))
 	for row in 0 ..< 5 {
 		r := ui.markdown_outline_row_rect(&f.outline, panel, row, 1)

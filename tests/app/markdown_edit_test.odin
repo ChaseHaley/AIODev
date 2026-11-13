@@ -220,6 +220,29 @@ a_file_changed_on_disk_reloads_unless_edits_wait :: proc(t: ^testing.T) {
 	testing.expect(t, strings.contains(file_text(t, f.file), "mine "))
 }
 
+// Windows delivers a typed character as its key's text, not as a text event of its own; AltGr's
+// Ctrl+Alt types, while a Ctrl chord's control character does not.
+@(test)
+keys_type_the_text_windows_gives_them :: proc(t: ^testing.T) {
+	f: Edit_Fixture
+	defer edit_fixture_destroy(t, &f)
+	w, pane := edit_fixture_start(t, &f, "Keys", "")
+	if pane == nil {return}
+	app.run_action(&f.state, w, .Edit_Markdown)
+	if !testing.expect(t, app.markdown_editing(pane)) {return}
+	typed := [?]struct {
+		key:       input.Key,
+		modifiers: input.Modifiers,
+		text:      string,
+	}{{.H, {}, "h"}, {.A, {}, "a"}, {.Digit_1, {.Shift}, "!"}, {.E, {.Control, .Alt}, "€"}, {.B, {.Control}, "\x02"}}
+	for k in typed {
+		app.handle_event(&f.state, input.Key_Event{window = w.id, key = k.key, modifiers = k.modifiers,
+			pressed = true, text = k.text})
+		app.handle_event(&f.state, input.Key_Event{window = w.id, key = k.key, modifiers = k.modifiers})
+	}
+	testing.expect_value(t, markdown.edit_string(&pane.editor.buffer), "ha!€")
+}
+
 // Open in Default App hands the pane's file to the system's handler.
 @(test)
 open_in_default_app_hands_over_the_pane_file :: proc(t: ^testing.T) {
