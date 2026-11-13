@@ -3,16 +3,22 @@ package main
 import "aio:input"
 import "aio:ui"
 
-// A control on the tab strip or rail: a tab by index, the new-tab button or the profile chevron. Nil
-// is none: empty chrome or outside it.
+// A control on the tab strip or rail: a tab by index, a tab group's chip, the new-tab button or the
+// profile chevron. Nil is none: empty chrome or outside it.
 Tab_Chrome_Target :: union {
 	Tab_Chrome_Tab,
+	Tab_Chrome_Group,
 	Tab_Chrome_New,
 	Tab_Chrome_Profiles,
 }
 
 Tab_Chrome_Tab :: struct {
 	index: int,
+}
+
+// A group's chip, by the group's id in the window's workspace.
+Tab_Chrome_Group :: struct {
+	id: u32,
 }
 
 Tab_Chrome_New :: struct {}
@@ -57,6 +63,15 @@ tab_interaction_press :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event
 			rail_overlay_dismiss(app, w)
 		} else if e.button == .Right {
 			profile_menu_open_new_tab(app, w, hit.menu_anchor[0], hit.menu_anchor[1])
+		}
+	case Tab_Chrome_Group:
+		#partial switch e.button {
+		case .Left:
+			group := tab_group_find(w.workspace, target.id)
+			if group != nil {_ = tab_group_fold(app, w, target.id, !group.folded)}
+		case .Right:
+			tab_group_menu_open(app, w, target.id, x, y)
+			rail_overlay_dismiss(app, w)
 		}
 	case Tab_Chrome_Tab:
 		if e.button == .Left && hit.close {
@@ -118,8 +133,11 @@ tabs_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: input.Mouse_
 @(private)
 tabs_tooltip :: proc(app: ^App, w: ^Window, x, y: f32) -> string {
 	hit := tab_chrome_hit(app, w, x, y, .Left)
-	switch _ in hit.target {
+	switch target in hit.target {
 	case Tab_Chrome_Tab: if hit.close {return "Close tab"}
+	case Tab_Chrome_Group:
+		group := tab_group_find(w.workspace, target.id)
+		if group != nil {return group.folded ? "Unfold group" : "Fold group"}
 	case Tab_Chrome_Profiles: return "Choose profile"
 	case Tab_Chrome_New: if w.tabs_horizontal {return "New tab"}
 	case nil:

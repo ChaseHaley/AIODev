@@ -16,6 +16,8 @@ Tab :: struct {
 	tree: layout.Layout,
 	title: string,
 	name: string,
+	// The tab's Tab_Group in its workspace, 0 for none.
+	group: u32,
 	documents: Document_List,
 }
 
@@ -32,6 +34,9 @@ Workspace :: struct {
 	settings_scroll: int,
 	settings_view: ui.Editor_View,
 	documents: Document_List,
+	// The labels on runs of tabs, in no particular order; tabs name them by id.
+	groups: [dynamic]Tab_Group,
+	next_group_id: u32,
 }
 
 @(require_results)
@@ -119,6 +124,8 @@ workspace_destroy :: proc(workspace: ^Workspace) {
 	documents_destroy(&workspace.documents)
 	ui.editor_view_destroy(&workspace.settings_view)
 	delete(workspace.tabs)
+	for &group in workspace.groups {tab_group_destroy(&group)}
+	delete(workspace.groups)
 	delete(workspace.name)
 	delete(workspace.icon.emoji)
 	free(workspace)
@@ -136,6 +143,7 @@ tab_select :: proc(app: ^App, w: ^Window, index: int, mode := Tab_Selection_Mode
 	if mode == .Replace_Marks {tab_select_one(w.workspace, index); mark_all_dirty(app)}
 	focus_leave(app, w)
 	w.workspace.selected = index
+	if tab_group_reveal(w.workspace, index) {layout_state_touch(app)}
 	window_relayout(app, w)
 	rail_reveal_active(w)
 	focus_enter(app, w)
@@ -155,6 +163,7 @@ tab_select_one :: proc(workspace: ^Workspace, index: int) {
 // Chooses a tab without a window's focus transition, keeping selection and its marks together.
 workspace_tab_choose :: proc(workspace: ^Workspace, index: int) {
 	workspace.selected = index
+	_ = tab_group_reveal(workspace, index)
 	tab_select_one(workspace, index)
 }
 
@@ -307,6 +316,10 @@ tab_move_marked :: proc(app: ^App, w: ^Window, end: bool) {
 			if current == order[original] {tab_move(app, w, from, to); break}
 		}
 	}
+	moved := make([dynamic]^Tab, 0, len(order), context.temp_allocator)
+	for tab in w.workspace.tabs {if tab.marked {append(&moved, tab)}}
+	tab_groups_settle(w.workspace, moved[:])
+	layout_state_touch(app)
 }
 
 // Puts back the marks a subset close replaced and releases the list, falling back to the active tab
@@ -372,6 +385,15 @@ workspace_close_tab :: proc(app: ^App, workspace: ^Workspace, original_index: in
 	// The record leaves the list and selection names a remaining tab before anything can observe either.
 	ordered_remove(&workspace.tabs, index)
 	workspace.selected = tab_selected_after_remove(workspace.selected, index, len(workspace.tabs))
+	tab_groups_tidy(workspace)
+	// A close never uncovers a folded tab: the nearest shown one takes its place, unless none shows.
+	if len(workspace.tabs) > 0 && !tab_shown(workspace, workspace.selected) {
+		if next := tab_nearest_shown(workspace, workspace.selected); next >= 0 {
+			workspace.selected = next
+		} else {
+			_ = tab_group_reveal(workspace, workspace.selected)
+		}
+	}
 	tab_record_free(tab)
 	workspace_mutation_finish(app, workspace, {.Structure})
 	for i := len(app.windows) - 1; i >= 0; i -= 1 {

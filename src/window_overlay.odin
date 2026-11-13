@@ -75,9 +75,11 @@ Overlay_Chip_Name :: struct {
 	error:     bool,
 }
 
-// The right-clicked tab. The menu acts on it, or on its marked group, without activating it.
+// The right-clicked tab, or the right-clicked chip's group and that group's first tab. The menu acts on the
+// tab, or on its marked group, or on the group, without activating anything.
 Overlay_Tab_Menu :: struct {
-	tab: u32,
+	tab:   u32,
+	group: u32,
 }
 
 // A dock edge's menu, which offers to keep the edge's current size. Its rows are w.divider_menu.
@@ -190,8 +192,9 @@ overlay_close :: proc(app: ^App, w: ^Window, exit := Overlay_Exit.Cancel) {
 		document_menu_close(&w.document_menu, current.mode)
 	case Overlay_Command_Menu:
 		command_menu_close(&w.command_menu, current.mode)
-	case Overlay_Tab_Menu, Overlay_Divider_Menu, Overlay_Activity_Menu, Overlay_Activity_Row_Menu,
-	     Overlay_Profile_Menu:
+	case Overlay_Tab_Menu:
+		submenu_reset(&w.tab_menu.submenu)
+	case Overlay_Divider_Menu, Overlay_Activity_Menu, Overlay_Activity_Row_Menu, Overlay_Profile_Menu:
 	}
 	w.overlay, w.dirty = nil, true
 }

@@ -18,6 +18,7 @@ tab_tile :: proc(app: ^App, w: ^Window, index: int) -> (ui.Tab_Tile, render.Buil
 		status_slot  = app.settings.status.enabled && app.settings.status.tab_indicators,
 		selected     = index == w.workspace.selected,
 		marked       = tab_marked_shown(w, index),
+		group        = tab_band_color(app, w, index),
 	}
 	front, has_front := layout.focused_content(&tab.tree)
 	if !has_front {return t, .Ok}
@@ -83,21 +84,32 @@ tab_pane_behind :: proc(app: ^App, tab: ^Tab, index: int) -> (best: Workspace_Pa
 	return
 }
 
-// Tab presentation indexed by tab position: both arrays stay aligned with the workspace tab list. The
+// Tab presentation indexed by tab position: the per-tab arrays stay aligned with the workspace tab list. The
 // strip's new-tab button and profile chevron keep their own controls.
 Tab_Presentation :: struct {
 	tab_controls:     [dynamic]ui.Control_Motion,
+	// Each tab's place in slots: strip tab widths, or rail rows.
 	tab_positions:    [dynamic]ui.Motion,
+	// Each tab's strip offset in DIPs, for the group chips before it.
+	tab_offsets:      [dynamic]ui.Motion,
 	new_tab_control:  ui.Control_Motion,
 	profiles_control: ui.Control_Motion,
+	// The orientation the motions last aimed for, none before the first. Slots mean different things in the
+	// strip and the rail.
+	horizontal:       Maybe(bool),
+	// The next update puts every tab straight in its place instead of easing it there: after a change of
+	// orientation or workspace.
+	jump:             bool,
 }
 
 // The window's tab chrome beside the per-tab arrays, which Window embeds: the selection underline's
 // motion, the strip control or rail row under the pointer, and a Close press held on a tab.
 Tab_Chrome_State :: struct {
-	tab_underline:   ui.Motion,
-	tab_hover:       Tab_Chrome_Target,
-	tab_close_armed: ui.Armed(int),
+	tab_underline:        ui.Motion,
+	// The underline's strip offset in DIPs, as tab_offsets.
+	tab_underline_offset: ui.Motion,
+	tab_hover:            Tab_Chrome_Target,
+	tab_close_armed:      ui.Armed(int),
 }
 
 // The window shows its workspace afresh: the underline rests on the selected tab, and no hover or
@@ -105,6 +117,7 @@ Tab_Chrome_State :: struct {
 tab_chrome_reset :: proc(w: ^Window) {
 	selected := f32(w.workspace.selected)
 	w.tab_underline = {value = selected, target = selected}
+	w.presentation.jump = true
 	tab_chrome_forget_hover(w)
 	ui.armed_cancel(&w.tab_close_armed)
 }
@@ -118,11 +131,13 @@ tab_chrome_forget_hover :: proc(w: ^Window) {
 tab_presentation_init :: proc(presentation: ^Tab_Presentation) {
 	presentation.tab_controls = make([dynamic]ui.Control_Motion)
 	presentation.tab_positions = make([dynamic]ui.Motion)
+	presentation.tab_offsets = make([dynamic]ui.Motion)
 }
 
 tab_presentation_destroy :: proc(presentation: ^Tab_Presentation) {
 	delete(presentation.tab_controls)
 	delete(presentation.tab_positions)
+	delete(presentation.tab_offsets)
 	presentation^ = {}
 }
 
@@ -131,19 +146,22 @@ tab_presentation_destroy :: proc(presentation: ^Tab_Presentation) {
 tab_presentation_clear :: proc(presentation: ^Tab_Presentation) {
 	clear(&presentation.tab_controls)
 	clear(&presentation.tab_positions)
+	clear(&presentation.tab_offsets)
 	presentation.new_tab_control, presentation.profiles_control = {}, {}
 }
 
-// Grows or shrinks both arrays to the tab count. Only entries beyond the previous length start
-// at their own index, so reordering and resizing keep an animating position on its tab.
+// Grows or shrinks the arrays to the tab count. Only entries beyond the previous length start at their own
+// index, so reordering and resizing keep an animating position on its tab.
 @(require_results)
 tab_presentation_resize :: proc(presentation: ^Tab_Presentation, tab_count: int) -> bool {
 	appended := len(presentation.tab_positions)
 	if resize(&presentation.tab_controls, tab_count) != nil {return false}
 	if resize(&presentation.tab_positions, tab_count) != nil {return false}
+	if resize(&presentation.tab_offsets, tab_count) != nil {return false}
 	for &position, i in presentation.tab_positions {
 		if i < appended {continue}
 		position.value, position.target = f32(i), f32(i)
+		presentation.tab_offsets[i] = {}
 	}
 	return true
 }
@@ -152,33 +170,50 @@ tab_presentation_resize :: proc(presentation: ^Tab_Presentation, tab_count: int)
 // another window, the selection underline and the strip controls. True when the window must draw again.
 tab_presentation_animate :: proc(app: ^App, w: ^Window, frame: ui.Frame_Time) -> bool {
 	changed := false
+	if shown, aimed := w.presentation.horizontal.?; aimed && shown != w.tabs_horizontal {
+		w.presentation.jump = true
+	}
+	w.presentation.horizontal = w.tabs_horizontal
+	animate := app.animations && !w.presentation.jump
+	w.presentation.jump = false
+	layout := tab_layout(app, w, w.tabs_horizontal)
 	// D-069: dragged tabs follow the pointer (tab_drag_follow_pointer); the others, and every tab once
 	// dropped, settle into their slots, opening the gap another window's drag asks for.
 	following := tab_drag_active(w)
 	for &position, i in w.tab_positions {
-		if i >= len(w.workspace.tabs) {continue}
+		if i >= len(layout.places) || i >= len(w.tab_offsets) {continue}
+		offset := &w.tab_offsets[i]
 		if !following || !w.workspace.tabs[i].marked {
 			gap := i >= w.tab_incoming.slot ? w.tab_incoming.count : 0
-			ui.motion_target(&position, f32(i + gap), ui.REORDER_DURATION, .Decelerate, app.animations)
+			place := layout.places[i]
+			ui.motion_target(&position, place.slot + f32(gap), ui.REORDER_DURATION, .Decelerate, animate)
+			ui.motion_target(offset, place.offset, ui.REORDER_DURATION, .Decelerate, animate)
 		}
 		changed = ui.motion_update(&position, frame) || changed
+		changed = ui.motion_update(offset, frame) || changed
 	}
 	changed = ui.motion_update(&w.tab_incoming.ghost, frame) || changed
-	selected := f32(w.workspace.selected)
-	ui.motion_target(&w.tab_underline, selected, ui.REORDER_DURATION, .Decelerate, app.animations)
+	if selected := w.workspace.selected; selected >= 0 && selected < len(layout.places) {
+		place := layout.places[selected]
+		ui.motion_target(&w.tab_underline, place.slot, ui.REORDER_DURATION, .Decelerate, animate)
+		ui.motion_target(&w.tab_underline_offset, place.offset, ui.REORDER_DURATION, .Decelerate, animate)
+	}
 	for &control, i in w.tab_controls {
 		changed = tab_strip_control_update(app, w, &control, Tab_Chrome_Tab{i}, frame) || changed
 	}
 	changed = tab_strip_control_update(app, w, &w.new_tab_control, Tab_Chrome_New{}, frame) || changed
 	changed = tab_strip_control_update(app, w, &w.profiles_control, Tab_Chrome_Profiles{}, frame) || changed
+	changed = ui.motion_update(&w.tab_underline_offset, frame) || changed
 	return ui.motion_update(&w.tab_underline, frame) || changed
 }
 
 tab_presentation_animating :: proc(w: ^Window) -> bool {
 	if ui.motion_active(w.tab_underline) || ui.motion_active(w.tab_incoming.ghost) {return true}
+	if ui.motion_active(w.tab_underline_offset) {return true}
 	for control in w.tab_controls {if ui.control_active(control) {return true}}
 	if ui.control_active(w.new_tab_control) || ui.control_active(w.profiles_control) {return true}
 	for position in w.tab_positions {if ui.motion_active(position) {return true}}
+	for offset in w.tab_offsets {if ui.motion_active(offset) {return true}}
 	return false
 }
 
@@ -196,21 +231,31 @@ tab_strip_control_update :: proc(
 	return ui.control_update(control, hovered, pressed, app.animations, frame)
 }
 
-// Relayout fits the presentation to the tab count. Only the strip draws its hover and presses from the
-// positions, so a count change while it shows forgets them. A failed resize leaves the arrays as they
-// were: drawing and tab_presentation_animate bound every index by the tab count instead.
-tab_presentation_fit :: proc(w: ^Window) {
+// Relayout fits the presentation to the tab count, with tabs that arrived resting in their places. Only the
+// strip draws its hover and presses from the positions, so a count change while it shows forgets them. A
+// failed resize leaves the arrays as they were: drawing and tab_presentation_animate bound every index by
+// the tab count instead.
+tab_presentation_fit :: proc(app: ^App, w: ^Window) {
 	tab_count := w.workspace != nil ? len(w.workspace.tabs) : 0
-	if tab_count != len(w.tab_positions) && w.tabs_horizontal {tab_chrome_forget_hover(w)}
+	appended := len(w.tab_positions)
+	if tab_count != appended && w.tabs_horizontal {tab_chrome_forget_hover(w)}
 	if !tab_presentation_resize(&w.presentation, tab_count) {
 		log.error("resizing tab presentation values failed")
+		return
+	}
+	if appended >= tab_count {return}
+	places := tab_layout(app, w, w.tabs_horizontal).places
+	for i in appended ..< min(tab_count, len(places)) {
+		w.tab_positions[i] = {value = places[i].slot, target = places[i].slot}
+		w.tab_offsets[i] = {value = places[i].offset, target = places[i].offset}
 	}
 }
 
 @(require_results)
 tab_presentation_reserve :: proc(presentation: ^Tab_Presentation, tab_count: int) -> bool {
 	return reserve(&presentation.tab_controls, tab_count) == nil &&
-		reserve(&presentation.tab_positions, tab_count) == nil
+		reserve(&presentation.tab_positions, tab_count) == nil &&
+		reserve(&presentation.tab_offsets, tab_count) == nil
 }
 
 // Tabs arriving at `at` start settled in the gap opened for them, while the tabs after it keep their motion.
@@ -221,24 +266,31 @@ tab_presentation_insert :: proc(presentation: ^Tab_Presentation, at, count: int)
 		place := f32(at + i)
 		inject_at(&presentation.tab_controls, at + i, ui.Control_Motion{})
 		inject_at(&presentation.tab_positions, at + i, ui.Motion{value = place, target = place})
+		offset := at + i > 0 ? presentation.tab_offsets[at + i - 1] : ui.Motion{}
+		inject_at(&presentation.tab_offsets, at + i, ui.Motion{value = offset.value, target = offset.target})
 	}
 }
 
-// Moves both presentation values with the tab, keeping every motion field it already has.
+// Moves the presentation values with the tab, keeping every motion field they already have.
 tab_presentation_move :: proc(presentation: ^Tab_Presentation, from, to: int) {
 	if from == to || from < 0 || to < 0 {return}
 	if from >= len(presentation.tab_positions) || to >= len(presentation.tab_positions) {return}
+	if from >= len(presentation.tab_offsets) || to >= len(presentation.tab_offsets) {return}
 	control := presentation.tab_controls[from]
 	position := presentation.tab_positions[from]
+	offset := presentation.tab_offsets[from]
 	ordered_remove(&presentation.tab_controls, from)
 	ordered_remove(&presentation.tab_positions, from)
+	ordered_remove(&presentation.tab_offsets, from)
 	inject_at(&presentation.tab_controls, to, control)
 	inject_at(&presentation.tab_positions, to, position)
+	inject_at(&presentation.tab_offsets, to, offset)
 }
 
-// Removes both presentation values for a closed tab.
+// Removes the presentation values for a closed tab.
 tab_presentation_remove :: proc(presentation: ^Tab_Presentation, index: int) {
 	if index < 0 {return}
 	if index < len(presentation.tab_positions) {ordered_remove(&presentation.tab_positions, index)}
+	if index < len(presentation.tab_offsets) {ordered_remove(&presentation.tab_offsets, index)}
 	if index < len(presentation.tab_controls) {ordered_remove(&presentation.tab_controls, index)}
 }

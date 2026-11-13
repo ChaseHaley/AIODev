@@ -2,7 +2,6 @@ package main
 
 import "aio:render"
 import "aio:ui"
-import "core:math"
 
 tab_press :: proc(app: ^App, w: ^Window, index: int, x, y: f32, modified: bool) {
 	if index < 0 || index >= len(w.workspace.tabs) || !w.workspace.tabs[index].marked {return}
@@ -85,6 +84,24 @@ tab_drag_apply_slot :: proc(app: ^App, w: ^Window, slot: int) -> bool {
 	return true
 }
 
+// How many tabs come before a block of tabs starting `edge` into the strip's pixels or the rail's rows, not
+// counting the marked tabs when they are the block, `carried`. A tab comes before once the block's start
+// passes its middle; a folded group's tabs have no width, so they pass with their chip, together. `unit` is
+// a tab's width in those units.
+@(private)
+tab_drag_slot :: proc(w: ^Window, layout: Tab_Layout, edge, unit, scale: f32, carried := true) -> int {
+	slot, lifted := 0, 0
+	for tab, i in w.workspace.tabs {
+		if carried && tab.marked {lifted += 1; continue}
+		if i >= len(layout.places) {break}
+		place := layout.places[i]
+		start := (place.slot - f32(lifted)) * unit + place.offset * scale
+		middle := start + (tab_shown(w.workspace, i) ? unit / 2 : 0)
+		if edge >= middle {slot += 1}
+	}
+	return slot
+}
+
 @(private)
 tab_drag_move_strip :: proc(app: ^App, w: ^Window, x: f32) -> bool {
 	a, d := tab_drag_state(w)
@@ -94,16 +111,15 @@ tab_drag_move_strip :: proc(app: ^App, w: ^Window, x: f32) -> bool {
 	count := 0
 	for tab in d.order {if tab.marked {count += 1}}
 	if len(d.order) - count <= 0 {return true}
-	first := clamp(
-		(x - bar.x - d.offset.x) / bar.tab_width - f32(d.rank),
-		0,
-		f32(len(d.order) - count),
-	)
-	if !tab_drag_apply_slot(app, w, int(math.floor(first + 0.5))) {return true}
-	tab_drag_follow_pointer(w, first)
+	room := max(0, bar.end - bar.x - f32(count) * bar.tab_width)
+	edge := clamp(x - bar.x - d.offset.x - f32(d.rank) * bar.tab_width, 0, room)
+	slot := tab_drag_slot(w, tab_layout(app, w, true), edge, bar.tab_width, w.scale)
+	if !tab_drag_apply_slot(app, w, slot) {return true}
+	tab_drag_follow_pointer(w, edge / bar.tab_width)
 	return true
 }
 
+// The dragged tabs ride on the pointer, `first` slots in, without the chips' offsets the tabs at rest take.
 @(private)
 tab_drag_follow_pointer :: proc(w: ^Window, first: f32) {
 	rank := 0
@@ -112,6 +128,7 @@ tab_drag_follow_pointer :: proc(w: ^Window, first: f32) {
 		if i < len(w.tab_positions) {
 			ui.motion_target(&w.tab_positions[i], first + f32(rank), 0, .Linear, false)
 		}
+		if i < len(w.tab_offsets) {ui.motion_target(&w.tab_offsets[i], 0, 0, .Linear, false)}
 		rank += 1
 	}
 }
@@ -135,14 +152,16 @@ tab_drag_move_rail :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {
 	count := 0
 	for tab in d.order {if tab.marked {count += 1}}
 	if len(d.order) - count <= 0 {return true}
+	places := tab_layout(nil, w, false)
+	rows := f32(max(0, places.slots - count))
 	first_row := ui.rail_row_rect(layout, 0)
 	first :=
 		(y - first_row.y) / layout.row_height -
 		d.offset.y -
 		f32(d.rank)
-	first = clamp(first, 0, f32(len(d.order) - count))
-	if !tab_drag_apply_slot(app, w, int(math.floor(first + 0.5))) {return true}
-	first = clamp(first + (w.rail_scroll - layout.scroll) / layout.row_height, 0, f32(len(d.order) - count))
+	first = clamp(first, 0, rows)
+	if !tab_drag_apply_slot(app, w, tab_drag_slot(w, places, first, 1, 0)) {return true}
+	first = clamp(first + (w.rail_scroll - layout.scroll) / layout.row_height, 0, rows)
 	tab_drag_follow_pointer(w, first)
 	return true
 }
@@ -187,6 +206,10 @@ tab_drag_release :: proc(app: ^App, w: ^Window) {
 			tab_drag_abandon(app, w, a)
 			if ready {notify(app, .Error, "Could not move the tabs. The source was preserved.")}
 		case Drop_Reorder:
+			moved := make([dynamic]^Tab, 0, len(w.workspace.tabs), context.temp_allocator)
+			for tab in w.workspace.tabs {if tab.marked {append(&moved, tab)}}
+			tab_groups_settle(w.workspace, moved[:])
+			layout_state_touch(app)
 			drag_let_go(app, w, a)
 		case nil:
 			tab_drag_abandon(app, w, a)

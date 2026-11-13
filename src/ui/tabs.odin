@@ -13,16 +13,24 @@ Tab_Bar :: struct {
 	count:                                     int,
 }
 
-// The strip spans `width` from `x`. Its `count` tabs share their width with `incoming` tabs a drag
-// offers, which hold their space without counting as tabs yet.
-tab_bar_layout :: proc(x, width, scale: f32, count: int, incoming := 0) -> Tab_Bar {
+// The strip spans `width` from `x`. Its `count` tabs show in `slots` places (a folded group's take none) and
+// share their width with `incoming` tabs a drag offers, which hold their space without counting as tabs
+// yet, and with the `chips` pixels group chips take. Slots -1 is one per tab.
+tab_bar_layout :: proc(
+	x, width, scale: f32,
+	count: int,
+	incoming := 0,
+	slots := -1,
+	chips: f32 = 0,
+) -> Tab_Bar {
 	bar := Tab_Bar{x = x, end = x, height = TAB_HEIGHT * scale}
-	slots := count + incoming
-	if slots < 1 {return bar}
+	places := (slots < 0 ? count : slots) + incoming
+	if count + incoming < 1 {return bar}
 	bar.width, bar.count = width, count
 	bar.button_width = min(width, TITLE_BUTTON_WIDTH * scale)
-	bar.tab_width = min(220 * scale, max(0, width - bar.button_width) / f32(slots))
-	bar.end = x + f32(count) * bar.tab_width
+	room := max(0, width - bar.button_width - chips)
+	bar.tab_width = min(220 * scale, room / f32(max(1, places)))
+	bar.end = x + f32(places - incoming) * bar.tab_width + chips
 	return bar
 }
 
@@ -75,6 +83,9 @@ Tab_Tile :: struct {
 	status_slot:  bool,
 	selected:     bool,
 	marked:       bool,
+	// The colour of the tab's group, drawn as a band along the strip's top or the rail's left edge;
+	// transparent for none.
+	group:        render.Color,
 }
 
 // Draws the badge in the leading icon column of `tile`, stacked over the mark behind it when the tab
@@ -179,6 +190,10 @@ tab_draw :: proc(
 	width := bar.tab_width
 	if render.push_layer(list, {x, 0, width, bar.height}) != .None {return .Ok}
 	draw_rect(list, {rect = {x, 0, width, bar.height}, color = theme.tab_bar})
+	if t.group.a > 0 {
+		band := render.Rect{x, (bar.height - HEIGHT_TOOLBAR * scale) / 2 - 4 * scale, width, 2 * scale}
+		draw_rect(list, {rect = band, color = t.group})
+	}
 	// Every tab rises on hover; the selected tab keeps its pane fill while it moves.
 	lift := hover_lift_at(theme, hover, scale)
 	tile := tab_tile_rect(bar, x, width, lift, scale)

@@ -33,12 +33,22 @@ Saved_Workspace :: struct {
 	open:     bool,
 	tabs:     []Saved_Tab,
 	documents: []Document `json:"documents,omitempty"`,
+	groups:   []Saved_Tab_Group `json:"groups,omitempty"`,
+}
+
+// Tabs name their group by this id, which holds only within its workspace.
+Saved_Tab_Group :: struct {
+	id:     u32,
+	name:   string `json:"name,omitempty"`,
+	color:  int,
+	folded: bool,
 }
 
 // Nodes are stored root first; splits refer to their children by index. A tab's view is not saved, so a
 // tab comes back in the split view.
 Saved_Tab :: struct {
 	name:  string `json:"name,omitempty"`,
+	group: u32 `json:"group,omitempty"`,
 	focus: int,
 	nodes: []Saved_Node,
 	documents: []Document `json:"documents,omitempty"`,
@@ -213,6 +223,8 @@ layout_state_encode :: proc(
 			tabs[i], encoded = layout_tab_encode(app, tab, processes)
 			if !encoded {return "", false}
 		}
+		groups := make([]Saved_Tab_Group, len(workspace.groups), context.temp_allocator)
+		for group, i in workspace.groups {groups[i] = {group.id, group.name, group.color, group.folded}}
 		append(
 			&workspaces,
 			Saved_Workspace {
@@ -222,6 +234,7 @@ layout_state_encode :: proc(
 				open = window_for_workspace(app, workspace) != nil,
 				tabs = tabs,
 				documents = workspace.documents[:],
+				groups = groups,
 			},
 		)
 	}
@@ -241,6 +254,7 @@ layout_tab_encode :: proc(app: ^App, tab: ^Tab, processes: []procinfo.Process_In
 	if !encoded {return {}, false}
 	return {
 			name = tab.name,
+			group = tab.group,
 			focus = focus,
 			nodes = nodes,
 			documents = tab.documents[:],
@@ -473,15 +487,38 @@ layout_workspace_restore :: proc(
 	if workspace_icon_valid_value({tint = icon.tint}) {workspace.icon.tint = icon.tint}
 	documents_restore(&workspace.documents, saved.documents)
 	selected := saved.selected
+	layout_groups_restore(workspace, saved.groups)
 	for &tab, i in saved.tabs {
-		if !layout_tab_restore(app, workspace, &tab, links) && i <= saved.selected {selected -= 1}
+		if layout_tab_restore(app, workspace, &tab, links) {
+			workspace.tabs[len(workspace.tabs) - 1].group = tab.group
+		} else if i <= saved.selected {
+			selected -= 1
+		}
 	}
+	tab_groups_tidy(workspace)
 	if len(workspace.tabs) == 0 {
 		_ = workspace_discard_empty(app, workspace)
 		return nil
 	}
 	workspace_tab_choose(workspace, clamp(selected, 0, len(workspace.tabs) - 1))
 	return workspace
+}
+
+// The saved groups, each kept on its own: one with an unknown colour, a damaged name or an id already taken
+// is skipped, and its tabs come back ungrouped.
+@(private)
+layout_groups_restore :: proc(workspace: ^Workspace, saved: []Saved_Tab_Group) {
+	for group in saved {
+		if group.id == 0 || tab_group_find(workspace, group.id) != nil {continue}
+		if group.color < 1 || group.color >= len(WORKSPACE_ICON_COLORS) || !utf8.valid_string(group.name) {continue}
+		name, err := strings.clone(group.name)
+		if err != nil {continue}
+		if _, err = append(&workspace.groups, Tab_Group{group.id, name, group.color, group.folded}); err != nil {
+			delete(name)
+			continue
+		}
+		workspace.next_group_id = max(workspace.next_group_id, group.id)
+	}
 }
 
 // Opens the linked panes' windows and starts the panes' shells. With `links`, as at startup, it

@@ -170,8 +170,15 @@ rename_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 	   .None {return .Ok}
 	frame := ui.dialog_panel(r, s)
 	if ui.panel_draw(&w.list, frame, app.theme) != .None {return .Ok}
-	_, tab := dialog.target.(Rename_Tab_Target)
-	title := tab ? "Rename Tab" : "Rename Pane"
+	title, empty := "Rename Pane", "Automatic title"
+	advice := "Enter saves · Esc cancels · Empty restores automatic titles"
+	#partial switch _ in dialog.target {
+	case Rename_Tab_Target:
+		title = "Rename Tab"
+	case Rename_Group_Target:
+		title, empty = "Rename Group", "No name"
+		advice = "Enter saves · Esc cancels · Empty shows only the group's colour"
+	}
 	if result := ui.draw_text(
 		&heading,
 		&w.list,
@@ -192,13 +199,13 @@ rename_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 		app.theme,
 		ui.field_box_baseline(box),
 		true,
-		"Automatic title",
+		empty,
 	); result != .Ok {return result}
 	if render.push_layer(&w.list, r) != .None {return .Ok}
 	return ui.draw_text(
 		&hint,
 		&w.list,
-		"Enter saves · Esc cancels · Empty restores automatic titles",
+		advice,
 		r.x + pad,
 		field.y + field.height + 8 * s + hint.ascent,
 		app.theme.muted,

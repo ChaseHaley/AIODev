@@ -626,6 +626,8 @@ when AIO_CONTROL {
 			}
 			state_value(r, state_key("tab.%d.id", n), tab.id)
 			state_value(r, state_key("tab.%d.marked", n), tab.marked)
+			state_value(r, state_key("tab.%d.group", n), tab.group)
+			state_value(r, state_key("tab.%d.shown", n), tab_shown(workspace, i))
 			state_valuef(r, state_key("tab.%d.position", n), "%g", position)
 			state_value(r, state_key("tab.%d.rail_row", n), row_index)
 			state_rect(r, state_key("tab.%d.rect", n), row_rect)
@@ -659,6 +661,7 @@ when AIO_CONTROL {
 			state_value(r, state_key("tab.%d.floating", n), shown_floats)
 			state_value(r, state_key("tab.%d.minimized", n), minimized_floats)
 		}
+		if w != nil {tab_groups_state_report(r, app, w)}
 	}
 
 	// The verified window's tiled panes and the views it keeps.

@@ -14,12 +14,15 @@ _ :: settings
 window_tab_bar :: proc(app: ^App, w: ^Window) -> ui.Tab_Bar {
 	if w.workspace == nil {return {}}
 	left := workspace_button_width(app, w)
+	layout := tab_layout(app, w, true)
 	return ui.tab_bar_layout(
 		left,
 		max(0, f32(w.width) - window_caption_reserve(w) - left),
 		w.scale,
 		len(w.workspace.tabs),
 		w.tab_incoming.count,
+		layout.slots,
+		layout.chips * w.scale,
 	)
 }
 
@@ -35,7 +38,8 @@ tab_position :: proc(w: ^Window, index: int) -> f32 {
 
 // Where tab `index` draws in the strip, following its motion.
 tab_strip_x :: proc(w: ^Window, bar: ui.Tab_Bar, index: int) -> f32 {
-	return bar.x + tab_position(w, index) * bar.tab_width
+	offset := index >= 0 && index < len(w.tab_offsets) ? w.tab_offsets[index].value : 0
+	return bar.x + tab_position(w, index) * bar.tab_width + offset * w.scale
 }
 
 window_tab_rect :: proc(app: ^App, w: ^Window, index: int) -> render.Rect {
@@ -59,10 +63,14 @@ window_tab_hit :: proc(app: ^App, w: ^Window, bar: ui.Tab_Bar, x, y: f32) -> Tab
 	for pass in 0 ..< 2 {
 		for i := bar.count - 1; i >= 0; i -= 1 {
 			foreground := tab_drag_active(w) && w.workspace.tabs[i].marked
-			if foreground != (pass == 0) {continue}
+			if foreground != (pass == 0) || !foreground && !tab_shown(w.workspace, i) {continue}
 			r := window_tab_rect(app, w, i)
 			if x >= r.x && x < r.x + r.width {return Tab_Chrome_Tab{i}}
 		}
+	}
+	for run in tab_layout(app, w, true).runs {
+		chip := tab_chip_strip_rect(w, bar, run)
+		if render.rect_contains(chip, x, y) {return Tab_Chrome_Group{run.group.id}}
 	}
 	if bar.count > 0 && render.rect_contains(ui.tab_new_rect(bar), x, y) {return Tab_Chrome_New{}}
 	return nil
@@ -93,6 +101,7 @@ strip_tab_interaction_hit :: proc(
 	#partial switch _ in hit.target {
 	case Tab_Chrome_New: hit.menu_anchor = {x, bar.height}
 	case Tab_Chrome_Tab: hit.close = window_tab_close_hit(app, w, bar, x, y) >= 0
+	case Tab_Chrome_Group: hit.menu_anchor = {x, bar.height}
 	}
 	return hit
 }
@@ -116,6 +125,7 @@ tab_control :: proc(w: ^Window, target: Tab_Chrome_Target) -> ui.Control_Motion 
 		if t.index >= 0 && t.index < len(w.tab_controls) {return w.tab_controls[t.index]}
 	case Tab_Chrome_New: return w.new_tab_control
 	case Tab_Chrome_Profiles: return w.profiles_control
+	case Tab_Chrome_Group:
 	}
 	return {}
 }
@@ -124,10 +134,17 @@ window_tab_strip_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 	bar := window_tab_bar(app, w)
 	if bar.count == 0 {return .Ok}
 	dragging := tab_drag_active(w)
+	if render.push_layer(&w.list, {bar.x, 0, bar.width, bar.height}) == .None {
+		for run in tab_layout(app, w, true).runs {
+			result := tab_chip_draw(app, w, run, tab_chip_strip_rect(w, bar, run))
+			if result != .Ok {return result}
+		}
+	}
 	for pass in 0 ..< (dragging ? 2 : 1) {
 		foreground := pass == 1
 		for tab, i in w.workspace.tabs {
 			if (dragging && tab.marked) != foreground {continue}
+			if !foreground && !tab_shown(w.workspace, i) {continue}
 			tile, built := tab_tile(app, w, i)
 			if built != .Ok {return built}
 			control := tab_control(w, Tab_Chrome_Tab{i})
@@ -146,7 +163,7 @@ window_tab_strip_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 		}
 	}
 	if render.push_layer(&w.list, {0, 0, f32(w.width), bar.height}) == .None {
-		x := bar.x + w.tab_underline.value * bar.tab_width
+		x := bar.x + w.tab_underline.value * bar.tab_width + w.tab_underline_offset.value * w.scale
 		moving := dragging
 		for motion in w.tab_positions {moving ||= ui.motion_active(motion)}
 		if moving {x = tab_strip_x(w, bar, w.workspace.selected)}

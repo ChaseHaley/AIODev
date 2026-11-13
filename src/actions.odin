@@ -88,6 +88,16 @@ Action :: enum u32 {
 	Close_Other_Tabs,
 	Close_Right_Tabs,
 	Tab_Settings,
+	New_Tab_Group,
+	Add_Tab_To_Group,
+	Remove_Tab_From_Group,
+	Rename_Tab_Group,
+	Tab_Group_Color,
+	Fold_Tab_Group,
+	Ungroup_Tabs,
+	Close_Tab_Group,
+	New_Tab_In_Group,
+	Move_Tab_Group_Workspace,
 	New_Workspace,
 	Change_Workspace,
 	Next_Workspace,
@@ -407,6 +417,23 @@ ACTIONS :: [Action]Command_Descriptor {
 	.Close_Other_Tabs = {"tab.close_others", "Close Other Tabs", nil, .Host, {}},
 	.Close_Right_Tabs = {"tab.close_right", "Close Tabs to the Right", nil, .Host, {}},
 	.Tab_Settings = {"tab.settings", "Tab Settings", nil, .Host, {}},
+	.New_Tab_Group = {"tab.group_new", "Add Tab to New Group", nil, .Host, {accepted = {.Text}}},
+	.Add_Tab_To_Group = {
+		"tab.group_add", "Add Tab to Group", nil, .Host, {accepted = {.Text}, required = {.Text}, hidden = true},
+	},
+	.Remove_Tab_From_Group = {"tab.group_remove", "Remove Tab from Group", nil, .Host, {}},
+	.Rename_Tab_Group = {"tab.group_rename", "Rename Tab Group", nil, .Host, {accepted = {.Text}}},
+	.Tab_Group_Color = {
+		"tab.group_color", "Change Tab Group Color", nil, .Host,
+		{accepted = {.Text}, required = {.Text}, hidden = true},
+	},
+	.Fold_Tab_Group = {"tab.group_fold", "Fold or Unfold Tab Group", nil, .Host, {}},
+	.Ungroup_Tabs = {"tab.group_ungroup", "Ungroup Tabs", nil, .Host, {}},
+	.Close_Tab_Group = {"tab.group_close", "Close Tab Group", nil, .Host, {}},
+	.New_Tab_In_Group = {"tab.group_new_tab", "New Tab in Group", nil, .Host, {}},
+	.Move_Tab_Group_Workspace = {
+		"tab.group_move_workspace", "Move Tab Group to Workspace…", nil, .Host, {accepted = {.Workspace}},
+	},
 	.New_Workspace = {
 		"workspace.new", "New Workspace", nil, .Host,
 		{accepted = {.Focus, .Directory, .Name, .Profile, .Program, .Command_File}, control = .Pane},
@@ -1089,16 +1116,17 @@ command_execute :: proc(app: ^App, ctx: Command_Context, invocation: commands.In
 		workspace_move_open(app, w, whole_tab, tab_index)
 	case .Move_Pane_New_Workspace, .Move_Tab_New_Workspace:
 		workspace_move_new(app, w, action == .Move_Tab_New_Workspace, tab_index)
-	case .Move_Tab_Left:
-		tab_move(app, w, tab_index, max(0, tab_index - 1))
-	case .Move_Tab_Right:
-		tab_move(app, w, tab_index, min(len(w.workspace.tabs) - 1, tab_index + 1))
+	case .Move_Tab_Left, .Move_Tab_Right:
+		tab_move_step(app, w, tab_index, action == .Move_Tab_Right ? 1 : -1)
 	case .Move_Tab_Start, .Move_Tab_End:
 		tab_move_marked(app, w, action == .Move_Tab_End)
 	case .Close_Other_Tabs, .Close_Right_Tabs:
 		tab_close_subset(app, w, action == .Close_Right_Tabs, tab_index)
 	case .Close_Tab:
 		tab_close_request(app, w, tab_index)
+	case .New_Tab_Group, .Add_Tab_To_Group, .Remove_Tab_From_Group, .Rename_Tab_Group, .Tab_Group_Color,
+	     .Fold_Tab_Group, .Ungroup_Tabs, .Close_Tab_Group, .New_Tab_In_Group, .Move_Tab_Group_Workspace:
+		return tab_group_command(app, w, action, tab_index, invocation, named_workspace)
 	case .Tab_Settings:
 		settings_reveal(app, w, {key = "tab.confirm_close", search = .Clear})
 	case .Restart_Shell:
@@ -1155,10 +1183,9 @@ command_execute :: proc(app: ^App, ctx: Command_Context, invocation: commands.In
 	case .Reopen_Closed:
 		closed_reopen(app, w)
 	case .Next_Tab:
-		tab_show(app, w, (w.workspace.selected + 1) % len(w.workspace.tabs))
+		tab_show(app, w, tab_shown_step(w.workspace, w.workspace.selected, 1))
 	case .Previous_Tab:
-		tabs := len(w.workspace.tabs)
-		tab_show(app, w, (w.workspace.selected + tabs - 1) % tabs)
+		tab_show(app, w, tab_shown_step(w.workspace, w.workspace.selected, -1))
 	case .Tab_1, .Tab_2, .Tab_3, .Tab_4, .Tab_5, .Tab_6, .Tab_7, .Tab_8, .Tab_9:
 		if param.index < len(w.workspace.tabs) {tab_show(app, w, param.index)}
 	case .Last_Tab:
