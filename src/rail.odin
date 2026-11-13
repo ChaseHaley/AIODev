@@ -245,8 +245,7 @@ rail_reveal_active :: proc(w: ^Window) {
 	}
 }
 
-// Empty while the window has no title bar, as in Fullscreen, so the title controls after it take no clicks
-// from the pane header beneath their place.
+// Empty while the window has no title bar, as in Fullscreen, which places no title controls after it.
 tab_orientation_button_rect :: proc(w: ^Window) -> render.Rect {
 	s := w.scale
 	if window_title_height(w) <= 0 {return {}}
