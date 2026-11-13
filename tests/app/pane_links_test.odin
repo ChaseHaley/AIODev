@@ -567,6 +567,63 @@ closing_a_split_linked_window_returns_every_pane :: proc(t: ^testing.T) {
 	testing.expect(t, app.session_find(f.state, f.content.id) != nil)
 }
 
+// The taskbar's Close All Windows asks every window to close at once, in its own order. The app hides to
+// the tray rather than ending, so the links must come through as they were for the layout a quit saves.
+@(test)
+closing_every_window_at_once_keeps_the_links :: proc(t: ^testing.T) {
+	for linked_first in ([]bool{true, false}) {
+		f: Fixture
+		defer fixture_stop(t, &f)
+		if !fixture_start(t, &f, 94 + int(linked_first)) {return}
+		w, added, ok := fixture_split_linked(t, &f)
+		if !ok {return}
+		host := f.host.id
+		if linked_first {
+			app.handle_event(f.state, platform.Close_Request_Event{w.id})
+			app.handle_event(f.state, platform.Close_Request_Event{host})
+		} else {
+			app.handle_event(f.state, platform.Close_Request_Event{host})
+			app.handle_event(f.state, platform.Close_Request_Event{w.id})
+		}
+		app.pane_links_sync(f.state)
+		testing.expect(t, app.app_tray_only(f.state))
+		testing.expect(t, content_is_linked(&f, f.content), "the link outlives its window closing with the host")
+		testing.expect(t, content_is_linked(&f, added))
+		testing.expect(t, linked_window(&f) == w)
+		testing.expect(t, w.phase == .Hidden)
+		testing.expect(t, app.pane_link_window_of(f.state, added) == w)
+		text, encoded := app.layout_state_encode(f.state, context.temp_allocator)
+		testing.expect(t, encoded && strings.contains(text, `"linked": true`))
+		app.show_window(f.state)
+		app.pane_links_sync(f.state)
+		testing.expect(t, w.phase == .Shown, "reopening from the tray brings the window back")
+		testing.expect_value(t, len(w.panes), 2)
+	}
+}
+
+// Whether a pane of the fixture's tab sits in a linked slot, alone or in a split.
+@(private = "file")
+content_is_linked :: proc(f: ^Fixture, content: layout.Content) -> bool {
+	node := layout.find_content(&f.tab.tree, content)
+	return node != layout.INVALID_NODE && layout.link_root(&f.tab.tree, node) != layout.INVALID_NODE
+}
+
+// Closing the linked window alone, with its host still open, still returns its panes (D-079).
+@(test)
+closing_a_linked_window_alone_returns_its_panes :: proc(t: ^testing.T) {
+	f: Fixture
+	defer fixture_stop(t, &f)
+	if !fixture_start(t, &f, 96) {return}
+	w, added, ok := fixture_split_linked(t, &f)
+	if !ok {return}
+	app.handle_event(f.state, platform.Close_Request_Event{w.id})
+	app.pane_links_sync(f.state)
+	testing.expect(t, !content_is_linked(&f, f.content) && !content_is_linked(&f, added))
+	testing.expect_value(t, len(f.state.windows), 1)
+	testing.expect_value(t, len(f.host.panes), 3)
+	testing.expect(t, app.session_find(f.state, added.id) != nil)
+}
+
 @(test)
 resizing_in_a_linked_window_survives_its_return :: proc(t: ^testing.T) {
 	f: Fixture
