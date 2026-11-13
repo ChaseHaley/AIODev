@@ -56,7 +56,7 @@ schema_row :: proc(entry: settings.Schema_Entry) -> Editor_Row {
 	case .None:
 	case .Themes:
 		row.flags += {.Live_Choices}
-	case .Shell_Fonts, .Interface_Fonts:
+	case .Shell_Fonts, .Interface_Fonts, .Markdown_Fonts, .Markdown_Code_Fonts:
 		row.flags += {.Live_Choices}
 		row.searchable, row.choice_min_width = true, FONT_CHOICE_WIDTH
 	}

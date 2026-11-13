@@ -4,12 +4,14 @@ import "aio:commands"
 import "aio:colour"
 import "aio:font"
 import "aio:input"
+import "aio:localpath"
 import "aio:platform"
 import "aio:pty"
 import "aio:settings"
 import "aio:ui"
 import "core:fmt"
 import "core:os"
+import "core:path/filepath"
 import "core:slice"
 import "core:strings"
 
@@ -165,6 +167,8 @@ settings_page_setting_rows :: proc(p: ^ui.Editor, s: ^settings.Settings, fonts: 
 			row.show_all_fonts = settings.value_text(s, filter^) == "true"
 		}
 		if entry.page_description != "" {row.description = entry.page_description}
+		// The list of program PNGs takes one more entry from the file dialog.
+		if entry.key == settings.PROGRAM_ICON_FILES_KEY {row.flags += {.Browse_Icon}}
 		if ui.editor_add(p, row, settings.group_title(entry.key)) != nil {return false}
 	}
 	return true
@@ -195,6 +199,7 @@ SETTINGS_GROUP_AREAS := [?]struct {
 	{"Window", .General},
 	{"Tabs", .General},
 	{"Panes", .General},
+	{"Markdown", .General},
 	{"Terminal", .General},
 	{"Cursor", .General},
 	{"Scrollback", .General},
@@ -284,6 +289,7 @@ settings_page_profile_rows :: proc(p: ^ui.Editor, profiles: []ui.Profile_Row) ->
 				value = row.icon,
 				badge = row.badge,
 				kind = .Icon_File,
+				flags = {.Browse_Icon},
 			},
 			.Hidden = {
 				title = "Show in menus",
@@ -355,6 +361,7 @@ settings_page_opener_rows :: proc(p: ^ui.Editor, openers: ^settings.Openers) -> 
 				description = "PNG path; empty finds one, such as Neovim's.",
 				value = opener.icon,
 				kind = .Icon_File,
+				flags = {.Browse_Icon},
 			},
 			.Offers = {
 				title = "Offered for",
@@ -447,6 +454,9 @@ editor_outcome :: proc(app: ^App, w: ^Window, outcome: ui.Editor_Outcome) {
 		return
 	case .Theme_Customize:
 		ui.editor_section_show(p, int(Settings_Area.Colors))
+		return
+	case .Browse_Icon:
+		editor_icon_browse(app, w, request)
 		return
 	case .Reset_All:
 		settings_reset_ask(app, w)
@@ -578,6 +588,68 @@ editor_kept_save :: proc(app: ^App, w: ^Window, kept: ^ui.Editor_Kept) {
 			return
 		}
 		editor_setting_save(app, w, &row, kept.value, kept = true)
+		return
+	}
+}
+
+// What a Browse button's file dialog offers: the images the icon loader reads (icon_png_load).
+@(private)
+ICON_FILTER_NAME :: "PNG images"
+@(private)
+ICON_FILTER :: "*.png"
+
+// Opens the file dialog a Browse button asked for, owned by the window, in the folder of the PNG
+// the field names. The dialog runs on its own thread (platform.file_pick_start); its owner window
+// waits disabled and every other window keeps drawing. One icon dialog is open at a time.
+@(private)
+editor_icon_browse :: proc(app: ^App, w: ^Window, request: ui.Editor_Request) {
+	browse, ok := request.(ui.Icon_Browse_Request)
+	if !ok || app.dialogs.icon != nil {return}
+	written := browse.value
+	if browse.key == settings.PROGRAM_ICON_FILES_KEY {written = settings.program_icon_files_last_path(written)}
+	directory := ""
+	if written = strings.trim_space(written); written != "" {
+		if path, err := localpath.settings_relative(written, app.settings_path, context.temp_allocator);
+		   err == .None {
+			directory = filepath.dir(path)
+		}
+	}
+	key, clone_error := strings.clone(browse.key)
+	if clone_error != nil {return}
+	pick := platform.file_pick_start(&app.platform, w.id, ICON_FILTER_NAME, ICON_FILTER, directory)
+	if pick == nil {
+		delete(key)
+		notify(app, .Error, "Could not show the file dialog.")
+		return
+	}
+	app.dialogs.icon = Icon_Pick{{pick, w.id}, key}
+}
+
+// Writes the PNG a Browse dialog chose into row `key` as typing its path there would: into the
+// field and saved as Enter saves it while the row is still selected, else saved as a field the user
+// moved off. Program icon files gain an entry named for the file, such as nvim for nvim.png.
+editor_icon_chosen :: proc(app: ^App, w: ^Window, key, path: string) {
+	p := &w.editor
+	for &row in p.rows {
+		if row.key != key {continue}
+		selected := ui.editor_row(p) == &row
+		value := path
+		if key == settings.PROGRAM_ICON_FILES_KEY {
+			current := selected ? ui.field_string(&p.value) : row.value
+			name := filepath.stem(path)
+			ok: bool
+			if value, ok = settings.program_icon_files_with(current, name, path, context.temp_allocator); !ok {return}
+		}
+		value = strings.clone(value, context.temp_allocator)
+		w.dirty = true
+		if selected {
+			ui.field_set(&p.value, value)
+			editor_outcome(app, w, .Save)
+			return
+		}
+		kept := ui.Editor_Kept{strings.clone(key), strings.clone(value)}
+		defer ui.editor_kept_destroy(&kept)
+		editor_kept_save(app, w, &kept)
 		return
 	}
 }
@@ -836,8 +908,27 @@ setting_live_choices :: proc(
 		return font.family_choices(fonts, s.font.show_all, s.font.family), nil, true
 	case .Interface_Fonts:
 		return font.family_choices(fonts, true, s.interface.font_family), nil, true
+	case .Markdown_Fonts:
+		families := font.family_choices(fonts, true, s.markdown.font_family)
+		choices, labels = markdown_font_choices(families, "GUI font")
+		return choices, labels, true
+	case .Markdown_Code_Fonts:
+		families := font.family_choices(fonts, s.font.show_all, s.markdown.code_font_family)
+		choices, labels = markdown_font_choices(families, "Shell font")
+		return choices, labels, true
 	}
 	return nil, nil, false
+}
+
+// A Markdown font list: first the empty value, labelled with the font it follows, then the families
+// by name. Labels run parallel to the choices, so the empty one has its own.
+@(private)
+markdown_font_choices :: proc(families: []string, follows: string) -> (choices, labels: []string) {
+	choices = make([]string, len(families) + 1, context.temp_allocator)
+	labels = make([]string, len(families) + 1, context.temp_allocator)
+	choices[0], labels[0] = "", follows
+	for family, i in families {choices[i + 1], labels[i + 1] = family, family}
+	return
 }
 
 // The theme selector lists theme files by display name, then custom themes in settings file order.
@@ -1144,12 +1235,19 @@ when AIO_CONTROL {
 			if i > 0 {strings.write_byte(&opener_ids, ',')}
 			strings.write_string(&opener_ids, app.settings.openers.items[index].id)
 		}
-		// Link programs whose table line drew their icon in the last frame.
+		// Profiles and link programs whose table line drew their icon in the last frame.
 		opener_icons := strings.builder_make(context.temp_allocator)
+		profile_icons := strings.builder_make(context.temp_allocator)
 		for row in p.rows {
-			if row.kind != .Opener || row.icon_atlas.width <= 0 {continue}
-			if strings.builder_len(opener_icons) > 0 {strings.write_byte(&opener_icons, ',')}
-			strings.write_string(&opener_icons, row.opener)
+			if row.icon_atlas.width <= 0 {continue}
+			#partial switch row.kind {
+			case .Opener:
+				if strings.builder_len(opener_icons) > 0 {strings.write_byte(&opener_icons, ',')}
+				strings.write_string(&opener_icons, row.opener)
+			case .Profile:
+				if strings.builder_len(profile_icons) > 0 {strings.write_byte(&profile_icons, ',')}
+				strings.write_string(&profile_icons, row.profile)
+			}
 		}
 		match, free := "", ""
 		rows := 0
@@ -1228,6 +1326,7 @@ when AIO_CONTROL {
 		state_text(r, "settings.opener.expanded", p.opener_expanded)
 		state_text(r, "settings.opener.ids", strings.to_string(opener_ids))
 		state_text(r, "settings.opener.icons", strings.to_string(opener_icons))
+		state_text(r, "settings.profile.icons", strings.to_string(profile_icons))
 		state_value(r, "settings.opener.app_count", len(app.settings.openers.items))
 		state_text(
 			r,
@@ -1242,6 +1341,9 @@ when AIO_CONTROL {
 		state_value(r, "settings.opener.drag_target", ui.editor_order_target(p))
 		state_text(r, "settings.opener.drag_id", ui.editor_order_opener(p))
 		state_rect(r, "settings.slider", selected.slider)
+		// The selected row's Browse button, which opens the file dialog for an icon path.
+		state_rect(r, "settings.browse", selected.browse)
+		state_value(r, "settings.icon_dialog_open", app.dialogs.icon != nil)
 		state_rect(r, "settings.search_rect", page.filter)
 		state_rect(r, "settings.outline_rect", page.outline)
 		state_rect(r, "settings.list_rect", page.list)

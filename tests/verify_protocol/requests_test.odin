@@ -33,6 +33,7 @@ parse_commands :: proc(t: ^testing.T) {
 		{"expect", "cursor", "2,3"}, {"expect", "state", "palette.query=a=b"},
 		{"expect", "cell", "0,1", "underline=single", "fg=default", "bg=#00AAbb", "wide=false"},
 		{"focus", "in"}, {"focus", "out"}, {"tray", "open"}, {"tray", "hide"}, {"tray", "quit"},
+		{"pick", `C:\icons\nvim.png`}, {"pick", "--cancel"},
 		{"resize", "1x1000"}, {"dpi", "48"}, {"dpi", "768"}, {"help"}, {"help", "screen"},
 		{"mouse", "move", "1,2"}, {"mouse", "down", "1,2", "--button", "right"},
 		{"mouse", "up", "1,2", "--button", "middle"}, {"mouse", "click", "1,2", "--button", "left"},
@@ -78,6 +79,12 @@ parse_commands :: proc(t: ^testing.T) {
 	s := split.(verify_protocol.Command)
 	testing.expect_value(t, s.ratio, f32(0.3))
 	testing.expect(t, !s.focus)
+	pick, pick_error := verify_protocol.parse({"pick", `C:\icons\nvim.png`})
+	testing.expect_value(t, pick_error.advice, "")
+	testing.expect_value(t, pick.(verify_protocol.Pick).path, `C:\icons\nvim.png`)
+	cancel, cancel_error := verify_protocol.parse({"pick", "--cancel"})
+	testing.expect_value(t, cancel_error.advice, "")
+	testing.expect_value(t, cancel.(verify_protocol.Pick).path, "")
 }
 
 @(test)
@@ -87,6 +94,7 @@ parse_errors :: proc(t: ^testing.T) {
 		{"screen", "-1"}, {"screen", "2:1"}, {"screen", "1:"}, {"screen", "x"},
 		{"screen", "1", "2"}, {"cells"}, {"cells", "x"}, {"cells", "0", "1"},
 		{"type"}, {"type", "a", "b"}, {"command", ""}, {"focus", "bad"}, {"tray", "bad"},
+		{"pick"}, {"pick", ""}, {"pick", "a", "b"},
 		{"command", "pane.zoom", "--ratio", "0.5"}, {"command", "pane.split", "--ratio", "NaN"},
 		{"command", "pane.split", "--ratio", "0"}, {"command", "pane.split", "--ratio", "1"},
 		{"command", "pane.split", "--direction", "above"}, {"command", "pane.split", "--focus", "no"},
@@ -164,7 +172,7 @@ help_verbs :: proc(t: ^testing.T) {
 	testing.expect_value(t, verify_protocol.help(&b), verify_protocol.Error.None)
 	testing.expect_value(t, strings.to_string(b), verify_protocol.HELP_OVERVIEW)
 	for command in ([]string{"ping", "screen", "cells", "state", "wait", "expect", "type", "key",
-		"run", "mouse", "focus", "resize", "dpi", "tray", "command", "window", "help", "capture",
+		"run", "mouse", "focus", "resize", "dpi", "tray", "pick", "command", "window", "help", "capture",
 		"pixels", "diff", "draws", "perf", "vt"}) {
 		strings.builder_reset(&b)
 		testing.expect_value(t, verify_protocol.help(&b, command), verify_protocol.Error.None)

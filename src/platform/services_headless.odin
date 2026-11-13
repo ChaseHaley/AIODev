@@ -207,7 +207,8 @@ when AIO_HEADLESS {
 		path: string,
 	}
 
-	// Queues the path the next file dialog chooses; an empty path cancels it.
+	// Queues the path the next file dialog chooses; an empty path cancels it. The verify `pick` request
+	// and tests queue paths here; record.file_picks shows each dialog the app opened.
 	file_pick_script :: proc(p: ^Platform, path: string) -> Error {
 		copied, err := strings.clone(path, p.allocator)
 		if err != nil {return .Out_Of_Memory}
@@ -232,6 +233,19 @@ when AIO_HEADLESS {
 			chosen := pop_front(&p.file_picks)
 			pick.path, _ = strings.clone(chosen)
 			delete(chosen, p.allocator)
+		}
+		record := File_Pick_Record {
+			window  = id,
+			folders = folders,
+		}
+		record.filter_name, _ = strings.clone(filter_name, p.allocator)
+		record.pattern, _ = strings.clone(pattern, p.allocator)
+		record.directory, _ = strings.clone(directory, p.allocator)
+		record.path, _ = strings.clone(pick.path, p.allocator)
+		if _, append_error := append(&p.record.file_picks, record); append_error != nil {
+			for s in ([?]string{record.filter_name, record.pattern, record.directory, record.path}) {
+				delete(s, p.allocator)
+			}
 		}
 		return pick
 	}
