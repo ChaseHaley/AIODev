@@ -111,6 +111,34 @@ directional_focus_uses_nested_geometry_and_stops_at_edges :: proc(t: ^testing.T)
 	testing.expect_value(t, layout.focus_direction(rects, layout.INVALID_NODE, .Up), layout.INVALID_NODE)
 }
 
+// Panes of several windows on one desktop: a pane beside the origin wins over a nearer diagonal one, a
+// diagonal one is reached only when nothing is beside, and a tie keeps the earlier pane.
+@(test)
+nearest_toward_prefers_panes_beside_then_panes_past_the_edge :: proc(t: ^testing.T) {
+	rects := []layout.Pane_Rect{
+		{node = 0, rect = {1000, 0, 400, 400}},
+		// Beside on the left, far.
+		{node = 1, rect = {0, 300, 300, 300}},
+		// Up and to the left, nearer, but overlapping neither way.
+		{node = 2, rect = {600, -500, 300, 300}},
+		// Below and to the right, past the bottom edge only.
+		{node = 3, rect = {1500, 600, 200, 200}},
+	}
+	testing.expect_value(t, layout.nearest_toward(rects, 0, .Left), 1)
+	testing.expect_value(t, layout.nearest_toward(rects, 0, .Up), 2)
+	testing.expect_value(t, layout.nearest_toward(rects, 0, .Down), 3)
+	testing.expect_value(t, layout.nearest_toward(rects, 0, .Right), 3)
+	// Nothing lies right of the bottom-right pane, beside it or past its edge.
+	testing.expect_value(t, layout.nearest_toward(rects, 3, .Right), -1)
+	// Two panes equally far: the earlier wins.
+	tie := []layout.Pane_Rect{
+		{node = 0, rect = {0, 0, 100, 100}},
+		{node = 1, rect = {200, -50, 100, 100}},
+		{node = 2, rect = {200, 50, 100, 100}},
+	}
+	testing.expect_value(t, layout.nearest_toward(tie, 0, .Right), 1)
+}
+
 @(test)
 resize_uses_nearest_matching_ancestor_and_clamps :: proc(t: ^testing.T) {
 	l: layout.Layout
