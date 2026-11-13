@@ -131,6 +131,9 @@ Markdown_View :: struct {
 	mono:       font.Family,
 	revision:   u64,
 	height:     f32,
+	// Counts the layouts fit has made, so what is measured from the lines (the heading outline) is
+	// measured again only when they move.
+	layouts:    u64,
 	scroll:     int,
 	// The selection runs from anchor to head, byte offsets into the document; they are equal when
 	// nothing is selected. Only the selection procs below write them.
@@ -200,6 +203,7 @@ markdown_view_fit :: proc(
 	if v.width == width && v.body_px == body_px && v.family == t.family && v.mono == mono &&
 	   v.revision == revision && v.scale == scale {return}
 	v.width, v.body_px, v.family, v.mono, v.revision, v.scale = width, body_px, t.family, mono, revision, scale
+	v.layouts += 1
 	v.fonts = t.fonts
 	for spec, face in FACE_SPECS {
 		family := face == .Code ? mono : t.family
