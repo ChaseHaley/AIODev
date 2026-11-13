@@ -14,11 +14,12 @@ IMAGE_IDLE_FRAMES :: 60
 
 @(private)
 Image_Texture :: struct {
-	texture:   ^d3d.ITexture2D,
+	texture:       ^d3d.ITexture2D,
 	// Nil records a texture that could not be created, so a frame does not retry and log forever.
-	view:      ^d3d.IShaderResourceView,
-	bytes:     int,
-	last_used: u64,
+	view:          ^d3d.IShaderResourceView,
+	bytes:         int,
+	last_used:     u64,
+	width, height: int,
 }
 
 // image_known reports whether image_upload has settled this key, even if the upload failed.
@@ -49,6 +50,56 @@ image_upload :: proc(d: ^Device, key: u64, width, height: int, pixels: []u8) {
 	}
 	d.image_bytes += entry.bytes
 	d.images[key] = entry
+}
+
+// image_render draws `list` into a new width x height texture under `key`, replacing any texture the key
+// named, for push_image to show, as an image or as dust. The key must have IMAGE_KEY_RENDERED set. The
+// list draws as a frame would, over transparent pixels, so the texture is premultiplied like an upload.
+@(require_results)
+image_render :: proc(d: ^Device, key: u64, width, height: int, list: ^Draw_List) -> Error {
+	assert(key & IMAGE_KEY_RENDERED != 0, "image_render keys set IMAGE_KEY_RENDERED")
+	if d.lost {return .Device_Lost}
+	if old, known := d.images[key]; known {
+		d.image_bytes -= old.bytes
+		image_release(&old)
+		delete_key(&d.images, key)
+	}
+	if width < 1 ||
+	   height < 1 ||
+	   width > d3d.REQ_TEXTURE2D_U_OR_V_DIMENSION ||
+	   height > d3d.REQ_TEXTURE2D_U_OR_V_DIMENSION {
+		return .Invalid_Argument
+	}
+	entry := Image_Texture {
+		last_used = d.image_frame,
+		width     = width,
+		height    = height,
+		bytes     = width * height * 4,
+	}
+	ok := false
+	defer if !ok {image_release(&entry)}
+	desc := d3d.TEXTURE2D_DESC {
+		Width = u32(width),
+		Height = u32(height),
+		MipLevels = 1,
+		ArraySize = 1,
+		Format = .R8G8B8A8_UNORM,
+		SampleDesc = {Count = 1},
+		BindFlags = {.SHADER_RESOURCE, .RENDER_TARGET},
+	}
+	hr := d.native->CreateTexture2D(&desc, nil, &entry.texture)
+	if err := checked(d, hr, "CreateTexture2D rendered image"); err != .None {return err}
+	hr = d.native->CreateShaderResourceView(entry.texture, nil, &entry.view)
+	if err := checked(d, hr, "CreateShaderResourceView rendered image"); err != .None {return err}
+	target: ^d3d.IRenderTargetView
+	hr = d.native->CreateRenderTargetView(entry.texture, nil, &target)
+	if err := checked(d, hr, "CreateRenderTargetView rendered image"); err != .None {return err}
+	defer release(target)
+	if err := list_draw(d, target, i32(width), i32(height), list, {}); err != .None {return err}
+	ok = true
+	d.image_bytes += entry.bytes
+	d.images[key] = entry
+	return .None
 }
 
 @(private, require_results)
@@ -87,6 +138,7 @@ image_texture_create :: proc(
 	d.ctx->UpdateSubresource(entry.texture, 0, nil, raw_data(pixels), u32(width * 4), 0)
 	d.ctx->GenerateMips(entry.view)
 	entry.bytes = len(pixels) * 4 / 3
+	entry.width, entry.height = width, height
 	return .None
 }
 

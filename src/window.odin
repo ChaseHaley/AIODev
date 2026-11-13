@@ -101,6 +101,10 @@ Window :: struct {
 	tabs_horizontal: bool,
 	using tab_chrome: Tab_Chrome_State,
 	using rail_state: Rail_State,
+	// The tabs passing between the rail and the strip as the orientation changes; see tab_flip.odin.
+	using tab_flip: Tab_Flip,
+	// The Activity panel moving to its other side; see panel_wrap.odin.
+	using panel_wrap: Panel_Wrap,
 	// The Activity panel's width left of the rail; see window_dock_reserve.
 	dock_left_width: f32,
 	using title_controls: Title_Controls,
@@ -330,6 +334,7 @@ window_free :: proc(w: ^Window) {
 	floating_window_destroy(&w.floats)
 	confirmation_clear(w)
 	pane_motion_destroy(w)
+	panel_wrap_destroy(w)
 	workspace_overview_destroy(w)
 	hidden_panes_destroy(w)
 	render.draw_list_destroy(&w.list)
@@ -401,6 +406,7 @@ window_apply_settings :: proc(app: ^App, w: ^Window) {
 	}
 	horizontal := fields.tabs_horizontal
 	placement_changed := horizontal != w.tabs_horizontal
+	rail, reserve, was_docked := rail_area(w), w.status_rail_reserve, rail_docked(w)
 	w.tabs_horizontal = horizontal
 	if placement_changed {
 		rail_resize_cancel(w)
@@ -411,6 +417,8 @@ window_apply_settings :: proc(app: ^App, w: ^Window) {
 		// does not survive the mode switch.
 		rail_auto_reset(w)
 	}
+	if placement_changed {tab_flip_begin(app, w, rail, reserve, was_docked)}
+	panel_side_apply(app, w)
 	window_relayout(app, w)
 }
 
@@ -441,7 +449,7 @@ window_relayout :: proc(app: ^App, w: ^Window) {
 		return
 	}
 	bar_height := window_title_height(w)
-	tab_presentation_fit(w)
+	tab_presentation_fit(app, w)
 	platform.window_title_bar(
 		&app.platform,
 		w.id,
@@ -689,6 +697,7 @@ build_frame :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 		if result := pane_draw_noted(app, w, pane, &blinking); result != .Ok {return result}
 	}
 	pane_ghost_raised_draw(app, w)
+	panel_wrap_draw(w, panes)
 	if !over {
 		if result := window_chrome_layers_draw(app, w); result != .Ok {return result}
 	}
@@ -766,7 +775,9 @@ window_chrome_layers_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status 
 		if result := window_chrome_draw(app, w); result != .Ok {return result}
 	}
 	if result := rail_draw(app, w); result != .Ok {return result}
+	panel := render.draw_mark(&w.list)
 	if result := status_panel_draw(app, w); result != .Ok {return result}
+	panel_wrap_draw(w, panel)
 	pane_ghosts_draw_alone(app, w, true)
 	return .Ok
 }

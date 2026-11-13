@@ -19,6 +19,8 @@ Menu_Item :: struct {
 	separator:             bool,
 	// A line icon in place of a badge, inked like the label; a badge or image replaces it.
 	glyph:                 Icon,
+	// A dot of this colour in the glyph's place, as a tab group's colour rows show; none while transparent.
+	swatch:                render.Color,
 	// Secondary text after the label, fading out where it runs out of room.
 	detail:                string,
 	// A compact button at the row's end, and one beyond it that shows while the row is selected.
@@ -387,6 +389,12 @@ menu_row_draw :: proc(
 	if item.glyph != .None && item.icon == "" && item.icon_atlas.width <= 0 {
 		glyph := render.Rect{label_x, row.y, ICON_BUTTON * scale, row.height}
 		icon_draw(list, item.glyph, glyph, ink, ICON_BUTTON, scale)
+		label_x += (ICON_BUTTON + SPACE_2) * scale
+	}
+	if item.swatch.a > 0 {
+		size := SPACE_3 * scale
+		dot := render.Rect{label_x + (ICON_BUTTON * scale - size) / 2, row.y + (row.height - size) / 2, size, size}
+		if render.push_rect(list, {rect = dot, color = item.swatch, radius = size / 2}) != .None {return .Ok}
 		label_x += (ICON_BUTTON + SPACE_2) * scale
 	}
 	end := row.x + row.width - inset

@@ -8,6 +8,7 @@ Rename_Target :: union {
 	Rename_Tab_Target,
 	Rename_Pane_Target,
 	Rename_Workspace_Target,
+	Rename_Group_Target,
 }
 
 Rename_Tab_Target :: struct {
@@ -20,6 +21,11 @@ Rename_Pane_Target :: struct {
 
 Rename_Workspace_Target :: struct {
 	workspace: u32,
+}
+
+// A tab group, found within its workspace. An empty name leaves the chip as a dot of its colour.
+Rename_Group_Target :: struct {
+	workspace, group: u32,
 }
 
 // What an empty name means to the editor that typed it. Every editor cleans the name the same way.
@@ -81,6 +87,9 @@ rename_target_commit :: proc(
 	case Rename_Workspace_Target:
 		for window in app.windows {window_relayout(app, window)}
 		workspace_mutation_finish(app, workspace_find(app, t.workspace), {.Names})
+	case Rename_Group_Target:
+		layout_state_touch(app)
+		mark_all_dirty(app)
 	}
 	return .Saved
 }
@@ -104,6 +113,8 @@ rename_target_destination :: proc(app: ^App, target: Rename_Target) -> ^string {
 		if entry := session_find(app, t.session); entry != nil {return &entry.name}
 	case Rename_Workspace_Target:
 		if workspace := workspace_find(app, t.workspace); workspace != nil {return &workspace.name}
+	case Rename_Group_Target:
+		if group := tab_group_find(workspace_find(app, t.workspace), t.group); group != nil {return &group.name}
 	}
 	return nil
 }

@@ -68,11 +68,26 @@ Glyph_Instance :: struct {
 GLYPH_COLOR :: u32(1)
 GLYPH_FADE :: u32(2)
 
-// A textured quad. `key` names a texture from image_upload; `uv` is the part of it to show, in 0..1.
+// A textured quad. `key` names a texture from image_upload or image_render; `uv` is the part of it to
+// show, in 0..1. A nonzero dust.progress draws it as dust instead; see Dust.
 Image_Instance :: struct {
 	rect, uv: Rect,
 	key:      u64,
+	dust:     Dust,
 }
+
+// An image crumbling to dust: each texel of the part `uv` shows is a grain, drawn `grain` pixels square
+// at its place in `rect`. Grains leave from the bottom left toward the top right, along a ragged front
+// whose shape `seed` picks; each turns to `ash`, then rises up to `rise` pixels while it thins out. At
+// progress 1 every grain has gone.
+Dust :: struct {
+	progress, seed: f32,
+	rise, grain:    f32,
+	ash:            Color,
+}
+
+// Keys of the textures image_render draws. image_upload keys never set this bit, so they never collide.
+IMAGE_KEY_RENDERED :: u64(1) << 63
 
 // A layer draws its rects, then its images, then its glyphs.
 Layer :: struct {
@@ -236,7 +251,11 @@ draw_scale :: proc(list: ^Draw_List, mark: Draw_Mark, centre: [2]f32, factor: f3
 		glyph.fade_start = centre.x + (glyph.fade_start - centre.x) * factor
 		glyph.fade_end = centre.x + (glyph.fade_end - centre.x) * factor
 	}
-	for &image in list.images[mark.images:] {image.rect = scaled(image.rect, centre, factor)}
+	for &image in list.images[mark.images:] {
+		image.rect = scaled(image.rect, centre, factor)
+		image.dust.rise *= factor
+		image.dust.grain *= factor
+	}
 }
 
 // Appends what `source` drew between `from` and `to` to `list`, as a copy that outlives `source`'s next
@@ -266,6 +285,19 @@ draw_list_copy :: proc(list: ^Draw_List, source: ^Draw_List, from, to: Draw_Mark
 		if _, err := append(&list.layers, copied); err != nil {list.error = .Out_Of_Memory}
 	}
 	return list.error
+}
+
+// Forgets everything drawn since `mark`, as if it had never been drawn.
+draw_list_truncate :: proc(list: ^Draw_List, mark: Draw_Mark) {
+	resize(&list.layers, mark.layers)
+	resize(&list.rects, mark.rects)
+	resize(&list.glyphs, mark.glyphs)
+	resize(&list.images, mark.images)
+	if len(list.layers) == 0 {return}
+	last := &list.layers[len(list.layers) - 1]
+	last.rect_count = clamp(mark.rects - last.rect_start, 0, last.rect_count)
+	last.glyph_count = clamp(mark.glyphs - last.glyph_start, 0, last.glyph_count)
+	last.image_count = clamp(mark.images - last.image_start, 0, last.image_count)
 }
 
 @(require_results)

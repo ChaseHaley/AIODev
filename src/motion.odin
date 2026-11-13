@@ -13,6 +13,8 @@ Window_Motion :: enum u8 {
 	Document_Menu,
 	Title_Controls,
 	Rail,
+	Tab_Flip,
+	Panel_Wrap,
 	Tabs,
 	Activity,
 	Panes,
@@ -39,6 +41,10 @@ window_motion_advance :: proc(app: ^App, w: ^Window, part: Window_Motion, frame:
 		return title_controls_animate(app, w, frame)
 	case .Rail:
 		return rail_slide_update(w, frame)
+	case .Tab_Flip:
+		return tab_flip_animate(w, frame)
+	case .Panel_Wrap:
+		return panel_wrap_animate(w, frame)
 	case .Tabs:
 		return tab_presentation_animate(app, w, frame)
 	case .Activity:
@@ -81,6 +87,10 @@ window_motion_running :: proc(w: ^Window, part: Window_Motion) -> bool {
 		return title_controls_animating(w)
 	case .Rail:
 		return rail_sliding(w)
+	case .Tab_Flip:
+		return tab_flip_active(w)
+	case .Panel_Wrap:
+		return panel_wrap_animating(w)
 	case .Tabs:
 		return tab_presentation_animating(w)
 	case .Activity:

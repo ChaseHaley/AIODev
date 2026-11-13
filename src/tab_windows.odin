@@ -5,7 +5,6 @@ import "aio:layout"
 import "aio:render"
 import "aio:ui"
 import "core:fmt"
-import "core:math"
 
 // A drag carries the marked tabs. As with a pane, their workspace must keep content of its own.
 @(require_results)
@@ -25,25 +24,31 @@ Tab_Incoming :: struct {
 	ghost:       ui.Motion,
 }
 
-// Where tabs dropped at a point in w would land, centring their group on the pointer. A drop away from the
-// tabs lands after them.
+// Where tabs dropped at a point in w would land, centring them on the pointer. A drop away from the tabs
+// lands after them.
 @(require_results)
 tab_drop_slot :: proc(app: ^App, w: ^Window, incoming: int, x, y: f32) -> int {
 	count := len(w.workspace.tabs)
-	offset, size: f32
 	if w.tabs_horizontal {
 		bar := window_tab_bar(app, w)
-		if y >= bar.height {return count}
-		offset, size = x - bar.x, bar.tab_width
-	} else {
-		area := rail_area(w)
-		if !rail_visible(w) || x < area.x || x >= area.x + area.width || y < area.y {return count}
-		rail, built := rail_current_layout(w)
-		if !built {return count}
-		offset, size = y - ui.rail_row_rect(rail, 0).y, rail.row_height
+		if y >= bar.height || bar.tab_width <= 0 {return count}
+		edge := x - bar.x - f32(incoming) * bar.tab_width / 2
+		return tab_drag_slot(w, tab_layout(app, w, true), edge, bar.tab_width, w.scale, carried = false)
 	}
-	if size <= 0 {return count}
-	return clamp(int(math.floor(offset / size - f32(incoming) / 2 + 0.5)), 0, count)
+	area := rail_area(w)
+	if !rail_visible(w) || x < area.x || x >= area.x + area.width || y < area.y {return count}
+	rail, built := rail_current_layout(w)
+	if !built || rail.row_height <= 0 {return count}
+	edge := (y - ui.rail_row_rect(rail, 0).y) / rail.row_height - f32(incoming) / 2
+	return tab_drag_slot(w, tab_layout(nil, w, false), edge, 1, 0, carried = false)
+}
+
+// Where arriving tabs would rest before tab `slot`, or after the last tab.
+@(private = "file")
+tab_incoming_place :: proc(app: ^App, w: ^Window, slot: int) -> Tab_Place {
+	layout := tab_layout(app, w, w.tabs_horizontal)
+	if slot >= 0 && slot < len(layout.places) {return layout.places[slot]}
+	return {f32(layout.slots), layout.chips}
 }
 
 // Opens, moves or, with a count of 0, closes the gap of window `id` for an offer of tabs.
@@ -51,6 +56,7 @@ tab_incoming_set :: proc(app: ^App, id: input.Window_Id, offer: Tab_Incoming) {
 	w := window_find(app, id)
 	if w == nil {return}
 	incoming := &w.tab_incoming
+	place := tab_incoming_place(app, w, offer.slot).slot
 	switch {
 	case offer.count == 0:
 		if incoming.count == 0 {return}
@@ -60,11 +66,11 @@ tab_incoming_set :: proc(app: ^App, id: input.Window_Id, offer: Tab_Incoming) {
 			source = offer.source,
 			count  = offer.count,
 			slot   = offer.slot,
-			ghost  = {value = f32(offer.slot), target = f32(offer.slot)},
+			ghost  = {value = place, target = place},
 		}
 	case incoming.slot != offer.slot:
 		incoming.slot = offer.slot
-		ui.motion_target(&incoming.ghost, f32(offer.slot), ui.REORDER_DURATION, .Decelerate, app.animations)
+		ui.motion_target(&incoming.ghost, place, ui.REORDER_DURATION, .Decelerate, app.animations)
 	case:
 		return
 	}
@@ -90,7 +96,12 @@ tab_workspace_drag_move :: proc(app: ^App, source, w: ^Window, x, y: f32) -> boo
 	a, carry := tab_drag_state(source)
 	if a == nil {return false}
 	grabbed := carry.grabbed
-	request := Workspace_Move_Request{source.workspace.id, grabbed.id, grabbed.tree.focus, true}
+	request := Workspace_Move_Request {
+		workspace = source.workspace.id,
+		tab       = grabbed.id,
+		node      = grabbed.tree.focus,
+		whole_tab = true,
+	}
 	allows := tab_window_source_allows(source.workspace)
 	held, on := workspace_picker_drag_hover(app, a, w, x, y, request, true, allows)
 	if !on {
@@ -267,7 +278,8 @@ tab_incoming_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 	r, clip: render.Rect
 	if w.tabs_horizontal && !pane_fill_active(w) {
 		bar := window_tab_bar(app, w)
-		x := bar.x + incoming.ghost.value * bar.tab_width
+		offset := tab_incoming_place(app, w, incoming.slot).offset * w.scale
+		x := bar.x + incoming.ghost.value * bar.tab_width + offset
 		r = ui.tab_tile_rect(bar, x, f32(incoming.count) * bar.tab_width, 0, w.scale)
 		clip = {0, 0, f32(w.width), bar.height}
 	} else if rail, built := rail_current_layout(w); built && rail_visible(w) {

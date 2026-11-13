@@ -187,6 +187,33 @@ float_views_float_zoom_ends_when_its_panes_change :: proc(t: ^testing.T) {
 	testing.expect_value(t, len(app.floating_rects(w)), 2)
 }
 
+// A float gaining a pane is no change to the tiling, so a zoomed tiled pane below it stays zoomed.
+@(test)
+float_views_splitting_a_float_keeps_the_tiled_zoom :: proc(t: ^testing.T) {
+	f: Palette_Fixture
+	defer palette_fixture_destroy(t, &f)
+	if !palette_fixture_create(t, &f, "float-split-tiled-zoom", second_window = false) {return}
+	s, w := &f.state, f.state.windows[0]
+	app.pane_split(s, w, .Right)
+	tiled := app.window_tree(w).focus
+	app.pane_split(s, w, .Right)
+	app.floating_toggle(s, w)
+	tree := app.window_tree(w)
+	floating := tree.focus
+	if !testing.expect(t, layout.is_floating(tree, floating)) {return}
+	app.pane_focus(s, w, tiled)
+	app.run_action(s, w, .Zoom_Pane)
+	if !testing.expect_value(t, app.pane_view_current(w), layout.Pane_View.Zoom) {return}
+
+	app.pane_focus(s, w, floating)
+	app.pane_split(s, w, .Right)
+	testing.expect_value(t, app.pane_view_current(w), layout.Pane_View.Zoom)
+	testing.expect_value(t, len(app.floating_rects(w)), 2)
+	if testing.expect_value(t, len(app.window_tiled_rects(w)), 1) {
+		testing.expect_value(t, app.window_tiled_rects(w)[0].node, tiled)
+	}
+}
+
 // Ctrl held at a corner resizes the float about its centre; letting go of Ctrl mid-drag moves only the
 // grabbed edges again.
 @(test)

@@ -800,6 +800,9 @@ when AIO_CONTROL {
 		@(static, rodata)
 		names := settings.STATUS_ROW_NAME_NAME
 		state_text(r, "activity.side", sides[s.panel_side])
+		// How far right of the layout the panes and panel draw while the panel changes side with no docked
+		// rail, wrapping around the window; 0 at rest.
+		state_valuef(r, "activity.wrap", "%g", math.round(w.wrap_shift * w.wrap.value))
 		state_rect(r, "activity.view_button", status_panel_button_rect(app, w, .View))
 		state_text(r, "activity.view", views[s.panel_view])
 		state_rect(r, "activity.group_button", status_panel_button_rect(app, w, .Group))

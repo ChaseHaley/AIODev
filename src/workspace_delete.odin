@@ -7,8 +7,11 @@ workspace_delete_request :: proc(app: ^App, w: ^Window, workspace: ^Workspace) {
 	pending_close_open_workspace(app, w, workspace, workspace_delete_plan(app, workspace))
 }
 
+// Removes `workspace` from the app. Windows play its deletion where it was on screen, and `actor`, the
+// window it was deleted from, plays it over its own workspace; see workspace_overview_deleted.
 @(private)
-workspace_delete_release :: proc(app: ^App, workspace: ^Workspace) {
+workspace_delete_release :: proc(app: ^App, workspace: ^Workspace, actor: ^Window = nil) {
+	workspace_overview_deleted(app, workspace, actor)
 	walk := workspace_session_panes(app, workspace)
 	for pane, ok := workspace_pane_next(&walk); ok; pane, ok = workspace_pane_next(&walk) {
 		session_close(app, pane.content.id)
@@ -23,7 +26,7 @@ workspace_delete_release :: proc(app: ^App, workspace: ^Workspace) {
 // identities, so the commit resolves them instead of deriving a second, possibly different plan.
 @(private)
 @(require_results)
-workspace_delete_commit :: proc(app: ^App, plan: Workspace_Delete_Plan) -> bool {
+workspace_delete_commit :: proc(app: ^App, plan: Workspace_Delete_Plan, actor: ^Window = nil) -> bool {
 	workspace := workspace_find(app, plan.workspace)
 	if workspace == nil || !workspace_eligible(app, workspace) {return false}
 	owner: ^Window
@@ -53,7 +56,7 @@ workspace_delete_commit :: proc(app: ^App, plan: Workspace_Delete_Plan) -> bool 
 	}
 	// Replacing pre-flights every view before the old workspace is released (D-053).
 	if owner != nil && !workspace_adopt(app, owner, destination, .Replace) {return false}
-	workspace_delete_release(app, workspace)
+	workspace_delete_release(app, workspace, actor)
 	committed = true
 	workspace_mutation_finish(app, destination, {.Names})
 	return true
@@ -69,7 +72,7 @@ workspace_delete_accept :: proc(app: ^App, w: ^Window, presented: Workspace_Dele
 		workspace_delete_request(app, w, workspace)
 		return
 	}
-	if !workspace_delete_commit(app, plan) {
+	if !workspace_delete_commit(app, plan, w) {
 		notify(app, .Error, "Could not prepare the replacement. The workspace was preserved.")
 	}
 }

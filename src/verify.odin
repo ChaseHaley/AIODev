@@ -589,8 +589,15 @@ when AIO_CONTROL {
 		state_value(r, "window.pane_view_floating", filled)
 		if camera, flying := workspace_overview_camera(w); flying {
 			state_valuef(r, "workspace.overview", "%g,%g", camera.scale, camera.card)
+			state_value(r, "workspace.overview_shown", workspace_overview_shown_card(w))
 		} else {
 			state_text(r, "workspace.overview", "none")
+			state_text(r, "workspace.overview_shown", "none")
+		}
+		if dust, slide, deleting := workspace_overview_deletion(w); deleting {
+			state_valuef(r, "workspace.overview_delete", "%g,%g", dust, slide)
+		} else {
+			state_text(r, "workspace.overview_delete", "none")
 		}
 		state_value(r, "window.preparing", w.phase == .Preparing)
 		state_word(r, "pointer.shape", w.pointer_shape)
@@ -626,6 +633,8 @@ when AIO_CONTROL {
 			}
 			state_value(r, state_key("tab.%d.id", n), tab.id)
 			state_value(r, state_key("tab.%d.marked", n), tab.marked)
+			state_value(r, state_key("tab.%d.group", n), tab.group)
+			state_value(r, state_key("tab.%d.shown", n), tab_shown(workspace, i))
 			state_valuef(r, state_key("tab.%d.position", n), "%g", position)
 			state_value(r, state_key("tab.%d.rail_row", n), row_index)
 			state_rect(r, state_key("tab.%d.rect", n), row_rect)
@@ -659,6 +668,7 @@ when AIO_CONTROL {
 			state_value(r, state_key("tab.%d.floating", n), shown_floats)
 			state_value(r, state_key("tab.%d.minimized", n), minimized_floats)
 		}
+		if w != nil {tab_groups_state_report(r, app, w)}
 	}
 
 	// The verified window's tiled panes and the views it keeps.

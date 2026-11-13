@@ -7,6 +7,8 @@ Workspace_Move_Request :: struct {
 	workspace, tab: u32,
 	node: layout.Node_Id,
 	whole_tab: bool,
+	// A tab group moves all its tabs, keeping its label; then `tab` and `node` are unused.
+	group: u32,
 }
 
 // Where moved content goes: a workspace that exists, or one the move creates.
@@ -57,11 +59,19 @@ Tab_Move_Result :: enum {
 // Moves tab `index`, or its focused pane when whole_tab is false.
 workspace_move_request :: proc(w: ^Window, whole_tab: bool, index: int) -> Workspace_Move_Request {
 	tab := w.workspace.tabs[index]
-	return {w.workspace.id, tab.id, tab.tree.focus, whole_tab}
+	return {workspace = w.workspace.id, tab = tab.id, node = tab.tree.focus, whole_tab = whole_tab}
 }
 
 workspace_move_open :: proc(app: ^App, w: ^Window, whole_tab: bool, index: int) {
-	request := workspace_move_request(w, whole_tab, index)
+	workspace_move_picker_open(app, w, workspace_move_request(w, whole_tab, index))
+}
+
+// Moves every tab of group `id` together, as one.
+workspace_move_group_request :: proc(w: ^Window, id: u32) -> Workspace_Move_Request {
+	return {workspace = w.workspace.id, whole_tab = true, group = id}
+}
+
+workspace_move_picker_open :: proc(app: ^App, w: ^Window, request: Workspace_Move_Request) {
 	workspace_picker_open(app, w)
 	if _, listing := w.workspace_picker.state.(Workspace_Picker_List); !listing {return}
 	workspace_picker_list_set(w, Workspace_Move_Target{request = request})
@@ -135,6 +145,14 @@ workspace_move_content :: proc(
 ) -> bool {
 	source_workspace := workspace_find(app, request.workspace)
 	if source_workspace == nil || w.workspace != source_workspace {return false}
+	if request.group != 0 {
+		tabs := make([dynamic]u32, 0, len(source_workspace.tabs), context.temp_allocator)
+		for tab in source_workspace.tabs {if tab.group == request.group {append(&tabs, tab.id)}}
+		if len(tabs) == 0 {return false}
+		selected := selected_tab(source_workspace)
+		shown := slice.contains(tabs[:], selected.id) ? selected.id : tabs[0]
+		return workspace_tabs_move(app, w, destination, tabs[:], shown, len(destination.tabs)) != .Failed
+	}
 	if request.whole_tab {
 		tabs := [1]u32{request.tab}
 		return workspace_tabs_move(app, w, destination, tabs[:], request.tab, len(destination.tabs)) != .Failed
@@ -255,6 +273,7 @@ workspace_tabs_transfer_reserve :: proc(app: ^App, transfer: Workspace_Tab_Trans
 	}
 	count := len(destination.tabs) + len(transfer.tabs)
 	if reserve(&destination.tabs, count) != nil {return false}
+	if reserve(&destination.groups, len(destination.groups) + len(source.groups)) != nil {return false}
 	for w in app.windows {
 		if w.workspace == destination && !tab_presentation_reserve(&w.presentation, count) {return false}
 	}
@@ -271,6 +290,7 @@ workspace_tabs_transfer :: proc(app: ^App, transfer: Workspace_Tab_Transfer) {
 	at := clamp(transfer.at, 0, len(destination.tabs))
 	for tab in destination.tabs {tab.marked = false}
 	selected := -1
+	carried := tab_groups_carry(source, destination, transfer.tabs)
 	for id, i in transfer.tabs {
 		index := tab_index_by_id(source, id)
 		tab := source.tabs[index]
@@ -280,6 +300,7 @@ workspace_tabs_transfer :: proc(app: ^App, transfer: Workspace_Tab_Transfer) {
 		destination.next_tab_id += 1
 		tab.id = destination.next_tab_id
 		tab.marked = true
+		tab.group = tab_group_carried(carried, tab.group)
 		inject_at(&destination.tabs, at + i, tab)
 		if selected < 0 || id == transfer.selected {selected = at + i}
 	}
@@ -288,6 +309,8 @@ workspace_tabs_transfer :: proc(app: ^App, transfer: Workspace_Tab_Transfer) {
 	}
 	destination.selected = selected
 	destination.selection_anchor = destination.tabs[selected].id
+	// The arrivals keep or join groups by the tabs beside them, as a drop within one strip does.
+	tab_groups_settle(destination, destination.tabs[at:at + len(transfer.tabs)])
 	if transfer.replacing == nil {return}
 	index, _ := slice.linear_search(destination.tabs[:], transfer.replacing)
 	ordered_remove(&destination.tabs, index)
@@ -300,7 +323,10 @@ workspace_tabs_transfer :: proc(app: ^App, transfer: Workspace_Tab_Transfer) {
 // workspace's Settings page follows its pane, open pickers show the changed rows (keeping their scroll when
 // only the order changed), the layout is saved and every window redraws.
 workspace_mutation_finish :: proc(app: ^App, workspace: ^Workspace, changes: bit_set[Workspace_Change]) {
-	if .Structure in changes {workspace_settings_sync(app, workspace)}
+	if .Structure in changes {
+		tab_groups_tidy(workspace)
+		workspace_settings_sync(app, workspace)
+	}
 	if .Names in changes {
 		workspace_pickers_refresh(app)
 	} else if .Order in changes {

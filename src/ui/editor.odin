@@ -1058,7 +1058,9 @@ editor_choice_toggle_focused :: proc(p: ^Editor) -> bool {
 // Whether the pointer holds anything on the page: a selection, a slider, a picker, a scrollbar thumb
 // or a reordering block.
 editor_dragging :: proc(p: ^Editor) -> bool {
-	if _, reordering := p.order.(Order_Dragging); reordering || p.page_drag.active {return true}
+	if _, reordering := p.order.(Order_Dragging); reordering || p.page_drag.active || p.strip.bar_drag.active {
+		return true
+	}
 	switch m in p.mode {
 	case Editor_Browsing:
 		return m.selecting
@@ -1075,9 +1077,9 @@ editor_dragging :: proc(p: ^Editor) -> bool {
 	return false
 }
 
-// Whether the pointer holds the page's or the choice list's scrollbar thumb.
+// Whether the pointer holds the page's, the theme strip's or the choice list's scrollbar thumb.
 editor_scrollbar_dragging :: proc(p: ^Editor) -> bool {
-	if p.page_drag.active {return true}
+	if p.page_drag.active || p.strip.bar_drag.active {return true}
 	choice, open := p.mode.(Editor_Choice_Popup)
 	if !open {return false}
 	_, holding := choice.drag.(Scroll_Drag)
@@ -3275,6 +3277,7 @@ editor_press :: proc(
 
 // Continues a pointer drag; returns whether anything changed.
 editor_drag :: proc(p: ^Editor, l: Editor_Layout, text: ^Text, x, y: f32) -> bool {
+	if p.strip.bar_drag.active {return editor_strip_bar_drag(p, l, x, y)}
 	if p.page_drag.active {
 		bar, visible := editor_page_scrollbar(p, l)
 		if !visible {return false}
@@ -3340,6 +3343,10 @@ editor_release :: proc(p: ^Editor) -> Editor_Outcome {
 	field_release(&p.choice_search)
 	if p.page_drag.active {
 		p.page_drag = {}
+		return .Changed
+	}
+	if p.strip.bar_drag.active {
+		p.strip.bar_drag = {}
 		return .Changed
 	}
 	if _, reordering := p.order.(Order_Dragging); reordering {return order_drop(p)}

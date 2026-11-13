@@ -12,6 +12,9 @@ cbuffer Frame : register(b0) {
     float clip_radius;
     float4 image_rect;
     float4 image_uv;
+    float4 dust;
+    float4 dust_ash;
+    uint4 dust_grid;
 };
 
 struct RectInstance {
@@ -165,6 +168,68 @@ Vertex image_vs(uint vertex : SV_VertexID) {
 // Images are premultiplied, so filtering between texels cannot darken a transparent edge.
 float4 image_ps(Vertex i) : SV_Target {
     return image_texture.Sample(image_sampler, i.texel) * clip_coverage(i.position.xy);
+}
+
+float hash(float2 p) {
+    p = frac(p * float2(123.34, 456.21));
+    p += dot(p, p + 45.32);
+    return frac(p.x * p.y);
+}
+
+float value_noise(float2 p) {
+    float2 i = floor(p), f = frac(p);
+    f = f * f * (3 - 2 * f);
+    return lerp(lerp(hash(i), hash(i + float2(1, 0)), f.x), lerp(hash(i + float2(0, 1)), hash(i + 1), f.x), f.y);
+}
+
+// Four octaves of value noise, 0..1.
+float fbm(float2 p) {
+    return (value_noise(p) * 8 + value_noise(p * 2.03) * 4 + value_noise(p * 4.07) * 2 + value_noise(p * 8.11)) / 15;
+}
+
+// One grain of an image crumbling to dust: instance i is texel i of the dust_grid.zw texels from
+// dust_grid.xy. dust = (progress, seed, rise, grain). Each grain leaves at its own moment, later toward
+// the top right, along a front that wanders with broad noise and frays with fine noise and per-grain
+// jitter. It ashes just before it lifts, then rises at its own speed with a slight sideways drift and
+// wobble, thinning out. A transparent texel, or a grain already gone, collapses to a point off screen.
+Vertex dust_vs(uint vertex : SV_VertexID, uint instance : SV_InstanceID) {
+    Vertex o = (Vertex)0;
+    o.position = float4(-2, -2, 0, 1);
+    uint2 cell = uint2(instance % dust_grid.z, instance / dust_grid.z);
+    float4 c = image_texture.Load(int3(dust_grid.xy + cell, 0));
+    if (c.a <= 0) return o;
+    float progress = dust.x, rise = dust.z;
+    float2 seed = dust.y * float2(17.13, 31.71);
+    float2 n = (cell + 0.5) / float2(dust_grid.zw);
+    // Noise is laid out in square units, so its features stay round on a wide image.
+    float2 square = float2(n.x * dust_grid.z / (float)dust_grid.w, n.y);
+    float diagonal = (n.x + 1 - n.y) * 0.5;
+    float front = diagonal * 0.62 + (fbm(square * 2.6 + seed) - 0.5) * 0.42 + (fbm(square * 13 + seed * 1.7) - 0.5) * 0.14;
+    // No grain ashes before progress 0, the latest starts by 0.57 and lives at most 0.42, so the dust
+    // begins as the image and every grain has gone by progress 1.
+    float start = 0.07 + saturate(front + 0.12) * 0.46 + hash(cell + seed) * 0.04;
+    float life = 0.26 + 0.16 * hash(cell.yx + seed * 7);
+    float t = progress - start;
+    float q = saturate(t / life);
+    if (q >= 1) return o;
+    float ash = saturate((t + 0.04) / 0.05);
+    float go = q * q * q * 0.6 + q * 0.4;
+    float speed = hash(cell * 1.31 + seed), drift = hash(cell * 0.77 + seed * 3);
+    float2 offset = float2(
+        (drift - 0.35) * 0.12 * rise * go + sin(speed * 6.2831853 + q * 7) * 0.025 * rise * q,
+        -rise * (0.35 + 0.65 * speed) * go);
+    float2 texel = image_rect.zw / float2(dust_grid.zw);
+    float2 centre = image_rect.xy + (cell + 0.5) * texel + offset;
+    float size = max(dust.w, 1);
+    o.position = clip_position(centre + (corner(vertex) - 0.5) * size);
+    float3 rgb = lerp(c.rgb / c.a, dust_ash.rgb, ash);
+    float alpha = c.a * (1 - q) * (1 - q);
+    o.color = float4(rgb * alpha, alpha);
+    return o;
+}
+
+float4 dust_ps(Vertex i) : SV_Target {
+    return i.color * clip_coverage(i.position.xy);
 }
 
 // DirectWrite grayscale correction, after microsoft/terminal src/renderer/atlas/dwrite.hlsl (MIT).

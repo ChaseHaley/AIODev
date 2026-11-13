@@ -16,6 +16,8 @@ Tab :: struct {
 	tree: layout.Layout,
 	title: string,
 	name: string,
+	// The tab's Tab_Group in its workspace, 0 for none.
+	group: u32,
 	documents: Document_List,
 }
 
@@ -32,6 +34,9 @@ Workspace :: struct {
 	settings_scroll: int,
 	settings_view: ui.Editor_View,
 	documents: Document_List,
+	// The labels on runs of tabs, in no particular order; tabs name them by id.
+	groups: [dynamic]Tab_Group,
+	next_group_id: u32,
 }
 
 @(require_results)
@@ -119,6 +124,8 @@ workspace_destroy :: proc(workspace: ^Workspace) {
 	documents_destroy(&workspace.documents)
 	ui.editor_view_destroy(&workspace.settings_view)
 	delete(workspace.tabs)
+	for &group in workspace.groups {tab_group_destroy(&group)}
+	delete(workspace.groups)
 	delete(workspace.name)
 	delete(workspace.icon.emoji)
 	free(workspace)
@@ -136,6 +143,7 @@ tab_select :: proc(app: ^App, w: ^Window, index: int, mode := Tab_Selection_Mode
 	if mode == .Replace_Marks {tab_select_one(w.workspace, index); mark_all_dirty(app)}
 	focus_leave(app, w)
 	w.workspace.selected = index
+	if tab_group_reveal(w.workspace, index) {layout_state_touch(app)}
 	window_relayout(app, w)
 	rail_reveal_active(w)
 	focus_enter(app, w)
@@ -155,6 +163,7 @@ tab_select_one :: proc(workspace: ^Workspace, index: int) {
 // Chooses a tab without a window's focus transition, keeping selection and its marks together.
 workspace_tab_choose :: proc(workspace: ^Workspace, index: int) {
 	workspace.selected = index
+	_ = tab_group_reveal(workspace, index)
 	tab_select_one(workspace, index)
 }
 
@@ -222,7 +231,7 @@ tab_close_covers :: proc(workspace: ^Workspace, index, i: int) -> bool {
 tab_close :: proc(app: ^App, w: ^Window, index: int) {
 	workspace := w.workspace
 	if index < 0 || index >= len(workspace.tabs) {return}
-	group := workspace.tabs[index].marked
+	several := workspace.tabs[index].marked
 	// Closing one tab can clear the marks on the rest, so the covered tabs are named by id before any close.
 	ids := make([dynamic]u32, 0, len(workspace.tabs), context.temp_allocator)
 	for tab, i in workspace.tabs {if tab_close_covers(workspace, index, i) {_ = append(&ids, tab.id)}}
@@ -232,7 +241,7 @@ tab_close :: proc(app: ^App, w: ^Window, index: int) {
 			workspace_close_tab(app, workspace, current)
 		}
 	}
-	if group && len(workspace.tabs) > 0 {workspace_tab_choose(workspace, workspace.selected)}
+	if several && len(workspace.tabs) > 0 {workspace_tab_choose(workspace, workspace.selected)}
 	workspace_close_empty(app, workspace)
 }
 
@@ -296,18 +305,22 @@ tab_duplicate :: proc(app: ^App, w: ^Window, index: int) {
 	tab_show(app, w, len(w.workspace.tabs) - 1)
 }
 
-tab_move_group :: proc(app: ^App, w: ^Window, end: bool) {
+tab_move_marked :: proc(app: ^App, w: ^Window, end: bool) {
 	order := slice.clone(w.workspace.tabs[:], context.temp_allocator)
 	marked := make([]bool, len(order), context.temp_allocator)
 	indices := make([]int, len(order), context.temp_allocator)
 	slot := 0
 	for tab, i in order {marked[i] = tab.marked; if end && !tab.marked {slot += 1}}
-	if !ui.tab_group_order(marked, slot, indices) {return}
+	if !ui.tab_marked_order(marked, slot, indices) {return}
 	for original, to in indices {
 		for current, from in w.workspace.tabs {
 			if current == order[original] {tab_move(app, w, from, to); break}
 		}
 	}
+	moved := make([dynamic]^Tab, 0, len(order), context.temp_allocator)
+	for tab in w.workspace.tabs {if tab.marked {append(&moved, tab)}}
+	tab_groups_settle(w.workspace, moved[:])
+	layout_state_touch(app)
 }
 
 // Puts back the marks a subset close replaced and releases the list, falling back to the active tab
@@ -334,7 +347,7 @@ tab_close_restore :: proc(w: ^Window, restore: ^[dynamic]u32) {
 // answered; the question then holds the marks to put back.
 tab_close_subset :: proc(app: ^App, w: ^Window, right: bool, anchor: int) {
 	if anchor < 0 || anchor >= len(w.workspace.tabs) {return}
-	group := w.workspace.tabs[anchor].marked
+	several := w.workspace.tabs[anchor].marked
 	restore, err := make([dynamic]u32, 0, len(w.workspace.tabs))
 	if err != nil {
 		notify(app, .Error, "Could not select tabs to close.")
@@ -343,7 +356,7 @@ tab_close_subset :: proc(app: ^App, w: ^Window, right: bool, anchor: int) {
 	for tab in w.workspace.tabs {if tab.marked {append(&restore, tab.id)}}
 	first := -1
 	for tab, i in w.workspace.tabs {
-		tab.marked = right ? i > anchor : (group ? !tab.marked : i != anchor)
+		tab.marked = right ? i > anchor : (several ? !tab.marked : i != anchor)
 		if tab.marked && first < 0 {first = i}
 	}
 	if first >= 0 {tab_close_request(app, w, first, &restore)}
@@ -373,6 +386,12 @@ workspace_close_tab :: proc(app: ^App, workspace: ^Workspace, original_index: in
 	// The record leaves the list and selection names a remaining tab before anything can observe either.
 	ordered_remove(&workspace.tabs, index)
 	workspace.selected = tab_selected_after_remove(workspace.selected, index, len(workspace.tabs))
+	// A close never uncovers a folded tab: the nearest shown one takes its place. With none shown, tidying
+	// unfolds the selected tab's group.
+	if len(workspace.tabs) > 0 && !tab_shown(workspace, workspace.selected) {
+		if next := tab_nearest_shown(workspace, workspace.selected); next >= 0 {workspace.selected = next}
+	}
+	tab_groups_tidy(workspace)
 	tab_record_free(tab)
 	workspace_mutation_finish(app, workspace, {.Structure})
 	for i := len(app.windows) - 1; i >= 0; i -= 1 {

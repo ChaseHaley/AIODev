@@ -39,7 +39,7 @@ settings_theme_strip_load :: proc(p: ^ui.Editor, s: ^settings.Settings) -> bool 
 
 when AIO_CONTROL {
 	// The strip's cards as drawn, `id@x,y,width,height` joined by `;`, with the applied and focused
-	// themes, the Customize button and whether anything still moves.
+	// themes, the Customize button, the scrollbar's track and thumb and whether anything still moves.
 	settings_theme_strip_state :: proc(r: ^State_Report, p: ^ui.Editor, page: ui.Editor_Layout) {
 		strip := &p.strip
 		state_text(r, "settings.theme.applied", ui.editor_strip_card_id(p, strip.applied))
@@ -59,7 +59,12 @@ when AIO_CONTROL {
 				fmt.sbprintf(&cards, "%s@%g,%g,%g,%g", card.id, rect.x, rect.y, rect.width, rect.height)
 			}
 			state_rect(r, "settings.theme.customize", ui.editor_strip_customize_rect(p, page, head))
+			if bar, visible := ui.editor_strip_scrollbar(p, page, head); visible {
+				state_rect(r, "settings.theme.scrollbar.track", bar.track)
+				state_rect(r, "settings.theme.scrollbar.thumb", bar.thumb)
+			}
 		}
 		state_text(r, "settings.theme.cards", strings.to_string(cards))
+		state_value(r, "settings.theme.scrollbar.held", strip.bar_drag.active)
 	}
 }
