@@ -75,7 +75,7 @@ Palette_Mode_Info :: struct {
 }
 
 @(private) PALETTE_MODES := [Palette_Mode]Palette_Mode_Info {
-	.All         = {"All", "all", "", "Search anything", .Grid},
+	.All         = {"All", "all", "", "Search everything", .Grid},
 	.Tabs        = {"Tabs", "tabs", "t:", "Search tabs", .Layout_Top},
 	.Workspaces  = {"Workspaces", "workspaces", "w:", "Search workspaces", .Workspace},
 	.Settings    = {"Settings", "settings", "s:", "Search settings", .Settings},
