@@ -722,8 +722,8 @@ workspace_button_tooltip :: proc(_: ^App, _: ^Window, _, _: f32) -> string {retu
 
 // The chip opens the workspace picker, as Change workspace does.
 @(private)
-workspace_button_command :: proc(_: ^App, _: ^Window, _, _: f32) -> (Action, bool) {
-	return .Change_Workspace, true
+workspace_button_shortcut :: proc(_: ^App, _: ^Window, _, _: f32) -> Tooltip_Shortcut {
+	return Action.Change_Workspace
 }
 
 @(private)

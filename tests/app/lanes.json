@@ -61,6 +61,7 @@
     "tab_reorder_scrolling_groups_and_cancellation_keep_pointer_and_identity",
     "tooltip_covers_palette_setting_reset",
     "tooltip_covers_scrollback_find_buttons",
+    "tooltip_key_search_names_its_toggle_key",
     "tooltip_neighbor_buttons_skip_second_delay",
     "tooltip_neighbor_grace_expires",
     "tooltip_shortcut_follows_the_commands_binding",

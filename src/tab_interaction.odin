@@ -155,15 +155,15 @@ tabs_tooltip :: proc(app: ^App, w: ^Window, x, y: f32) -> string {
 // The commands that do from the keyboard what a tab's close button and a group chip do for the selected
 // tab: close it, and fold or unfold its group.
 @(private)
-tabs_command :: proc(app: ^App, w: ^Window, x, y: f32) -> (Action, bool) {
+tabs_shortcut :: proc(app: ^App, w: ^Window, x, y: f32) -> Tooltip_Shortcut {
 	hit := tab_chrome_hit(app, w, x, y, .Left)
 	switch _ in hit.target {
-	case Tab_Chrome_Tab: return .Close_Tab, hit.close
-	case Tab_Chrome_Group: return .Fold_Tab_Group, true
-	case Tab_Chrome_New: return .New_Tab, true
+	case Tab_Chrome_Tab: if hit.close {return Action.Close_Tab}
+	case Tab_Chrome_Group: return Action.Fold_Tab_Group
+	case Tab_Chrome_New: return Action.New_Tab
 	case Tab_Chrome_Profiles, nil:
 	}
-	return {}, false
+	return nil
 }
 
 // A tab close fires on a matching release; a tab drag settles wherever it is released.

@@ -31,15 +31,25 @@ tooltip_label :: proc(app: ^App, w: ^Window, owner: Pointer_Target, x, y: f32) -
 	return tooltip_clip(label(app, w, x, y), TOOLTIP_LIMIT)
 }
 
-// The shortcut a control's tooltip shows beside its label: the first active shortcut of the command the
-// control runs, as menus show it, written to out (commands.SHORTCUT_TEXT_CAP bytes). Read at every draw,
-// so a rebinding shows at once; empty when the control runs no command or the command is unbound.
+// Where the shortcut a control's tooltip names comes from: the command the control runs, which the user
+// can rebind, or the fixed key the control's own surface handles, taken from the table its key handler
+// reads. nil names none.
+Tooltip_Shortcut :: union {
+	Action,
+	commands.Shortcut,
+}
+
+// The shortcut a control's tooltip shows beside its label, as menus write it, in out
+// (commands.SHORTCUT_TEXT_CAP bytes). A command's is its first active shortcut, read at every draw so a
+// rebinding shows at once. Empty when the control names none or its command is unbound.
 tooltip_shortcut :: proc(app: ^App, w: ^Window, owner: Pointer_Target, x, y: f32, out: []u8) -> string {
-	command_of := pointer_surfaces[owner].command
-	if command_of == nil {return ""}
-	action, runs := command_of(app, w, x, y)
-	if !runs {return ""}
-	return action_shortcut_text(app, action, out)
+	shortcut_of := pointer_surfaces[owner].shortcut
+	if shortcut_of == nil {return ""}
+	switch shortcut in shortcut_of(app, w, x, y) {
+	case Action: return action_shortcut_text(app, shortcut, out)
+	case commands.Shortcut: return commands.shortcut_text(shortcut, out)
+	}
+	return ""
 }
 
 // The window's tooltip: nil is Cold. Pending shows `label` at `deadline`; Visible shows it; Warm

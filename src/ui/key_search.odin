@@ -122,8 +122,9 @@ key_search_pointer :: proc(rect: render.Rect, x, y: f32) -> (platform.Cursor_Sha
 	return .Hand, render.rect_contains(rect, x, y)
 }
 
+// What the keyboard button's tooltip says; the tooltip shows KEY_SEARCH_TOGGLE beside it.
 key_search_tooltip :: proc(k: ^Key_Search) -> string {
-	return k.state == .Off ? "Search by pressing a shortcut (Alt+K)" : "Search by typing (Alt+K)"
+	return k.state == .Off ? "Search by pressing a shortcut" : "Search by typing"
 }
 
 // Draws the recorded keys as keycaps from the left of `area`, centred on it, with what recording still

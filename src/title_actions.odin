@@ -97,9 +97,10 @@ title_action_tooltip :: proc(_: ^App, w: ^Window, x, y: f32) -> string {
 }
 
 @(private)
-title_action_command :: proc(_: ^App, w: ^Window, x, y: f32) -> (Action, bool) {
+title_action_shortcut :: proc(_: ^App, w: ^Window, x, y: f32) -> Tooltip_Shortcut {
 	hit := title_action_hit(w, x, y)
-	return TITLE_CONTROLS[hit].action, hit != .None
+	if hit == .None {return nil}
+	return TITLE_CONTROLS[hit].action
 }
 
 @(private)
@@ -147,8 +148,8 @@ orientation_tooltip :: proc(_: ^App, w: ^Window, _, _: f32) -> string {
 }
 
 @(private)
-orientation_command :: proc(_: ^App, _: ^Window, _, _: f32) -> (Action, bool) {
-	return .Toggle_Tabs_Orientation, true
+orientation_shortcut :: proc(_: ^App, _: ^Window, _, _: f32) -> Tooltip_Shortcut {
+	return Action.Toggle_Tabs_Orientation
 }
 
 @(private)

@@ -217,6 +217,12 @@ palette_tooltip :: proc(app: ^App, _: ^Window, _, _: f32) -> string {
 }
 
 @(private)
+palette_shortcut :: proc(app: ^App, _: ^Window, _, _: f32) -> Tooltip_Shortcut {
+	if app.palette.keys_hover {return ui.KEY_SEARCH_TOGGLE}
+	return nil
+}
+
+@(private)
 palette_press :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) {
 	x, y := f32(e.x), f32(e.y)
 	p := &app.palette

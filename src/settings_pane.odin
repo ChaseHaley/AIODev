@@ -228,7 +228,14 @@ settings_pointer_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: 
 @(private)
 settings_tooltip :: proc(_: ^App, w: ^Window, _, _: f32) -> string {
 	if w.editor.hover_reset >= 0 {return "Reset setting"}
+	if w.editor.keys_hover {return ui.key_search_tooltip(&w.editor.keys)}
 	return ui.editor_profile_tooltip(&w.editor)
+}
+
+@(private)
+settings_shortcut :: proc(_: ^App, w: ^Window, _, _: f32) -> Tooltip_Shortcut {
+	if w.editor.hover_reset < 0 && w.editor.keys_hover {return ui.KEY_SEARCH_TOGGLE}
+	return nil
 }
 
 @(private)

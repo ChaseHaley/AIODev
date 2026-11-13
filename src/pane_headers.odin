@@ -500,15 +500,16 @@ header_tooltip_card :: proc(app: ^App, w: ^Window, x, y: f32) -> Tooltip_Card {
 // The command a header button runs, or for Links and Commands the one that opens the same menu on the
 // focused pane, which the press makes this one. A refused button names it too: the keyboard still runs it.
 @(private)
-header_command :: proc(_: ^App, w: ^Window, x, y: f32) -> (Action, bool) {
+header_shortcut :: proc(_: ^App, w: ^Window, x, y: f32) -> Tooltip_Shortcut {
 	_, target, hit := pane_header_hit(w, x, y)
 	button, is_button := target.(Pane_Header_Button)
-	if !hit || !is_button {return {}, false}
+	if !hit || !is_button {return nil}
 	#partial switch button {
-	case .Links: return .Show_Links, true
-	case .Commands: return .Show_Commands, true
+	case .Links: return Action.Show_Links
+	case .Commands: return Action.Show_Commands
 	}
-	return pane_header_command(button)
+	if action, runs := pane_header_command(button); runs {return action}
+	return nil
 }
 
 // The header swallows its presses, so it also finishes a release that lands anywhere.

@@ -4,6 +4,7 @@ import app "../../src"
 import "aio:commands"
 import "aio:input"
 import "aio:render"
+import "aio:search"
 import "aio:settings"
 import "aio:ui"
 import "core:testing"
@@ -30,13 +31,19 @@ tooltip_covers_scrollback_find_buttons :: proc(t: ^testing.T) {
 	defer ui.find_destroy(&w.find)
 	ui.find_open(&w.find)
 	l := ui.find_layout(900, 1, 50)
-	buttons := [?]struct{rect: render.Rect, label: string} {
-		{l.case_toggle, "Match case"},
-		{l.regex_toggle, "Use regular expression"},
-		{l.up, "Previous match"},
-		{l.down, "Next match"},
-		{l.close, "Close find"},
+	// Each button's tooltip names the key that does the same while the bar has the keyboard.
+	buttons := [?]struct {
+		rect:            render.Rect,
+		label, shortcut: string,
+		outcome:         ui.Find_Outcome,
+	} {
+		{l.case_toggle, "Match case", "Alt+C", ui.Find_Change.Changed},
+		{l.regex_toggle, "Use regular expression", "Alt+R", ui.Find_Change.Changed},
+		{l.up, "Previous match", "Shift+Enter", search.Step.Previous},
+		{l.down, "Next match", "Enter", search.Step.Next},
+		{l.close, "Close find", "Esc", ui.Find_Change.Closed},
 	}
+	buffer: [commands.SHORTCUT_TEXT_CAP]u8
 	for button in buttons {
 		x := i32(button.rect.x + button.rect.width / 2)
 		y := i32(button.rect.y + button.rect.height / 2)
@@ -44,7 +51,41 @@ tooltip_covers_scrollback_find_buttons :: proc(t: ^testing.T) {
 		app.tooltip_hover(&state, &w, .Find, input.Mouse_Move_Event{x = x, y = y})
 		testing.expect_value(t, app.tooltip_current(&w), button.label)
 		testing.expect(t, !tooltip_visible(&w) && tooltip_pending(&w))
+		testing.expect_value(t, app.tooltip_shortcut(&state, &w, .Find, f32(x), f32(y), buffer[:]), button.shortcut)
+		key := ui.FIND_KEYS[w.find.hover]
+		testing.expect_value(t, ui.find_key(&w.find, {key = key.key, modifiers = key.modifiers, pressed = true}),
+			button.outcome)
 	}
+}
+
+// The palette's and the Settings search's keyboard button say what they do and name Alt+K, the key that
+// does the same, in the shortcut slot rather than in the words.
+@(test)
+tooltip_key_search_names_its_toggle_key :: proc(t: ^testing.T) {
+	state: app.App
+	w: app.Window
+	buffer: [commands.SHORTCUT_TEXT_CAP]u8
+	toggle := ui.KEY_SEARCH_TOGGLE
+	testing.expect(t, ui.key_search_toggles({key = toggle.key, modifiers = toggle.modifiers, pressed = true,
+		unshifted = 'k'}))
+
+	state.palette.keys_hover = true
+	app.tooltip_hover(&state, &w, .Palette, input.Mouse_Move_Event{})
+	testing.expect_value(t, app.tooltip_current(&w), "Search by pressing a shortcut")
+	testing.expect_value(t, app.tooltip_shortcut(&state, &w, .Palette, 0, 0, buffer[:]), "Alt+K")
+	state.palette.keys.state = .Recording
+	app.tooltip_hover(&state, &w, .Palette, input.Mouse_Move_Event{})
+	testing.expect_value(t, app.tooltip_current(&w), "Search by typing")
+	testing.expect_value(t, app.tooltip_shortcut(&state, &w, .Palette, 0, 0, buffer[:]), "Alt+K")
+	state.palette.keys_hover = false
+	testing.expect_value(t, app.tooltip_shortcut(&state, &w, .Palette, 0, 0, buffer[:]), "")
+
+	w.editor.hover_reset = -1
+	w.editor.hover_profile_item = -1
+	w.editor.keys_hover = true
+	app.tooltip_hover(&state, &w, .Settings_Page, input.Mouse_Move_Event{})
+	testing.expect_value(t, app.tooltip_current(&w), "Search by pressing a shortcut")
+	testing.expect_value(t, app.tooltip_shortcut(&state, &w, .Settings_Page, 0, 0, buffer[:]), "Alt+K")
 }
 
 @(test)
