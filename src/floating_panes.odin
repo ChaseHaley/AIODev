@@ -223,11 +223,6 @@ floating_hover_clear :: proc(w: ^Window) {
 	w.float_capsule_hover, w.float_header_hover = nil, nil
 }
 
-// Whether the window shows any floating pane, whose header controls then animate.
-window_floats_shown :: proc(w: ^Window) -> bool {
-	return len(w.panes) > 0 && w.panes[len(w.panes) - 1].floating
-}
-
 // Floating panes can cover the workspace chrome below the native title bar, including the vertical tab
 // rail and Activity panel.
 floating_area :: proc(w: ^Window) -> layout.Rect {

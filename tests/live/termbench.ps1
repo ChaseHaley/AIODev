@@ -11,7 +11,6 @@ param(
     [ValidateSet('dark', 'light')]
     [string] $ThemeMode = 'dark',
     [double] $MinimumContrast = 4.5,
-    [switch] $HideHeaders,
     [ValidateRange(1, 120)]
     [int] $StartupSeconds = 15,
     [ValidateRange(1, 300)]
@@ -97,7 +96,6 @@ $settings = @(
     ('process.padding_groups = ' + (ConvertTo-TermBenchSettingString $ProcessGroups))
     ('theme.name = ' + (ConvertTo-TermBenchSettingString "studio-$ThemeMode"))
 )
-if ($HideHeaders) { $settings += 'pane.show_headers = false' }
 if ($MinimumContrast -ne 4.5) { $settings += "terminal.minimum_contrast = $MinimumContrast" }
 [IO.File]::WriteAllLines((Join-Path $data 'settings.ini'), $settings)
 # Each run measures one fresh tab, not the layout an earlier run left behind.

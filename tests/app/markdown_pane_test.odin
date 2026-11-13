@@ -504,8 +504,7 @@ a_press_holds_its_pane_until_release_and_hover_has_one_owner :: proc(t: ^testing
 		if candidate.content.kind == .Markdown {shown = candidate} else {terminal = candidate}
 	}
 	if !testing.expect_value(t, shown.content.kind, layout.Content_Kind.Markdown) {return}
-	r := shown.rect
-	g := ui.markdown_geometry({r.x, r.y + w.header_height, r.width, r.height - w.header_height}, w.scale)
+	g := ui.markdown_geometry(app.pane_body_rect(w, shown), w.scale)
 	ui.markdown_view_fit(&pane.view, document, pane.revision, &w.ui_text, f.state.family, g.width, w.scale)
 	line := f32(ui.markdown_line(&pane.view))
 	y := g.top + line / 2
@@ -553,8 +552,7 @@ a_markdown_link_offers_the_link_menu_and_opens_its_file_in_a_linked_window :: pr
 	if !testing.expect(t, document != nil) {return}
 	shown: layout.Pane_Rect
 	for candidate in w.panes {if candidate.content.kind == .Markdown {shown = candidate}}
-	r := shown.rect
-	g := ui.markdown_geometry({r.x, r.y + w.header_height, r.width, r.height - w.header_height}, w.scale)
+	g := ui.markdown_geometry(app.pane_body_rect(w, shown), w.scale)
 	ui.markdown_view_fit(&pane.view, document, pane.revision, &w.ui_text, f.state.family, g.width, w.scale)
 	x, y := g.left + 5, g.top
 	for ui.markdown_link_at(&pane.view, g, x, y) < 0 && y < g.area.y + g.area.height {y += 1}
@@ -610,8 +608,7 @@ a_markdown_link_offers_the_link_menu_and_opens_its_file_in_a_linked_window :: pr
 fitted :: proc(state: ^app.App, w: ^app.Window, pane: ^app.Markdown_Pane) -> (g: ui.Markdown_Geometry, found: bool) {
 	for shown in w.panes {
 		if shown.content != {.Markdown, pane.id} {continue}
-		r := shown.rect
-		g = ui.markdown_geometry({r.x, r.y + w.header_height, r.width, r.height - w.header_height}, w.scale)
+		g = ui.markdown_geometry(app.pane_body_rect(w, shown), w.scale)
 		document := app.markdown_document(pane)
 		ui.markdown_view_fit(&pane.view, document, pane.revision, &w.ui_text, state.family, g.width, w.scale)
 		return g, true

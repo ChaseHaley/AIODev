@@ -504,7 +504,7 @@ command_menu_open_pane :: proc(app: ^App, w: ^Window, pane: layout.Pane_Rect) {
 	command_menu_show(app, w, pane.content, anchor.x, anchor.y)
 }
 
-// The Show Commands command: the only way to the menu for a split pane with headers off.
+// The Show Commands command: the focused pane's Commands menu from the keyboard or the palette.
 command_menu_open_focused :: proc(app: ^App, w: ^Window) {
 	tree := window_tree(w)
 	if tree == nil {return}

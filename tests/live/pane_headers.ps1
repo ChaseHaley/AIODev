@@ -267,14 +267,6 @@ try {
     }
     Invoke-Aio dpi 96
     & (Join-Path $repo 'tools/win32.ps1') -Name $name -Resize $fullSize
-    Set-Option pane.show_headers false
-    Invoke-Aio command settings.reload
-    Invoke-Aio expect state panes.header_height=0
-    Assert-Origin
-    Shot hidden
-    Start-Sleep -Milliseconds 6600
-    Assert-Idle
-    Set-Option pane.show_headers true
     Add-Type -AssemblyName System.Drawing
     $iconPath = Join-Path $directory 'shell.png'
     $icon = [Drawing.Bitmap]::new(16,16)
