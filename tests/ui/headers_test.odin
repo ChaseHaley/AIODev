@@ -128,3 +128,79 @@ headers_divide_groups_only_where_a_later_group_shows :: proc(t: ^testing.T) {
 	down := only_splits.buttons[.Split_Down]
 	testing.expect_value(t, down.x + down.width, end)
 }
+
+// A header's program status sits just left of its buttons while they show and at the header's right end
+// while they are hidden, where the last button's fill would end. The title keeps one width either way.
+@(test)
+headers_move_the_status_to_the_right_end_while_buttons_hide :: proc(t: ^testing.T) {
+	for scale in ([?]f32{1, 1.5}) {
+		area := render.Rect{5, 8, 600 * scale, 200 * scale}
+		l := header(area, scale)
+		natural := 100 * scale
+		beside, title := ui.header_status_layout(l, natural, scale, 0)
+		testing.expect_value(t, beside.width, natural)
+		testing.expect_value(t, beside.x + beside.width + ui.SPACE_2 * scale, l.buttons[.Documents].x)
+		testing.expect_value(t, title, l.title.width - natural - ui.SPACE_2 * scale)
+		edge, edge_title := ui.header_status_layout(l, natural, scale, 1)
+		close := l.buttons[.Close]
+		testing.expect_value(t, edge.x + edge.width, close.x + close.width)
+		testing.expect_value(t, edge.x + edge.width, area.x + area.width - ui.SPACE_1 * scale)
+		testing.expect_value(t, edge.width, natural)
+		testing.expect_value(t, edge.y, beside.y)
+		testing.expect_value(t, edge.height, beside.height)
+		testing.expect_value(t, edge_title, title)
+		// Halfway through the slide it is halfway between.
+		half, half_title := ui.header_status_layout(l, natural, scale, 0.5)
+		testing.expect_value(t, half.x, (beside.x + edge.x) / 2)
+		testing.expect_value(t, half_title, title)
+	}
+
+	// A long status takes at most half the title's room beside the buttons; at the right end it also takes
+	// theirs, growing from where it began.
+	l := header({0, 0, 400, 200}, 1)
+	beside, title := ui.header_status_layout(l, 1000, 1, 0)
+	testing.expect_value(t, beside.width, l.title.width * 0.5)
+	edge, edge_title := ui.header_status_layout(l, 1000, 1, 1)
+	testing.expect_value(t, edge.x, beside.x)
+	testing.expect_value(t, edge.x + edge.width, 400 - ui.SPACE_1)
+	testing.expect_value(t, edge_title, title)
+
+	// The owner's widget before the buttons stays clear of the status at the right end.
+	area := render.Rect{0, 0, 600, 200}
+	with_widget := ui.header_layout(area, 1, ALL, GROUP_ENDS, DROP_ORDER[:], {20, 20})
+	widget := with_widget.widget
+	if !testing.expect(t, widget.width > 0) {return}
+	beside, _ = ui.header_status_layout(with_widget, 1000, 1, 0)
+	testing.expect(t, beside.x + beside.width <= widget.x)
+	edge, _ = ui.header_status_layout(with_widget, 1000, 1, 1)
+	testing.expect_value(t, edge.x, widget.x + widget.width + ui.SPACE_2)
+	testing.expect_value(t, edge.x + edge.width, area.width - ui.SPACE_1)
+}
+
+// In every width, narrow headers that drop buttons included, the status at the right end never reaches
+// left of its place beside the buttons, so it never covers the title, and stays inside the header.
+@(test)
+headers_keep_the_status_clear_of_the_title_in_narrow_headers :: proc(t: ^testing.T) {
+	for scale in ([?]f32{1, 1.5, 2}) {
+		for width := f32(0); width <= 640; width += 10 {
+			area := render.Rect{5, 8, width * scale, 200 * scale}
+			l := header(area, scale)
+			for natural in ([?]f32{40, 120, 400}) {
+				beside, title := ui.header_status_layout(l, natural * scale, scale, 0)
+				edge, edge_title := ui.header_status_layout(l, natural * scale, scale, 1)
+				testing.expect_value(t, edge_title, title)
+				if l.title.width < 120 * scale {
+					testing.expect_value(t, beside, render.Rect{})
+					testing.expect_value(t, edge, render.Rect{})
+					testing.expect_value(t, title, l.title.width)
+					continue
+				}
+				testing.expect(t, l.title.x + title + ui.SPACE_2 * scale <= beside.x + 0.001)
+				testing.expect(t, edge.x >= beside.x)
+				testing.expect(t, edge.width >= beside.width)
+				testing.expect(t, edge.width <= natural * scale)
+				testing.expect(t, edge.x + edge.width <= area.x + area.width - ui.SPACE_1 * scale + 0.001)
+			}
+		}
+	}
+}
