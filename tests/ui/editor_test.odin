@@ -761,3 +761,79 @@ settings_page_revision_tracks_edits_navigation_and_external_conflicts :: proc(t:
 	testing.expect_value(t, ui.field_string(&p.value), "Pending")
 	testing.expect_value(t, ui.editor_source(&p), source)
 }
+
+@(private)
+search_rows :: proc(p: ^ui.Editor) -> []string {
+	keys := make([dynamic]string, context.temp_allocator)
+	for item in p.items {
+		if item.row >= 0 && item.part == 0 {append(&keys, p.rows[item.row].key)}
+	}
+	return keys[:]
+}
+
+@(private, rodata)
+panel_view_names := [?]string{"comfy", "dense"}
+@(private, rodata)
+panel_view_labels := [?]string{"Comfy", "Dense"}
+
+// Settings search finds a row by one of its schema choices, as the palette does, and says which. Its
+// own text still wins: only the best tier is listed. Live lists (themes, fonts) are not searched.
+@(test)
+settings_search_matches_choice_labels_below_the_rows_own_text :: proc(t: ^testing.T) {
+	p: ui.Editor
+	defer ui.editor_destroy(&p)
+	rows := [?]struct {
+		row:   ui.Editor_Row,
+		group: string,
+	}{
+		{{key = "status.panel_view", title = "Activity panel view", description = "How tasks show.",
+			value = "comfy", default_value = "comfy", kind = .Choice, choices = panel_view_names[:],
+			choice_labels = panel_view_labels[:]}, "Activity"},
+		{{key = "theme.name", title = "Theme", description = "Colors.", value = "comfy", kind = .Choice,
+			choices = panel_view_names[:], choice_labels = panel_view_labels[:], flags = {.Live_Choices}},
+			"Theme"},
+		{{key = "pane.gap", title = "Pane Gap", description = "Space between panes.", value = "5",
+			kind = .Integer, minimum = 0, maximum = 24}, "Panes"},
+	}
+	for r in rows {testing.expect_value(t, ui.editor_add(&p, r.row, r.group), nil)}
+	ui.field_set(&p.filter, "comfy")
+	ui.editor_filter(&p)
+	keys := search_rows(&p)
+	if testing.expect_value(t, len(keys), 1) {testing.expect_value(t, keys[0], "status.panel_view")}
+	testing.expect_value(t, ui.editor_row(&p).key, "status.panel_view")
+	testing.expect_value(t, p.items[p.selected].value, "Comfy")
+	// Two words: one in the row's own text, one in a choice.
+	ui.field_set(&p.filter, "activity dense")
+	ui.editor_filter(&p)
+	keys = search_rows(&p)
+	if testing.expect_value(t, len(keys), 1) {testing.expect_value(t, keys[0], "status.panel_view")}
+	testing.expect_value(t, p.items[p.selected].value, "Dense")
+	// The row's own text matching lists it without a value.
+	ui.field_set(&p.filter, "panel")
+	ui.editor_filter(&p)
+	testing.expect_value(t, ui.editor_row(&p).key, "status.panel_view")
+	testing.expect_value(t, p.items[p.selected].value, "")
+}
+
+// "c1" starts "card" and "1": the title's word starts outrank another title's scattered letters.
+@(test)
+settings_search_ranks_title_word_starts_above_scattered_letters :: proc(t: ^testing.T) {
+	p: ui.Editor
+	defer ui.editor_destroy(&p)
+	rows := [?]struct {
+		row:   ui.Editor_Row,
+		group: string,
+	}{
+		{{key = "a.scattered", title = "Record 1", value = "", kind = .Text}, "Records"},
+		{{key = "a.words", title = "(card 1) foo", value = "", kind = .Text}, "Cards"},
+	}
+	for r in rows {testing.expect_value(t, ui.editor_add(&p, r.row, r.group), nil)}
+	ui.field_set(&p.filter, "c1")
+	ui.editor_filter(&p)
+	keys := search_rows(&p)
+	if testing.expect_value(t, len(keys), 1) {testing.expect_value(t, keys[0], "a.words")}
+	ui.field_set(&p.filter, "rc1")
+	ui.editor_filter(&p)
+	keys = search_rows(&p)
+	if testing.expect_value(t, len(keys), 1) {testing.expect_value(t, keys[0], "a.scattered")}
+}

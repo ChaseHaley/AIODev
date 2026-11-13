@@ -2,6 +2,7 @@ package ui
 
 import "aio:colour"
 import "aio:commands"
+import "aio:fuzzy"
 import "aio:input"
 import "aio:platform"
 import "aio:render"
@@ -11,7 +12,6 @@ import "core:fmt"
 import "core:math"
 import "core:strconv"
 import "core:strings"
-import "core:unicode/utf8"
 
 Row_Kind :: enum {
 	Text,
@@ -61,6 +61,9 @@ Editor_Row_Flag :: enum {
 	Builtin,
 	// A profile Settings may not delete (settings.profile_can_remove is false).
 	Protected,
+	// The choices come from installed themes or fonts, not the schema, so search leaves them out as the
+	// palette does.
+	Live_Choices,
 }
 
 // Strings, `choices` and `choice_labels` are owned by the editor. `choice_labels`, when present,
@@ -131,6 +134,8 @@ Editor_Item :: struct {
 	// A row taller than one line lists a line per `part`, counting from 0 at its first.
 	part:              int,
 	shortcut:          Shortcut_Highlight,
+	// The label of the choice the search matched when the row's own text did not; drawn after the title.
+	value:             string,
 }
 
 // Keyboard focus as readers see it: the search field, the selected row's control, its key-position
@@ -1312,26 +1317,92 @@ editor_reveal :: proc(p: ^Editor, target: Reveal_Target) -> bool {
 	return editor_select_key(p, key)
 }
 
-// Each query word matches as written or, for plurals such as "panes", without its final s.
+// How a search answers a row, best last; the page lists only the rows of the best tier any row reaches.
+// A query word matches the row's own text (key, title, group, description, detail, badge, shortcut)
+// as written or, for plurals such as "panes", without its final s; a recorded or typed chord its
+// shortcut holds counts the same. Then a shortcut label's letters; then words the row's text lacks
+// found in the labels of its schema choices, up to word starts, so "comfy" finds Activity panel view;
+// then the title by word starts ("c1" in "(card 1) foo"), the title by scattered letters, and any of
+// the row's text by scattered letters. Every comparison is the palette's fuzzy.classify.
 @(private)
-row_matches :: proc(words: []string, haystack: string, fuzzy: bool = false) -> bool {
-	for word in words {
-		if strings.contains(haystack, word) {continue}
-		if len(word) > 3 &&
-		   word[len(word) - 1] == 's' &&
-		   strings.contains(haystack, word[:len(word) - 1]) {
-			continue
-		}
-		if !fuzzy {return false}
-		at := 0
-		for c in haystack {
-			if at >= len(word) {break}
-			wanted, size := utf8.decode_rune(word[at:])
-			if wanted == c {at += size}
-		}
-		if at != len(word) {return false}
+Search_Tier :: enum u8 {
+	None,
+	Text_Scattered,
+	Title_Scattered,
+	Title_Words,
+	Choice,
+	Shortcut_Label,
+	Text,
+}
+
+// The best class `word` reaches in any of `fields`. A word found only without its final s counts as a
+// substring.
+@(private)
+word_class :: proc(word: string, fields: []string) -> fuzzy.Class {
+	best := fuzzy.Class.None
+	for field in fields {
+		if class := fuzzy.classify(word, field); class < best {best = class}
+		if best <= .Substring {return best}
 	}
-	return true
+	if last := len(word) - 1; len(word) > 3 && (word[last] == 's' || word[last] == 'S') {
+		for field in fields {
+			if fuzzy.classify(word[:last], field) <= .Substring {return .Substring}
+		}
+	}
+	return best
+}
+
+// The loosest class among the query's words, each taking its best field.
+@(private)
+words_class :: proc(query: string, fields: []string) -> fuzzy.Class {
+	loosest := fuzzy.Class.Exact
+	rest := query
+	for word in strings.fields_iterator(&rest) {
+		if class := word_class(word, fields); class > loosest {loosest = class}
+		if loosest == .None {break}
+	}
+	return loosest
+}
+
+// Whether every word the row's own text lacks starts words of one of its schema choices' labels, as the
+// palette matches them, and the label the first such word found.
+@(private)
+choice_words_match :: proc(
+	query: string,
+	fields: []string,
+	row: ^Editor_Row,
+) -> (
+	label: string,
+	matched: bool,
+) {
+	if .Live_Choices in row.flags || len(row.choices) == 0 {return}
+	rest := query
+	for word in strings.fields_iterator(&rest) {
+		if word_class(word, fields) <= .Substring {continue}
+		best, best_label := fuzzy.Class.None, ""
+		for _, i in row.choices {
+			text := dropdown_label({choices = row.choices, labels = row.choice_labels}, i)
+			if class := fuzzy.classify(word, text); class < best {best, best_label = class, text}
+		}
+		if best > .Words {return "", false}
+		if label == "" {label = best_label}
+	}
+	return label, true
+}
+
+// The row's own text a search reads. A query in the shortcut grammar leaves out shortcut values, which
+// it compares by the grammar only.
+@(private)
+row_search_fields :: proc(p: ^Editor, row: ^Editor_Row, chord: bool) -> [7]string {
+	return {
+		row.key,
+		row.title,
+		p.groups[row.group].title,
+		row.description,
+		row.detail,
+		row.badge,
+		row.kind == .Shortcut && !chord ? row.value : "",
+	}
 }
 
 // Whether a row belongs to the page in the current expansion state, before search ranks it.
@@ -1376,10 +1447,9 @@ row_shortcut_match :: proc(p: ^Editor, q: ^commands.Shortcut_Query, row: Editor_
 }
 
 // Rebuilds the visible lines, keeping the current selection when it stays visible. A conflict chain
-// shows only its own rows. Otherwise only the best match class is listed: words in a row's text or a
-// chord its shortcut holds, then a shortcut label's letters, then fuzzy title and row text. A query in
-// the shortcut grammar compares shortcuts by the grammar only, and record mode lists the shortcuts the
-// recorded keys run.
+// shows only its own rows. Otherwise only the rows of the best Search_Tier any row reaches are listed,
+// in page order. A query in the shortcut grammar compares shortcuts by the grammar only, and record
+// mode lists the shortcuts the recorded keys run.
 editor_rebuild :: proc(p: ^Editor) {
 	if editor_chained(p) {
 		p.free = nil
@@ -1390,17 +1460,16 @@ editor_rebuild :: proc(p: ^Editor) {
 	if p.selected >= 0 && p.selected < len(p.items) {selected = p.items[p.selected]}
 	clear(&p.items)
 	p.free = nil
-	query := strings.to_lower(strings.trim_space(field_string(&p.filter)), context.temp_allocator)
-	words := strings.fields(query, context.temp_allocator)
+	query := strings.trim_space(field_string(&p.filter))
 	recording := p.keys.state != .Off
 	shortcuts: commands.Shortcut_Query
 	if !recording && query != "" {shortcuts = commands.shortcut_query(query)}
 	searching := recording || query != ""
-	ranks := make([]u8, len(p.rows), context.temp_allocator)
+	ranks := make([]Search_Tier, len(p.rows), context.temp_allocator)
 	matches := make([]Shortcut_Highlight, len(p.rows), context.temp_allocator)
 	used := false
-	best: u8
-	for row, i in p.rows {
+	best: Search_Tier
+	for &row, i in p.rows {
 		if !row_available(p, row) {continue}
 		if searching && row.kind == .Shortcut {
 			matches[i] = row_shortcut_match(p, &shortcuts, row)
@@ -1408,33 +1477,28 @@ editor_rebuild :: proc(p: ^Editor) {
 		}
 		match := matches[i].hit.match
 		if recording {
-			if match != .None {ranks[i] = 4}
+			if match != .None {ranks[i] = .Text}
 			best = max(best, ranks[i])
 			continue
 		}
-		haystack := strings.to_lower(
-			fmt.tprintf(
-				"%s %s %s %s %s %s %s",
-				row.key,
-				row.title,
-				p.groups[row.group].title,
-				row.description,
-				row.detail,
-				row.badge,
-				row.kind == .Shortcut && !shortcuts.chord ? row.value : "",
-			),
-			context.temp_allocator,
-		)
+		fields := row_search_fields(p, &row, shortcuts.chord)
+		text := words_class(query, fields[:])
 		switch {
-		case row_matches(words, haystack) || match >= .Modifiers:
-			ranks[i] = 4
+		case text <= .Substring || match >= .Modifiers:
+			ranks[i] = .Text
 		case match == .Label:
-			ranks[i] = 3
+			ranks[i] = .Shortcut_Label
 		case shortcuts.chord:
-		case row_matches(words, strings.to_lower(row.title, context.temp_allocator), true):
-			ranks[i] = 2
-		case row_matches(words, haystack, true):
-			ranks[i] = 1
+		case:
+			if _, found := choice_words_match(query, fields[:], &row); found {
+				ranks[i] = .Choice
+			} else if title := words_class(query, []string{row.title}); title <= .Words {
+				ranks[i] = .Title_Words
+			} else if title == .Scattered {
+				ranks[i] = .Title_Scattered
+			} else if text == .Scattered {
+				ranks[i] = .Text_Scattered
+			}
 		}
 		best = max(best, ranks[i])
 	}
@@ -1450,14 +1514,19 @@ editor_rebuild :: proc(p: ^Editor) {
 		clear(&matched)
 		for row, i in p.rows {
 			if row.group != g {continue}
-			if best > 0 && ranks[i] == best {append(&matched, i)}
+			if best > .None && ranks[i] == best {append(&matched, i)}
 		}
 		if len(matched) == 0 {continue}
 		if section >= 0 && section < EDITOR_SECTION_LIMIT {p.section_matches[section] += len(matched)}
 		if len(p.sections) > 0 && shown >= 0 && section != shown {continue}
 		append(&p.items, Editor_Item{group = g, row = -1, count = len(matched)})
 		for i in matched {
-			append(&p.items, Editor_Item{group = g, row = i, shortcut = matches[i]})
+			value := ""
+			if best == .Choice {
+				fields := row_search_fields(p, &p.rows[i], shortcuts.chord)
+				value, _ = choice_words_match(query, fields[:], &p.rows[i])
+			}
+			append(&p.items, Editor_Item{group = g, row = i, shortcut = matches[i], value = value})
 			for part in 1 ..< row_lines(p.rows[i]) {
 				append(&p.items, Editor_Item{group = g, row = i, part = part})
 			}
@@ -4379,6 +4448,11 @@ editor_draw :: proc(
 			theme.text,
 			text_width_limit,
 		); result != .Ok {return result}
+		if item.value != "" {
+			hint_x := r.x + inset + min(text_width(text, row.title), text_width_limit) + SPACE_2 * s
+			if result := choice_hint_draw(text, list, theme, item.value, nil, hint_x, baseline,
+				r.x + inset + text_width_limit - hint_x); result != .Ok {return result}
+		}
 		note := row.note
 		note_error := note != ""
 		if p.error_key == row.key && p.error_text != "" {

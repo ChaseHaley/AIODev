@@ -240,3 +240,85 @@ optimal_traceback_matches_an_exhaustive_oracle :: proc(t: ^testing.T) {
 		testing.expect(t, abs(value - best) < 1e-10)
 	}
 }
+
+@(test)
+each_class_names_how_the_field_holds_the_query :: proc(t: ^testing.T) {
+	cases := [?]struct {
+		query, candidate: string,
+		class:            fuzzy.Class,
+	}{
+		{"Quit", "quit", .Exact},
+		{"res", "Restart Shell", .Prefix},
+		{"shell", "Restart Shell", .Substring},
+		{"rs", "Restart Shell", .Words},
+		{"c1", "(card 1) foo", .Words},
+		{"cafo", "(card 1) foo", .Words},
+		{"card foo", "(card 1) foo", .Words},
+		{"nwtab", "New tab", .Scattered},
+		{"xyz", "Restart Shell", .None},
+		{"", "anything", .Prefix},
+	}
+	for c in cases {
+		testing.expectf(t, fuzzy.classify(c.query, c.candidate) == c.class, "%q in %q: got %v, want %v",
+			c.query, c.candidate, fuzzy.classify(c.query, c.candidate), c.class)
+	}
+}
+
+// A piece may start after punctuation, at a digit after a letter or a letter after a digit, or at a
+// camel hump; never inside a word.
+@(test)
+word_starts_follow_punctuation_digits_and_camel_humps :: proc(t: ^testing.T) {
+	testing.expect_value(t, fuzzy.classify("t2", "tab2"), fuzzy.Class.Words)
+	testing.expect_value(t, fuzzy.classify("v2b", "v2beta"), fuzzy.Class.Prefix)
+	testing.expect_value(t, fuzzy.classify("vb", "v2beta"), fuzzy.Class.Words)
+	testing.expect_value(t, fuzzy.classify("fb", "fooBar"), fuzzy.Class.Words)
+	testing.expect_value(t, fuzzy.classify("pv", "status.panel_view"), fuzzy.Class.Words)
+	testing.expect_value(t, fuzzy.classify("ab", "xab"), fuzzy.Class.Substring)
+	testing.expect_value(t, fuzzy.classify("ac", "abc"), fuzzy.Class.Scattered)
+	// "abd" needs the pieces "a" and "bd"; the greedy "ab" first would leave "d" stranded.
+	testing.expect_value(t, fuzzy.classify("abd", "abc bd"), fuzzy.Class.Words)
+}
+
+@(test)
+a_class_looser_than_asked_is_no_match :: proc(t: ^testing.T) {
+	s := scratch(t)
+	defer free(s)
+	words, err := fuzzy.score("c1", "(card 1) foo", s, .Words)
+	testing.expect_value(t, err, fuzzy.Error.None)
+	testing.expect(t, words.matched)
+	testing.expect_value(t, words.class, fuzzy.Class.Words)
+	scattered, scattered_error := fuzzy.score("nws", "notes in pwsh", s, .Words)
+	testing.expect_value(t, scattered_error, fuzzy.Error.None)
+	testing.expect(t, !scattered.matched)
+	testing.expect_value(t, scattered.class, fuzzy.Class.None)
+}
+
+// The word-start bonus after an opening bracket and a space lights the "c" of "card" and the "1".
+@(test)
+word_start_highlights_land_on_the_word_starts :: proc(t: ^testing.T) {
+	s := scratch(t)
+	defer free(s)
+	positions: [2]int
+	result, err := fuzzy.match_positions("c1", "(card 1) foo", positions[:], s)
+	testing.expect_value(t, err, fuzzy.Error.None)
+	testing.expect(t, result.matched)
+	testing.expect_value(t, positions[0], 1)
+	testing.expect_value(t, positions[1], 6)
+}
+
+@(test)
+classes_fold_case_and_unicode_like_scoring :: proc(t: ^testing.T) {
+	testing.expect_value(t, fuzzy.classify("KΣ", "kς"), fuzzy.Class.Exact)
+	testing.expect_value(t, fuzzy.classify("éco", "Écran Couleur"), fuzzy.Class.Words)
+}
+
+@(test)
+a_query_too_long_for_word_starts_still_finds_substrings :: proc(t: ^testing.T) {
+	long: [80]u8
+	for &byte, i in long {byte = 'a' + u8(i % 26)}
+	query := string(long[10:75])
+	testing.expect_value(t, fuzzy.classify(query, string(long[:])), fuzzy.Class.Substring)
+	testing.expect_value(t, fuzzy.classify(string(long[:75]), string(long[:])), fuzzy.Class.Prefix)
+	testing.expect_value(t, fuzzy.classify(string(long[:]), string(long[:])), fuzzy.Class.Exact)
+	testing.expect_value(t, fuzzy.classify(string(long[:70]), string(long[5:])), fuzzy.Class.None)
+}
