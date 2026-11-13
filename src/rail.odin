@@ -356,14 +356,16 @@ rail_tab_interaction_hit :: proc(w: ^Window, x, y: f32, button: input.Mouse_Butt
 		return {inside = true}
 	}
 	close := render.rect_contains(rail_tab_close_rect(w, layout, index), x, y)
-	return {target = Tab_Chrome_Tab{index}, inside = true, close = close}
+	return {target = tab_chrome_tab(w, index), inside = true, close = close}
 }
 
 @(require_results)
 rail_pane_target :: proc(w: ^Window, x, y: f32) -> (tab: int, new_tab, ok: bool) {
 	hit := rail_tab_interaction_hit(w, x, y, .Left)
 	if !hit.inside {return -1, false, false}
-	if target, on_tab := hit.target.(Tab_Chrome_Tab); on_tab {return target.index, false, true}
+	if target, on_tab := hit.target.(Tab_Chrome_Tab); on_tab {
+		return tab_index_by_id(w.workspace, target.id), false, true
+	}
 	return -1, true, true
 }
 
@@ -394,8 +396,8 @@ rail_row_draw :: proc(
 	moving: bool,
 ) -> render.Build_Status {
 	s := w.scale
-	hover := w.tab_hover == Tab_Chrome_Tab{index}
-	pressed := gesture_tab_pressed(w) == Tab_Chrome_Tab{index}
+	hover := tab_hovered(w, index)
+	pressed := tab_pressed(w, index)
 	tile := rail_tab_rect(w, layout, index)
 	list_bottom := layout.list.y + layout.list.height
 	if tile.width <= 0 || tile.y + tile.height <= layout.list.y || tile.y >= list_bottom {
@@ -409,7 +411,7 @@ rail_row_draw :: proc(
 	if built != .Ok {return built}
 	has_badge := ui.tab_badge_shown(t.badge)
 	close := rail_tab_close_rect(w, layout, index)
-	show_close := hover || pressed || ui.armed_is(w.tab_close_armed, index)
+	show_close := hover || pressed || ui.armed_is(w.tab_close_armed, w.workspace.tabs[index].id)
 	// Every row keeps the badge column, so titles line up whatever each row's badge is.
 	leading := (ui.TAB_BADGE_COLUMN + ui.SPACE_2) * s
 	trailing := show_close ? tile.x + tile.width - close.x - 4 * s : 0

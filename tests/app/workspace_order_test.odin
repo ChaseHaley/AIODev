@@ -36,9 +36,12 @@ workspace_order_grabbed_row_follows_pointer_instead_of_a_drop_line :: proc(t: ^t
 	testing.expect_value(t, app.workspace_picker_row_rect(&w, 0).y, row.y + 40)
 	testing.expect(t, app.workspace_order_lifted(&w.workspace_picker, 0))
 	testing.expect_value(t, app.workspace_picker_hit(&w, f32(x), f32(y + 40)), 0)
+	// The highlighted row is the lifted workspace, not the row sliding into its slot.
+	testing.expect_value(t, w.workspace_picker.rows[w.workspace_picker.selected].id, u32(1))
 	app.handle_event(&state, input.Mouse_Button_Event{window = w.id, button = .Left,
 		x = x, y = y + 40})
 	testing.expect_value(t, state.workspaces[1].id, u32(1))
+	testing.expect_value(t, w.workspace_picker.rows[w.workspace_picker.selected].id, u32(1))
 	grabbed := app.workspace_order_position(&w.workspace_picker, 1)
 	if !testing.expect(t, grabbed != nil) {return}
 	testing.expect(t, app.workspace_order_settling(&w.workspace_picker))
