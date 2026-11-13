@@ -264,6 +264,48 @@ zoomed_pane_grows_over_the_others_and_shrinks_back :: proc(t: ^testing.T) {
 	testing.expect_value(t, app.pane_motion_rect(w, w.panes[1]), zoomed.rect)
 }
 
+// Closing a zoomed pane ends the zoom with the split view already in place beneath it: the pane taking its
+// place does not grow out of it, and the closed pane's last frame collapses above it toward the edge the
+// two shared in the split view.
+@(test)
+closing_a_zoomed_pane_collapses_it_over_the_split_view :: proc(t: ^testing.T) {
+	f: Palette_Fixture
+	defer palette_fixture_destroy(t, &f)
+	if !palette_fixture_create(t, &f, "pane-motion-zoom-close", second_window = false) {return}
+	s := &f.state
+	s.animations = true
+	w := s.windows[0]
+	whole := w.panes[0].rect
+	app.pane_split(s, w, .Right)
+	motion_settle(s, w)
+	app.run_action(s, w, .Zoom_Pane)
+	motion_settle(s, w)
+	if !testing.expect_value(t, len(w.panes), 1) {return}
+	zoomed := w.panes[0]
+	w.dirty = true
+	app.window_render(s, w)
+
+	app.pane_close(s, w)
+	if !testing.expect_value(t, len(w.panes), 1) {return}
+	kept := w.panes[0]
+	testing.expect_value(t, kept.rect, whole)
+	testing.expect(t, app.pane_motion_animating(w) && app.pane_motion_over_chrome(w))
+	testing.expect_value(t, len(w.pane_motion.ghosts), 1)
+	key := u64(zoomed.content.kind) << 32 | u64(zoomed.content.id)
+	testing.expect_value(t, w.pane_motion.raised, Maybe(u64)(key))
+	first := motion_frame(time.tick_now())
+	app.window_motion_update(s, w, first)
+	testing.expect_value(t, app.pane_motion_rect(w, kept), kept.rect)
+	gone := ui.layout_motion_rect(&w.pane_motion.moving, key, {})
+	right := zoomed.rect.x + zoomed.rect.width
+	testing.expect(t, gone.x > zoomed.rect.x && gone.width > 0, "the closed pane shrinks toward its right edge")
+	testing.expect_value(t, gone.x + gone.width, right)
+	if !testing.expect(t, app.window_build_frame(s, w)) {return}
+	app.window_motion_update(s, w, motion_frame(time.tick_add(first.display, PANE_DURATION)))
+	testing.expect(t, !app.pane_motion_animating(w))
+	testing.expect_value(t, len(w.pane_motion.ghosts), 0)
+}
+
 // Minimizing a float shrinks its frame and panes into its capsule, drawn from their last frame; restoring
 // it grows them back out of the capsule.
 @(test)

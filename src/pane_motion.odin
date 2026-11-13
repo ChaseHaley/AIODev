@@ -25,6 +25,9 @@ Pane_Motion :: struct {
 	// The tiled pane drawn above the others while the motion runs, as a zoomed pane shrinking back over the
 	// panes it uncovers, and the one the next armed placement raises.
 	raised, raise_next: Maybe(u64),
+	// The pane a single-pane view showed alone that the armed close takes away, with the place it held in
+	// the split view; see pane_motion_close_arm.
+	closing: Maybe(ui.Layout_Hint),
 	// The bars between tiled panes as drawn; see pane_bars.
 	bars:   [dynamic]layout.Edge,
 	// Where each pane, float frame and chrome region drew in the window's last frame, so one that goes
@@ -107,6 +110,26 @@ pane_motion_arm :: proc(w: ^Window, motion: settings.Motion_Context, raised: May
 	if content, ok := raised.?; ok {w.pane_motion.raise_next = pane_motion_key(content)}
 }
 
+// The next relayout closes `node` of `tree`, which must still hold it: its neighbours ease into the space
+// it leaves. When w shows it alone in Zoom, Fill window or Fullscreen, the close ends the view and nothing
+// else moves; the split view it uncovers is already in place beneath it, and it leaves as from the place it
+// held there, shrinking toward the edge it shares with the pane taking that place over, or by its close
+// effect where it is.
+pane_motion_close_arm :: proc(app: ^App, w: ^Window, tree: ^layout.Layout, node: layout.Node_Id) {
+	closing: Maybe(ui.Layout_Hint)
+	if window_tree(w) == tree && pane_view_solo(w) && layout.focus_tiled(tree) == node {
+		split := make([dynamic]layout.Pane_Rect, context.temp_allocator)
+		layout.compute(tree, window_content_area_in(app, w, .None), window_gap(app, w), &split)
+		for pane in split {
+			if pane.node != node {continue}
+			r := pane.rect
+			closing = ui.Layout_Hint{pane_motion_key(pane.content), {r.x, r.y, r.width, r.height}}
+		}
+	}
+	pane_motion_arm(w, .Close)
+	w.pane_motion.closing = closing
+}
+
 // Whether `pane` draws above the other tiled panes this frame; see Pane_Motion.raised.
 pane_motion_raised :: proc(w: ^Window, pane: layout.Pane_Rect) -> bool {
 	raised, ok := w.pane_motion.raised.?
@@ -144,7 +167,7 @@ pane_motion_shift :: proc(w: ^Window, by: [2]f32) {
 // A change the window cannot show now, as while it is minimized, neither moves nor slides when it is
 // shown later.
 pane_motion_lapse :: proc(w: ^Window) {
-	w.pane_motion.armed, w.pane_motion.stage, w.pane_motion.shift = nil, {}, {}
+	w.pane_motion.armed, w.pane_motion.closing, w.pane_motion.stage, w.pane_motion.shift = nil, nil, {}, {}
 }
 
 pane_motion_animate :: proc(app: ^App, w: ^Window, frame: ui.Frame_Time) -> bool {
@@ -228,8 +251,8 @@ pane_motion_placed :: proc(app: ^App, w: ^Window, shown: Pane_Motion_Shown) {
 	m := &w.pane_motion
 	tree := window_tree(w)
 	armed := m.armed != nil && m.armed == tree && m.tree == tree
-	raise := m.raise_next
-	m.armed, m.raise_next = nil, nil
+	raise, closing := m.raise_next, m.closing
+	m.armed, m.raise_next, m.closing = nil, nil, nil
 	before := m.stage
 	m.stage = pane_stage(w)
 	// The temporary places are this placement's own, so they move with the screen in place.
@@ -255,10 +278,24 @@ pane_motion_placed :: proc(app: ^App, w: ^Window, shown: Pane_Motion_Shown) {
 	pane_ghosts_clear(m)
 	m.raised, m.slide = raise, nil
 	// A view grows the focused pane over everything else, or shrinks it back off it, so nothing else moves:
-	// what it covers stays drawn where it was until covered, and what it uncovers is already in place.
-	m.over_chrome = m.cause == .View
+	// what it covers stays drawn where it was until covered, and what it uncovers is already in place. Closing
+	// the pane a view shows alone ends the view the same way, with the pane leaving above what it uncovers.
+	closed, closes_solo := closing.?
+	closes_solo = closes_solo && !pane_place_find(targets, closed.key)
+	m.over_chrome = m.cause == .View || closes_solo
 	hints := pane_motion_hints(app, w, shown, targets)
 	if m.over_chrome {hints = pane_hints_in_place(places, targets)}
+	stood: []ui.Layout_Hint
+	if closes_solo {
+		m.raised, stood = closed.key, make([]ui.Layout_Hint, 1, context.temp_allocator)
+		stood[0] = closed
+		for hint, i in hints {
+			if hint.key != closed.key {continue}
+			hints[i] = hints[len(hints) - 1]
+			hints = hints[:len(hints) - 1]
+			break
+		}
+	}
 	motion := settings.motion_resolve(&app.settings, m.cause)
 	duration := settings.motion_duration(&app.settings, motion)
 	// Only a split brings a pane in, and only a close takes one away, in the ways their settings choose.
@@ -275,6 +312,7 @@ pane_motion_placed :: proc(app: ^App, w: ^Window, shown: Pane_Motion_Shown) {
 		hints,
 		enter,
 		leave,
+		stood,
 	)
 	pane_ghosts_capture_leaving(app, w, shown.places)
 }
@@ -510,7 +548,7 @@ pane_motion_region_drawn :: proc(w: ^Window, key: u64, rect: layout.Rect, from: 
 // nothing, lapses here, so it never moves a later, unrelated change.
 pane_motion_drawn_reset :: proc(w: ^Window) {
 	clear(&w.pane_motion.drawn)
-	w.pane_motion.armed, w.pane_motion.raise_next = nil, nil
+	w.pane_motion.armed, w.pane_motion.raise_next, w.pane_motion.closing = nil, nil, nil
 }
 
 // Draws the last frame of each closed pane collapsing beneath `pane`, just before `pane` draws, so it sits
@@ -525,7 +563,8 @@ pane_ghosts_draw :: proc(app: ^App, w: ^Window, pane: layout.Pane_Rect) {
 }
 
 // Draws what went away on its own, such as a float shrinking into its capsule or a pane sliding away: the
-// chrome regions when `chrome`, the panes otherwise, each where the live one would draw.
+// chrome regions when `chrome`, the panes otherwise, each where the live one would draw. A raised pane
+// waits for pane_ghost_raised_draw.
 pane_ghosts_draw_alone :: proc(app: ^App, w: ^Window, chrome: bool) {
 	ghosts := w.pane_motion.ghosts[:]
 	alone :: proc(g: Pane_Ghost, kind: u64) -> bool {
@@ -537,7 +576,11 @@ pane_ghosts_draw_alone :: proc(app: ^App, w: ^Window, chrome: bool) {
 	}
 	// Tiled panes beneath every float, then float by float, each frame beneath its own panes, then panes
 	// whose frame stayed.
-	for &pane in ghosts {if alone(pane, 0) && pane.container == 0 {pane_ghost_draw(app, w, &pane)}}
+	raised, has_raised := w.pane_motion.raised.?
+	for &pane in ghosts {
+		if !alone(pane, 0) || pane.container != 0 || (has_raised && raised == pane.key) {continue}
+		pane_ghost_draw(app, w, &pane)
+	}
 	for &frame in ghosts {
 		if !alone(frame, PANE_MOTION_FRAME) {continue}
 		pane_ghost_draw(app, w, &frame)
@@ -552,6 +595,15 @@ pane_ghosts_draw_alone :: proc(app: ^App, w: ^Window, chrome: bool) {
 	for &pane in ghosts {
 		if !alone(pane, 0) || pane.container == 0 || framed(ghosts, pane.container) {continue}
 		pane_ghost_draw(app, w, &pane)
+	}
+}
+
+// Draws the pane a single-pane view showed alone as it closes, above the tiled panes it uncovers.
+pane_ghost_raised_draw :: proc(app: ^App, w: ^Window) {
+	raised, ok := w.pane_motion.raised.?
+	if !ok || !pane_motion_animating(w) {return}
+	for &ghost in w.pane_motion.ghosts {
+		if ghost.key == raised && ghost.successor == nil {pane_ghost_draw(app, w, &ghost)}
 	}
 }
 

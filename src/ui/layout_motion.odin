@@ -90,7 +90,10 @@ layout_motion_rect :: proc(m: ^Layout_Motion, key: u64, target: render.Rect) -> 
 // that takes its place; the caller draws what it last showed there (see layout_motion_rect). A hint for a
 // key replaces either edge with its rectangle. Entering and leaving items without a hint take `enter` and
 // `leave`: any effect but .Edge keeps them at their target or shown rectangle, and layout_motion_look says
-// how to present them. Disabled animations, or nothing to move, end any motion.
+// how to present them. A leaving item in `stood` takes its edge from the rectangle given there, where it
+// stood in an arrangement that was not drawn, as the split place of a pane a single-pane view showed
+// alone; it has no successor, so the caller draws it on its own. Disabled animations, or nothing to move,
+// end any motion.
 layout_motion_begin :: proc(
 	m: ^Layout_Motion,
 	shown, targets: []Layout_Place,
@@ -100,6 +103,7 @@ layout_motion_begin :: proc(
 	hints: []Layout_Hint = nil,
 	enter: settings.Motion_Effect = .Edge,
 	leave: settings.Motion_Effect = .Edge,
+	stood: []Layout_Hint = nil,
 ) {
 	clear(&m.items)
 	moving := false
@@ -127,11 +131,16 @@ layout_motion_begin :: proc(
 			hinted: bool
 			item.to, hinted = layout_hint_rect(hints, place.key)
 			if !hinted {
-				item.edge, item.successor = layout_enter_rect(targets, place)
+				from := place
+				slot, elsewhere := layout_hint_rect(stood, place.key)
+				if elsewhere {from.rect = slot}
+				item.edge, item.successor = layout_enter_rect(targets, from)
 				// Nothing takes its place, so there is nothing for it to collapse beneath.
 				if item.successor == nil {continue}
 				item.to, item.effect = item.edge, leave
 				if leave != .Edge {item.to = place.rect}
+				// Drawn where it never stood among the others, it leaves above them rather than beneath one.
+				if elsewhere {item.successor = nil}
 			}
 			if _, err := append(&m.items, item); err != nil {
 				moving = false

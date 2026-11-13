@@ -455,6 +455,12 @@ pane_remove :: proc(
 	if was_focused {
 		for w in app.windows {if w.workspace == workspace {focus_leave(app, w)}}
 	}
+	// The closed pane's neighbours in its container ease into the space it leaves. A floating pane's close
+	// leaves the tiled panes exactly as they were. The motion is armed while the pane is still in the
+	// layout, so a view that shows it alone knows where it stood.
+	if visible {
+		for w in app.windows {if w.workspace == workspace {pane_motion_close_arm(app, w, &tab.tree, node)}}
+	}
 	floating := layout.float_is_root(&tab.tree, node)
 	if !layout.remove(&tab.tree, node) {return}
 	if pane_owns_session(content.kind) {session_close(app, content.id)}
@@ -463,9 +469,6 @@ pane_remove :: proc(
 	if visible {
 		for w in app.windows {
 			if w.workspace != workspace {continue}
-			// The closed pane's neighbours in its container ease into the space it leaves. A floating
-			// pane's close leaves the tiled panes exactly as they were.
-			pane_motion_arm(w, .Close)
 			if floating {window_floats_layout(app, w)} else {window_relayout(app, w)}
 			if was_focused {focus_enter(app, w)}
 		}
