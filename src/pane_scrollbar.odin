@@ -91,14 +91,15 @@ pane_scrollbar_at :: proc(app: ^App, w: ^Window, x, y: f32) -> (content: layout.
 	return pane.content, true
 }
 
-// Moves the content's view to `offset` on its bar: rows for a terminal, pixels for a page.
+// Moves the held content's view to `offset` on its bar: rows for a terminal, pixels for a page. Moves
+// come faster than frames, so a terminal's bar may be the one captured before earlier moves scrolled;
+// the view goes to the row rather than by the difference from that bar.
 @(private = "file")
-pane_scrollbar_apply :: proc(app: ^App, content: layout.Content, bar: ui.Scrollbar, offset: int) {
+pane_scrollbar_drag_to :: proc(app: ^App, content: layout.Content, offset: int) {
 	#partial switch content.kind {
 	case .Terminal:
-		entry := workspace_session_for_content(app, content)
-		if entry != nil && offset != bar.extent.offset {
-			term.scroll_viewport(entry.session, offset - bar.extent.offset)
+		if entry := workspace_session_for_content(app, content); entry != nil {
+			term.scroll_viewport_to(entry.session, offset)
 		}
 	case .Markdown:
 		if page := markdown_find(app, content.id); page != nil {page.view.scroll = offset}
@@ -111,7 +112,17 @@ pane_scrollbar_press :: proc(app: ^App, w: ^Window, pane: layout.Pane_Rect, x, y
 	bar, visible := pane_scrollbar_geometry(app, w, pane)
 	if !visible || !ui.scrollbar_contains(bar, x, y) {return false}
 	grab: ui.Scroll_Drag
-	pane_scrollbar_apply(app, pane.content, bar, ui.scrollbar_press(&grab, bar, y))
+	// A track press pages once from wherever the view is; a thumb press leaves it in place.
+	offset := ui.scrollbar_press(&grab, bar, y)
+	#partial switch pane.content.kind {
+	case .Terminal:
+		entry := workspace_session_for_content(app, pane.content)
+		if entry != nil && offset != bar.extent.offset {
+			term.scroll_viewport(entry.session, offset - bar.extent.offset)
+		}
+	case .Markdown:
+		if page := markdown_find(app, pane.content.id); page != nil {page.view.scroll = offset}
+	}
 	w.scrollbars.drag = nil
 	if grab.active {w.scrollbars.drag = Pane_Scroll_Drag{pane.content, grab}}
 	w.dirty = true
@@ -131,7 +142,7 @@ pane_scrollbar_move :: proc(app: ^App, w: ^Window, x, y: f32) {
 		}
 		bar, visible := pane_scrollbar_geometry(app, w, pane)
 		if !visible {return}
-		pane_scrollbar_apply(app, held.content, bar, ui.scrollbar_drag(held.grab, bar, y))
+		pane_scrollbar_drag_to(app, held.content, ui.scrollbar_drag(held.grab, bar, y))
 		w.dirty = true
 		return
 	}
