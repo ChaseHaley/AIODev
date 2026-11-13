@@ -158,7 +158,7 @@ window_tab_strip_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 			color, ends := tab_tray_place(app, w, i)
 			if color.a <= 0 {continue}
 			x := bar.x + layout.places[i].slot * bar.tab_width + layout.places[i].offset * w.scale
-			if ui.tab_tray_draw(&w.list, {x, y, bar.tab_width, height}, color, ends, false, w.scale) != .None {
+			if ui.tab_tray_draw(&w.list, {x, y, bar.tab_width, height}, color, ends, .Rest, false, w.scale) != .None {
 				return .Ok
 			}
 		}

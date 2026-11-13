@@ -180,7 +180,8 @@ tab_chip_strip_draw :: proc(
 	if tab_group_tray_shown(w, run.group) {
 		y, height := ui.tab_tray_band(bar.height, w.scale)
 		slice := render.Rect{chip.x, y, chip.width + ui.TAB_CHIP_MARGIN * w.scale, height}
-		if ui.tab_tray_draw(&w.list, slice, tab_group_color(app, run.group), {.Start}, false, w.scale) != .None {
+		color, state := tab_group_color(app, run.group), tab_group_state(w, run.group.id)
+		if ui.tab_tray_draw(&w.list, slice, color, {.Start}, state, false, w.scale) != .None {
 			return .Ok
 		}
 	}
@@ -251,8 +252,26 @@ tab_chip_draw :: proc(app: ^App, w: ^Window, run: Tab_Run, rect: render.Rect) ->
 	chip.status_phase = status_phase(app, w, chip.status)
 	r := rect
 	r.width = min(r.width, ui.tab_chip_width(&w.ui_text, chip, w.scale))
-	hover := f32(int(w.tab_hover == Tab_Chrome_Group{run.group.id}))
-	return ui.tab_chip_draw(&w.list, &w.ui_text, app.theme, r, chip, hover, w.scale)
+	return ui.tab_chip_draw(&w.list, &w.ui_text, app.theme, r, chip, tab_group_state(w, run.group.id), w.scale)
+}
+
+// The group whose chip is held, pressed or dragging its group; 0 for none.
+tab_group_held :: proc(w: ^Window) -> u32 {
+	#partial switch d in w.drag {
+	case Drag_Pressed:
+		if grab, ok := d.grab.(Tab_Grab); ok {return grab.chip}
+	case Drag_Active:
+		if carry, ok := d.carry.(Tab_Carry); ok {return carry.grab.chip}
+	}
+	return 0
+}
+
+// How strongly group `id` shows its outline (WORK-454): its chip held, under the pointer, or neither.
+tab_group_state :: proc(w: ^Window, id: u32) -> ui.Tray_State {
+	if id == 0 {return .Rest}
+	if tab_group_held(w) == id {return .Pressed}
+	if w.tab_hover == (Tab_Chrome_Group{id}) {return .Hover}
+	return .Rest
 }
 
 when AIO_CONTROL {

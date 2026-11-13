@@ -87,6 +87,7 @@ Tab_Tile :: struct {
 	// The tab's part of its group's tray, transparent for none, closed at the ends in `tray_ends`.
 	tray:         render.Color,
 	tray_ends:    Tray_Ends,
+	tray_state:   Tray_State,
 }
 
 // Draws the badge in the leading icon column of `tile`, stacked over the mark behind it when the tab
@@ -197,7 +198,7 @@ tab_draw :: proc(
 	if t.tray.a > 0 {
 		y, height := tab_tray_band(bar.height, scale)
 		slice := render.Rect{room.x, y, room.width, height}
-		if tab_tray_draw(list, slice, t.tray, t.tray_ends, false, scale) != .None {return .Ok}
+		if tab_tray_draw(list, slice, t.tray, t.tray_ends, t.tray_state, false, scale) != .None {return .Ok}
 	}
 	// Every tab rises on hover; the selected tab keeps its pane fill while it moves.
 	lift := hover_lift_at(theme, hover, scale)

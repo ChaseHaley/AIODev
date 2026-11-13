@@ -65,11 +65,14 @@ tab_menu_scope :: proc(w: ^Window) -> int {
 	return count
 }
 
-// Whether tab `index` draws as marked. While the menu is open on an unmarked tab, only that tab does.
+// Whether tab `index` draws as marked. While the menu is open on an unmarked tab, only that tab does. A
+// group held by its chip marks its tabs only to carry them; the group's outline shows it is held instead.
 tab_marked_shown :: proc(w: ^Window, index: int) -> bool {
+	tab := w.workspace.tabs[index]
+	if held := tab_group_held(w); held != 0 && tab.group == held {return false}
 	target := tab_menu_target(w)
 	if target >= 0 && tab_menu_group(w) == nil && !w.workspace.tabs[target].marked {return index == target}
-	return w.workspace.tabs[index].marked
+	return tab.marked
 }
 
 tab_menu_open :: proc(app: ^App, w: ^Window, index: int, x, y: f32) {

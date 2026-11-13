@@ -20,6 +20,7 @@ tab_tile :: proc(app: ^App, w: ^Window, index: int) -> (ui.Tab_Tile, render.Buil
 		marked       = tab_marked_shown(w, index),
 	}
 	t.tray, t.tray_ends = tab_tray(app, w, index)
+	t.tray_state = tab_group_state(w, tab_laid_group(w, index))
 	front, has_front := layout.focused_content(&tab.tree)
 	if !has_front {return t, .Ok}
 	behind, stacked := tab_pane_behind(app, tab, index)

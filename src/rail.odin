@@ -425,7 +425,7 @@ rail_row_draw :: proc(
 	if t.tray.a > 0 {
 		inset := ui.TAB_TRAY_INSET * s
 		slice := render.Rect{tile.x - inset, tile.y, tile.width + 2 * inset, tile.height}
-		if ui.tab_tray_draw(&w.list, slice, t.tray, t.tray_ends, true, s) != .None {return .Ok}
+		if ui.tab_tray_draw(&w.list, slice, t.tray, t.tray_ends, t.tray_state, true, s) != .None {return .Ok}
 		if .End in t.tray_ends {row.height -= 2 * s}
 	}
 	if result := ui.navigation_row_draw(&w.list, &w.ui_text, app.theme, row,
@@ -475,7 +475,8 @@ rail_chip_draw :: proc(app: ^App, w: ^Window, layout: ui.Rail_Layout, run: Tab_R
 	if tab_group_tray_shown(w, run.group) {
 		inset := ui.TAB_TRAY_INSET * w.scale
 		slice := render.Rect{row.x - inset, row.y + inset, row.width + 2 * inset, row.height - inset}
-		if ui.tab_tray_draw(&w.list, slice, tab_group_color(app, run.group), {.Start}, true, w.scale) != .None {
+		color, state := tab_group_color(app, run.group), tab_group_state(w, run.group.id)
+		if ui.tab_tray_draw(&w.list, slice, color, {.Start}, state, true, w.scale) != .None {
 			return .Ok
 		}
 	}
@@ -545,7 +546,7 @@ rail_body_draw :: proc(app: ^App, w: ^Window, laid: ui.Rail_Layout) -> render.Bu
 		row.y += rail.places[i].slot * layout.row_height
 		inset := ui.TAB_TRAY_INSET * w.scale
 		slice := render.Rect{row.x - inset, row.y, row.width + 2 * inset, row.height}
-		if ui.tab_tray_draw(&w.list, slice, color, ends, true, w.scale) != .None {return .Ok}
+		if ui.tab_tray_draw(&w.list, slice, color, ends, .Rest, true, w.scale) != .None {return .Ok}
 	}
 	moving := dragging
 	for position in w.tab_positions {moving ||= ui.motion_active(position)}

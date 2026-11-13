@@ -5,9 +5,9 @@ import "core:fmt"
 import "core:math"
 
 // A tab group's chip (D-093): its name in the group's colour before its tabs, in the strip and the rail
-// alike, on the tray that holds the group's run (WORK-454). A caret says the chip folds. A folded
-// group's chip stands in for its tabs, so it takes a tinted outline and adds how many there are and
-// the most urgent status.
+// alike, a bare label on the tray that holds the group's run (WORK-454). A folded group's chip stands in
+// for its tabs, so it takes a tint and an outline of its own and adds how many there are and the most
+// urgent status.
 Tab_Chip :: struct {
 	name:         string,
 	color:        render.Color,
@@ -33,6 +33,24 @@ Tray_End :: enum u8 {
 }
 Tray_Ends :: bit_set[Tray_End;u8]
 
+// How strongly a group's outline shows: at rest, with the pointer on its chip, and with its chip pressed or
+// dragging the group, each a step more contrast.
+Tray_State :: enum u8 {
+	Rest,
+	Hover,
+	Pressed,
+}
+
+@(private = "file")
+tray_edge :: proc(state: Tray_State) -> f32 {
+	switch state {
+	case .Rest: return 0.2
+	case .Hover: return 0.45
+	case .Pressed: return 0.75
+	}
+	return 0.2
+}
+
 // The tray's band across the strip, around the tab tiles.
 tab_tray_band :: proc(bar_height, scale: f32) -> (y, height: f32) {
 	tile := HEIGHT_TOOLBAR * scale
@@ -47,6 +65,7 @@ tab_tray_draw :: proc(
 	slice: render.Rect,
 	color: render.Color,
 	ends: Tray_Ends,
+	state: Tray_State,
 	vertical: bool,
 	scale: f32,
 ) -> render.Error {
@@ -73,13 +92,13 @@ tab_tray_draw :: proc(
 	}
 	fill, edge := color, color
 	fill.a *= 0.09
-	edge.a *= 0.2
+	edge.a *= tray_edge(state)
 	draw_rect(list, {rect = shape, color = fill, radius = radius})
 	draw_rect(list, {rect = shape, color = edge, radius = radius, stroke = scale})
 	return render.push_layer(list, previous.clip, previous.radius)
 }
 
-// What a folded chip adds after its caret or dot: the tab count, then the status. Zero while unfolded.
+// What a folded chip adds after its name or dot: the tab count, then the status. Zero while unfolded.
 @(private = "file")
 tab_chip_tail :: proc(text: ^Text, chip: Tab_Chip, scale: f32) -> f32 {
 	if !chip.folded {return 0}
@@ -88,40 +107,39 @@ tab_chip_tail :: proc(text: ^Text, chip: Tab_Chip, scale: f32) -> f32 {
 	return tail
 }
 
-// The chip's width in pixels: its name between insets and its caret, else a square holding a dot of its
-// colour, then what a folded chip adds.
+// The chip's width in pixels: its name between insets, else a square holding a dot of its colour, then
+// what a folded chip adds.
 tab_chip_width :: proc(text: ^Text, chip: Tab_Chip, scale: f32) -> f32 {
 	inset := CONTROL_INSET * scale
 	tail := tab_chip_tail(text, chip, scale)
 	if chip.name == "" {return HEIGHT_COMPACT * scale + (chip.folded ? tail + inset : 0)}
 	strong := text_styled(text, .Strong)
 	width := min(TAB_CHIP_MAX_WIDTH * scale, text_width(&strong, chip.name) + 2 * inset)
-	return width + (SPACE_1 + ICON_INDICATOR) * scale + (chip.folded ? SPACE_1 * scale + tail : 0)
+	return width + (chip.folded ? SPACE_1 * scale + tail : 0)
 }
 
-// The chip fills `rect` at its own height, centred. Unfolded it lies bare on its tray, tinted only on hover;
-// folded it is tinted and outlined.
+// The chip fills `rect` at its own height, centred. Unfolded it is a bare label on its tray, which shows
+// `state`; folded it has no tray, so it is tinted and outlined itself, its outline showing `state`.
 tab_chip_draw :: proc(
 	list: ^render.Draw_List,
 	text: ^Text,
 	theme: Theme,
 	rect: render.Rect,
 	chip: Tab_Chip,
-	hover, scale: f32,
+	state: Tray_State,
+	scale: f32,
 ) -> render.Build_Status {
 	height := HEIGHT_COMPACT * scale
 	r := render.Rect{rect.x, rect.y + (rect.height - height) / 2, rect.width, height}
 	radius := RADIUS_CONTROL * scale
-	fill := chip.color
-	fill.a *= chip.folded ? 0.12 + 0.1 * hover : 0.14 * hover
-	if fill.a > 0 {draw_rect(list, {rect = r, color = fill, radius = radius})}
 	if chip.folded {
-		edge := chip.color
-		edge.a *= 0.3
+		fill, edge := chip.color, chip.color
+		fill.a *= 0.12
+		edge.a *= tray_edge(state) + 0.1
+		draw_rect(list, {rect = r, color = fill, radius = radius})
 		draw_rect(list, {rect = r, color = edge, radius = radius, stroke = scale})
 	}
 	inset := CONTROL_INSET * scale
-	indicator := ICON_INDICATOR * scale
 	tail := tab_chip_tail(text, chip, scale)
 	x := r.x + height
 	if chip.name == "" {
@@ -131,16 +149,11 @@ tab_chip_draw :: proc(
 	} else {
 		strong := text_styled(text, .Strong)
 		baseline := r.y + (height - strong.line_height) / 2 + strong.ascent
-		room := r.width - 2 * inset - SPACE_1 * scale - indicator - (chip.folded ? SPACE_1 * scale + tail : 0)
+		room := r.width - 2 * inset - (chip.folded ? SPACE_1 * scale + tail : 0)
 		label := min(text_width(&strong, chip.name), max(0, room))
 		if result := draw_fading_text(&strong, list, chip.name, r.x + inset, baseline, chip.color, label);
 		   result != .Ok {return result}
-		left := r.x + inset + label + SPACE_1 * scale
-		caret := render.Rect{left, r.y + (height - indicator) / 2, indicator, indicator}
-		ink := chip.color
-		ink.a *= 0.7
-		icon_draw(list, chip.folded ? .Chevron_Right : .Chevron_Down, caret, ink, ICON_INDICATOR, scale)
-		x = caret.x + indicator + SPACE_1 * scale
+		x = r.x + inset + label + SPACE_1 * scale
 	}
 	if !chip.folded {return .Ok}
 	count := fmt.tprint(chip.count)
