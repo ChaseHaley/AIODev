@@ -51,8 +51,14 @@ workspace_delete_commit :: proc(app: ^App, plan: Workspace_Delete_Plan) -> bool 
 		entry := session_find(app, session)
 		if entry == nil || term.status(entry.session).kind == .Failed {return false}
 	}
-	// Replacing pre-flights every view before the old workspace is released (D-053).
-	if owner != nil && !workspace_adopt(app, owner, destination, .Replace) {return false}
+	// Replacing pre-flights every view before the old workspace is released (D-053). The switch it makes
+	// plays as the workspace's deletion.
+	if owner != nil {
+		workspace_overview_delete_begin(owner, workspace)
+		adopted := workspace_adopt(app, owner, destination, .Replace)
+		workspace_overview_delete_end(owner)
+		if !adopted {return false}
+	}
 	workspace_delete_release(app, workspace)
 	committed = true
 	workspace_mutation_finish(app, destination, {.Names})

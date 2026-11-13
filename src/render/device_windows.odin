@@ -38,6 +38,8 @@ Device :: struct {
 	rect_ps, glyph_ps:  ^d3d.IPixelShader,
 	image_vs:           ^d3d.IVertexShader,
 	image_ps:           ^d3d.IPixelShader,
+	dust_vs:            ^d3d.IVertexShader,
+	dust_ps:            ^d3d.IPixelShader,
 	image_sampler:      ^d3d.ISamplerState,
 	images:             map[u64]Image_Texture,
 	image_bytes:        int,
@@ -86,12 +88,17 @@ Frame_Constants :: struct {
 	clip_radius:             f32,
 	_padding:                [3]f32,
 	image_rect, image_uv:    Rect,
+	// Dust only: progress, seed, rise and grain; the ash colour; the first texel and the grid of grains.
+	dust:                    [4]f32,
+	dust_ash:                Color,
+	dust_grid:               [4]u32,
 }
 
 // Frame_Constants is draw.hlsl's `Frame` cbuffer. Constant-buffer packing never lets a vector cross
 // a 16-byte register, so the explicit padding keeps round_clip and image_rect on register starts.
 #assert(offset_of(Frame_Constants, rect_start) == 28 && offset_of(Frame_Constants, round_clip) == 48)
-#assert(offset_of(Frame_Constants, image_rect) == 80 && size_of(Frame_Constants) == 112)
+#assert(offset_of(Frame_Constants, image_rect) == 80 && offset_of(Frame_Constants, dust) == 112)
+#assert(size_of(Frame_Constants) == 160)
 
 // The draw.hlsl names for the fill and glyph flag values, defined from the Odin constants.
 @(private)
@@ -199,6 +206,8 @@ Shader_Entry :: enum {
 	Glyph_PS,
 	Image_VS,
 	Image_PS,
+	Dust_VS,
+	Dust_PS,
 }
 
 @(private, rodata)
@@ -211,6 +220,8 @@ SHADER_ENTRIES := [Shader_Entry]struct {
 	.Glyph_PS = {"glyph_ps", "ps_5_0"},
 	.Image_VS = {"image_vs", "vs_5_0"},
 	.Image_PS = {"image_ps", "ps_5_0"},
+	.Dust_VS  = {"dust_vs", "vs_5_0"},
+	.Dust_PS  = {"dust_ps", "ps_5_0"},
 }
 
 // Compiled shaders. Compiling needs no device and takes about a third as long as the driver
@@ -400,6 +411,12 @@ device_create :: proc(driver: Driver, allocator := context.allocator) -> (^Devic
 	if d.image_ps, err = pixel_shader(d, code.blobs[.Image_PS]); err != .None {
 		return nil, err
 	}
+	if d.dust_vs, err = vertex_shader(d, code.blobs[.Dust_VS]); err != .None {
+		return nil, err
+	}
+	if d.dust_ps, err = pixel_shader(d, code.blobs[.Dust_PS]); err != .None {
+		return nil, err
+	}
 	sampler := d3d.SAMPLER_DESC {
 		Filter         = .MIN_MAG_MIP_LINEAR,
 		AddressU       = .CLAMP,
@@ -475,6 +492,8 @@ device_destroy :: proc(d: ^Device) {
 	release(d.image_sampler)
 	release(d.image_vs)
 	release(d.image_ps)
+	release(d.dust_vs)
+	release(d.dust_ps)
 	release(d.factory)
 	release(d.ctx)
 	release(d.native)

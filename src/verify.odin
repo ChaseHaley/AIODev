@@ -594,6 +594,11 @@ when AIO_CONTROL {
 			state_text(r, "workspace.overview", "none")
 			state_text(r, "workspace.overview_shown", "none")
 		}
+		if dust, slide, deleting := workspace_overview_deletion(w); deleting {
+			state_valuef(r, "workspace.overview_delete", "%g,%g", dust, slide)
+		} else {
+			state_text(r, "workspace.overview_delete", "none")
+		}
 		state_value(r, "window.preparing", w.phase == .Preparing)
 		state_word(r, "pointer.shape", w.pointer_shape)
 		state_value(r, "pointer.updates", app.verify.pointer_updates)

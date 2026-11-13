@@ -59,8 +59,7 @@ instance_upload :: proc(d: ^Device, buffer: ^Instance_Buffer, data: []$T) -> Err
 }
 
 @(private)
-scissor :: proc(clip: Rect, s: ^Surface) -> d3d.RECT {
-	width, height := f32(s.width), f32(s.height)
+scissor :: proc(clip: Rect, width, height: f32) -> d3d.RECT {
 	return {
 		left = i32(math.floor(clamp(clip.x, 0, width))),
 		top = i32(math.floor(clamp(clip.y, 0, height))),
@@ -71,11 +70,30 @@ scissor :: proc(clip: Rect, s: ^Surface) -> d3d.RECT {
 
 @(require_results)
 frame_render :: proc(d: ^Device, s: ^Surface, list: ^Draw_List, clear: Color) -> Error {
+	assert(s.owner == d)
+	d.image_frame += 1
+	if err := list_draw(d, s.target, s.width, s.height, list, clear); err != .None {return err}
+	images_evict(d)
+	if s.chain == nil {
+		s.rendered += 1
+		return .None
+	}
+	return checked(d, s.chain->Present(1, {}), "Present", .Surface_Failed)
+}
+
+// Draws `list` into `target`, a width x height render target cleared to `clear` first.
+@(private, require_results)
+list_draw :: proc(
+	d: ^Device,
+	target: ^d3d.IRenderTargetView,
+	width, height: i32,
+	list: ^Draw_List,
+	clear: Color,
+) -> Error {
 	if list.error != .None {return list.error}
 	if list.atlas_generation != 0 && list.atlas_generation != atlas_generation(d) {
 		return .Atlas_Invalidated
 	}
-	assert(s.owner == d)
 	if err := instance_upload(d, &d.rects, list.rects[:]); err != .None {
 		return err
 	}
@@ -83,14 +101,15 @@ frame_render :: proc(d: ^Device, s: ^Surface, list: ^Draw_List, clear: Color) ->
 		return err
 	}
 	c := d.ctx
-	c->OMSetRenderTargets(1, &s.target, nil)
+	target := target
+	c->OMSetRenderTargets(1, &target, nil)
 	premultiplied := Color{clear.r * clear.a, clear.g * clear.a, clear.b * clear.a, clear.a}
-	c->ClearRenderTargetView(s.target, &premultiplied)
+	c->ClearRenderTargetView(target, &premultiplied)
 	c->OMSetBlendState(d.blend, nil, max(u32))
 	c->RSSetState(d.rasterizer)
 	viewport := d3d.VIEWPORT {
-		Width    = f32(s.width),
-		Height   = f32(s.height),
+		Width    = f32(width),
+		Height   = f32(height),
 		MaxDepth = 1,
 	}
 	c->RSSetViewports(1, &viewport)
@@ -103,14 +122,13 @@ frame_render :: proc(d: ^Device, s: ^Surface, list: ^Draw_List, clear: Color) ->
 	atlases := [2]^d3d.IShaderResourceView{d.atlas.view, d.color_atlas.view}
 	c->PSSetShaderResources(2, len(atlases), &atlases[0])
 	c->PSSetSamplers(0, 1, &d.image_sampler)
-	d.image_frame += 1
 	constants := Frame_Constants {
 		gamma_ratios      = gamma_ratios(d.gamma.gamma),
-		target_size       = {f32(s.width), f32(s.height)},
+		target_size       = {f32(width), f32(height)},
 		enhanced_contrast = d.gamma.enhanced_contrast,
 	}
 	for layer in list.layers {
-		clip := scissor(layer.clip, s)
+		clip := scissor(layer.clip, f32(width), f32(height))
 		if clip.right <= clip.left || clip.bottom <= clip.top {
 			continue
 		}
@@ -125,18 +143,37 @@ frame_render :: proc(d: ^Device, s: ^Surface, list: ^Draw_List, clear: Color) ->
 			c->PSSetShader(d.rect_ps, nil, 0)
 			c->DrawInstanced(6, u32(layer.rect_count), 0, 0)
 		}
-		if layer.image_count > 0 {
-			c->VSSetShader(d.image_vs, nil, 0)
-			c->PSSetShader(d.image_ps, nil, 0)
-			for instance in list.images[layer.image_start:][:layer.image_count] {
-				entry, known := &d.images[instance.key]
-				if !known {continue}
-				entry.last_used = d.image_frame
-				if entry.view == nil {continue}
-				constants.image_rect, constants.image_uv = instance.rect, instance.uv
-				if err := constants_write(d, &constants); err != .None {
-					return err
-				}
+		for instance in list.images[layer.image_start:][:layer.image_count] {
+			entry, known := &d.images[instance.key]
+			if !known {continue}
+			entry.last_used = d.image_frame
+			if entry.view == nil || instance.dust.progress >= 1 {continue}
+			constants.image_rect, constants.image_uv = instance.rect, instance.uv
+			grains: u32
+			if instance.dust.progress > 0 {
+				// One instance per texel of the part shown; see dust_vs.
+				uv := instance.uv
+				first := [2]u32{u32(uv.x * f32(entry.width) + 0.5), u32(uv.y * f32(entry.height) + 0.5)}
+				columns := u32(uv.width * f32(entry.width) + 0.5)
+				rows := u32(uv.height * f32(entry.height) + 0.5)
+				dust := instance.dust
+				constants.dust = {dust.progress, dust.seed, dust.rise, dust.grain}
+				constants.dust_ash = dust.ash
+				constants.dust_grid = {first.x, first.y, columns, rows}
+				grains = columns * rows
+				if grains == 0 {continue}
+			}
+			if err := constants_write(d, &constants); err != .None {
+				return err
+			}
+			if grains > 0 {
+				c->VSSetShader(d.dust_vs, nil, 0)
+				c->PSSetShader(d.dust_ps, nil, 0)
+				c->VSSetShaderResources(4, 1, &entry.view)
+				c->DrawInstanced(6, grains, 0, 0)
+			} else {
+				c->VSSetShader(d.image_vs, nil, 0)
+				c->PSSetShader(d.image_ps, nil, 0)
 				c->PSSetShaderResources(4, 1, &entry.view)
 				c->DrawInstanced(6, 1, 0, 0)
 			}
@@ -147,12 +184,12 @@ frame_render :: proc(d: ^Device, s: ^Surface, list: ^Draw_List, clear: Color) ->
 			c->DrawInstanced(6, u32(layer.glyph_count), 0, 0)
 		}
 	}
-	images_evict(d)
-	if s.chain == nil {
-		s.rendered += 1
-		return .None
-	}
-	return checked(d, s.chain->Present(1, {}), "Present", .Surface_Failed)
+	// A texture drawn from here may be the target of a later image_render, which cannot write a texture
+	// still bound for reading.
+	unbound: ^d3d.IShaderResourceView
+	c->VSSetShaderResources(4, 1, &unbound)
+	c->PSSetShaderResources(4, 1, &unbound)
+	return .None
 }
 
 @(private, require_results)
