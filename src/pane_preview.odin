@@ -129,11 +129,12 @@ pane_preview_rects :: proc(
 	}
 }
 
-// Splitting ends any zoom or fill, so a split is placed in the split view, the panes in `after` and the new
-// one `added`. Refused with .Minimum when a pane would fall below the minimum size, as the split itself is.
+// The tree after a split, with the new pane `added`. A split in the tiling ends any zoom or fill, and one in
+// a float only that float's zoom and a fill showing one of its panes, so the tiling keeps any other view.
+// Refused with .Minimum when a pane would fall below the minimum size, as the split itself is.
 @(private = "file")
 Split_Trial :: struct {
-	after: [dynamic]layout.Pane_Rect,
+	trial: layout.Layout,
 	added: layout.Node_Id,
 }
 
@@ -159,8 +160,8 @@ pane_trial_split_minimum :: proc(
 	before := make([dynamic]layout.Pane_Rect, 0, len(tree.nodes), context.temp_allocator)
 	layout.place_shown(&trial, g, false, &after)
 	layout.place_shown(tree, g, false, &before)
-	if !pane_minimum_allows(app, w, after[:], before[:], false) {return {after, added}, .Minimum}
-	return {after, added}, .None
+	if !pane_minimum_allows(app, w, after[:], before[:], false) {return {trial, added}, .Minimum}
+	return {trial, added}, .None
 }
 
 @(private = "file")
@@ -173,8 +174,12 @@ pane_preview_split :: proc(
 ) -> Tooltip_Card {
 	split, _ := pane_trial_split_minimum(app, w, node, direction)
 	if split.added == layout.INVALID_NODE {return {description = description}}
-	g := window_geometry(app, w, .None)
-	preview := pane_preview_rects(w, g.tiled, window_title_height_in(w, .None), split.after[:], split.added)
+	fill, solo := layout.Pane_Fill.None, false
+	if !split.trial.panes_changed {
+		fill = split.trial.fill
+		solo = layout.pane_view_of(fill, split.trial.zoomed) != .Split
+	}
+	preview := pane_preview_of(app, w, &split.trial, fill, solo, split.added)
 	return {description = description, preview = preview}
 }
 
