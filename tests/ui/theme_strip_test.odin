@@ -268,3 +268,55 @@ theme_strip_scrolls_sideways_to_the_keyboard_card_and_under_the_wheel :: proc(t:
 	testing.expect_value(t, p.scroll, 0)
 	testing.expect(t, p.strip.scroll.value >= scrolled)
 }
+
+@(test)
+theme_strip_scrollbar_grows_under_the_pointer_and_drags_like_every_other :: proc(t: ^testing.T) {
+	p: ui.Editor
+	defer ui.editor_destroy(&p)
+	strip_page(t, &p, "amber")
+	l := ui.editor_layout({0, 40, 1200, 520}, 1)
+	ui.editor_fit(&p, l)
+	testing.expect(t, ui.editor_select_key(&p, "theme.name"))
+	head := p.selected
+	rest, visible := ui.editor_strip_scrollbar(&p, l, head)
+	if !testing.expect(t, visible) {return}
+	testing.expect(t, rest.horizontal)
+	block := ui.editor_strip_rect(&p, l, head)
+	testing.expect(t, rest.track.y + rest.track.height <= block.y + block.height)
+
+	// The thin thumb widens once the pointer enters the track, and narrows when it leaves.
+	x, y := center(rest.thumb)
+	testing.expect(t, ui.editor_hover(&p, l, x, rest.track.y + 1))
+	hovered, _ := ui.editor_strip_scrollbar(&p, l, head)
+	testing.expect(t, hovered.thumb.height > rest.thumb.height)
+	testing.expect_value(t, p.strip.hover, -1)
+
+	// A press on the thumb holds it; the strip follows the pointer at once, clamped at the end,
+	// and the page never scrolls.
+	testing.expect_value(t, ui.editor_press(&p, l, nil, x, y, false), ui.Editor_Outcome.Changed)
+	testing.expect(t, ui.editor_scrollbar_dragging(&p))
+	testing.expect(t, ui.editor_drag(&p, l, nil, x + 100, y + 200))
+	testing.expect(t, p.strip.scroll.value > 0)
+	testing.expect(t, !ui.editor_animating(&p))
+	testing.expect(t, ui.editor_drag(&p, l, nil, x + 5000, y))
+	end := p.strip.scroll.value
+	last := ui.editor_strip_card_rect(&p, l, head, len(strip_ids) - 1)
+	testing.expect(t, abs(last.x + last.width - (block.x + block.width)) < 40)
+	testing.expect_value(t, p.scroll, 0)
+	held, _ := ui.editor_strip_scrollbar(&p, l, head)
+	testing.expect(t, held.thumb.x + held.thumb.width <= held.track.x + held.track.width + 0.01)
+	testing.expect_value(t, ui.editor_release(&p), ui.Editor_Outcome.Changed)
+	testing.expect(t, !ui.editor_scrollbar_dragging(&p))
+	testing.expect_value(t, p.strip.scroll.value, end)
+
+	// A press on the track before the thumb pages back toward it, easing as the wheel does.
+	bar, _ := ui.editor_strip_scrollbar(&p, l, head)
+	_ = ui.editor_press(&p, l, nil, bar.track.x + 2, bar.track.y + bar.track.height / 2, false)
+	testing.expect(t, !ui.editor_scrollbar_dragging(&p))
+	strip_settle(&p)
+	testing.expect(t, p.strip.scroll.value < end)
+
+	// Leaving the page drops the hover, so the thumb narrows again.
+	testing.expect(t, ui.editor_hover_clear(&p))
+	testing.expect(t, !p.strip.bar_hover)
+}
