@@ -123,6 +123,43 @@ Pane_Settings :: struct {
 	minimum_columns, minimum_rows: int,
 	focus_border, unfocused_dim:   int,
 }
+// The weight of Markdown headings.
+Heading_Weight :: enum int {
+	Regular,
+	Semibold,
+	Bold,
+}
+HEADING_WEIGHT_NAME :: [Heading_Weight]string {
+	.Regular  = "regular",
+	.Semibold = "semibold",
+	.Bold     = "bold",
+}
+HEADING_WEIGHT_LABEL :: [Heading_Weight]string {
+	.Regular  = "Regular",
+	.Semibold = "Semibold",
+	.Bold     = "Bold",
+}
+#assert(len(Heading_Weight) == 3)
+HEADING_WEIGHT_NAMES :: []string {
+	HEADING_WEIGHT_NAME[Heading_Weight(0)],
+	HEADING_WEIGHT_NAME[Heading_Weight(1)],
+	HEADING_WEIGHT_NAME[Heading_Weight(2)],
+}
+HEADING_WEIGHT_LABELS :: []string {
+	HEADING_WEIGHT_LABEL[Heading_Weight(0)],
+	HEADING_WEIGHT_LABEL[Heading_Weight(1)],
+	HEADING_WEIGHT_LABEL[Heading_Weight(2)],
+}
+// How Markdown panes set their text. Families are empty to follow the interface and shell fonts, and
+// a zero size follows the interface's; the ratios multiply the body size.
+Markdown_Settings :: struct {
+	font_family, code_font_family: string,
+	font_size, line_height:        f64,
+	heading_sizes:                 [6]f64,
+	heading_weight:                Heading_Weight,
+	paragraph_spacing, code_size:  f64,
+	text_width:                    int,
+}
 Tabs_Orientation :: enum int {
 	Vertical,
 	Horizontal,
@@ -578,6 +615,7 @@ Settings :: struct {
 	themes:          [dynamic]Custom_Theme,
 	active_theme:    Theme,
 	pane:            Pane_Settings,
+	markdown:        Markdown_Settings,
 	motion:          Motion_Settings,
 	tabs:            Tabs_Settings,
 	status:          Status_Settings,
@@ -595,6 +633,9 @@ SCHEMA_CAPACITY :: 128
 // Font zoom keys keep the shell font size within this span, apart from the file's `valid` range
 // and the slider's comfortable one.
 FONT_SIZE_ZOOM :: Range{6, 72}
+// What a Markdown heading size accepts, as a multiple of the text size, and a slider's span of it.
+HEADING_SIZE_RANGE :: Range{0.5, 4}
+HEADING_SIZE_SLIDER :: Range{0.75, 3}
 KEY_BINDING_PREFIX :: "keys."
 // The settings key of the leader shortcut, which binding validation reports beside the "keys." rows.
 LEADER_KEY :: "input.leader"
@@ -646,6 +687,10 @@ Live_Choices :: enum {
 	Themes,
 	Shell_Fonts,
 	Interface_Fonts,
+	// Families for Markdown text, after the empty choice that follows the interface font.
+	Markdown_Fonts,
+	// Monospaced families for Markdown code, after the empty choice that follows the shell font.
+	Markdown_Code_Fonts,
 }
 // When the running app applies a saved value.
 Apply_Timing :: enum {
@@ -690,6 +735,8 @@ group_title :: proc(key: string) -> string {
 		return "Motion"
 	case "pane":
 		return "Panes"
+	case "markdown":
+		return "Markdown"
 	case "tab":
 		return "Tabs"
 	case "tabs":
@@ -827,6 +874,163 @@ SCHEMA :: [?]Schema_Entry {
 		valid = {0, 32767},
 		description = "Minimum content rows for a new pane or split. Zero disables the height check; existing " +
 			"panes may shrink.",
+	},
+	{
+		key = "markdown.font_family",
+		title = "Text font",
+		kind = .String,
+		offset = offset_of(Settings, markdown) + offset_of(Markdown_Settings, font_family),
+		default_value = "",
+		valid = {0, 256},
+		control = .Choice,
+		live_choices = .Markdown_Fonts,
+		description = "Font family for Markdown text. Empty follows the GUI font.",
+	},
+	{
+		key = "markdown.font_size",
+		title = "Text size",
+		kind = .Float,
+		offset = offset_of(Settings, markdown) + offset_of(Markdown_Settings, font_size),
+		default_value = "0",
+		valid = {0, 72},
+		slider = {0, 24},
+		// 0.75 pt is one pixel at 96 DPI, so each step lands on a whole pixel size.
+		step = 0.75,
+		description = "Markdown text size in points. Zero follows the GUI font size, one step larger.",
+	},
+	{
+		key = "markdown.line_height",
+		title = "Line height",
+		kind = .Float,
+		offset = offset_of(Settings, markdown) + offset_of(Markdown_Settings, line_height),
+		default_value = "1.5",
+		valid = {1, 3},
+		slider = {1, 2.5},
+		step = 0.05,
+		description = "Line height of Markdown text as a multiple of its size; headings keep their tighter " +
+			"spacing in proportion.",
+	},
+	{
+		key = "markdown.paragraph_spacing",
+		title = "Paragraph spacing",
+		kind = .Float,
+		offset = offset_of(Settings, markdown) + offset_of(Markdown_Settings, paragraph_spacing),
+		default_value = "0.7",
+		valid = {0, 3},
+		slider = {0, 2},
+		step = 0.05,
+		description = "Space between paragraphs, lists, code blocks and tables while reading, in lines.",
+	},
+	{
+		key = "markdown.text_width",
+		title = "Text width",
+		kind = .Int,
+		offset = offset_of(Settings, markdown) + offset_of(Markdown_Settings, text_width),
+		default_value = "720",
+		valid = {0, 4000},
+		slider = {0, 1600},
+		step = 20,
+		description = "Widest the reading column grows, in DIPs; it stays centred in wider panes. Zero fills " +
+			"the pane.",
+	},
+	{
+		key = "markdown.heading_weight",
+		title = "Heading weight",
+		kind = .Enum,
+		offset = offset_of(Settings, markdown) + offset_of(Markdown_Settings, heading_weight),
+		default_value = "bold",
+		names = HEADING_WEIGHT_NAMES,
+		labels = HEADING_WEIGHT_LABELS,
+		description = "Font weight of Markdown headings.",
+	},
+	{
+		key = "markdown.h1_size",
+		title = "Heading 1 size",
+		kind = .Float,
+		offset = offset_of(Settings, markdown) + offset_of(Markdown_Settings, heading_sizes),
+		default_value = "1.75",
+		valid = HEADING_SIZE_RANGE,
+		slider = HEADING_SIZE_SLIDER,
+		step = 0.05,
+		description = "Size of level 1 headings as a multiple of the text size.",
+	},
+	{
+		key = "markdown.h2_size",
+		title = "Heading 2 size",
+		kind = .Float,
+		offset = offset_of(Settings, markdown) + offset_of(Markdown_Settings, heading_sizes) + 1 * size_of(f64),
+		default_value = "1.4",
+		valid = HEADING_SIZE_RANGE,
+		slider = HEADING_SIZE_SLIDER,
+		step = 0.05,
+		description = "Size of level 2 headings as a multiple of the text size.",
+	},
+	{
+		key = "markdown.h3_size",
+		title = "Heading 3 size",
+		kind = .Float,
+		offset = offset_of(Settings, markdown) + offset_of(Markdown_Settings, heading_sizes) + 2 * size_of(f64),
+		default_value = "1.15",
+		valid = HEADING_SIZE_RANGE,
+		slider = HEADING_SIZE_SLIDER,
+		step = 0.05,
+		description = "Size of level 3 headings as a multiple of the text size.",
+	},
+	{
+		key = "markdown.h4_size",
+		title = "Heading 4 size",
+		kind = .Float,
+		offset = offset_of(Settings, markdown) + offset_of(Markdown_Settings, heading_sizes) + 3 * size_of(f64),
+		default_value = "1",
+		valid = HEADING_SIZE_RANGE,
+		slider = HEADING_SIZE_SLIDER,
+		step = 0.05,
+		description = "Size of level 4 headings as a multiple of the text size.",
+	},
+	{
+		key = "markdown.h5_size",
+		title = "Heading 5 size",
+		kind = .Float,
+		offset = offset_of(Settings, markdown) + offset_of(Markdown_Settings, heading_sizes) + 4 * size_of(f64),
+		default_value = "1",
+		valid = HEADING_SIZE_RANGE,
+		slider = HEADING_SIZE_SLIDER,
+		step = 0.05,
+		description = "Size of level 5 headings as a multiple of the text size.",
+	},
+	{
+		key = "markdown.h6_size",
+		title = "Heading 6 size",
+		kind = .Float,
+		offset = offset_of(Settings, markdown) + offset_of(Markdown_Settings, heading_sizes) + 5 * size_of(f64),
+		default_value = "1",
+		valid = HEADING_SIZE_RANGE,
+		slider = HEADING_SIZE_SLIDER,
+		step = 0.05,
+		description = "Size of level 6 headings as a multiple of the text size.",
+	},
+	{
+		key = "markdown.code_font_family",
+		title = "Code font",
+		kind = .String,
+		offset = offset_of(Settings, markdown) + offset_of(Markdown_Settings, code_font_family),
+		default_value = "",
+		valid = {0, 256},
+		control = .Choice,
+		live_choices = .Markdown_Code_Fonts,
+		choice_filter = "font.show_all",
+		description = "Font family for Markdown code. Empty follows the shell font.",
+	},
+	{
+		key = "markdown.code_size",
+		title = "Code size",
+		kind = .Float,
+		offset = offset_of(Settings, markdown) + offset_of(Markdown_Settings, code_size),
+		default_value = "0.9",
+		valid = {0.5, 2},
+		slider = {0.6, 1.5},
+		step = 0.05,
+		description = "Size of Markdown code as a multiple of the text size.",
 	},
 	{
 		key = "motion.speed",

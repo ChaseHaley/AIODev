@@ -199,6 +199,7 @@ SETTINGS_GROUP_AREAS := [?]struct {
 	{"Window", .General},
 	{"Tabs", .General},
 	{"Panes", .General},
+	{"Markdown", .General},
 	{"Terminal", .General},
 	{"Cursor", .General},
 	{"Scrollback", .General},
@@ -907,8 +908,27 @@ setting_live_choices :: proc(
 		return font.family_choices(fonts, s.font.show_all, s.font.family), nil, true
 	case .Interface_Fonts:
 		return font.family_choices(fonts, true, s.interface.font_family), nil, true
+	case .Markdown_Fonts:
+		families := font.family_choices(fonts, true, s.markdown.font_family)
+		choices, labels = markdown_font_choices(families, "GUI font")
+		return choices, labels, true
+	case .Markdown_Code_Fonts:
+		families := font.family_choices(fonts, s.font.show_all, s.markdown.code_font_family)
+		choices, labels = markdown_font_choices(families, "Shell font")
+		return choices, labels, true
 	}
 	return nil, nil, false
+}
+
+// A Markdown font list: first the empty value, labelled with the font it follows, then the families
+// by name. Labels run parallel to the choices, so the empty one has its own.
+@(private)
+markdown_font_choices :: proc(families: []string, follows: string) -> (choices, labels: []string) {
+	choices = make([]string, len(families) + 1, context.temp_allocator)
+	labels = make([]string, len(families) + 1, context.temp_allocator)
+	choices[0], labels[0] = "", follows
+	for family, i in families {choices[i + 1], labels[i + 1] = family, family}
+	return
 }
 
 // The theme selector lists theme files by display name, then custom themes in settings file order.
