@@ -125,6 +125,51 @@ pen_dot :: proc(p: Icon_Pen, x, y: f32) {
 	draw_rect(p.list, {rect = r, color = p.ink, radius = d / 2})
 }
 
+// An almond outline from two circular arcs around a round pupil, centred on a whole pixel so the
+// drawing is symmetric at every scale. The pupil's edges and the lids' outermost edges land on whole
+// pixels. Crossed out, the pupil gives way to a slash from corner to corner, and the lids break where
+// it crosses them.
+@(private = "file")
+pen_eye :: proc(p: Icon_Pen, crossed: bool) {
+	half := p.width / 2
+	c := [2]f32{math.round(p.origin.x + 8 * p.unit), math.round(p.origin.y + 8 * p.unit)}
+	// Half the distance between the corners, and from the centre to the middle of each lid.
+	spread := math.round(6.75 * p.unit + half) - half
+	lift := math.round(4 * p.unit + half) - half
+	radius := (spread * spread + lift * lift) / (2 * lift)
+	reach := math.asin(spread / radius)
+	upper := c + [2]f32{0, radius - lift}
+	lower := c - [2]f32{0, radius - lift}
+	if !crossed {
+		_ = render.push_arc(p.list, upper, radius, -math.PI / 2 - reach, 2 * reach, p.width, p.ink)
+		_ = render.push_arc(p.list, lower, radius, math.PI / 2 - reach, 2 * reach, p.width, p.ink)
+		pupil := 2 * math.round(2 * p.unit)
+		pupil_rect := render.Rect{c.x - pupil / 2, c.y - pupil / 2, pupil, pupil}
+		draw_rect(p.list, {rect = pupil_rect, color = p.ink, radius = pupil / 2})
+		return
+	}
+	// The slash meets the upper lid up and to the left of the centre, and the lower lid opposite it.
+	along := [2]f32{1, 1} / math.SQRT_TWO
+	toward := c - upper
+	b := toward.x * along.x + toward.y * along.y
+	t := -b - math.sqrt(b * b - (toward.x * toward.x + toward.y * toward.y) + radius * radius)
+	meet := toward + t * along
+	angle := math.atan2(meet.y, meet.x)
+	// Each lid stops short of the slash, leaving three quarters of a stroke's width between them. A
+	// lid crossing the slash at an angle needs a longer stretch of itself left out for that clearance.
+	crossing := abs(along.x * meet.x + along.y * meet.y) / radius
+	gap := 1.75 * p.width / (radius * crossing)
+	start := -math.PI / 2 - reach
+	_ = render.push_arc(p.list, upper, radius, start, angle - gap - start, p.width, p.ink)
+	_ = render.push_arc(p.list, upper, radius, angle + gap, start + 2 * reach - angle - gap, p.width, p.ink)
+	start = math.PI / 2 - reach
+	_ = render.push_arc(p.list, lower, radius, start, angle + math.PI - gap - start, p.width, p.ink)
+	_ = render.push_arc(p.list, lower, radius, angle + math.PI + gap,
+		start + 2 * reach - angle - math.PI - gap, p.width, p.ink)
+	slash := 6 * p.unit * [2]f32{1, 1}
+	_ = render.push_segment(p.list, c - slash, c + slash, p.width, p.ink)
+}
+
 // Draws `icon` centred in `area` at `size` DIPs.
 icon_draw :: proc(
 	list: ^render.Draw_List,
@@ -265,10 +310,7 @@ icon_draw :: proc(
 	case .More_Vertical:
 		for y in ([?]f32{3, 8, 13}) {pen_dot(p, 8, y)}
 	case .Eye, .Eye_Off:
-		pen_path(p, {1, 8}, {4, 4.5}, {8, 3.5}, {12, 4.5}, {15, 8})
-		pen_path(p, {1, 8}, {4, 11.5}, {8, 12.5}, {12, 11.5}, {15, 8})
-		pen_arc(p, 8, 8, 2, 0, 2 * math.PI)
-		if icon == .Eye_Off {pen_path(p, {2, 2}, {14, 14})}
+		pen_eye(p, icon == .Eye_Off)
 	case .Grip:
 		for y in ([?]f32{4, 8, 12}) {
 			pen_dot(p, 6, y)
