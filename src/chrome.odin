@@ -291,6 +291,14 @@ caption_tooltip :: proc(_: ^App, w: ^Window, x, y: f32) -> string {
 	return ""
 }
 
+// A linked window's close returns its pane to the tab, as the linked-window command does there. The
+// other caption buttons belong to Windows and run no command.
+@(private)
+caption_command :: proc(_: ^App, w: ^Window, x, y: f32) -> (Action, bool) {
+	button, hit := ui.caption_hit(f32(w.width), x, y, w.scale).?
+	return .Linked_Window, hit && button == .Close && window_linked(w)
+}
+
 @(private)
 caption_press :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) {
 	if e.button != .Left || drag_held(w) {return}

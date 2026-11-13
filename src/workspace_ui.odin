@@ -720,6 +720,12 @@ workspace_button_hover :: proc(
 @(private)
 workspace_button_tooltip :: proc(_: ^App, _: ^Window, _, _: f32) -> string {return "Workspaces"}
 
+// The chip opens the workspace picker, as Change workspace does.
+@(private)
+workspace_button_command :: proc(_: ^App, _: ^Window, _, _: f32) -> (Action, bool) {
+	return .Change_Workspace, true
+}
+
 @(private)
 workspace_button_press :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) {
 	if e.button == .Left {workspace_picker_chip_press(app, w, e.time_ns)}

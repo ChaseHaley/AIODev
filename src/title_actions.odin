@@ -97,6 +97,12 @@ title_action_tooltip :: proc(_: ^App, w: ^Window, x, y: f32) -> string {
 }
 
 @(private)
+title_action_command :: proc(_: ^App, w: ^Window, x, y: f32) -> (Action, bool) {
+	hit := title_action_hit(w, x, y)
+	return TITLE_CONTROLS[hit].action, hit != .None
+}
+
+@(private)
 title_action_press :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) {
 	if e.button == .Left {ui.armed_press(&w.title_action_armed, title_action_hit(w, f32(e.x), f32(e.y)))}
 }
@@ -138,6 +144,11 @@ orientation_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: input
 @(private)
 orientation_tooltip :: proc(_: ^App, w: ^Window, _, _: f32) -> string {
 	return w.tabs_horizontal ? "Show vertical tabs" : "Show horizontal tabs"
+}
+
+@(private)
+orientation_command :: proc(_: ^App, _: ^Window, _, _: f32) -> (Action, bool) {
+	return .Toggle_Tabs_Orientation, true
 }
 
 @(private)

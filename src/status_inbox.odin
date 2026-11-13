@@ -718,6 +718,9 @@ status_pill_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: input
 status_pill_tooltip :: proc(_: ^App, _: ^Window, _, _: f32) -> string {return "Activity inbox"}
 
 @(private)
+status_pill_command :: proc(_: ^App, _: ^Window, _, _: f32) -> (Action, bool) {return .Status_Inbox, true}
+
+@(private)
 status_pill_press :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) {
 	if e.button == .Left {status_inbox_toggle(app, w)}
 }

@@ -80,6 +80,9 @@ Pointer_Surface :: struct {
 	tooltip:      proc(app: ^App, w: ^Window, x, y: f32) -> string,
 	// Optional: what the labelled control would do, drawn under the label while the tooltip shows.
 	tooltip_card: proc(app: ^App, w: ^Window, x, y: f32) -> Tooltip_Card,
+	// Optional: the command the labelled control runs, for a tooltip that names its shortcut. A control
+	// with a command names it here, never in its label, so a rebinding reaches every tooltip at once.
+	command:      proc(app: ^App, w: ^Window, x, y: f32) -> (Action, bool),
 	// Capture loss: the surface drops its hover, armed control and drag, whether or not it holds a button.
 	cancel:       proc(app: ^App, w: ^Window),
 	// The pointer left the window: the surface drops its hover, as a move another surface owns does.
@@ -147,7 +150,7 @@ pointer_surfaces := [Pointer_Target]Pointer_Surface {
 	// native caption moves keep; a caption move outside the client area clears it instead.
 	.Caption          = {
 		claims = caption_claims, hover = caption_hover, press = caption_press, release = caption_release,
-		tooltip = caption_tooltip, cancel = caption_cancel, holds = true,
+		tooltip = caption_tooltip, command = caption_command, cancel = caption_cancel, holds = true,
 	},
 	.Confirmation     = {
 		claims = confirmation_claims, hover = confirmation_pointer_hover, press = confirmation_press,
@@ -159,13 +162,13 @@ pointer_surfaces := [Pointer_Target]Pointer_Surface {
 	},
 	.Tab_Orientation  = {
 		claims = orientation_claims, hover = orientation_hover, press = orientation_press,
-		release = orientation_release, tooltip = orientation_tooltip, cancel = orientation_cancel,
-		leave = orientation_leave, holds = true,
+		release = orientation_release, tooltip = orientation_tooltip, command = orientation_command,
+		cancel = orientation_cancel, leave = orientation_leave, holds = true,
 	},
 	.Title_Action     = {
 		claims = title_action_claims, hover = title_action_pointer_hover, press = title_action_press,
-		release = title_action_release, tooltip = title_action_tooltip, cancel = title_action_cancel,
-		leave = title_action_leave, holds = true,
+		release = title_action_release, tooltip = title_action_tooltip, command = title_action_command,
+		cancel = title_action_cancel, leave = title_action_leave, holds = true,
 	},
 	.Hidden_Panes     = {
 		claims = hidden_panes_claims, hover = hidden_panes_hover, press = hidden_panes_press,
@@ -177,12 +180,13 @@ pointer_surfaces := [Pointer_Target]Pointer_Surface {
 	},
 	.Workspace_Button = {
 		claims = workspace_button_claims, hover = workspace_button_hover, press = workspace_button_press,
-		tooltip = workspace_button_tooltip, leave = workspace_button_leave, holds = true, blurs_find = true,
+		tooltip = workspace_button_tooltip, command = workspace_button_command, leave = workspace_button_leave,
+		holds = true, blurs_find = true,
 	},
 	.Status_Pill      = {
 		claims = status_pill_claims, hover = status_pill_hover, press = status_pill_press,
-		tooltip = status_pill_tooltip, leave = status_pill_leave, holds = true, blurs_find = true,
-		under_floats = true,
+		tooltip = status_pill_tooltip, command = status_pill_command, leave = status_pill_leave, holds = true,
+		blurs_find = true, under_floats = true,
 	},
 	.Divider          = {
 		claims = divider_claims, hover = divider_hover, press = divider_pointer_press, release = divider_release,
@@ -195,18 +199,18 @@ pointer_surfaces := [Pointer_Target]Pointer_Surface {
 	},
 	.Tabs             = {
 		claims = tabs_claims, hover = tabs_hover, press = tab_interaction_press, release = tabs_release,
-		tooltip = tabs_tooltip, cancel = tabs_cancel, leave = tabs_leave, held = tabs_held, holds = true,
-		blurs_find = true, under_floats = true,
+		tooltip = tabs_tooltip, command = tabs_command, cancel = tabs_cancel, leave = tabs_leave,
+		held = tabs_held, holds = true, blurs_find = true, under_floats = true,
 	},
 	.Floating         = {
 		claims = floating_claims, hover = floating_hover, press = floating_press, release = floating_release,
-		tooltip = floating_tooltip, cancel = floating_pointer_cancel, leave = floating_leave,
-		held = floating_held, holds = true, blurs_find = true,
+		tooltip = floating_tooltip, command = floating_command, cancel = floating_pointer_cancel,
+		leave = floating_leave, held = floating_held, holds = true, blurs_find = true,
 	},
 	.Pane_Header      = {
 		claims = header_claims, hover = header_hover, press = pane_header_press, release = header_release,
-		tooltip = header_tooltip, tooltip_card = header_tooltip_card, cancel = header_cancel,
-		leave = header_leave, held = pane_drag_held, holds = true, blurs_find = true,
+		tooltip = header_tooltip, tooltip_card = header_tooltip_card, command = header_command,
+		cancel = header_cancel, leave = header_leave, held = pane_drag_held, holds = true, blurs_find = true,
 	},
 	.Scrollbar        = {
 		claims = scrollbar_claims, hover = scrollbar_hover, press = scrollbar_press,

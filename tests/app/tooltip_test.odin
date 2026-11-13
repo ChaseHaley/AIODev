@@ -1,8 +1,10 @@
 package app_test
 
 import app "../../src"
+import "aio:commands"
 import "aio:input"
 import "aio:render"
+import "aio:settings"
 import "aio:ui"
 import "core:testing"
 import "core:time"
@@ -147,4 +149,36 @@ tooltip_profile_chevron_uses_shared_hit_bounds :: proc(t: ^testing.T) {
 	app.tooltip_hover(&state, &w, .Tabs,
 		input.Mouse_Move_Event{x = i32(r.x + r.width / 2), y = i32(r.y + r.height + 1)})
 	testing.expect_value(t, app.tooltip_current(&w), "")
+}
+
+// A control that runs a command shows that command's first shortcut beside its label, read from the
+// registry at each draw: Settings rebinding it changes the tooltip at once, and unbinding it removes it.
+@(test)
+tooltip_shortcut_follows_the_commands_binding :: proc(t: ^testing.T) {
+	state := app.App{registry = commands.create()}
+	defer commands.destroy(&state.registry)
+	if !testing.expect_value(t, app.register_actions(&state.registry), commands.Error.None) {return}
+	w := app.Window{width = 900, height = 600, scale = 1}
+	r := app.title_action_rect(&w, .Palette)
+	x, y := r.x + r.width / 2, r.y + r.height / 2
+	app.tooltip_hover(&state, &w, .Title_Action, input.Mouse_Move_Event{x = i32(x), y = i32(y)})
+	testing.expect_value(t, app.tooltip_current(&w), "Command palette")
+	buffer: [commands.SHORTCUT_TEXT_CAP]u8
+	testing.expect_value(t, app.tooltip_shortcut(&state, &w, .Title_Action, x, y, buffer[:]), "Ctrl+Shift+P")
+
+	steps := [?]struct {
+		setting, shortcut: string,
+	}{{"keys.app.command_palette = Ctrl+Alt+K\n", "Ctrl+Alt+K"}, {"keys.app.command_palette =\n", ""}}
+	for step in steps {
+		parsed, diagnostics, parse_error := settings.parse(step.setting)
+		settings.diagnostics_destroy(&diagnostics)
+		if !testing.expect_value(t, parse_error, nil) {return}
+		_, report_error := app.binding_report(&state.registry, &parsed)
+		settings.destroy(&parsed)
+		if !testing.expect_value(t, report_error, nil) {return}
+		testing.expect_value(t, app.tooltip_shortcut(&state, &w, .Title_Action, x, y, buffer[:]), step.shortcut)
+	}
+
+	// Minimize belongs to Windows and runs no command.
+	testing.expect_value(t, app.tooltip_shortcut(&state, &w, .Caption, f32(w.width) - 130, 20, buffer[:]), "")
 }

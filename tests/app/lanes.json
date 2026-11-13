@@ -63,6 +63,7 @@
     "tooltip_covers_scrollback_find_buttons",
     "tooltip_neighbor_buttons_skip_second_delay",
     "tooltip_neighbor_grace_expires",
+    "tooltip_shortcut_follows_the_commands_binding",
     "tooltip_skips_labeled_vertical_new_tab",
     "tooltip_waits_for_its_hover_deadline",
     "tooltip_workspace_color_wheel",
