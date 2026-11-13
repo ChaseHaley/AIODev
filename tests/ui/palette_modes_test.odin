@@ -300,8 +300,8 @@ palette_ranking_is_exact_prefix_substring_then_natural_order :: proc(t: ^testing
 	testing.expect_value(t, names[4], "notes")
 	testing.expect(t, !p.results[4].title_match)
 
-	// Tab and workspace ranking is exact, prefix, or substring only; a fuzzy subsequence
-	// of a long process title is not a match.
+	// Tab and workspace ranking stops at word starts; the scattered letters of a long process title
+	// are not a match.
 	ui.palette_text(&p, &registry, "nws")
 	testing.expect_value(t, len(p.results), 0)
 }
@@ -334,7 +334,7 @@ palette_workspace_query_returns_every_owned_tab_in_all_and_tabs_modes :: proc(t:
 			}
 		}
 	}
-	// Workspace names use the same literal match classes as tab and process titles.
+	// Workspace names use the same match classes as tab and process titles; "mn" is scattered letters.
 	ui.palette_open_mode(&p, &registry, .Tabs)
 	ui.palette_text(&p, &registry, "mn")
 	testing.expect_value(t, len(p.results), 0)
@@ -380,6 +380,86 @@ palette_settings_match_label_before_key :: proc(t: ^testing.T) {
 	testing.expect(t, p.results[0].title_match)
 	testing.expect_value(t, ui.palette_result_name(&p, p.results[1]), "aio.key")
 	testing.expect(t, !p.results[1].title_match)
+}
+
+// "c1" starts "card" and "1", so it finds the tab "(card 1) foo", lighting those two letters. Word
+// starts rank below the label's exact, prefix and substring classes.
+@(test)
+palette_tabs_match_word_starts_below_substrings :: proc(t: ^testing.T) {
+	tabs := Mode_Source {
+		items = []ui.Palette_Item {
+			{"(card 1) foo", "pwsh", "work", 1},
+			{"my c1 notes", "pwsh", "work", 2},
+			{"c1 build", "pwsh", "work", 3},
+			{"cards", "pwsh", "work", 4},
+		},
+	}
+	p: ui.Palette
+	registry := mode_palette(t, &p, nil, &tabs, nil)
+	defer commands.destroy(&registry)
+	defer ui.palette_destroy(&p)
+	ui.palette_open_mode(&p, &registry, .Tabs)
+	ui.palette_text(&p, &registry, "c1")
+	if !testing.expect_value(t, len(p.results), 3) {return}
+	for id, i in ([?]u64{3, 2, 1}) {
+		testing.expect_value(t, ui.palette_target(&p, p.results[i]).id, id)
+		testing.expect(t, p.results[i].title_match)
+	}
+	if testing.expect_value(t, len(p.results[2].positions), 2) {
+		testing.expect_value(t, p.results[2].positions[0], 1)
+		testing.expect_value(t, p.results[2].positions[1], 6)
+	}
+}
+
+// Settings and commands keep scattered letters, below the label's word starts.
+@(test)
+palette_word_starts_rank_above_scattered_letters :: proc(t: ^testing.T) {
+	rows := [?]ui.Palette_Setting {
+		{key = "a.refresh", title = "Refresh", group = "Panes"},
+		{key = "a.restart", title = "Restart Shell", group = "Panes"},
+	}
+	p: ui.Palette
+	registry := mode_palette(t, &p, rows[:], nil, nil)
+	defer commands.destroy(&registry)
+	defer ui.palette_destroy(&p)
+	ui.palette_open_mode(&p, &registry, .Settings)
+	ui.palette_text(&p, &registry, "rsh")
+	if !testing.expect_value(t, len(p.results), 2) {return}
+	testing.expect_value(t, ui.palette_result_name(&p, p.results[0]), "a.restart")
+	testing.expect_value(t, ui.palette_result_name(&p, p.results[1]), "a.refresh")
+}
+
+// A setting is found by the label of one of its choices, below any match of its own text, and the
+// result names the choice it matched with that choice's letters lit, not the title's.
+@(test)
+palette_settings_match_choice_labels_below_their_own_text :: proc(t: ^testing.T) {
+	@(static, rodata) view_names := [?]string{"comfy", "dense"}
+	@(static, rodata) view_labels := [?]string{"Comfy", "Dense"}
+	rows := [?]ui.Palette_Setting {
+		{key = "status.panel_view", title = "Activity panel view", group = "Activity", control = .Choice,
+			choices = view_names[:], choice_labels = view_labels[:]},
+		{key = "pane.comfy", title = "Comfy panes", group = "Panes"},
+	}
+	p: ui.Palette
+	registry := mode_palette(t, &p, rows[:], nil, nil)
+	defer commands.destroy(&registry)
+	defer ui.palette_destroy(&p)
+	for mode in ([?]ui.Palette_Mode{.All, .Settings}) {
+		ui.palette_open_mode(&p, &registry, mode)
+		ui.palette_text(&p, &registry, "comfy")
+		if !testing.expect_value(t, len(p.results), 2) {continue}
+		testing.expect_value(t, ui.palette_result_name(&p, p.results[0]), "pane.comfy")
+		testing.expect_value(t, p.results[0].value, "")
+		found := p.results[1]
+		testing.expect_value(t, ui.palette_result_name(&p, found), "status.panel_view")
+		testing.expect_value(t, found.value, "Comfy")
+		testing.expect(t, !found.title_match)
+		testing.expect_value(t, len(found.positions), 5)
+	}
+	// Choices match up to word starts only: scattered letters across short labels would match anything.
+	ui.palette_open_mode(&p, &registry, .Settings)
+	ui.palette_text(&p, &registry, "dns")
+	testing.expect_value(t, len(p.results), 0)
 }
 
 @(test)

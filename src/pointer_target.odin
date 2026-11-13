@@ -246,11 +246,24 @@ POINTER_LINKED_ABSENT :: bit_set[Pointer_Target] {
 	.Tabs,
 }
 
+// The chrome Fullscreen hides: the title bar's caption buttons and controls, and the tabs. The caption
+// buttons and the tab strip keep their places while hidden, over the pane header at the top edge.
+@(private = "file")
+POINTER_SCREEN_ABSENT :: bit_set[Pointer_Target] {
+	.Caption,
+	.Tab_Orientation,
+	.Title_Action,
+	.Workspace_Button,
+	.Status_Pill,
+	.Tabs,
+}
+
 // The topmost surface whose area holds the point. Below the modal surfaces, callers handle presses
 // and drags that already hold the pointer before acting on the answer.
 pointer_target :: proc(app: ^App, w: ^Window, x, y: f32) -> Pointer_Target {
 	for target in Pointer_Target {
 		if window_linked(w) && target in POINTER_LINKED_ABSENT {continue}
+		if w.pane_fill == .Screen && target in POINTER_SCREEN_ABSENT {continue}
 		if pointer_surfaces[target].under_floats && floating_covers(w, x, y) {continue}
 		if pointer_surfaces[target].claims(app, w, x, y) {return target}
 	}
