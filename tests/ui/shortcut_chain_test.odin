@@ -5,7 +5,7 @@ import "aio:input"
 import "aio:ui"
 import "core:testing"
 
-// Find, Show Command Palette and Copy with their default shortcuts, and New Tab, as a surface lists them.
+// Find, Show everything palette and Copy with their default shortcuts, and New Tab, as a surface lists them.
 @(private = "file")
 chain_book :: proc() -> []ui.Shortcut_Command {
 	@(static, rodata) find := [?]commands.Shortcut{{.F, {.Control, .Shift}}}
@@ -14,7 +14,7 @@ chain_book :: proc() -> []ui.Shortcut_Command {
 	@(static, rodata) new_tab := [?]commands.Shortcut{{.T, {.Control, .Shift}}}
 	book := make([]ui.Shortcut_Command, 4, context.temp_allocator)
 	book[0] = {"keys.terminal.find", "Find", find[:]}
-	book[1] = {"keys.app.command_palette", "Show Command Palette", palette[:]}
+	book[1] = {"keys.app.command_palette", "Show everything palette", palette[:]}
 	book[2] = {"keys.edit.copy", "Copy", copy[:]}
 	book[3] = {"keys.tab.new", "New Tab", new_tab[:]}
 	return book
@@ -38,7 +38,7 @@ chain_record :: proc(
 	ui.shortcut_capture_check(c, book, key)
 }
 
-// Find applies Ctrl+Shift+P: a chain on Find and Show Command Palette.
+// Find applies Ctrl+Shift+P: a chain on Find and Show everything palette.
 @(private = "file")
 chain_find_takes_palette :: proc(t: ^testing.T, chain: ^ui.Shortcut_Chain) -> bool {
 	c: ui.Shortcut_Capture
@@ -46,7 +46,7 @@ chain_find_takes_palette :: proc(t: ^testing.T, chain: ^ui.Shortcut_Chain) -> bo
 	defer delete(draft.bytes)
 	book := chain_book()
 	chain_record(&c, &draft, "Ctrl+Shift+F", "keys.terminal.find", book, .P, {.Control, .Shift})
-	testing.expect_value(t, ui.shortcut_capture_used_by(&c), "Used by Show Command Palette")
+	testing.expect_value(t, ui.shortcut_capture_used_by(&c), "Used by Show everything palette")
 	err := ui.shortcut_chain_open(chain, book, "keys.terminal.find", ui.field_string(&draft), &c)
 	if !testing.expect_value(t, err, nil) {return false}
 	return testing.expect_value(t, len(chain.members), 2)
@@ -75,13 +75,13 @@ capture_names_every_other_command_holding_the_recorded_chord :: proc(t: ^testing
 	testing.expect_value(t, ui.shortcut_capture_used_by(&c), "")
 	shared := []ui.Shortcut_Command{book[0], book[1], {"keys.tab.close", "Close Tab", book[1].shortcuts}}
 	chain_record(&c, &draft, "Ctrl+Shift+F", "keys.terminal.find", shared, .P, {.Control, .Shift})
-	testing.expect_value(t, ui.shortcut_capture_used_by(&c), "Used by Show Command Palette, Close Tab")
+	testing.expect_value(t, ui.shortcut_capture_used_by(&c), "Used by Show everything palette, Close Tab")
 	// Backspace removes the alternative, which leaves nothing recorded to clash.
 	ui.shortcut_capture_key(&c, &draft, "Ctrl+Shift+F", .Alternatives, press(.Backspace), 0)
 	testing.expect_value(t, ui.shortcut_capture_used_by(&c), "")
 }
 
-// The owner's example: Find takes Ctrl+Shift+P, Show Command Palette then takes Copy's Ctrl+Shift+C,
+// The owner's example: Find takes Ctrl+Shift+P, Show everything palette then takes Copy's Ctrl+Shift+C,
 // and removing Copy's Ctrl+Shift+C resolves the whole chain.
 @(test)
 chain_appends_each_owner_and_resolves_when_no_chord_is_held_twice :: proc(t: ^testing.T) {

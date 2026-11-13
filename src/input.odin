@@ -423,11 +423,7 @@ on_wheel :: proc(app: ^App, w: ^Window, e: input.Mouse_Wheel_Event) {
 	   f32(e.x) < rail_area_rect.x + rail_area_rect.width &&
 	   f32(e.y) >= rail_area_rect.y &&
 	   f32(e.y) < rail_area_rect.y + rail_area_rect.height {
-		if layout, ok := rail_current_layout(w); ok {
-			step := f32(math.sign(e.delta_y)) * 3 * layout.row_height
-			w.rail_scroll = ui.rail_scroll_clamped(layout, w.rail_scroll - step)
-			w.dirty = true
-		}
+		rail_wheel(app, w, e.delta_y)
 		return
 	}
 	w.wheel_remainder += e.delta_y * WHEEL_LINES

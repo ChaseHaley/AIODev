@@ -1655,7 +1655,7 @@ SCHEMA :: [?]Schema_Entry {
 		title = "Cursor style",
 		kind = .Enum,
 		offset = offset_of(Settings, cursor) + offset_of(Cursor_Settings, style),
-		default_value = "block",
+		default_value = "bar",
 		names = CURSOR_STYLE_NAMES,
 		labels = CURSOR_STYLE_LABELS,
 		description = "Cursor shape: block, bar or underline.",
@@ -1665,7 +1665,7 @@ SCHEMA :: [?]Schema_Entry {
 		title = "Cursor blink",
 		kind = .Bool,
 		offset = offset_of(Settings, cursor) + offset_of(Cursor_Settings, blink),
-		default_value = "false",
+		default_value = "true",
 		description = "Blink the cursor.",
 	},
 	{

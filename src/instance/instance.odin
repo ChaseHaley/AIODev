@@ -118,7 +118,7 @@ Paths :: struct {
 	logs:     string,
 	log:      string,
 	layout:   string,
-	// What the command palette has run, for its frecency order.
+	// What the everything palette has run, for its frecency order.
 	palette:  string,
 	// The record each pane's agent session hook writes, one file per pane key.
 	agents:   string,

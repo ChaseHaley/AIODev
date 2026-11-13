@@ -65,11 +65,14 @@ tab_menu_scope :: proc(w: ^Window) -> int {
 	return count
 }
 
-// Whether tab `index` draws as marked. While the menu is open on an unmarked tab, only that tab does.
+// Whether tab `index` draws as marked. While the menu is open on an unmarked tab, only that tab does. A
+// group held by its chip marks its tabs only to carry them; the group's outline shows it is held instead.
 tab_marked_shown :: proc(w: ^Window, index: int) -> bool {
+	tab := w.workspace.tabs[index]
+	if held := tab_group_held(w); held != 0 && tab.group == held {return false}
 	target := tab_menu_target(w)
 	if target >= 0 && tab_menu_group(w) == nil && !w.workspace.tabs[target].marked {return index == target}
-	return w.workspace.tabs[index].marked
+	return tab.marked
 }
 
 tab_menu_open :: proc(app: ^App, w: ^Window, index: int, x, y: f32) {
@@ -247,7 +250,9 @@ tab_submenu_open :: proc(app: ^App, w: ^Window, row: int, select_first: bool) {
 		@(static, rodata) colors := WORKSPACE_ICON_COLORS
 		for color, i in colors[1:] {
 			swatch := workspace_icon_tint(i + 1, app.theme.text)
-			add(sub, {label = color.name, swatch = swatch, checked = group.color == i + 1, enabled = true,
+			// A colour another group of this name has is taken (WORK-460).
+			free := !tab_group_taken(w.workspace, group.name, i + 1, group.id)
+			add(sub, {label = color.name, swatch = swatch, checked = group.color == i + 1, enabled = free,
 				payload = u32(i + 1)})
 		}
 	} else {
@@ -285,7 +290,7 @@ tab_submenu_choose :: proc(app: ^App, w: ^Window, index: int) {
 	if target < 0 {return}
 	switch {
 	case action == .Tab_Group_Color && group != nil:
-		tab_group_color_set(app, w, group.id, int(payload))
+		_ = tab_group_color_set(app, w, group.id, int(payload))
 	case action == .Add_Tab_To_Group && payload == 0:
 		created := tab_group_create(app, w, target)
 		if created == nil {notify(app, .Error, "Could not make the group."); return}

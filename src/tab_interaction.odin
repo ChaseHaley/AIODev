@@ -63,6 +63,7 @@ tab_chrome_hit :: proc(
 
 tab_interaction_press :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) {
 	x, y := f32(e.x), f32(e.y)
+	if e.button == .Left && !w.tabs_horizontal && rail_scrollbar_press(app, w, x, y) {return}
 	hit := tab_chrome_hit(app, w, x, y, e.button)
 	// A Left press draws its tab, new-tab button or rail row pressed until the release; the strip's
 	// profile chevron opens its menu without drawing pressed.
@@ -151,10 +152,13 @@ tabs_claims :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {
 @(private)
 tabs_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: input.Mouse_Move_Event) {
 	x, y := f32(e.x), f32(e.y)
+	// The rail's scrollbar lies over the right of its rows and takes the pointer from them.
+	on_bar := owner == .Tabs && !w.tabs_horizontal && rail_scrollbar_hover(w, x, y)
+	if owner != .Tabs && w.rail_bar_hover {w.rail_bar_hover, w.dirty = false, true}
 	hover: Tab_Chrome_Target
-	if owner == .Tabs {hover = tab_chrome_hit(app, w, x, y, .Left).target}
+	if owner == .Tabs && !on_bar {hover = tab_chrome_hit(app, w, x, y, .Left).target}
 	if hover != w.tab_hover {w.tab_hover, w.dirty = hover, true}
-	if owner == .Tabs {pointer_set(app, w, chrome_pointer(app, w, x, y))}
+	if owner == .Tabs {pointer_set(app, w, on_bar ? .Arrow : chrome_pointer(app, w, x, y))}
 }
 
 @(private)
@@ -190,6 +194,7 @@ tabs_shortcut :: proc(app: ^App, w: ^Window, x, y: f32) -> Tooltip_Shortcut {
 @(private)
 tabs_release :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) -> bool {
 	if e.button != .Left {return false}
+	if rail_scrollbar_release(w) {return true}
 	w.dirty = true
 	if tab_interaction_release(app, w, f32(e.x), f32(e.y)) {return true}
 	if !tab_drag_held(w) {return false}
@@ -203,17 +208,20 @@ tabs_release :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) -> bool
 tabs_cancel :: proc(_: ^App, w: ^Window) {
 	w.tab_hover = nil
 	ui.armed_cancel(&w.tab_close_armed)
+	_ = rail_scrollbar_release(w)
 }
 
 @(private)
 tabs_leave :: proc(_: ^App, w: ^Window) {
 	w.tab_hover = nil
+	w.rail_bar_hover = false
 	gesture_tab_unpress(w)
 }
 
 // A tab drag follows the pointer once it has started, or while no modal surface is under it.
 @(private)
 tabs_held :: proc(app: ^App, w: ^Window, under: Pointer_Target, e: input.Mouse_Move_Event) -> Pointer_Held {
+	if .Left in e.buttons && rail_scrollbar_move(w, f32(e.y)) {return .Taken}
 	if !tab_drag_held(w) || drag_active(w) == nil && pointer_modal(under) {return .Free}
 	if .Left not_in e.buttons {tab_drag_cancel(app, w); return .Ended}
 	if !tab_drag_move(app, w, f32(e.x), f32(e.y)) {return .Free}

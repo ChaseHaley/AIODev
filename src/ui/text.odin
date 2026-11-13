@@ -270,7 +270,7 @@ Text_Style :: enum {
 	Detail,
 	// The title of a dialog or overlay, semibold.
 	Title,
-	// The one large element of a surface: the command palette query and a page title.
+	// The one large element of a surface: the everything palette query and a page title.
 	Display,
 }
 
