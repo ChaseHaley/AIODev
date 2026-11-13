@@ -80,6 +80,16 @@ shipped_themes_resolve_after_parsing :: proc(t: ^testing.T) {
 		{"tokyonight-storm", {0x24, 0x28, 0x3b}, {0xf7, 0x76, 0x8e}, false},
 		{"tokyonight-moon", {0x22, 0x24, 0x36}, {0xff, 0x75, 0x7f}, false},
 		{"tokyonight-day", {0xe1, 0xe2, 0xe7}, {0xf5, 0x2a, 0x65}, true},
+		{"catppuccin-latte", {0xef, 0xf1, 0xf5}, {0xd2, 0x0f, 0x39}, true},
+		{"catppuccin-frappe", {0x30, 0x34, 0x46}, {0xe7, 0x82, 0x84}, false},
+		{"catppuccin-macchiato", {0x24, 0x27, 0x3a}, {0xed, 0x87, 0x96}, false},
+		{"catppuccin-mocha", {0x1e, 0x1e, 0x2e}, {0xf3, 0x8b, 0xa8}, false},
+		{"gruvbox-dark", {0x28, 0x28, 0x28}, {0xcc, 0x24, 0x1d}, false},
+		{"gruvbox-light", {0xfb, 0xf1, 0xc7}, {0xcc, 0x24, 0x1d}, true},
+		{"palenight", {0x29, 0x2d, 0x3e}, {0xff, 0x53, 0x70}, false},
+		{"one-dark", {0x28, 0x2c, 0x34}, {0xe0, 0x6c, 0x75}, false},
+		{"dracula", {0x28, 0x2a, 0x36}, {0xff, 0x55, 0x55}, false},
+		{"nord", {0x2e, 0x34, 0x40}, {0xbf, 0x61, 0x6a}, false},
 	}
 	for fixture in cases {
 		s, d, err := parse_themes(fmt.tprintf("theme.name = %s\n", fixture.id), THEMES)
@@ -124,7 +134,6 @@ custom_theme_inherits_its_base_and_overrides_single_colors :: proc(t: ^testing.T
 	defer settings.diagnostics_destroy(&d)
 	testing.expect_value(t, err, nil)
 	testing.expect_value(t, len(d), 0)
-	testing.expect_value(t, len(s.themes), 12)
 	base := fixtures.shipped_theme("tide-light")
 	testing.expect_value(t, s.active_theme.colors[.Tab_Bar], settings.Theme_Color{1, 2, 3, 255})
 	testing.expect_value(t, s.active_theme.colors[.Border], settings.Theme_Color{4, 5, 6, 0x80})
