@@ -51,7 +51,8 @@ tab_layout :: proc(app: ^App, w: ^Window, horizontal: bool) -> Tab_Layout {
 		if group != nil && id != (carried ? previous_carried : previous) {
 			width: f32
 			if horizontal {
-				width = ui.tab_chip_width(&w.ui_text, tab_chip(app, w, group), w.scale) / w.scale
+				chip := tab_chip(app, w, group, group.folded)
+				width = ui.tab_chip_width(&w.ui_text, chip, w.scale) / w.scale
 				if naming, editor := group_name_editing(w); naming == group && !editor {
 					width = max(width, GROUP_NAME_MIN_WIDTH)
 				}
@@ -96,16 +97,16 @@ tab_group_carried_whole :: proc(workspace: ^Workspace, id: u32) -> bool {
 	return true
 }
 
-// Group `group`'s chip: its name, as typed while it is being named, its colour in the theme, and, folded,
-// its tab count and the most urgent status of its tabs. The spinner's phase is drawing's to add.
-tab_chip :: proc(app: ^App, w: ^Window, group: ^Tab_Group) -> ui.Tab_Chip {
+// Group `group`'s chip: its name, as typed while it is being named, its colour in the theme, and, shown
+// `folded`, its tab count and the most urgent status of its tabs. The spinner's phase is drawing's to add.
+tab_chip :: proc(app: ^App, w: ^Window, group: ^Tab_Group, folded: bool) -> ui.Tab_Chip {
 	chip := ui.Tab_Chip {
 		name   = group.name,
 		color  = tab_group_color(app, group),
-		folded = group.folded,
+		folded = folded,
 	}
 	if naming, _ := group_name_editing(w); naming == group {chip.name = ui.field_string(&w.rename)}
-	if !group.folded {return chip}
+	if !folded {return chip}
 	summary: Status_Summary
 	for tab, i in w.workspace.tabs {
 		if tab.group != group.id {continue}
@@ -246,10 +247,18 @@ tab_chip_rail_rect :: proc(w: ^Window, layout: ui.Rail_Layout, run: Tab_Run) -> 
 	return row
 }
 
-// Draws a chip and its hover, `rect` being its room in the strip or its row in the rail.
-tab_chip_draw :: proc(app: ^App, w: ^Window, run: Tab_Run, rect: render.Rect) -> render.Build_Status {
-	chip := tab_chip(app, w, run.group)
+// Draws a chip and its hover, `rect` being its room in the strip or its row in the rail. A `bare` chip lies
+// on the tray that folds into it, which stands in for its own tint and outline.
+tab_chip_draw :: proc(
+	app: ^App,
+	w: ^Window,
+	run: Tab_Run,
+	rect: render.Rect,
+	bare := false,
+) -> render.Build_Status {
+	chip := tab_chip(app, w, run.group, run.group.folded)
 	chip.status_phase = status_phase(app, w, chip.status)
+	chip.bare = bare
 	r := rect
 	r.width = min(r.width, ui.tab_chip_width(&w.ui_text, chip, w.scale))
 	return ui.tab_chip_draw(&w.list, &w.ui_text, app.theme, r, chip, tab_group_state(w, run.group.id), w.scale)

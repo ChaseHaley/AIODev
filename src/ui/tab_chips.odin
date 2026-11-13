@@ -15,6 +15,8 @@ Tab_Chip :: struct {
 	count:        int,
 	status:       Status_Mark,
 	status_phase: f32,
+	// The chip lies on its group's tray as that folds into it or out of it: no tint or outline of its own.
+	bare:         bool,
 }
 
 // A long name fades out at this width rather than crowd the tabs.
@@ -98,6 +100,33 @@ tab_tray_draw :: proc(
 	return render.push_layer(list, previous.clip, previous.radius)
 }
 
+// Where a group's tray lies `open` of the way from `closed`, its folded chip, to `tray`, its tray at rest
+// open: every edge moves together, so the tray gathers into the chip's top left corner as it folds.
+tab_tray_fold_rect :: proc(closed, tray: render.Rect, open: f32) -> render.Rect {
+	left := math.lerp(closed.x, tray.x, open)
+	top := math.lerp(closed.y, tray.y, open)
+	right := math.lerp(closed.x + closed.width, tray.x + tray.width, open)
+	bottom := math.lerp(closed.y + closed.height, tray.y + tray.height, open)
+	return {left, top, right - left, bottom - top}
+}
+
+// Draws a folding group's tray at `rect`, from tab_tray_fold_rect, its corners and tint `open` of the way
+// from the folded chip's to the open tray's, so the tray hands over to the chip without a seam.
+tab_tray_fold_draw :: proc(
+	list: ^render.Draw_List,
+	rect: render.Rect,
+	color: render.Color,
+	state: Tray_State,
+	open, scale: f32,
+) {
+	radius := math.lerp(RADIUS_CONTROL, RADIUS_OVERLAY, open) * scale
+	fill, edge := color, color
+	fill.a *= math.lerp(f32(0.12), 0.09, open)
+	edge.a *= tray_edge(state) + math.lerp(f32(0.1), 0, open)
+	draw_rect(list, {rect = rect, color = fill, radius = radius})
+	draw_rect(list, {rect = rect, color = edge, radius = radius, stroke = scale})
+}
+
 // What a folded chip adds after its name or dot: the tab count, then the status. Zero while unfolded.
 @(private = "file")
 tab_chip_tail :: proc(text: ^Text, chip: Tab_Chip, scale: f32) -> f32 {
@@ -132,7 +161,7 @@ tab_chip_draw :: proc(
 	height := HEIGHT_COMPACT * scale
 	r := render.Rect{rect.x, rect.y + (rect.height - height) / 2, rect.width, height}
 	radius := RADIUS_CONTROL * scale
-	if chip.folded {
+	if chip.folded && !chip.bare {
 		fill, edge := chip.color, chip.color
 		fill.a *= 0.12
 		edge.a *= tray_edge(state) + 0.1

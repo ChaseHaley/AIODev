@@ -101,8 +101,10 @@ Tab_Presentation :: struct {
 	// The next update puts every tab straight in its place instead of easing it there: after a change of
 	// orientation or workspace.
 	jump:             bool,
-	// The group whose tabs are sliding into or out of its chip, until they rest.
+	// The group whose tabs are sliding into or out of its chip, until they rest, and how open it is on the
+	// way, 1 open to 0 folded, which the rail's tray follows as it gathers into the chip.
 	folding:          u32,
+	fold:             ui.Motion,
 }
 
 // The window's tab chrome beside the per-tab arrays, which Window embeds: the selection underline's
@@ -195,6 +197,10 @@ tab_presentation_animate :: proc(app: ^App, w: ^Window, frame: ui.Frame_Time) ->
 		changed = ui.motion_update(&position, frame) || changed
 		changed = ui.motion_update(offset, frame) || changed
 	}
+	if group := tab_group_find(w.workspace, w.folding); group != nil {
+		ui.motion_target(&w.fold, group.folded ? 0 : 1, ui.REORDER_DURATION, .Decelerate, animate)
+	}
+	changed = ui.motion_update(&w.fold, frame) || changed
 	if !tab_presentation_animating(w) {w.folding = 0}
 	changed = ui.motion_update(&w.tab_incoming.ghost, frame) || changed
 	if selected := w.workspace.selected; selected >= 0 && selected < len(layout.places) {
@@ -213,6 +219,7 @@ tab_presentation_animate :: proc(app: ^App, w: ^Window, frame: ui.Frame_Time) ->
 
 tab_presentation_animating :: proc(w: ^Window) -> bool {
 	if ui.motion_active(w.tab_underline) || ui.motion_active(w.tab_incoming.ghost) {return true}
+	if ui.motion_active(w.fold) {return true}
 	if ui.motion_active(w.tab_underline_offset) {return true}
 	for control in w.tab_controls {if ui.control_active(control) {return true}}
 	if ui.control_active(w.new_tab_control) || ui.control_active(w.profiles_control) {return true}

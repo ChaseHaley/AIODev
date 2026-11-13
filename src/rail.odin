@@ -408,6 +408,8 @@ rail_row_draw :: proc(
 	}
 	t, built := tab_tile(app, w, index)
 	if built != .Ok {return built}
+	// A folding group's tray is drawn whole, gathering into its chip (rail_fold_rect).
+	if w.folding != 0 && w.workspace.tabs[index].group == w.folding {t.tray = {}}
 	has_badge := ui.tab_badge_shown(t.badge)
 	close := rail_tab_close_rect(w, layout, index)
 	show_close := hover || pressed || ui.armed_is(w.tab_close_armed, index)
@@ -465,22 +467,49 @@ rail_selection_mark_draw :: proc(app: ^App, w: ^Window, layout: ui.Rail_Layout, 
 }
 
 // A group's chip in the row above its tabs, aligned with their tiles, on the start of its group's tray, which
-// leaves a gap above the chip row; a folded chip has no tray.
+// leaves a gap above the chip row; a folded chip has no tray. While the group folds or unfolds the chip lies
+// on its whole tray, gathering into it or spreading out of it.
 @(private)
 rail_chip_draw :: proc(app: ^App, w: ^Window, layout: ui.Rail_Layout, run: Tab_Run) -> render.Build_Status {
 	row := tab_chip_rail_rect(w, layout, run)
 	if row.width <= 0 || row.y + row.height <= layout.list.y || row.y >= layout.list.y + layout.list.height {
 		return .Ok
 	}
+	color, state := tab_group_color(app, run.group), tab_group_state(w, run.group.id)
+	if run.group.id == w.folding {
+		shape := rail_fold_rect(app, w, layout, run)
+		ui.tab_tray_fold_draw(&w.list, shape, color, state, w.fold.value, w.scale)
+		return tab_chip_draw(app, w, run, row, bare = true)
+	}
 	if tab_group_tray_shown(w, run.group) {
 		inset := ui.TAB_TRAY_INSET * w.scale
 		slice := render.Rect{row.x - inset, row.y + inset, row.width + 2 * inset, row.height - inset}
-		color, state := tab_group_color(app, run.group), tab_group_state(w, run.group.id)
-		if ui.tab_tray_draw(&w.list, slice, color, {.Start}, state, true, w.scale) != .None {
-			return .Ok
-		}
+		if ui.tab_tray_draw(&w.list, slice, color, {.Start}, state, true, w.scale) != .None {return .Ok}
 	}
 	return tab_chip_draw(app, w, run, row)
+}
+
+// Where folding group `run`'s tray lies in the rail: from its tray at rest open, its chip row and its tabs'
+// rows, to its chip folded, by how open the group is, so it gathers from the bottom right into the chip's
+// top left corner and spreads back out the same way.
+@(private)
+rail_fold_rect :: proc(app: ^App, w: ^Window, layout: ui.Rail_Layout, run: Tab_Run) -> render.Rect {
+	s := w.scale
+	row := tab_chip_rail_rect(w, layout, run)
+	count := 0
+	for tab in w.workspace.tabs {if tab.group == run.group.id {count += 1}}
+	inset := ui.TAB_TRAY_INSET * s
+	tray := render.Rect {
+		row.x - inset,
+		row.y + inset,
+		row.width + 2 * inset,
+		row.height - inset + f32(count) * layout.row_height,
+	}
+	chip := tab_chip(app, w, run.group, true)
+	height := ui.HEIGHT_COMPACT * s
+	width := min(row.width, ui.tab_chip_width(&w.ui_text, chip, s))
+	closed := render.Rect{row.x, row.y + (row.height - height) / 2, width, height}
+	return ui.tab_tray_fold_rect(closed, tray, w.fold.value)
 }
 
 rail_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
@@ -531,8 +560,11 @@ rail_body_draw :: proc(app: ^App, w: ^Window, laid: ui.Rail_Layout) -> render.Bu
 	if render.push_layer(&w.list, layout.list) != .None {return .Ok}
 	rail := tab_layout(nil, w, false)
 	runs := rail.runs
+	// The folding group's tray and chip draw over its rows, which the tray clips as it gathers.
+	folding: Maybe(Tab_Run)
 	for run in runs {
 		if run.carried {continue}
+		if run.group.id == w.folding {folding = run; continue}
 		if result := rail_chip_draw(app, w, layout, run); result != .Ok {return result}
 	}
 	dragging := tab_drag_active(w)
@@ -556,6 +588,13 @@ rail_body_draw :: proc(app: ^App, w: ^Window, laid: ui.Rail_Layout) -> render.Bu
 			if (dragging && tab.marked) != foreground {continue}
 			clip, sliding := tab_fold_clip(app, w, index)
 			if !tab_shown(w.workspace, index) && !sliding {continue}
+			if run, gathering := folding.?; gathering && sliding {
+				shape := rail_fold_rect(app, w, layout, run)
+				left, top := max(clip.x, shape.x), max(clip.y, shape.y)
+				right := min(clip.x + clip.width, shape.x + shape.width)
+				bottom := min(clip.y + clip.height, shape.y + shape.height)
+				clip = {left, top, max(0, right - left), max(0, bottom - top)}
+			}
 			if sliding {
 				if render.push_layer(&w.list, clip) != .None {continue}
 				// Opaque, so the rows stacking into the chip cover one another.
@@ -565,6 +604,9 @@ rail_body_draw :: proc(app: ^App, w: ^Window, laid: ui.Rail_Layout) -> render.Bu
 			if result := rail_row_draw(app, w, layout, index, moving && !sliding); result != .Ok {return result}
 			if sliding {_ = render.push_layer(&w.list, layout.list)}
 		}
+	}
+	if run, gathering := folding.?; gathering {
+		if result := rail_chip_draw(app, w, layout, run); result != .Ok {return result}
 	}
 	// A dragged group's chip rides in front of its tabs.
 	if dragging && render.push_layer(&w.list, layout.list) == .None {

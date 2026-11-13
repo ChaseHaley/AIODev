@@ -325,6 +325,8 @@ tab_group_fold :: proc(app: ^App, w: ^Window, id: u32, folded: bool) -> bool {
 		tab_select(app, w, next)
 	}
 	group.folded = folded
+	// A fold reversed on the way carries on from where the tray is; any other starts from the group as it was.
+	if w.folding != id {w.fold = {value = folded ? 1 : 0, target = folded ? 1 : 0}}
 	w.folding = id
 	tab_groups_changed(app, w)
 	return true
