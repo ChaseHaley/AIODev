@@ -102,9 +102,13 @@ Tab_Presentation :: struct {
 	// orientation or workspace.
 	jump:             bool,
 	// The group whose tabs are sliding into or out of its chip, until they rest, and how open it is on the
-	// way, 1 open to 0 folded, which the rail's tray follows as it gathers into the chip.
+	// way, 1 open to 0 folded, which the rail's tray follows as it gathers into the chip. While it folds, the
+	// strip's tab width and end and the rail's footer, in pixels, ease from where they were with the tabs.
 	folding:          u32,
 	fold:             ui.Motion,
+	strip_width:      ui.Motion,
+	strip_end:        ui.Motion,
+	rail_footer:      ui.Motion,
 }
 
 // The window's tab chrome beside the per-tab arrays, which Window embeds: the selection underline's
@@ -201,6 +205,7 @@ tab_presentation_animate :: proc(app: ^App, w: ^Window, frame: ui.Frame_Time) ->
 		ui.motion_target(&w.fold, group.folded ? 0 : 1, ui.REORDER_DURATION, .Decelerate, animate)
 	}
 	changed = ui.motion_update(&w.fold, frame) || changed
+	changed = tab_fold_room_animate(app, w, frame, animate) || changed
 	changed = rail_scroll_animate(app, w, frame) || changed
 	if !tab_presentation_animating(w) {w.folding = 0}
 	changed = ui.motion_update(&w.tab_incoming.ghost, frame) || changed
@@ -220,13 +225,44 @@ tab_presentation_animate :: proc(app: ^App, w: ^Window, frame: ui.Frame_Time) ->
 
 tab_presentation_animating :: proc(w: ^Window) -> bool {
 	if ui.motion_active(w.tab_underline) || ui.motion_active(w.tab_incoming.ghost) {return true}
-	if ui.motion_active(w.fold) {return true}
+	if ui.motion_active(w.fold) || ui.motion_active(w.strip_width) || ui.motion_active(w.strip_end) {return true}
+	if ui.motion_active(w.rail_footer) {return true}
 	if ui.motion_active(w.tab_underline_offset) {return true}
 	for control in w.tab_controls {if ui.control_active(control) {return true}}
 	if ui.control_active(w.new_tab_control) || ui.control_active(w.profiles_control) {return true}
 	for position in w.tab_positions {if ui.motion_active(position) {return true}}
 	for offset in w.tab_offsets {if ui.motion_active(offset) {return true}}
 	return false
+}
+
+// Holds the strip's tab width and end, or the rail's footer, where they show now, so a fold starting eases
+// them from there to where the tabs will rest (WORK-454).
+tab_fold_room_hold :: proc(app: ^App, w: ^Window) {
+	if w.tabs_horizontal {
+		bar := window_tab_bar(app, w)
+		w.strip_width = {value = bar.tab_width, target = bar.tab_width}
+		w.strip_end = {value = bar.end, target = bar.end}
+	} else if layout, ok := rail_layout_query(w); ok {
+		footer := layout.footer.y - layout.area.y
+		w.rail_footer = {value = footer, target = footer}
+	}
+}
+
+// Eases the strip's tab width and end, or the rail's footer, to where they rest, while a group folds.
+@(private = "file")
+tab_fold_room_animate :: proc(app: ^App, w: ^Window, frame: ui.Frame_Time, animate: bool) -> bool {
+	if w.folding == 0 {return false}
+	if w.tabs_horizontal {
+		rest := window_tab_bar_rest(app, w)
+		ui.motion_target(&w.strip_width, rest.tab_width, ui.REORDER_DURATION, .Decelerate, animate)
+		ui.motion_target(&w.strip_end, rest.end, ui.REORDER_DURATION, .Decelerate, animate)
+		width := ui.motion_update(&w.strip_width, frame)
+		return ui.motion_update(&w.strip_end, frame) || width
+	}
+	rest, ok := rail_layout_rest(w)
+	if !ok {return false}
+	ui.motion_target(&w.rail_footer, rest.footer.y - rest.area.y, ui.REORDER_DURATION, .Decelerate, animate)
+	return ui.motion_update(&w.rail_footer, frame)
 }
 
 // A strip control hovers while the pointer is over it, and draws a held strip press while it hovers.

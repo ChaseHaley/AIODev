@@ -12,6 +12,18 @@ _ :: settings
 // workspace chip and the caption controls, so both the tab bar and the controls end read the same
 // layout. Vertical mode uses the rail instead.
 window_tab_bar :: proc(app: ^App, w: ^Window) -> ui.Tab_Bar {
+	bar := window_tab_bar_rest(app, w)
+	// While a group folds the tabs' width and the strip's end ease with the tabs, so the tabs start from where
+	// they were and New tab moves with them (WORK-454).
+	if w.folding != 0 {
+		if ui.motion_active(w.strip_width) {bar.tab_width = w.strip_width.value}
+		if ui.motion_active(w.strip_end) {bar.end = w.strip_end.value}
+	}
+	return bar
+}
+
+// The strip as the tabs will rest.
+window_tab_bar_rest :: proc(app: ^App, w: ^Window) -> ui.Tab_Bar {
 	if w.workspace == nil {return {}}
 	left := workspace_button_width(app, w)
 	layout := tab_layout(app, w, true)

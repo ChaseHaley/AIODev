@@ -230,9 +230,21 @@ rail_current_layout :: proc(w: ^Window) -> (layout: ui.Rail_Layout, ok: bool) {
 	return
 }
 
-// The rail's layout with its scroll clamped to the rows, leaving the window unchanged.
+// The rail's layout with its scroll clamped to the rows, leaving the window unchanged. While a group folds,
+// the rows' end and the footer below them ease with the rows (WORK-454).
 @(require_results)
 rail_layout_query :: proc(w: ^Window) -> (layout: ui.Rail_Layout, ok: bool) {
+	layout, ok = rail_layout_rest(w)
+	if ok && w.folding != 0 && ui.motion_active(w.rail_footer) {
+		layout.footer.y = layout.area.y + w.rail_footer.value
+		layout.list.height = max(0, layout.footer.y - layout.list.y)
+	}
+	return
+}
+
+// The rail's layout as its rows will rest.
+@(require_results)
+rail_layout_rest :: proc(w: ^Window) -> (layout: ui.Rail_Layout, ok: bool) {
 	if w.tabs_horizontal {return {}, false}
 	area := rail_area(w)
 	area.height = max(0, area.height - w.status_rail_reserve)

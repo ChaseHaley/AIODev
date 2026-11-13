@@ -98,9 +98,11 @@ rail_scroll_animating :: proc(w: ^Window) -> bool {
 	return ui.motion_active(w.rail_glide) || rail_drag_edge_speed(w) != 0
 }
 
-// The rail's scrollbar along the right of the rows `layout` places, while they overflow.
+// The rail's scrollbar along the right of the rows `layout` places, while they overflow. While a group folds
+// the rows' end eases, but the bar keeps to the rows at rest, so it does not come and go on the way.
 rail_scrollbar_place :: proc(w: ^Window, layout: ui.Rail_Layout) -> (bar: ui.Scrollbar, visible: bool) {
 	list := layout.list
+	if rest, ok := rail_layout_rest(w); ok {list.height = rest.list.height}
 	area := render.Rect{list.x, list.y, list.width - 2 * w.scale, list.height}
 	extent := ui.Scroll_Extent {
 		total   = int(math.round(layout.content_height)),

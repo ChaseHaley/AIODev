@@ -315,12 +315,16 @@ tab_group_fold :: proc(app: ^App, w: ^Window, id: u32, folded: bool) -> bool {
 	workspace := w.workspace
 	group := tab_group_find(workspace, id)
 	if group == nil || group.folded == folded {return false}
-	if folded && workspace.tabs[workspace.selected].group == id {
-		next := tab_nearest_shown(workspace, workspace.selected, id)
-		if next < 0 {
-			notify(app, .Info, "Nothing else is open, so the group stays unfolded.")
-			return false
-		}
+	// Folding the shown tab's group shows the nearest tab outside it.
+	shown := folded && workspace.tabs[workspace.selected].group == id
+	next := shown ? tab_nearest_shown(workspace, workspace.selected, id) : -1
+	if shown && next < 0 {
+		notify(app, .Info, "Nothing else is open, so the group stays unfolded.")
+		return false
+	}
+	// The strip's tab width and end, or the rail's footer, ease from where they show now.
+	tab_fold_room_hold(app, w)
+	if shown {
 		group.folded = true
 		tab_select(app, w, next)
 	}
