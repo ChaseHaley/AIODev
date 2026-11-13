@@ -113,7 +113,7 @@ tab_interaction_close_requires_matching_uncancelled_left_release_in_both_adapter
 		app.update_motion(s)
 		one, two := interaction_rect(s, w, 0, true), interaction_rect(s, w, 1, true)
 		interaction_button(s, w.id, one, .Left, true)
-		testing.expect(t, ui.armed_is(w.tab_close_armed, 0))
+		testing.expect(t, ui.armed_is(w.tab_close_armed, w.workspace.tabs[0].id))
 		interaction_button(s, w.id, two, .Left, false)
 		interaction_button(s, w.id, one, .Left, false)
 		testing.expect_value(t, len(w.workspace.tabs), 3)
@@ -127,7 +127,7 @@ tab_interaction_close_requires_matching_uncancelled_left_release_in_both_adapter
 		}
 		interaction_button(s, w.id, two, .Left, true)
 		interaction_button(s, w.id, two, .Right, false)
-		testing.expect(t, ui.armed_is(w.tab_close_armed, 1))
+		testing.expect(t, ui.armed_is(w.tab_close_armed, w.workspace.tabs[1].id))
 		interaction_button(s, w.id, two, .Left, false)
 		testing.expect_value(t, len(w.workspace.tabs), 2)
 		app.update_motion(s)
@@ -195,5 +195,60 @@ tab_interaction_final_close_can_retire_the_event_window_in_both_adapters :: proc
 			for pressed in ([?]bool{true, false}) {interaction_button(s, id, r, button, pressed)}
 			testing.expect(t, s.run == .Quit && len(s.windows) == 0 && len(s.workspaces) == 0 && len(s.sessions) == 0)
 		}
+	}
+}
+
+// The tab under the pointer stays hovered and pressed while it is dragged to another slot and after the drop;
+// the tab sliding into the slot it left takes neither its highlight nor its hover motion.
+@(test)
+tab_hover_and_press_stay_with_the_dragged_tab_in_both_adapters :: proc(t: ^testing.T) {
+	for horizontal in ([?]bool{true, false}) {
+		f: Profile_Fixture
+		defer profile_fixture_destroy(t, &f)
+		if !profile_fixture_create(t, &f, "tab-hover-identity", "profile.default.command = cmd.exe\n") {return}
+		s, w := &f.state, f.state.windows[0]
+		interaction_placement(s, w, horizontal)
+		app.tab_new(s, w)
+		app.tab_new(s, w)
+		app.tab_select(s, w, 0)
+		app.update_motion(s)
+		grabbed, neighbour := w.workspace.tabs[0], w.workspace.tabs[1]
+		r := interaction_rect(s, w, 0)
+		x, y := i32(r.x + r.width / 2), i32(r.y + r.height / 2)
+		app.handle_event(s, input.Mouse_Move_Event{window = w.id, x = x, y = y})
+		app.update_motion(s)
+		testing.expect(t, app.tab_hovered(w, 0))
+		if horizontal {testing.expect_value(t, app.tab_motion(w, 0).hover.value, f32(1))}
+		s.animations = true
+		app.handle_event(s, input.Mouse_Button_Event{window = w.id, button = .Left, pressed = true, x = x, y = y})
+		if horizontal {x += i32(1.25 * r.width)} else {y += i32(1.25 * r.height)}
+		app.handle_event(s, input.Mouse_Move_Event{window = w.id, buttons = {.Left}, x = x, y = y})
+		if !testing.expect(t, app.tab_drag_active(w)) {return}
+		if !testing.expect(t, w.workspace.tabs[1] == grabbed && w.workspace.tabs[0] == neighbour) {return}
+		app.update_motion(s)
+		// Mid-drag: the grabbed tab, now second, keeps the hover and the press; the neighbour in its old slot
+		// shows neither and its hover motion does not start.
+		testing.expect(t, app.tab_hovered(w, 1) && app.tab_pressed(w, 1))
+		testing.expect(t, !app.tab_hovered(w, 0) && !app.tab_pressed(w, 0))
+		if horizontal {
+			testing.expect_value(t, app.tab_motion(w, 1).hover.target, f32(1))
+			testing.expect_value(t, app.tab_motion(w, 1).press.target, f32(1))
+			testing.expect_value(t, app.tab_motion(w, 0).hover.target, f32(0))
+			testing.expect_value(t, app.tab_motion(w, 0).hover.value, f32(0))
+		}
+		app.handle_event(s, input.Mouse_Button_Event{window = w.id, button = .Left, x = x, y = y})
+		testing.expect(t, !app.drag_held(w) && w.workspace.tabs[1] == grabbed)
+		s.animations = false
+		app.update_motion(s)
+		// After the drop, before and after the pointer moves again.
+		testing.expect(t, app.tab_hovered(w, 1) && !app.tab_hovered(w, 0))
+		if horizontal {
+			testing.expect_value(t, app.tab_motion(w, 1).hover.value, f32(1))
+			testing.expect_value(t, app.tab_motion(w, 0).hover.value, f32(0))
+		}
+		app.handle_event(s, input.Mouse_Move_Event{window = w.id, x = x, y = y})
+		app.update_motion(s)
+		testing.expect(t, app.tab_hovered(w, 1) && !app.tab_hovered(w, 0))
+		if horizontal {testing.expect_value(t, app.tab_motion(w, 1).hover.value, f32(1))}
 	}
 }

@@ -70,8 +70,9 @@ horizontal_tabs_fill_the_title_bar_without_a_rail :: proc(t: ^testing.T) {
 	bar := app.window_tab_bar(&state, &w)
 	testing.expect_value(t, bar.count, 3)
 	testing.expect(t, bar.tab_width > 0 && bar.tab_width <= 220)
-	testing.expect(t, app.window_tab_hit(&state, &w, bar, bar.x+2, 20) == app.Tab_Chrome_Tab{0})
-	testing.expect(t, app.window_tab_hit(&state, &w, bar, bar.x+bar.tab_width+2, 20) == app.Tab_Chrome_Tab{1})
+	first_tab, second_tab := app.Tab_Chrome_Tab{w.workspace.tabs[0].id}, app.Tab_Chrome_Tab{w.workspace.tabs[1].id}
+	testing.expect(t, app.window_tab_hit(&state, &w, bar, bar.x+2, 20) == first_tab)
+	testing.expect(t, app.window_tab_hit(&state, &w, bar, bar.x+bar.tab_width+2, 20) == second_tab)
 	testing.expect(t, app.window_tab_hit(&state, &w, bar, bar.x+2, bar.height) == nil)
 	testing.expect(t, app.window_tab_hit(&state, &w, bar, bar.x+bar.tab_width*3+2, 20) == app.Tab_Chrome_New{})
 	testing.expect(t, app.window_tab_hit(&state, &w, bar, 1, 20) == nil)
@@ -150,7 +151,7 @@ horizontal_tab_click_and_close_use_the_strip_geometry :: proc(t: ^testing.T) {
 			y = i32(close.y + close.height / 2),
 		},
 	)
-	testing.expect(t, ui.armed_is(w.tab_close_armed, 1))
+	testing.expect(t, ui.armed_is(w.tab_close_armed, w.workspace.tabs[1].id))
 	app.handle_event(
 		&state,
 		input.Mouse_Button_Event {
