@@ -124,11 +124,14 @@ settings_page_build :: proc(app: ^App, source: string, view: ^ui.Editor_View) ->
 		notify(app, .Error, "Could not allocate the link program table.")
 		return
 	}
-	if !settings_add_theme_rows(p, &s) || !settings_page_shortcut_rows(app, p, &s) {
+	if !settings_add_theme_rows(p, &s) ||
+	   !settings_theme_strip_load(p, &s) ||
+	   !settings_page_shortcut_rows(app, p, &s) {
 		notify(app, .Error, "Could not allocate settings editor.")
 		return
 	}
 	p.capture.leader = app.leader
+	settings_page_sections(p)
 	if view != nil {ui.editor_view_restore(p, view)}
 	ui.editor_hover_clear(p)
 	ui.editor_filter(p)
@@ -165,6 +168,63 @@ settings_page_setting_rows :: proc(p: ^ui.Editor, s: ^settings.Settings, fonts: 
 		if ui.editor_add(p, row, settings.group_title(entry.key)) != nil {return false}
 	}
 	return true
+}
+
+// The page's top sections: the tabs above its list. The left outline lists the shown section's groups.
+Settings_Area :: enum {
+	General,
+	Advanced,
+	Shortcuts,
+	Colors,
+}
+
+// Indexed by Settings_Area. A global, so the page's slice of it outlives the call that sets it.
+@(rodata)
+SETTINGS_AREA_TITLES := [len(Settings_Area)]string{"General", "Advanced", "Shortcuts", "Colors"}
+
+// Each named group's section, in page order. Command shortcut groups are not listed: they follow
+// these in Shortcuts, in the order the registry adds them.
+@(private, rodata)
+SETTINGS_GROUP_AREAS := [?]struct {
+	title: string,
+	area:  Settings_Area,
+} {
+	{"Theme", .General},
+	{"Font", .General},
+	{"Interface", .General},
+	{"Window", .General},
+	{"Tabs", .General},
+	{"Panes", .General},
+	{"Terminal", .General},
+	{"Cursor", .General},
+	{"Scrollback", .General},
+	{"Shell", .General},
+	{"Program Status", .General},
+	{"Motion", .Advanced},
+	{"Profiles", .Advanced},
+	{"Link Programs", .Advanced},
+	{"Processes", .Advanced},
+	{"Command Line", .Advanced},
+	{"Input", .Shortcuts},
+	{THEME_MANAGE_GROUP, .Colors},
+}
+
+// The section a group's title belongs to and its place there; theme color groups follow Manage Theme.
+settings_group_area :: proc(title: string) -> (area: Settings_Area, rank: int) {
+	for entry, i in SETTINGS_GROUP_AREAS {
+		if entry.title == title {return entry.area, i}
+	}
+	if color_rank, color := settings_color_group_area(title); color {return .Colors, color_rank}
+	return .Shortcuts, len(SETTINGS_GROUP_AREAS)
+}
+
+@(private)
+settings_page_sections :: proc(p: ^ui.Editor) {
+	p.sections = SETTINGS_AREA_TITLES[:]
+	for &group in p.groups {
+		area, rank := settings_group_area(group.title)
+		group.section, group.rank = int(area), rank
+	}
 }
 
 @(private, require_results)
@@ -384,6 +444,9 @@ editor_outcome :: proc(app: ^App, w: ^Window, outcome: ui.Editor_Outcome) {
 	ui.editor_outcome_begin(p, outcome)
 	switch outcome {
 	case .None, .Changed:
+		return
+	case .Theme_Customize:
+		ui.editor_section_show(p, int(Settings_Area.Colors))
 		return
 	case .Reset_All:
 		settings_reset_ask(app, w)
@@ -804,8 +867,11 @@ settings_theme_choices :: proc(s: ^settings.Settings) -> (choices, labels: []str
 	return ids[:], names[:]
 }
 
-// The active theme's management rows and one row per theme color. Every color shows the value in
-// effect; a custom theme's Reset returns a color to its base theme.
+// The Colors section's group of actions on the active theme; choosing a theme is General's first row.
+@(private)
+THEME_MANAGE_GROUP :: "Manage Theme"
+
+// The active theme's management rows, which the Colors board shows as its card, then its colors.
 @(private)
 settings_add_theme_rows :: proc(p: ^ui.Editor, s: ^settings.Settings) -> bool {
 	if ui.editor_theme_set(p, s.theme.name) != nil {return false}
@@ -842,22 +908,11 @@ settings_add_theme_rows :: proc(p: ^ui.Editor, s: ^settings.Settings) -> bool {
 				action = .Theme_Rename,
 			},
 			duplicate,
-			{
-				key = "theme.delete",
-				title = "Delete Theme",
-				description = fmt.tprintf(
-					"Remove this custom theme and switch to %s.",
-					settings.theme_display_name(s, settings.theme_delete_target(s, custom)),
-				),
-				value = "Delete…",
-				kind = .Action,
-				action = .Theme_Delete,
-			},
 		}
 		for row in rows {
-			if ui.editor_add(p, row, settings.group_title("theme.name")) != nil {return false}
+			if ui.editor_add(p, row, THEME_MANAGE_GROUP) != nil {return false}
 		}
-	} else if ui.editor_add(p, duplicate, settings.group_title("theme.name")) != nil {return false}
+	} else if ui.editor_add(p, duplicate, THEME_MANAGE_GROUP) != nil {return false}
 	if ui.editor_add(p, {
 		key = "theme.export",
 		title = "Export Theme File",
@@ -865,24 +920,23 @@ settings_add_theme_rows :: proc(p: ^ui.Editor, s: ^settings.Settings) -> bool {
 		kind = .Action,
 		value = "Export",
 		action = .Theme_Export,
-	}, settings.group_title("theme.name")) != nil {return false}
-	base := settings.theme_base(s)
-	tokens := settings.THEME_TOKENS
-	for token in settings.Theme_Token {
-		info := tokens[token]
-		row := ui.Editor_Row {
-			key           = fmt.tprintf("%s%s", SETTINGS_COLOR_PREFIX, info.key),
-			title         = info.title,
-			description   = info.description,
-			value         = settings.theme_color_text(token, s.active_theme.colors[token]),
-			default_value = settings.theme_color_text(token, base.colors[token]),
-			kind          = info.kind == .Optional ? .Optional_Color : .Color,
-			action        = .Theme_Color,
+	}, THEME_MANAGE_GROUP) != nil {return false}
+	// Delete follows the actions that keep the theme.
+	if custom := settings.custom_theme_find(s, s.theme.name); settings.theme_custom(s) {
+		delete_row := ui.Editor_Row {
+			key         = "theme.delete",
+			title       = "Delete Theme",
+			description = fmt.tprintf(
+				"Remove this custom theme and switch to %s.",
+				settings.theme_display_name(s, settings.theme_delete_target(s, custom)),
+			),
+			value       = "Delete…",
+			kind        = .Action,
+			action      = .Theme_Delete,
 		}
-		group := settings.token_terminal(token) ? "Terminal Colors" : "Interface Colors"
-		if ui.editor_add(p, row, group) != nil {return false}
+		if ui.editor_add(p, delete_row, THEME_MANAGE_GROUP) != nil {return false}
 	}
-	return true
+	return settings_add_color_rows(p, s)
 }
 
 // Applies a theme change made on the page; a change that does not apply is reported there.
@@ -929,7 +983,7 @@ editor_owns :: proc(e: input.Key_Event) -> bool {
 	#partial switch e.key {
 	case .Arrow_Left, .Arrow_Right, .Home, .End:
 		return modifiers - {.Shift} == {.Control}
-	case .A, .N, .P, .R, .Backspace, .Delete:
+	case .A, .N, .P, .R, .Backspace, .Delete, .Page_Up, .Page_Down:
 		return modifiers == {.Control}
 	}
 	return false
@@ -1098,7 +1152,7 @@ when AIO_CONTROL {
 		}
 		match, free := "", ""
 		rows := 0
-		for item in p.items {if item.row >= 0 {rows += 1}}
+		for item in p.items {if item.row >= 0 && item.part == 0 {rows += 1}}
 		if p.selected >= 0 && p.selected < len(p.items) && p.items[p.selected].row >= 0 {
 			item := p.items[p.selected]
 			labels := commands.shortcut_alternatives(p.rows[item.row].value, context.temp_allocator)
@@ -1119,7 +1173,11 @@ when AIO_CONTROL {
 		state_value(r, "settings.open", ui.editor_loaded(p))
 		state_text(r, "settings.revision", settings_page_revision_word(p))
 		state_value(r, "settings.theme_delete_armed", p.delete_armed)
+		settings_theme_strip_state(r, p, page)
 		state_text(r, "settings.filter", string(p.filter.bytes[:]))
+		if p.section >= 0 && p.section < len(p.sections) {
+			state_text(r, "settings.section", p.sections[p.section])
+		}
 		state_value(r, "settings.scroll", p.scroll)
 		state_value(r, "settings.group", ui.editor_active_group(p))
 		state_text(r, "settings.key", key)
@@ -1194,6 +1252,7 @@ when AIO_CONTROL {
 		used_by := ui.shortcut_capture_used_by(&p.capture)
 		if ui.editor_chained(p) {used_by = ui.shortcut_chain_used_by(&p.chain)}
 		state_text(r, "settings.used_by", used_by)
+		settings_board_state_report(r, p, page)
 	}
 
 	// Current pages report draft while they hold pending work, derived rather than stored.

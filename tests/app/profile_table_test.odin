@@ -48,18 +48,22 @@ profile_add_and_remove_preserve_settings_scroll :: proc(t: ^testing.T) {
 	defer profile_fixture_destroy(t, &f)
 	if !profile_fixture_create(t, &f, "viewport", PROFILE_FIXTURE_SETTINGS) {return}
 	e := profile_open(&f)
+	ui.editor_fit(e, ui.editor_layout({0, 40, 1200, 400}, 1, true))
 	if !testing.expect(t, ui.editor_select_key(e, "profiles.add")) {return}
-	e.scroll = 35
+	// A scroll that keeps the selected row in view, which a rebuild for the save must keep.
+	scroll := e.selected - 2
+	if !testing.expect(t, scroll > 0) {return}
+	e.scroll = scroll
 	app.editor_outcome(&f.state, f.state.windows[0], .Save)
-	testing.expect_value(t, e.scroll, 35)
+	testing.expect_value(t, e.scroll, scroll)
 	ui.editor_request_set(e, ui.Profile_Request{.Remove, strings.clone("profile-1")})
 	app.editor_outcome(&f.state, f.state.windows[0], .Profile_Action)
 	removing := app.confirmation_asking(f.state.windows[0], app.Profile_Remove)
 	if !testing.expect(t, removing != nil) {return}
 	testing.expect_value(t, app.editor_profile_remove_text(removing^).title, "Delete New Profile?")
-	e.scroll = 35
+	e.scroll = scroll
 	app.confirmation_finish(&f.state, f.state.windows[0], true)
-	testing.expect_value(t, e.scroll, 35)
+	testing.expect_value(t, e.scroll, scroll)
 }
 
 @(private)
@@ -122,11 +126,13 @@ profile_fixture_destroy :: proc(t: ^testing.T, f: ^Profile_Fixture) {
 	}
 }
 
+// Opens the page on Advanced, the section with profiles, link programs, program groups and motion.
 @(private)
 profile_open :: proc(f: ^Profile_Fixture) -> ^ui.Editor {
 	_ = app.settings_load(&f.state, &f.state.windows[0].editor)
 	app.settings_reveal_page(&f.state.windows[0].editor, {search = .Clear})
-	ui.editor_fit(&f.state.windows[0].editor, ui.editor_layout({0, 40, 1200, 1400}, 1))
+	ui.editor_section_show(&f.state.windows[0].editor, int(app.Settings_Area.Advanced))
+	ui.editor_fit(&f.state.windows[0].editor, ui.editor_layout({0, 40, 1200, 1400}, 1, true))
 	return&f.state.windows[0].editor
 }
 

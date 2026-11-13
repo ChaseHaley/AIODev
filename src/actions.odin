@@ -1128,7 +1128,7 @@ command_execute :: proc(app: ^App, ctx: Command_Context, invocation: commands.In
 	     .Fold_Tab_Group, .Ungroup_Tabs, .Close_Tab_Group, .New_Tab_In_Group, .Move_Tab_Group_Workspace:
 		return tab_group_command(app, w, action, tab_index, invocation, named_workspace)
 	case .Tab_Settings:
-		settings_reveal(app, w, {key = "tab.confirm_close", search = .Clear})
+		settings_reveal(app, w, {key = "interface.confirm", search = .Clear})
 	case .Restart_Shell:
 		if entry != nil {
 			session_restart(app, entry)

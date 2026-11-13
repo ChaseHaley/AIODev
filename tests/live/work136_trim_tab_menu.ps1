@@ -176,13 +176,13 @@ try {
 
     Invoke-Aio key Menu End Enter
     Invoke-Aio expect state settings.active=true
-    Invoke-Aio expect state settings.key=tab.confirm_close
+    Invoke-Aio expect state settings.key=interface.confirm
     Invoke-Aio expect state settings.filter=
     Invoke-Aio type unrelated
     Invoke-Aio key Menu
     Assert-Menu $single @(2,6)
     Choose-Menu 'Tab Settings'
-    Invoke-Aio expect state settings.key=tab.confirm_close
+    Invoke-Aio expect state settings.key=interface.confirm
     Invoke-Aio expect state settings.filter=
     Invoke-Aio key Menu
     Choose-Menu Close

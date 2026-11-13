@@ -156,7 +156,7 @@ $others = @(
 
 Aio launch --fresh --size 150x46 | Out-Null
 try {
-    Add-Content -LiteralPath $settings -Value ("`nstatus.panel = true`nstatus.show_idle = true`nstatus.show_done = true" +
+    Add-Content -LiteralPath $settings -Value ("`nstatus.panel = true`nstatus.show = working, blocked, done, error, idle" +
         "`nstatus.row_terms = title, message, workspace")
     Aio command settings.reload | Out-Null
     $s = State

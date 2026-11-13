@@ -40,7 +40,7 @@ paste_clipboard :: proc(app: ^App, w: ^Window, entry: ^Session_Entry) {
 	now := clock_now(&app.clock)
 	armed, is_armed := w.paste_confirm.(Paste_Armed)
 	confirmed :=
-		!app.settings.terminal.confirm_multiline_paste ||
+		.Multiline_Paste not_in app.settings.interface.confirm ||
 		(is_armed && armed.session == entry.id && time.tick_diff(now, armed.until) > 0)
 	switch term.paste(entry.session, text, confirmed) {
 	case .Sent:

@@ -55,7 +55,7 @@ function Save-Shot([string] $Id, [string] $File) {
 }
 
 $settings = Join-Path $evidence 'settings.ini'
-Set-Content -LiteralPath $settings -Value "cursor.blink = false`ntab.confirm_close = false"
+Set-Content -LiteralPath $settings -Value "cursor.blink = false`ninterface.confirm = shell_switch, multiline_paste"
 Invoke-Aio launch --fresh --settings $settings | Out-Null
 try {
     Invoke-Aio wait text 'PS ' | Out-Null

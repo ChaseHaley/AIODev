@@ -141,15 +141,15 @@ status_state_settings :: proc(
 ) -> Status_State_Policy {
 	switch state {
 	case .Idle:
-		return {shown = s.show_idle, channels = s.notify_idle}
+		return {shown = .Idle in s.show, channels = s.notify_idle}
 	case .Working:
-		return {s.show_working, s.taskbar_working, s.notify_working}
+		return {.Working in s.show, .Working in s.taskbar, s.notify_working}
 	case .Blocked:
-		return {s.show_blocked, s.taskbar_blocked, s.notify_blocked}
+		return {.Blocked in s.show, .Blocked in s.taskbar, s.notify_blocked}
 	case .Done:
-		return {shown = s.show_done, channels = s.notify_done}
+		return {shown = .Done in s.show, channels = s.notify_done}
 	case .Error:
-		return {s.show_error, s.taskbar_error, s.notify_error}
+		return {.Error in s.show, .Error in s.taskbar, s.notify_error}
 	}
 	return {}
 }
@@ -212,7 +212,7 @@ status_headline :: proc(mark: ui.Status_Mark, buffer: []u8) -> string {
 
 // The workspace picker's summary of what a workspace's programs report.
 status_picker_text :: proc(app: ^App, workspace: ^Workspace) -> string {
-	if !app.settings.status.workspace_picker {return ""}
+	if .Workspace_Picker not_in app.settings.status.surfaces {return ""}
 	summary := status_workspace_summary(app, workspace)
 	@(static, rodata)
 	ranks := [4]Status_Rank{.Blocked, .Failed, .Done, .Working}

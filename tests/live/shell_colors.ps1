@@ -94,6 +94,31 @@ try {
     Invoke-Aio launch --settings $persisted
     Invoke-Aio expect state theme.name=tide-dark-custom
     Write-Output 'PASS editing a theme file color saves and persists a custom theme'
+    # The Colors board: a tile chosen with the pointer takes a typed hex value, and Reset on the
+    # inspector returns it to the base theme.
+    Invoke-Aio command settings.customize_colors
+    Invoke-Aio expect state settings.board.shown=true
+    $base = (Read-State)['terminal.background']
+    $list = (Read-State)['settings.list_rect'] -split ','
+    $middle = "$([int]([double]$list[0] + 40)),$([int]([double]$list[1] + [double]$list[3] / 2))"
+    Invoke-Aio mouse wheel $middle -20 --px
+    $tile = ((Read-State)['settings.board.tiles'] -split ';' | Where-Object { $_ -like 'colors.background@*' })
+    $rect = ($tile -replace '^.*@', '') -split ','
+    Invoke-Aio mouse click "$([int]([double]$rect[0] + 20)),$([int]([double]$rect[1] + 12))" --px
+    Invoke-Aio expect state settings.board.key=colors.background
+    Invoke-Aio key Enter
+    Invoke-Aio expect state settings.board.control=Hex
+    Invoke-Aio type '#224466'
+    Invoke-Aio key Enter
+    Invoke-Aio expect state settings.error=false
+    Invoke-Aio expect state terminal.background=#224466
+    Invoke-Aio expect state theme.name=tide-dark-custom
+    Shot color-board-hex-edit
+    $reset = (Read-State)['settings.board.reset'] -split ','
+    Invoke-Aio mouse click "$([int]([double]$reset[0] + 30)),$([int]([double]$reset[1] + 12))" --px
+    Invoke-Aio expect state 'settings.message=Color returned to the base theme.'
+    Invoke-Aio expect state "terminal.background=$base"
+    Write-Output 'PASS the color board edits a tile through its hex field and resets it to the base'
 } finally {
     & $ctl --name $name stop | Write-Output
 }

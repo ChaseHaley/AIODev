@@ -128,7 +128,8 @@ agent_panes_resume_their_session_on_reopen :: proc(t: ^testing.T) {
 	defer for pair, i in redirected {
 		if value, found := previous[i].?; found {_ = os.set_env(pair[0], value)} else {os.unset_env(pair[0])}
 	}
-	settings := "shell.command = cmd.exe /d\ntabs.program_icons = false\ntab.confirm_close = false\ncursor.blink = false\n"
+	settings := "shell.command = cmd.exe /d\ntabs.program_icons = false\n" +
+		"interface.confirm = shell_switch, multiline_paste\ncursor.blink = false\n"
 	write_file(t, fmt.tprintf("%s/settings.ini", directory), settings)
 	state := app.App{options = {data_dir = directory, inactive = true}}
 	state.app_id = fmt.aprintf("AIODev.Test.AgentResume.%d", os.get_pid())
