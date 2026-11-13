@@ -52,3 +52,27 @@ editor_profile_menu_choose :: proc(p: ^Editor) -> Editor_Outcome {
 	p.profile_control = Profile_Control(p.profile_menu.items[index].payload)
 	return profile_activate(p, row)
 }
+
+// What the profile table control under the pointer does, for its tooltip; empty when none is.
+// The words match the overflow menu's, and a two-way control names the way it would go.
+editor_profile_tooltip :: proc(p: ^Editor) -> string {
+	if p.hover_profile_item < 0 || p.hover_profile_item >= len(p.items) {return ""}
+	item := p.items[p.hover_profile_item]
+	if item.row < 0 || item.row >= len(p.rows) {return ""}
+	row := &p.rows[item.row]
+	switch p.hover_profile_control {
+	case .Radio:
+		return .Default in row.flags ? "Default profile" : "Use as default"
+	case .Hidden:
+		return .Hidden in row.flags ? "Show in menus" : "Hide from menus"
+	case .Expand:
+		return p.expanded == row.profile ? "Collapse profile" : "Edit profile"
+	case .Duplicate:
+		return "Duplicate profile"
+	case .Remove:
+		return "Delete profile"
+	case .More:
+		return "More actions"
+	}
+	return ""
+}

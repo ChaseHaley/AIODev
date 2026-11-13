@@ -396,7 +396,7 @@ editor_process_orderable :: proc(p: ^Editor) -> bool {
 
 editor_process_draw :: proc(
 	p: ^Editor, row: ^Editor_Row, parts: Row_Parts, selected: bool,
-	list: ^render.Draw_List, text: ^Text, theme: Theme, scale: f32,
+	list: ^render.Draw_List, text: ^Text, theme: Theme, pointer: [2]f32, scale: f32,
 ) -> render.Build_Status {
 	s, r := scale, parts.row
 	baseline := r.y + (r.height - text.line_height) / 2 + text.ascent
@@ -409,7 +409,9 @@ editor_process_draw :: proc(
 		cells := editor_block_parts(r, s)
 		grip_ink := selected || editor_order_dragging(p, .Process_Groups) ? theme.muted : theme.faint
 		icon_draw(list, .Grip, cells.handle, grip_ink, ICON_BUTTON, s)
-		icon_draw(list, .Trash, cells.remove, theme.muted, ICON_BUTTON, s)
+		remove_hovered := editor_row_control_hovered(p, row, cells.remove, pointer)
+		if table_button_draw(list, cells.remove, .Trash, ICON_BUTTON, theme, s, false, remove_hovered, selected,
+			   pointer) != .None {return .Ok}
 		chevron := render.Rect{cells.remove.x - HEIGHT_COMPACT * s, r.y, HEIGHT_COMPACT * s, r.height}
 		icon_draw(list, p.process_expanded == row.process ? .Chevron_Down : .Chevron_Right, chevron,
 			theme.muted, ICON_INDICATOR, s)
@@ -434,7 +436,9 @@ editor_process_draw :: proc(
 			max(1, parts.text_right - r.x - 36 * s)); result != .Ok {return result}
 	}
 	if row.process_field == .Program {
-		icon_draw(list, .Close, parts.clear, theme.muted, ICON_INDICATOR, s)
+		clear_hovered := editor_row_control_hovered(p, row, parts.clear, pointer)
+		if table_button_draw(list, parts.clear, .Close, ICON_INDICATOR, theme, s, false, clear_hovered, selected,
+			   pointer) != .None {return .Ok}
 	}
-	return control_draw(p, row, parts, selected, list, text, theme, r, scale)
+	return control_draw(p, row, parts, selected, list, text, theme, r, pointer, scale)
 }

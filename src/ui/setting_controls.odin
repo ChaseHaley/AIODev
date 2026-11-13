@@ -125,8 +125,8 @@ slider_draw :: proc(list: ^render.Draw_List, track: render.Rect, fraction: f32, 
 	draw_rect(list, {rect = thumb, color = theme.surface, radius = pill_radius(thumb), stroke = 2 * scale})
 }
 
-// A setting's reset button: faint while the value is the default, lit under the pointer otherwise.
-// A selected row already carries a tint, so the button adds only the rim there.
+// A setting's reset button: faint while the value is the default, raised and lit under the pointer
+// otherwise. It sits inside its row, so a selected row's tint stays under the hover.
 @(private)
 reset_button_draw :: proc(
 	list: ^render.Draw_List,
@@ -136,21 +136,17 @@ reset_button_draw :: proc(
 	pointer: [2]f32,
 	scale: f32,
 ) -> render.Error {
-	if hovered && modified {
-		if !selected {draw_rect(list, {rect = rect, color = theme.hover, radius = RADIUS_CONTROL * scale})}
-		radius := RADIUS_CONTROL * scale
-		if err := hover_rim_draw(list, theme, rect, radius, 1, scale, pointer, !selected); err != .None {
-			return err
-		}
+	b := Button {
+		rect     = rect,
+		hover    = hovered ? 1 : 0,
+		radius   = RADIUS_CONTROL,
+		disabled = !modified,
+		on_tint  = selected,
 	}
-	color := theme.faint
-	if modified {
-		color = hovered ? theme.text : theme.muted
-	} else {
-		color.a *= 0.5
-	}
-	icon_draw(list, .Undo, rect, color, ICON_BUTTON, scale)
-	return .None
+	face, ink, err := button_draw(list, theme, b, scale, pointer)
+	if !modified {ink.a *= 0.5}
+	icon_draw(list, .Undo, face, ink, ICON_BUTTON, scale)
+	return err
 }
 
 // Indexes of the choices whose label, or value when unlabelled, contains `query` ignoring case.

@@ -524,10 +524,13 @@ workspace_picker_pointer_hover :: proc(
 
 @(private)
 workspace_picker_tooltip :: proc(_: ^App, w: ^Window, x, y: f32) -> string {
-	_, icons := w.workspace_picker.state.(Workspace_Picker_Icons)
+	p := &w.workspace_picker
+	_, icons := p.state.(Workspace_Picker_Icons)
 	if icons && render.rect_contains(workspace_icon_color_button(w), x, y) {
 		return "Change icon color"
 	}
+	// The row's "…" button, as the hover found it; it opens the row's menu.
+	if p.menu_hover != 0 && workspace_row_index(w, p.menu_hover) >= 0 {return "More actions"}
 	return ""
 }
 
