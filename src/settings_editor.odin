@@ -422,7 +422,7 @@ editor_font_filter :: proc(app: ^App, w: ^Window) {
 	if row == nil || !row.font_filter {return}
 	entry := settings.schema_find(row.key)
 	if entry == nil || entry.choice_filter == "" {return}
-	query := strings.clone(ui.field_string(&p.choice_search), context.temp_allocator)
+	query := strings.clone(ui.field_string(&p.dropdown.search), context.temp_allocator)
 	focused := ui.editor_choice_toggle_focused(p)
 	value := row.show_all_fonts ? "false" : "true"
 	result := settings_change(app, Setting_Value{entry.choice_filter, value}, Settings_Page{p})
@@ -1188,8 +1188,8 @@ when AIO_CONTROL {
 		state_value(r, "settings.active", settings_active(w))
 		state_value(r, "settings.popup", ui.editor_popup(p))
 		state_value(r, "settings.choice_count", choice_count)
-		state_text(r, "settings.choice_query", ui.field_string(&p.choice_search))
-		state_value(r, "settings.choice_matches", len(p.choice_matches))
+		state_text(r, "settings.choice_query", ui.field_string(&p.dropdown.search))
+		state_value(r, "settings.choice_matches", len(p.dropdown.matches))
 		state_value(r, "settings.capturing", ui.editor_capturing(p))
 		state_text(r, "settings.title", title)
 		state_text(r, "settings.message", p.message)

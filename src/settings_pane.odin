@@ -210,7 +210,7 @@ settings_pointer_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: 
 	if !found {
 		// A held scrollbar follows the pointer anywhere, as it does on every other surface, and
 		// collapses on release because the pointer is no longer over it.
-		if w.editor.popup_bar_hover {w.editor.popup_bar_hover, w.dirty = false, true}
+		if w.editor.dropdown.bar_hover {w.editor.dropdown.bar_hover, w.dirty = false, true}
 		if w.editor.page_bar_hover {w.editor.page_bar_hover, w.dirty = false, true}
 		if w.editor.strip.bar_hover {w.editor.strip.bar_hover, w.dirty = false, true}
 		if ui.editor_scrollbar_dragging(&w.editor) && .Left in e.buttons &&

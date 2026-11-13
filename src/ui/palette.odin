@@ -147,8 +147,12 @@ Palette_Setting :: struct {
 	control:                Palette_Control,
 	minimum, maximum, step: f64,
 	choices, choice_labels: []string,
-	// The choice list has a filter field, as the Settings page gives font pickers.
+	// The dropdown has a search field, as the Settings page gives font pickers, and is at least
+	// `choice_min_width` DIPs wide.
 	searchable:             bool,
+	choice_min_width:       f32,
+	// The setting the dropdown's Show all fonts switch saves, or "" for a list without one.
+	filter_key:             string,
 	// A reset button restores `default_value`, as on the Settings page.
 	resettable:             bool,
 	default_value:          string,
@@ -1406,10 +1410,8 @@ palette_mouse_move :: proc(p: ^Palette, l: Palette_Layout, x, y: f32, text: ^Tex
 	case Chain_Edit:
 		return palette_chain_hover(p, &edit, l, text, x, y)
 	case Choice_Edit:
-		hover := popup_row_at(p, &edit, l, x, y)
-		if hover == edit.hover {return .None}
-		edit.hover = hover
-		return .Changed
+		c, a, _ := palette_dropdown(p, l)
+		return dropdown_hover(&p.buffers.dropdown, c, a, x, y, l.scale) ? .Changed : .None
 	case Text_Edit:
 		return .None
 	}
@@ -1561,7 +1563,10 @@ palette_scroll :: proc(p: ^Palette, rows: int) -> Outcome {
 		return .None
 	case Chain_Edit:
 	case Choice_Edit:
-		return popup_wheel(p, &edit, rows)
+		// The wheel has no layout; the list fits the window the last palette_fit measured.
+		a := Dropdown_Anchor{bounds = p.fit_page, align_end = true}
+		moved := dropdown_wheel(&p.buffers.dropdown, choice_dropdown(p, edit.setting), a, rows, p.fit_scale)
+		return moved ? .Changed : .None
 	case Text_Edit:
 		edit_set(p, nil)
 	}
@@ -1968,6 +1973,6 @@ palette_draw :: proc(
 	if binding, open := &p.edit.(Shortcut_Edit); open {
 		return palette_binding_popup_draw(p, binding, l, list, text, theme, pointer)
 	}
-	if result := draw_popup(p, list, text, theme, l); result != .Ok {return result}
+	if result := draw_popup(p, list, text, theme, l, pointer); result != .Ok {return result}
 	return .Ok
 }

@@ -36,7 +36,7 @@ font_pickers_filter_and_apply_independent_families_to_all_windows :: proc(t: ^te
 	app.editor_outcome(s, s.windows[0], outcome)
 	testing.expect(t, s.settings.font.show_all)
 	testing.expect_value(t, ui.editor_popup(p), ui.Editor_Popup.Choice)
-	testing.expect_value(t, ui.field_string(&p.choice_search), "Selaw")
+	testing.expect_value(t, ui.field_string(&p.dropdown.search), "Selaw")
 	testing.expect_value(t, s.family, previous_shell)
 	testing.expect(t, ui.editor_choice_toggle_focused(p))
 	ui.editor_key(p, {key = .Escape, pressed = true})
