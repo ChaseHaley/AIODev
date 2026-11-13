@@ -22,6 +22,9 @@ Icon :: enum {
 	Layout_Top,
 	Layout_Left,
 	Layout_Right,
+	// The Activity panel docked on that side: the window with the panel's edge and its rows.
+	Activity_Left,
+	Activity_Right,
 	More,
 	More_Vertical,
 	Eye,
@@ -285,6 +288,14 @@ icon_draw :: proc(
 	case .Layout_Right:
 		pen_box(p, 1, 2, 14, 12, 2)
 		pen_path(p, {10, 2}, {10, 14})
+	case .Activity_Left:
+		pen_box(p, 1, 2, 14, 12, 2)
+		pen_path(p, {7.5, 2}, {7.5, 14})
+		for y in ([?]f32{5.5, 8, 10.5}) {pen_path(p, {3, y}, {5.5, y})}
+	case .Activity_Right:
+		pen_box(p, 1, 2, 14, 12, 2)
+		pen_path(p, {8.5, 2}, {8.5, 14})
+		for y in ([?]f32{5.5, 8, 10.5}) {pen_path(p, {10.5, y}, {13, y})}
 	case .Terminal:
 		pen_box(p, 1, 2, 14, 12, 2)
 		pen_path(p, {4, 5}, {7, 8}, {4, 11})

@@ -99,17 +99,28 @@ settings_pane_draw :: proc(app: ^App, w: ^Window, pane: layout.Pane_Rect) -> ren
 	)
 }
 
-// Gives each shown link program line and Icon row the program's icon once it is ready. Rows scrolled
-// away or filtered out ask nothing, so they hold no slot in the program icon cache.
+// Gives each shown profile and link program line and Icon row its icon once it is ready: a profile's
+// loaded Icon PNG, a program's found icon. Rows scrolled away or filtered out ask nothing, so they
+// hold no slot in the program icon cache.
 @(private = "file", require_results)
 settings_page_icons :: proc(app: ^App, p: ^ui.Editor, scale: f32) -> render.Build_Status {
 	for &row in p.rows {
-		if row.opener != "" {row.icon_atlas = {}}
+		if row.opener != "" || row.profile != "" {row.icon_atlas = {}}
 	}
 	last := min(len(p.items), p.scroll + max(1, p.visible_rows) + 1)
 	for item in p.items[min(p.scroll, last):last] {
 		if item.row < 0 {continue}
 		row := &p.rows[item.row]
+		if row.profile != "" {
+			profile_field, is_profile_field := row.profile_field.?
+			if row.kind != .Profile && !(is_profile_field && profile_field == .Icon) {continue}
+			icon := shell_icon_find(app, row.profile)
+			if icon == nil {continue}
+			atlas, result := shell_icon_atlas(app, icon)
+			if result != .Ok {return result}
+			row.icon_atlas = atlas
+			continue
+		}
 		if row.opener == "" {continue}
 		field, is_field := row.opener_field.?
 		if row.kind != .Opener && !(is_field && field == .Icon) {continue}
@@ -229,6 +240,7 @@ settings_pointer_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: 
 @(private)
 settings_tooltip :: proc(_: ^App, w: ^Window, _, _: f32) -> string {
 	if w.editor.hover_reset >= 0 {return "Reset setting"}
+	if w.editor.hover_browse {return "Choose icon…"}
 	if w.editor.keys_hover {return ui.key_search_tooltip(&w.editor.keys)}
 	return ui.editor_profile_tooltip(&w.editor)
 }

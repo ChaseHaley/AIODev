@@ -54,6 +54,9 @@ Status_Panel :: struct {
 	// The pane those marks belong to, zero for none, and whether any row of it was listed.
 	panel_mark_session: u32,
 	panel_mark_shown:   bool,
+	// The title bar button that shows and hides the panel.
+	panel_toggle_hover: bool,
+	panel_toggle_armed: ui.Armed(bool),
 }
 
 status_panel_visible :: proc(app: ^App, w: ^Window) -> bool {
@@ -790,6 +793,8 @@ when AIO_CONTROL {
 		s := &app.settings.status
 		area := status_panel_rect(app, w)
 		state_rect(r, "activity.rect", area)
+		state_value(r, "activity.panel", s.panel)
+		state_rect(r, "activity.toggle", status_panel_toggle_rect(app, w))
 		state_rect(r, "activity.side_button", status_panel_button_rect(app, w, .Side))
 		@(static, rodata)
 		sides := settings.STATUS_PANEL_SIDE_NAME
@@ -873,4 +878,73 @@ status_panel_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: inpu
 		return
 	}
 	status_panel_leave(app, w)
+}
+
+// Activity panel toggle pointer surface: the title bar button that shows and hides the panel. It sits
+// right after the tab orientation toggle, the two layout controls side by side, with Settings and the
+// palette after it. It stays while Activity is on, so the panel comes back from where it went.
+
+status_panel_toggle_rect :: proc(app: ^App, w: ^Window) -> render.Rect {
+	if !app.settings.status.enabled || window_linked(w) || window_title_height(w) <= 0 {return {}}
+	tabs := tab_orientation_button_rect(w)
+	return {tabs.x + tabs.width, tabs.y, ui.TITLE_BUTTON_WIDTH * w.scale, tabs.height}
+}
+
+// The icon is the window with the panel's rows on its side, unlike the tab orientation's plain layout.
+status_panel_toggle_draw :: proc(app: ^App, w: ^Window) {
+	r := status_panel_toggle_rect(app, w)
+	if r.width <= 0 {return}
+	if render.push_layer(&w.list, {0, 0, f32(w.width), ui.TITLE_BAR_HEIGHT * w.scale}) != .None {return}
+	icon: ui.Icon = app.settings.status.panel_side == .Left ? .Activity_Left : .Activity_Right
+	hover := f32(int(w.status.panel_toggle_hover))
+	press := f32(int(ui.armed_is(w.status.panel_toggle_armed, true)))
+	_ = ui.icon_button_draw(&w.list, app.theme, r, icon, hover, press, w.scale, w.pointer)
+}
+
+@(private)
+status_panel_toggle_claims :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {
+	return render.rect_contains(status_panel_toggle_rect(app, w), x, y)
+}
+
+@(private)
+status_panel_toggle_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: input.Mouse_Move_Event) {
+	hovered := owner == .Activity_Toggle
+	if hovered != w.status.panel_toggle_hover {w.status.panel_toggle_hover, w.dirty = hovered, true}
+	if hovered {pointer_set(app, w, .Hand)}
+}
+
+@(private)
+status_panel_toggle_tooltip :: proc(app: ^App, _: ^Window, _, _: f32) -> string {
+	return app.settings.status.panel ? "Hide Activity panel" : "Show Activity panel"
+}
+
+@(private)
+status_panel_toggle_shortcut :: proc(_: ^App, _: ^Window, _, _: f32) -> Tooltip_Shortcut {
+	return Action.Status_Panel
+}
+
+@(private)
+status_panel_toggle_press :: proc(_: ^App, w: ^Window, e: input.Mouse_Button_Event) {
+	if e.button == .Left {ui.armed_press(&w.status.panel_toggle_armed, true)}
+}
+
+@(private)
+status_panel_toggle_release :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) -> bool {
+	if e.button != .Left || !ui.armed_down(w.status.panel_toggle_armed) {return false}
+	hit := status_panel_toggle_claims(app, w, f32(e.x), f32(e.y))
+	fired, ok := ui.armed_release(&w.status.panel_toggle_armed, hit)
+	w.dirty = true
+	if ok && fired {run_action(app, w, .Status_Panel)}
+	return true
+}
+
+@(private)
+status_panel_toggle_cancel :: proc(_: ^App, w: ^Window) {
+	w.status.panel_toggle_hover = false
+	ui.armed_cancel(&w.status.panel_toggle_armed)
+}
+
+@(private)
+status_panel_toggle_leave :: proc(_: ^App, w: ^Window) {
+	w.status.panel_toggle_hover = false
 }

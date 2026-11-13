@@ -292,7 +292,7 @@ status_pill_width :: proc(app: ^App, w: ^Window) -> f32 {
 status_pill_rect :: proc(app: ^App, w: ^Window) -> render.Rect {
 	width := status_pill_width(app, w)
 	if width == 0 {return {}}
-	palette := title_action_rect(w, .Palette)
+	palette := title_action_rect(app, w, .Palette)
 	return {palette.x + palette.width, palette.y, width, palette.height}
 }
 
