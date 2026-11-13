@@ -81,13 +81,14 @@ nearest_side :: proc(r: layout.Rect, x, y: f32) -> layout.Direction {
 	return .Down
 }
 
-// Where the dragged pane would land on `drop` in w, and whether it fits there: the target's card for a swap,
-// the new tab's place, otherwise the pane's card in a trial of the move the drop would make.
+// Where the pane `grab` holds would land on `drop` in w, and whether it fits there: the target's card for a
+// swap, the new tab's place, otherwise the pane's card in a trial of the move the drop would make. A header
+// drag's outline and a keyboard move (pane_steps.odin) both measure their drop here.
 @(private)
-pane_drag_preview :: proc(
+pane_drop_preview :: proc(
 	app: ^App,
 	source_window: ^Window,
-	carry: ^Pane_Carry,
+	grab: Pane_Grab,
 	w: ^Window,
 	drop: ^Pane_Drop,
 ) -> (
@@ -96,10 +97,10 @@ pane_drag_preview :: proc(
 ) {
 	switch drop.place {
 	case .New_Tab:
-		content, is_pane := layout.pane_content(&carry.source.tree, carry.node)
+		content, is_pane := layout.pane_content(&grab.source.tree, grab.node)
 		if !is_pane {return {}, .Refused}
 		panes := [?]layout.Pane_Rect{{content = content, rect = window_content_area(app, w)}}
-		drop.reorders_tab = pane_to_tab_reorders(app, w, carry.source, carry.node)
+		drop.reorders_tab = pane_to_tab_reorders(app, w, grab.source, grab.node)
 		if !drop.reorders_tab && !pane_minimum_allows(app, w, panes[:], nil, notify_failure = false) {
 			return {}, .Too_Small
 		}
@@ -122,8 +123,8 @@ pane_drag_preview :: proc(
 		return {}, .Refused
 	case .Beside, .Edge:
 	}
-	op, resolved := pane_drop_operation(app, source_window, carry.source, carry.node, w, drop^)
-	if !resolved {return {}, pane_drop_refusal(source_window, carry.source, w, drop^)}
+	op, resolved := pane_drop_operation(app, source_window, grab.source, grab.node, w, drop^)
+	if !resolved {return {}, pane_drop_refusal(source_window, grab.source, w, drop^)}
 	result := pane_trial_operation(app, w, op)
 	#partial switch result.error {
 	case .None:
@@ -321,7 +322,7 @@ pane_drag_target_move :: proc(
 	if pane_destination_same(carry.destination, next) && !changed_window {return true}
 	rect: layout.Rect
 	if drop, placed := &next.(Pane_Drop); placed {
-		rect, drop.fit = pane_drag_preview(app, source_window, carry, w, drop)
+		rect, drop.fit = pane_drop_preview(app, source_window, carry.grab, w, drop)
 	}
 	shown := pane_drag_ghost_shown(a)
 	pane_drag_retarget(app, source_window, a, next)
@@ -501,18 +502,11 @@ pane_drag_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 		)
 		return .Ok
 	}
+	ghost := carry.ghost
+	target := render.Rect{ghost[0].target, ghost[1].target, ghost[2].target, ghost[3].target}
 	opacity := carry.reveal.value
-	fill := app.theme.accent
-	fill.a = 0.16 * opacity
-	if render.push_rect(&w.list, {rect = r, color = fill, radius = radius}) != .None {return .Ok}
-	r = {carry.ghost[0].target, carry.ghost[1].target, carry.ghost[2].target, carry.ghost[3].target}
-	accent := app.theme.accent
-	accent.a *= opacity
-	if render.push_rect(
-		   &w.list,
-		   {rect = r, color = accent, radius = radius, stroke = 2 * w.scale},
-	   ) !=
-	   .None {return .Ok}
+	if pane_outline_draw(app, w, r, target, opacity) != .None {return .Ok}
+	r = target
 	label := pane_drag_label(drop)
 	text := ui.text_styled(&w.ui_text, .Strong)
 	width := ui.text_width(&text, label)
@@ -527,6 +521,18 @@ pane_drag_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 		label_color,
 		max(1, r.width - 16 * w.scale),
 	)
+}
+
+// The drop outline: a faint accent fill over `fill`, the place easing toward its target, and the accent
+// border at `border`, the target, both at `opacity`. Arrange mode marks the pane it moves the same way.
+pane_outline_draw :: proc(app: ^App, w: ^Window, fill, border: render.Rect, opacity: f32) -> render.Error {
+	radius := f32(app.settings.pane.corner_radius) * w.scale
+	tint := app.theme.accent
+	tint.a = 0.16 * opacity
+	if err := render.push_rect(&w.list, {rect = fill, color = tint, radius = radius}); err != .None {return err}
+	accent := app.theme.accent
+	accent.a *= opacity
+	return render.push_rect(&w.list, {rect = border, color = accent, radius = radius, stroke = 2 * w.scale})
 }
 
 // Ends every pointer arrangement gesture, restoring a dragged tab to its starting position. A drag from

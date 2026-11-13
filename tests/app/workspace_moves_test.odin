@@ -39,6 +39,11 @@ workspace_move_commands_preserve_live_content_and_cleanup_sources :: proc(t: ^te
 	pid := term.process_id(session)
 	app.run_action(&state, w, .Move_Pane_Workspace)
 	testing.expect_value(t, len(w.workspace_picker.rows), 0)
+	// A pane's move offers a new workspace and a new window, as its drag does (WORK-477); a tab's only the
+	// new workspace.
+	testing.expect_value(t, app.workspace_picker_count(w), 2)
+	app.workspace_picker_cancel(w)
+	app.run_action(&state, w, .Move_Tab_Workspace)
 	testing.expect_value(t, app.workspace_picker_count(w), 1)
 	app.workspace_picker_cancel(w)
 	testing.expect_value(t, app.tab_pane_count(app.selected_tab(original)), 2)

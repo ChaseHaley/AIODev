@@ -167,6 +167,26 @@ Action :: enum u32 {
 	App_Version,
 	Install_Agent_Hooks,
 	Update,
+	Move_Left,
+	Move_Right,
+	Move_Up,
+	Move_Down,
+	Dock_Left,
+	Dock_Right,
+	Dock_Up,
+	Dock_Down,
+	Rotate_Split,
+	Move_Pane_Tab_1,
+	Move_Pane_Tab_2,
+	Move_Pane_Tab_3,
+	Move_Pane_Tab_4,
+	Move_Pane_Tab_5,
+	Move_Pane_Tab_6,
+	Move_Pane_Tab_7,
+	Move_Pane_Tab_8,
+	Move_Pane_Tab_9,
+	Move_Pane_New_Tab,
+	Move_Pane_New_Window,
 }
 
 // Everything one command is: its name and title, default shortcuts, what it does when a linked window
@@ -206,9 +226,9 @@ Control_Form :: enum u8 {
 @(private)
 Action_Family :: enum u8 {
 	None,
-	// `direction`: Focus, Swap and Split toward a side.
+	// `direction`: Focus, Swap, Split, Move and Dock toward a side.
 	Toward,
-	// `index`, from 0: Select Tab N.
+	// `index`, from 0: Select Tab N and Move Pane to Tab N.
 	Tab,
 	// `index`, from 0: Select Workspace N.
 	Workspace,
@@ -627,6 +647,59 @@ ACTIONS :: [Action]Command_Descriptor {
 	},
 	.Install_Agent_Hooks = {"app.install_agent_hooks", "Install agent session hooks", nil, .Local, {}},
 	.Update = {"app.update", "Update AIODev", nil, .Local, {}},
+	.Move_Left = {
+		"pane.move_left", "Move pane left", nil, .Local, {param = {family = .Toward, direction = .Left}},
+	},
+	.Move_Right = {
+		"pane.move_right", "Move pane right", nil, .Local, {param = {family = .Toward, direction = .Right}},
+	},
+	.Move_Up = {"pane.move_up", "Move pane up", nil, .Local, {param = {family = .Toward, direction = .Up}}},
+	.Move_Down = {
+		"pane.move_down", "Move pane down", nil, .Local, {param = {family = .Toward, direction = .Down}},
+	},
+	.Dock_Left = {
+		"pane.dock_left", "Dock pane to left edge", nil, .Local, {param = {family = .Toward, direction = .Left}},
+	},
+	.Dock_Right = {
+		"pane.dock_right", "Dock pane to right edge", nil, .Local,
+		{param = {family = .Toward, direction = .Right}},
+	},
+	.Dock_Up = {
+		"pane.dock_up", "Dock pane to top edge", nil, .Local, {param = {family = .Toward, direction = .Up}},
+	},
+	.Dock_Down = {
+		"pane.dock_down", "Dock pane to bottom edge", nil, .Local, {param = {family = .Toward, direction = .Down}},
+	},
+	.Rotate_Split = {"pane.rotate_split", "Rotate split", nil, .Local, {}},
+	.Move_Pane_Tab_1 = {
+		"pane.move_tab_1", "Move pane to tab 1", nil, .Local, {param = {family = .Tab, index = 0}},
+	},
+	.Move_Pane_Tab_2 = {
+		"pane.move_tab_2", "Move pane to tab 2", nil, .Local, {param = {family = .Tab, index = 1}},
+	},
+	.Move_Pane_Tab_3 = {
+		"pane.move_tab_3", "Move pane to tab 3", nil, .Local, {param = {family = .Tab, index = 2}},
+	},
+	.Move_Pane_Tab_4 = {
+		"pane.move_tab_4", "Move pane to tab 4", nil, .Local, {param = {family = .Tab, index = 3}},
+	},
+	.Move_Pane_Tab_5 = {
+		"pane.move_tab_5", "Move pane to tab 5", nil, .Local, {param = {family = .Tab, index = 4}},
+	},
+	.Move_Pane_Tab_6 = {
+		"pane.move_tab_6", "Move pane to tab 6", nil, .Local, {param = {family = .Tab, index = 5}},
+	},
+	.Move_Pane_Tab_7 = {
+		"pane.move_tab_7", "Move pane to tab 7", nil, .Local, {param = {family = .Tab, index = 6}},
+	},
+	.Move_Pane_Tab_8 = {
+		"pane.move_tab_8", "Move pane to tab 8", nil, .Local, {param = {family = .Tab, index = 7}},
+	},
+	.Move_Pane_Tab_9 = {
+		"pane.move_tab_9", "Move pane to tab 9", nil, .Local, {param = {family = .Tab, index = 8}},
+	},
+	.Move_Pane_New_Tab = {"pane.move_new_tab", "Move pane to new tab", nil, .Local, {}},
+	.Move_Pane_New_Window = {"pane.move_new_window", "Move pane to new window", nil, .Local, {}},
 }
 
 // What help says about a command beyond its usage and title: a summary, and the command's own help for
@@ -1229,23 +1302,27 @@ command_execute :: proc(app: ^App, ctx: Command_Context, invocation: commands.In
 		window_relayout(app, w)
 	case .Keep_Pane_Open:
 		pane_keep_open(app, w)
-	case .Swap_Left, .Swap_Right, .Swap_Up, .Swap_Down, .Swap_Previous, .Swap_Next:
-		rects := pane_action_rects(app, w)
-		other: layout.Node_Id
+	case .Swap_Left, .Swap_Right, .Swap_Up, .Swap_Down:
+		pane_swap_toward(app, w, param.direction)
+	case .Swap_Previous, .Swap_Next:
 		tree := window_tree(w)
-		if param.family == .Toward {
-			other = layout.focus_direction(rects, tree.focus, param.direction)
-		} else {
-			other = layout.focus_cycle(rects, tree.focus, action == .Swap_Next ? 1 : -1)
-		}
-		if other != tree.focus {
-			tab := selected_tab(w.workspace)
-			swap := Pane_Operation{place = .Swap, source = tab, destination = tab, node = tree.focus,
-				target = other, slot = layout.INVALID_NODE}
-			_ = pane_rearrange(app, w, swap)
-		}
+		other := layout.focus_cycle(pane_action_rects(app, w), tree.focus, action == .Swap_Next ? 1 : -1)
+		pane_swap(app, w, other)
 	case .Focus_Left, .Focus_Right, .Focus_Up, .Focus_Down:
 		pane_focus_toward(app, w, param.direction)
+	case .Move_Left, .Move_Right, .Move_Up, .Move_Down:
+		_ = pane_move_toward(app, w, param.direction)
+	case .Dock_Left, .Dock_Right, .Dock_Up, .Dock_Down:
+		_ = pane_dock(app, w, param.direction)
+	case .Rotate_Split:
+		pane_rotate_split(app, w)
+	case .Move_Pane_Tab_1, .Move_Pane_Tab_2, .Move_Pane_Tab_3, .Move_Pane_Tab_4, .Move_Pane_Tab_5,
+	     .Move_Pane_Tab_6, .Move_Pane_Tab_7, .Move_Pane_Tab_8, .Move_Pane_Tab_9:
+		_ = pane_move_to_tab(app, w, param.index)
+	case .Move_Pane_New_Tab:
+		_ = pane_move_to_new_tab(app, w)
+	case .Move_Pane_New_Window:
+		_ = pane_move_to_new_window(app, w, selected_tab(w.workspace), window_tree(w).focus)
 	case .Resize_Left, .Resize_Right, .Resize_Up, .Resize_Down, .Resize_Left_Large, .Resize_Right_Large,
 	     .Resize_Up_Large, .Resize_Down_Large:
 		step := param.resize

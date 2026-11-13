@@ -360,6 +360,10 @@ workspace_picker_choose :: proc(app: ^App, w: ^Window) {
 		#partial switch t in chosen {
 		case Picker_Workspace: destination = Workspace_Move_Existing{t.id}
 		case Picker_New_Workspace: destination = Workspace_Move_New{}
+		case Picker_New_Window:
+			workspace_picker_cancel(w)
+			workspace_move_new_window(app, w, move.request)
+			return
 		case: return
 		}
 		workspace_picker_cancel(w)
