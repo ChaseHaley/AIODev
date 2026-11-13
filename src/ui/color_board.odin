@@ -1571,17 +1571,20 @@ board_token_draw :: proc(
 	if r := draw_text(&small, list, base_text, dot.x + dot.width + SPACE_1 * s, base_baseline, theme.muted,
 		max(1, b.reset.x - dot.x - dot.width - SPACE_2 * s)); r != .Ok {return r}
 	modified := board_modified(row)
-	reset_hovered := modified && board.hover_hit.target == .Reset
-	if reset_hovered {
-		draw_rect(list, {rect = b.reset, color = theme.hover, radius = RADIUS_CONTROL * s})
-		if hover_rim_draw(list, theme, b.reset, RADIUS_CONTROL * s, 1, s, pointer) != .None {return .Ok}
+	reset := Button {
+		rect     = b.reset,
+		hover    = board.hover_hit.target == .Reset ? 1 : 0,
+		radius   = RADIUS_CONTROL,
+		disabled = !modified,
 	}
-	if control_focused && board.control == .Reset {focus_ring_draw(list, b.reset, theme, s)}
-	ink := modified ? (reset_hovered ? theme.text : theme.muted) : theme.faint
+	face, ink, err := button_draw(list, theme, reset, s, pointer)
+	if err != .None {return .Ok}
+	if control_focused && board.control == .Reset {focus_ring_draw(list, face, theme, s)}
 	if !modified {ink.a *= 0.5}
-	icon := render.Rect{b.reset.x + SPACE_1 * s, b.reset.y, ICON_BUTTON * s, b.reset.height}
+	icon := render.Rect{face.x + SPACE_1 * s, face.y, ICON_BUTTON * s, face.height}
 	icon_draw(list, .Undo, icon, ink, ICON_BUTTON, s)
-	if r := draw_text(&small, list, "Reset", icon.x + icon.width + SPACE_1 * s, base_baseline, ink); r != .Ok {
+	label_baseline := base_baseline + face.y - b.reset.y
+	if r := draw_text(&small, list, "Reset", icon.x + icon.width + SPACE_1 * s, label_baseline, ink); r != .Ok {
 		return r
 	}
 	// The colors that share this value, which change with it only when each is changed.

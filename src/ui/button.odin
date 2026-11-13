@@ -15,7 +15,9 @@ Button_Surface :: enum u8 {
 // fill and the ink for its content. `hover` and `press` are the animated 0..1 values from
 // Control_Motion; `radius` is in DIPs, RADIUS_BUTTON when zero. A `selected` toggle keeps its tint
 // under the hover. A disabled button stays flat with faint ink. `press_color` replaces the default
-// pressed fill.
+// pressed fill. An `on_tint` button sits inside a tinted surface such as a selected row: an opaque
+// hover fill would punch a hole in that tint, so there it takes the lift and the light without the
+// fill or the hairline.
 Button :: struct {
 	rect:        render.Rect,
 	hover:       f32,
@@ -24,6 +26,7 @@ Button :: struct {
 	surface:     Button_Surface,
 	selected:    bool,
 	disabled:    bool,
+	on_tint:     bool,
 	press_color: Maybe(render.Color),
 }
 
@@ -51,7 +54,8 @@ button_draw :: proc(
 		}
 	}
 	if b.selected {draw_rect(list, {rect = face, color = theme.selection, radius = radius})}
-	if !b.selected || !hover_fill_opaque(theme) {
+	keep_tint := (b.selected || b.on_tint) && hover_fill_opaque(theme)
+	if !keep_tint {
 		fill := b.surface == .Flat_Unfilled ? render.Color{} : theme.hover
 		fill.a *= hover
 		draw_rect(list, {rect = face, color = fill, radius = radius})
@@ -67,7 +71,8 @@ button_draw :: proc(
 	case:
 		ink = theme.muted
 	}
-	err = hover_rim_draw(list, theme, face, radius, hover, scale, pointer, !b.selected, compact = true)
+	edge := !b.selected && !keep_tint
+	err = hover_rim_draw(list, theme, face, radius, hover, scale, pointer, edge, compact = true)
 	return
 }
 

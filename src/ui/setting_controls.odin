@@ -68,12 +68,27 @@ row_step :: proc(row: ^Editor_Row) -> f64 {
 	return row.kind == .Integer ? 1 : 0.1
 }
 
+// The multiple of `step` nearest `value`, as the double its decimal text parses to. A bare
+// round(value / step) * step drifts in binary (3 * 0.1 is 0.30000000000000004), and the shortest
+// round-trip text of that drift is what %g would show and save, so the product is rounded once more
+// to the decimals the step itself has.
+@(private)
+step_round :: proc(step, value: f64) -> f64 {
+	rounded := math.round(value / step) * step
+	scale := 1.0
+	for _ in 0 ..< 9 {
+		if abs(step * scale - math.round(step * scale)) < 0.000000001 {break}
+		scale *= 10
+	}
+	return math.round(rounded * scale) / scale
+}
+
 // A number rounded to `step` as a setting value: whole numbers for whole steps, two decimals for
 // steps finer than a tenth.
 @(private)
 number_text :: proc(step, value: f64) -> string {
-	if step >= 1 {return fmt.tprintf("%d", int(math.round(value / step) * step))}
-	rounded := math.round(value / step) * step
+	rounded := step_round(step, value)
+	if step >= 1 {return fmt.tprintf("%d", int(rounded))}
 	if step < 0.1 {return fmt.tprintf("%.2f", rounded)}
 	return fmt.tprintf("%g", rounded)
 }
@@ -110,8 +125,8 @@ slider_draw :: proc(list: ^render.Draw_List, track: render.Rect, fraction: f32, 
 	draw_rect(list, {rect = thumb, color = theme.surface, radius = pill_radius(thumb), stroke = 2 * scale})
 }
 
-// A setting's reset button: faint while the value is the default, lit under the pointer otherwise.
-// A selected row already carries a tint, so the button adds only the rim there.
+// A setting's reset button: faint while the value is the default, raised and lit under the pointer
+// otherwise. It sits inside its row, so a selected row's tint stays under the hover.
 @(private)
 reset_button_draw :: proc(
 	list: ^render.Draw_List,
@@ -121,21 +136,17 @@ reset_button_draw :: proc(
 	pointer: [2]f32,
 	scale: f32,
 ) -> render.Error {
-	if hovered && modified {
-		if !selected {draw_rect(list, {rect = rect, color = theme.hover, radius = RADIUS_CONTROL * scale})}
-		radius := RADIUS_CONTROL * scale
-		if err := hover_rim_draw(list, theme, rect, radius, 1, scale, pointer, !selected); err != .None {
-			return err
-		}
+	b := Button {
+		rect     = rect,
+		hover    = hovered ? 1 : 0,
+		radius   = RADIUS_CONTROL,
+		disabled = !modified,
+		on_tint  = selected,
 	}
-	color := theme.faint
-	if modified {
-		color = hovered ? theme.text : theme.muted
-	} else {
-		color.a *= 0.5
-	}
-	icon_draw(list, .Undo, rect, color, ICON_BUTTON, scale)
-	return .None
+	face, ink, err := button_draw(list, theme, b, scale, pointer)
+	if !modified {ink.a *= 0.5}
+	icon_draw(list, .Undo, face, ink, ICON_BUTTON, scale)
+	return err
 }
 
 // Indexes of the choices whose label, or value when unlabelled, contains `query` ignoring case.

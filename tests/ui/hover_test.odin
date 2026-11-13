@@ -242,3 +242,35 @@ hover_shadow_sits_under_the_lifted_rect :: proc(t: ^testing.T) {
 	testing.expect_value(t, list.rects[0].softness, f32(7))
 	testing.expect_value(t, list.rects[0].color.a, theme.shadow.a)
 }
+
+// A button inside a tinted row lifts and takes the light like any other, but leaves out the paper
+// fill and its hairline so the row's tint stays.
+@(test)
+on_tint_button_lifts_and_keeps_the_tint :: proc(t: ^testing.T) {
+	theme := ui.theme_from(fixtures.shipped_theme("studio-light"), fixtures.default_interface())
+	list := render.draw_list_init()
+	defer render.draw_list_destroy(&list)
+	rect := render.Rect{10, 20, 22, 22}
+	for on_tint in ([?]bool{false, true}) {
+		render.draw_list_reset(&list)
+		if !testing.expect_value(t, render.push_layer(&list, {0, 0, 200, 100}), render.Error.None) {
+			return
+		}
+		b := ui.Button{rect = rect, hover = 1, on_tint = on_tint}
+		face, _, err := ui.button_draw(&list, theme, b, 1, {21, 31})
+		testing.expect_value(t, err, render.Error.None)
+		testing.expect_value(t, face.y, rect.y - theme.hover_lift)
+		shadow, paper, hairline, rim: bool
+		for r in list.rects {
+			switch {
+			case r.fill == render.RECT_FILL_RIM: rim = true
+			case r.softness > 0: shadow = true
+			case r.stroke > 0: hairline = true
+			case r.color == theme.hover: paper = true
+			}
+		}
+		testing.expect(t, shadow && rim, "a hovered button lifts on its seat and takes the light")
+		testing.expect_value(t, paper, !on_tint)
+		testing.expect_value(t, hairline, !on_tint)
+	}
+}

@@ -227,7 +227,8 @@ settings_pointer_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: 
 
 @(private)
 settings_tooltip :: proc(_: ^App, w: ^Window, _, _: f32) -> string {
-	return w.editor.hover_reset >= 0 ? "Reset setting" : ""
+	if w.editor.hover_reset >= 0 {return "Reset setting"}
+	return ui.editor_profile_tooltip(&w.editor)
 }
 
 @(private)

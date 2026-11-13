@@ -3574,6 +3574,16 @@ editor_hover_clear :: proc(p: ^Editor) -> (changed: bool) {
 	return
 }
 
+// Whether the pointer is over `rect`, a control drawn in `row`, while the page hover is on that row.
+// The hover leaves rows under a popup, a drag or the color board, so neither do their controls; a
+// hovered row carries the pointer light, so the window repaints as the pointer crosses the control.
+@(private)
+editor_row_control_hovered :: proc(p: ^Editor, row: ^Editor_Row, rect: render.Rect, pointer: [2]f32) -> bool {
+	if p.hover_item < 0 || p.hover_item >= len(p.items) {return false}
+	item := p.items[p.hover_item]
+	return item.row >= 0 && &p.rows[item.row] == row && render.rect_contains(rect, pointer.x, pointer.y)
+}
+
 // Whether the pointer is over editable text, which shows a text cursor.
 editor_over_text :: proc(p: ^Editor, l: Editor_Layout, x, y: f32) -> bool {
 	if profile_menu_shown(p) || editor_chained(p) {return false}
@@ -3752,28 +3762,28 @@ profile_badge_draw :: proc(
 	)
 }
 
-// A 22px radio dot with a pointer and keyboard focus state.
+// A 22px radio dot with a pointer and keyboard focus state. Under the pointer it rises on the shared
+// button surface, a disc 4 DIPs wider than the dot's cell; `on_tint` is the row's selection tint.
 @(private)
 profile_radio_draw :: proc(
 	list: ^render.Draw_List,
 	rect: render.Rect,
-	on, focused, hovered: bool,
+	on, focused, hovered, on_tint: bool,
 	theme: Theme,
 	scale: f32,
-) {
-	if rect.width <= 0 {return}
-	if hovered {
-		hover := render.Rect {
-			rect.x - 4 * scale,
-			rect.y - 4 * scale,
-			rect.width + 8 * scale,
-			rect.height + 8 * scale,
-		}
-		draw_rect(list, {rect = hover, color = theme.hover, radius = hover.width / 2})
+	pointer: [2]f32,
+) -> render.Error {
+	if rect.width <= 0 {return .None}
+	b := Button {
+		rect    = {rect.x - 4 * scale, rect.y - 4 * scale, rect.width + 8 * scale, rect.height + 8 * scale},
+		hover   = hovered ? 1 : 0,
+		radius  = rect.width / scale / 2 + 4,
+		on_tint = on_tint,
 	}
+	face, _, err := button_draw(list, theme, b, scale, pointer)
 	dot := render.Rect {
-		rect.x + rect.width / 2 - 8 * scale,
-		rect.y + rect.height / 2 - 8 * scale,
+		face.x + face.width / 2 - 8 * scale,
+		face.y + face.height / 2 - 8 * scale,
 		16 * scale,
 		16 * scale,
 	}
@@ -3784,30 +3794,34 @@ profile_radio_draw :: proc(
 		draw_rect(list, {rect = inner, color = theme.accent_text, radius = pill_radius(inner)})
 	}
 	if focused {focus_ring_draw(list, dot, theme, scale)}
+	return err
 }
 
-// A small icon button inside a table row.
+// A small icon button inside a table row, on the shared button surface. `focused` is the keyboard's
+// place among the row's controls; `on_tint` is the row's selection tint under the button.
 @(private)
-profile_button_draw :: proc(
+table_button_draw :: proc(
 	list: ^render.Draw_List,
 	rect: render.Rect,
 	icon: Icon,
 	size: f32,
 	theme: Theme,
 	scale: f32,
-	focused, hovered, enabled: bool,
-) {
-	if rect.width <= 0 {return}
-	if enabled && (hovered || focused) {
-		draw_rect(
-			list,
-			{rect = rect, color = hovered ? theme.hover : theme.selection, radius = RADIUS_CONTROL * scale},
-		)
+	focused, hovered, on_tint: bool,
+	pointer: [2]f32,
+) -> render.Error {
+	if rect.width <= 0 {return .None}
+	b := Button {
+		rect     = rect,
+		hover    = hovered ? 1 : 0,
+		radius   = RADIUS_CONTROL,
+		selected = focused,
+		on_tint  = on_tint,
 	}
-	color := enabled ? theme.muted : theme.faint
-	if hovered || focused {color = theme.text}
-	if focused {focus_ring_draw(list, rect, theme, scale)}
-	icon_draw(list, icon, rect, color, size, scale)
+	face, ink, err := button_draw(list, theme, b, scale, pointer)
+	if focused {focus_ring_draw(list, face, theme, scale)}
+	icon_draw(list, icon, face, ink, size, scale)
+	return err
 }
 
 @(private)
@@ -3821,6 +3835,7 @@ profile_row_draw :: proc(
 	text: ^Text,
 	theme: Theme,
 	scale: f32,
+	pointer: [2]f32,
 ) -> render.Build_Status {
 	table := profile_row_parts(.Profile, parts.row, scale)
 	small := text_styled(text, .Detail)
@@ -3881,27 +3896,14 @@ profile_row_draw :: proc(
 			max(1, table.directory.width),
 		); result != .Ok {return result}
 	}
-	radio_focus := focused && p.profile_control == .Radio
-	if table.radio.width > 0 {profile_radio_draw(
-		list,
-		table.radio,
-		.Default in row.flags,
-		radio_focus,
-		hovered && p.hover_profile_control == .Radio,
-		theme,
-		scale,
-	)}
-	profile_button_draw(
-		list,
-		table.toggle,
-		.Hidden in row.flags ? .Eye_Off : .Eye,
-		ICON_BUTTON,
-		theme,
-		scale,
-		focused && p.profile_control == .Hidden,
-		hovered && p.hover_profile_control == .Hidden,
-		true,
-	)
+	radio_focused := focused && p.profile_control == .Radio
+	radio_hovered := hovered && p.hover_profile_control == .Radio
+	if err := profile_radio_draw(list, table.radio, .Default in row.flags, radio_focused, radio_hovered,
+		selected, theme, scale, pointer); err != .None {return .Ok}
+	eye: Icon = .Hidden in row.flags ? .Eye_Off : .Eye
+	eye_hovered := hovered && p.hover_profile_control == .Hidden
+	if err := table_button_draw(list, table.toggle, eye, ICON_BUTTON, theme, scale,
+		focused && p.profile_control == .Hidden, eye_hovered, selected, pointer); err != .None {return .Ok}
 	if table.expand.width > 0 {
 		controls := [?]struct {
 			rect: render.Rect,
@@ -3917,17 +3919,10 @@ profile_row_draw :: proc(
 		for control in controls {
 			if control.rect.width <= 0 {continue}
 			if control.kind == .Remove && .Protected in row.flags {continue}
-			profile_button_draw(
-				list,
-				control.rect,
-				control.icon,
-				control.size,
-				theme,
-				scale,
-				focused && p.profile_control == control.kind,
-				hovered && p.hover_profile_control == control.kind,
-				true,
-			)
+			control_hovered := hovered && p.hover_profile_control == control.kind
+			if err := table_button_draw(list, control.rect, control.icon, control.size, theme, scale,
+				focused && p.profile_control == control.kind, control_hovered, selected, pointer);
+			   err != .None {return .Ok}
 		}
 	}
 	if p.error_profile != "" && p.error_profile == row.profile {
@@ -3978,6 +3973,7 @@ control_draw :: proc(
 	text: ^Text,
 	theme: Theme,
 	page: render.Rect,
+	pointer: [2]f32,
 	scale: f32,
 	match: Shortcut_Highlight = {},
 ) -> render.Build_Status {
@@ -3992,8 +3988,13 @@ control_draw :: proc(
 	case .Toggle:
 		on := value == "true"
 		if row.profile != "" {
-			profile_button_draw(list, parts.toggle, on ? .Eye : .Eye_Off, ICON_BUTTON,
-			                    theme, scale, focused, false, true)
+			// The eye is the same square icon button as the profile line's, centred in the switch's cell.
+			size := HEIGHT_COMPACT * scale
+			cell := parts.toggle
+			eye := render.Rect{cell.x + (cell.width - size) / 2, cell.y + (cell.height - size) / 2, size, size}
+			hovered := editor_row_control_hovered(p, row, cell, pointer)
+			_ = table_button_draw(list, eye, on ? .Eye : .Eye_Off, ICON_BUTTON, theme, scale, focused, hovered,
+				selected, pointer)
 			return .Ok
 		}
 		switch_draw(list, parts.toggle, on, focused, theme, scale)
@@ -4317,12 +4318,14 @@ filter_draw :: proc(
 	}
 	clear := editor_clear_rect(p, l)
 	if clear.width == 0 {return .Ok}
-	if p.hover_clear {
-		draw_rect(list, {rect = clear, color = theme.hover, radius = RADIUS_CONTROL * s})
-		if result := hover_rim_draw(list, theme, clear, RADIUS_CONTROL * s, 1, s, pointer);
-		   result != .None {return .Ok}
+	b := Button {
+		rect   = clear,
+		hover  = p.hover_clear ? 1 : 0,
+		radius = RADIUS_CONTROL,
 	}
-	icon_draw(list, .Close, clear, p.hover_clear ? theme.text : theme.muted, ICON_INDICATOR, s)
+	face, ink, err := button_draw(list, theme, b, s, pointer)
+	if err != .None {return .Ok}
+	icon_draw(list, .Close, face, ink, ICON_INDICATOR, s)
 	return .Ok
 }
 
@@ -4568,12 +4571,12 @@ editor_draw :: proc(
 		}
 		row := &p.rows[item.row]
 		if row.process_field != .None {
-			if result := editor_process_draw(p, row, parts, selected, list, text, theme, s);
+			if result := editor_process_draw(p, row, parts, selected, list, text, theme, pointer, s);
 			   result != .Ok {return result}
 			continue
 		}
 		if row.kind == .Opener {
-			if result := editor_opener_draw(p, row, parts, selected, list, text, theme, s);
+			if result := editor_opener_draw(p, row, parts, selected, list, text, theme, pointer, s);
 			   result != .Ok {return result}
 			continue
 		}
@@ -4583,7 +4586,7 @@ editor_draw :: proc(
 			continue
 		}
 		if row.kind == .Profile {
-			if result := profile_row_draw(p, row, parts, index, selected, list, text, theme, s);
+			if result := profile_row_draw(p, row, parts, index, selected, list, text, theme, s, pointer);
 			   result != .Ok {
 				return result
 			}
@@ -4640,7 +4643,8 @@ editor_draw :: proc(
 			theme.muted,
 			text_width_limit,
 		); result != .Ok {return result}
-		if result := control_draw(p, row, parts, selected, list, text, theme, l.list, s, item.shortcut);
+		if result := control_draw(p, row, parts, selected, list, text, theme, l.list, pointer, s,
+			   item.shortcut);
 		   result != .Ok {
 			return result
 		}
