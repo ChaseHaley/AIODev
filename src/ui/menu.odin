@@ -31,6 +31,10 @@ Menu_Item :: struct {
 	submenu:               bool,
 	// The owner's key for what choosing the row does; the menu only carries it.
 	payload:               u32,
+	// A reorder's drawing of the row away from its slot, in DIPs; layout and hit testing keep the slot.
+	offset:                f32,
+	// The row being dragged, or settling after one: drawn over the others on a backing.
+	lifted:                bool,
 }
 
 Menu_Row_Part :: enum {
@@ -292,7 +296,8 @@ menu_submenu_anchor :: proc(parent: ^Menu, index: int, child_width, width, heigh
 	return {x, row.y - OVERLAY_PADDING * scale}
 }
 
-// Draws the rows around the selection; it reads the menu and changes nothing in it.
+// Draws the rows around the selection; it reads the menu and changes nothing in it. Lifted rows draw last,
+// over the rest.
 menu_draw :: proc(
 	m: ^Menu,
 	list: ^render.Draw_List,
@@ -302,123 +307,157 @@ menu_draw :: proc(
 	pointer: [2]f32 = {},
 ) -> render.Build_Status {
 	surface, rows, first := menu_view(m, width, height, scale)
-	selected := menu_selected(m)
 	if !popover_open(list, surface, theme, width, height, scale) {return .Ok}
+	for lifted in ([?]bool{false, true}) {
+		present := false
+		for visible in 0..<rows {
+			if first + visible < len(m.items) && m.items[first + visible].lifted == lifted {present = true; break}
+		}
+		if !present {continue}
+		// A layer of its own puts a lifted row's backing over the text of the rows below it.
+		if lifted && render.push_layer(list, surface, RADIUS_OVERLAY * scale) != .None {return .Ok}
+		for visible in 0..<rows {
+			i := first + visible
+			if i >= len(m.items) {break}
+			if m.items[i].lifted != lifted {continue}
+			if result := menu_row_draw(m, i, list, text, theme, width, height, scale, pointer); result != .Ok {
+				return result
+			}
+		}
+	}
+	return .Ok
+}
+
+@(private = "file")
+menu_row_draw :: proc(
+	m: ^Menu,
+	i: int,
+	list: ^render.Draw_List,
+	text: ^Text,
+	theme: Theme,
+	width, height, scale: f32,
+	pointer: [2]f32,
+) -> render.Build_Status {
+	selected := menu_selected(m)
 	small := text_styled(text, .Detail)
 	inset := CONTROL_INSET * scale
-	for visible in 0..<rows {
-		i := first + visible
-		if i >= len(m.items) {break}
-		item := m.items[i]
-		row := menu_row_rect(m, i, width, height, scale)
-		if item.separator {
-			if render.push_rect(
-				list,
-				{
-					rect = {row.x + inset, row.y + 4 * scale, row.width - 2 * inset, scale},
-					color = theme.border,
-				},
-			) != .None {return .Ok}
-			continue
-		}
-		if i == selected && item.enabled {
-			if render.push_rect(list, {rect = row, color = theme.selection, radius = RADIUS_CONTROL * scale}) !=
-			   .None {return .Ok}
-		}
-		if item.checked {
-			mark := render.Rect{row.x + scale, row.y + 8 * scale, 3 * scale, row.height - 16 * scale}
-			if render.push_rect(list, {rect = mark, color = theme.accent, radius = pill_radius(mark)}) !=
-			   .None {return .Ok}
-		}
-		label_x := row.x + inset
-		if item.icon != "" || item.icon_atlas.width > 0 {
-			icon_width := (16 + SPACE_2) * scale
-			if result := shell_badge_draw(
-				list,
-				text,
-				theme,
-				{label_x, row.y + (row.height - 16 * scale) / 2, 16 * scale, 16 * scale},
-				item.icon,
-				scale,
-				item.icon_atlas,
-			); result != .Ok {return result}
-			label_x += icon_width
-		}
-		ink := item.enabled ? theme.text : theme.muted
-		if item.danger {ink = theme.error}
-		if item.glyph != .None && item.icon == "" && item.icon_atlas.width <= 0 {
-			glyph := render.Rect{label_x, row.y, ICON_BUTTON * scale, row.height}
-			icon_draw(list, item.glyph, glyph, ink, ICON_BUTTON, scale)
-			label_x += (ICON_BUTTON + SPACE_2) * scale
-		}
-		end := row.x + row.width - inset
-		has_action := item.action != .None
-		has_selected_action := item.selected_action != .None
-		if has_selected_action {
-			end = menu_action_rect(m, i, .Selected_Action, width, height, scale).x
-		}
-		if has_action {
-			end = menu_action_rect(m, i, .Action, width, height, scale).x
-		}
-		if item.submenu {
-			chevron := render.Rect{end - ICON_BUTTON * scale, row.y, ICON_BUTTON * scale, row.height}
-			icon_draw(list, .Chevron_Right, chevron, theme.faint, ICON_BUTTON, scale)
-			end = chevron.x - SPACE_2 * scale
-		}
-		shortcut_width := f32(0)
-		if item.shortcut != "" {
-			shortcut_width = text_width(&small, item.shortcut)
-			if result := draw_text(
+	item := m.items[i]
+	shift := item.offset * scale
+	row := menu_row_rect(m, i, width, height, scale)
+	row.y += shift
+	if item.separator {
+		if render.push_rect(
+			list,
+			{
+				rect = {row.x + inset, row.y + 4 * scale, row.width - 2 * inset, scale},
+				color = theme.border,
+			},
+		) != .None {return .Ok}
+		return .Ok
+	}
+	if item.lifted {
+		if render.push_rect(list, {rect = row, color = theme.surface, radius = RADIUS_CONTROL * scale}) !=
+		   .None {return .Ok}
+	}
+	if i == selected && item.enabled {
+		if render.push_rect(list, {rect = row, color = theme.selection, radius = RADIUS_CONTROL * scale}) !=
+		   .None {return .Ok}
+	}
+	if item.checked {
+		mark := render.Rect{row.x + scale, row.y + 8 * scale, 3 * scale, row.height - 16 * scale}
+		if render.push_rect(list, {rect = mark, color = theme.accent, radius = pill_radius(mark)}) !=
+		   .None {return .Ok}
+	}
+	label_x := row.x + inset
+	if item.icon != "" || item.icon_atlas.width > 0 {
+		icon_width := (16 + SPACE_2) * scale
+		if result := shell_badge_draw(
+			list,
+			text,
+			theme,
+			{label_x, row.y + (row.height - 16 * scale) / 2, 16 * scale, 16 * scale},
+			item.icon,
+			scale,
+			item.icon_atlas,
+		); result != .Ok {return result}
+		label_x += icon_width
+	}
+	ink := item.enabled ? theme.text : theme.muted
+	if item.danger {ink = theme.error}
+	if item.glyph != .None && item.icon == "" && item.icon_atlas.width <= 0 {
+		glyph := render.Rect{label_x, row.y, ICON_BUTTON * scale, row.height}
+		icon_draw(list, item.glyph, glyph, ink, ICON_BUTTON, scale)
+		label_x += (ICON_BUTTON + SPACE_2) * scale
+	}
+	end := row.x + row.width - inset
+	has_action := item.action != .None
+	has_selected_action := item.selected_action != .None
+	if has_selected_action {
+		end = menu_action_rect(m, i, .Selected_Action, width, height, scale).x
+	}
+	if has_action {
+		end = menu_action_rect(m, i, .Action, width, height, scale).x
+	}
+	if item.submenu {
+		chevron := render.Rect{end - ICON_BUTTON * scale, row.y, ICON_BUTTON * scale, row.height}
+		icon_draw(list, .Chevron_Right, chevron, theme.faint, ICON_BUTTON, scale)
+		end = chevron.x - SPACE_2 * scale
+	}
+	shortcut_width := f32(0)
+	if item.shortcut != "" {
+		shortcut_width = text_width(&small, item.shortcut)
+		if result := draw_text(
+			&small,
+			list,
+			item.shortcut,
+			row.x + row.width - inset - shortcut_width,
+			row.y + (row.height - small.line_height) / 2 + small.ascent,
+			theme.faint,
+		); result != .Ok {return result}
+	}
+	end -= shortcut_width > 0 ? shortcut_width + SPACE_2 * scale : 0
+	available := max(1, end - label_x)
+	label_baseline := row.y + (row.height - text.line_height) / 2 + text.ascent
+	if item.detail == "" {
+		if result := draw_text(text, list, item.label, label_x, label_baseline, ink, available);
+		   result != .Ok {return result}
+	} else {
+		label_width := min(text_width(text, item.label), available)
+		if result := draw_fading_text(text, list, item.label, label_x, label_baseline, ink, label_width);
+		   result != .Ok {return result}
+		detail_x := label_x + label_width + SPACE_2 * scale
+		if end - detail_x > 0 {
+			if result := draw_fading_text(
 				&small,
 				list,
-				item.shortcut,
-				row.x + row.width - inset - shortcut_width,
-				row.y + (row.height - small.line_height) / 2 + small.ascent,
+				item.detail,
+				detail_x,
+				label_baseline,
 				theme.faint,
+				end - detail_x,
 			); result != .Ok {return result}
 		}
-		end -= shortcut_width > 0 ? shortcut_width + SPACE_2 * scale : 0
-		available := max(1, end - label_x)
-		label_baseline := row.y + (row.height - text.line_height) / 2 + text.ascent
-		if item.detail == "" {
-			if result := draw_text(text, list, item.label, label_x, label_baseline, ink, available);
-			   result != .Ok {return result}
-		} else {
-			label_width := min(text_width(text, item.label), available)
-			if result := draw_fading_text(text, list, item.label, label_x, label_baseline, ink, label_width);
-			   result != .Ok {return result}
-			detail_x := label_x + label_width + SPACE_2 * scale
-			if end - detail_x > 0 {
-				if result := draw_fading_text(
-					&small,
-					list,
-					item.detail,
-					detail_x,
-					label_baseline,
-					theme.faint,
-					end - detail_x,
-				); result != .Ok {return result}
-			}
+	}
+	if i == selected && item.enabled && render.rect_contains(row, pointer.x, pointer.y) {
+		if result := hover_rim_draw(list, theme, row, RADIUS_CONTROL * scale, 1, scale, pointer);
+		   result != .None {return .Ok}
+	}
+	if item.action != .None {
+		hover: f32 = i == selected && m.hover_part == .Action ? 1 : 0
+		rect := menu_action_rect(m, i, .Action, width, height, scale)
+		rect.y += shift
+		if icon_button_draw(list, theme, rect, item.action, hover, 0, scale, pointer,
+			radius = RADIUS_CONTROL) != .None {
+			return .Ok
 		}
-		if i == selected && item.enabled && render.rect_contains(row, pointer.x, pointer.y) {
-			if result := hover_rim_draw(list, theme, row, RADIUS_CONTROL * scale, 1, scale, pointer);
-			   result != .None {return .Ok}
-		}
-		if item.action != .None {
-			hover: f32 = i == selected && m.hover_part == .Action ? 1 : 0
-			rect := menu_action_rect(m, i, .Action, width, height, scale)
-			if icon_button_draw(list, theme, rect, item.action, hover, 0, scale, pointer,
-				radius = RADIUS_CONTROL) != .None {
-				return .Ok
-			}
-		}
-		if item.selected_action != .None && i == selected {
-			hover: f32 = m.hover_part == .Selected_Action ? 1 : 0
-			rect := menu_action_rect(m, i, .Selected_Action, width, height, scale)
-			if icon_button_draw(list, theme, rect, item.selected_action, hover, 0, scale, pointer,
-				radius = RADIUS_CONTROL) != .None {
-				return .Ok
-			}
+	}
+	if item.selected_action != .None && i == selected {
+		hover: f32 = m.hover_part == .Selected_Action ? 1 : 0
+		rect := menu_action_rect(m, i, .Selected_Action, width, height, scale)
+		rect.y += shift
+		if icon_button_draw(list, theme, rect, item.selected_action, hover, 0, scale, pointer,
+			radius = RADIUS_CONTROL) != .None {
+			return .Ok
 		}
 	}
 	return .Ok

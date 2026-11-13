@@ -692,7 +692,8 @@ status_panel_press :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) {
 		w.dirty = true
 		return
 	}
-	if render.rect_contains(status_panel_receipt_rect(app, w, rect, rows[index]), x, y) {
+	if status_item_markable(item) &&
+	   render.rect_contains(status_panel_receipt_rect(app, w, rect, rows[index]), x, y) {
 		status_receipt_toggle(app, item)
 		return
 	}
