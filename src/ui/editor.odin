@@ -64,7 +64,8 @@ Editor_Row_Flag :: enum {
 // Strings, `choices` and `choice_labels` are owned by the editor. `choice_labels`, when present,
 // is what each choice displays; the choice itself is the saved value. An empty optional color has no
 // color at all. Profile rows also own `profile`, `badge`, `detail` (extra search text) and `note`
-// (an inline problem); link program rows own `opener`, the ID of the program they belong to.
+// (an inline problem), and a color board tile shows `badge` as its short label; link program rows
+// own `opener`, the ID of the program they belong to.
 Editor_Row :: struct {
 	key, title, description, value, default_value: string,
 	group:                                         int,
@@ -475,6 +476,8 @@ Editor :: struct {
 	keys_hover:                                                        bool,
 	// A complete chord the search names that no shortcut row uses, which Enter offers to assign.
 	free:                                                              Maybe(commands.Shortcut),
+	// The swatch board the Colors section draws instead of its rows (color_board.odin).
+	board:                                                             Color_Board,
 }
 Editor_Outcome :: enum {
 	None,
@@ -601,6 +604,7 @@ editor_destroy :: proc(p: ^Editor) {
 	if drag, dragging := p.order.(Order_Dragging); dragging {order_block_free(drag.block)}
 	profile_positions_clear(&p.profile_positions)
 	delete(p.profile_positions)
+	color_board_destroy(&p.board)
 	p^ = {}
 }
 
@@ -705,7 +709,10 @@ editor_adopt :: proc(p, next: ^Editor, adoption: Editor_Adoption) -> Editor_Adop
 	next.filter.cursor, next.filter.anchor = p.filter.cursor, p.filter.anchor
 	next.fit_layout, next.visible_rows = p.fit_layout, p.visible_rows
 	next.scroll = clamp(p.scroll, 0, max(0, len(next.items) - max(1, p.visible_rows)))
-	if selected {editor_carry(next, p, draft)}
+	if selected {
+		editor_carry(next, p, draft)
+		color_board_carry(next, p)
+	}
 	if chained {
 		next.chain, p.chain = p.chain, {}
 		next.chain_view, p.chain_view = p.chain_view, {}
@@ -1190,6 +1197,11 @@ editor_select :: proc(p: ^Editor, index: int) {
 		sync_color(p)
 	}
 	p.profile_control = .Radio
+	color_board_follow(p)
+	if color_board_shown(p) {
+		color_board_reveal(p)
+		return
+	}
 	if p.selected < p.scroll {p.scroll = p.selected}
 	if p.selected >= p.scroll + max(1, p.visible_rows) {
 		p.scroll = p.selected - max(1, p.visible_rows) + 1
@@ -1451,6 +1463,7 @@ editor_list_top :: proc(p: ^Editor) {
 	editor_rebuild(p)
 	first := 0
 	for item, index in p.items {if item.row >= 0 {first = index; break}}
+	if board := color_board_first(p); board >= 0 && color_board_shown(p) {first = board}
 	p.scroll, p.outline_scroll = 0, 0
 	editor_select(p, first)
 }
@@ -1912,6 +1925,7 @@ editor_underlined_section :: proc(p: ^Editor) -> int {
 // slides between tabs as the window's tab underline does. True when the page must draw again.
 editor_animate :: proc(p: ^Editor, enabled: bool, frame: Frame_Time) -> bool {
 	changed := editor_profiles_animate(p, enabled, frame)
+	changed = color_board_animate(p, enabled, frame) || changed
 	target := editor_underlined_section(p)
 	if target < 0 {
 		changed ||= p.underline_shown
@@ -1929,7 +1943,7 @@ editor_animate :: proc(p: ^Editor, enabled: bool, frame: Frame_Time) -> bool {
 }
 
 editor_animating :: proc(p: ^Editor) -> bool {
-	return editor_profiles_animating(p) || motion_active(p.section_underline)
+	return editor_profiles_animating(p) || motion_active(p.section_underline) || color_board_animating(p)
 }
 
 @(private)
@@ -1953,7 +1967,10 @@ editor_step :: proc(p: ^Editor, delta: int) {
 }
 
 @(private)
-max_scroll :: proc(p: ^Editor) -> int {return max(0, len(p.items) - max(1, p.visible_rows))}
+max_scroll :: proc(p: ^Editor) -> int {
+	if color_board_shown(p) {return color_board_max_scroll(p)}
+	return max(0, len(p.items) - max(1, p.visible_rows))
+}
 
 // Scrolls the page, or the outline under the pointer, without moving the selection.
 editor_wheel :: proc(p: ^Editor, l: Editor_Layout, x, y: f32, rows: int) {
@@ -2001,6 +2018,7 @@ outline_rows :: proc(l: Editor_Layout) -> int {
 editor_active_group :: proc(p: ^Editor) -> int {
 	if len(p.items) == 0 {return -1}
 	for item in p.items {if item.row < 0 && item.group == p.jump_group {return p.jump_group}}
+	if color_board_shown(p) {return color_board_group_at(p)}
 	return p.items[clamp(p.scroll, 0, len(p.items) - 1)].group
 }
 
@@ -2010,9 +2028,10 @@ editor_jump :: proc(p: ^Editor, entry: int) {
 	if entry < 0 || entry >= len(entries) {return}
 	header := entries[entry]
 	if editor_focus(p) != .Search {editor_keep(p); stop_editing(p)}
-	p.scroll = clamp(header, 0, max_scroll(p))
+	top := color_board_shown(p) ? color_board_line(p, header) : header
+	p.scroll = clamp(top, 0, max_scroll(p))
 	editor_select(p, header + 1)
-	p.scroll = clamp(header, 0, max_scroll(p))
+	p.scroll = clamp(top, 0, max_scroll(p))
 	p.jump_group = p.items[header].group
 }
 
@@ -2364,6 +2383,7 @@ editor_key :: proc(p: ^Editor, raw: input.Key_Event) -> Editor_Outcome {
 		if e.key == .Escape {editor_mode_set(p, Editor_Browsing{}); return .Changed}
 		if e.key != .Tab {return .None}
 	}
+	if result, handled := color_board_key(p, row, e); handled {return result}
 	if result, handled := editor_process_key(p, row, e); handled {return result}
 	if result, handled := editor_opener_key(p, row, e); handled {return result}
 	if result, handled := editor_motion_key(p, row, e); handled {return result}
@@ -2544,6 +2564,7 @@ editor_text :: proc(p: ^Editor, text: string) {
 	case Editor_Positions, Editor_Reset_All:
 		return
 	}
+	if color_board_text(p) {return}
 	row := editor_row(p)
 	if curve, open := p.mode.(Editor_Curve_Popup); open && curve.naming {
 		_ = field_text(&p.choice_search, text)
@@ -2673,7 +2694,7 @@ editor_page_scrollbar :: proc(p: ^Editor, l: Editor_Layout) -> (bar: Scrollbar, 
 	width := SCROLLBAR_TRACK * s
 	x := min(l.list.x + l.list.width + SPACE_1 * s, l.page.x + l.page.width - width)
 	area := render.Rect{x, l.list.y, width, l.list.height}
-	extent := Scroll_Extent{len(p.items), l.rows, p.scroll}
+	extent := Scroll_Extent{color_board_shown(p) ? color_board_lines(p, l) : len(p.items), l.rows, p.scroll}
 	return scrollbar_layout(area, extent, scrollbar_state(p.page_bar_hover, p.page_drag), s)
 }
 
@@ -2764,6 +2785,7 @@ filter_box :: proc(p: ^Editor, l: Editor_Layout, text: ^Text) -> Field_Box {
 
 editor_row_parts :: proc(p: ^Editor, l: Editor_Layout, index: int) -> Row_Parts {
 	s := l.scale
+	if parts, board := color_board_row_parts(p, l, index); board {return parts}
 	r := render.Rect {
 		l.list.x,
 		l.list.y + (f32(index - p.scroll) + editor_line_shift(p, index)) * l.row_height,
@@ -2898,6 +2920,7 @@ choice_option_right :: proc(p: ^Editor, l: Editor_Layout, popup: render.Rect) ->
 
 editor_popup_rect :: proc(p: ^Editor, l: Editor_Layout) -> render.Rect {
 	row := editor_row(p)
+	if color_board_shown(p) {return color_board_popup_rect(p, l)}
 	popup := editor_popup(p)
 	if popup == .None || row == nil || p.selected < p.scroll || p.selected >= p.scroll + l.rows {
 		return {}
@@ -2993,6 +3016,7 @@ editor_press :: proc(
 		editor_mode_set(p, Editor_Editing{})
 		return .Changed
 	}
+	if result, handled := color_board_press(p, l, text, x, y, extend); handled {return result}
 	popup := editor_popup(p)
 	if popup == .None && render.rect_contains(editor_reset_all_rect(l), x, y) {
 		editor_blur(p)
@@ -3358,6 +3382,9 @@ editor_hover :: proc(p: ^Editor, l: Editor_Layout, x, y: f32, text: ^Text = nil)
 	// An open dropdown highlights the option under the pointer, like the menus.
 	bar_changed := false
 	popup_open := editor_popup(p)
+	// The board's picker is part of the page, not a popup over it.
+	board_changed := color_board_hover(p, l, x, y)
+	if color_board_shown(p) {popup_open = .None}
 	if popup_open != .None {
 		bar, bar_visible := choice_scrollbar(p, l)
 		over := bar_visible && scrollbar_contains(bar, x, y)
@@ -3388,7 +3415,8 @@ editor_hover :: proc(p: ^Editor, l: Editor_Layout, x, y: f32, text: ^Text = nil)
 	}
 	item, reset, outline := -1, -1, -1
 	profile_item, profile_control := -1, Profile_Control.Radio
-	if popup_open == .None && !editor_order_dragging(p, .Profiles) && render.rect_contains(l.list, x, y) {
+	if popup_open == .None && !editor_order_dragging(p, .Profiles) && !color_board_shown(p) &&
+	   render.rect_contains(l.list, x, y) {
 		index := p.scroll + int((y - l.list.y) / l.row_height)
 		if index < len(p.items) && p.items[index].row >= 0 {
 			item = index
@@ -3436,7 +3464,7 @@ editor_hover :: proc(p: ^Editor, l: Editor_Layout, x, y: f32, text: ^Text = nil)
 	   over_page_bar == p.page_bar_hover &&
 	   profile_item == p.hover_profile_item &&
 	   profile_control == p.hover_profile_control {
-		return bar_changed
+		return bar_changed || board_changed
 	}
 	p.hover_item, p.hover_reset, p.hover_outline, p.hover_clear = item, reset, outline, clear
 	p.keys_hover = keys
@@ -3457,12 +3485,14 @@ editor_hover_clear :: proc(p: ^Editor) -> (changed: bool) {
 	p.hover_section, p.page_bar_hover = -1, false
 	p.hover_profile_item, p.hover_profile_control = -1, .Radio
 	changed = shortcut_chain_hover(&p.chain, {}) || changed
+	changed = board_hover_set(p, {}) || changed
 	return
 }
 
 // Whether the pointer is over editable text, which shows a text cursor.
 editor_over_text :: proc(p: ^Editor, l: Editor_Layout, x, y: f32) -> bool {
 	if profile_menu_shown(p) || editor_chained(p) {return false}
+	if color_board_shown(p) && render.rect_contains(l.list, x, y) {return color_board_over_text(p, l, x, y)}
 	if render.rect_contains(editor_popup_rect(p, l), x, y) {return false}
 	if render.rect_contains(filter_text_rect(p, l), x, y) {return true}
 	if !render.rect_contains(l.list, x, y) {return false}
@@ -3477,6 +3507,7 @@ editor_over_text :: proc(p: ^Editor, l: Editor_Layout, x, y: f32) -> bool {
 editor_pointer :: proc(p: ^Editor, l: Editor_Layout, x, y: f32, text: ^Text = nil) -> platform.Cursor_Shape {
 	if editor_chained(p) {return editor_chain_pointer(p, l, text, x, y) ? .Hand : .Arrow}
 	if profile_menu_shown(p) {return .Hand}
+	if shape, board := color_board_pointer(p, l, x, y); board {return shape}
 	s := l.scale
 	if popup := editor_popup_rect(p, l); render.rect_contains(popup, x, y) {
 		row := editor_row(p)
@@ -4067,59 +4098,7 @@ popup_draw :: proc(
 		return .Ok
 	}
 	c := color_parts(r, row.kind == .Optional_Color, s)
-	wheel := c.wheel
-	draw_rect(
-		list,
-		{
-			rect = wheel,
-			color = {p.hsv[2], 0, 0, 1},
-			radius = wheel.width / 2,
-			fill = render.RECT_FILL_HUE_WHEEL,
-		},
-	)
-	draw_rect(list, {rect = wheel, color = theme.border, radius = wheel.width / 2, stroke = s})
-	angle := math.to_radians(p.hsv[0])
-	reach := wheel.width / 2 * p.hsv[1]
-	mx := wheel.x + wheel.width / 2 + math.cos(angle) * reach
-	my := wheel.y + wheel.height / 2 + math.sin(angle) * reach
-	draw_rect(
-		list,
-		{
-			rect = {mx - 7 * s, my - 7 * s, 14 * s, 14 * s},
-			color = {0, 0, 0, 0.6},
-			radius = pill_radius({0, 0, 14 * s, 14 * s}),
-			stroke = s,
-		},
-	)
-	draw_rect(
-		list,
-		{
-			rect = {mx - 6 * s, my - 6 * s, 12 * s, 12 * s},
-			color = {1, 1, 1, 1},
-			radius = RADIUS_CONTROL * s,
-			stroke = 2 * s,
-		},
-	)
-	full := colour.rgba(colour.hsv_to_rgb(p.hsv[0], p.hsv[1], 1))
-	draw_rect(
-		list,
-		{rect = c.ramp, color = full, radius = RADIUS_CONTROL * s, fill = render.RECT_FILL_VALUE_RAMP},
-	)
-	draw_rect(list, {rect = c.ramp, color = theme.border, radius = RADIUS_CONTROL * s, stroke = s})
-	marker := c.ramp.x + c.ramp.width * p.hsv[2]
-	draw_rect(
-		list,
-		{
-			rect = {marker - 3 * s, c.ramp.y - 3 * s, 6 * s, c.ramp.height + 6 * s},
-			color = {1, 1, 1, 1},
-			radius = pill_radius({0, 0, 6 * s, c.ramp.height + 6 * s}),
-			stroke = 2 * s,
-		},
-	)
-	if color, ok := swatch_color(field_string(&p.value)); ok {
-		draw_rect(list, {rect = c.swatch, color = color, radius = RADIUS_CONTROL * s})
-	}
-	draw_rect(list, {rect = c.swatch, color = theme.border, radius = RADIUS_CONTROL * s, stroke = s})
+	color_picker_draw(list, theme, c, p.hsv, field_string(&p.value), s)
 	small := text_styled(text, .Detail)
 	if result := draw_text(
 		&small,
@@ -4141,6 +4120,72 @@ popup_draw :: proc(
 		theme.text,
 		c.no_color.width - 2 * CONTROL_INSET * s,
 	)
+}
+
+// The picker's hue wheel, brightness ramp and swatch, with its markers at `hsv` and the swatch
+// showing `value`. The colour popup and the Colors board share it.
+@(private)
+color_picker_draw :: proc(
+	list: ^render.Draw_List,
+	theme: Theme,
+	c: Color_Parts,
+	hsv: [3]f32,
+	value: string,
+	s: f32,
+) {
+	wheel := c.wheel
+	draw_rect(
+		list,
+		{
+			rect = wheel,
+			color = {hsv[2], 0, 0, 1},
+			radius = wheel.width / 2,
+			fill = render.RECT_FILL_HUE_WHEEL,
+		},
+	)
+	draw_rect(list, {rect = wheel, color = theme.border, radius = wheel.width / 2, stroke = s})
+	angle := math.to_radians(hsv[0])
+	reach := wheel.width / 2 * hsv[1]
+	mx := wheel.x + wheel.width / 2 + math.cos(angle) * reach
+	my := wheel.y + wheel.height / 2 + math.sin(angle) * reach
+	draw_rect(
+		list,
+		{
+			rect = {mx - 7 * s, my - 7 * s, 14 * s, 14 * s},
+			color = {0, 0, 0, 0.6},
+			radius = pill_radius({0, 0, 14 * s, 14 * s}),
+			stroke = s,
+		},
+	)
+	draw_rect(
+		list,
+		{
+			rect = {mx - 6 * s, my - 6 * s, 12 * s, 12 * s},
+			color = {1, 1, 1, 1},
+			radius = RADIUS_CONTROL * s,
+			stroke = 2 * s,
+		},
+	)
+	full := colour.rgba(colour.hsv_to_rgb(hsv[0], hsv[1], 1))
+	draw_rect(
+		list,
+		{rect = c.ramp, color = full, radius = RADIUS_CONTROL * s, fill = render.RECT_FILL_VALUE_RAMP},
+	)
+	draw_rect(list, {rect = c.ramp, color = theme.border, radius = RADIUS_CONTROL * s, stroke = s})
+	marker := c.ramp.x + c.ramp.width * hsv[2]
+	draw_rect(
+		list,
+		{
+			rect = {marker - 3 * s, c.ramp.y - 3 * s, 6 * s, c.ramp.height + 6 * s},
+			color = {1, 1, 1, 1},
+			radius = pill_radius({0, 0, 6 * s, c.ramp.height + 6 * s}),
+			stroke = 2 * s,
+		},
+	)
+	if color, ok := swatch_color(value); ok {
+		draw_rect(list, {rect = c.swatch, color = color, radius = RADIUS_CONTROL * s})
+	}
+	draw_rect(list, {rect = c.swatch, color = theme.border, radius = RADIUS_CONTROL * s, stroke = s})
 }
 
 @(private)
@@ -4353,6 +4398,7 @@ editor_draw :: proc(
 	   r != .Ok {return r}
 	if r := outline_draw(p, l, list, text, theme, pointer); r != .Ok {return r}
 	if r := sections_draw(p, l, list, text, theme); r != .Ok {return r}
+	if color_board_shown(p) {return color_board_draw(p, l, list, text, theme, pointer)}
 	if len(p.items) == 0 && filtering(p) {
 		if render.push_layer(list, l.page) != .None {return .Ok}
 		empty := "No matching settings or shortcuts"

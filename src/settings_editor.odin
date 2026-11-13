@@ -205,15 +205,14 @@ SETTINGS_GROUP_AREAS := [?]struct {
 	{"Command Line", .Advanced},
 	{"Input", .Shortcuts},
 	{THEME_MANAGE_GROUP, .Colors},
-	{"Interface Colors", .Colors},
-	{"Terminal Colors", .Colors},
 }
 
-// The section a group's title belongs to and its place there.
+// The section a group's title belongs to and its place there; theme color groups follow Manage Theme.
 settings_group_area :: proc(title: string) -> (area: Settings_Area, rank: int) {
 	for entry, i in SETTINGS_GROUP_AREAS {
 		if entry.title == title {return entry.area, i}
 	}
+	if color_rank, color := settings_color_group_area(title); color {return .Colors, color_rank}
 	return .Shortcuts, len(SETTINGS_GROUP_AREAS)
 }
 
@@ -867,8 +866,7 @@ settings_theme_choices :: proc(s: ^settings.Settings) -> (choices, labels: []str
 @(private)
 THEME_MANAGE_GROUP :: "Manage Theme"
 
-// The active theme's management rows and one row per theme color. Every color shows the value in
-// effect; a custom theme's Reset returns a color to its base theme.
+// The active theme's management rows, which the Colors board shows as its card, then its colors.
 @(private)
 settings_add_theme_rows :: proc(p: ^ui.Editor, s: ^settings.Settings) -> bool {
 	if ui.editor_theme_set(p, s.theme.name) != nil {return false}
@@ -905,17 +903,6 @@ settings_add_theme_rows :: proc(p: ^ui.Editor, s: ^settings.Settings) -> bool {
 				action = .Theme_Rename,
 			},
 			duplicate,
-			{
-				key = "theme.delete",
-				title = "Delete Theme",
-				description = fmt.tprintf(
-					"Remove this custom theme and switch to %s.",
-					settings.theme_display_name(s, settings.theme_delete_target(s, custom)),
-				),
-				value = "Delete…",
-				kind = .Action,
-				action = .Theme_Delete,
-			},
 		}
 		for row in rows {
 			if ui.editor_add(p, row, THEME_MANAGE_GROUP) != nil {return false}
@@ -929,23 +916,22 @@ settings_add_theme_rows :: proc(p: ^ui.Editor, s: ^settings.Settings) -> bool {
 		value = "Export",
 		action = .Theme_Export,
 	}, THEME_MANAGE_GROUP) != nil {return false}
-	base := settings.theme_base(s)
-	tokens := settings.THEME_TOKENS
-	for token in settings.Theme_Token {
-		info := tokens[token]
-		row := ui.Editor_Row {
-			key           = fmt.tprintf("%s%s", SETTINGS_COLOR_PREFIX, info.key),
-			title         = info.title,
-			description   = info.description,
-			value         = settings.theme_color_text(token, s.active_theme.colors[token]),
-			default_value = settings.theme_color_text(token, base.colors[token]),
-			kind          = info.kind == .Optional ? .Optional_Color : .Color,
-			action        = .Theme_Color,
+	// Delete follows the actions that keep the theme.
+	if custom := settings.custom_theme_find(s, s.theme.name); settings.theme_custom(s) {
+		delete_row := ui.Editor_Row {
+			key         = "theme.delete",
+			title       = "Delete Theme",
+			description = fmt.tprintf(
+				"Remove this custom theme and switch to %s.",
+				settings.theme_display_name(s, settings.theme_delete_target(s, custom)),
+			),
+			value       = "Delete…",
+			kind        = .Action,
+			action      = .Theme_Delete,
 		}
-		group := settings.token_terminal(token) ? "Terminal Colors" : "Interface Colors"
-		if ui.editor_add(p, row, group) != nil {return false}
+		if ui.editor_add(p, delete_row, THEME_MANAGE_GROUP) != nil {return false}
 	}
-	return true
+	return settings_add_color_rows(p, s)
 }
 
 // Applies a theme change made on the page; a change that does not apply is reported there.
@@ -1260,6 +1246,7 @@ when AIO_CONTROL {
 		used_by := ui.shortcut_capture_used_by(&p.capture)
 		if ui.editor_chained(p) {used_by = ui.shortcut_chain_used_by(&p.chain)}
 		state_text(r, "settings.used_by", used_by)
+		settings_board_state_report(r, p, page)
 	}
 
 	// Current pages report draft while they hold pending work, derived rather than stored.
