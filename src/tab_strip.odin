@@ -146,7 +146,7 @@ window_tab_strip_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 	if render.push_layer(&w.list, {bar.x, 0, bar.width, bar.height}) == .None {
 		for run in runs {
 			if run.carried {continue}
-			result := tab_chip_draw(app, w, run, tab_chip_strip_rect(w, bar, run))
+			result := tab_chip_strip_draw(app, w, bar, run, tab_chip_strip_rect(w, bar, run))
 			if result != .Ok {return result}
 		}
 	}
@@ -187,7 +187,7 @@ window_tab_strip_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 	if dragging && render.push_layer(&w.list, {bar.x, 0, bar.width, bar.height}) == .None {
 		for run in runs {
 			if !run.carried {continue}
-			result := tab_chip_draw(app, w, run, tab_chip_strip_rect(w, bar, run))
+			result := tab_chip_strip_draw(app, w, bar, run, tab_chip_strip_rect(w, bar, run))
 			if result != .Ok {return result}
 		}
 	}

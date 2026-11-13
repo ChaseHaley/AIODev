@@ -112,16 +112,51 @@ tab_group_color :: proc(app: ^App, group: ^Tab_Group) -> render.Color {
 	return workspace_icon_tint(group.color, app.theme.text)
 }
 
-// The colour of tab `index`'s group band, transparent for an ungrouped tab. Dragged tabs take the band of
-// the group they would join if dropped now, so the drop's outcome shows before the release.
-tab_band_color :: proc(app: ^App, w: ^Window, index: int) -> render.Color {
-	group := tab_group_of(w.workspace, index)
-	if _, carry := tab_drag_state(w); carry != nil && !carry.whole && w.workspace.tabs[index].marked {
+// Whether group `group` shows its tray: while unfolded, and while its tabs slide into the chip as it folds.
+tab_group_tray_shown :: proc(w: ^Window, group: ^Tab_Group) -> bool {
+	return !group.folded || w.folding == group.id
+}
+
+// Tab `index`'s part of a group's tray (WORK-454): transparent for an ungrouped tab, else its group's colour,
+// closing the tray when it is the last of its group laid out together. A tab dragged on its own carries a
+// tray of the group it would join if dropped now, so the drop's outcome shows before the release.
+tab_tray :: proc(app: ^App, w: ^Window, index: int) -> (render.Color, ui.Tray_Ends) {
+	workspace := w.workspace
+	group := tab_group_of(workspace, index)
+	marked := workspace.tabs[index].marked
+	if _, carry := tab_drag_state(w); carry != nil && !carry.whole && marked {
 		_, reordering := carry.destination.(Drop_Reorder)
-		group = reordering ? tab_group_find(w.workspace, carry.group) : nil
+		group = reordering ? tab_group_find(workspace, carry.group) : nil
+		if group == nil {return {}, {}}
+		return tab_group_color(app, group), {.Start, .End}
 	}
-	if group == nil {return {}}
-	return tab_group_color(app, group)
+	if group == nil || !tab_group_tray_shown(w, group) {return {}, {}}
+	// Dragged tabs ride apart from the others, so each side's run ends at its own last tab.
+	dragging := tab_drag_active(w)
+	next := index + 1
+	for next < len(workspace.tabs) && dragging && workspace.tabs[next].marked != marked {next += 1}
+	ends: ui.Tray_Ends
+	if next >= len(workspace.tabs) || workspace.tabs[next].group != group.id {ends = {.End}}
+	return tab_group_color(app, group), ends
+}
+
+// Draws run `run`'s chip at `chip` in the strip, on the start of its group's tray, which takes the chip's
+// room and the margin after it.
+tab_chip_strip_draw :: proc(
+	app: ^App,
+	w: ^Window,
+	bar: ui.Tab_Bar,
+	run: Tab_Run,
+	chip: render.Rect,
+) -> render.Build_Status {
+	if tab_group_tray_shown(w, run.group) {
+		y, height := ui.tab_tray_band(bar.height, w.scale)
+		slice := render.Rect{chip.x, y, chip.width + ui.TAB_CHIP_MARGIN * w.scale, height}
+		if ui.tab_tray_draw(&w.list, slice, tab_group_color(app, run.group), {.Start}, false, w.scale) != .None {
+			return .Ok
+		}
+	}
+	return tab_chip_draw(app, w, run, chip)
 }
 
 // Run `run`'s chip in the strip, before its first tab as that tab moves.

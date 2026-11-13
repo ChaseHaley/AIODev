@@ -419,23 +419,29 @@ rail_row_draw :: proc(
 	if t.status_slot || t.status.glyph != .None {
 		trailing = tile.x + tile.width - status_right + (ui.ICON_INDICATOR + ui.SPACE_1) * s
 	}
-	if result := ui.navigation_row_draw(&w.list, &w.ui_text, app.theme, tile,
+	// The row's part of its group's tray reaches past its sides; the row closing the tray leaves room below
+	// its tile.
+	row := tile
+	if t.tray.a > 0 {
+		inset := ui.TAB_TRAY_INSET * s
+		slice := render.Rect{tile.x - inset, tile.y, tile.width + 2 * inset, tile.height}
+		if ui.tab_tray_draw(&w.list, slice, t.tray, t.tray_ends, true, s) != .None {return .Ok}
+		if .End in t.tray_ends {row.height -= 2 * s}
+	}
+	if result := ui.navigation_row_draw(&w.list, &w.ui_text, app.theme, row,
 		{title = t.title, selected = t.selected, marked = t.marked, hovered = hover, pressed = pressed,
 		 mark_elsewhere = true, leading = leading, trailing = trailing}, s, w.pointer);
 	   result != .Ok {return result}
-	if t.group.a > 0 {
-		ui.draw_rect(&w.list, {rect = {layout.list.x + s, tile.y, 2 * s, tile.height}, color = t.group})
-	}
 	if t.status.glyph != .None {
-		band := render.Rect{tile.x, tile.y + s, tile.width, tile.height - 3 * s}
+		band := render.Rect{row.x, row.y + s, row.width, row.height - 3 * s}
 		ui.tab_progress_draw(&w.list, app.theme, band, t.status, s)
 		size := ui.ICON_INDICATOR * s
-		mark := render.Rect{status_right - ui.SPACE_1 * s - size, tile.y + (tile.height - size) / 2, size, size}
+		mark := render.Rect{status_right - ui.SPACE_1 * s - size, row.y + (row.height - size) / 2, size, size}
 		if result := ui.status_glyph_draw(&w.list, &w.ui_text, app.theme, mark, t.status, t.status_phase, s);
 		   result != .Ok {return result}
 	}
 	if has_badge {
-		badge := ui.tab_badge_draw(&w.list, &w.ui_text, app.theme, tile, t, s)
+		badge := ui.tab_badge_draw(&w.list, &w.ui_text, app.theme, row, t, s)
 		if badge != .Ok {return badge}
 	}
 	if show_close {
@@ -458,17 +464,20 @@ rail_selection_mark_draw :: proc(app: ^App, w: ^Window, layout: ui.Rail_Layout, 
 	ui.draw_rect(&w.list, {rect = mark, color = app.theme.tab_indicator, radius = ui.pill_radius(mark)})
 }
 
-// A group's chip in the row above its tabs, aligned with their tiles, and the start of the band down the
-// group's rows from the chip row's top; a folded chip has no rows below it.
+// A group's chip in the row above its tabs, aligned with their tiles, on the start of its group's tray, which
+// leaves a gap above the chip row; a folded chip has no tray.
 @(private)
 rail_chip_draw :: proc(app: ^App, w: ^Window, layout: ui.Rail_Layout, run: Tab_Run) -> render.Build_Status {
 	row := tab_chip_rail_rect(w, layout, run)
 	if row.width <= 0 || row.y + row.height <= layout.list.y || row.y >= layout.list.y + layout.list.height {
 		return .Ok
 	}
-	if !run.group.folded {
-		band := render.Rect{layout.list.x + w.scale, row.y, 2 * w.scale, row.height}
-		ui.draw_rect(&w.list, {rect = band, color = tab_group_color(app, run.group)})
+	if tab_group_tray_shown(w, run.group) {
+		inset := ui.TAB_TRAY_INSET * w.scale
+		slice := render.Rect{row.x - inset, row.y + inset, row.width + 2 * inset, row.height - inset}
+		if ui.tab_tray_draw(&w.list, slice, tab_group_color(app, run.group), {.Start}, true, w.scale) != .None {
+			return .Ok
+		}
 	}
 	return tab_chip_draw(app, w, run, row)
 }

@@ -18,8 +18,8 @@ tab_tile :: proc(app: ^App, w: ^Window, index: int) -> (ui.Tab_Tile, render.Buil
 		status_slot  = app.settings.status.enabled && .Tabs in app.settings.status.surfaces,
 		selected     = index == w.workspace.selected,
 		marked       = tab_marked_shown(w, index),
-		group        = tab_band_color(app, w, index),
 	}
+	t.tray, t.tray_ends = tab_tray(app, w, index)
 	front, has_front := layout.focused_content(&tab.tree)
 	if !has_front {return t, .Ok}
 	behind, stacked := tab_pane_behind(app, tab, index)

@@ -300,6 +300,30 @@ the_rail_gives_each_chip_the_row_above_its_tabs :: proc(t: ^testing.T) {
 }
 
 @(test)
+a_groups_tray_runs_from_its_chip_to_its_last_tab_and_goes_while_folded :: proc(t: ^testing.T) {
+	state: app.App
+	defer grouped_destroy(&state)
+	state.theme.text = {1, 1, 1, 1}
+	workspace := grouped_workspace(&state, {1, 1, 0, 2})
+	w := grouped_window(&state, workspace, true)
+	defer grouped_window_destroy(w)
+	Expected :: struct {
+		shown: bool,
+		ends:  ui.Tray_Ends,
+	}
+	trays :: proc(state: ^app.App, w: ^app.Window) -> (out: [4]Expected) {
+		for &tray, i in out {
+			color, ends := app.tab_tray(state, w, i)
+			tray = {color.a > 0, ends}
+		}
+		return
+	}
+	testing.expect_value(t, trays(&state, w), [4]Expected{{true, {}}, {true, {.End}}, {}, {true, {.End}}})
+	app.tab_group_find(workspace, 1).folded = true
+	testing.expect_value(t, trays(&state, w), [4]Expected{{}, {}, {}, {true, {.End}}})
+}
+
+@(test)
 the_group_menu_and_the_tab_menu_offer_folding_colours_and_groups_to_join :: proc(t: ^testing.T) {
 	f: Menu_Fixture
 	defer menu_fixture_destroy(&f)
