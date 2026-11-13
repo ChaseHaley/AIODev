@@ -4,7 +4,6 @@ import "aio:input"
 import "aio:platform"
 import "aio:render"
 import "aio:settings"
-import "core:math"
 import "core:strconv"
 import "core:strings"
 
@@ -247,7 +246,7 @@ setting_value :: proc(p: ^Palette, s: ^Palette_Setting) -> (value, label: string
 
 @(private)
 snap :: proc(s: ^Palette_Setting, value: f64) -> f64 {
-	return clamp(math.round(value / s.step) * s.step, s.minimum, s.maximum)
+	return clamp(step_round(s.step, value), s.minimum, s.maximum)
 }
 
 @(private)
