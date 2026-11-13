@@ -17,21 +17,31 @@ Document_Pick :: struct {
 	content:      layout.Content,
 }
 
-// The open dialogs: Open Markdown File, and Add File/Add Folder with the pane it is choosing for.
+// A Settings Browse button chooses a PNG for the row `key` of its window's page. The key is owned.
+Icon_Pick :: struct {
+	using dialog: File_Dialog,
+	key:          string,
+}
+
+// The open dialogs: Open Markdown File, Add File/Add Folder with the pane it is choosing for, and a
+// Settings icon.
 File_Dialogs :: struct {
 	markdown: Maybe(File_Dialog),
 	document: Maybe(Document_Pick),
+	icon:     Maybe(Icon_Pick),
 }
 
-// Acts on each dialog that has finished: Markdown first, then the document pick.
+// Acts on each dialog that has finished: Markdown first, then the document pick, then the icon.
 file_dialogs_tick :: proc(app: ^App) {
 	markdown_dialog_tick(app)
 	document_dialog_tick(app)
+	icon_dialog_tick(app)
 }
 
 file_dialogs_destroy :: proc(app: ^App) {
 	markdown_dialog_close(app)
 	document_dialog_close(app)
+	icon_dialog_close(app)
 }
 
 // A dialog's answer is for the window it was opened from, so closing that window closes the dialog
@@ -39,6 +49,7 @@ file_dialogs_destroy :: proc(app: ^App) {
 file_dialogs_window_closed :: proc(app: ^App, id: input.Window_Id) {
 	if dialog, open := app.dialogs.markdown.?; open && dialog.window == id {markdown_dialog_close(app)}
 	if dialog, open := app.dialogs.document.?; open && dialog.window == id {document_dialog_close(app)}
+	if dialog, open := app.dialogs.icon.?; open && dialog.window == id {icon_dialog_close(app)}
 }
 
 // Opens what the dialog chose once it closes.
@@ -67,6 +78,19 @@ document_dialog_tick :: proc(app: ^App) {
 	document_dialog_close(app)
 }
 
+// Writes the chosen PNG into its Settings row once the dialog closes; a cancel changes nothing.
+@(private = "file")
+icon_dialog_tick :: proc(app: ^App) {
+	dialog, open := app.dialogs.icon.?
+	if !open {return}
+	path, finished := platform.file_pick_finished(dialog.pick)
+	if !finished {return}
+	if w := window_find(app, dialog.window); w != nil && path != "" {
+		editor_icon_chosen(app, w, dialog.key, path)
+	}
+	icon_dialog_close(app)
+}
+
 @(private = "file")
 markdown_dialog_close :: proc(app: ^App) {
 	if dialog, open := app.dialogs.markdown.?; open {platform.file_pick_destroy(dialog.pick)}
@@ -77,4 +101,13 @@ markdown_dialog_close :: proc(app: ^App) {
 document_dialog_close :: proc(app: ^App) {
 	if dialog, open := app.dialogs.document.?; open {platform.file_pick_destroy(dialog.pick)}
 	app.dialogs.document = nil
+}
+
+@(private = "file")
+icon_dialog_close :: proc(app: ^App) {
+	if dialog, open := app.dialogs.icon.?; open {
+		platform.file_pick_destroy(dialog.pick)
+		delete(dialog.key)
+	}
+	app.dialogs.icon = nil
 }
