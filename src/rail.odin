@@ -528,12 +528,25 @@ rail_body_draw :: proc(app: ^App, w: ^Window, laid: ui.Rail_Layout) -> render.Bu
 	body := render.draw_mark(&w.list)
 	defer if rise != 0 {render.draw_translate(&w.list, body, {}, laid.area)}
 	if render.push_layer(&w.list, layout.list) != .None {return .Ok}
-	runs := tab_layout(nil, w, false).runs
+	rail := tab_layout(nil, w, false)
+	runs := rail.runs
 	for run in runs {
 		if run.carried {continue}
 		if result := rail_chip_draw(app, w, layout, run); result != .Ok {return result}
 	}
 	dragging := tab_drag_active(w)
+	// The gap a tab dragged on its own leaves lies on the tray of the group it would join.
+	_, carry := tab_drag_state(w)
+	for tab, i in w.workspace.tabs {
+		if carry == nil || carry.whole || !tab.marked || i >= len(rail.places) {continue}
+		color, ends := tab_tray_place(app, w, i)
+		if color.a <= 0 {continue}
+		row := ui.rail_row_rect(layout, 0)
+		row.y += rail.places[i].slot * layout.row_height
+		inset := ui.TAB_TRAY_INSET * w.scale
+		slice := render.Rect{row.x - inset, row.y, row.width + 2 * inset, row.height}
+		if ui.tab_tray_draw(&w.list, slice, color, ends, true, w.scale) != .None {return .Ok}
+	}
 	moving := dragging
 	for position in w.tab_positions {moving ||= ui.motion_active(position)}
 	for pass in 0 ..< (dragging ? 2 : 1) {

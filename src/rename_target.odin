@@ -43,6 +43,7 @@ Rename_Outcome :: enum {
 	Empty,   // A row editor's workspace name cannot be empty.
 	Missing, // The target no longer exists.
 	Failed,  // The cleaned name could not be stored.
+	Taken,   // Another group in the workspace has both the name and the group's colour (WORK-460).
 }
 
 // A name as typed, cleaned as every rename stores it.
@@ -63,6 +64,10 @@ rename_target_commit :: proc(
 	destination := rename_target_destination(app, target)
 	if destination == nil {return .Missing}
 	clean := rename_clean(value)
+	if t, group := target.(Rename_Group_Target); group {
+		named := tab_group_find(workspace_find(app, t.workspace), t.group)
+		if tab_group_taken(workspace_find(app, t.workspace), clean, named.color, t.group) {return .Taken}
+	}
 	if clean == "" {
 		switch intent {
 		case .Automatic_Title:

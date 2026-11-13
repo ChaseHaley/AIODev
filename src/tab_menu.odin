@@ -247,7 +247,9 @@ tab_submenu_open :: proc(app: ^App, w: ^Window, row: int, select_first: bool) {
 		@(static, rodata) colors := WORKSPACE_ICON_COLORS
 		for color, i in colors[1:] {
 			swatch := workspace_icon_tint(i + 1, app.theme.text)
-			add(sub, {label = color.name, swatch = swatch, checked = group.color == i + 1, enabled = true,
+			// A colour another group of this name has is taken (WORK-460).
+			free := !tab_group_taken(w.workspace, group.name, i + 1, group.id)
+			add(sub, {label = color.name, swatch = swatch, checked = group.color == i + 1, enabled = free,
 				payload = u32(i + 1)})
 		}
 	} else {
@@ -285,7 +287,7 @@ tab_submenu_choose :: proc(app: ^App, w: ^Window, index: int) {
 	if target < 0 {return}
 	switch {
 	case action == .Tab_Group_Color && group != nil:
-		tab_group_color_set(app, w, group.id, int(payload))
+		_ = tab_group_color_set(app, w, group.id, int(payload))
 	case action == .Add_Tab_To_Group && payload == 0:
 		created := tab_group_create(app, w, target)
 		if created == nil {notify(app, .Error, "Could not make the group."); return}

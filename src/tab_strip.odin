@@ -142,12 +142,25 @@ window_tab_strip_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 	bar := window_tab_bar(app, w)
 	if bar.count == 0 {return .Ok}
 	dragging := tab_drag_active(w)
-	runs := tab_layout(app, w, true).runs
+	layout := tab_layout(app, w, true)
+	runs := layout.runs
 	if render.push_layer(&w.list, {bar.x, 0, bar.width, bar.height}) == .None {
 		for run in runs {
 			if run.carried {continue}
 			result := tab_chip_strip_draw(app, w, bar, run, tab_chip_strip_rect(w, bar, run))
 			if result != .Ok {return result}
+		}
+		// The gap a tab dragged on its own leaves lies on the tray of the group it would join.
+		y, height := ui.tab_tray_band(bar.height, w.scale)
+		_, carry := tab_drag_state(w)
+		for tab, i in w.workspace.tabs {
+			if carry == nil || carry.whole || !tab.marked || i >= len(layout.places) {continue}
+			color, ends := tab_tray_place(app, w, i)
+			if color.a <= 0 {continue}
+			x := bar.x + layout.places[i].slot * bar.tab_width + layout.places[i].offset * w.scale
+			if ui.tab_tray_draw(&w.list, {x, y, bar.tab_width, height}, color, ends, false, w.scale) != .None {
+				return .Ok
+			}
 		}
 	}
 	// Tabs pulled out of a group ending the strip ride over the New Tab and profile buttons, which give way.

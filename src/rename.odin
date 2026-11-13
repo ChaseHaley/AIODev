@@ -62,7 +62,10 @@ rename_finish :: proc(app: ^App, w: ^Window, save: bool) {
 			return
 		}
 	case Overlay_Group_Name:
-		if save {group_name_save(app, w, current.group)}
+		if save && !group_name_save(app, w, current.group) {
+			current.error, w.dirty = true, true
+			return
+		}
 	case:
 		return
 	}
@@ -75,6 +78,7 @@ rename_key :: proc(app: ^App, w: ^Window, e: input.Key_Event) {
 	if e.key == .Enter || e.key == .Numpad_Enter {rename_finish(app, w, true); return}
 	field_edit_key(app, &w.rename, e)
 	if chip, ok := &w.overlay.(Overlay_Chip_Name); ok {chip.error = false}
+	if group, ok := &w.overlay.(Overlay_Group_Name); ok {group.error = false}
 	w.dirty = true
 }
 
