@@ -24,21 +24,22 @@ USAGE_FORMAT :: `Usage: aio [--instance <name>] [--json] <command> [options] [--
        aio agent-session (claude | codex)
 
 Runs AIODev commands from scripts and coding agents. Every palette command runs by
-name, such as aio tab.next; aio commands lists them all, and aio help <command>
-explains one's options, their defaults and an example of each. aio version prints
-aio's build and the running AIODev's, and aio warns on stderr when the two differ.
+name, such as aio tab.next; aio commands lists AIODev's commands, and aio help <command>
+explains one's options, their defaults and an example of each, for aio's own wait, commands,
+help, version and agent-session too. aio version prints aio's build and the running AIODev's,
+and aio warns on stderr when the two differ.
 
 Panes   --pane takes a pane id, a pane name, here or focused. Inside an AIODev pane the
         default is here, the pane aio runs in; elsewhere it is the focused pane.
         --workspace takes a workspace id or name; workspace.change, pane.move_workspace
         and tab.move_workspace open their dialog without it.
-Files   aio pane.open_markdown [--direction right|down|left|up] [--focus] <file>
+Files   aio pane.open_markdown [--direction left|right|up|down] [--focus] <file>
             Shows a Markdown file beside the pane and updates it when the file changes.
         aio layout.apply [--focus] <file>
             Opens a tab of named panes from a JSON layout; prints their ids in order.
-Common  aio tab.new [--cwd <dir>] [--name <name>] [--tab-name <name>] [--focus] [-- <program>]
-        aio workspace.new [--cwd <dir>] [--name <name>] [--focus] [-- <program>]
-        aio pane.split [--direction right|down|left|up] [--ratio <0.05-0.95>] [-- <program>]
+Common  aio tab.new [--cwd <directory>] [--name <name>] [--tab-name <name>] [--focus] [-- <program>]
+        aio workspace.new [--cwd <directory>] [--name <name>] [--focus] [-- <program>]
+        aio pane.split [--direction left|right|up|down] [--ratio 0.05-0.95] [-- <program>]
             Each prints the new pane's id, starts in aio's working directory unless --cwd
             names another, and leaves focus where it is unless --focus.
             tab.new --name names the pane; workspace.new --name names the workspace.
@@ -46,8 +47,9 @@ Common  aio tab.new [--cwd <dir>] [--name <name>] [--tab-name <name>] [--focus] 
             strings instead, so no shell quotes them.
         aio tab.rename <name>             names the pane's tab
         aio workspace.rename [--workspace <workspace>] <name>
-            Without a name, both open their dialog.
-        aio pane.send [--enter] <text>    types text into the pane, then presses Enter
+            Without a name, tab.rename opens its dialog, and so does workspace.rename without
+            --workspace.
+        aio pane.send [--enter] <text>    types text into the pane; --enter then presses Enter
         aio pane.send --file <file>       types a UTF-8 file's text exactly
         aio pane.read [--lines <rows>] [--scrollback] [--unwrap]
             Prints the pane's visible text; --scrollback adds the history above it, --unwrap joins
@@ -56,16 +58,18 @@ Common  aio tab.new [--cwd <dir>] [--name <name>] [--tab-name <name>] [--focus] 
         aio tab.list, aio workspace.list  one line per tab or workspace
         aio pane.close
 Wait    aio wait polls until the pane shows the text, a line matches the pattern or its program
-        exits; text and patterns match across rows the terminal wrapped. --idle also waits until
-        the screen has not changed for that long. The default timeout is %d ms, and 0 waits
-        without limit. --exit prints the exit code, even after the pane closed with its program,
+        exits; text and patterns match across rows the terminal wrapped. --idle then waits until the
+        screen has not changed for that long, and alone waits only for that. Give --text, --regex,
+        --idle or --exit; --idle does not combine with --exit. The default timeout is %d ms, and 0
+        waits without limit. --exit prints the exit code, even after the pane closed with its program,
         or closed when it was closed while running.
 Hooks   aio agent-session runs from a Claude Code or Codex SessionStart hook and records the
-        session the hook names, so the pane can resume it; Install Agent Session Hooks sets it up.
+        session the hook names, so the pane can resume it; the "Install agent session hooks"
+        command sets it up.
 Exit    %d ok, %d failed, %d bad command line, %d pane missing or ambiguous,
         %d AIODev unreachable, %d control pipe server unverified, %d interrupted.
 
-Turn on Command Line Control in AIODev's Settings (control.enabled) first.
+Turn on "Command line control" in AIODev's Settings (control.enabled) first.
 `
 
 WAIT_DEFAULT_TIMEOUT_MS :: 30000
@@ -77,12 +81,13 @@ WAIT_DEFAULT_TIMEOUT_MS :: 30000
 local_commands := [?]cli_protocol.Command_Report {
 	{
 		name = "wait",
-		title = "Wait for Text, a Pattern, a Quiet Screen or Exit",
-		usage = "wait [--pane <pane>] (--text <text> | --regex <pattern> | --exit) [--idle <ms>] " +
+		title = "Wait for text, a pattern, a quiet screen or exit",
+		usage = "wait [--pane <pane>] ([--text <text> | --regex <pattern>] [--idle <ms>] | --exit) " +
 		"[--timeout <ms>]",
 		summary = "Polls the pane until its screen shows the text or a matching line, then with --idle until " +
-		"the screen stays the same, or until its program exits; text and patterns match across rows the " +
-		"terminal wrapped. On timeout aio exits with status 1.",
+		"the screen stays the same, or until its program exits; --idle alone waits only for the screen to " +
+		"stay the same. Text and patterns match across rows the terminal wrapped. On timeout aio exits " +
+		"with status 1.",
 		options = {
 			cli_protocol.PANE_OPTION,
 			{
@@ -122,13 +127,13 @@ local_commands := [?]cli_protocol.Command_Report {
 	},
 	{
 		name = "commands",
-		title = "List Commands",
+		title = "List commands",
 		usage = "commands",
 		summary = "Prints every command AIODev runs by name, with its title; --json adds usage and summary.",
 	},
 	{
 		name = "help",
-		title = "Show Help",
+		title = "Show help",
 		usage = "help [<command>]",
 		summary = "Prints aio's usage, or one command's usage, title, summary and options.",
 		options = {
@@ -143,18 +148,19 @@ local_commands := [?]cli_protocol.Command_Report {
 	},
 	{
 		name = "version",
-		title = "Show Builds",
+		title = "Show aio's and AIODev's builds",
 		usage = "version",
 		summary = "Prints aio's build, then the running AIODev's; --version does the same. aio warns on " +
-		"stderr whenever the two differ, and exits 4 after its own line when AIODev is unreachable.",
+		"stderr whenever the two differ, and after its own line exits 4 when AIODev is unreachable or 5 " +
+		"when its control pipe server is unverified.",
 	},
 	{
 		name = "agent-session",
-		title = "Record an Agent Session",
+		title = "Record an agent session",
 		usage = "agent-session (claude | codex)",
 		summary = "Run by a Claude Code or Codex SessionStart hook: records the session the hook names so " +
 		"the pane can resume it. Needs no control pipe, prints nothing and succeeds outside an AIODev pane; " +
-		"Install Agent Session Hooks sets it up.",
+		"the \"Install agent session hooks\" command sets it up.",
 		options = {
 			{
 				option = "claude | codex",

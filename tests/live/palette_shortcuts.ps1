@@ -30,7 +30,7 @@ function Assert-Value($Actual, $Expected, [string] $Label) {
 Invoke-Aio launch --fresh
 try {
     Invoke-Aio command app.palette_commands | Out-Null
-    Invoke-Aio type 'Split Right' | Out-Null
+    Invoke-Aio type 'Split right' | Out-Null
     Assert-Value (Read-State)['palette.item'] 'pane.split_right' 'command is searchable'
     $state = Read-State
     $list = $state['palette.list'] -split ','
@@ -73,7 +73,7 @@ try {
     Invoke-Aio capture --out (Join-Path $repo 'build/shortcut-summary-palette-menu.png') | Out-Null
     Invoke-Aio key Esc Esc | Out-Null
     Invoke-Aio command settings.open | Out-Null
-    Invoke-Aio type 'Split Right' | Out-Null
+    Invoke-Aio type 'Split right' | Out-Null
     Assert-Value (Read-State)['settings.key'] 'keys.pane.split_right' 'Settings finds the same shortcut'
     Assert-Value (Read-State)['settings.value'] 'Ctrl+Alt+F9, Ctrl+Alt+F10' 'Settings retains the full value'
     Invoke-Aio capture --out (Join-Path $repo 'build/shortcut-summary-settings.png') | Out-Null
@@ -82,7 +82,7 @@ try {
     Invoke-Aio capture --out (Join-Path $repo 'build/shortcut-summary-settings-menu.png') | Out-Null
     Invoke-Aio key Esc | Out-Null
     Invoke-Aio command app.palette_commands | Out-Null
-    Invoke-Aio type 'Split Right' | Out-Null
+    Invoke-Aio type 'Split right' | Out-Null
     Invoke-Aio key Ctrl+Enter Down Delete | Out-Null
     Assert-Value (Read-State)['palette.value'] 'Ctrl+Alt+F9' 'Delete removes only the chosen alternative'
 

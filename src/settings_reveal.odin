@@ -40,7 +40,7 @@ Settings_Section_Info :: struct {
 SETTINGS_SECTIONS := [Settings_Section]Settings_Section_Info {
 	.None          = {},
 	.Profiles      = {title = "Profiles", palette_key = "profiles"},
-	.Link_Programs = {title = "Link Programs", palette_key = "link_programs"},
+	.Link_Programs = {title = "Link programs", palette_key = "link_programs"},
 	.Shortcuts     = {area = .Shortcuts},
 	.Colors        = {area = .Colors},
 }

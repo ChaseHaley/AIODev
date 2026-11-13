@@ -38,13 +38,13 @@ palette_mode_actions_register_without_defaults :: proc(t: ^testing.T) {
 expected_title :: proc(action: app.Action) -> string {
 	#partial switch action {
 	case .Palette_Tabs:
-		return "Show Palette: Tabs"
+		return "Show palette: tabs"
 	case .Palette_Workspaces:
-		return "Show Palette: Workspaces"
+		return "Show palette: workspaces"
 	case .Palette_Settings:
-		return "Show Palette: Settings"
+		return "Show palette: settings"
 	case .Palette_Commands:
-		return "Show Palette: Commands"
+		return "Show palette: commands"
 	case:
 		return ""
 	}

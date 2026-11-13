@@ -16,9 +16,9 @@ Activity_Row_Choice :: enum u32 {
 
 @(private = "file", rodata)
 ACTIVITY_ROW_LABELS := [Activity_Row_Choice]string {
-	.Go_To_Pane  = "Go to Pane",
-	.Mark_Read   = "Mark as Read",
-	.Mark_Unread = "Mark as Unread",
+	.Go_To_Pane  = "Go to pane",
+	.Mark_Read   = "Mark as read",
+	.Mark_Unread = "Mark as unread",
 }
 
 activity_row_menu_shown :: proc(w: ^Window) -> bool {

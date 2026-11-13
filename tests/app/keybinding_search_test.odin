@@ -58,7 +58,7 @@ keybinding_search_records_app_chords_and_assigns_free_ones :: proc(t: ^testing.T
 	press(s, w, .Enter)
 	if !testing.expect(t, app.palette_active(s, w)) {return}
 	testing.expect(t, s.palette.assign != nil)
-	app.handle_event(s, input.Text_Event{w.id, "Split Right"})
+	app.handle_event(s, input.Text_Event{w.id, "Split right"})
 	if !testing.expect_value(t, ui.palette_result_name(&s.palette, s.palette.results[0]), "pane.split_right") {
 		return
 	}

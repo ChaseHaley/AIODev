@@ -126,7 +126,7 @@ pending_close_text :: proc(
 			text.body = "Closing will interrupt this work."
 		} else {
 			setting := settings.schema_find("interface.confirm")
-			text.note = fmt.tprintf("Turn this off with %s in Settings.", setting.title)
+			text.note = fmt.tprintf("Turn this off with \"%s\" in Settings.", setting.title)
 		}
 	case Close_Workspace:
 		name := target.workspace_name
@@ -136,23 +136,22 @@ pending_close_text :: proc(
 			counts := workspace_pane_counts(found)
 			pc.tabs, pc.panes, pc.sessions = counts.tabs, counts.panes, counts.sessions
 		}
-		text.title = fmt.tprintf("Delete “%s”?", name)
+		text.title = fmt.tprintf("Delete \"%s\"?", name)
 		text.body = fmt.tprintf(
-			"Close %d tabs (%d panes); stop %d sessions.",
+			"Close %d tab%s (%d pane%s); stop %d session%s.",
 			pc.tabs,
+			pc.tabs == 1 ? "" : "s",
 			pc.panes,
+			pc.panes == 1 ? "" : "s",
 			pc.sessions,
+			pc.sessions == 1 ? "" : "s",
 		)
 		text.label = "Delete"
 		switch {
 		case target.owner == 0:
 			text.note = "Other workspaces and their sessions stay open."
 		case target.destination != 0:
-			text.note = fmt.tprintf(
-				"Switch its window to #%d “%s”.",
-				target.destination,
-				target.destination_name,
-			)
+			text.note = fmt.tprintf("Switch its window to \"%s\".", target.destination_name)
 		case:
 			text.note = "Replace it with a fresh default workspace and shell."
 		}

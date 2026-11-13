@@ -142,7 +142,7 @@ send :: proc(pipe: string, request: []string, check_build: bool) -> (control.Res
 	client, connect_error := control.connect(pipe, CONNECT_TIMEOUT_MS, context.temp_allocator)
 	if connect_error != .None {
 		fmt.eprintln(
-			"aio: AIODev is not reachable. Start it and turn on Command Line Control in Settings " +
+			"aio: AIODev is not reachable. Start it and turn on \"Command line control\" in Settings " +
 			"(control.enabled).",
 		)
 		return {}, .Unreachable
@@ -151,7 +151,7 @@ send :: proc(pipe: string, request: []string, check_build: bool) -> (control.Res
 	identity, identity_ok := server_identity(SERVER_NAME, context.temp_allocator)
 	if !identity_ok {
 		fmt.eprintln("aio: could not locate the AIODev executable to verify the control pipe.")
-		return {}, .Unreachable
+		return {}, .Impostor
 	}
 	verify_error := control.verify_server(&client, identity)
 	if verify_error == .Impostor && SERVER_ALTERNATE != "" {
@@ -172,7 +172,7 @@ send :: proc(pipe: string, request: []string, check_build: bool) -> (control.Res
 			"aio: could not verify the control pipe server (%v); refusing to send.",
 			verify_error,
 		)
-		return {}, .Unreachable
+		return {}, .Impostor
 	}
 	if check_build {
 		version_command := [1]string{cli_protocol.VERSION_COMMAND}

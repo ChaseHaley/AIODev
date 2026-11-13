@@ -228,7 +228,7 @@ try {
     Invoke-Aio key Enter | Out-Null
     Assert-Value (Read-State)['settings.scroll'] $scroll 'adding preserves Settings scroll'
     Invoke-Aio key Tab Delete | Out-Null
-    Assert-Value (Read-State)['settings.profile.remove_title'] 'Delete New Profile?' 'confirmation uses display name'
+    Assert-Value (Read-State)['settings.profile.remove_title'] 'Delete New profile?' 'confirmation uses display name'
     $scroll = (Read-State)['settings.scroll']
     Invoke-Aio capture --out (Join-Path $repo 'build/profile-confirmation.png') | Out-Null
     Invoke-Aio key Left Enter | Out-Null

@@ -3,6 +3,7 @@ package main
 import "aio:commands"
 import "aio:input"
 import "aio:render"
+import "aio:settings"
 import "aio:term"
 import "aio:ui"
 import "core:fmt"
@@ -368,7 +369,8 @@ status_inbox_toggle :: proc(app: ^App, w: ^Window) {
 		return
 	}
 	if !app.settings.status.enabled {
-		notify(app, .Info, "Program status is off. Turn on status.enabled to use the inbox.")
+		title := settings.schema_find("status.enabled").title
+		notify(app, .Info, fmt.tprintf("Activity is off. Turn on \"%s\" in Settings to use the inbox.", title))
 		return
 	}
 	if !gesture_cancel(app, w) {return}
@@ -491,7 +493,7 @@ status_inbox_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 	if result := ui.draw_text(
 		&strong,
 		&w.list,
-		"Program status",
+		"Activity inbox",
 		surface.x + 12 * s,
 		surface.y + (STATUS_HEADER_HEIGHT * s - strong.line_height) / 2 + strong.ascent,
 		app.theme.text,
@@ -500,7 +502,7 @@ status_inbox_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 		&small,
 		&w.list,
 		scope,
-		surface.x + 12 * s + ui.text_width(&strong, "Program status") + 8 * s,
+		surface.x + 12 * s + ui.text_width(&strong, "Activity inbox") + 8 * s,
 		surface.y + (STATUS_HEADER_HEIGHT * s - small.line_height) / 2 + small.ascent,
 		app.theme.faint,
 	); result != .Ok {return result}
@@ -713,7 +715,7 @@ status_pill_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: input
 }
 
 @(private)
-status_pill_tooltip :: proc(_: ^App, _: ^Window, _, _: f32) -> string {return "Activity"}
+status_pill_tooltip :: proc(_: ^App, _: ^Window, _, _: f32) -> string {return "Activity inbox"}
 
 @(private)
 status_pill_press :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) {

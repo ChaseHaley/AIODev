@@ -179,7 +179,7 @@ pane_minimum_refusal_reports_the_grid_the_layout_applies_at_every_scale :: proc(
 			if !testing.expect_value(t, len(state.notices.items), 1) {continue}
 			expected := fmt.tprintf(
 				"Can't create this pane: %d × %d content cells; minimum %d × %d. " +
-				"Change Minimum Pane Width and Height in Settings.",
+				"Change \"Minimum pane width\" and \"Minimum pane height\" in Settings.",
 				applied.columns,
 				applied.rows,
 				state.settings.pane.minimum_columns,

@@ -177,14 +177,14 @@ LINK_ACTIONS := [Link_Action]struct {
 	glyph: ui.Icon,
 } {
 	.Open           = {"Open", .None},
-	.Open_Shell     = {"Open in Shell", .Terminal},
+	.Open_Shell     = {"Open in shell", .Terminal},
 	.Program        = {"", .Terminal},
-	.Open_External  = {"Open with Default App", .Document},
-	.Copy           = {"Copy Path", .Copy},
-	.Open_Folder    = {"Open Containing Folder", .Folder},
-	.Move_Pane      = {"Move to This Pane", .Split_Right},
-	.Move_Tab       = {"Move to This Tab", .Layout_Top},
-	.Move_Workspace = {"Move to This Workspace", .Workspace},
+	.Open_External  = {"Open in default app", .Document},
+	.Copy           = {"Copy path", .Copy},
+	.Open_Folder    = {"Open containing folder", .Folder},
+	.Move_Pane      = {"Move to this pane", .Split_Right},
+	.Move_Tab       = {"Move to this tab", .Layout_Top},
+	.Move_Workspace = {"Move to this workspace", .Workspace},
 	.Remove         = {"Remove", .Close},
 }
 
@@ -194,11 +194,11 @@ LINK_PLACEMENTS := [Link_Placement]struct {
 	glyph: ui.Icon,
 } {
 	.Default       = {"", .None},
-	.Split_Right   = {"Right Split", .Split_Right},
-	.Split_Down    = {"Down Split", .Split_Down},
+	.Split_Right   = {"Right split", .Split_Right},
+	.Split_Down    = {"Down split", .Split_Down},
 	.Float         = {"Float", .Float_Pane},
-	.Tab           = {"New Tab", .Layout_Top},
-	.Linked_Window = {"Linked Window", .Window_Out},
+	.Tab           = {"New tab", .Layout_Top},
+	.Linked_Window = {"Linked window", .Window_Out},
 }
 
 @(private = "file")
@@ -265,7 +265,7 @@ link_choice_item :: proc(
 			if !item.submenu {item.glyph = .Window_Out}
 		}
 	case .Copy:
-		if document_is_web(document.target) {item.label = "Copy Link"}
+		if document_is_web(document.target) {item.label = "Copy link"}
 	}
 	return item
 }
@@ -370,7 +370,7 @@ link_program_run :: proc(
 ) {
 	program, found := link_program(app, int(choice.program))
 	if !found {
-		notify(app, .Error, "That link program is no longer in settings.")
+		notify(app, .Error, "That link program is no longer in Settings.")
 		return
 	}
 	directory := document.folder ? document.target : filepath.dir(document.target)
@@ -434,16 +434,16 @@ DOCUMENT_ACTIONS_WIDTH :: f32(224)
 
 @(private = "file", rodata)
 DOCUMENT_LEVEL_LABELS := [Document_Level]string {
-	.Pane      = "This Pane",
-	.Tab       = "This Tab",
-	.Workspace = "This Workspace",
+	.Pane      = "This pane",
+	.Tab       = "This tab",
+	.Workspace = "This workspace",
 }
 
 @(private = "file", rodata)
 DOCUMENT_PIN_LABELS := [Document_Level]string {
-	.Pane      = "Pin to This Pane",
-	.Tab       = "Pin to This Tab",
-	.Workspace = "Pin to This Workspace",
+	.Pane      = "Pin to this pane",
+	.Tab       = "Pin to this tab",
+	.Workspace = "Pin to this workspace",
 }
 
 @(private = "file", rodata)
@@ -811,8 +811,8 @@ document_menu_build_list :: proc(
 	add :: proc(menu: ^Document_Menu, label: string, glyph: ui.Icon, action: Document_Menu_Action) {
 		document_menu_push(menu, {label = label, glyph = glyph, enabled = true}, {action = action})
 	}
-	add(menu, "Add File…", .Document, .Add_File)
-	add(menu, "Add Folder…", .Folder, .Add_Folder)
+	add(menu, "Add file…", .Document, .Add_File)
+	add(menu, "Add folder…", .Folder, .Add_Folder)
 	if url, entering := list.step.(Document_Url_Entry); entering {
 		document_menu_push(menu, {}, {action = .Url_Field})
 		if url.invalid {

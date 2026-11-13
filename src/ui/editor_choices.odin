@@ -87,7 +87,7 @@ choice_set_toggle :: proc(p: ^Editor, index: int) -> Editor_Outcome {
 
 @(private)
 choice_set_label :: proc(row: ^Editor_Row, mask: u32) -> string {
-	if mask == 0 {return "Off"}
+	if mask == 0 {return "None"}
 	b := strings.builder_make(context.temp_allocator)
 	for label, i in row.choice_labels {
 		if !choice_set_has(mask, i) {continue}

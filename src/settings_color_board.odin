@@ -33,15 +33,15 @@ COLOR_GROUPS := [Color_Group]struct {
 } {
 	.Surfaces         = {"Surfaces", "Interface"},
 	.Text             = {"Text", "Interface"},
-	.Accent           = {"Accent & Focus", "Interface"},
-	.Tabs             = {"Tab Colors", "Interface"},
-	.Pane_Borders     = {"Pane Borders", "Interface"},
+	.Accent           = {"Accent & focus", "Interface"},
+	.Tabs             = {"Tab colors", "Interface"},
+	.Pane_Borders     = {"Pane borders", "Interface"},
 	.Status           = {"Status", "Interface"},
 	.Scrollbar        = {"Scrollbar", "Interface"},
-	.Shell_Text       = {"Shell Text", "Terminal"},
-	.Selection_Search = {"Selection & Search", "Terminal"},
+	.Shell_Text       = {"Shell text", "Terminal"},
+	.Selection_Search = {"Selection & search", "Terminal"},
 	.Ansi             = {"ANSI 0–7", "Terminal"},
-	.Ansi_Bright      = {"ANSI Bright 8–15", "Terminal"},
+	.Ansi_Bright      = {"ANSI bright 8–15", "Terminal"},
 }
 
 @(private)
@@ -109,7 +109,7 @@ COLOR_TILES := [?]Color_Tile {
 }
 #assert(len(COLOR_TILES) == len(settings.Theme_Token))
 
-// A color group's place in the Colors section, after Manage Theme.
+// A color group's place in the Colors section, after Manage theme.
 @(private)
 settings_color_group_area :: proc(title: string) -> (rank: int, found: bool) {
 	for info, group in COLOR_GROUPS {

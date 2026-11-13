@@ -144,7 +144,7 @@ status_panel_view_toggle :: proc(app: ^App) {
 	@(static, rodata)
 	names := settings.STATUS_PANEL_VIEW_NAME
 	next: settings.Status_Panel_View = app.settings.status.panel_view == .Comfy ? .Dense : .Comfy
-	settings_save_value(app, "status.panel_view", names[next], "Could not save Activity view.")
+	settings_save_value(app, "status.panel_view", names[next], "Could not save the Activity view.")
 }
 
 // Runs a header button after a press and release both landed on it.
@@ -167,7 +167,7 @@ status_panel_side_toggle :: proc(app: ^App) {
 	@(static, rodata)
 	names := settings.STATUS_PANEL_SIDE_NAME
 	next: settings.Status_Panel_Side = app.settings.status.panel_side == .Right ? .Left : .Right
-	settings_save_value(app, "status.panel_side", names[next], "Could not save Activity side.")
+	settings_save_value(app, "status.panel_side", names[next], "Could not save the Activity side.")
 }
 
 @(private)
@@ -709,9 +709,9 @@ status_panel_hover_clear :: proc(w: ^Window) {
 status_panel_tooltip :: proc(app: ^App, w: ^Window, x, y: f32) -> string {
 	switch status_panel_button_at(app, w, x, y) {
 	case .Side:
-		return "Move activity panel"
+		return "Move Activity panel"
 	case .View:
-		return app.settings.status.panel_view == .Comfy ? "Switch to Dense" : "Switch to Comfy"
+		return app.settings.status.panel_view == .Comfy ? "Switch to dense" : "Switch to comfy"
 	case .Group:
 		@(static, rodata)
 		groups := settings.STATUS_GROUP_LABEL

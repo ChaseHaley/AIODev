@@ -7,13 +7,13 @@ import "aio:render"
 // The hints a capture shows on the Settings page, and the palette footer's shorter forms.
 CAPTURE_HINT :: "Press a shortcut. Enter saves this alternative, Esc cancels, Backspace removes it."
 @(private)
-CAPTURE_NO_LEADER_HINT :: CAPTURE_HINT + " Set Leader Key to use leader chords."
+CAPTURE_NO_LEADER_HINT :: CAPTURE_HINT + " Set \"Leader key\" to use leader chords."
 @(private)
 CAPTURE_LEADER_HINT :: "Leader pressed; press the key that follows it."
 @(private)
-CAPTURE_TYPING_ERROR :: "Typing keys need Ctrl, Alt, or the leader."
+CAPTURE_TYPING_ERROR :: "Typing keys need Ctrl, Alt or the leader."
 @(private)
-ALTERNATIVES_HINT :: "Choose an alternative to replace; Delete removes it. Add shortcut keeps the others."
+ALTERNATIVES_HINT :: "Choose an alternative to replace; Delete removes it. \"Add shortcut\" keeps the others."
 @(private)
 CAPTURE_FOOTER :: "Press keys · Enter saves · Esc cancels · Backspace removes"
 @(private)

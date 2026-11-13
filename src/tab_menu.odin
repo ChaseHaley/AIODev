@@ -148,20 +148,20 @@ tab_menu_add_rows :: proc(app: ^App, w: ^Window, rows: []Maybe(Action)) -> bool 
 @(private = "file")
 tab_menu_action_label :: proc(action: Action) -> string {
 	#partial switch action {
-	case .Rename_Tab: return "Rename"
+	case .Rename_Tab: return "Rename…"
 	case .Duplicate_Tab: return "Duplicate"
-	case .Close_Right_Tabs: return "Close to the Right"
-	case .Close_Other_Tabs: return "Close Others"
+	case .Close_Right_Tabs: return "Close to the right"
+	case .Close_Other_Tabs: return "Close others"
 	case .Close_Tab: return "Close"
-	case .Add_Tab_To_Group: return "Add to Group"
-	case .Remove_Tab_From_Group: return "Remove from Group"
-	case .Rename_Tab_Group: return "Rename Group…"
+	case .Add_Tab_To_Group: return "Add to group"
+	case .Remove_Tab_From_Group: return "Remove from group"
+	case .Rename_Tab_Group: return "Rename group…"
 	case .Tab_Group_Color: return "Color"
 	case .Fold_Tab_Group: return "Fold"
-	case .New_Tab_In_Group: return "New Tab in Group"
-	case .Move_Tab_Group_Workspace: return "Move Group to Workspace…"
+	case .New_Tab_In_Group: return "New tab in group"
+	case .Move_Tab_Group_Workspace: return "Move group to workspace…"
 	case .Ungroup_Tabs: return "Ungroup"
-	case .Close_Tab_Group: return "Close Group"
+	case .Close_Tab_Group: return "Close group"
 	}
 	@(static, rodata) actions := ACTIONS
 	return actions[action].title
@@ -177,7 +177,7 @@ tab_menu_sync :: proc(w: ^Window) {
 		#partial switch Action(item.payload) {
 		case .Close_Tab:
 			count := tab_menu_scope(w)
-			item.label = count > 1 ? fmt.bprintf(menu.close_label[:], "Close %d Selected Tabs", count) : "Close"
+			item.label = count > 1 ? fmt.bprintf(menu.close_label[:], "Close %d selected tabs", count) : "Close"
 		case .Fold_Tab_Group:
 			if group := tab_menu_group(w); group != nil {item.label = group.folded ? "Unfold" : "Fold"}
 		}
@@ -251,7 +251,7 @@ tab_submenu_open :: proc(app: ^App, w: ^Window, row: int, select_first: bool) {
 				payload = u32(i + 1)})
 		}
 	} else {
-		add(sub, {label = "New Group", glyph = .Add, enabled = true, payload = 0})
+		add(sub, {label = "New group", glyph = .Add, enabled = true, payload = 0})
 		scope := tab_group_scope(w.workspace, tab_menu_target(w))
 		divided := false
 		for tab in w.workspace.tabs {

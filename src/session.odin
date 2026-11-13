@@ -400,13 +400,14 @@ session_workspace_titles_changed :: proc(app: ^App, workspace: ^Workspace, id: u
 	}
 }
 
-// A stopped pane's message names the first key bound to Restart Stopped Pane, or the command itself
-// when no key is. A failed start points at the pane's own profile keys, which the file format uses.
+// A stopped pane's message names the first key bound to "Restart stopped pane", or the command itself
+// when no key is. A failed start points at the settings of the pane's own profile.
 session_message :: proc(app: ^App, profile_id: string, status: term.Status) -> string {
 	if status.kind == .Running {return ""}
 	buffer: [commands.SHORTCUT_TEXT_CAP]u8
 	chord := action_shortcut_text(app, .Restart_Pane, buffer[:])
-	target := chord != "" ? chord : "Restart Stopped Pane"
+	@(static, rodata) actions := ACTIONS
+	target := chord != "" ? chord : fmt.tprintf("\"%s\"", actions[.Restart_Pane].title)
 	#partial switch status.kind {
 	case .Exited:
 		return fmt.tprintf(
@@ -417,14 +418,13 @@ session_message :: proc(app: ^App, profile_id: string, status: term.Status) -> s
 		)
 	case .Failed:
 		reason := status.message != "" ? status.message : "Could not start the shell."
-		profile := profile_id != "" ? profile_id : settings.PROFILE_DEFAULT_ID
+		profile_key := profile_id != "" ? profile_id : settings.PROFILE_DEFAULT_ID
+		profile := settings.profile_find(&app.settings.profiles, profile_key)
 		return fmt.tprintf(
-			"%s Check %s%s.command and %s%s.directory in settings, then %s %s to try again.",
+			"%s Check \"Command line\" and \"Starting directory\" for the %s profile in Settings, " +
+			"then %s %s to try again.",
 			reason,
-			settings.PROFILE_PREFIX,
-			profile,
-			settings.PROFILE_PREFIX,
-			profile,
+			profile != nil && profile.name != "" ? profile.name : profile_key,
 			chord != "" ? "press" : "run",
 			target,
 		)

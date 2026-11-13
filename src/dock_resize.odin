@@ -131,7 +131,7 @@ Dock_Divider_Choice :: enum u32 {
 
 @(private = "file", rodata)
 DOCK_DIVIDER_CHOICE_LABELS := [Dock_Divider_Choice]string {
-	.Save_Default = "Set as Default Size",
+	.Save_Default = "Set as default size",
 }
 
 dock_divider_menu_shown :: proc(w: ^Window) -> bool {

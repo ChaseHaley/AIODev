@@ -197,7 +197,7 @@ workspace_target_resolve :: proc(app: ^App, text: string) -> (^Workspace, Outcom
 		if workspace := workspace_find(app, id); workspace != nil && workspace_eligible(app, workspace) {
 			return workspace, {}
 		}
-		return nil, outcome_failure(.Target, "no workspace has that id; aio --json pane.list shows their ids")
+		return nil, outcome_failure(.Target, "no workspace has that id; use aio workspace.list")
 	}
 	match: ^Workspace
 	ids := make([dynamic]u32, context.temp_allocator)
@@ -208,7 +208,7 @@ workspace_target_resolve :: proc(app: ^App, text: string) -> (^Workspace, Outcom
 	}
 	switch len(ids) {
 	case 0:
-		return nil, outcome_failure(.Target, "no workspace has that name; aio pane.list shows their names")
+		return nil, outcome_failure(.Target, "no workspace has that name; use aio workspace.list")
 	case 1:
 		return match, {}
 	}
@@ -594,7 +594,10 @@ control_split :: proc(
 	switch err {
 	case .None:
 	case .Minimum:
-		return outcome_failure(.Failed, "the pane is too small to split; change Minimum Pane Width and Height")
+		return outcome_failure(
+			.Failed,
+			`the pane is too small to split; change "Minimum pane width" and "Minimum pane height" in Settings`,
+		)
 	case .Check, .Layout:
 		return outcome_failure(.Failed, "could not split the pane")
 	case .Session:
@@ -660,6 +663,14 @@ invocation_files_read :: proc(invocation: ^commands.Invocation) -> Outcome {
 	return {}
 }
 
+// A file size limit as help writes it, such as 64 KiB or 1 MiB.
+@(private, require_results)
+size_limit_text :: proc(bytes: i64) -> string {
+	MIB :: 1024 * 1024
+	if bytes % MIB == 0 {return fmt.tprintf("%d MiB", bytes / MIB)}
+	return fmt.tprintf("%d KiB", bytes / 1024)
+}
+
 // A local file's bytes, read into temporary memory when it is a nonempty regular file of at most
 // `limit` bytes.
 @(private, require_results)
@@ -671,7 +682,7 @@ argument_file_read :: proc(path: string, limit: i64) -> ([]u8, Outcome) {
 		}
 		return nil, outcome_failure(
 			.Failed,
-			fmt.tprintf("%s: use a nonempty local file of at most %d KiB", path, limit / 1024),
+			fmt.tprintf("%s: use a nonempty local file of at most %s", path, size_limit_text(limit)),
 		)
 	}
 	data, err := os.read_entire_file(path, context.temp_allocator)

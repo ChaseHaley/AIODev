@@ -79,7 +79,7 @@ theme_duplicate :: proc(
 			if _, error = theme_edit_line(
 				&revision,
 				custom_theme_field_key(id, "name"),
-				fmt.tprintf("%s Copy", custom.name),
+				fmt.tprintf("%s copy", custom.name),
 				allocator,
 			); error != .None {return}
 		}
@@ -221,7 +221,7 @@ theme_custom_lines :: proc(
 	issue: string,
 	error: Theme_Edit_Error,
 ) {
-	name := fmt.tprintf("%s Custom", theme_display_name(s, base))
+	name := fmt.tprintf("%s custom", theme_display_name(s, base))
 	name_key := custom_theme_field_key(id, "name")
 	if issue, error = theme_edit_line(revision, name_key, name, allocator); error != .None {return}
 	return theme_edit_line(revision, custom_theme_field_key(id, "base"), base, allocator)

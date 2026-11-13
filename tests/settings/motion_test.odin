@@ -53,7 +53,7 @@ motion_spec_grammar_takes_tokens_in_any_order_and_writes_them_canonically :: pro
 	testing.expect(t, close_set && close_effect == .Pop)
 	testing.expect_value(t, settings.motion_spec_text(.Close, close), "popout")
 	testing.expect_value(t, settings.motion_effect_names(.Close)[int(settings.Motion_Effect.Edge)], "collapse")
-	testing.expect_value(t, settings.motion_effect_labels(.Split)[int(settings.Motion_Effect.Pop)], "Pop In")
+	testing.expect_value(t, settings.motion_effect_labels(.Split)[int(settings.Motion_Effect.Pop)], "Pop in")
 	testing.expect(t, settings.motion_effect_names(.View) == nil)
 }
 

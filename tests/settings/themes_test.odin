@@ -271,7 +271,7 @@ themes_show_free_text_names_while_ids_stay_the_key :: proc(t: ^testing.T) {
 	defer delete(created)
 	testing.expect_value(t, edit_error, settings.Theme_Edit_Error.None)
 	testing.expect_value(t, issue, "")
-	testing.expect(t, strings.contains(updated, "theme.custom.tide-dark-custom.name = \"Tide Dark Custom\"\n"))
+	testing.expect(t, strings.contains(updated, "theme.custom.tide-dark-custom.name = \"Tide Dark custom\"\n"))
 	named, message, name_error := edit_name(updated, "Mine, with spaces!", THEMES)
 	defer delete(named)
 	testing.expect_value(t, name_error, settings.Theme_Edit_Error.None)
@@ -286,7 +286,7 @@ themes_show_free_text_names_while_ids_stay_the_key :: proc(t: ^testing.T) {
 	testing.expect_value(t, ce, nil)
 	testing.expect_value(t, len(cd), 0)
 	testing.expect_value(t, settings.theme_display_name(&c, "tide-dark-custom"), "Mine, with spaces!")
-	testing.expect_value(t, settings.theme_display_name(&c, copy_id), "Mine, with spaces! Copy")
+	testing.expect_value(t, settings.theme_display_name(&c, copy_id), "Mine, with spaces! copy")
 }
 
 @(test)

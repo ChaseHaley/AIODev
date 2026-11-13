@@ -103,12 +103,12 @@ workspace_controls_switch_hidden_runtimes_and_activate_owners :: proc(t: ^testin
 	state.sessions[1].status = .Failed
 	app.workspace_picker_open(&state, w)
 	for row in w.workspace_picker.rows {
-		if row.id == two.id { testing.expect_value(t, row.status, "Blocked") }
+		if row.id == two.id { testing.expect_value(t, row.status, "Shell failed") }
 	}
 	state.sessions[1].status = .Exited
 	app.workspace_picker_status_changed(&state)
 	for row in w.workspace_picker.rows {
-		if row.id == two.id { testing.expect_value(t, row.status, "Finished") }
+		if row.id == two.id { testing.expect_value(t, row.status, "Exited") }
 	}
 	state.sessions[1].status = .Running
 	app.workspace_picker_cancel(w)

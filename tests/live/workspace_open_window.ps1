@@ -84,7 +84,7 @@ try {
     $rightPid=Shell-Pid 'right_before'
     Aio command workspace.select_1 | Out-Null
     Open-Row 'Split target' '2'
-    Aio expect state 'workspace.picker.window_title=Open in New Window'
+    Aio expect state 'workspace.picker.window_title=Open in new window'
     Aio expect state workspace.picker.window_enabled=true
     Shot 'hidden-workspace-open'
     Aio key Enter | Out-Null
@@ -107,7 +107,7 @@ try {
     Shot 'opened-split-workspace'
     Aio window select $requester | Out-Null
     Open-Row 'Split target' '2'
-    Aio expect state 'workspace.picker.window_title=Show Existing Window'
+    Aio expect state 'workspace.picker.window_title=Show existing window'
     Shot 'foreign-owner-reuse'
     Click 'workspace.picker.menu_item'
     Aio expect state windows.count=2
@@ -148,7 +148,7 @@ try {
         Aio dpi $v.dpi | Out-Null
         Aio resize 40x10 | Out-Null
         Open-Row 'Split target' '2'
-        Aio expect state 'workspace.picker.window_title=Show Existing Window'
+        Aio expect state 'workspace.picker.window_title=Show existing window'
         Shot "short-$($v.mode)$($v.dpi)"
         Aio key Esc Esc | Out-Null
     }

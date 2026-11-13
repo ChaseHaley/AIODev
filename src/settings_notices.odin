@@ -68,7 +68,7 @@ show_settings_diagnostics :: proc(
 	kind: ui.Notice_Kind = .Warning
 	text :=
 		"The leader key and a shortcut overlap; only one is active. " +
-		"Review Leader Key and shortcut assignments in Settings."
+		"Review \"Leader key\" and shortcut assignments in Settings."
 	if read_error != nil {
 		kind = .Error
 		text = "Could not read settings. Using defaults. Check the settings file's location and permissions."

@@ -54,7 +54,7 @@ function Check-Layout([string] $Label) {
     Invoke-Aio key Tab Tab
     $apply = Rect (Read-State) 'workspace.picker.row'
     Check ($apply[1] -gt $field[1]+$field[3] -and
-        $apply[1]+$apply[3] -le $r[1]+$r[3]) "$Label Apply Custom Emoji below field and inside menu"
+        $apply[1]+$apply[3] -le $r[1]+$r[3]) "$Label Apply custom emoji below field and inside menu"
     Shot $Label
 }
 

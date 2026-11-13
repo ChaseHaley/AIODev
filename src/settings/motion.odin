@@ -91,26 +91,26 @@ MOTION_CONTEXT_TITLE :: [Motion_Context]string {
 	.Panes  = "Panes",
 	.Split  = "Split",
 	.Close  = "Close",
-	.View   = "Zoom and Fill Window",
-	.Switch = "Switch Pane",
-	.Workspace = "Switch Workspace",
-	.Resize = "Balance and Resize",
-	.Move   = "Rearrange and Swap",
-	.Float  = "Floating Panes",
-	.Chrome = "Rail and Activity Panel",
+	.View   = "Zoom and fill window",
+	.Switch = "Switch pane",
+	.Workspace = "Switch workspace",
+	.Resize = "Balance and resize",
+	.Move   = "Rearrange and swap",
+	.Float  = "Floating panes",
+	.Chrome = "Rail and Activity panel",
 }
 
 MOTION_CONTEXT_DESCRIPTION :: [Motion_Context]string {
 	.Panes  = "Every pane layout change. The other pane motions inherit what they leave unset.",
 	.Split  = "A new pane opening out of the pane it divides.",
 	.Close  = "A closing pane giving its space back to its neighbors.",
-	.View   = "A pane zooming in, filling the window or the screen, and returning.",
-	.Switch = "Sliding to another tab, or to another pane in Zoom, Fill Window or Fullscreen.",
-	.Workspace = "Zooming out to every workspace, travelling to the one chosen and zooming back in.",
-	.Resize = "Panes settling after Balance, a keyboard resize or a divider snap.",
+	.View   = "A pane zooming in or filling the window or the screen, then returning.",
+	.Switch = "Sliding to another tab, or to another pane in \"Zoom pane\", \"Fill window\" or \"Fullscreen\".",
+	.Workspace = "Zooming out to every workspace, traveling to the one chosen and zooming back in.",
+	.Resize = "Panes settling after \"Balance all splits\", a keyboard resize or a divider snap.",
 	.Move   = "Panes trading places when you rearrange or swap them.",
 	.Float  = "Panes floating, tiling, minimizing and restoring.",
-	.Chrome = "The tab rail and activity panel opening and closing beside the panes.",
+	.Chrome = "The tab rail and Activity panel opening and closing beside the panes.",
 }
 
 // How an entering or leaving pane appears. Edge grows it from, or collapses it into, the side it
@@ -132,8 +132,8 @@ MOTION_EFFECT_NAME := #partial [Motion_Context][len(Motion_Effect)]string {
 
 @(private)
 MOTION_EFFECT_LABEL := #partial [Motion_Context][len(Motion_Effect)]string {
-	.Split = {"Grow from Side", "Pop In", "Fade", "Slide In"},
-	.Close = {"Collapse", "Pop Out", "Fade", "Slide Out"},
+	.Split = {"Grow from side", "Pop in", "Fade", "Slide in"},
+	.Close = {"Collapse", "Pop out", "Fade", "Slide out"},
 }
 
 // The effect names as problems list them.
@@ -665,10 +665,14 @@ motion_preset_parse :: proc(text: string) -> (specs: [Motion_Context]string, pro
 			given += {c}
 			continue parts
 		}
-		return {}, fmt.tprintf(
-			"\"%s\" is not a motion; use panes, split, close, view, resize, move, float or chrome",
-			name,
-		)
+		known := strings.builder_make(context.temp_allocator)
+		for candidate, c in names {
+			if c != .Panes {
+				strings.write_string(&known, c == Motion_Context(len(Motion_Context) - 1) ? " or " : ", ")
+			}
+			strings.write_string(&known, candidate)
+		}
+		return {}, fmt.tprintf("\"%s\" is not a motion; use %s", name, strings.to_string(known))
 	}
 	return specs, ""
 }

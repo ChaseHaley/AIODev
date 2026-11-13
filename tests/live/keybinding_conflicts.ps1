@@ -2,7 +2,7 @@
 param()
 
 # WORK-408: a clashing shortcut opens a conflict chain in Settings and in the palette. Covers the owner's
-# example (Find, Show Command Palette, Copy) saved in one write and undone in one write, a swap, and
+# example (Find, Show command palette, Copy) saved in one write and undone in one write, a swap, and
 # Escape cancelling a recording before the chain, with dark and light screenshots of each state.
 $ErrorActionPreference = 'Stop'
 $repo = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
@@ -92,7 +92,7 @@ try {
         Invoke-Aio type $find | Out-Null
         Assert-Value (Read-State)['settings.key'] $find "$mode Settings selects Find"
         Invoke-Aio key Enter Enter Ctrl+Shift+P | Out-Null
-        Assert-Value (Read-State)['settings.used_by'] 'Used by Show Command Palette' "$mode Settings names the owner"
+        Assert-Value (Read-State)['settings.used_by'] 'Used by Show command palette' "$mode Settings names the owner"
         Assert-Value (Read-State)['settings.chain'] '' "$mode recording alone opens no chain"
         Shot "settings-note-$mode"
         Invoke-Aio key Enter | Out-Null
@@ -147,7 +147,7 @@ try {
         Assert-Value (Read-State)['palette.item'] 'terminal.find' "$mode palette selects Find"
         $selected = (Read-State)['palette.selected']
         Invoke-Aio key Ctrl+Enter Enter Ctrl+Shift+P | Out-Null
-        Assert-Value (Read-State)['palette.used_by'] 'Used by Show Command Palette' "$mode palette names the owner"
+        Assert-Value (Read-State)['palette.used_by'] 'Used by Show command palette' "$mode palette names the owner"
         Shot "palette-note-$mode"
         Invoke-Aio key Enter | Out-Null
         Assert-Value (Read-State)['palette.edit'] 'Chain' "$mode palette opens the chain"

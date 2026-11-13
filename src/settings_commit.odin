@@ -628,7 +628,7 @@ settings_bindings_check :: proc(s: ^settings.Settings, path: string) -> (problem
 		if issue.severity == .Shortcut_Warning {
 			if warning == "" {warning = binding_issue_identity(issue, path)}
 		} else if issue.kind == .Duplicate_Shortcut {
-			return fmt.tprintf("Assigned to %s. Choose another shortcut.", issue.conflict.winner.title), ""
+			return fmt.tprintf("Assigned to \"%s\". Choose another shortcut.", issue.conflict.winner.title), ""
 		} else {
 			return fmt.tprintf("%s: %s", issue.key, binding_issue_text(issue, path)), ""
 		}

@@ -57,12 +57,12 @@ OPENER_PLACEMENT_NAME :: [Opener_Placement]string {
 	.Own_Window    = "window",
 }
 OPENER_PLACEMENT_LABEL :: [Opener_Placement]string {
-	.Right_Split   = "Right Split",
-	.Down_Split    = "Down Split",
+	.Right_Split   = "Right split",
+	.Down_Split    = "Down split",
 	.Float         = "Float",
-	.Tab           = "New Tab",
-	.Linked_Window = "Linked Window",
-	.Own_Window    = "Own Window",
+	.Tab           = "New tab",
+	.Linked_Window = "Linked window",
+	.Own_Window    = "Own window",
 }
 
 opener_field_from_name :: proc(name: string) -> (Opener_Field, bool) {

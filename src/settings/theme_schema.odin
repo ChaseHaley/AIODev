@@ -13,7 +13,7 @@ theme_schema_text :: proc(allocator := context.allocator) -> (string, bool) {
 	defer strings.builder_destroy(&builder)
 	if write_parts(&builder, `{
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "AIODev Theme",
+  "title": "AIODev theme",
   "type": "object",
   "additionalProperties": false,
   "required": [`) != nil {return "", false}

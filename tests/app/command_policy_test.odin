@@ -21,7 +21,7 @@ command_categories_cover_every_action_namespace :: proc(t: ^testing.T) {
 		category := commands.category(command.name)
 		testing.expectf(t, category.title != "Commands", "uncategorized action: %s", command.name)
 		if strings.has_prefix(command.name, "status.") {
-			testing.expect_value(t, category.title, "Status")
+			testing.expect_value(t, category.title, "Activity")
 		}
 		if strings.has_prefix(command.name, "profile.") {
 			testing.expect_value(t, category.title, "Profiles")
@@ -177,6 +177,8 @@ pane_restart_takes_its_keys_only_from_a_stopped_session :: proc(t: ^testing.T) {
 	testing.expect_value(t, app.session_message(s, "", exited), "The shell exited with code 1. Press F5 to restart it.")
 	unbound := [?]commands.Override{{command.id, nil}}
 	testing.expect_value(t, commands.rebind(&s.registry, unbound[:], errors[:]), commands.Error.None)
-	testing.expect_value(t, app.session_message(s, "pwsh", {kind = .Failed, message = "Gone."}),
-		"Gone. Check profile.pwsh.command and profile.pwsh.directory in settings, then run Restart Stopped Pane to try again.")
+	// An unknown profile is named by its ID.
+	testing.expect_value(t, app.session_message(s, "missing", {kind = .Failed, message = "Gone."}),
+		"Gone. Check \"Command line\" and \"Starting directory\" for the missing profile in Settings, " +
+		"then run \"Restart stopped pane\" to try again.")
 }

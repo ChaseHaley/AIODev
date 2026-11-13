@@ -199,17 +199,17 @@ SETTINGS_GROUP_AREAS := [?]struct {
 	{"Cursor", .General},
 	{"Scrollback", .General},
 	{"Shell", .General},
-	{"Program Status", .General},
+	{"Activity", .General},
 	{"Motion", .Advanced},
 	{"Profiles", .Advanced},
-	{"Link Programs", .Advanced},
+	{"Link programs", .Advanced},
 	{"Processes", .Advanced},
-	{"Command Line", .Advanced},
+	{"Command line", .Advanced},
 	{"Input", .Shortcuts},
 	{THEME_MANAGE_GROUP, .Colors},
 }
 
-// The section a group's title belongs to and its place there; theme color groups follow Manage Theme.
+// The section a group's title belongs to and its place there; theme color groups follow Manage theme.
 settings_group_area :: proc(title: string) -> (area: Settings_Area, rank: int) {
 	for entry, i in SETTINGS_GROUP_AREAS {
 		if entry.title == title {return entry.area, i}
@@ -301,9 +301,9 @@ settings_page_profile_rows :: proc(p: ^ui.Editor, profiles: []ui.Profile_Row) ->
 	}
 	add := ui.Editor_Row {
 		key         = PROFILE_ADD_KEY,
-		title       = "Add Profile",
+		title       = "Add profile",
 		description = "Add a shell with its own command line and starting directory.",
-		value       = "Add Profile",
+		value       = "Add profile",
 		kind        = .Profile_Add,
 	}
 	if ui.editor_add(p, add, group) != nil {return false}
@@ -385,9 +385,9 @@ settings_page_opener_rows :: proc(p: ^ui.Editor, openers: ^settings.Openers) -> 
 	}
 	add := ui.Editor_Row {
 		key         = OPENER_ADD_KEY,
-		title       = "Add Link Program",
+		title       = "Add link program",
 		description = "Offer a program, such as an editor, for opening a link's file or folder.",
-		value       = "Add Program",
+		value       = "Add program",
 		kind        = .Action,
 		action      = .Opener_Add,
 	}
@@ -699,7 +699,7 @@ editor_profile_mutate :: proc(app: ^App, w: ^Window, change: settings.Profile_Mu
 	case .Remove:
 		message, key = "Profile removed.", PROFILE_ADD_KEY
 	case .Move:
-		message = "Profile order saved. Menus and Ctrl+Shift+1 to 9 follow it."
+		message = "Profile order saved. Menus and the \"New tab with profile\" commands follow it."
 	}
 	// The reveal rebuilds the published page, which then opens the new profile's inline editor.
 	if change.kind == .Add || change.kind == .Duplicate {
@@ -869,7 +869,7 @@ settings_theme_choices :: proc(s: ^settings.Settings) -> (choices, labels: []str
 
 // The Colors section's group of actions on the active theme; choosing a theme is General's first row.
 @(private)
-THEME_MANAGE_GROUP :: "Manage Theme"
+THEME_MANAGE_GROUP :: "Manage theme"
 
 // The active theme's management rows, which the Colors board shows as its card, then its colors.
 @(private)
@@ -877,12 +877,12 @@ settings_add_theme_rows :: proc(p: ^ui.Editor, s: ^settings.Settings) -> bool {
 	if ui.editor_theme_set(p, s.theme.name) != nil {return false}
 	duplicate := ui.Editor_Row {
 		key         = "theme.duplicate",
-		title       = "Save as New Theme",
+		title       = "Save as new theme",
 		description = fmt.tprintf(
 			"Copy %s into a custom theme you can edit.",
 			settings.theme_display_name(s, s.theme.name),
 		),
-		value       = "Save Copy",
+		value       = "Save copy",
 		kind        = .Action,
 		action      = .Theme_Duplicate,
 	}
@@ -892,7 +892,7 @@ settings_add_theme_rows :: proc(p: ^ui.Editor, s: ^settings.Settings) -> bool {
 		rows := [?]ui.Editor_Row {
 			{
 				key = THEME_NAME_KEY,
-				title = "Theme Name",
+				title = "Theme name",
 				description = "Shown in the theme selector. Any text; empty shows the theme ID.",
 				value = custom.name,
 				kind = .Text,
@@ -915,7 +915,7 @@ settings_add_theme_rows :: proc(p: ^ui.Editor, s: ^settings.Settings) -> bool {
 	} else if ui.editor_add(p, duplicate, THEME_MANAGE_GROUP) != nil {return false}
 	if ui.editor_add(p, {
 		key = "theme.export",
-		title = "Export Theme File",
+		title = "Export theme file",
 		description = "Save a portable JSON file in the themes folder. Share it with its schema file.",
 		kind = .Action,
 		value = "Export",
@@ -925,7 +925,7 @@ settings_add_theme_rows :: proc(p: ^ui.Editor, s: ^settings.Settings) -> bool {
 	if custom := settings.custom_theme_find(s, s.theme.name); settings.theme_custom(s) {
 		delete_row := ui.Editor_Row {
 			key         = "theme.delete",
-			title       = "Delete Theme",
+			title       = "Delete theme",
 			description = fmt.tprintf(
 				"Remove this custom theme and switch to %s.",
 				settings.theme_display_name(s, settings.theme_delete_target(s, custom)),
@@ -976,6 +976,7 @@ editor_theme_color :: proc(app: ^App, w: ^Window, row: ^ui.Editor_Row, reset: bo
 }
 
 // Plain and shifted keys type or navigate, and these Ctrl chords edit text or move through the list.
+// Ctrl+F always reaches the search, so the keycap the search field shows for it stays true.
 @(private)
 editor_owns :: proc(e: input.Key_Event) -> bool {
 	modifiers := e.modifiers & {.Control, .Shift, .Alt, .Super}
@@ -983,7 +984,7 @@ editor_owns :: proc(e: input.Key_Event) -> bool {
 	#partial switch e.key {
 	case .Arrow_Left, .Arrow_Right, .Home, .End:
 		return modifiers - {.Shift} == {.Control}
-	case .A, .N, .P, .R, .Backspace, .Delete, .Page_Up, .Page_Down:
+	case .A, .F, .N, .P, .R, .Backspace, .Delete, .Page_Up, .Page_Down:
 		return modifiers == {.Control}
 	}
 	return false

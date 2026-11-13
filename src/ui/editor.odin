@@ -847,7 +847,7 @@ editor_theme_delete_press :: proc(p: ^Editor) -> bool {
 	}
 	editor_message(
 		p,
-		fmt.tprintf("Delete theme %s and its colors? Press Delete Theme again to confirm.", p.theme),
+		fmt.tprintf("Delete theme %s and its colors? Press \"Delete\" again to confirm.", p.theme),
 		true,
 	)
 	p.delete_armed, p.delete_prompt = true, true
@@ -4295,7 +4295,7 @@ filter_draw :: proc(
 		if result := key_search_draw(&p.keys, list, text, theme, area, s); result != .Ok {return result}
 	} else {
 		placeholder :=
-			l.outline.width > 0 ? "Search settings" : "Search settings, groups, and shortcuts"
+			l.outline.width > 0 ? "Search settings" : "Search settings, groups and shortcuts"
 		if result := field_box_draw(box, list, theme, field_box_baseline(box), focused, placeholder);
 		   result != .Ok {
 			return result
@@ -4479,7 +4479,7 @@ editor_draw :: proc(
 	); r != .Ok {return r}
 	reset := editor_reset_all_rect(l)
 	reset_focused := focused && editor_focus(p) == .Reset_All
-	if r := text_button_draw(list, text, theme, reset, "Reset to Defaults", reset_focused, s, pointer);
+	if r := text_button_draw(list, text, theme, reset, "Reset to defaults", reset_focused, s, pointer);
 	   r != .Ok {return r}
 	if r := filter_draw(p, l, list, text, theme, focused && editor_focus(p) == .Search, pointer);
 	   r != .Ok {return r}

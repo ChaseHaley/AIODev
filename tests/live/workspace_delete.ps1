@@ -136,7 +136,9 @@ try {
         } else { Invoke-Aio command workspace.delete }
         Invoke-Aio expect state confirm.open=true
         Invoke-Aio expect state confirm.workspace=1
-        Invoke-Aio expect state 'confirm.title=Delete “Disposable tabs and panes”?'
+        # State quotes values with \" for a quote, so the title is read back rather than passed to expect.
+        $title = (Read-State)['confirm.title'] -replace '\\"', '"'
+        if ($title -cne 'Delete "Disposable tabs and panes"?') { throw "Unexpected confirm.title: $title" }
         Invoke-Aio expect state 'confirm.body=Close 3 tabs (4 panes); stop 3 sessions.'
         if ($cancel -eq 'native-escape') { Shot 'multiple-tabs-last-confirm' }
         switch ($cancel) {

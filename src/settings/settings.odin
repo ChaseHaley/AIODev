@@ -24,6 +24,17 @@ CURSOR_STYLE_NAMES :: []string {
 	CURSOR_STYLE_NAME[Cursor_Style(1)],
 	CURSOR_STYLE_NAME[Cursor_Style(2)],
 }
+// What Settings shows for each style.
+CURSOR_STYLE_LABEL :: [Cursor_Style]string {
+	.Block     = "Block",
+	.Bar       = "Bar",
+	.Underline = "Underline",
+}
+CURSOR_STYLE_LABELS :: []string {
+	CURSOR_STYLE_LABEL[Cursor_Style(0)],
+	CURSOR_STYLE_LABEL[Cursor_Style(1)],
+	CURSOR_STYLE_LABEL[Cursor_Style(2)],
+}
 // How the cursor moves between cells. Off keeps the plain cursor and turns every other cursor
 // animation setting off.
 Cursor_Animation :: enum int {
@@ -90,9 +101,9 @@ CONFIRM_PROMPT_NAME :: [Confirm_Prompt]string {
 	.Multiline_Paste = "multiline_paste",
 }
 CONFIRM_PROMPT_LABEL :: [Confirm_Prompt]string {
-	.Close_Split_Tab = "Closing Split Tabs",
-	.Shell_Switch    = "Switching Pane Shells",
-	.Multiline_Paste = "Multiline Paste",
+	.Close_Split_Tab = "Closing split tabs",
+	.Shell_Switch    = "Switching pane shells",
+	.Multiline_Paste = "Multiline paste",
 }
 #assert(len(Confirm_Prompt) == 3)
 CONFIRM_PROMPT_NAMES :: []string {
@@ -126,6 +137,15 @@ TABS_ORIENTATION_NAMES :: []string {
 	TABS_ORIENTATION_NAME[Tabs_Orientation(0)],
 	TABS_ORIENTATION_NAME[Tabs_Orientation(1)],
 }
+// What Settings shows for each orientation.
+TABS_ORIENTATION_LABEL :: [Tabs_Orientation]string {
+	.Vertical   = "Vertical",
+	.Horizontal = "Horizontal",
+}
+TABS_ORIENTATION_LABELS :: []string {
+	TABS_ORIENTATION_LABEL[Tabs_Orientation(0)],
+	TABS_ORIENTATION_LABEL[Tabs_Orientation(1)],
+}
 Tabs_Settings :: struct {
 	orientation:        Tabs_Orientation,
 	rail_width:         int,
@@ -142,6 +162,12 @@ STATUS_SCOPE_NAME :: [Status_Scope]string {
 }
 #assert(len(Status_Scope) == 2)
 STATUS_SCOPE_NAMES :: []string{STATUS_SCOPE_NAME[Status_Scope(0)], STATUS_SCOPE_NAME[Status_Scope(1)]}
+// What Settings shows for each scope; Workspace means the window's own workspace.
+STATUS_SCOPE_LABEL :: [Status_Scope]string {
+	.All       = "All workspaces",
+	.Workspace = "This workspace",
+}
+STATUS_SCOPE_LABELS :: []string{STATUS_SCOPE_LABEL[Status_Scope(0)], STATUS_SCOPE_LABEL[Status_Scope(1)]}
 Status_Panel_Side :: enum int {
 	Right,
 	Left,
@@ -154,6 +180,15 @@ STATUS_PANEL_SIDE_NAME :: [Status_Panel_Side]string {
 STATUS_PANEL_SIDE_NAMES :: []string {
 	STATUS_PANEL_SIDE_NAME[Status_Panel_Side(0)],
 	STATUS_PANEL_SIDE_NAME[Status_Panel_Side(1)],
+}
+// What Settings shows for each side.
+STATUS_PANEL_SIDE_LABEL :: [Status_Panel_Side]string {
+	.Right = "Right",
+	.Left  = "Left",
+}
+STATUS_PANEL_SIDE_LABELS :: []string {
+	STATUS_PANEL_SIDE_LABEL[Status_Panel_Side(0)],
+	STATUS_PANEL_SIDE_LABEL[Status_Panel_Side(1)],
 }
 Status_Panel_View :: enum int {
 	Comfy,
@@ -177,7 +212,7 @@ STATUS_PANEL_VIEW_LABELS :: []string {
 	STATUS_PANEL_VIEW_LABEL[Status_Panel_View(0)],
 	STATUS_PANEL_VIEW_LABEL[Status_Panel_View(1)],
 }
-// How Activity and the status inbox group and order reports (WORK-412). Within a group, reports
+// How Activity and the Activity inbox group and order reports (WORK-412). Within a group, reports
 // with the same status sort newest first by when they entered it; the view only sets row size.
 Status_Group :: enum int {
 	Status,
@@ -343,7 +378,7 @@ STATUS_CHANNEL_LABELS :: []string {
 	STATUS_CHANNEL_LABEL[Status_Channel(3)],
 	STATUS_CHANNEL_LABEL[Status_Channel(4)],
 }
-// Where Show Status On draws program status.
+// Where "Show status on" draws program status.
 Status_Surface :: enum u8 {
 	Tabs,
 	Active_Tab,
@@ -360,9 +395,9 @@ STATUS_SURFACE_NAME :: [Status_Surface]string {
 }
 STATUS_SURFACE_LABEL :: [Status_Surface]string {
 	.Tabs             = "Tabs",
-	.Active_Tab       = "Active Tab",
-	.Pane_Headers     = "Pane Headers",
-	.Workspace_Picker = "Workspace Picker",
+	.Active_Tab       = "Active tab",
+	.Pane_Headers     = "Pane headers",
+	.Workspace_Picker = "Workspace picker",
 }
 #assert(len(Status_Surface) == 4)
 STATUS_SURFACE_NAMES :: []string {
@@ -377,7 +412,7 @@ STATUS_SURFACE_LABELS :: []string {
 	STATUS_SURFACE_LABEL[Status_Surface(2)],
 	STATUS_SURFACE_LABEL[Status_Surface(3)],
 }
-// The program states Show Statuses lists.
+// The program states "Show statuses" lists.
 Status_Show_State :: enum u8 {
 	Working,
 	Blocked,
@@ -396,9 +431,9 @@ STATUS_SHOW_STATE_NAME :: [Status_Show_State]string {
 }
 STATUS_SHOW_STATE_LABEL :: [Status_Show_State]string {
 	.Working = "Working",
-	.Blocked = "Blocked",
+	.Blocked = "Needs you",
 	.Done    = "Done",
-	.Error   = "Error",
+	.Error   = "Failed",
 	.Idle    = "Idle",
 }
 #assert(len(Status_Show_State) == 5)
@@ -416,7 +451,7 @@ STATUS_SHOW_STATE_LABELS :: []string {
 	STATUS_SHOW_STATE_LABEL[Status_Show_State(3)],
 	STATUS_SHOW_STATE_LABEL[Status_Show_State(4)],
 }
-// The program states Taskbar Progress shows; none turns it off.
+// The program states "Taskbar progress" shows; none turns it off.
 Status_Taskbar_State :: enum u8 {
 	Working,
 	Blocked,
@@ -431,8 +466,8 @@ STATUS_TASKBAR_STATE_NAME :: [Status_Taskbar_State]string {
 }
 STATUS_TASKBAR_STATE_LABEL :: [Status_Taskbar_State]string {
 	.Working = "Working",
-	.Blocked = "Blocked",
-	.Error   = "Error",
+	.Blocked = "Needs you",
+	.Error   = "Failed",
 }
 #assert(len(Status_Taskbar_State) == 3)
 STATUS_TASKBAR_STATE_NAMES :: []string {
@@ -488,8 +523,8 @@ FIND_REOPEN_NAME :: [Find_Reopen]string {
 }
 FIND_REOPEN_LABEL :: [Find_Reopen]string {
 	.Empty         = "Empty",
-	.Last          = "Last Search",
-	.Last_Selected = "Last Search Selected",
+	.Last          = "Last search",
+	.Last_Selected = "Last search selected",
 }
 #assert(len(Find_Reopen) == 3)
 FIND_REOPEN_NAMES :: []string {
@@ -661,7 +696,7 @@ group_title :: proc(key: string) -> string {
 	case "tabs":
 		return "Tabs"
 	case "status":
-		return "Program Status"
+		return "Activity"
 	case "shell":
 		return "Shell"
 	case "input":
@@ -683,7 +718,7 @@ group_title :: proc(key: string) -> string {
 	case "colors":
 		return "Colors"
 	case "control":
-		return "Command Line"
+		return "Command line"
 	}
 	return "Other"
 }
@@ -691,7 +726,7 @@ group_title :: proc(key: string) -> string {
 SCHEMA :: [?]Schema_Entry {
 	{
 		key = "terminal.scroll_page_length",
-		title = "Scroll Page Length",
+		title = "Scroll page length",
 		kind = .Float,
 		offset = offset_of(Settings, terminal) + offset_of(Terminal_Settings, scroll_page_length),
 		default_value = "0.5",
@@ -700,7 +735,7 @@ SCHEMA :: [?]Schema_Entry {
 	},
 	{
 		key = "terminal.scrollbar",
-		title = "Show Scrollbar",
+		title = "Show scrollbar",
 		kind = .Bool,
 		offset = offset_of(Settings, terminal) + offset_of(Terminal_Settings, scrollbar),
 		default_value = "true",
@@ -720,7 +755,7 @@ SCHEMA :: [?]Schema_Entry {
 	},
 	{
 		key = "pane.gap",
-		title = "Pane Gap",
+		title = "Pane gap",
 		kind = .Int,
 		offset = offset_of(Settings, pane) + offset_of(Pane_Settings, gap),
 		default_value = "4",
@@ -729,7 +764,7 @@ SCHEMA :: [?]Schema_Entry {
 	},
 	{
 		key = "pane.corner_radius",
-		title = "Pane Corner Radius",
+		title = "Pane corner radius",
 		kind = .Int,
 		offset = offset_of(Settings, pane) + offset_of(Pane_Settings, corner_radius),
 		default_value = "8",
@@ -738,7 +773,7 @@ SCHEMA :: [?]Schema_Entry {
 	},
 	{
 		key = "pane.focus_border",
-		title = "Focus Border Width",
+		title = "Focus border width",
 		kind = .Int,
 		offset = offset_of(Settings, pane) + offset_of(Pane_Settings, focus_border),
 		default_value = "1",
@@ -747,7 +782,7 @@ SCHEMA :: [?]Schema_Entry {
 	},
 	{
 		key = "pane.unfocused_dim",
-		title = "Dim Unfocused Panes",
+		title = "Dim unfocused panes",
 		kind = .Int,
 		offset = offset_of(Settings, pane) + offset_of(Pane_Settings, unfocused_dim),
 		default_value = "0",
@@ -757,7 +792,7 @@ SCHEMA :: [?]Schema_Entry {
 	},
 	{
 		key = "pane.show_headers",
-		title = "Show Pane Headers",
+		title = "Show pane headers",
 		kind = .Bool,
 		offset = offset_of(Settings, pane) + offset_of(Pane_Settings, show_headers),
 		default_value = "true",
@@ -765,26 +800,26 @@ SCHEMA :: [?]Schema_Entry {
 	},
 	{
 		key = "pane.markdown_floating",
-		title = "Open Markdown Files in a Float",
+		title = "Open Markdown files in a float",
 		kind = .Bool,
 		offset = offset_of(Settings, pane) + offset_of(Pane_Settings, markdown_floating),
 		default_value = "false",
-		description = "Open a Markdown file from a terminal link or Open Markdown File in a float above the tab, " +
-			"so the panes already there keep their size.",
+		description = "Open a Markdown file from a terminal link or \"Open Markdown file\" in a float above the " +
+			"tab, so the panes already there keep their size.",
 	},
 	{
 		key = "pane.resume_agents",
-		title = "Resume Agent Sessions",
+		title = "Resume agent sessions",
 		kind = .Bool,
 		offset = offset_of(Settings, pane) + offset_of(Pane_Settings, resume_agents),
 		default_value = "true",
 		description = "Bring a pane running Claude Code, Codex or omp back in the same conversation when it " +
-			"is reopened or AIODev restarts. Run Install Agent Session Hooks once so Claude Code and Codex " +
+			"is reopened or AIODev restarts. Run \"Install agent session hooks\" once so Claude Code and Codex " +
 			"panes always know their conversation.",
 	},
 	{
 		key = "pane.minimum_columns",
-		title = "Minimum Pane Width",
+		title = "Minimum pane width",
 		kind = .Int,
 		offset = offset_of(Settings, pane) + offset_of(Pane_Settings, minimum_columns),
 		default_value = "20",
@@ -794,7 +829,7 @@ SCHEMA :: [?]Schema_Entry {
 	},
 	{
 		key = "pane.minimum_rows",
-		title = "Minimum Pane Height",
+		title = "Minimum pane height",
 		kind = .Int,
 		offset = offset_of(Settings, pane) + offset_of(Pane_Settings, minimum_rows),
 		default_value = "5",
@@ -804,14 +839,14 @@ SCHEMA :: [?]Schema_Entry {
 	},
 	{
 		key = "motion.speed",
-		title = "Animation Speed",
+		title = "Animation speed",
 		kind = .Float,
 		offset = offset_of(Settings, motion) + offset_of(Motion_Settings, speed),
 		default_value = "1",
 		valid = {0.25, 4},
 		step = 0.05,
 		description = "Speed of every pane animation: 2 runs them twice as fast, 0.5 at half speed. Windows' " +
-			"Animation effects setting still turns them all off.",
+			"\"Animation effects\" setting still turns them all off.",
 	},
 	{
 		key = MOTION_CONTEXT_KEY[Motion_Context.Panes],
@@ -937,17 +972,18 @@ SCHEMA :: [?]Schema_Entry {
 	},
 	{
 		key = "tabs.orientation",
-		title = "Tab Orientation",
+		title = "Tab orientation",
 		kind = .Enum,
 		offset = offset_of(Settings, tabs) + offset_of(Tabs_Settings, orientation),
 		default_value = "horizontal",
 		names = TABS_ORIENTATION_NAMES,
+		labels = TABS_ORIENTATION_LABELS,
 		description = "Draw tabs in a vertical rail along the left or in a horizontal strip in the title bar. " +
-			"Switch at any time with Ctrl+Shift+L.",
+			"Switch at any time with \"Switch between vertical and horizontal tabs\".",
 	},
 	{
 		key = "tabs.rail_width",
-		title = "Vertical Tab Width",
+		title = "Vertical tab width",
 		kind = .Int,
 		offset = offset_of(Settings, tabs) + offset_of(Tabs_Settings, rail_width),
 		default_value = "208",
@@ -956,7 +992,7 @@ SCHEMA :: [?]Schema_Entry {
 	},
 	{
 		key = "tabs.program_icons",
-		title = "Program Icons",
+		title = "Program icons",
 		kind = .Bool,
 		offset = offset_of(Settings, tabs) + offset_of(Tabs_Settings, program_icons),
 		default_value = "true",
@@ -965,7 +1001,7 @@ SCHEMA :: [?]Schema_Entry {
 	},
 	{
 		key = PROGRAM_ICON_FILES_KEY,
-		title = "Program Icon Files",
+		title = "Program icon files",
 		kind = .String,
 		offset = offset_of(Settings, tabs) + offset_of(Tabs_Settings, program_icon_files),
 		default_value = "",
@@ -976,7 +1012,7 @@ SCHEMA :: [?]Schema_Entry {
 	},
 	{
 		key = "status.enabled",
-		title = "Program Status",
+		title = "Activity",
 		kind = .Bool,
 		offset = offset_of(Settings, status) + offset_of(Status_Settings, enabled),
 		default_value = "true",
@@ -985,20 +1021,20 @@ SCHEMA :: [?]Schema_Entry {
 	},
 	{
 		key = "status.surfaces",
-		title = "Show Status On",
+		title = "Show status on",
 		kind = .Set,
 		offset = offset_of(Settings, status) + offset_of(Status_Settings, surfaces),
 		default_value = "tabs, active_tab, pane_headers, workspace_picker",
 		names = STATUS_SURFACE_NAMES,
 		labels = STATUS_SURFACE_LABELS,
 		description = "Where program status shows: a spinner, progress bar or symbol on tabs and on the " +
-			"tab you are looking at, what a pane's program reports in its header, and a summary of " +
-			"each workspace in the workspace picker. Active Tab needs Tabs; Pane Headers needs pane " +
-			"headers.",
+			"tab you are looking at, what a pane's program reports in its header and a summary of " +
+			"each workspace in the workspace picker. \"Active tab\" needs \"Tabs\"; \"Pane headers\" needs " +
+			"\"Show pane headers\".",
 	},
 	{
 		key = "status.inbox",
-		title = "Status Inbox",
+		title = "Activity inbox",
 		kind = .Bool,
 		offset = offset_of(Settings, status) + offset_of(Status_Settings, inbox),
 		default_value = "true",
@@ -1007,7 +1043,7 @@ SCHEMA :: [?]Schema_Entry {
 	},
 	{
 		key = "status.panel",
-		title = "Activity Panel",
+		title = "Activity panel",
 		kind = .Bool,
 		offset = offset_of(Settings, status) + offset_of(Status_Settings, panel),
 		default_value = "true",
@@ -1015,16 +1051,17 @@ SCHEMA :: [?]Schema_Entry {
 	},
 	{
 		key = "status.panel_side",
-		title = "Activity Panel Side",
+		title = "Activity panel side",
 		kind = .Enum,
 		offset = offset_of(Settings, status) + offset_of(Status_Settings, panel_side),
 		default_value = "right",
 		names = STATUS_PANEL_SIDE_NAMES,
-		description = "Dock Activity at the far right or far left of the workspace.",
+		labels = STATUS_PANEL_SIDE_LABELS,
+		description = "Dock the Activity panel at the far right or far left of the workspace.",
 	},
 	{
 		key = "status.panel_view",
-		title = "Activity Panel View",
+		title = "Activity panel view",
 		kind = .Enum,
 		offset = offset_of(Settings, status) + offset_of(Status_Settings, panel_view),
 		default_value = "comfy",
@@ -1034,81 +1071,81 @@ SCHEMA :: [?]Schema_Entry {
 	},
 	{
 		key = "status.group_by",
-		title = "Activity Grouping",
+		title = "Activity grouping",
 		kind = .Enum,
 		offset = offset_of(Settings, status) + offset_of(Status_Settings, group_by),
 		default_value = "status",
 		names = STATUS_GROUP_NAMES,
 		labels = STATUS_GROUP_LABELS,
-		description = "Group Activity and the status inbox by status, or by workspace and then status. " +
-			"Programs with the same status show the newest to reach it first.",
+		description = "Group the Activity panel and the Activity inbox by status, or by workspace and then " +
+			"status. Programs with the same status show the newest to reach it first.",
 	},
 	{
 		key = "status.row_name",
-		title = "Activity Row Name",
+		title = "Activity row name",
 		kind = .Enum,
 		offset = offset_of(Settings, status) + offset_of(Status_Settings, row_name),
 		default_value = "pane",
 		names = STATUS_ROW_NAME_NAMES,
 		labels = STATUS_ROW_NAME_LABELS,
-		description = "What names each program in Activity and the status inbox. A subagent's report " +
-			"keeps its own title.",
+		description = "What names each program in the Activity panel and the Activity inbox. A subagent's " +
+			"report keeps its own title.",
 	},
 	{
 		key = "status.row_terms",
-		title = "Activity Row Details",
+		title = "Activity row details",
 		kind = .Set,
 		offset = offset_of(Settings, status) + offset_of(Status_Settings, row_terms),
 		default_value = "message, workspace",
 		names = STATUS_ROW_TERM_NAMES,
 		labels = STATUS_ROW_TERM_LABELS,
-		description = "What each row in Activity and the status inbox shows after its name.",
+		description = "What each row in the Activity panel and the Activity inbox shows after its name.",
 	},
 	{
 		key = "status.panel_width",
-		title = "Activity Panel Width",
+		title = "Activity panel width",
 		kind = .Int,
 		offset = offset_of(Settings, status) + offset_of(Status_Settings, panel_width),
 		default_value = "300",
 		valid = {144, 480},
-		description = "Width of the docked activity panel in DIPs. Double-clicking its edge returns it to this " +
+		description = "Width of the docked Activity panel in DIPs. Double-clicking its edge returns it to this " +
 			"width.",
 	},
 	{
 		key = "status.panel_height",
-		title = "Activity Panel Height",
+		title = "Activity panel height",
 		kind = .Int,
 		offset = offset_of(Settings, status) + offset_of(Status_Settings, panel_height),
 		default_value = "45",
 		valid = {20, 80},
-		description = "Share of the vertical tab rail the activity panel takes below the tabs, in percent. " +
+		description = "Share of the vertical tab rail the Activity panel takes below the tabs, in percent. " +
 			"Double-clicking its edge returns it to this height.",
 	},
 	{
 		key = "status.taskbar",
-		title = "Taskbar Progress",
+		title = "Taskbar progress",
 		kind = .Set,
 		offset = offset_of(Settings, status) + offset_of(Status_Settings, taskbar),
 		default_value = "working, blocked, error",
 		names = STATUS_TASKBAR_STATE_NAMES,
 		labels = STATUS_TASKBAR_STATE_LABELS,
 		description = "Which programs show on the window's taskbar button: progress for working ones, " +
-			"and blocked and failed work. None turns taskbar progress off.",
+			"and ones that need you or failed. None turns taskbar progress off.",
 	},
 	{
 		key = "status.show",
-		title = "Show Statuses",
+		title = "Show statuses",
 		kind = .Set,
 		offset = offset_of(Settings, status) + offset_of(Status_Settings, show),
 		default_value = "working, blocked, done, error, idle",
 		names = STATUS_SHOW_STATE_NAMES,
 		labels = STATUS_SHOW_STATE_LABELS,
-		description = "Which programs status shows: working, waiting for you, finished work to look at, " +
-			"failed, or idle at their own prompt.",
+		description = "Which programs show their status: working, needing you, done with work to look at, " +
+			"failed or idle at their own prompt.",
 	},
 	{
 		key = "status.notify_blocked",
-		title = "Notify When Blocked",
+		title = "Notify when a program needs you",
 		kind = .Set,
 		offset = offset_of(Settings, status) + offset_of(Status_Settings, notify_blocked),
 		default_value = "banner, sound",
@@ -1118,7 +1155,7 @@ SCHEMA :: [?]Schema_Entry {
 	},
 	{
 		key = "status.notify_error",
-		title = "Notify on Errors",
+		title = "Notify when a program fails",
 		kind = .Set,
 		offset = offset_of(Settings, status) + offset_of(Status_Settings, notify_error),
 		default_value = "banner, sound",
@@ -1128,7 +1165,7 @@ SCHEMA :: [?]Schema_Entry {
 	},
 	{
 		key = "status.notify_done",
-		title = "Notify When Done",
+		title = "Notify when a program is done",
 		kind = .Set,
 		offset = offset_of(Settings, status) + offset_of(Status_Settings, notify_done),
 		default_value = "none",
@@ -1138,7 +1175,7 @@ SCHEMA :: [?]Schema_Entry {
 	},
 	{
 		key = "status.notify_idle",
-		title = "Notify When Idle",
+		title = "Notify when a program goes idle",
 		kind = .Set,
 		offset = offset_of(Settings, status) + offset_of(Status_Settings, notify_idle),
 		default_value = "none",
@@ -1148,7 +1185,7 @@ SCHEMA :: [?]Schema_Entry {
 	},
 	{
 		key = "status.notify_working",
-		title = "Notify When Working",
+		title = "Notify when a program starts working",
 		kind = .Set,
 		offset = offset_of(Settings, status) + offset_of(Status_Settings, notify_working),
 		default_value = "none",
@@ -1158,7 +1195,7 @@ SCHEMA :: [?]Schema_Entry {
 	},
 	{
 		key = "status.notify_focused",
-		title = "Notify While Watching",
+		title = "Notify while watching",
 		kind = .Bool,
 		offset = offset_of(Settings, status) + offset_of(Status_Settings, notify_focused),
 		default_value = "false",
@@ -1166,27 +1203,29 @@ SCHEMA :: [?]Schema_Entry {
 	},
 	{
 		key = "status.scope",
-		title = "Status Overview Scope",
+		title = "Activity scope",
 		kind = .Enum,
 		offset = offset_of(Settings, status) + offset_of(Status_Settings, scope),
 		default_value = "all",
 		names = STATUS_SCOPE_NAMES,
-		description = "Whether the inbox and panel list every workspace or only the window's workspace.",
+		labels = STATUS_SCOPE_LABELS,
+		description = "Whether the Activity inbox and the Activity panel list every workspace or only the " +
+			"window's workspace.",
 	},
 	{
 		key = "status.keep_finished",
-		title = "Keep Finished Status",
+		title = "Keep finished status",
 		kind = .Enum,
 		offset = offset_of(Settings, status) + offset_of(Status_Settings, keep_finished),
 		default_value = "program",
 		names = STATUS_KEEP_NAMES,
 		labels = STATUS_KEEP_LABELS,
-		description = "When done and error status you have read leaves the lists: once the program that " +
-			"reported it ends, as soon as you leave the pane, or only when you dismiss it.",
+		description = "When Done and Failed status you have read leaves the lists: once the program that " +
+			"reported it ends, as soon as you leave the pane or only when you dismiss it.",
 	},
 	{
 		key = "status.ignore_apps",
-		title = "Ignore Status From",
+		title = "Ignore status from",
 		kind = .String,
 		offset = offset_of(Settings, status) + offset_of(Status_Settings, ignore_apps),
 		default_value = "",
@@ -1196,16 +1235,16 @@ SCHEMA :: [?]Schema_Entry {
 	},
 	{
 		key = "shell.default_profile",
-		title = "Default Shell Profile",
+		title = "Default shell profile",
 		kind = .String,
 		offset = offset_of(Settings, shell) + offset_of(Shell_Settings, default_profile),
 		default_value = "default",
 		valid = {1, 64},
-		description = "Profile for new tabs, splits and the plus button. Profiles are ordered by profile.order.",
+		description = "Profile for new tabs, splits and the plus button. Profiles follow the profile list's order.",
 	},
 	{
 		key = LEADER_KEY,
-		title = "Leader Key",
+		title = "Leader key",
 		kind = .String,
 		offset = offset_of(Settings, input) + offset_of(Input_Settings, leader),
 		default_value = "",
@@ -1217,7 +1256,7 @@ SCHEMA :: [?]Schema_Entry {
 	},
 	{
 		key = "font.family",
-		title = "Shell Font",
+		title = "Shell font",
 		kind = .String,
 		offset = offset_of(Settings, font) + offset_of(Font_Settings, family),
 		default_value = "Cascadia Mono",
@@ -1229,7 +1268,7 @@ SCHEMA :: [?]Schema_Entry {
 	},
 	{
 		key = "font.show_all",
-		title = "Show All Fonts",
+		title = "Show all fonts",
 		kind = .Bool,
 		offset = offset_of(Settings, font) + offset_of(Font_Settings, show_all),
 		default_value = "false",
@@ -1238,7 +1277,7 @@ SCHEMA :: [?]Schema_Entry {
 	},
 	{
 		key = "interface.font_family",
-		title = "GUI Font",
+		title = "GUI font",
 		kind = .String,
 		offset = offset_of(Settings, interface) + offset_of(Interface_Settings, font_family),
 		default_value = "Segoe UI Variable Text",
@@ -1249,7 +1288,7 @@ SCHEMA :: [?]Schema_Entry {
 	},
 	{
 		key = "interface.font_size",
-		title = "GUI Font Size",
+		title = "GUI font size",
 		kind = .Float,
 		offset = offset_of(Settings, interface) + offset_of(Interface_Settings, font_size),
 		default_value = "9.75",
@@ -1260,7 +1299,7 @@ SCHEMA :: [?]Schema_Entry {
 	},
 	{
 		key = "interface.hover_lift",
-		title = "Hover Lift",
+		title = "Hover lift",
 		kind = .Float,
 		offset = offset_of(Settings, interface) + offset_of(Interface_Settings, hover_lift),
 		default_value = "1.5",
@@ -1269,7 +1308,7 @@ SCHEMA :: [?]Schema_Entry {
 	},
 	{
 		key = "interface.hover_gloss",
-		title = "Hover Gloss",
+		title = "Hover gloss",
 		kind = .Float,
 		offset = offset_of(Settings, interface) + offset_of(Interface_Settings, hover_gloss),
 		default_value = "1",
@@ -1279,19 +1318,19 @@ SCHEMA :: [?]Schema_Entry {
 	},
 	{
 		key = "interface.confirm",
-		title = "Confirm Before",
+		title = "Confirm before",
 		kind = .Set,
 		offset = offset_of(Settings, interface) + offset_of(Interface_Settings, confirm),
 		default_value = "close_split_tab, shell_switch, multiline_paste",
 		names = CONFIRM_PROMPT_NAMES,
 		labels = CONFIRM_PROMPT_LABELS,
 		description = "Ask before closing a tab that has more than one pane, before replacing a running " +
-			"pane's shell and losing its session, and before pasting line breaks the shell would run as " +
+			"pane's shell, which loses its session, and before pasting line breaks the shell would run as " +
 			"separate commands.",
 	},
 	{
 		key = "font.size",
-		title = "Font Size",
+		title = "Font size",
 		kind = .Float,
 		offset = offset_of(Settings, font) + offset_of(Font_Settings, size),
 		default_value = "12",
@@ -1302,7 +1341,7 @@ SCHEMA :: [?]Schema_Entry {
 	},
 	{
 		key = "font.line_height",
-		title = "Line Height",
+		title = "Line height",
 		kind = .Float,
 		offset = offset_of(Settings, font) + offset_of(Font_Settings, line_height),
 		default_value = "1.0",
@@ -1313,7 +1352,7 @@ SCHEMA :: [?]Schema_Entry {
 	},
 	{
 		key = "shell.refresh_environment",
-		title = "Refresh Shell Environment",
+		title = "Refresh shell environment",
 		kind = .Bool,
 		offset = offset_of(Settings, shell) + offset_of(Shell_Settings, refresh_environment),
 		default_value = "true",
@@ -1322,7 +1361,7 @@ SCHEMA :: [?]Schema_Entry {
 	},
 	{
 		key = "shell.integration",
-		title = "Shell Integration",
+		title = "Shell integration",
 		kind = .Bool,
 		offset = offset_of(Settings, shell) + offset_of(Shell_Settings, integration),
 		default_value = "true",
@@ -1330,7 +1369,7 @@ SCHEMA :: [?]Schema_Entry {
 	},
 	{
 		key = "window.columns",
-		title = "Initial Columns",
+		title = "Initial columns",
 		kind = .Int,
 		offset = offset_of(Settings, window) + offset_of(Window_Settings, columns),
 		default_value = "120",
@@ -1340,7 +1379,7 @@ SCHEMA :: [?]Schema_Entry {
 	},
 	{
 		key = "window.rows",
-		title = "Initial Rows",
+		title = "Initial rows",
 		kind = .Int,
 		offset = offset_of(Settings, window) + offset_of(Window_Settings, rows),
 		default_value = "32",
@@ -1350,16 +1389,16 @@ SCHEMA :: [?]Schema_Entry {
 	},
 	{
 		key = "window.padding",
-		title = "Content Padding",
+		title = "Content padding",
 		kind = .Int,
 		offset = offset_of(Settings, window) + offset_of(Window_Settings, padding),
 		default_value = "8",
 		valid = CONTENT_PADDING_RANGE,
-		description = "Terminal content inset inside each pane card in DIPs; outer spacing follows pane.gap.",
+		description = "Terminal content inset inside each pane card in DIPs; outer spacing follows \"Pane gap\".",
 	},
 	{
 		key = "window.tray_notification",
-		title = "Notify When Closing to Tray",
+		title = "Notify when closing to tray",
 		kind = .Bool,
 		offset = offset_of(Settings, window) + offset_of(Window_Settings, tray_notification),
 		default_value = "true",
@@ -1368,7 +1407,7 @@ SCHEMA :: [?]Schema_Entry {
 	},
 	{
 		key = PADDING_GROUPS_KEY,
-		title = "Process Padding Groups",
+		title = "Process padding groups",
 		kind = .String,
 		offset = offset_of(Settings, process) + offset_of(Process_Settings, padding_groups),
 		default_value = "",
@@ -1376,11 +1415,11 @@ SCHEMA :: [?]Schema_Entry {
 		control = .Group,
 		validator = .Padding_Groups,
 		description = "Named groups: " + PADDING_GROUPS_EXAMPLE + ". First match wins; " +
-			"other processes use Content Padding.",
+			"other processes use \"Content padding\".",
 	},
 	{
 		key = "scrollback.lines",
-		title = "Scrollback Lines",
+		title = "Scrollback lines",
 		kind = .Int,
 		offset = offset_of(Settings, scrollback) + offset_of(Scrollback_Settings, lines),
 		default_value = "10000",
@@ -1390,26 +1429,26 @@ SCHEMA :: [?]Schema_Entry {
 	},
 	{
 		key = "terminal.copy_on_select",
-		title = "Copy on Select",
+		title = "Copy on select",
 		kind = .Bool,
 		offset = offset_of(Settings, terminal) + offset_of(Terminal_Settings, copy_on_select),
 		default_value = "false",
-		description = "Copy selected text automatically; otherwise Ctrl+Shift+C copies it.",
+		description = "Copy selected text automatically; otherwise \"Copy\" copies it.",
 	},
 	{
 		key = "terminal.find_reopen",
-		title = "Find Bar Reopens With",
+		title = "Find bar reopens with",
 		kind = .Enum,
 		offset = offset_of(Settings, terminal) + offset_of(Terminal_Settings, find_reopen),
 		default_value = "empty",
 		names = FIND_REOPEN_NAMES,
 		labels = FIND_REOPEN_LABELS,
-		description = "What find starts with: an empty search, the last search, or the last search " +
+		description = "What find starts with: an empty search, the last search or the last search " +
 			"selected so typing replaces it.",
 	},
 	{
 		key = "terminal.minimum_contrast",
-		title = "Minimum Text Contrast",
+		title = "Minimum text contrast",
 		kind = .Float,
 		offset = offset_of(Settings, terminal) + offset_of(Terminal_Settings, minimum_contrast),
 		default_value = "4.5",
@@ -1419,16 +1458,17 @@ SCHEMA :: [?]Schema_Entry {
 	},
 	{
 		key = "cursor.style",
-		title = "Cursor Style",
+		title = "Cursor style",
 		kind = .Enum,
 		offset = offset_of(Settings, cursor) + offset_of(Cursor_Settings, style),
 		default_value = "block",
 		names = CURSOR_STYLE_NAMES,
-		description = "Cursor shape: block, bar, or underline.",
+		labels = CURSOR_STYLE_LABELS,
+		description = "Cursor shape: block, bar or underline.",
 	},
 	{
 		key = "cursor.blink",
-		title = "Cursor Blink",
+		title = "Cursor blink",
 		kind = .Bool,
 		offset = offset_of(Settings, cursor) + offset_of(Cursor_Settings, blink),
 		default_value = "false",
@@ -1436,20 +1476,20 @@ SCHEMA :: [?]Schema_Entry {
 	},
 	{
 		key = "cursor.animation",
-		title = "Cursor Animation",
+		title = "Cursor animation",
 		kind = .Enum,
 		offset = offset_of(Settings, cursor) + offset_of(Cursor_Settings, animation),
 		default_value = "off",
 		names = CURSOR_ANIMATION_NAMES,
 		labels = CURSOR_ANIMATION_LABELS,
 		description = "Cursor animation preset for the terminal cursor and the caret of every text field: " +
-			"off, smooth, smear, or trail. Off draws the cursor in place and turns every other cursor " +
+			"off, smooth, smear or trail. Off draws the cursor in place and turns every other cursor " +
 			"animation setting off. Smooth glides the cursor without a trail; smear stretches it toward " +
 			"its new place; trail leaves a fading trail behind it.",
 	},
 	{
 		key = "cursor.animation_duration",
-		title = "Cursor Animation Duration (ms)",
+		title = "Cursor animation duration (ms)",
 		kind = .Int,
 		offset = offset_of(Settings, cursor) + offset_of(Cursor_Settings, animation_duration),
 		default_value = "100",
@@ -1458,7 +1498,7 @@ SCHEMA :: [?]Schema_Entry {
 	},
 	{
 		key = "cursor.animation_strength",
-		title = "Cursor Smear and Trail Strength (%)",
+		title = "Cursor smear and trail strength (%)",
 		kind = .Int,
 		offset = offset_of(Settings, cursor) + offset_of(Cursor_Settings, animation_strength),
 		default_value = "65",
@@ -1468,7 +1508,7 @@ SCHEMA :: [?]Schema_Entry {
 	},
 	{
 		key = "cursor.animation_movement",
-		title = "Animate Cursor Movement",
+		title = "Animate cursor movement",
 		kind = .Bool,
 		offset = offset_of(Settings, cursor) + offset_of(Cursor_Settings, animation_movement),
 		default_value = "true",
@@ -1477,16 +1517,16 @@ SCHEMA :: [?]Schema_Entry {
 	},
 	{
 		key = "cursor.animation_across_panes",
-		title = "Animate Cursor Across Panes",
+		title = "Animate cursor across panes",
 		kind = .Bool,
 		offset = offset_of(Settings, cursor) + offset_of(Cursor_Settings, animation_across_panes),
 		default_value = "true",
 		description = "Use the selected cursor animation when switching between panes. " +
-			"Has no effect when Cursor Animation is Off.",
+			"Has no effect when \"Cursor animation\" is Off.",
 	},
 	{
 		key = "control.enabled",
-		title = "Command Line Control",
+		title = "Command line control",
 		kind = .Bool,
 		offset = offset_of(Settings, control) + offset_of(Control_Settings, enabled),
 		default_value = "false",
@@ -2113,7 +2153,8 @@ default_text :: proc(
 	write_parts(
 		&builder,
 		"\n# Profiles: profile.ID.name, .command, .directory, .icon and .hidden.\n",
-		"# profile.order controls menu order and Ctrl+Shift+1 to 9; unlisted IDs follow by ID.\n",
+		"# profile.order controls menu order and which profile each \"New tab with profile N\" command\n",
+		"# opens; unlisted IDs follow by ID.\n",
 		PROFILE_ORDER_KEY,
 		" = default\n\n",
 		"profile.default.name = \"PowerShell 7\"\n",
@@ -2124,7 +2165,7 @@ default_text :: proc(
 		DEFAULT_PROFILE_DIRECTORY,
 		"\"\n\n",
 		"# Link programs open a link's file or folder from its menu: opener.ID.name, .command,\n",
-		"# .offers (files, folders, or both separated by a comma) and .placement (right, down,\n",
+		"# .offers (files, folders or both separated by a comma) and .placement (right, down,\n",
 		"# float, tab, linked or window). %1 in the command is the path; without %1 the path\n",
 		"# follows the command. .icon is a PNG path; without one, a known program such as Neovim shows\n",
 		"# its own icon.\n",

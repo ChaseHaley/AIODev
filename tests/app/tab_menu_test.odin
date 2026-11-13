@@ -92,8 +92,8 @@ tab_menu_exact_single_rows :: proc(t: ^testing.T) {
 	w := &f.w
 	app.tab_menu_open(&f.state, w, 0, 10, 20)
 	if !testing.expect_value(t, len(w.tab_menu.items), 12) { return }
-	labels := [?]string{"Rename", "Duplicate", "", "Add to Group", "", "Move Tab to Workspace…",
-		"Move Tab to New Workspace", "Close to the Right", "Close Others", "Close", "", "Tab Settings"}
+	labels := [?]string{"Rename…", "Duplicate", "", "Add to group", "", "Move tab to workspace…",
+		"Move tab to new workspace", "Close to the right", "Close others", "Close", "", "Tab settings"}
 	actions := [?]app.Action{.Rename_Tab, .Duplicate_Tab, {}, .Add_Tab_To_Group, {}, .Move_Tab_Workspace,
 		.Move_Tab_New_Workspace, .Close_Right_Tabs, .Close_Other_Tabs, .Close_Tab, {}, .Tab_Settings}
 	for label, i in labels {
@@ -145,12 +145,12 @@ tab_menu_group_and_settings_capabilities :: proc(t: ^testing.T) {
 	f.workspace.tabs[2].marked = true
 	app.tab_menu_open(&f.state, w, 2, 10, 20)
 	testing.expect_value(t, len(w.tab_menu.items), 6)
-	testing.expect_value(t, w.tab_menu.items[0].label, "Add to Group")
+	testing.expect_value(t, w.tab_menu.items[0].label, "Add to group")
 	testing.expect(t, w.tab_menu.items[1].separator)
-	testing.expect_value(t, w.tab_menu.items[2].label, "Close Others")
-	testing.expect_value(t, w.tab_menu.items[3].label, "Close 2 Selected Tabs")
+	testing.expect_value(t, w.tab_menu.items[2].label, "Close others")
+	testing.expect_value(t, w.tab_menu.items[3].label, "Close 2 selected tabs")
 	testing.expect(t, w.tab_menu.items[4].separator)
-	testing.expect_value(t, w.tab_menu.items[5].label, "Tab Settings")
+	testing.expect_value(t, w.tab_menu.items[5].label, "Tab settings")
 	testing.expect(t, f.workspace.tabs[0].marked && f.workspace.tabs[2].marked)
 	// Right-clicking never activates a tab or changes the marks.
 	testing.expect_value(t, f.workspace.selected, 0)
@@ -165,8 +165,8 @@ tab_menu_group_and_settings_capabilities :: proc(t: ^testing.T) {
 	testing.expect_value(t, layout.init(&settings_tab.tree, {.Settings, 0}), nil)
 	app.tab_menu_open(&f.state, w, 1, 10, 20)
 	testing.expect_value(t, len(w.tab_menu.items), 12)
-	for label, i in ([?]string{"Rename", "Duplicate", "", "Add to Group", "", "Move Tab to Workspace…",
-		"Move Tab to New Workspace", "Close to the Right", "Close Others", "Close", "", "Tab Settings"}) {
+	for label, i in ([?]string{"Rename…", "Duplicate", "", "Add to group", "", "Move tab to workspace…",
+		"Move tab to new workspace", "Close to the right", "Close others", "Close", "", "Tab settings"}) {
 		testing.expect_value(t, w.tab_menu.items[i].label, label)
 	}
 	// A settings pane has no runtime to duplicate, but its tab still renames and closes normally.
@@ -432,8 +432,8 @@ tab_menu_draw_matches_labels_separators_and_disabled_rows :: proc(t: ^testing.T)
 		testing.expect_value(t, render.push_layer(&expected, {0, 0, f32(w.width), f32(w.height)}), render.Error.None)
 		testing.expect_value(t, app.tab_menu_draw(&f.state, w), render.Build_Status.Ok)
 		y := window_menu_row(w, &w.tab_menu.menu, 0).y
-		labels := [?]string{"Rename", "Duplicate", "", "Add to Group", "", "Move Tab to Workspace…",
-			"Move Tab to New Workspace", "Close to the Right", "Close Others", "Close", "", "Tab Settings"}
+		labels := [?]string{"Rename…", "Duplicate", "", "Add to group", "", "Move tab to workspace…",
+			"Move tab to new workspace", "Close to the right", "Close others", "Close", "", "Tab settings"}
 		// The chevron of a submenu row is drawn with strokes, so dividers are found by their place.
 		for label, i in labels {
 			row := window_menu_row(w, &w.tab_menu.menu, i)

@@ -75,7 +75,7 @@ workspace133_window_action_rechecks_requester_target_and_owner :: proc(t: ^testi
 	testing.expect(t, !app.workspace_row_window_enabled(s, w, f.current.id))
 	testing.expect(t, !app.workspace_open_window(s, w, f.current.id))
 	testing.expect_value(t, len(s.windows), 2)
-	testing.expect_value(t, app.workspace_row_window_title(s, f.target.id), "Show Existing Window")
+	testing.expect_value(t, app.workspace_row_window_title(s, f.target.id), "Show existing window")
 	testing.expect(t, app.workspace_row_window_enabled(s, w, f.target.id))
 	f.owner.phase = .Preparing
 	testing.expect(t, !app.workspace_open_window(s, w, f.target.id))
@@ -107,7 +107,7 @@ workspace133_failed_open_preserves_filtered_row_and_runtime :: proc(t: ^testing.
 	ordered_remove(&s.windows, 1)
 	ui.field_set(&w.workspace_picker.query, "Workspace 2")
 	app.workspace_row_menu_open(s, w, f.target.id)
-	testing.expect_value(t, app.workspace_row_window_title(s, f.target.id), "Open in New Window")
+	testing.expect_value(t, app.workspace_row_window_title(s, f.target.id), "Open in new window")
 	testing.expect(t, app.workspace_row_window_enabled(s, w, f.target.id))
 	w.workspace_picker.menu_selected = 2
 	app.workspace_row_menu_choose(s, w)

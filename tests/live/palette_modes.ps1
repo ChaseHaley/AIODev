@@ -175,9 +175,9 @@ try {
     $start = "$([int]($input[0]+44*$scale)),$([int]($input[1]+32*$scale))"
     $end = "$([int]($input[0]+$input[2]-16*$scale)),$([int]($input[1]+32*$scale))"
     Invoke-Aio mouse drag $start $end --px
-    Invoke-Aio type 'c:Reload Settings'
+    Invoke-Aio type 'c:Reload settings'
     Invoke-Aio expect state 'palette.mode=commands'
-    Invoke-Aio expect state 'palette.query=Reload Settings'
+    Invoke-Aio expect state 'palette.query=Reload settings'
     Invoke-Aio expect state 'palette.item=settings.reload'
     Shot 'scope-tabs-command-light'
     Invoke-Aio key Enter

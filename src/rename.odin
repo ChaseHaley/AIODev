@@ -175,7 +175,7 @@ rename_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 	frame := ui.dialog_panel(r, s)
 	if ui.panel_draw(&w.list, frame, app.theme) != .None {return .Ok}
 	_, tab := dialog.target.(Rename_Tab_Target)
-	title := tab ? "Rename Tab" : "Rename Pane"
+	title := tab ? "Rename tab" : "Rename pane"
 	empty, advice := "Automatic title", "Enter saves · Esc cancels · Empty restores automatic titles"
 	if result := ui.draw_text(
 		&heading,

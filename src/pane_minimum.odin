@@ -5,7 +5,7 @@ import "core:fmt"
 
 // How every refusal for the minimum pane size ends: where the user changes it.
 @(private)
-PANE_MINIMUM_HINT :: "Change Minimum Pane Width and Height in Settings."
+PANE_MINIMUM_HINT :: "Change \"Minimum pane width\" and \"Minimum pane height\" in Settings."
 
 // Whether every pane in `rects` keeps the minimum pane size, measured with the header each pane is drawn
 // with, as pane fitting measures it. A pane no smaller than it was in `before` keeps what it had.

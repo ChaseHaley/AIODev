@@ -16,11 +16,11 @@ Workspace_Row_Menu_Item :: struct {
 
 @(rodata)
 WORKSPACE_ROW_MENU := [?]Workspace_Row_Menu_Item {
-	{.Rename, "Rename"},
-	{.Icon, "Change Icon"},
-	{.Open_Window, "Open in New Window"},
-	{.Move_Up, "Move Up"},
-	{.Move_Down, "Move Down"},
+	{.Rename, "Rename…"},
+	{.Icon, "Change icon…"},
+	{.Open_Window, "Open in new window"},
+	{.Move_Up, "Move up"},
+	{.Move_Down, "Move down"},
 	{.Delete, "Delete…"},
 }
 
@@ -49,8 +49,8 @@ workspace_row_window_enabled :: proc(app: ^App, w: ^Window, id: u32) -> bool {
 
 workspace_row_window_title :: proc(app: ^App, id: u32) -> string {
 	target := workspace_row_target(app, id)
-	if target != nil && window_for_workspace(app, target) != nil {return "Show Existing Window"}
-	return "Open in New Window"
+	if target != nil && window_for_workspace(app, target) != nil {return "Show existing window"}
+	return "Open in new window"
 }
 
 @(require_results)

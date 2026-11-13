@@ -244,19 +244,19 @@ workspace_button_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 
 @(private)
 workspace_status :: proc(app: ^App, workspace: ^Workspace) -> string {
-	done, blocked := false, false
+	exited, failed := false, false
 	walk := workspace_session_panes(app, workspace)
 	for pane, ok := workspace_pane_next(&walk); ok; pane, ok = workspace_pane_next(&walk) {
 		entry := pane.session
 		if entry == nil {continue}
-		done ||= entry.status == .Exited
-		blocked ||= entry.status == .Failed
+		exited ||= entry.status == .Exited
+		failed ||= entry.status == .Failed
 	}
-	if blocked {
-		return "Blocked"
+	if failed {
+		return "Shell failed"
 	}
-	if done {
-		return "Finished"
+	if exited {
+		return "Exited"
 	}
 	return ""
 }
@@ -638,8 +638,8 @@ workspace_picker_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 				if program := status_picker_text(app, workspace); program != "" {
 					detail = detail == "" ? program : fmt.tprintf("%s · %s", detail, program)
 				}
-			case Picker_New_Workspace: label = "Move to New Workspace"
-			case Picker_New_Window: label = "Move to New Window"
+			case Picker_New_Workspace: label = "Move to new workspace"
+			case Picker_New_Window: label = "Move to new window"
 			case Picker_Action: label = action_info[t.action].title
 			}
 			baseline := row.y + (row.height - w.ui_text.line_height) / 2 + w.ui_text.ascent

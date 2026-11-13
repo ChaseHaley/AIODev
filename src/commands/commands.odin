@@ -287,25 +287,25 @@ category :: proc(name: string) -> Category {
 		namespace: string,
 		category:  Category,
 	} {
-		{"app", {"Application", "Application Shortcuts"}},
-		{"terminal", {"Terminal", "Terminal Shortcuts"}},
-		{"pane", {"Panes", "Pane Shortcuts"}},
-		{"tab", {"Tabs", "Tab Shortcuts"}},
-		{"workspace", {"Workspaces", "Workspace Shortcuts"}},
-		{"layout", {"Layouts", "Layout Shortcuts"}},
-		{"window", {"Windows", "Window Shortcuts"}},
-		{"settings", {"Settings", "Settings Shortcuts"}},
-		{"edit", {"Edit", "Edit Shortcuts"}},
-		{"view", {"View", "View Shortcuts"}},
-		{"status", {"Status", "Status Shortcuts"}},
-		{"profile", {"Profiles", "Profile Shortcuts"}},
+		{"app", {"Application", "Application shortcuts"}},
+		{"terminal", {"Terminal", "Terminal shortcuts"}},
+		{"pane", {"Panes", "Pane shortcuts"}},
+		{"tab", {"Tabs", "Tab shortcuts"}},
+		{"workspace", {"Workspaces", "Workspace shortcuts"}},
+		{"layout", {"Layouts", "Layout shortcuts"}},
+		{"window", {"Windows", "Window shortcuts"}},
+		{"settings", {"Settings", "Settings shortcuts"}},
+		{"edit", {"Edit", "Edit shortcuts"}},
+		{"view", {"View", "View shortcuts"}},
+		{"status", {"Activity", "Activity shortcuts"}},
+		{"profile", {"Profiles", "Profile shortcuts"}},
 	}
 	dot := strings.index_byte(name, '.')
 	namespace := dot < 0 ? name : name[:dot]
 	for entry in categories {
 		if entry.namespace == namespace {return entry.category}
 	}
-	return {"Commands", "Other Shortcuts"}
+	return {"Commands", "Other shortcuts"}
 }
 
 @(private)

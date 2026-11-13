@@ -48,7 +48,7 @@ profile_mutate :: proc(
 	defer delete(revision, allocator)
 	if change.kind == .Add || change.kind == .Duplicate {
 		values := Profile {
-			name = "New Profile", command = DEFAULT_PROFILE_COMMAND, directory = DEFAULT_PROFILE_DIRECTORY,
+			name = "New profile", command = DEFAULT_PROFILE_COMMAND, directory = DEFAULT_PROFILE_DIRECTORY,
 		}
 		fields := bit_set[Profile_Field]{.Name, .Command, .Directory}
 		if change.kind != .Add {

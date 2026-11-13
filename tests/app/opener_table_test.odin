@@ -18,7 +18,7 @@ opener_table_adds_edits_moves_and_removes_a_program :: proc(t: ^testing.T) {
 	if !testing.expect(t, ui.editor_select_key(e, "openers.add")) {return}
 	app.editor_outcome(&f.state, w, .Save)
 	testing.expect(t, !e.error)
-	testing.expect(t, profile_file_has(f.path, `opener.program-1.name = "New Program"`))
+	testing.expect(t, profile_file_has(f.path, `opener.program-1.name = "New program"`))
 	testing.expect_value(t, e.opener_expanded, "program-1")
 	testing.expect_value(t, ui.editor_row(e).key, "opener.program-1")
 
@@ -59,7 +59,7 @@ opener_table_adds_edits_moves_and_removes_a_program :: proc(t: ^testing.T) {
 	profile_press(&f, {key = .Delete})
 	removing := app.confirmation_asking(w, app.Opener_Remove)
 	if !testing.expect(t, removing != nil) {return}
-	testing.expect_value(t, app.editor_opener_remove_text(removing^).title, "Delete New Program?")
+	testing.expect_value(t, app.editor_opener_remove_text(removing^).title, "Delete New program?")
 	app.confirmation_finish(&f.state, w, true)
 	testing.expect(t, profile_file_lacks(f.path, "opener.program-1."))
 	testing.expect(t, profile_file_has(f.path, "opener.order = program-2"))

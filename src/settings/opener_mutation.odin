@@ -14,7 +14,7 @@ Opener_Mutation :: struct {
 }
 
 // What Add writes: a working program the owner then edits.
-OPENER_NEW_NAME :: "New Program"
+OPENER_NEW_NAME :: "New program"
 OPENER_NEW_COMMAND :: "notepad.exe %1"
 
 // The resolved programs are those `source` parses to. All returned strings are owned; failures

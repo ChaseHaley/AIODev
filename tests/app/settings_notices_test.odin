@@ -209,5 +209,5 @@ settings_inline_shortcut_warning_outlives_validation :: proc(t: ^testing.T) {
 	}
 	testing.expect(t, !w.editor.error)
 	testing.expect_value(t, w.editor.message,
-		"Saved. input.leader (Ctrl+Shift+T) vs New Tab (tab.new); input.leader wins")
+		"Saved. input.leader (Ctrl+Shift+T) vs New tab (tab.new); input.leader wins")
 }

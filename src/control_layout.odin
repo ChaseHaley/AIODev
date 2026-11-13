@@ -74,7 +74,11 @@ layout_file_read :: proc(app: ^App, path, caller: string) -> (commands.Layout_Fi
 	if info.size > commands.LAYOUT_FILE_SIZE_MAX {
 		return {}, outcome_failure(
 			.Usage,
-			fmt.tprintf("%s: a layout file holds at most %d bytes", path, commands.LAYOUT_FILE_SIZE_MAX),
+			fmt.tprintf(
+				"%s: a layout file holds at most %s",
+				path,
+				size_limit_text(commands.LAYOUT_FILE_SIZE_MAX),
+			),
 		)
 	}
 	data, read_error := os.read_entire_file(path, context.temp_allocator)
@@ -166,7 +170,9 @@ layout_pane_open :: proc(
 	switch err {
 	case .None:
 	case .Minimum:
-		return 0, "the window is too small for this layout; change Minimum Pane Width and Height"
+		return 0,
+			`the window is too small for this layout; change "Minimum pane width" and "Minimum pane height" ` +
+			"in Settings"
 	case .Check, .Layout:
 		return 0, "could not split the pane"
 	case .Session:

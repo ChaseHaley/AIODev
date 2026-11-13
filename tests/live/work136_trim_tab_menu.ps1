@@ -64,7 +64,7 @@ function Choose-Menu([string] $Label) {
     }
     throw "Menu lacks '$Label'"
 }
-$single = @('Rename', 'Duplicate', '-', 'Move Tab to Workspace…', 'Move Tab to New Workspace', 'Close to the Right', 'Close Others', 'Close', '-', 'Tab Settings')
+$single = @('Rename…', 'Duplicate', '-', 'Move tab to workspace…', 'Move tab to new workspace', 'Close to the right', 'Close others', 'Close', '-', 'Tab settings')
 Invoke-Aio launch --fresh
 Start-Transcript -LiteralPath (Join-Path $directory 'journey.log') | Out-Null
 try {
@@ -123,17 +123,17 @@ try {
     Invoke-Aio command tab.new
     Invoke-Aio mouse click (Tab-Center 1) --mods Ctrl --px
     Invoke-Aio mouse click (Tab-Center 1) --button right --px
-    Assert-Menu @('Close Others', 'Close 2 Selected Tabs', '-', 'Tab Settings')
+    Assert-Menu @('Close others', 'Close 2 selected tabs', '-', 'Tab settings')
     Invoke-Aio expect state tab.1.marked=true
     Invoke-Aio expect state tab.2.marked=false
     Invoke-Aio expect state tab.3.marked=true
-    Choose-Menu 'Close Others'
+    Choose-Menu 'Close others'
     Invoke-Aio expect state tabs.count=2
     Invoke-Aio expect state tab.1.marked=true
     Invoke-Aio expect state tab.2.marked=true
     Invoke-Aio key Menu
-    Assert-Menu @('Close Others', 'Close 2 Selected Tabs', '-', 'Tab Settings') @(1)
-    Choose-Menu 'Close 2 Selected Tabs'
+    Assert-Menu @('Close others', 'Close 2 selected tabs', '-', 'Tab settings') @(1)
+    Choose-Menu 'Close 2 selected tabs'
     Invoke-Aio expect state confirm.open=true
     Invoke-Aio key Esc
     Invoke-Aio expect state tabs.count=2
@@ -144,14 +144,14 @@ try {
     Invoke-Aio command tab.select_2
     Invoke-Aio key Shift+F10
     Assert-Menu $single @(6)
-    Choose-Menu 'Close Others'
+    Choose-Menu 'Close others'
     Invoke-Aio expect state confirm.open=true
     Invoke-Aio key Esc
     Invoke-Aio expect state tab.1.marked=false
     Invoke-Aio expect state tab.2.marked=true
     Invoke-Aio expect state tabs.selected=2
     Invoke-Aio key Menu
-    Choose-Menu 'Close Others'
+    Choose-Menu 'Close others'
     Invoke-Aio key Enter
     Invoke-Aio expect state tabs.count=1
     Invoke-Aio command tab.new
@@ -161,14 +161,14 @@ try {
     Invoke-Aio expect state tabs.selected=2
     Invoke-Aio expect state tab.1.marked=false
     Invoke-Aio expect state tab.2.marked=true
-    Choose-Menu 'Close to the Right'
+    Choose-Menu 'Close to the right'
     Invoke-Aio expect state confirm.open=true
     Invoke-Aio key Esc
     Invoke-Aio expect state tabs.selected=2
     Invoke-Aio expect state tab.1.marked=false
     Invoke-Aio expect state tab.2.marked=true
     Invoke-Aio mouse click (Tab-Center 1) --button right --px
-    Choose-Menu 'Close to the Right'
+    Choose-Menu 'Close to the right'
     Invoke-Aio key Enter
     Invoke-Aio expect state tabs.count=1
     Invoke-Aio expect state tab.1.marked=true
@@ -181,7 +181,7 @@ try {
     Invoke-Aio type unrelated
     Invoke-Aio key Menu
     Assert-Menu $single @(2,6)
-    Choose-Menu 'Tab Settings'
+    Choose-Menu 'Tab settings'
     Invoke-Aio expect state settings.key=interface.confirm
     Invoke-Aio expect state settings.filter=
     Invoke-Aio key Menu

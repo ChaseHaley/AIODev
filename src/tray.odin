@@ -17,7 +17,7 @@ tray_init :: proc(app: ^App) {
 	}
 	tray_menu := [?]platform.Tray_Menu_Item {
 		{id = TRAY_OPEN, title = "Open AIODev"},
-		{id = TRAY_QUIT, title = "Quit"},
+		{id = TRAY_QUIT, title = "Quit AIODev"},
 	}
 	if platform.tray_set_menu(&app.platform, tray_menu[:]) != .None {
 		log.error("setting the tray menu failed")
@@ -76,7 +76,7 @@ hide_to_tray :: proc(app: ^App, w: ^Window) {
 	if !app_tray_only(app) {return}
 	if app.settings.window.tray_notification && !app.tray_hint_shown {
 		app.tray_hint_shown = true
-		text := "Your shell keeps running. Click the tray icon to reopen AIODev, or use Quit to exit."
+		text := "Your shell keeps running. Click the tray icon to reopen AIODev, or use \"Quit AIODev\" to exit."
 		if platform.tray_notify(&app.platform, "AIODev is still running", text) != .None {
 			log.error("showing the tray notification failed")
 		}

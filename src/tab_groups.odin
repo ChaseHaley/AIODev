@@ -445,7 +445,7 @@ tab_group_command :: proc(
 			tab_group_color_set(app, w, id, i + 1)
 			return {}
 		}
-		return outcome_failure(.Failed, "no colour of that name")
+		return outcome_failure(.Failed, "no color of that name")
 	case .Fold_Tab_Group:
 		if !tab_group_fold(app, w, id, !group.folded) {
 			return outcome_failure(.Failed, "nothing else is open, so the group stays unfolded")

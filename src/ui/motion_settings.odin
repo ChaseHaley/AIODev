@@ -161,7 +161,7 @@ MOTION_FIELD_KEY := [settings.Motion_Field]string {
 @(private = "file", rodata)
 MOTION_FIELD_DESCRIPTION := [settings.Motion_Field]string {
 	.On       = "Off moves panes at once.",
-	.Duration = "Milliseconds, before Animation Speed divides it.",
+	.Duration = "Milliseconds, before \"Animation speed\" divides it.",
 	.Curve    = "How the motion speeds up and settles.",
 	.Effect   = "How the pane appears or leaves.",
 }
@@ -178,7 +178,7 @@ motion_editor_destroy :: proc(m: ^Motion_Editor_State) {
 motion_preset_label :: proc(name: string) -> string {
 	switch name {
 	case "default":
-		return "AIODev Default"
+		return "AIODev default"
 	case "snappy":
 		return "Snappy"
 	case "fluid":
@@ -251,8 +251,8 @@ editor_motion_load :: proc(p: ^Editor, s: ^settings.Settings) -> runtime.Allocat
 		kind = .Choice, choices = choices, choice_labels = labels, motion_part = .Preset,
 	}, group) or_return
 	editor_add(p, {
-		key = MOTION_SAVE_PRESET_KEY, title = "Save as Preset", kind = .Text, motion_part = .Save_Preset,
-		description = "Name the current motion to keep it in the Preset list.",
+		key = MOTION_SAVE_PRESET_KEY, title = "Save as preset", kind = .Text, motion_part = .Save_Preset,
+		description = "Name the current motion to keep it in the \"Preset\" list.",
 	}, group) or_return
 	for c in settings.Motion_Context {motion_context_rows(p, s, c, group) or_return}
 	for preset in s.motion.presets {
@@ -1020,7 +1020,7 @@ editor_motion_popup_draw :: proc(
 	if curve.spring {slider_draw(list, c.bounce, curve.p[0] / MOTION_BOUNCE_MAXIMUM, theme, s)}
 	if result := text_button_draw(list, text, theme, c.new_bezier, "New Bézier", false, s, pointer);
 	   result != .Ok {return result}
-	return text_button_draw(list, text, theme, c.new_spring, "New Spring", false, s, pointer)
+	return text_button_draw(list, text, theme, c.new_spring, "New spring", false, s, pointer)
 }
 
 // The shown curve's name: a field while naming, else its name, with Delete for the file's own curves.

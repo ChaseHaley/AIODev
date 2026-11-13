@@ -311,8 +311,8 @@ the_group_menu_and_the_tab_menu_offer_folding_colours_and_groups_to_join :: proc
 	f.workspace.tabs[1].group, f.workspace.tabs[2].group = 1, 1
 
 	app.tab_group_menu_open(&f.state, w, 1, 10, 20)
-	labels := [?]string{"Rename Group…", "Color", "", "Fold", "New Tab in Group", "Move Group to Workspace…", "",
-		"Ungroup", "Close Group"}
+	labels := [?]string{"Rename group…", "Color", "", "Fold", "New tab in group", "Move group to workspace…", "",
+		"Ungroup", "Close group"}
 	if !testing.expect_value(t, len(w.tab_menu.items), len(labels)) {return}
 	for label, i in labels {testing.expect_value(t, w.tab_menu.items[i].label, label)}
 	testing.expect_value(t, app.tab_menu_target(w), 1)
@@ -332,14 +332,14 @@ the_group_menu_and_the_tab_menu_offer_folding_colours_and_groups_to_join :: proc
 	testing.expect(t, app.tab_group_find(&f.workspace, 1).folded)
 	testing.expect_value(t, f.workspace.selected, 0)
 
-	// The tab menu's Add to Group lists New Group, then the groups the tab is not in.
+	// The tab menu's "Add to group" lists "New group", then the groups the tab is not in.
 	app.tab_menu_open(&f.state, w, 0, 10, 20)
 	ui.menu_select(&w.tab_menu.menu, 3)
 	app.tab_menu_choose(&f.state, w)
 	if !testing.expect(t, app.tab_submenu_shown(w)) {return}
 	sub := w.tab_menu.submenu.items
 	if !testing.expect_value(t, len(sub), 3) {return}
-	testing.expect(t, sub[0].label == "New Group" && sub[1].separator && sub[2].label == "Unnamed group")
+	testing.expect(t, sub[0].label == "New group" && sub[1].separator && sub[2].label == "Unnamed group")
 	menu_key(&f, {key = .Arrow_Down})
 	menu_key(&f, {key = .Enter})
 	testing.expect_value(t, ids_of(&f.workspace), [8]u32{2, 3, 1, 0, 0, 0, 0, 0})

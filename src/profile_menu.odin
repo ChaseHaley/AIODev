@@ -164,7 +164,7 @@ profile_menu_open :: proc(app: ^App, w: ^Window, mode: Profile_Menu_Mode, x, y: 
 		profile_menu_push(
 			menu,
 			{
-				label = "Command Palette",
+				label = "Command palette",
 				shortcut = profile_menu_shortcut(app, menu, PROFILE_MENU_SHORTCUTS - 1, .Command_Palette),
 				enabled = true,
 			},

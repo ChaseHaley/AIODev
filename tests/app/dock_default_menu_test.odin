@@ -40,7 +40,7 @@ dock_menu_saves_current_sizes_in_setting_units_and_cancel_preserves_file :: proc
 			testing.expect(t, shown)
 			testing.expect_value(t, divider.edge, edge)
 			testing.expect_value(t, len(w.divider_menu.items), 1)
-			testing.expect_value(t, w.divider_menu.items[0].label, "Set as Default Size")
+			testing.expect_value(t, w.divider_menu.items[0].label, "Set as default size")
 			testing.expect_value(t, divider_count(w), 0)
 			app.handle_event(s, input.Key_Event{window = w.id, key = .Escape, pressed = true})
 			testing.expect(t, w.overlay == nil)

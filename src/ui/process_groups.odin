@@ -402,7 +402,7 @@ editor_process_draw :: proc(
 	baseline := r.y + (r.height - text.line_height) / 2 + text.ascent
 	buffer: [128]u8
 	if row.process_field == .Fallback {
-		return draw_text(text, list, fmt.bprintf(buffer[:], "Other programs use Content Padding · %d DIP.",
+		return draw_text(text, list, fmt.bprintf(buffer[:], "Other programs use \"Content padding\" · %d DIP.",
 			p.process_fallback), r.x + 12 * s, baseline, theme.muted, max(1, r.width - 24 * s))
 	}
 	if row.process_field == .Group {

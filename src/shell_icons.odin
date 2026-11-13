@@ -59,14 +59,14 @@ shell_icon_load :: proc(app: ^App, profile: ^settings.Profile) {
 	case .None:
 	case .Refused:
 		notify(app, .Error, fmt.tprintf(
-			"The %s profile's Icon needs a readable PNG no larger than %d × %d. " +
+			"The %s profile's \"Icon\" needs a readable PNG no larger than %d × %d. " +
 			"Using the shell default.",
 			profile.name, ICON_PNG_MAX_SIDE, ICON_PNG_MAX_SIDE,
 		))
 		return
 	case .Undecodable:
 		notify(app, .Error, fmt.tprintf(
-			"Could not decode the %s profile's Icon as an 8-bit PNG. Using the shell default.",
+			"Could not decode the %s profile's \"Icon\" as an 8-bit PNG. Using the shell default.",
 			profile.name,
 		))
 		return

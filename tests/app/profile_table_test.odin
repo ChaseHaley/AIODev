@@ -60,7 +60,7 @@ profile_add_and_remove_preserve_settings_scroll :: proc(t: ^testing.T) {
 	app.editor_outcome(&f.state, f.state.windows[0], .Profile_Action)
 	removing := app.confirmation_asking(f.state.windows[0], app.Profile_Remove)
 	if !testing.expect(t, removing != nil) {return}
-	testing.expect_value(t, app.editor_profile_remove_text(removing^).title, "Delete New Profile?")
+	testing.expect_value(t, app.editor_profile_remove_text(removing^).title, "Delete New profile?")
 	e.scroll = scroll
 	app.confirmation_finish(&f.state, f.state.windows[0], true)
 	testing.expect_value(t, e.scroll, scroll)

@@ -29,7 +29,7 @@ palette_keybindings_capture_clipboard_chords_reject_conflicts_and_apply_without_
 	s := &f.state
 	w := s.windows[0]
 	app.palette_open_mode(s, w, .Commands)
-	ui.palette_text(&s.palette, &s.registry, "Split Right")
+	ui.palette_text(&s.palette, &s.registry, "Split right")
 	if !testing.expect_value(t, ui.palette_result_name(&s.palette, s.palette.results[0]), "pane.split_right") {return}
 	before, read_error := os.read_entire_file(f.path, context.temp_allocator)
 	if !testing.expect_value(t, read_error, nil) {return}

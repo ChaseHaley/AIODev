@@ -54,7 +54,7 @@ try {
     }
     Configure 'input.leader = Ctrl+Shift+A'
     $first = Read-State
-    Assert-True ($first['notice.settings'] -like 'warning: *only one is active*Review Leader Key*') 'leader overlap is an actionable warning'
+    Assert-True ($first['notice.settings'] -like 'warning: *only one is active*Review *Leader key*') 'leader overlap is an actionable warning'
     Assert-True ($first['notice.settings'] -notlike '*settings.ini:*') 'toast omits technical source locations'
     $log = (Read-Log $first['app.log'])
     Assert-True ($log -like '*input.leader*Select All*edit.select_all*input.leader wins*defaults*') 'full source-order conflict details remain in the log'

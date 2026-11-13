@@ -16,7 +16,7 @@ build_info_registry_dispatch_refreshes_one_owned_notice_without_a_session :: pro
 	if !testing.expect_value(t, app.register_actions(&state.registry), commands.Error.None) {return}
 	command := commands.find(&state.registry, "app.build_info")
 	if !testing.expect(t, command != nil) {return}
-	testing.expect_value(t, command.title, "Show Build Info")
+	testing.expect_value(t, command.title, "Show build info")
 	w := app.Window{}
 	app.run_action(&state, &w, app.Action(command.id))
 	if !testing.expect_value(t, len(state.notices.items), 1) {return}

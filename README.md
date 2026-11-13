@@ -59,7 +59,7 @@ powershell -ExecutionPolicy Bypass -File "$env:LOCALAPPDATA\Programs\AIODev\unin
 It removes the installed files, the PATH entry, the Start menu shortcut and AIODev's notification
 registration. It keeps your settings, layouts and logs, and says where they are.
 
-Reload Settings refreshes open settings pages while keeping pending fields whose rows still exist.
+"Reload settings" refreshes open settings pages while keeping pending fields whose rows still exist.
 A save refuses to overwrite an external file edit; reload before saving that draft again. Delete Theme
 asks for a second press on the same theme; navigation, Escape, a settings revision or closing Settings
 ends that prompt.

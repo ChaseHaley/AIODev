@@ -128,7 +128,7 @@ try {
     $state = Read-State
     Assert-Value $state['palette.assign'] 'Ctrl+Shift+G' 'Unassigned asks for a command'
     Assert-Value $state['palette.mode'] 'commands' 'the command list is shown'
-    Invoke-Aio type 'Split Right' | Out-Null
+    Invoke-Aio type 'Split right' | Out-Null
     Invoke-Aio key Enter | Out-Null
     Assert-Value (Read-State)['palette.edit'] 'Shortcut' 'the shortcut editor opens with the chord'
     Invoke-Aio key Enter | Out-Null

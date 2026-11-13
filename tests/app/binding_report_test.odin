@@ -44,16 +44,16 @@ binding_report_keeps_duplicate_winner_origins_and_text :: proc(t: ^testing.T) {
 	testing.expect_value(t, issue.key, "keys.edit.select_all")
 	testing.expect_value(t, issue.apply_error, commands.Error.Duplicate_Shortcut)
 	testing.expect_value(t, issue.conflict.loser.name, "edit.select_all")
-	testing.expect_value(t, issue.conflict.loser.title, "Select All")
+	testing.expect_value(t, issue.conflict.loser.title, "Select all")
 	testing.expect_value(t, issue.conflict.loser.line, 1)
 	testing.expect_value(t, issue.conflict.winner.name, "tab.new")
-	testing.expect_value(t, issue.conflict.winner.title, "New Tab")
+	testing.expect_value(t, issue.conflict.winner.title, "New tab")
 	testing.expect_value(t, issue.conflict.winner.line, 0)
 	testing.expect_value(t, issue.conflict.shortcut.key, input.Key.T)
 	testing.expect_value(t, issue.conflict.shortcut.modifiers, input.Modifiers{.Control, .Shift})
 	testing.expect_value(t, app.binding_issue_text(issue, "C:/data/settings.ini"),
-		"shortcut \"Ctrl+Shift+T\" for Select All (edit.select_all at settings.ini:1) " +
-		"already used by New Tab (tab.new at defaults)")
+		"shortcut \"Ctrl+Shift+T\" for Select all (edit.select_all at settings.ini:1) " +
+		"already used by New tab (tab.new at defaults)")
 	select_all := commands.find(&registry, "edit.select_all")
 	testing.expect_value(t, len(commands.active_shortcuts(select_all)), 1)
 	testing.expect_value(t, commands.active_shortcuts(select_all)[0].key, input.Key.A)
@@ -75,15 +75,15 @@ binding_report_keeps_default_origin_for_a_rejected_override :: proc(t: ^testing.
 	testing.expect_value(t, duplicate.conflict.winner.name, "app.command_palette")
 	testing.expect_value(t, duplicate.conflict.winner.line, 0)
 	testing.expect_value(t, app.binding_issue_text(duplicate, "settings.ini"),
-		"shortcut \"Ctrl+Shift+P\" for New Tab (tab.new at settings.ini:2) " +
-		"already used by Show Command Palette (app.command_palette at defaults)")
+		"shortcut \"Ctrl+Shift+P\" for New tab (tab.new at settings.ini:2) " +
+		"already used by Show command palette (app.command_palette at defaults)")
 	leader := report.issues[1]
 	testing.expect_value(t, leader.kind, app.Binding_Issue_Kind.Leader_Prefix)
 	testing.expect_value(t, leader.conflict.loser.name, "tab.new")
 	testing.expect_value(t, leader.conflict.loser.line, 0)
 	testing.expect_value(t, leader.conflict.winner.name, "input.leader")
 	testing.expect_value(t, app.binding_issue_text(leader, "settings.ini"),
-		"input.leader (Ctrl+Shift+T) vs New Tab (tab.new); " +
+		"input.leader (Ctrl+Shift+T) vs New tab (tab.new); " +
 		"input.leader wins [settings.ini:1; defaults]")
 	testing.expect(t, report.leader != nil)
 }
@@ -102,7 +102,7 @@ binding_report_keeps_leader_prefix_winner_origins_and_text :: proc(t: ^testing.T
 	testing.expect_value(t, issue.line, 1)
 	testing.expect_value(t, issue.key, "input.leader")
 	testing.expect_value(t, issue.conflict.loser.name, "tab.new")
-	testing.expect_value(t, issue.conflict.loser.title, "New Tab")
+	testing.expect_value(t, issue.conflict.loser.title, "New tab")
 	testing.expect_value(t, issue.conflict.loser.line, 0)
 	testing.expect_value(t, issue.conflict.winner.name, "input.leader")
 	testing.expect_value(t, issue.conflict.winner.line, 1)
@@ -110,7 +110,7 @@ binding_report_keeps_leader_prefix_winner_origins_and_text :: proc(t: ^testing.T
 	testing.expect_value(t, issue.conflict.shortcut.key, input.Key.T)
 	testing.expect_value(t, issue.conflict.shortcut.modifiers, input.Modifiers{.Control, .Shift})
 	testing.expect_value(t, app.binding_issue_text(issue, "settings.ini"),
-		"input.leader (Ctrl+Shift+T) vs New Tab (tab.new); " +
+		"input.leader (Ctrl+Shift+T) vs New tab (tab.new); " +
 		"input.leader wins [settings.ini:1; defaults]")
 	leader, enabled := report.leader.?
 	testing.expect(t, enabled)
@@ -135,7 +135,7 @@ binding_report_declines_leader_when_a_later_binding_owns_its_prefix :: proc(t: ^
 	testing.expect_value(t, issue.conflict.winner.name, "tab.new")
 	testing.expect_value(t, issue.conflict.winner.line, 2)
 	testing.expect_value(t, app.binding_issue_text(issue, "settings.ini"),
-		"input.leader (Ctrl+B) vs New Tab (tab.new); " +
+		"input.leader (Ctrl+B) vs New tab (tab.new); " +
 		"tab.new wins [settings.ini:1; settings.ini:2]")
 	testing.expect(t, report.leader == nil)
 	new_tab := commands.find(&registry, "tab.new")
@@ -186,5 +186,5 @@ settings_inline_duplicate_names_the_winner_without_reading_prose :: proc(t: ^tes
 	app.editor_outcome(s, w, .Save)
 	testing.expect(t, w.editor.error)
 	testing.expect_value(t, w.editor.message,
-		"Assigned to Show Command Palette. Choose another shortcut.")
+		"Assigned to \"Show command palette\". Choose another shortcut.")
 }

@@ -17,7 +17,7 @@ function State {
 function Check([bool]$Condition,[string]$Label){if(!$Condition){throw $Label};"PASS $Label"}
 function Show-Info {
     Aio command app.command_palette | Out-Null
-    Aio type 'Show Build Info' | Out-Null
+    Aio type 'Show build info' | Out-Null
     Aio expect state palette.items=1
     Aio expect state palette.item=app.build_info
     Aio key Enter | Out-Null

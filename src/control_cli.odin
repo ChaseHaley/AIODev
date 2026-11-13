@@ -62,7 +62,12 @@ control_cli_sync :: proc(app: ^App) {
 	if err == .None {server, err = control.create(name, {wake_platform, &app.platform})}
 	if err != .None {
 		log.errorf("starting the command line pipe failed: %v", err)
-		notify(app, .Error, "Could not start command line control. Check the log, then turn it off and on.")
+		notify(
+			app,
+			.Error,
+			`Could not start command line control. Check the log, then turn "Command line control" off and ` +
+			"on in Settings.",
+		)
 		app.cli = Cli_Pipe_Failed{}
 		return
 	}

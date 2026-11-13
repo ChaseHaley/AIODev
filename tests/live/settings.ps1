@@ -125,7 +125,7 @@ try {
     Assert-Value ([IO.File]::ReadAllText($path)) $external 'external edit preserved'
 
     Open-Field cursor.blink -NoFocus
-    Assert-Value (Read-State)['settings.title'].Trim('"') 'Cursor Blink' 'friendly setting name'
+    Assert-Value (Read-State)['settings.title'].Trim('"') 'Cursor blink' 'friendly setting name'
     Invoke-Aio key Enter
     Assert-Value (Read-State)['settings.error'] 'false' 'boolean saved despite unrelated unknown key'
     Assert-Value (Read-State)['settings.value'] 'true' 'Enter flips an inline toggle'

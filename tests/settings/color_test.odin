@@ -45,7 +45,7 @@ every_setting_has_a_friendly_title_and_group :: proc(t: ^testing.T) {
 			"%s needs a readable title", entry.key)
 		testing.expectf(t, settings.group_title(entry.key) != "Other", "%s needs a group", entry.key)
 	}
-	testing.expect_value(t, settings.schema_find("pane.gap").title, "Pane Gap")
+	testing.expect_value(t, settings.schema_find("pane.gap").title, "Pane gap")
 	testing.expect_value(t, settings.group_title("pane.gap"), "Panes")
 }
 

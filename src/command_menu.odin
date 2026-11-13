@@ -117,16 +117,16 @@ COMMAND_CHOICES := [Command_Choice]struct {
 	label: string,
 	glyph: ui.Icon,
 } {
-	.Split_Right     = {"Run in Right Split", .Split_Right},
-	.Split_Down      = {"Run in Down Split", .Split_Down},
-	.Float           = {"Run in Float", .Float_Pane},
-	.Tab             = {"Run in New Tab", .Layout_Top},
-	.Linked_Window   = {"Run in Linked Window", .Window_Out},
-	.Type            = {"Type into This Pane", .Command},
+	.Split_Right     = {"Run in right split", .Split_Right},
+	.Split_Down      = {"Run in down split", .Split_Down},
+	.Float           = {"Run in float", .Float_Pane},
+	.Tab             = {"Run in new tab", .Layout_Top},
+	.Linked_Window   = {"Run in linked window", .Window_Out},
+	.Type            = {"Type into this pane", .Command},
 	.Edit            = {"Edit…", .Document},
-	.Move_Folder     = {"Move to This Folder", .Folder},
+	.Move_Folder     = {"Move to this folder", .Folder},
 	.Move_Profile    = {"", .Terminal},
-	.Move_Everywhere = {"Move to Everywhere", .Globe},
+	.Move_Everywhere = {"Move to everywhere", .Globe},
 	.Remove          = {"Remove", .Close},
 }
 
@@ -340,7 +340,7 @@ command_level_detail :: proc(pane: Command_Pane, level: settings.Saved_Command_L
 @(private = "file")
 command_level_label :: proc(app: ^App, pane: Command_Pane, level: settings.Saved_Command_Level) -> string {
 	switch level {
-	case .Folder: return "This Folder"
+	case .Folder: return "This folder"
 	case .Profile: return command_profile_name(app, pane.profile)
 	case .Everywhere: return "Everywhere"
 	}
@@ -387,13 +387,13 @@ command_menu_build_list :: proc(app: ^App, menu: ^Command_Menu, pane: Command_Pa
 		command_menu_push(menu, {label = query != "" ? "No commands match" : "No saved commands for this pane"})
 	}
 	command_menu_push(menu, {separator = true})
-	save := ui.Menu_Item{label = "Save Command…", glyph = .Add, shortcut = "Ctrl+S", enabled = true}
+	save := ui.Menu_Item{label = "Save command…", glyph = .Add, shortcut = "Ctrl+S", enabled = true}
 	command_menu_push(menu, save, {action = .Save})
 }
 
 @(private = "file")
 command_menu_build_form :: proc(app: ^App, menu: ^Command_Menu, pane: Command_Pane, form: Command_Menu_Form) {
-	command_menu_push(menu, {label = form.edit != "" ? "Edit Command" : "Save a Command"})
+	command_menu_push(menu, {label = form.edit != "" ? "Edit command" : "Save a command"})
 	command_menu_push(menu, {}, {action = .Command_Field})
 	command_menu_push(menu, {}, {action = .Name_Field})
 	if form.invalid {command_menu_push(menu, {label = "Enter a command line.", danger = true})}

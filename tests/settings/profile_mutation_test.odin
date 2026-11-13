@@ -46,7 +46,7 @@ profile_generated_names_remain_editable_after_repeated_add_and_duplicate :: proc
 		{kind = .Duplicate, id = "alpha"}, {kind = .Duplicate, id = "alpha"},
 		{kind = .Duplicate, id = "alpha"},
 	}
-	expected := [?]string{"New Profile", "New Profile 2", "New Profile 3", "Alpha copy", "Alpha copy 2", "Alpha copy 3"}
+	expected := [?]string{"New profile", "New profile 2", "New profile 3", "Alpha copy", "Alpha copy 2", "Alpha copy 3"}
 	for change, index in changes {
 		s := mutation_parse(t, source)
 		defer settings.destroy(&s)
@@ -83,7 +83,7 @@ profile_mutation_add_owns_fields_id_and_eligible_order :: proc(t: ^testing.T) {
 	defer settings.destroy(&after)
 	profile := settings.profile_find(&after.profiles, id)
 	if !testing.expect(t, profile != nil) {return}
-	testing.expect_value(t, profile.name, "New Profile")
+	testing.expect_value(t, profile.name, "New profile")
 	testing.expect_value(t, profile.command, settings.DEFAULT_PROFILE_COMMAND)
 	testing.expect_value(t, profile.directory, settings.DEFAULT_PROFILE_DIRECTORY)
 	testing.expect_value(t, profile.set, bit_set[settings.Profile_Field]{.Name, .Command, .Directory})

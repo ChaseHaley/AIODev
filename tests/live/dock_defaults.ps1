@@ -59,7 +59,7 @@ try {
             $fileBefore = Get-Content -LiteralPath "$data/settings.ini" -Raw
             Aio mouse click "$endX,$endY" --button right --px | Out-Null
             Equal (State)['tab_menu.open'] true "$kind $dpi opens"
-            Equal (State)['tab_menu.row.1.label'] 'Set as Default Size' "$kind $dpi menu"
+            Equal (State)['tab_menu.row.1.label'] 'Set as default size' "$kind $dpi menu"
             Aio key Esc | Out-Null
             Equal (Get-Content -LiteralPath "$data/settings.ini" -Raw) $fileBefore "$kind $dpi cancel"
             Aio mouse click "$endX,$endY" --button right --px | Out-Null

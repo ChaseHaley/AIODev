@@ -49,7 +49,7 @@ function Read-Diagnostics {
 
 function Assert-Conflict([string] $Winner) {
     $notice = (Read-State)['notice.settings']
-    if ($notice -notlike '*warning: *Review Leader Key*') { throw "Not an actionable warning: $notice" }
+    if ($notice -notlike '*warning: *Review *Leader key*') { throw "Not an actionable warning: $notice" }
     $details = Read-Diagnostics
     foreach ($part in @('input.leader', 'tab.new', 'settings.ini:', "$Winner wins")) {
         if ($details -notlike "*$part*") { throw "Missing $part in diagnostic log" }

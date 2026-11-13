@@ -105,6 +105,14 @@ pending_close_workspace_subject_recounts_and_deletes :: proc(t: ^testing.T) {
 	w := state.windows[0]
 	target := w.workspace
 	target_id := target.id
+	// A single tab, pane and session read in the singular.
+	app.workspace_delete_request(state, w, target)
+	single := close_asking(w)
+	if !testing.expect(t, single != nil) { return }
+	text := app.pending_close_text(state, single, true, w.workspace)
+	testing.expect_value(t, text.body, "Close 1 tab (1 pane); stop 1 session.")
+	app.confirmation_finish(state, w, false)
+	testing.expect(t, close_asking(w) == nil)
 	app.pane_split(state, w, .Right)
 	app.tab_new(state, w)
 	app.workspace_delete_request(state, w, target)
@@ -115,7 +123,7 @@ pending_close_workspace_subject_recounts_and_deletes :: proc(t: ^testing.T) {
 	testing.expect_value(t, plan.workspace, target_id)
 	testing.expect_value(t, plan.owner, w.id)
 	testing.expect_value(t, plan.destination, u32(0))
-	text := app.pending_close_text(state, pc, true, w.workspace)
+	text = app.pending_close_text(state, pc, true, w.workspace)
 	testing.expect_value(t, text.body, "Close 2 tabs (3 panes); stop 3 sessions.")
 	testing.expect_value(t, text.label, "Delete")
 	testing.expect_value(t, text.note, "Replace it with a fresh default workspace and shell.")

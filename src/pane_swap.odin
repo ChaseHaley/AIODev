@@ -98,7 +98,7 @@ pane_swap_opt_out :: proc(app: ^App) {
 	value := settings.set_text(settings.CONFIRM_PROMPT_NAMES, transmute(u32)prompts)
 	if settings_save_value(app, "interface.confirm", value, failure) {
 		title := settings.schema_find("interface.confirm").title
-		notify(app, .Info, fmt.tprintf("Won't ask again. Turn it back on with %s in Settings.", title))
+		notify(app, .Info, fmt.tprintf("Won't ask again. Turn it back on with \"%s\" in Settings.", title))
 	}
 }
 

@@ -197,7 +197,7 @@ workspace_icon_picker_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status
 	if render.push_rect(&w.list, apply) != .None { return .Ok }
 	color := workspace_icon_valid(ui.field_string(&p.query)) ? app.theme.text : app.theme.muted
 	apply_baseline := g.apply.y + (g.apply.height - w.ui_text.line_height) / 2 + w.ui_text.ascent
-	label := "Apply Custom Emoji"
+	label := "Apply custom emoji"
 	label_x := g.apply.x + max(inset, (g.apply.width - ui.text_width(&w.ui_text, label)) / 2)
 	return ui.draw_text(&w.ui_text, &w.list, label, label_x, apply_baseline, color,
 		max(0, g.apply.width - 2 * inset))
