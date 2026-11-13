@@ -43,6 +43,10 @@ Pane_View :: struct {
 	header_armed:   ui.Armed(Pane_Header_Target),
 	// The header buttons the window would refuse for this pane, measured at the last relayout.
 	header_refused: [Pane_Header_Button]Pane_Header_Refusal,
+	// Where the header's program status sits: 0 beside the buttons, 1 at the header's right end while
+	// they are hidden; and whether the last draw showed a status, without which it lands at once.
+	header_status:       ui.Motion,
+	header_status_drawn: bool,
 }
 
 Window :: struct {
