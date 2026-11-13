@@ -349,10 +349,10 @@ ACTIONS :: [Action]Command_Descriptor {
 		{param = {family = .Resize, resize = {.Vertical, RESIZE_PIXELS}}},
 	},
 	.Focus_Previous = {
-		"pane.focus_previous", "Focus previous pane", {{.Bracket_Left, {.Control, .Super}}}, .Local, {},
+		"pane.focus_previous", "Previous pane", {{.Bracket_Left, {.Control, .Super}}}, .Local, {},
 	},
 	.Focus_Next = {
-		"pane.focus_next", "Focus next pane", {{.Bracket_Right, {.Control, .Super}}}, .Local, {},
+		"pane.focus_next", "Next pane", {{.Bracket_Right, {.Control, .Super}}}, .Local, {},
 	},
 	.Last_Tab = {"tab.last", "Select last tab", nil, .Host, {}},
 	.Close_Tab = {"tab.close", "Close selected tabs", {{.W, {.Control, .Shift}}}, .Host, {}},
@@ -540,14 +540,14 @@ ACTIONS :: [Action]Command_Descriptor {
 		{{.L, {.Control, .Shift}}}, .Host, {},
 	},
 	.Status_Next = {
-		"status.next", "Go to the next program that needs you", {{.J, {.Control, .Shift}}}, .Host, {},
+		"status.next", "Next program that needs you", {{.J, {.Control, .Shift}}}, .Host, {},
 	},
 	.Focus_Back = {
-		"pane.focus_back", "Go back to the previous pane", {{.Bracket_Left, {.Control, .Shift}}},
+		"pane.focus_back", "Back in pane history", {{.Bracket_Left, {.Control, .Shift}}},
 		.Host, {},
 	},
 	.Focus_Forward = {
-		"pane.focus_forward", "Go forward to the next pane", {{.Bracket_Right, {.Control, .Shift}}},
+		"pane.focus_forward", "Forward in pane history", {{.Bracket_Right, {.Control, .Shift}}},
 		.Host, {},
 	},
 	.Status_Inbox = {
@@ -560,10 +560,10 @@ ACTIONS :: [Action]Command_Descriptor {
 		"status.dismiss_finished", "Dismiss finished Activity items", nil, .Host, {},
 	},
 	.Status_Panel_Next = {
-		"status.panel_next", "Go to the next Activity item", nil, .Host, {},
+		"status.panel_next", "Next Activity item", nil, .Host, {},
 	},
 	.Status_Panel_Previous = {
-		"status.panel_previous", "Go to the previous Activity item", nil, .Host, {},
+		"status.panel_previous", "Previous Activity item", nil, .Host, {},
 	},
 	.Move_Pane_Workspace = {
 		"pane.move_workspace", "Move pane to workspace…", nil, .Refuse, {accepted = {.Workspace}},
