@@ -83,7 +83,7 @@ tab_flip_rail_layout :: proc(w: ^Window) -> (ui.Rail_Layout, bool) {
 	if !w.tabs_horizontal {return rail_layout_query(w)}
 	area := w.flip_rail
 	area.height = max(0, area.height - w.flip_reserve)
-	return ui.rail_layout(area, w.scale, len(w.workspace.tabs), w.rail_scroll), true
+	return ui.rail_layout(area, w.scale, tab_layout(nil, w, false).slots, w.rail_scroll), true
 }
 
 // How far the rows of the rail laid out as `layout` have risen into the title bar, in whole pixels: all
@@ -157,58 +157,112 @@ tab_flip_rail_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 	return rail_body_draw(app, w, layout)
 }
 
-// The strip while the tabs change orientation, in place of window_tab_strip_draw: each tab as far out of
-// the workspace chip as its rail row has gone into the title bar, then New tab with the profile chevron
-// as far as the rail's footer has. Until a piece starts out it waits behind the one before it, and later
-// pieces draw beneath earlier ones, so each comes out from behind the tab before it.
+// One thing passing through the corner: a tab, a group's chip or New tab with the profile chevron. It rests
+// in the strip at `left`, `width` wide, its row starts at `row` in the rail before it rises, and it draws
+// `shift` from where it rests.
+@(private = "file")
+Tab_Flip_Piece :: struct {
+	kind:        Tab_Flip_Piece_Kind,
+	tab:         int,
+	run:         Tab_Run,
+	left, width: f32,
+	row, shift:  f32,
+}
+
+@(private = "file")
+Tab_Flip_Piece_Kind :: enum u8 {
+	Tab,
+	Chip,
+	New_Tab,
+}
+
+// The strip while the tabs change orientation, in place of window_tab_strip_draw: each tab and group chip
+// as far out of the workspace chip as its rail row has gone into the title bar, then New tab with the
+// profile chevron as far as the rail's footer has. Until a piece starts out it waits behind the one before
+// it, and later pieces draw beneath earlier ones, so each comes out from behind the one before it. The
+// tabs' positions belong to whichever orientation w has now, so both ends come from their resting layouts.
 tab_flip_strip_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 	bar := window_tab_bar(app, w)
 	layout, ok := tab_flip_rail_layout(w)
 	if bar.count == 0 || !ok {return .Ok}
 	items := tab_flip_items(layout)
 	rise := tab_flip_rise(w, layout)
-	lefts := make([]f32, bar.count + 1, context.temp_allocator)
-	for i in 0 ..= bar.count {
-		width, y, height := bar.tab_width, items.first + f32(i) * items.row, items.row
-		if i == bar.count {width, y, height = 2 * bar.button_width, items.footer, items.footer_height}
-		gone := tab_flip_gone(items, y, height, rise)
-		lefts[i] = math.round(bar.x + f32(i) * bar.tab_width - width * (1 - gone))
-		if gone <= 0 && i > 0 {lefts[i] = min(lefts[i], lefts[i - 1])}
+	strip, rail := tab_layout(app, w, true), tab_layout(nil, w, false)
+	pieces := make([dynamic]Tab_Flip_Piece, 0, bar.count + len(strip.runs) + 1, context.temp_allocator)
+	run := 0
+	for i in 0 ..< min(bar.count, len(strip.places), len(rail.places)) {
+		x := bar.x + strip.places[i].slot * bar.tab_width + strip.places[i].offset * w.scale
+		row := items.first + rail.places[i].slot * items.row
+		for run < len(strip.runs) && strip.runs[run].carried {run += 1}
+		if run < len(strip.runs) && strip.runs[run].first == i {
+			width := strip.runs[run].width * w.scale
+			chip := Tab_Flip_Piece{kind = .Chip, run = strip.runs[run], left = x - width, width = width}
+			chip.row = row - items.row
+			append(&pieces, chip)
+			run += 1
+		}
+		if !tab_shown(w.workspace, i) {continue}
+		append(&pieces, Tab_Flip_Piece{kind = .Tab, tab = i, left = x, width = bar.tab_width, row = row})
 	}
-	strip := render.Rect{bar.x, 0, max(0, f32(w.width) - bar.x), bar.height}
-	from := render.draw_mark(&w.list)
-	defer render.draw_translate(&w.list, from, {}, strip)
-	new_tab := tab_control(w, Tab_Chrome_New{})
-	hover, press := new_tab.hover.value, new_tab.press.value
-	if result := ui.tab_new_draw(&w.list, app.theme, bar, hover, press, w.scale, w.pointer); result != .Ok {
-		return result
+	new_tab := ui.tab_new_rect(bar)
+	footer := Tab_Flip_Piece{kind = .New_Tab, left = new_tab.x, width = 2 * bar.button_width, row = items.footer}
+	append(&pieces, footer)
+	previous: f32
+	for &piece, i in pieces {
+		height := piece.kind == .New_Tab ? items.footer_height : items.row
+		gone := tab_flip_gone(items, piece.row, height, rise)
+		at := math.round(piece.left - piece.width * (1 - gone))
+		if gone <= 0 && i > 0 {at = min(at, previous)}
+		piece.shift, previous = at - piece.left, at
 	}
-	chevron := tab_chevron_rect(app, w)
-	if render.push_layer(&w.list, chevron) != .None {return .Ok}
-	profiles := tab_control(w, Tab_Chrome_Profiles{})
-	_ = ui.icon_button_draw(
-		&w.list,
-		app.theme,
-		ui.tab_tile_rect(bar, chevron.x, chevron.width, 0, w.scale),
-		.Chevron_Down,
-		profiles.hover.value,
-		profiles.press.value,
-		w.scale,
-		w.pointer,
-		ui.ICON_INDICATOR,
-	)
-	render.draw_translate(&w.list, from, {lefts[bar.count] - ui.tab_new_rect(bar).x, 0}, strip)
-	for i := bar.count - 1; i >= 0; i -= 1 {
-		tile, built := tab_tile(app, w, i)
-		if built != .Ok {return built}
-		position := (lefts[i] - bar.x) / bar.tab_width
-		if result := ui.tab_draw(&w.list, &w.ui_text, app.theme, bar, i, position, tile, 0, 0, w.scale, w.pointer);
-		   result != .Ok {return result}
-		if i != w.workspace.selected {continue}
-		underline := ui.tab_underline_rect(bar, position, 0, w.scale)
-		if render.push_layer(&w.list, {lefts[i], 0, bar.tab_width, bar.height}) != .None {return .Ok}
-		radius := ui.pill_radius(underline)
-		ui.draw_rect(&w.list, {rect = underline, color = app.theme.tab_indicator, radius = radius})
+	clip := render.Rect{bar.x, 0, max(0, f32(w.width) - bar.x), bar.height}
+	for i := len(pieces) - 1; i >= 0; i -= 1 {
+		mark := render.draw_mark(&w.list)
+		result := tab_flip_piece_draw(app, w, bar, pieces[i])
+		render.draw_translate(&w.list, mark, {pieces[i].shift, 0}, clip)
+		if result != .Ok {return result}
 	}
+	return .Ok
+}
+
+// Draws `piece` where it rests in the strip, on the title bar's colour, so pieces behind it stay hidden.
+@(private = "file")
+tab_flip_piece_draw :: proc(
+	app: ^App,
+	w: ^Window,
+	bar: ui.Tab_Bar,
+	piece: Tab_Flip_Piece,
+) -> render.Build_Status {
+	x := piece.left
+	if render.push_layer(&w.list, {x, 0, piece.width, bar.height}) != .None {return .Ok}
+	ui.draw_rect(&w.list, {rect = {x, 0, piece.width, bar.height}, color = app.theme.tab_bar})
+	switch piece.kind {
+	case .Chip:
+		margin := ui.TAB_CHIP_MARGIN * w.scale
+		return tab_chip_draw(app, w, piece.run, {x + margin, 0, max(0, piece.width - 2 * margin), bar.height})
+	case .New_Tab:
+		new_tab := tab_control(w, Tab_Chrome_New{})
+		hover, press := new_tab.hover.value, new_tab.press.value
+		if result := ui.tab_new_draw(&w.list, app.theme, bar, hover, press, w.scale, w.pointer); result != .Ok {
+			return result
+		}
+		chevron := tab_chevron_rect(app, w)
+		if render.push_layer(&w.list, chevron) != .None {return .Ok}
+		profiles := tab_control(w, Tab_Chrome_Profiles{})
+		tile := ui.tab_tile_rect(bar, chevron.x, chevron.width, 0, w.scale)
+		_ = ui.icon_button_draw(&w.list, app.theme, tile, .Chevron_Down, profiles.hover.value,
+			profiles.press.value, w.scale, w.pointer, ui.ICON_INDICATOR)
+		return .Ok
+	case .Tab:
+	}
+	tile, built := tab_tile(app, w, piece.tab)
+	if built != .Ok {return built}
+	if result := ui.tab_draw(&w.list, &w.ui_text, app.theme, bar, x, tile, 0, 0, w.scale, w.pointer);
+	   result != .Ok {return result}
+	if piece.tab != w.workspace.selected {return .Ok}
+	underline := ui.tab_underline_rect(bar, x, 0, w.scale)
+	if render.push_layer(&w.list, {x, 0, bar.tab_width, bar.height}) != .None {return .Ok}
+	radius := ui.pill_radius(underline)
+	ui.draw_rect(&w.list, {rect = underline, color = app.theme.tab_indicator, radius = radius})
 	return .Ok
 }

@@ -295,18 +295,27 @@ rail_row_rect_for_tab :: proc(w: ^Window, tab: int) -> render.Rect {
 
 @(private)
 rail_tab_rect :: proc(w: ^Window, layout: ui.Rail_Layout, index: int) -> render.Rect {
-	if index < 0 || index >= rail_tab_count(w) {return {}}
+	if index < 0 || w.workspace == nil || index >= len(w.workspace.tabs) {return {}}
 	r := ui.rail_row_rect(layout, 0)
-	r.y += tab_position(w, index) * layout.row_height
+	r.y += rail_tab_row(w, index) * layout.row_height
 	return r
 }
 
 @(private)
 rail_tab_close_rect :: proc(w: ^Window, layout: ui.Rail_Layout, index: int) -> render.Rect {
-	if index < 0 || index >= rail_tab_count(w) {return {}}
+	if index < 0 || w.workspace == nil || index >= len(w.workspace.tabs) {return {}}
 	r := ui.rail_close_rect(layout, 0, w.scale)
-	r.y += tab_position(w, index) * layout.row_height
+	r.y += rail_tab_row(w, index) * layout.row_height
 	return r
+}
+
+// The row tab `index` draws at in the rail. While the strip shows, the tabs' positions are the strip's, so a
+// rail still drawing then, as when the tabs pass up into the strip, keeps the tab in its resting row.
+@(private)
+rail_tab_row :: proc(w: ^Window, index: int) -> f32 {
+	if !w.tabs_horizontal {return tab_position(w, index)}
+	places := tab_layout(nil, w, false).places
+	return index < len(places) ? places[index].slot : f32(index)
 }
 
 // The tab whose row is under the point, or -1. Dragged tabs draw above the rest, so they hit first.
@@ -442,6 +451,7 @@ rail_selection_mark_draw :: proc(app: ^App, w: ^Window, layout: ui.Rail_Layout, 
 	selected := w.workspace.selected
 	if selected < 0 || selected >= len(w.workspace.tabs) {return}
 	position := moving ? tab_position(w, selected) : w.tab_underline.value
+	if w.tabs_horizontal {position = rail_tab_row(w, selected)}
 	row := ui.rail_row_rect(layout, 0)
 	row.y += position * layout.row_height
 	mark := ui.navigation_row_mark_rect(row, w.scale)
