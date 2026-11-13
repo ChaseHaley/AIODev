@@ -16,7 +16,7 @@ Window_Motion :: enum u8 {
 	Panes,
 	Workspace_Overview,
 	Pane_Drag,
-	Settings_Profiles,
+	Settings_Page,
 	Pane_Headers,
 	Float_Header,
 	Find,
@@ -44,8 +44,8 @@ window_motion_advance :: proc(app: ^App, w: ^Window, part: Window_Motion, frame:
 	case .Pane_Drag:
 		// It marks the window itself.
 		pane_drag_animate(app, w, app.animations, frame)
-	case .Settings_Profiles:
-		return ui.editor_profiles_animate(&w.editor, app.animations, frame)
+	case .Settings_Page:
+		return ui.editor_animate(&w.editor, app.animations, frame)
 	case .Pane_Headers:
 		return pane_header_controls_animate(app, w, frame)
 	case .Float_Header:
@@ -81,8 +81,8 @@ window_motion_running :: proc(w: ^Window, part: Window_Motion) -> bool {
 		return workspace_overview_animating(w)
 	case .Pane_Drag:
 		return pane_drag_animating(w)
-	case .Settings_Profiles:
-		return ui.editor_profiles_animating(&w.editor)
+	case .Settings_Page:
+		return ui.editor_animating(&w.editor)
 	case .Pane_Headers:
 		return pane_header_controls_animating(w)
 	case .Float_Header:

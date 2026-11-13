@@ -443,6 +443,9 @@ Editor :: struct {
 	search_scope:                                                      int,
 	// Each section's matching rows under the search, whichever section it is narrowed to.
 	section_matches:                                                   [EDITOR_SECTION_LIMIT]int,
+	// The underline's place along the tabs, in tab slots, and whether a tab has one.
+	section_underline:                                                 Motion,
+	underline_shown:                                                   bool,
 	// The page's own scrollbar: its thumb drag and whether the pointer is over its track.
 	page_drag:                                                         Scroll_Drag,
 	page_bar_hover:                                                    bool,
@@ -1895,6 +1898,38 @@ editor_profiles_animating :: proc(p: ^Editor) -> bool {
 	for entry in p.profile_positions {if motion_active(entry.position) {return true}}
 	_, settling := p.order.(Order_Settling)
 	return settling && len(p.profile_positions) > 0
+}
+
+// The tab the section underline rests under: the shown section, the one a search is narrowed to,
+// or none while a search lists every section.
+@(private)
+editor_underlined_section :: proc(p: ^Editor) -> int {
+	if len(p.sections) == 0 {return -1}
+	return filtering(p) ? p.search_scope - 1 : p.section
+}
+
+// Advances everything on the page that moves: reordering rows and the section underline, which
+// slides between tabs as the window's tab underline does. True when the page must draw again.
+editor_animate :: proc(p: ^Editor, enabled: bool, frame: Frame_Time) -> bool {
+	changed := editor_profiles_animate(p, enabled, frame)
+	target := editor_underlined_section(p)
+	if target < 0 {
+		changed ||= p.underline_shown
+		p.underline_shown = false
+		return changed
+	}
+	// An underline that was hidden appears under its tab rather than sliding in from the last one.
+	if !p.underline_shown {
+		p.section_underline = {value = f32(target), target = f32(target)}
+		p.underline_shown = true
+		changed = true
+	}
+	motion_target(&p.section_underline, f32(target), REORDER_DURATION, .Decelerate, enabled)
+	return motion_update(&p.section_underline, frame) || changed
+}
+
+editor_animating :: proc(p: ^Editor) -> bool {
+	return editor_profiles_animating(p) || motion_active(p.section_underline)
 }
 
 @(private)
@@ -4219,6 +4254,17 @@ sections_draw :: proc(
 		rect = {l.sections.x, l.sections.y + l.sections.height - s, l.sections.width, s},
 		color = theme.border,
 	})
+	// One underline slides between tabs; before the page first animates it rests under its tab.
+	if underlined := editor_underlined_section(p); underlined >= 0 {
+		position := p.underline_shown ? p.section_underline.value : f32(underlined)
+		width := editor_section_rect(p, l, 0).width
+		inset := min(CONTROL_INSET * s, width / 2)
+		line_height := min(2 * s, l.sections.height)
+		bottom := l.sections.y + l.sections.height
+		line := render.Rect{l.sections.x + position * width + inset, bottom - line_height,
+			max(0, width - 2 * inset), line_height}
+		draw_rect(list, {rect = line, color = theme.accent, radius = pill_radius(line)})
+	}
 	searching := filtering(p)
 	counts := editor_section_counts(p)
 	label_text := text_styled(text, .Body)
@@ -4230,12 +4276,6 @@ sections_draw :: proc(
 		if i == p.hover_section {
 			hover := render.Rect{tab.x, tab.y + SPACE_1 * s, tab.width, max(0, tab.height - 2 * SPACE_1 * s)}
 			draw_rect(list, {rect = hover, color = theme.hover, radius = RADIUS_CONTROL * s})
-		}
-		if selected {
-			line_height := min(2 * s, tab.height)
-			line := render.Rect{tab.x + inset, tab.y + tab.height - line_height,
-				max(0, tab.width - 2 * inset), line_height}
-			draw_rect(list, {rect = line, color = theme.accent, radius = pill_radius(line)})
 		}
 		room := max(0, tab.width - 2 * inset)
 		if room <= 0 {continue}
