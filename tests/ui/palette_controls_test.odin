@@ -4,6 +4,7 @@ import "aio:commands"
 import "aio:input"
 import "aio:settings"
 import "aio:ui"
+import "core:strconv"
 import "core:testing"
 
 @(private)
@@ -401,4 +402,34 @@ palette_static_choice_popup_keeps_descriptor_labels_and_saved_values :: proc(t: 
 	testing.expect_value(t, outcome, ui.Outcome.Set_Setting)
 	testing.expect_value(t, key, "status.panel_view")
 	testing.expect_value(t, value, "dense")
+}
+
+@(test)
+palette_alt_arrows_step_a_fractional_slider_onto_clean_decimals :: proc(t: ^testing.T) {
+	rows := [?]ui.Palette_Setting {
+		{key = "interface.hover_lift", title = "Hover lift", group = "Interface", control = .Slider,
+			minimum = 0, maximum = 4, step = 0.1},
+	}
+	p: ui.Palette
+	v: Control_Values
+	registry := commands.create()
+	defer commands.destroy(&registry)
+	defer ui.palette_destroy(&p)
+	testing.expect_value(t, ui.palette_init(&p, rows[:]), nil)
+	ui.palette_set_values(&p, {user = &v, value = control_value})
+	control_set(&v, "interface.hover_lift", "0")
+	ui.palette_open_mode(&p, &registry, .Settings)
+	select_setting(&p, "interface.hover_lift")
+
+	// 0.1 + 0.1 + 0.1 drifts to 0.30000000000000004 in binary; each step lands on the decimal.
+	value: string
+	for _ in 0 ..< 3 {
+		outcome, _ := ui.palette_key(&p, &registry, press(.Arrow_Right, {.Alt}))
+		testing.expect_value(t, outcome, ui.Outcome.Set_Setting)
+		_, value = chosen_value(&p)
+		control_set(&v, "interface.hover_lift", value)
+	}
+	testing.expect_value(t, value, "0.3")
+	number, ok := strconv.parse_f64(value)
+	testing.expect(t, ok && number == 0.3, "the saved text parses to the same double as \"0.3\"")
 }
