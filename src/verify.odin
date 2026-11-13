@@ -589,8 +589,10 @@ when AIO_CONTROL {
 		state_value(r, "window.pane_view_floating", filled)
 		if camera, flying := workspace_overview_camera(w); flying {
 			state_valuef(r, "workspace.overview", "%g,%g", camera.scale, camera.card)
+			state_value(r, "workspace.overview_shown", workspace_overview_shown_card(w))
 		} else {
 			state_text(r, "workspace.overview", "none")
+			state_text(r, "workspace.overview_shown", "none")
 		}
 		state_value(r, "window.preparing", w.phase == .Preparing)
 		state_word(r, "pointer.shape", w.pointer_shape)
