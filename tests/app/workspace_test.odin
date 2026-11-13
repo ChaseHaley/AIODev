@@ -133,7 +133,7 @@ workspace_controls_switch_hidden_runtimes_and_activate_owners :: proc(t: ^testin
 	testing.expect_value(t, app.rail_tab_hit(w, layout, row0.x + 10 * w.scale, row0.y + 10 * w.scale), 0)
 	close := ui.rail_close_rect(layout, 1, w.scale)
 	hit := app.rail_tab_interaction_hit(w, close.x + close.width / 2, close.y + close.height / 2, .Left)
-	testing.expect(t, hit.close && hit.target == app.Tab_Chrome_Tab{1})
+	testing.expect(t, hit.close && hit.target == app.Tab_Chrome_Tab{w.workspace.tabs[1].id})
 	app.handle_event(&state, input.Mouse_Button_Event{window = w.id, button = .Left, pressed = true,
 		x = i32(row0.x + 20 * w.scale), y = i32(row0.y + 16 * w.scale)})
 	testing.expect_value(t, original.selected, 0)

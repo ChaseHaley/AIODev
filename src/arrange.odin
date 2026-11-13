@@ -256,7 +256,9 @@ pane_drag_target_move :: proc(
 	over_rail, rail_new_tab := false, false
 	if w.tabs_horizontal {
 		if tab, ok := window_tab_hit(app, w, window_tab_bar(app, w), x, y).(Tab_Chrome_Tab); ok {
-			on_tab, destination = tab.index, w.workspace.tabs[tab.index]
+			if index := tab_index_by_id(w.workspace, tab.id); index >= 0 {
+				on_tab, destination = index, w.workspace.tabs[index]
+			}
 		}
 	} else {
 		rail_tab, new_tab_target, over := rail_pane_target(w, x, y)

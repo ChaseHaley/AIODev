@@ -82,7 +82,8 @@ find_headless_releases_finish_tab_and_divider_gestures :: proc(t: ^testing.T) {
 	close := ui.rail_close_rect(layout_state, workspace.selected, w.scale)
 	app.handle_event(&state, input.Mouse_Button_Event{window = w.id, button = .Left, pressed = true,
 		x = i32(close.x+close.width/2), y = i32(close.y+close.height/2)})
-	if !testing.expect_value(t, ui.armed_target(w.tab_close_armed), workspace.selected) { return }
+	selected := workspace.tabs[workspace.selected].id
+	if !testing.expect_value(t, ui.armed_target(w.tab_close_armed), selected) { return }
 	app.handle_event(&state, input.Mouse_Button_Event{window = w.id, x = x, y = y, button = .Left})
 	testing.expect(t, !ui.armed_down(w.tab_close_armed))
 	testing.expect_value(t, len(workspace.tabs), 2)
