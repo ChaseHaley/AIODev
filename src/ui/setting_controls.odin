@@ -68,12 +68,27 @@ row_step :: proc(row: ^Editor_Row) -> f64 {
 	return row.kind == .Integer ? 1 : 0.1
 }
 
+// The multiple of `step` nearest `value`, as the double its decimal text parses to. A bare
+// round(value / step) * step drifts in binary (3 * 0.1 is 0.30000000000000004), and the shortest
+// round-trip text of that drift is what %g would show and save, so the product is rounded once more
+// to the decimals the step itself has.
+@(private)
+step_round :: proc(step, value: f64) -> f64 {
+	rounded := math.round(value / step) * step
+	scale := 1.0
+	for _ in 0 ..< 9 {
+		if abs(step * scale - math.round(step * scale)) < 0.000000001 {break}
+		scale *= 10
+	}
+	return math.round(rounded * scale) / scale
+}
+
 // A number rounded to `step` as a setting value: whole numbers for whole steps, two decimals for
 // steps finer than a tenth.
 @(private)
 number_text :: proc(step, value: f64) -> string {
-	if step >= 1 {return fmt.tprintf("%d", int(math.round(value / step) * step))}
-	rounded := math.round(value / step) * step
+	rounded := step_round(step, value)
+	if step >= 1 {return fmt.tprintf("%d", int(rounded))}
 	if step < 0.1 {return fmt.tprintf("%.2f", rounded)}
 	return fmt.tprintf("%g", rounded)
 }
