@@ -14,6 +14,7 @@ Window_Motion :: enum u8 {
 	Title_Controls,
 	Rail,
 	Tabs,
+	Activity,
 	Panes,
 	Workspace_Overview,
 	Pane_Drag,
@@ -40,6 +41,8 @@ window_motion_advance :: proc(app: ^App, w: ^Window, part: Window_Motion, frame:
 		return rail_slide_update(w, frame)
 	case .Tabs:
 		return tab_presentation_animate(app, w, frame)
+	case .Activity:
+		return status_panel_mark_animate(app, w, frame)
 	case .Panes:
 		return pane_motion_animate(app, w, frame)
 	case .Workspace_Overview:
@@ -80,6 +83,8 @@ window_motion_running :: proc(w: ^Window, part: Window_Motion) -> bool {
 		return rail_sliding(w)
 	case .Tabs:
 		return tab_presentation_animating(w)
+	case .Activity:
+		return status_panel_mark_animating(w)
 	case .Panes:
 		return pane_motion_animating(w)
 	case .Workspace_Overview:

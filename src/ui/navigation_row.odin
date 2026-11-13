@@ -5,7 +5,7 @@ import "aio:render"
 Navigation_Row :: struct {
 	title: string,
 	selected, marked, hovered, pressed: bool,
-	// The caller draws the selection mark itself, as the tab rail does to slide it between rows.
+	// The caller draws the selection mark itself, as the tab rail and Activity do to slide it between rows.
 	mark_elsewhere: bool,
 	leading, trailing: f32,
 }
