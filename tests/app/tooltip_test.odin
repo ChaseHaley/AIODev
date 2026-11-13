@@ -200,7 +200,7 @@ tooltip_shortcut_follows_the_commands_binding :: proc(t: ^testing.T) {
 	defer commands.destroy(&state.registry)
 	if !testing.expect_value(t, app.register_actions(&state.registry), commands.Error.None) {return}
 	w := app.Window{width = 900, height = 600, scale = 1}
-	r := app.title_action_rect(&w, .Palette)
+	r := app.title_action_rect(&state, &w, .Palette)
 	x, y := r.x + r.width / 2, r.y + r.height / 2
 	app.tooltip_hover(&state, &w, .Title_Action, input.Mouse_Move_Event{x = i32(x), y = i32(y)})
 	testing.expect_value(t, app.tooltip_current(&w), "Everything palette")
@@ -232,7 +232,7 @@ tooltip_draws_its_shortcut_as_a_keycap :: proc(t: ^testing.T) {
 	defer palette_fixture_destroy(t, &f)
 	if !palette_fixture_create(t, &f, "tooltip-keycap", second_window = false) {return}
 	s, w := &f.state, f.state.windows[0]
-	r := app.title_action_rect(w, .Palette)
+	r := app.title_action_rect(s, w, .Palette)
 	x, y := r.x + r.width / 2, r.y + r.height / 2
 	w.pointer = {x, y}
 	app.tooltip_hover(s, w, .Title_Action, input.Mouse_Move_Event{x = i32(x), y = i32(y)})
