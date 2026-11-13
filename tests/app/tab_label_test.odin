@@ -106,7 +106,7 @@ tab_label_turns_the_way_focus_moves :: proc(t: ^testing.T) {
 			testing.expect_value(t, tile.turn.title, old_title)
 			testing.expect_value(t, tile.title, fmt.tprintf("pane %d", focused(w).id))
 			testing.expect_value(t, tile.turn.toward, step.toward)
-			testing.expect(t, abs(ui.tab_turn_width(tile.turn.progress) - math.cos(f32(math.PI) / 4)) < 0.02)
+			testing.expect(t, abs(tile.turn.progress - 0.25) < 0.01)
 			leaving, entering := ui.tab_turn_offsets(tile.turn, {100, 30})
 			testing.expect(t, leaving.x * step.toward.x + leaving.y * step.toward.y < 0)
 			testing.expect(t, entering.x * step.toward.x + entering.y * step.toward.y > 0)
@@ -168,7 +168,9 @@ tab_label_retargets_from_what_it_draws :: proc(t: ^testing.T) {
 		testing.expect_value(t, label.from, c.keeps ? lower : upper)
 		testing.expect_value(t, label.toward, c.toward)
 		testing.expect(t, abs(label.turn.value - (c.keeps ? p : 1 - p)) < 0.001)
-		testing.expect(t, abs(ui.tab_turn_width(label.turn.value) - ui.tab_turn_width(p)) < 0.001)
+		// The sphere goes on from the angle it had: the mark nearest the front keeps its depth.
+		depth :: proc(progress: f32) -> f32 {return abs(math.cos(math.PI * progress))}
+		testing.expect(t, abs(depth(label.turn.value) - depth(p)) < 0.001)
 		after, after_built := app.tab_tile(s, w, 0)
 		testing.expect_value(t, after_built, render.Build_Status.Ok)
 		if !testing.expect(t, after.turn.turning) {continue}

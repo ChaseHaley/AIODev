@@ -94,9 +94,10 @@ Tab_Tile :: struct {
 	turn:         Tab_Turn,
 }
 
-// A tab's label turning to the pane focus moved to (WORK-483): its marks swivel about the badge column's
-// vertical axis, the old face turning away edge on and the new one turning in, while the old title slides out
-// of its box and the new one slides in from the side `toward` points to.
+// A tab's label turning to the pane focus moved to (WORK-483): its marks ride a small sphere that spins along
+// the move, the front mark going round toward `toward` and back while the mark behind comes round from the
+// other side to the front, and the old title slides out of its line while the new one slides in from the
+// side `toward` points to.
 Tab_Turn :: struct {
 	turning:  bool,
 	// The label turned away from: its title and marks, drawn as the tile's own are.
@@ -105,35 +106,145 @@ Tab_Turn :: struct {
 	behind:   Tab_Badge,
 	// Eased from 0 to 1, so it may overshoot.
 	progress: f32,
-	// A unit step along x or y, the side the new title enters from; the old one leaves the other way.
+	// A unit step along x or y: the side the pane focus moved to lies on, which the new title enters from
+	// and the front mark spins toward.
 	toward:   [2]f32,
-	// Where the old title starts, in title boxes from its place: away from zero when a turn took over from
+	// Where the old title starts, in title lines from its place: away from zero when a turn took over from
 	// another part way through.
 	start:    [2]f32,
 }
 
-// How bright a mark seen edge on is, against 1 facing: the turned card catches less light.
-TAB_TURN_SHADE :: f32(0.45)
-// The fade at each end of the title's box while titles slide across it, in DIPs.
-TAB_TURN_FADE :: f32(12)
+// The sphere the marks ride, as how far a mark swings out along the move halfway round, in DIPs.
+TAB_SPIN_RADIUS :: f32(6)
+// How much smaller and dimmer a mark is on the far side of the sphere, against its resting self.
+TAB_SPIN_SHRINK :: f32(0.35)
+TAB_SPIN_DIM :: f32(0.6)
+// How far beyond the badge column the spinning marks may draw, in DIPs, short of the title's gap.
+TAB_SPIN_MARGIN :: f32(3)
 // The room above and below the title's line that sliding titles keep, in DIPs.
 TAB_TURN_LINE_PAD :: f32(2)
 
-// How wide the turning marks draw at `progress`, 1 facing to 0 edge on halfway through.
-tab_turn_width :: proc(progress: f32) -> f32 {
-	return abs(math.cos(math.PI * clamp(progress, 0, 1)))
-}
-
-// Where the old and new titles draw at `turn`'s progress, in pixels from their place, for a title box of
+// Where the old and new titles draw at `turn`'s progress, in pixels from their place, for a title line of
 // `size`.
 tab_turn_offsets :: proc(turn: Tab_Turn, size: [2]f32) -> (leaving, entering: [2]f32) {
 	p := turn.progress
 	return (turn.start * (1 - p) - turn.toward * p) * size, turn.toward * (1 - p) * size
 }
 
+// Where a tab's marks rest in the leading column of `tile`: the front mark and, in a stack, the one behind.
+// A single mark rests at the column's left at full size; its back is where a stack's would be.
+tab_mark_places :: proc(tile: render.Rect, stacked: bool, scale: f32) -> (front, back: render.Rect) {
+	left := tile.x + CONTROL_INSET * scale
+	top := tile.y + (tile.height - ICON_BUTTON * scale) / 2
+	size := TAB_STACK_MARK * scale
+	back = {left, top, size, size}
+	if !stacked {return {left, top, ICON_BUTTON * scale, ICON_BUTTON * scale}, back}
+	return {left + TAB_STACK_OFFSET.x * scale, top + TAB_STACK_OFFSET.y * scale, size, size}, back
+}
+
+// One mark of a turning label: where it rests before and after, how it gets there, and where
+// tab_spin_sample puts it.
+Tab_Spin_Mark :: struct {
+	badge:    Tab_Badge,
+	from, to: render.Rect,
+	// 1 goes from the front round the sphere toward `toward` to the back, -1 comes from the back round the
+	// other side to the front, 0 stays on its side of the sphere.
+	path:     f32,
+	// 1 front or -1 back, for a mark that stays on its side.
+	side:     f32,
+	fade_in:  bool,
+	fade_out: bool,
+	rect:     render.Rect,
+	opacity:  f32,
+	// 1 at the front of the sphere, -1 at the back.
+	depth:    f32,
+}
+
+// The marks of `t`'s turn at its progress, farthest first, so drawing them in order puts the nearest on top.
+// A mark in both stacks travels from its old place to its new one: the front mark round the sphere to the
+// back and the one behind round to the front when they trade places. A mark only in the new stack comes in
+// from the hidden back of the sphere, fading in, and one only in the old stack goes out to it, fading away.
+// Marks that look alike count as the same mark, so marks that do not change keep still.
+tab_spin_marks :: proc(tile: render.Rect, t: Tab_Tile, scale: f32) -> (marks: [4]Tab_Spin_Mark, count: int) {
+	turn := t.turn
+	old_stacked, new_stacked := tab_badge_shown(turn.behind), tab_badge_shown(t.behind)
+	old_front, old_back := tab_mark_places(tile, old_stacked, scale)
+	new_front, new_back := tab_mark_places(tile, new_stacked, scale)
+	front_used, back_used := !tab_badge_shown(turn.badge), !old_stacked
+	add :: proc(marks: ^[4]Tab_Spin_Mark, count: ^int, mark: Tab_Spin_Mark) {
+		marks[count^] = mark
+		count^ += 1
+	}
+	if tab_badge_shown(t.badge) {
+		switch {
+		case !front_used && t.badge == turn.badge:
+			add(&marks, &count, {badge = t.badge, from = old_front, to = new_front, side = 1})
+			front_used = true
+		case !back_used && t.badge == turn.behind:
+			add(&marks, &count, {badge = t.badge, from = old_back, to = new_front, path = -1})
+			back_used = true
+		case:
+			add(&marks, &count, {badge = t.badge, from = old_back, to = new_front, path = -1, fade_in = true})
+		}
+	}
+	if new_stacked {
+		switch {
+		case !back_used && t.behind == turn.behind:
+			add(&marks, &count, {badge = t.behind, from = old_back, to = new_back, side = -1})
+			back_used = true
+		case !front_used && t.behind == turn.badge:
+			add(&marks, &count, {badge = t.behind, from = old_front, to = new_back, path = 1})
+			front_used = true
+		case:
+			add(&marks, &count, {badge = t.behind, from = new_back, to = new_back, side = -1, fade_in = true})
+		}
+	}
+	if !front_used {
+		add(&marks, &count, {badge = turn.badge, from = old_front, to = new_back, path = 1, fade_out = true})
+	}
+	if !back_used {
+		add(&marks, &count, {badge = turn.behind, from = old_back, to = old_back, side = -1, fade_out = true})
+	}
+	for &mark in marks[:count] {tab_spin_sample(&mark, turn, scale)}
+	// Farthest first; at most four, so insertion sort.
+	for i in 1 ..< count {
+		for j := i; j > 0 && marks[j].depth < marks[j - 1].depth; j -= 1 {
+			marks[j], marks[j - 1] = marks[j - 1], marks[j]
+		}
+	}
+	return
+}
+
+// Places `mark` at `turn`'s progress. The sphere has turned half a revolution at the end; a mark on its way
+// round swings out along the move by the sphere's radius halfway, shrinking and dimming toward the far side.
+@(private = "file")
+tab_spin_sample :: proc(mark: ^Tab_Spin_Mark, turn: Tab_Turn, scale: f32) {
+	mix :: proc(a, b, t: f32) -> f32 {return a + (b - a) * t}
+	angle := math.PI * clamp(turn.progress, 0, 1)
+	travel := (1 - math.cos(angle)) / 2
+	swing := math.sin(angle)
+	centre := [2]f32 {
+		mix(mark.from.x + mark.from.width / 2, mark.to.x + mark.to.width / 2, travel),
+		mix(mark.from.y + mark.from.height / 2, mark.to.y + mark.to.height / 2, travel),
+	}
+	size := mix(mark.from.width, mark.to.width, travel)
+	mark.opacity = 1
+	mark.depth = mark.side
+	if mark.path != 0 {
+		mark.depth = mark.path * math.cos(angle)
+		centre += mark.path * TAB_SPIN_RADIUS * scale * swing * turn.toward
+		away := (1 - mark.depth) / 2 * swing
+		size *= 1 - TAB_SPIN_SHRINK * away
+		mark.opacity = 1 - TAB_SPIN_DIM * away
+	}
+	if mark.fade_in {mark.opacity *= travel}
+	if mark.fade_out {mark.opacity *= 1 - travel}
+	mark.rect = {centre.x - size / 2, centre.y - size / 2, size, size}
+}
+
 // Draws the badge in the leading icon column of `tile`, stacked over the mark behind it when the tab
-// has one. While the label turns, the face showing (the old marks for the first half, then the new) is
-// squeezed about its own centre and shaded as it turns edge on.
+// has one. While the label turns, its marks spin round as tab_spin_marks places them, inside the column,
+// the others kept clear of the nearest by the stack's gap as the mark behind is at rest.
 tab_badge_draw :: proc(
 	list: ^render.Draw_List,
 	text: ^Text,
@@ -144,19 +255,69 @@ tab_badge_draw :: proc(
 ) -> render.Build_Status {
 	ink := t.selected ? theme.tab_active_text : theme.tab_text
 	if !t.turn.turning {return tab_marks_draw(list, text, theme, tile, t.badge, t.behind, ink, scale)}
-	old := t.turn.progress < 0.5
-	front, behind := old ? t.turn.badge : t.badge, old ? t.turn.behind : t.behind
-	if !tab_badge_shown(front) {return .Ok}
+	marks, count := tab_spin_marks(tile, t, scale)
+	if count == 0 {return .Ok}
 	current := list.layers[len(list.layers) - 1]
-	mark := render.draw_mark(list)
-	result := tab_marks_draw(list, text, theme, tile, front, behind, ink, scale)
-	if result != .Ok {return result}
-	width := tab_turn_width(t.turn.progress)
-	face := tab_badge_shown(behind) ? TAB_BADGE_COLUMN : ICON_BUTTON
-	render.draw_squeeze(list, mark, tile.x + (CONTROL_INSET + face / 2) * scale, width)
-	fade_draw(list, mark, {opacity = TAB_TURN_SHADE + (1 - TAB_TURN_SHADE) * width})
-	// A stack's clips were squeezed with it; what follows draws in the tab's own again.
-	if len(list.layers) > mark.layers {_ = render.push_layer(list, current.clip, current.radius)}
+	margin := TAB_SPIN_MARGIN * scale
+	left := tile.x + CONTROL_INSET * scale
+	column := render.Rect{left - margin, tile.y, TAB_BADGE_COLUMN * scale + 2 * margin, tile.height}
+	column = rect_within(column, current.clip)
+	// The cut-out shrinks with a fading mark, so a mark coming or going leaves no hole where it is not seen.
+	top := marks[count - 1]
+	gap := TAB_STACK_GAP * scale
+	reach := top.opacity
+	cut := render.Rect {
+		top.rect.x - gap + (top.rect.width + 2 * gap) * (1 - reach) / 2,
+		top.rect.y - gap + (top.rect.height + 2 * gap) * (1 - reach) / 2,
+		(top.rect.width + 2 * gap) * reach,
+		(top.rect.height + 2 * gap) * reach,
+	}
+	right, bottom := column.x + column.width, column.y + column.height
+	beside := [4]render.Rect {
+		{column.x, column.y, cut.x - column.x, column.height},
+		{cut.x + cut.width, column.y, right - cut.x - cut.width, column.height},
+		{cut.x, column.y, cut.width, cut.y - column.y},
+		{cut.x, cut.y + cut.height, cut.width, bottom - cut.y - cut.height},
+	}
+	for mark, i in marks[:count] {
+		if mark.opacity <= 0 {continue}
+		if i == count - 1 || cut.width <= 0 {
+			result := tab_spin_mark_draw(list, text, theme, mark, column, ink, scale)
+			if result != .Ok {return result}
+			continue
+		}
+		for clip in beside {
+			if clip.width <= 0 || clip.height <= 0 {continue}
+			result := tab_spin_mark_draw(list, text, theme, mark, rect_within(clip, column), ink, scale)
+			if result != .Ok {return result}
+		}
+	}
+	_ = render.push_layer(list, current.clip, current.radius)
+	return .Ok
+}
+
+// Draws one spinning mark in `clip`: at the size it comes to rest at, then scaled to its place and faded.
+@(private = "file")
+tab_spin_mark_draw :: proc(
+	list: ^render.Draw_List,
+	text: ^Text,
+	theme: Theme,
+	mark: Tab_Spin_Mark,
+	clip: render.Rect,
+	ink: render.Color,
+	scale: f32,
+) -> render.Build_Status {
+	if render.push_layer(list, clip) != .None {return .Ok}
+	at := render.draw_mark(list)
+	base := mark.to.width
+	r := mark.rect
+	centre := [2]f32{r.x + r.width / 2, r.y + r.height / 2}
+	area := render.Rect{centre.x - base / 2, centre.y - base / 2, base, base}
+	if result := tab_mark_draw(list, text, theme, area, mark.badge, ink, base / scale, scale); result != .Ok {
+		return result
+	}
+	render.draw_scale(list, at, centre, r.width / base)
+	fade_draw(list, at, {opacity = mark.opacity})
 	return .Ok
 }
 
@@ -173,15 +334,8 @@ tab_marks_draw :: proc(
 	ink: render.Color,
 	scale: f32,
 ) -> render.Build_Status {
-	left := tile.x + CONTROL_INSET * scale
-	top := tile.y + (tile.height - ICON_BUTTON * scale) / 2
-	if !tab_badge_shown(behind) {
-		size := ICON_BUTTON * scale
-		return tab_mark_draw(list, text, theme, {left, top, size, size}, badge, ink, ICON_BUTTON, scale)
-	}
-	size := TAB_STACK_MARK * scale
-	back := render.Rect{left, top, size, size}
-	front := render.Rect{left + TAB_STACK_OFFSET.x * scale, top + TAB_STACK_OFFSET.y * scale, size, size}
+	front, back := tab_mark_places(tile, tab_badge_shown(behind), scale)
+	if !tab_badge_shown(behind) {return tab_mark_draw(list, text, theme, front, badge, ink, ICON_BUTTON, scale)}
 	cut_x := front.x - TAB_STACK_GAP * scale
 	cut_y := front.y - TAB_STACK_GAP * scale
 	current := list.layers[len(list.layers) - 1]
@@ -201,10 +355,9 @@ tab_marks_draw :: proc(
 
 // Draws a tab's title in `box`, centred on its height and fading out at its end when it does not fit. While
 // the label turns to another title, the old one slides out of the title's line and the new one slides in,
-// both clipped to the line, fading over a short band at either end on the way. The line spans the longer
-// title and its fade band, at most the box, so sideways the titles travel their own length rather than the
-// whole tab; up or down it is the text's height, which keeps the titles clear of the tab's edges and
-// underline.
+// clipped to the line: sideways across the box's width, up or down a line's height, which keeps the titles
+// clear of the tab's edges and underline. A title fades only where titles fade at rest, toward the box's
+// right end (see tab_title_slid).
 tab_title_draw :: proc(
 	list: ^render.Draw_List,
 	text: ^Text,
@@ -218,52 +371,46 @@ tab_title_draw :: proc(
 		return draw_fading_text(text, list, t.title, box.x, baseline, color, box.width)
 	}
 	pad := TAB_TURN_LINE_PAD * scale
-	longer := max(text_width(text, t.turn.title), text_width(text, t.title))
-	width := min(box.width, longer + TAB_TURN_FADE * scale)
-	line := render.Rect{box.x, baseline - text.ascent - pad, width, text.line_height + 2 * pad}
+	line := render.Rect{box.x, baseline - text.ascent - pad, box.width, text.line_height + 2 * pad}
 	current := list.layers[len(list.layers) - 1]
 	if render.push_layer(list, rect_within(line, current.clip)) != .None {return .Ok}
 	leaving, entering := tab_turn_offsets(t.turn, {line.width, line.height})
-	mark := render.draw_mark(list)
-	if result := draw_fading_text(text, list, t.turn.title, box.x, baseline, color, box.width);
-	   result != .Ok {return result}
-	tab_title_slide(list, mark, line, leaving, scale)
-	mark = render.draw_mark(list)
-	if result := draw_fading_text(text, list, t.title, box.x, baseline, color, box.width); result != .Ok {
+	if result := tab_title_slid(list, text, t.turn.title, box, baseline, color, leaving); result != .Ok {
 		return result
 	}
-	tab_title_slide(list, mark, line, entering, scale)
+	if result := tab_title_slid(list, text, t.title, box, baseline, color, entering); result != .Ok {
+		return result
+	}
 	_ = render.push_layer(list, current.clip, current.radius)
 	return .Ok
 }
 
-// Moves the title glyphs drawn since `mark` by `offset` within `box`, whose ends stay where they fade: a
-// glyph in the box's first half fades toward its left end, one in the second half toward its right end,
-// keeping the fade a title too long for the box already has there. Sliding up or down fades the title as
-// it leaves.
+// Draws `title` moved by `offset` in a `box` that stays put, faded as the box fades titles at rest: a title
+// too long for the box over the box's last fifth, as draw_fading_text does, and a shorter one from its own
+// end or that last fifth, whichever is further right, to the box's end, so where it rests it does not fade.
+// Moved left, it draws on to fill the box.
 @(private = "file")
-tab_title_slide :: proc(
+tab_title_slid :: proc(
 	list: ^render.Draw_List,
-	mark: render.Draw_Mark,
+	text: ^Text,
+	title: string,
 	box: render.Rect,
+	baseline: f32,
+	color: render.Color,
 	offset: [2]f32,
-	scale: f32,
-) {
-	band := min(TAB_TURN_FADE * scale, box.width / 4)
-	right := box.x + box.width
+) -> render.Build_Status {
+	mark := render.draw_mark(list)
+	if result := draw_fading_text(text, list, title, box.x, baseline, color, max(0, box.width - offset.x));
+	   result != .Ok {return result}
+	width := text_width(text, title)
+	fade := width > box.width ? box.width * 0.8 : max(box.width * 0.8, width)
 	for &glyph in list.glyphs[mark.glyphs:] {
 		glyph.rect.x += offset.x
 		glyph.rect.y += offset.y
-		if offset.y != 0 {glyph.color.a *= clamp(1 - abs(offset.y) / max(1, box.height), 0, 1)}
-		if offset.x == 0 {continue}
-		if glyph.rect.x + glyph.rect.width / 2 < box.x + box.width / 2 {
-			glyph.flags |= render.GLYPH_FADE
-			glyph.fade_start, glyph.fade_end = box.x + band, box.x
-		} else if glyph.flags & render.GLYPH_FADE == 0 {
-			glyph.flags |= render.GLYPH_FADE
-			glyph.fade_start, glyph.fade_end = right - band, right
-		}
+		glyph.flags |= render.GLYPH_FADE
+		glyph.fade_start, glyph.fade_end = box.x + fade, box.x + box.width
 	}
+	return .Ok
 }
 
 @(private = "file")
