@@ -34,6 +34,8 @@ Row_Kind :: enum {
 	// The Motion section: a context's header, and the field that opens the curve popover.
 	Motion_Context,
 	Curve,
+	// The theme filmstrip, a row three page lines tall.
+	Theme_Strip,
 }
 
 // What saving an action or theme row asks the page owner to do. Rows are still found, searched and
@@ -125,6 +127,8 @@ Editor_Group :: struct {
 // A shortcut row a search matched carries the matched alternative and parts.
 Editor_Item :: struct {
 	group, row, count: int,
+	// A row taller than one line lists a line per `part`, counting from 0 at its first.
+	part:              int,
 	shortcut:          Shortcut_Highlight,
 }
 
@@ -420,6 +424,7 @@ Editor :: struct {
 	using motions:                                                     Motion_Editor_State,
 	using page:                                                        Page_Revision_State,
 	using themes:                                                      Theme_Page_State,
+	strip:                                                             Theme_Strip,
 	hover_clear:                                                       bool,
 	// The shortcut field's capture, alternatives list and key-positions choice.
 	capture:                                                           Shortcut_Capture,
@@ -492,6 +497,8 @@ Editor_Outcome :: enum {
 	Shortcut_Chain,
 	// The page owner lets the user pick a command for editor_free_chord.
 	Assign_Shortcut,
+	// The page owner shows the Colors section for the applied theme.
+	Theme_Customize,
 }
 
 // A field the user typed into and then left: its row's key and the typed text. Owned.
@@ -509,6 +516,7 @@ Editor_View :: struct {
 	section:           int,
 	order:             Order_Kind,
 	profile_positions: [dynamic]Profile_Position,
+	strip:             Theme_Strip_View,
 }
 
 // Wide pages put the search field and a group outline in a left column; narrow ones have no outline.
@@ -601,6 +609,7 @@ editor_destroy :: proc(p: ^Editor) {
 	if drag, dragging := p.order.(Order_Dragging); dragging {order_block_free(drag.block)}
 	profile_positions_clear(&p.profile_positions)
 	delete(p.profile_positions)
+	theme_strip_destroy(&p.strip)
 	p^ = {}
 }
 
@@ -617,6 +626,7 @@ editor_view_take :: proc(p: ^Editor) -> (view: Editor_View, alloc_error: runtime
 	view.order, _ = order_kind(p)
 	view.profile_positions, p.profile_positions = p.profile_positions, {}
 	if _, settling := p.order.(Order_Settling); settling {order_settle(p, view.order)}
+	theme_strip_view_take(&view.strip, &p.strip) or_return
 	return
 }
 
@@ -625,6 +635,7 @@ editor_view_destroy :: proc(view: ^Editor_View) {
 	delete(view.opener_expanded)
 	profile_positions_clear(&view.profile_positions)
 	delete(view.profile_positions)
+	theme_strip_view_destroy(&view.strip)
 	view^ = {}
 }
 
@@ -643,6 +654,7 @@ editor_view_restore :: proc(p: ^Editor, view: ^Editor_View) {
 	delete(p.profile_positions)
 	p.profile_positions, view.profile_positions = view.profile_positions, {}
 	order_settle(p, view.order)
+	theme_strip_restore(&p.strip, &view.strip)
 	if p.expanded != "" && !editor_has_profile_row(p, p.expanded) {delete(p.expanded); p.expanded = ""}
 	if p.opener_expanded != "" && !editor_has_opener_row(p, p.opener_expanded) {
 		delete(p.opener_expanded)
@@ -1178,6 +1190,7 @@ editor_select :: proc(p: ^Editor, index: int) {
 	}
 	p.jump_group = -1
 	p.selected = clamp(index, 0, max(0, len(p.items) - 1))
+	if p.selected < len(p.items) {p.selected -= p.items[p.selected].part}
 	row := editor_row(p)
 	focus := editor_focus(p)
 	if row == nil || row.kind == .Shortcut || focus == .Positions {focus = .Search}
@@ -1191,8 +1204,9 @@ editor_select :: proc(p: ^Editor, index: int) {
 	}
 	p.profile_control = .Radio
 	if p.selected < p.scroll {p.scroll = p.selected}
-	if p.selected >= p.scroll + max(1, p.visible_rows) {
-		p.scroll = p.selected - max(1, p.visible_rows) + 1
+	// A row taller than a line comes wholly into view when the page has room for it.
+	if end := p.selected + editor_item_span(p, p.selected); end > p.scroll + max(1, p.visible_rows) {
+		p.scroll = min(p.selected, end - max(1, p.visible_rows))
 	}
 }
 
@@ -1413,11 +1427,16 @@ editor_rebuild :: proc(p: ^Editor) {
 		if section >= 0 && section < EDITOR_SECTION_LIMIT {p.section_matches[section] += len(matched)}
 		if len(p.sections) > 0 && shown >= 0 && section != shown {continue}
 		append(&p.items, Editor_Item{group = g, row = -1, count = len(matched)})
-		for i in matched {append(&p.items, Editor_Item{group = g, row = i, shortcut = matches[i]})}
+		for i in matched {
+			append(&p.items, Editor_Item{group = g, row = i, shortcut = matches[i]})
+			for part in 1 ..< row_lines(p.rows[i]) {
+				append(&p.items, Editor_Item{group = g, row = i, part = part})
+			}
+		}
 	}
 	p.selected = 0
 	for item, index in p.items {
-		if item.group == selected.group && item.row == selected.row {p.selected = index}
+		if item.group == selected.group && item.row == selected.row && item.part == 0 {p.selected = index}
 	}
 }
 
@@ -1908,10 +1927,12 @@ editor_underlined_section :: proc(p: ^Editor) -> int {
 	return filtering(p) ? p.search_scope - 1 : p.section
 }
 
-// Advances everything on the page that moves: reordering rows and the section underline, which
-// slides between tabs as the window's tab underline does. True when the page must draw again.
+// Advances everything on the page that moves: reordering rows, the theme strip and the section
+// underline, which slides between tabs as the window's tab underline does. True when the page must
+// draw again.
 editor_animate :: proc(p: ^Editor, enabled: bool, frame: Frame_Time) -> bool {
 	changed := editor_profiles_animate(p, enabled, frame)
+	changed = editor_strip_animate(p, enabled, frame) || changed
 	target := editor_underlined_section(p)
 	if target < 0 {
 		changed ||= p.underline_shown
@@ -1929,7 +1950,7 @@ editor_animate :: proc(p: ^Editor, enabled: bool, frame: Frame_Time) -> bool {
 }
 
 editor_animating :: proc(p: ^Editor) -> bool {
-	return editor_profiles_animating(p) || motion_active(p.section_underline)
+	return editor_profiles_animating(p) || motion_active(p.section_underline) || editor_strip_animating(p)
 }
 
 @(private)
@@ -1944,10 +1965,14 @@ editor_step :: proc(p: ^Editor, delta: int) {
 	if len(p.items) == 0 {return}
 	direction := delta < 0 ? -1 : 1
 	index := clamp(p.selected + delta, 0, len(p.items) - 1)
-	for index >= 0 && index < len(p.items) && p.items[index].row < 0 {index += direction}
+	for index >= 0 && index < len(p.items) && (p.items[index].row < 0 || p.items[index].part > 0) {
+		index += direction
+	}
 	if index < 0 || index >= len(p.items) {
 		index = clamp(p.selected + delta, 0, len(p.items) - 1)
-		for index >= 0 && index < len(p.items) && p.items[index].row < 0 {index -= direction}
+		for index >= 0 && index < len(p.items) && (p.items[index].row < 0 || p.items[index].part > 0) {
+			index -= direction
+		}
 	}
 	if index >= 0 && index < len(p.items) {editor_select(p, index)}
 }
@@ -1980,6 +2005,7 @@ editor_wheel :: proc(p: ^Editor, l: Editor_Layout, x, y: f32, rows: int) {
 		)
 		return
 	}
+	if editor_strip_wheel(p, l, x, y, rows) {return}
 	p.jump_group = -1
 	p.scroll = clamp(p.scroll - rows, 0, max_scroll(p))
 }
@@ -2180,6 +2206,9 @@ activate :: proc(p: ^Editor, row: ^Editor_Row) -> Editor_Outcome {
 	case .Curve:
 		motion_popover_open(p, row)
 	case .Process_Group, .Motion_Context:
+	case .Theme_Strip:
+		editor_mode_set(p, Editor_Editing{})
+		editor_strip_enter(p, false)
 	case .Opener:
 		// The keyboard reaches the line's controls; Delete removes and Enter opens the fields.
 		editor_mode_set(p, Editor_Editing{})
@@ -2199,6 +2228,7 @@ activate :: proc(p: ^Editor, row: ^Editor_Row) -> Editor_Outcome {
 editor_tab :: proc(p: ^Editor, row: ^Editor_Row, back: bool) -> Editor_Outcome {
 	focus := editor_focus(p)
 	if editor_popup(p) != .None {editor_mode_set(p, Editor_Editing{})}
+	if editor_strip_tab(p, row, focus, back) {return .Changed}
 	if row != nil && row.kind == .Shortcut {
 		if focus == .Control && !back {editor_mode_set(p, Editor_Positions{}); return .Changed}
 		if focus == .Positions && back {editor_mode_set(p, Editor_Editing{}); return .Changed}
@@ -2232,6 +2262,9 @@ editor_tab :: proc(p: ^Editor, row: ^Editor_Row, back: bool) -> Editor_Outcome {
 	switch {
 	case next.kind == .Shortcut && back:
 		editor_mode_set(p, Editor_Positions{})
+	case next.kind == .Theme_Strip:
+		editor_mode_set(p, Editor_Editing{})
+		editor_strip_enter(p, back)
 	case next.kind == .Profile:
 		editor_mode_set(p, Editor_Editing{})
 		p.profile_control = .Radio
@@ -2248,7 +2281,7 @@ editor_tab :: proc(p: ^Editor, row: ^Editor_Row, back: bool) -> Editor_Outcome {
 @(private)
 editor_tab_row :: proc(p: ^Editor, from, step: int) -> int {
 	for index := from + step; index >= 0 && index < len(p.items); index += step {
-		if p.items[index].row >= 0 {return index}
+		if p.items[index].row >= 0 && p.items[index].part == 0 {return index}
 	}
 	return -1
 }
@@ -2367,6 +2400,7 @@ editor_key :: proc(p: ^Editor, raw: input.Key_Event) -> Editor_Outcome {
 	if result, handled := editor_process_key(p, row, e); handled {return result}
 	if result, handled := editor_opener_key(p, row, e); handled {return result}
 	if result, handled := editor_motion_key(p, row, e); handled {return result}
+	if result, handled := editor_strip_key(p, row, e); handled {return result}
 	if editor_popup(p) != .None && row != nil {
 		if outcome, handled := popup_key(p, row, e); handled {return outcome}
 	}
@@ -2696,6 +2730,7 @@ editor_fit :: proc(p: ^Editor, l: Editor_Layout) {
 		p.outline_active = active
 	}
 	p.outline_scroll = clamp(p.outline_scroll, 0, max(0, len(entries) - rows))
+	editor_strip_fit(p, l)
 	if row := editor_row(p); row != nil {
 		if editor_popup(p) == .Choice {
 			choice_list_keep_visible(&p.choice_list, editor_choice_count(p, row), choice_popup_rows(p, row, l))
@@ -2815,7 +2850,7 @@ editor_row_parts :: proc(p: ^Editor, l: Editor_Layout, index: int) -> Row_Parts 
 		parts.text_right = parts.swatch.x - SPACE_3 * s
 	case .Shortcut:
 		shortcut_parts(&parts, s, index == p.selected)
-	case .Process_Group, .Motion_Context, .Profile, .Profile_Add, .Opener:
+	case .Process_Group, .Motion_Context, .Profile, .Profile_Add, .Opener, .Theme_Strip:
 		parts.reset = {}
 	}
 	if parts.field.width > 0 && parts.text_right > parts.field.x {parts.text_right = parts.field.x}
@@ -3101,6 +3136,7 @@ editor_press :: proc(
 		editor_blur(p)
 		return .Changed
 	}
+	index -= p.items[index].part
 	if index != p.selected {editor_select(p, index)}
 	// A row is its control's label: pressing it gives the control the keyboard without acting on it.
 	if focus := editor_focus(p); focus == .Search || focus == .Page {editor_mode_set(p, Editor_Editing{})}
@@ -3110,6 +3146,7 @@ editor_press :: proc(
 		if result, handled := editor_process_press(p, row, parts, x, y, s); handled {return result}
 	}
 	if row.kind == .Opener {return editor_opener_press(p, row, parts, index, x, y, s)}
+	if row.kind == .Theme_Strip {return editor_strip_press(p, l, index, x, y)}
 	if row.motion_part != .None {
 		if result, handled := editor_motion_press(p, row, parts, x, y); handled {return result}
 	}
@@ -3388,9 +3425,12 @@ editor_hover :: proc(p: ^Editor, l: Editor_Layout, x, y: f32, text: ^Text = nil)
 	}
 	item, reset, outline := -1, -1, -1
 	profile_item, profile_control := -1, Profile_Control.Radio
+	strip_item := -1
 	if popup_open == .None && !editor_order_dragging(p, .Profiles) && render.rect_contains(l.list, x, y) {
 		index := p.scroll + int((y - l.list.y) / l.row_height)
 		if index < len(p.items) && p.items[index].row >= 0 {
+			index -= p.items[index].part
+			if p.rows[p.items[index].row].kind == .Theme_Strip {strip_item = index}
 			item = index
 			parts := editor_row_parts(p, l, index)
 			if render.rect_contains(parts.reset, x, y) {reset = index}
@@ -3427,6 +3467,7 @@ editor_hover :: proc(p: ^Editor, l: Editor_Layout, x, y: f32, text: ^Text = nil)
 	section := popup_open == .None ? editor_section_at(p, l, x, y) : -1
 	page_bar, page_bar_visible := editor_page_scrollbar(p, l)
 	over_page_bar := popup_open == .None && page_bar_visible && scrollbar_contains(page_bar, x, y)
+	strip_changed := editor_strip_hover(p, l, strip_item, x, y)
 	if item == p.hover_item &&
 	   reset == p.hover_reset &&
 	   outline == p.hover_outline &&
@@ -3436,7 +3477,7 @@ editor_hover :: proc(p: ^Editor, l: Editor_Layout, x, y: f32, text: ^Text = nil)
 	   over_page_bar == p.page_bar_hover &&
 	   profile_item == p.hover_profile_item &&
 	   profile_control == p.hover_profile_control {
-		return bar_changed
+		return bar_changed || strip_changed
 	}
 	p.hover_item, p.hover_reset, p.hover_outline, p.hover_clear = item, reset, outline, clear
 	p.keys_hover = keys
@@ -3457,6 +3498,7 @@ editor_hover_clear :: proc(p: ^Editor) -> (changed: bool) {
 	p.hover_section, p.page_bar_hover = -1, false
 	p.hover_profile_item, p.hover_profile_control = -1, .Radio
 	changed = shortcut_chain_hover(&p.chain, {}) || changed
+	changed = editor_strip_hover_clear(p) || changed
 	return
 }
 
@@ -3521,7 +3563,9 @@ editor_pointer :: proc(p: ^Editor, l: Editor_Layout, x, y: f32, text: ^Text = ni
 	if !render.rect_contains(l.list, x, y) {return .Arrow}
 	index := p.scroll + int((y - l.list.y) / l.row_height)
 	if index >= len(p.items) || p.items[index].row < 0 {return .Arrow}
+	index -= p.items[index].part
 	row := &p.rows[p.items[index].row]
+	if row.kind == .Theme_Strip {return editor_strip_pointer(p, l, index, x, y) ? .Hand : .Arrow}
 	parts := editor_row_parts(p, l, index)
 	if row.process_field == .Group {
 		cells := editor_block_parts(parts.row, s)
@@ -3944,7 +3988,7 @@ control_draw :: proc(
 				return result
 			}
 		}
-	case .Process_Group, .Motion_Context, .Profile, .Profile_Add, .Opener:
+	case .Process_Group, .Motion_Context, .Profile, .Profile_Add, .Opener, .Theme_Strip:
 		return .Ok
 	}
 	if selected {
@@ -4374,8 +4418,22 @@ editor_draw :: proc(
 		)
 	}
 	if render.push_layer(list, l.list) != .None {return .Ok}
-	for index in editor_drawn_lines(p, l) {
+	for line in editor_drawn_lines(p, l) {
+		index := line
 		item := p.items[index]
+		// A row taller than a line draws once: from its first line, or from the top of the list when
+		// that line is scrolled away.
+		if item.part > 0 {
+			if index != p.scroll {continue}
+			index -= item.part
+			item = p.items[index]
+		}
+		if item.row >= 0 && p.rows[item.row].kind == .Theme_Strip {
+			if result := editor_strip_draw(p, l, index, list, text, theme, focused, pointer); result != .Ok {
+				return result
+			}
+			continue
+		}
 		parts := editor_row_parts(p, l, index)
 		r := parts.row
 		selected := index == p.selected

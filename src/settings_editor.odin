@@ -124,7 +124,9 @@ settings_page_build :: proc(app: ^App, source: string, view: ^ui.Editor_View) ->
 		notify(app, .Error, "Could not allocate the link program table.")
 		return
 	}
-	if !settings_add_theme_rows(p, &s) || !settings_page_shortcut_rows(app, p, &s) {
+	if !settings_add_theme_rows(p, &s) ||
+	   !settings_theme_strip_load(p, &s) ||
+	   !settings_page_shortcut_rows(app, p, &s) {
 		notify(app, .Error, "Could not allocate settings editor.")
 		return
 	}
@@ -443,6 +445,9 @@ editor_outcome :: proc(app: ^App, w: ^Window, outcome: ui.Editor_Outcome) {
 	ui.editor_outcome_begin(p, outcome)
 	switch outcome {
 	case .None, .Changed:
+		return
+	case .Theme_Customize:
+		ui.editor_section_show(p, int(Settings_Area.Colors))
 		return
 	case .Reset_All:
 		settings_reset_ask(app, w)
@@ -1161,7 +1166,7 @@ when AIO_CONTROL {
 		}
 		match, free := "", ""
 		rows := 0
-		for item in p.items {if item.row >= 0 {rows += 1}}
+		for item in p.items {if item.row >= 0 && item.part == 0 {rows += 1}}
 		if p.selected >= 0 && p.selected < len(p.items) && p.items[p.selected].row >= 0 {
 			item := p.items[p.selected]
 			labels := commands.shortcut_alternatives(p.rows[item.row].value, context.temp_allocator)
@@ -1182,6 +1187,7 @@ when AIO_CONTROL {
 		state_value(r, "settings.open", ui.editor_loaded(p))
 		state_text(r, "settings.revision", settings_page_revision_word(p))
 		state_value(r, "settings.theme_delete_armed", p.delete_armed)
+		settings_theme_strip_state(r, p, page)
 		state_text(r, "settings.filter", string(p.filter.bytes[:]))
 		if p.section >= 0 && p.section < len(p.sections) {
 			state_text(r, "settings.section", p.sections[p.section])
