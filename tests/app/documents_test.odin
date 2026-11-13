@@ -299,7 +299,7 @@ choose_placement :: proc(
 @(private = "file")
 point_at :: proc(s: ^app.App, w: ^app.Window, parent: ^ui.Menu, row: int) {
 	pass_over(s, w, parent, row)
-	// Resting there: a row shows its submenu after app.LINK_SUBMENU_DELAY.
+	// Resting there: a row shows its submenu after app.SUBMENU_DELAY.
 	app.document_submenu_tick(s, w, time.tick_add(time.tick_now(), time.Second))
 }
 

@@ -397,6 +397,7 @@ Settings :: struct {
 	control:         Control_Settings,
 	profiles:        Profiles,
 	openers:         Openers,
+	saved_commands:  Saved_Commands,
 	allocator:       runtime.Allocator,
 	// The file line of each SCHEMA entry, zero when the file does not set it; read through
 	// setting_line. Sized by a constant because SCHEMA's own length depends on this struct.
@@ -1734,6 +1735,7 @@ defaults :: proc(allocator := context.allocator) -> (Settings, runtime.Allocator
 	s.themes.allocator = allocator
 	profiles_init(&s.profiles, allocator)
 	openers_init(&s.openers, allocator)
+	saved_commands_init(&s.saved_commands, allocator)
 	motion_init(&s.motion, allocator)
 	for entry in SCHEMA {
 		issue, err := assign(&s, entry, entry.default_value)
@@ -1770,6 +1772,7 @@ destroy :: proc(s: ^Settings) {
 	}
 	profiles_destroy(&s.profiles)
 	openers_destroy(&s.openers)
+	saved_commands_destroy(&s.saved_commands)
 	motion_destroy(&s.motion, s.allocator)
 	for theme in s.themes {
 		delete(theme.id, s.allocator)
@@ -1923,6 +1926,11 @@ parse :: proc(
 			if opener_error != nil {return {}, {}, opener_error}
 			continue
 		}
+		if strings.has_prefix(key, SAVED_COMMAND_PREFIX) {
+			command_error := parse_saved_command_key(&s, &diagnostics, key, value, line.number)
+			if command_error != nil {return {}, {}, command_error}
+			continue
+		}
 		if strings.has_prefix(key, CUSTOM_THEME_PREFIX) {
 			theme_error := parse_custom_theme_key(&s, &diagnostics, key, value, line.number)
 			if theme_error != nil {return {}, {}, theme_error}
@@ -1992,6 +2000,9 @@ parse :: proc(
 	if opener_error := openers_finalize(&s.openers, &diagnostics); opener_error != nil {
 		return {}, {}, opener_error
 	}
+	if command_error := saved_commands_finalize(&s.saved_commands, &diagnostics); command_error != nil {
+		return {}, {}, command_error
+	}
 	if motion_error := motion_finalize(&s, &diagnostics); motion_error != nil {return {}, {}, motion_error}
 	if inputs != nil {
 		if detect_error := profiles_apply_detection(&s, inputs.detected[:]); detect_error != nil {
@@ -2051,6 +2062,12 @@ default_text :: proc(
 		"# opener.nvim.command = \"nvim %1\"\n",
 		"# opener.nvim.offers = files, folders\n",
 		"# opener.nvim.placement = right\n\n",
+		"# Saved commands show in a pane's Commands menu: saved_command.ID.command, .name and .level\n",
+		"# (folder, profile or everywhere). A folder command shows in .folder and the folders below it\n",
+		"# and runs with .profile; a profile command shows in panes of .profile. The menu saves them.\n",
+		"# saved_command.build.command = \".\\build.ps1 verify\"\n",
+		"# saved_command.build.level = folder\n",
+		"# saved_command.build.folder = \"C:\\Projects\\App\"\n\n",
 		"# Custom themes: theme.custom.ID.base names another theme such as studio-dark, and\n",
 		"# theme.custom.ID.COLOR = #rrggbb overrides one color. Changing a color in Settings saves one.\n\n",
 		"# Motion curves: motion.curve.NAME = x1, y1, x2, y2 is a cubic Bezier whose y may leave 0..1\n",

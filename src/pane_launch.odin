@@ -67,7 +67,7 @@ pane_placement_window :: proc(
 }
 
 // Starts a shell with `launch` at `placement` beside the pane at `node` of w, as pane_placement_window
-// chooses the window.
+// chooses the window, and returns its session id.
 @(require_results)
 shell_open_placed :: proc(
 	app: ^App,
@@ -75,15 +75,18 @@ shell_open_placed :: proc(
 	node: layout.Node_Id,
 	launch: Pane_Launch,
 	placement: Pane_Placement,
-) -> bool {
+) -> (
+	u32,
+	bool,
+) {
 	acting, beside, found := pane_placement_window(app, w, node, placement)
-	if !found {return false}
+	if !found {return 0, false}
 	id, opened := session_open(app, launch.command, launch.directory, launch.profile)
-	if !opened {return false}
+	if !opened {return 0, false}
 	tab := acting.workspace.selected
-	if pane_place(app, acting, acting.workspace, tab, beside, {.Terminal, id}, placement, true) {return true}
+	if pane_place(app, acting, acting.workspace, tab, beside, {.Terminal, id}, placement, true) {return id, true}
 	session_close(app, id)
-	return false
+	return 0, false
 }
 
 // Shows `content`, which no pane shows yet, beside `node` of the workspace's tab at `tab_index`. A split

@@ -142,6 +142,7 @@ Action :: enum u32 {
 	Reopen_Closed,
 	Linked_Window,
 	Show_Links,
+	Show_Commands,
 	New_Floating,
 	Float_Pane,
 	Minimize_Floating,
@@ -563,6 +564,7 @@ ACTIONS :: [Action]Command_Descriptor {
 	},
 	.Linked_Window = {"pane.linked_window", "Toggle Pane in Linked Window", nil, .Local, {}},
 	.Show_Links = {"pane.links", "Show Links", nil, .Local, {}},
+	.Show_Commands = {"pane.commands", "Show Saved Commands", nil, .Local, {}},
 	.New_Floating = {
 		"pane.new_floating", "New Shell Float", {{.Backquote, {.Control, .Shift}}}, .Host,
 		{accepted = {.Focus, .Directory, .Name, .Profile, .Program, .Command_File}, control = .Pane},
@@ -969,6 +971,8 @@ command_execute :: proc(app: ^App, ctx: Command_Context, invocation: commands.In
 		floating_minimize_all_toggle(app, w)
 	case .Show_Links:
 		document_menu_open_focused(app, w)
+	case .Show_Commands:
+		command_menu_open_focused(app, w)
 	case .Show_Build_Info:
 		show_build_info(app)
 	case .Install_Agent_Hooks:

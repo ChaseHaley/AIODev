@@ -15,6 +15,7 @@ Pointer_Target :: enum u8 {
 	Activity_Row_Menu,
 	Profile_Menu,
 	Document_Menu,
+	Command_Menu,
 	Status_Inbox,
 	Rename,
 	// Window caption buttons, which stay usable over every overlay.
@@ -132,6 +133,10 @@ pointer_surfaces := [Pointer_Target]Pointer_Surface {
 		claims = document_menu_claims, hover = document_menu_pointer_hover, press = document_menu_button,
 		tooltip = document_menu_tooltip, cancel = document_menu_pointer_cancel, leave = document_menu_leave,
 		modal = true,
+	},
+	.Command_Menu     = {
+		claims = command_menu_claims, hover = command_menu_pointer_hover, press = command_menu_button,
+		cancel = command_menu_pointer_cancel, leave = command_menu_leave, modal = true,
 	},
 	.Status_Inbox     = {
 		claims = status_inbox_claims, hover = status_inbox_hover, press = status_inbox_button, modal = true,

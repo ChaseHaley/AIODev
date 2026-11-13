@@ -16,6 +16,8 @@ Content_Policy :: struct {
 	linkable:          bool,
 	// Has a Links button and its own pinned links.
 	documents:         bool,
+	// Has a Commands button: saved commands type into it and run beside it (D-092).
+	commands:          bool,
 	// The badge a tab, float capsule or pane header shows for the content; terminals show their shell's
 	// instead.
 	icon:              ui.Icon,
@@ -25,7 +27,9 @@ Content_Policy :: struct {
 
 @(rodata)
 CONTENT_POLICY := [layout.Content_Kind]Content_Policy {
-	.Terminal = {owns_session = true, linkable = true, documents = true, display_name = "Terminal"},
+	.Terminal = {
+		owns_session = true, linkable = true, documents = true, commands = true, display_name = "Terminal",
+	},
 	.Settings = {one_per_workspace = true, icon = .Settings, display_name = "Settings"},
 	.Markdown = {linkable = true, documents = true, icon = .Markdown, display_name = "Markdown"},
 }

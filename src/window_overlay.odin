@@ -14,6 +14,7 @@ Overlay_Surfaces :: struct {
 	activity_row_menu: ui.Menu,
 	profile_menu:      Profile_Menu,
 	document_menu:     Document_Menu,
+	command_menu:      Command_Menu,
 	// The name Overlay_Rename, Overlay_Chip_Name or the picker's rename mode edits. They share it because
 	// they exclude each other: opening one closes the others, and each releases the text when it ends.
 	rename:            ui.Text_Field,
@@ -26,9 +27,10 @@ overlay_surfaces_init :: proc(s: ^Overlay_Surfaces) {
 	ui.menu_init(&s.activity_row_menu)
 	profile_menu_init(&s.profile_menu)
 	document_menu_init(&s.document_menu)
+	command_menu_init(&s.command_menu)
 }
 
-// Takes w because a document menu still showing holds a document in w.overlay.
+// Takes w because a document or command menu still showing holds text in w.overlay.
 overlay_surfaces_destroy :: proc(w: ^Window) {
 	tab_menu_destroy(&w.tab_menu)
 	ui.menu_destroy(&w.divider_menu)
@@ -36,6 +38,7 @@ overlay_surfaces_destroy :: proc(w: ^Window) {
 	ui.menu_destroy(&w.activity_row_menu)
 	profile_menu_destroy(&w.profile_menu)
 	document_menu_destroy(w)
+	command_menu_destroy(w)
 	delete(w.rename.bytes)
 }
 
@@ -57,6 +60,7 @@ Window_Overlay :: union {
 	Overlay_Activity_Row_Menu,
 	Overlay_Profile_Menu,
 	Overlay_Document_Menu,
+	Overlay_Command_Menu,
 }
 
 // A tab or pane renames in a dialog; the text is w.rename.
@@ -101,6 +105,12 @@ Overlay_Document_Menu :: struct {
 	mode:    Document_Menu_Mode,
 }
 
+Overlay_Command_Menu :: struct {
+	// The pane whose saved commands the menu shows, runs beside and types into.
+	content: layout.Content,
+	mode:    Command_Menu_Mode,
+}
+
 // Which surface has the window's input. When more than one claims it, which only commands driven from
 // outside can arrange, the order here decides, as the order of on_key's checks did.
 Overlay_Kind :: enum u8 {
@@ -114,6 +124,7 @@ Overlay_Kind :: enum u8 {
 	Activity_Row_Menu,
 	Profile_Menu,
 	Document_Menu,
+	Command_Menu,
 	Confirmation,
 	Palette,
 }
@@ -129,6 +140,7 @@ overlay_kind :: proc(app: ^App, w: ^Window) -> Overlay_Kind {
 	case Overlay_Activity_Row_Menu: return .Activity_Row_Menu
 	case Overlay_Profile_Menu: return .Profile_Menu
 	case Overlay_Document_Menu: return .Document_Menu
+	case Overlay_Command_Menu: return .Command_Menu
 	}
 	if confirmation_current(w) != nil {return .Confirmation}
 	if palette_active(app, w) {return .Palette}
@@ -176,6 +188,8 @@ overlay_close :: proc(app: ^App, w: ^Window, exit := Overlay_Exit.Cancel) {
 		ui.field_release(&w.rename)
 	case Overlay_Document_Menu:
 		document_menu_close(&w.document_menu, current.mode)
+	case Overlay_Command_Menu:
+		command_menu_close(&w.command_menu, current.mode)
 	case Overlay_Tab_Menu, Overlay_Divider_Menu, Overlay_Activity_Menu, Overlay_Activity_Row_Menu,
 	     Overlay_Profile_Menu:
 	}
@@ -204,6 +218,8 @@ overlay_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 		menu = profile_menu_draw(app, w)
 	case Overlay_Document_Menu:
 		menu = document_menu_draw(app, w)
+	case Overlay_Command_Menu:
+		menu = command_menu_draw(app, w)
 	case nil, Overlay_Rename, Overlay_Chip_Name:
 	}
 	if menu != .Ok {return menu}

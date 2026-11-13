@@ -73,7 +73,7 @@ pane_header_previews_show_what_the_buttons_do :: proc(t: ^testing.T) {
 		case .Linked_Window:
 			testing.expect_value(t, preview.pane, -1)
 			testing.expect_value(t, preview.away, [2]f32{pane.rect.width, pane.rect.height})
-		case .Links, .Zoom, .Fill_Window, .Dock, .Close:
+		case .Links, .Commands, .Zoom, .Fill_Window, .Dock, .Close:
 			testing.expectf(t, w.panes[preview.pane].content == pane.content, "%v picks its pane", c.button)
 		}
 	}
