@@ -229,7 +229,7 @@ theme_strip_scrolls_sideways_to_the_keyboard_card_and_under_the_wheel :: proc(t:
 	testing.expect(t, p.strip.scroll.value > 0)
 	testing.expect(t, last.x + last.width <= l.list.x + l.list.width)
 
-	// The wheel over the strip scrolls it back; at its start the wheel scrolls the page.
+	// The wheel over the strip scrolls it back, and never moves the page.
 	block := ui.editor_strip_rect(&p, l, head)
 	x, y := block.x + block.width / 2, block.y + block.height / 2
 	scrolled := p.strip.scroll.value
@@ -258,4 +258,13 @@ theme_strip_scrolls_sideways_to_the_keyboard_card_and_under_the_wheel :: proc(t:
 	testing.expect(t, !ui.editor_animating(&p))
 	applied := ui.editor_strip_card_rect(&p, narrow, head, 0)
 	testing.expect(t, applied.x >= narrow.list.x)
+
+	// Past the strip's last card, or over the row's title, the wheel still leaves the page put.
+	ui.editor_fit(&p, l)
+	testing.expect(t, len(p.items) > l.rows)
+	for _ in 0 ..< 20 {ui.editor_wheel(&p, l, x, y, -3)}
+	ui.editor_wheel(&p, l, x, block.y + 4, -3)
+	strip_settle(&p)
+	testing.expect_value(t, p.scroll, 0)
+	testing.expect(t, p.strip.scroll.value >= scrolled)
 }

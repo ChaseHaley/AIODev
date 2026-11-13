@@ -423,18 +423,17 @@ editor_strip_pointer :: proc(p: ^Editor, l: Editor_Layout, index: int, x, y: f32
 	return card >= 0 && card != strip.applied
 }
 
-// Wheel over a strip that can still move that way scrolls it sideways; at either end the page
-// scrolls instead.
+// Wheel anywhere over the theme row scrolls the strip sideways and never the page, even at either
+// end of the strip: a page that lurches away once the last theme comes into view loses the reader.
 @(private)
 editor_strip_wheel :: proc(p: ^Editor, l: Editor_Layout, x, y: f32, rows: int) -> bool {
 	strip := &p.strip
-	view, ok := strip_view_at(p, l, y)
-	if !ok || !strip.placed || !render.rect_contains(view, x, y) {return false}
+	_, ok := strip_view_at(p, l, y)
+	if !ok || x < l.list.x || x >= l.list.x + l.list.width {return false}
+	if !strip.placed {return true}
 	limit := strip_max_scroll(strip, strip_view_width(l), true)
 	target := strip.scroll.target + strip.wheel
-	delta := -f32(rows) * STRIP_WHEEL_STEP
-	if (delta < 0 && target <= 0) || (delta > 0 && target >= limit) {return false}
-	strip.wheel = clamp(target + delta, 0, limit) - strip.scroll.target
+	strip.wheel = clamp(target - f32(rows) * STRIP_WHEEL_STEP, 0, limit) - strip.scroll.target
 	return true
 }
 
