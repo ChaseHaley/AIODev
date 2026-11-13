@@ -105,10 +105,16 @@ start :: proc() -> int {
 		log.errorf("locating the saved layout failed: %v", layout_error)
 	} else {
 		layout_state_enable(&app, layout)
+		if palette, palette_error := strings.clone(paths.palette); palette_error != nil {
+			log.errorf("locating the palette usage failed: %v", palette_error)
+		} else {
+			palette_usage_enable(&app, palette)
+		}
 	}
 	if !app_init(&app) {return 1}
 	run(&app)
 	layout_state_save(&app, fresh = true)
+	palette_usage_save(&app)
 	restart = app.run == .Restart
 	return 0
 }

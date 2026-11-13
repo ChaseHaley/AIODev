@@ -8,6 +8,7 @@
     "focus_jumps_walk_back_and_forward",
     "horizontal_tab_click_and_close_use_the_strip_geometry",
     "horizontal_tabs_fill_the_title_bar_without_a_rail",
+    "palette_usage_survives_a_restart_without_session_ids",
     "pane_box_inverse_produces_the_requested_grid_through_the_window_content_area",
     "pane_box_inverse_respects_resized_rail_width",
     "pane_drag_label_names_each_drop",

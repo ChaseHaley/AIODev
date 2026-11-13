@@ -83,6 +83,8 @@ App :: struct {
 	registry:              commands.Registry,
 	leader:                Maybe(commands.Shortcut),
 	palette:               ui.Palette,
+	// Where the palette's usage is saved; see palette_usage.odin.
+	palette_store:         Palette_Usage_Store,
 	find_history:          ui.Find_History,
 	focus_jumps:           Focus_Jumps,
 	// The window the palette is open or closing in; see palette_owner.odin.
@@ -205,6 +207,7 @@ app_init :: proc(app: ^App) -> bool {
 		return false
 	}
 	if !palette_settings_init(app) {return false}
+	palette_usage_load(app)
 	palette_set_sources(app)
 	control_cli_init(app)
 	if !load_settings(app) {return false}
@@ -296,7 +299,7 @@ app_destroy :: proc(app: ^App) {
 		font.system_destroy(app.fonts)
 	}
 	ui.palette_destroy(&app.palette)
-	ui.find_history_destroy(&app.find_history)
+	ui.query_history_destroy(&app.find_history)
 	focus_jumps_destroy(&app.focus_jumps)
 	file_dialogs_destroy(app)
 	markdown_app_destroy(&app.markdown_state)
@@ -310,6 +313,7 @@ app_destroy :: proc(app: ^App) {
 	instance.paths_destroy(&app.paths)
 	delete(app.log_path)
 	layout_state_destroy(app)
+	palette_usage_store_destroy(&app.palette_store)
 	closed_destroy(app)
 	app_update_destroy(app)
 	delete(app.app_id)
@@ -440,6 +444,7 @@ App_Timer :: enum u8 {
 	Drag_Hover,
 	Verify,
 	Layout_Save,
+	Palette_Usage_Save,
 	File_Dialogs,
 	Markdown,
 	Update,
@@ -458,7 +463,7 @@ app_timer_phase :: proc(timer: App_Timer) -> Timer_Phase {
 	switch timer {
 	case .Processes, .Notices, .Drag_Hover:
 		return .Before_Draw
-	case .Verify, .Layout_Save, .File_Dialogs, .Markdown, .Update:
+	case .Verify, .Layout_Save, .Palette_Usage_Save, .File_Dialogs, .Markdown, .Update:
 		return .After_Draw
 	}
 	return .Before_Draw
@@ -479,6 +484,8 @@ app_timers_advance :: proc(app: ^App, phase: Timer_Phase) {
 			when AIO_CONTROL {verify_tick(app)}
 		case .Layout_Save:
 			layout_state_tick(app)
+		case .Palette_Usage_Save:
+			palette_usage_tick(app)
 		case .File_Dialogs:
 			file_dialogs_tick(app)
 		case .Markdown:
@@ -504,6 +511,8 @@ app_timer_deadline :: proc(app: ^App, timer: App_Timer) -> (next: time.Tick, pen
 		when AIO_CONTROL {return verify_deadline(app)}
 	case .Layout_Save:
 		return layout_state_deadline(app)
+	case .Palette_Usage_Save:
+		return palette_usage_deadline(app)
 	case .File_Dialogs:
 		// A finished dialog wakes the loop itself.
 	case .Markdown:
@@ -640,7 +649,6 @@ initial_geometry :: proc(app: ^App) -> term.Geometry {
 		metrics            = fields.metrics,
 		rail_default_width = fields.rail_default_width,
 		tabs_horizontal    = fields.tabs_horizontal,
-		header_height      = fields.header_height,
 	}
 	box, width, height, _ := pane_box_for_grid(
 		app,

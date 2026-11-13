@@ -435,6 +435,25 @@ retired_vertical_scope_is_ignored_and_absent_from_the_schema :: proc(t: ^testing
 	for entry in settings.SCHEMA {testing.expect(t, entry.key != "tabs.vertical_scope")}
 }
 
+// Pane headers are always shown (WORK-456); a settings file that still hides them loads without a
+// complaint, and the lines after the retired key still apply.
+@(test)
+retired_show_headers_is_ignored_and_absent_from_the_schema :: proc(t: ^testing.T) {
+	for source in ([?]string{
+		"pane.show_headers = false\npane.gap = 7\n",
+		"pane.show_headers = true\npane.gap = 7\n",
+		"pane.show_headers = maybe\npane.gap = 7\n",
+	}) {
+		s, diagnostics, parse_error := settings.parse(source)
+		if !testing.expect_value(t, parse_error, nil) {return}
+		testing.expect_value(t, len(diagnostics), 0)
+		testing.expect_value(t, s.pane.gap, 7)
+		settings.destroy(&s)
+		settings.diagnostics_destroy(&diagnostics)
+	}
+	for entry in settings.SCHEMA {testing.expect(t, entry.key != "pane.show_headers")}
+}
+
 @(test)
 activity_panel_view_defaults_to_comfy_and_refuses_unknown_values :: proc(t: ^testing.T) {
 	s, d, err := settings.parse("")

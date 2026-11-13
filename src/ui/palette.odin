@@ -98,7 +98,7 @@ Palette_Mode_Info :: struct {
 	.Commands = 120,
 }
 
-// The order of an empty query's list and of equal-ranked matches: the original domains first.
+// The order of an empty query's never-run results and of equal-ranked matches: the original domains first.
 @(private) PALETTE_DOMAIN_ORDER := [?]Palette_Kind{.Command, .Setting, .Tab, .Workspace}
 
 @(private) PALETTE_KIND_WORDS := [Palette_Kind]string {
@@ -192,6 +192,8 @@ Palette_Result :: struct {
 	chord:       commands.Shortcut,
 	// A command that cannot run now, listed because a shortcut search matched it; drawn disabled.
 	unavailable: bool,
+	// How often and recently it was run, from Palette_Usage when the palette opened.
+	frecency:    f64,
 }
 
 // The identity activation needs, independent of the current result ordering.
@@ -237,6 +239,18 @@ Palette :: struct {
 	keys_hover:   bool,
 	// The chord the Unassigned row offered: the next command chosen opens its shortcut editor with it.
 	assign:       Maybe(commands.Shortcut),
+	// Queries that ran a result, and the Up and Down walk through them; see palette_recall_key.
+	history:      Palette_History,
+	browse:       Maybe(Query_Browse(Palette_Mode)),
+	usage:        Palette_Usage,
+	// When the palette opened, in Unix seconds. Frecency scores against it and records uses at it.
+	opened_at:    i64,
+	// The items this opening has counted a use of, at most once each, and whether one was recorded since
+	// palette_used_take last asked.
+	counted:      [dynamic]Palette_Use,
+	used:         bool,
+	// The query texts this opening has recorded in history, owned; see palette_note_query.
+	noted:        [dynamic]string,
 }
 
 // What the last outcome names for the owner: the setting to reveal (Open_Setting), the value to save
@@ -312,6 +326,8 @@ palette_init :: proc(
 	p.positions = make([dynamic]int, allocator)
 	p.chosen_value = make([dynamic]u8, allocator)
 	p.chosen_key = make([dynamic]u8, allocator)
+	p.counted = make([dynamic]Palette_Use, allocator)
+	p.noted = make([dynamic]string, allocator)
 	edit_init(&p.buffers, allocator)
 	p.settings = settings
 	p.visible_rows = PALETTE_MAX_ROWS
@@ -331,6 +347,12 @@ palette_init :: proc(
 
 palette_destroy :: proc(p: ^Palette) {
 	edit_set(p, nil)
+	palette_browse_end(p)
+	query_history_destroy(&p.history)
+	palette_usage_destroy(&p.usage)
+	delete(p.counted)
+	palette_noted_clear(p)
+	delete(p.noted)
 	delete(p.chosen_key)
 	free(p.scratch, p.query.bytes.allocator)
 	delete(p.query.bytes)
@@ -352,13 +374,18 @@ palette_set_availability :: proc(p: ^Palette, availability: Palette_Availability
 	p.availability = availability
 }
 
-palette_open :: proc(p: ^Palette, registry: ^commands.Registry) {
-	palette_open_mode(p, registry, .All)
+palette_open :: proc(p: ^Palette, registry: ^commands.Registry, now: i64 = 0) {
+	palette_open_mode(p, registry, .All, now)
 }
 
-palette_open_mode :: proc(p: ^Palette, registry: ^commands.Registry, mode: Palette_Mode) {
+// `now`, in Unix seconds, dates the uses this opening records and ages the ones before it.
+palette_open_mode :: proc(p: ^Palette, registry: ^commands.Registry, mode: Palette_Mode, now: i64 = 0) {
 	presence_open(&p.presence, DIALOG_PRESENCE)
+	palette_browse_end(p)
 	field_set(&p.query, "")
+	p.opened_at = now
+	clear(&p.counted)
+	palette_noted_clear(p)
 	p.selected, p.scroll = 0, 0
 	p.mode = mode
 	p.mode_hover = -1
@@ -372,6 +399,7 @@ palette_open_mode :: proc(p: ^Palette, registry: ^commands.Registry, mode: Palet
 
 palette_close :: proc(p: ^Palette) {
 	edit_set(p, nil)
+	palette_browse_end(p)
 	presence_close(&p.presence)
 
 	p.mode_hover = -1
@@ -440,6 +468,7 @@ palette_next_mode :: proc(mode: Palette_Mode, reverse: bool = false) -> Palette_
 // become typed text, which every mode can search, and a pending assignment ends.
 palette_set_mode :: proc(p: ^Palette, registry: ^commands.Registry, mode: Palette_Mode) {
 	if p.mode == mode {return}
+	palette_browse_end(p)
 	if p.keys.state != .Off {key_search_leave(&p.keys, &p.query)}
 	p.assign = nil
 	p.mode = mode
@@ -458,6 +487,7 @@ palette_recording :: proc(p: ^Palette) -> bool {return p.keys.state == .Recordin
 palette_key_search_toggle :: proc(p: ^Palette, registry: ^commands.Registry) -> Outcome {
 	edit_set(p, nil)
 	drag_set(p, nil)
+	palette_browse_end(p)
 	if p.keys.state != .Off {
 		key_search_leave(&p.keys, &p.query)
 	} else {
@@ -487,6 +517,7 @@ palette_key_search_step :: proc(p: ^Palette, registry: ^commands.Registry, step:
 // its shortcut editor with the chord added, and Enter there saves it.
 palette_assign :: proc(p: ^Palette, registry: ^commands.Registry, chord: commands.Shortcut) -> Outcome {
 	edit_set(p, nil)
+	palette_browse_end(p)
 	p.keys = {}
 	field_set(&p.query, "")
 	p.mode = .Commands
@@ -809,16 +840,26 @@ count_of :: proc(source: Palette_Source) -> int {
 	return max(0, source.count(source.user))
 }
 
+// Match class first. Within the label classes (exact, prefix, substring) and the shortcut classes, the
+// more frecent result leads and then the better score, since every match there answers the query
+// equally plainly. Scattered letters and secondary fields vary in how well they match, so there the
+// score leads and frecency only breaks ties.
 @(private)
 less_result :: proc(a, b: Palette_Result) -> bool {
 	if a.rank != b.rank {return a.rank < b.rank}
-	return a.score > b.score
+	if a.rank < PALETTE_RANK_FUZZY && a.frecency != b.frecency {return a.frecency > b.frecency}
+	if a.score != b.score {return a.score > b.score}
+	return a.frecency > b.frecency
 }
 
-// Rebuilds the visible result list for the active mode as one flat ranking. An empty query lists
-// each domain in natural order; otherwise label matches rank first, then shortcut and secondary fields,
-// by match class and score, with the palette's domain order and then insertion order breaking ties. A
-// complete chord no command uses leads the list as the Unassigned row.
+@(private)
+more_frecent :: proc(a, b: Palette_Result) -> bool {return a.frecency > b.frecency}
+
+// Rebuilds the visible result list for the active mode as one flat ranking. An empty query lists the
+// results run before by frecency, then the rest of each domain in natural order; otherwise label matches
+// rank first, then shortcut and secondary fields, by match class, frecency and score (see less_result),
+// with the palette's domain order and then insertion order breaking ties. A complete chord no command
+// uses leads the list as the Unassigned row.
 @(private)
 refresh :: proc(p: ^Palette, registry: ^commands.Registry) {
 	query := palette_query(p)
@@ -956,7 +997,10 @@ refresh :: proc(p: ^Palette, registry: ^commands.Registry) {
 		for kind in PALETTE_DOMAIN_ORDER {
 			append(&p.results, ..p.ordered[spans[kind][0]:spans[kind][1]])
 		}
-		if !empty {slice.stable_sort_by(p.results[first:], less_result)}
+		if !palette_usage_empty(&p.usage) {
+			for &result in p.results[first:] {result.frecency = palette_frecency(p, result)}
+		}
+		slice.stable_sort_by(p.results[first:], empty ? more_frecent : less_result)
 	}
 	p.selected = clamp(p.selected, 0, max(0, len(p.results) - 1))
 	keep_selection_visible(p)
@@ -1031,6 +1075,7 @@ run :: proc(p: ^Palette, registry: ^commands.Registry, index: int) -> (Outcome, 
 		return palette_binding_assign(p, registry, index), 0
 	}
 	if result.kind == .Command && !palette_available(p, result.command) {return .None, 0}
+	palette_record(p, result)
 	palette_close(p)
 	switch result.kind {
 	case .Command:
@@ -1068,6 +1113,7 @@ edited :: proc(p: ^Palette, registry: ^commands.Registry, change: Field_Change) 
 		return .Changed
 	case .Edited:
 	}
+	palette_browse_end(p)
 	if mode, length := palette_parse_prefix(field_string(&p.query)); length > 0 {
 		strip_prefix(&p.query, length)
 		p.mode = mode
@@ -1141,7 +1187,11 @@ palette_key :: proc(
 			if PALETTE_OPERATE in e.modifiers {return control_activate(p, setting), 0}
 		}
 	}
-	if step := list_key_step(e, p.visible_rows, len(p.results)); step != 0 {return move(p, step), 0}
+	if outcome, recalled := palette_recall_key(p, registry, e); recalled {return outcome, 0}
+	if step := list_key_step(e, p.visible_rows, len(p.results)); step != 0 {
+		palette_browse_end(p)
+		return move(p, step), 0
+	}
 	#partial switch e.key {
 	case PALETTE_CANCEL_KEY:
 		palette_close(p)
