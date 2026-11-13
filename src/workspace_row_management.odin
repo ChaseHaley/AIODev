@@ -1,9 +1,22 @@
 package main
 
+import "aio:commands"
 import "aio:input"
 import "core:time"
 import "aio:render"
 import "aio:ui"
+
+// The keys that open the selected row's menu, the one its "…" button opens; the button's tooltip names
+// the first. An entry without modifiers opens it whatever modifiers are held.
+@(rodata)
+WORKSPACE_ROW_MENU_KEYS := [?]commands.Shortcut{{.F10, {.Shift}}, {.Context_Menu, {}}, {.Arrow_Right, {}}}
+
+workspace_row_menu_key :: proc(e: input.Key_Event) -> bool {
+	for open in WORKSPACE_ROW_MENU_KEYS {
+		if e.key == open.key && (open.modifiers == {} || e.modifiers == open.modifiers) { return true }
+	}
+	return false
+}
 
 Workspace_Row_Action :: enum { Rename, Icon, Open_Window, Delete, Move_Up, Move_Down }
 
@@ -270,7 +283,7 @@ workspace_row_key :: proc(app: ^App, w: ^Window, e: input.Key_Event) -> bool {
 	}
 	row, on_row := workspace_picker_selection(w).(Picker_Workspace)
 	if !on_row { return false }
-	if e.key == .Arrow_Right || e.key == .Context_Menu || e.key == .F10 && e.modifiers == {.Shift} {
+	if workspace_row_menu_key(e) {
 		workspace_row_menu_open(app, w, row.id)
 		return true
 	}

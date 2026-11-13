@@ -262,6 +262,12 @@ find_tooltip :: proc(_: ^App, w: ^Window, _, _: f32) -> string {
 }
 
 @(private)
+find_shortcut :: proc(_: ^App, w: ^Window, _, _: f32) -> Tooltip_Shortcut {
+	if w.find.hover == .None {return nil}
+	return ui.FIND_KEYS[w.find.hover]
+}
+
+@(private)
 find_pointer_cancel :: proc(_: ^App, w: ^Window) {
 	ui.armed_cancel(&w.find.armed)
 	w.find.hover = .None
