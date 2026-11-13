@@ -75,7 +75,7 @@ tab_drag_apply_slot :: proc(app: ^App, w: ^Window, slot: int) -> bool {
 	order, order_error := make([]int, len(d.order), context.temp_allocator)
 	if order_error !=
 	   nil {tab_drag_cancel(app, w); notify(app, .Error, "Could not move tabs."); return false}
-	if !ui.tab_group_order(marked, slot, order) {return false}
+	if !ui.tab_marked_order(marked, slot, order) {return false}
 	for original, to in order {
 		for tab, from in w.workspace.tabs {
 			if tab == d.order[original] {tab_move(app, w, from, to); break}

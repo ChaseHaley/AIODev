@@ -1094,7 +1094,7 @@ command_execute :: proc(app: ^App, ctx: Command_Context, invocation: commands.In
 	case .Move_Tab_Right:
 		tab_move(app, w, tab_index, min(len(w.workspace.tabs) - 1, tab_index + 1))
 	case .Move_Tab_Start, .Move_Tab_End:
-		tab_move_group(app, w, action == .Move_Tab_End)
+		tab_move_marked(app, w, action == .Move_Tab_End)
 	case .Close_Other_Tabs, .Close_Right_Tabs:
 		tab_close_subset(app, w, action == .Close_Right_Tabs, tab_index)
 	case .Close_Tab:

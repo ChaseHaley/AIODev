@@ -67,9 +67,9 @@ tab_menu_open :: proc(app: ^App, w: ^Window, index: int, x, y: f32) {
 		.Move_Tab_New_Workspace,
 		.Close_Right_Tabs,
 	}
-	group := [?]Maybe(Action){.Close_Other_Tabs, .Close_Tab, nil, .Tab_Settings}
+	every := [?]Maybe(Action){.Close_Other_Tabs, .Close_Tab, nil, .Tab_Settings}
 	if tab_menu_scope(w) == 1 && !tab_menu_add_rows(app, w, single[:]) {return}
-	if !tab_menu_add_rows(app, w, group[:]) {return}
+	if !tab_menu_add_rows(app, w, every[:]) {return}
 	tab_menu_sync(w)
 	ui.menu_select(&menu.menu, -1)
 	ui.menu_step(&menu.menu, 1)
