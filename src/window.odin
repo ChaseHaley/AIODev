@@ -462,12 +462,20 @@ window_relayout :: proc(app: ^App, w: ^Window) {
 }
 
 // Lays out only the floating panes, after one opened, moved, resized, rose or was minimized. The tiled
-// panes keep their rectangles, grids and cached drawing.
+// panes keep their rectangles, grids and cached drawing, which holds only while those rectangles still
+// show panes of the tree: a float that Fill window or Fullscreen showed alone was placed among them, and
+// once it closes or docks the whole window lays out again.
 window_floats_layout :: proc(app: ^App, w: ^Window) {
 	tree := window_tree(w)
 	if w.phase == .Preparing || window_minimized(w) || tree == nil {
 		w.pane_motion.armed = nil
 		return
+	}
+	for pane in window_tiled_rects(w) {
+		if content, live := layout.pane_content(tree, pane.node); !live || content != pane.content {
+			window_relayout(app, w)
+			return
+		}
 	}
 	shown := pane_motion_shown(w)
 	tiled := len(window_tiled_rects(w))

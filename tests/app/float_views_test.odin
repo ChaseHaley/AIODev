@@ -90,6 +90,28 @@ float_views_fill_and_fullscreen_show_the_float_pane_alone :: proc(t: ^testing.T)
 	}
 }
 
+// Closing the floating pane Fill window shows alone ends the fill and lays the window out again, showing
+// the tiled pane: the pane the fill drew was counted with the tiled ones, so keeping those rectangles kept
+// a pane that no longer exists, and measuring its header buttons crashed.
+@(test)
+float_views_closing_a_filled_float_pane_shows_the_tiled_panes :: proc(t: ^testing.T) {
+	f: Palette_Fixture
+	defer palette_fixture_destroy(t, &f)
+	s, w, _, ok := float_fixture(t, &f, "float-fill-close")
+	if !ok {return}
+	tree := app.window_tree(w)
+	app.run_action(s, w, .Fill_Window_Pane)
+	if !testing.expect_value(t, len(w.panes), 1) {return}
+	app.run_action(s, w, .Close_Pane)
+	testing.expect_value(t, w.pane_fill, layout.Pane_Fill.None)
+	testing.expect_value(t, len(app.floating_rects(w)), 0)
+	if !testing.expect_value(t, len(w.panes), 1) {return}
+	for pane in w.panes {
+		content, live := layout.pane_content(tree, pane.node)
+		testing.expectf(t, live && content == pane.content, "pane %v is in the tree", pane.node)
+	}
+}
+
 // A fill showing a floating pane shows whichever pane focus moves to; on a tiled pane it is the tiled
 // fill, with the floats above it again.
 @(test)
