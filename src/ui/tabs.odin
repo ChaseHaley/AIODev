@@ -14,6 +14,9 @@ Tab_Bar :: struct {
 	count:                                     int,
 }
 
+// A strip tab is never wider than this; it shares the strip's room below it.
+TAB_MAX_WIDTH :: f32(220)
+
 // The strip spans `width` from `x`. Its `count` tabs show in `slots` places (a folded group's take none) and
 // share their width with `incoming` tabs a drag offers, which hold their space without counting as tabs
 // yet, and with the `chips` pixels group chips take. Slots -1 is one per tab.
@@ -30,7 +33,7 @@ tab_bar_layout :: proc(
 	bar.width, bar.count = width, count
 	bar.button_width = min(width, TITLE_BUTTON_WIDTH * scale)
 	room := max(0, width - bar.button_width - chips)
-	bar.tab_width = min(220 * scale, room / f32(max(1, places)))
+	bar.tab_width = min(TAB_MAX_WIDTH * scale, room / f32(max(1, places)))
 	bar.end = x + f32(places - incoming) * bar.tab_width + chips
 	return bar
 }

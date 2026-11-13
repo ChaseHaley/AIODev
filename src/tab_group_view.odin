@@ -52,7 +52,7 @@ tab_layout :: proc(app: ^App, w: ^Window, horizontal: bool) -> Tab_Layout {
 			width: f32
 			if horizontal {
 				chip := tab_chip(app, w, group, group.folded)
-				width = ui.tab_chip_width(&w.ui_text, chip, w.scale) / w.scale
+				width = ui.tab_chip_width(&w.ui_text, chip, w.scale, ui.TAB_CHIP_MAX_WIDTH * w.scale) / w.scale
 				if naming, editor := group_name_editing(w); naming == group && !editor {
 					width = max(width, GROUP_NAME_MIN_WIDTH)
 				}
@@ -224,10 +224,11 @@ strip_fold_rect :: proc(
 	count := 0
 	for tab in w.workspace.tabs {if tab.group == run.group.id {count += 1}}
 	y, height := ui.tab_tray_band(bar.height, s)
-	open := ui.tab_chip_width(&w.ui_text, tab_chip(app, w, run.group, false), s)
+	widest := ui.TAB_CHIP_MAX_WIDTH * s
+	open := ui.tab_chip_width(&w.ui_text, tab_chip(app, w, run.group, false), s, widest)
 	tray := render.Rect{chip.x, y, open + ui.TAB_CHIP_MARGIN * s + f32(count) * bar.tab_width, height}
 	folded := ui.HEIGHT_COMPACT * s
-	width := ui.tab_chip_width(&w.ui_text, tab_chip(app, w, run.group, true), s)
+	width := ui.tab_chip_width(&w.ui_text, tab_chip(app, w, run.group, true), s, widest)
 	closed := render.Rect{chip.x, (bar.height - folded) / 2, width, folded}
 	return ui.tab_tray_fold_rect(closed, tray, w.fold.value)
 }
@@ -294,7 +295,7 @@ tab_chip_draw :: proc(
 	chip.status_phase = status_phase(app, w, chip.status)
 	chip.bare = bare
 	r := rect
-	r.width = min(r.width, ui.tab_chip_width(&w.ui_text, chip, w.scale))
+	r.width = min(r.width, ui.tab_chip_width(&w.ui_text, chip, w.scale, r.width))
 	return ui.tab_chip_draw(&w.list, &w.ui_text, app.theme, r, chip, tab_group_state(w, run.group.id), w.scale)
 }
 

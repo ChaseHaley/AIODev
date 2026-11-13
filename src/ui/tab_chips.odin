@@ -19,8 +19,9 @@ Tab_Chip :: struct {
 	bare:         bool,
 }
 
-// A long name fades out at this width rather than crowd the tabs.
-TAB_CHIP_MAX_WIDTH :: f32(160)
+// In the strip a long name fades out where a tab's title would, at a tab's widest; in the rail, at the row's
+// end as a tab's does.
+TAB_CHIP_MAX_WIDTH :: TAB_MAX_WIDTH
 // The strip keeps this much clear on either side of a chip.
 TAB_CHIP_MARGIN :: SPACE_1
 // The tray reaches this far past the tiles of the tabs it holds, above and below in the strip and to the
@@ -136,15 +137,15 @@ tab_chip_tail :: proc(text: ^Text, chip: Tab_Chip, scale: f32) -> f32 {
 	return tail
 }
 
-// The chip's width in pixels: its name between insets, else a square holding a dot of its colour, then
-// what a folded chip adds.
-tab_chip_width :: proc(text: ^Text, chip: Tab_Chip, scale: f32) -> f32 {
+// The chip's width in pixels: its name between insets, at most `widest` pixels in all, else a square holding
+// a dot of its colour, then what a folded chip adds.
+tab_chip_width :: proc(text: ^Text, chip: Tab_Chip, scale, widest: f32) -> f32 {
 	inset := CONTROL_INSET * scale
 	tail := tab_chip_tail(text, chip, scale)
 	if chip.name == "" {return HEIGHT_COMPACT * scale + (chip.folded ? tail + inset : 0)}
 	strong := text_styled(text, .Strong)
-	width := min(TAB_CHIP_MAX_WIDTH * scale, text_width(&strong, chip.name) + 2 * inset)
-	return width + (chip.folded ? SPACE_1 * scale + tail : 0)
+	extra := chip.folded ? SPACE_1 * scale + tail : 0
+	return min(max(0, widest - extra), text_width(&strong, chip.name) + 2 * inset) + extra
 }
 
 // The chip fills `rect` at its own height, centred. Unfolded it is a bare label on its tray, which shows

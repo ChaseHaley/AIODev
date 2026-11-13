@@ -231,11 +231,11 @@ rail_current_layout :: proc(w: ^Window) -> (layout: ui.Rail_Layout, ok: bool) {
 }
 
 // The rail's layout with its scroll clamped to the rows, leaving the window unchanged. While a group folds,
-// the rows' end and the footer below them ease with the rows (WORK-454).
+// the rows' end and the footer below them ease with the rows (WORK-454), held from the fold's first frame.
 @(require_results)
 rail_layout_query :: proc(w: ^Window) -> (layout: ui.Rail_Layout, ok: bool) {
 	layout, ok = rail_layout_rest(w)
-	if ok && w.folding != 0 && ui.motion_active(w.rail_footer) {
+	if ok && w.folding != 0 && w.rail_footer.value > 0 {
 		layout.footer.y = layout.area.y + w.rail_footer.value
 		layout.list.height = max(0, layout.footer.y - layout.list.y)
 	}
@@ -524,7 +524,7 @@ rail_fold_rect :: proc(app: ^App, w: ^Window, layout: ui.Rail_Layout, run: Tab_R
 	}
 	chip := tab_chip(app, w, run.group, true)
 	height := ui.HEIGHT_COMPACT * s
-	width := min(row.width, ui.tab_chip_width(&w.ui_text, chip, s))
+	width := ui.tab_chip_width(&w.ui_text, chip, s, row.width)
 	closed := render.Rect{row.x, row.y + (row.height - height) / 2, width, height}
 	return ui.tab_tray_fold_rect(closed, tray, w.fold.value)
 }

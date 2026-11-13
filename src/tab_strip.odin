@@ -14,10 +14,11 @@ _ :: settings
 window_tab_bar :: proc(app: ^App, w: ^Window) -> ui.Tab_Bar {
 	bar := window_tab_bar_rest(app, w)
 	// While a group folds the tabs' width and the strip's end ease with the tabs, so the tabs start from where
-	// they were and New tab moves with them (WORK-454).
-	if w.folding != 0 {
-		if ui.motion_active(w.strip_width) {bar.tab_width = w.strip_width.value}
-		if ui.motion_active(w.strip_end) {bar.end = w.strip_end.value}
+	// they were and New tab moves with them (WORK-454). They hold from the fold's first frame, before the
+	// motions take their targets.
+	if w.folding != 0 && w.strip_width.value > 0 {
+		bar.tab_width = w.strip_width.value
+		bar.end = w.strip_end.value
 	}
 	return bar
 }
@@ -48,9 +49,25 @@ tab_position :: proc(w: ^Window, index: int) -> f32 {
 	return index >= 0 && index < len(w.tab_positions) ? w.tab_positions[index].value : f32(index)
 }
 
-// Where tab `index` draws in the strip, following its motion.
+// Where tab `index` draws in the strip, following its motion. While a group folds, the tabs' width eases
+// with their places, and a place times a width would bow off a straight path, starting some tabs too far
+// right; each tab instead goes straight from where it drew to where it rests, at the fold's pace.
 tab_strip_x :: proc(w: ^Window, bar: ui.Tab_Bar, index: int) -> f32 {
 	offset := index >= 0 && index < len(w.tab_offsets) ? w.tab_offsets[index].value : 0
+	width := w.strip_width
+	if w.folding != 0 && width.value > 0 && ui.motion_active(width) && width.target != width.from &&
+	   index >= 0 && index < len(w.tab_positions) && index < len(w.tab_offsets) {
+		ends :: proc(m: ui.Motion) -> (from, to: f32) {
+			if ui.motion_active(m) {return m.from, m.target}
+			return m.value, m.value
+		}
+		slot_from, slot_to := ends(w.tab_positions[index])
+		offset_from, offset_to := ends(w.tab_offsets[index])
+		from := slot_from * width.from + offset_from * w.scale
+		to := slot_to * width.target + offset_to * w.scale
+		pace := (width.value - width.from) / (width.target - width.from)
+		return bar.x + from + (to - from) * pace
+	}
 	return bar.x + tab_position(w, index) * bar.tab_width + offset * w.scale
 }
 

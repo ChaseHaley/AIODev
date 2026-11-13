@@ -236,16 +236,19 @@ tab_presentation_animating :: proc(w: ^Window) -> bool {
 }
 
 // Holds the strip's tab width and end, or the rail's footer, where they show now, so a fold starting eases
-// them from there to where the tabs will rest (WORK-454).
+// them from there to where the tabs will rest (WORK-454); the other layout's are cleared.
 tab_fold_room_hold :: proc(app: ^App, w: ^Window) {
 	if w.tabs_horizontal {
 		bar := window_tab_bar(app, w)
 		w.strip_width = {value = bar.tab_width, target = bar.tab_width}
 		w.strip_end = {value = bar.end, target = bar.end}
-	} else if layout, ok := rail_layout_query(w); ok {
-		footer := layout.footer.y - layout.area.y
-		w.rail_footer = {value = footer, target = footer}
+		w.rail_footer = {}
+		return
 	}
+	w.strip_width, w.strip_end = {}, {}
+	layout, ok := rail_layout_query(w)
+	footer := ok ? layout.footer.y - layout.area.y : 0
+	w.rail_footer = {value = footer, target = footer}
 }
 
 // Eases the strip's tab width and end, or the rail's footer, to where they rest, while a group folds.
