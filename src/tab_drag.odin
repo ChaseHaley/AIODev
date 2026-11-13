@@ -206,10 +206,17 @@ tab_drag_release :: proc(app: ^App, w: ^Window) {
 			tab_drag_abandon(app, w, a)
 			if ready {notify(app, .Error, "Could not move the tabs. The source was preserved.")}
 		case Drop_Reorder:
-			moved := make([dynamic]^Tab, 0, len(w.workspace.tabs), context.temp_allocator)
-			for tab in w.workspace.tabs {if tab.marked {append(&moved, tab)}}
-			tab_groups_settle(w.workspace, moved[:])
-			layout_state_touch(app)
+			// Dropped on a chip, the tabs join that group, folded or not; elsewhere their neighbours decide.
+			if chip := tab_chip_at(app, w, w.pointer.x, w.pointer.y); chip != 0 {
+				for tab, i in w.workspace.tabs {
+					if tab.marked {tab_group_add(app, w, i, chip); break}
+				}
+			} else {
+				moved := make([dynamic]^Tab, 0, len(w.workspace.tabs), context.temp_allocator)
+				for tab in w.workspace.tabs {if tab.marked {append(&moved, tab)}}
+				tab_groups_settle(w.workspace, moved[:])
+				layout_state_touch(app)
+			}
 			drag_let_go(app, w, a)
 		case nil:
 			tab_drag_abandon(app, w, a)

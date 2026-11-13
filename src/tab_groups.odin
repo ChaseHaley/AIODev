@@ -85,11 +85,15 @@ tab_groups_tidy :: proc(workspace: ^Workspace) {
 		tab_group_destroy(&workspace.groups[i])
 		ordered_remove(&workspace.groups, i)
 	}
+	// Whatever moved, the shown tab never ends up folded away.
+	selected := workspace.selected
+	if selected >= 0 && selected < len(tabs) {_ = tab_group_reveal(workspace, selected)}
 }
 
 // What a block of tabs that just moved together keeps or joins, where it now lies. Landing between two tabs
-// of one group joins that group. Otherwise each tab keeps its group while a tab beside the block shares it,
-// or while the block holds all of that group, which then moves as a whole; any other tab leaves its group.
+// of one group joins that group. Otherwise a tab keeps its group while an unbroken run of that group joins
+// it to the tab beside the block that shares it, or while the block holds all of that group, which then
+// moves as a whole; any other tab leaves its group.
 tab_groups_settle :: proc(workspace: ^Workspace, moved: []^Tab) {
 	if len(moved) == 0 {return}
 	first, _ := slice.linear_search(workspace.tabs[:], moved[0])
@@ -99,14 +103,20 @@ tab_groups_settle :: proc(workspace: ^Workspace, moved: []^Tab) {
 	if left != 0 && left == right {
 		for tab in moved {tab.group = left}
 	} else {
-		for tab in moved {
-			if tab.group == 0 || tab.group == left || tab.group == right {continue}
+		keep := make([]bool, len(moved), context.temp_allocator)
+		for tab, i in moved {
+			group := tab.group
+			if group == 0 {continue}
+			touching_left, touching_right := group == left, group == right
+			for before in moved[:i] {touching_left &&= before.group == group}
+			for after in moved[i + 1:] {touching_right &&= after.group == group}
 			whole := true
 			for other in workspace.tabs {
-				if other.group == tab.group && !slice.contains(moved, other) {whole = false; break}
+				if other.group == group && !slice.contains(moved, other) {whole = false; break}
 			}
-			if !whole {tab.group = 0}
+			if keep != nil {keep[i] = touching_left || touching_right || whole}
 		}
+		for tab, i in moved {if keep == nil || !keep[i] {tab.group = 0}}
 	}
 	tab_groups_tidy(workspace)
 }
@@ -321,8 +331,14 @@ tab_group_close :: proc(app: ^App, w: ^Window, id: u32) {
 		tab.marked = tab.group == id
 		if tab.marked && first < 0 {first = i}
 	}
+	// Closing every tab can retire the window, and the marks with it.
+	window := w.id
 	if first >= 0 {tab_close_request(app, w, first, &restore)}
-	tab_close_restore(w, &restore)
+	if current := window_find(app, window); current == w {
+		tab_close_restore(w, &restore)
+	} else {
+		delete(restore)
+	}
 }
 
 // Opens a tab at the end of group `id` and shows it.

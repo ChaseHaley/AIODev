@@ -43,7 +43,11 @@ tab_strip_x :: proc(w: ^Window, bar: ui.Tab_Bar, index: int) -> f32 {
 }
 
 window_tab_rect :: proc(app: ^App, w: ^Window, index: int) -> render.Rect {
-	bar := window_tab_bar(app, w)
+	return tab_strip_rect(w, window_tab_bar(app, w), index)
+}
+
+// Tab `index`'s rect in `bar`, so a caller holding the bar does not lay the strip out again.
+tab_strip_rect :: proc(w: ^Window, bar: ui.Tab_Bar, index: int) -> render.Rect {
 	if index < 0 || index >= bar.count {return {}}
 	return {tab_strip_x(w, bar, index), 0, bar.tab_width, bar.height}
 }
@@ -53,7 +57,11 @@ window_tab_new_rect :: proc(app: ^App, w: ^Window) -> render.Rect {
 }
 
 window_tab_close_rect :: proc(app: ^App, w: ^Window, index: int) -> render.Rect {
-	bar := window_tab_bar(app, w)
+	return tab_strip_close_rect(w, window_tab_bar(app, w), index)
+}
+
+@(private = "file")
+tab_strip_close_rect :: proc(w: ^Window, bar: ui.Tab_Bar, index: int) -> render.Rect {
 	if index < 0 || index >= bar.count {return {}}
 	return ui.tab_close_rect(bar, tab_strip_x(w, bar, index), w.scale)
 }
@@ -64,7 +72,7 @@ window_tab_hit :: proc(app: ^App, w: ^Window, bar: ui.Tab_Bar, x, y: f32) -> Tab
 		for i := bar.count - 1; i >= 0; i -= 1 {
 			foreground := tab_drag_active(w) && w.workspace.tabs[i].marked
 			if foreground != (pass == 0) || !foreground && !tab_shown(w.workspace, i) {continue}
-			r := window_tab_rect(app, w, i)
+			r := tab_strip_rect(w, bar, i)
 			if x >= r.x && x < r.x + r.width {return Tab_Chrome_Tab{i}}
 		}
 	}

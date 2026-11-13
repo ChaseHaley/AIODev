@@ -386,15 +386,12 @@ workspace_close_tab :: proc(app: ^App, workspace: ^Workspace, original_index: in
 	// The record leaves the list and selection names a remaining tab before anything can observe either.
 	ordered_remove(&workspace.tabs, index)
 	workspace.selected = tab_selected_after_remove(workspace.selected, index, len(workspace.tabs))
-	tab_groups_tidy(workspace)
-	// A close never uncovers a folded tab: the nearest shown one takes its place, unless none shows.
+	// A close never uncovers a folded tab: the nearest shown one takes its place. With none shown, tidying
+	// unfolds the selected tab's group.
 	if len(workspace.tabs) > 0 && !tab_shown(workspace, workspace.selected) {
-		if next := tab_nearest_shown(workspace, workspace.selected); next >= 0 {
-			workspace.selected = next
-		} else {
-			_ = tab_group_reveal(workspace, workspace.selected)
-		}
+		if next := tab_nearest_shown(workspace, workspace.selected); next >= 0 {workspace.selected = next}
 	}
+	tab_groups_tidy(workspace)
 	tab_record_free(tab)
 	workspace_mutation_finish(app, workspace, {.Structure})
 	for i := len(app.windows) - 1; i >= 0; i -= 1 {

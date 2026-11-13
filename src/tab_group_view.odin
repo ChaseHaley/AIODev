@@ -59,6 +59,17 @@ tab_layout :: proc(app: ^App, w: ^Window, horizontal: bool) -> Tab_Layout {
 		if carried || group == nil || !group.folded {result.slots += 1}
 	}
 	result.runs = runs[:]
+	// Chips take at most half the strip, shrinking together and fading their names, so tabs stay usable.
+	if horizontal && result.chips > 0 {
+		strip := (f32(w.width) - window_caption_reserve(w) - workspace_button_width(app, w)) / w.scale
+		budget := max(0, strip / 2)
+		if result.chips > budget {
+			factor := budget / result.chips
+			for &place in places {place.offset *= factor}
+			for &run in result.runs {run.width *= factor}
+			result.chips = budget
+		}
+	}
 	return result
 }
 
@@ -75,7 +86,7 @@ tab_chip :: proc(app: ^App, w: ^Window, group: ^Tab_Group) -> ui.Tab_Chip {
 	for tab, i in w.workspace.tabs {
 		if tab.group != group.id {continue}
 		chip.count += 1
-		if !app.settings.status.enabled || !app.settings.status.tab_indicators {continue}
+		if !app.settings.status.enabled || .Tabs not_in app.settings.status.surfaces {continue}
 		walk := tab_session_panes(app, &tab.tree, i)
 		for pane, ok := workspace_pane_next(&walk); ok; pane, ok = workspace_pane_next(&walk) {
 			status_summary_add(app, &summary, pane.session)
@@ -100,8 +111,25 @@ tab_band_color :: proc(app: ^App, w: ^Window, index: int) -> render.Color {
 tab_chip_strip_rect :: proc(w: ^Window, bar: ui.Tab_Bar, run: Tab_Run) -> render.Rect {
 	margin := ui.TAB_CHIP_MARGIN * w.scale
 	right := tab_strip_x(w, bar, run.first) - margin
-	width := run.width * w.scale - 2 * margin
+	width := max(0, run.width * w.scale - 2 * margin)
 	return {right - width, 0, width, bar.height}
+}
+
+// The group whose chip lies under the point, in the strip or the rail, or 0.
+tab_chip_at :: proc(app: ^App, w: ^Window, x, y: f32) -> u32 {
+	if w.tabs_horizontal {
+		bar := window_tab_bar(app, w)
+		for run in tab_layout(app, w, true).runs {
+			if render.rect_contains(tab_chip_strip_rect(w, bar, run), x, y) {return run.group.id}
+		}
+		return 0
+	}
+	rail, ok := rail_layout_query(w)
+	if !ok {return 0}
+	for run in tab_layout(nil, w, false).runs {
+		if render.rect_contains(tab_chip_rail_rect(w, rail, run), x, y) {return run.group.id}
+	}
+	return 0
 }
 
 // Run `run`'s chip in the rail, in the row above its first tab as that tab moves.

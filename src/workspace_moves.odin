@@ -309,7 +309,8 @@ workspace_tabs_transfer :: proc(app: ^App, transfer: Workspace_Tab_Transfer) {
 	}
 	destination.selected = selected
 	destination.selection_anchor = destination.tabs[selected].id
-	_ = tab_group_reveal(destination, selected)
+	// The arrivals keep or join groups by the tabs beside them, as a drop within one strip does.
+	tab_groups_settle(destination, destination.tabs[at:at + len(transfer.tabs)])
 	if transfer.replacing == nil {return}
 	index, _ := slice.linear_search(destination.tabs[:], transfer.replacing)
 	ordered_remove(&destination.tabs, index)

@@ -495,12 +495,14 @@ layout_workspace_restore :: proc(
 			selected -= 1
 		}
 	}
-	tab_groups_tidy(workspace)
 	if len(workspace.tabs) == 0 {
 		_ = workspace_discard_empty(app, workspace)
 		return nil
 	}
-	workspace_tab_choose(workspace, clamp(selected, 0, len(workspace.tabs) - 1))
+	// Tidied once the saved tab is shown, so only its own group can unfold.
+	workspace.selected = clamp(selected, 0, len(workspace.tabs) - 1)
+	tab_groups_tidy(workspace)
+	workspace_tab_choose(workspace, workspace.selected)
 	return workspace
 }
 
