@@ -317,3 +317,63 @@ palette_frecency_follows_a_tab_by_id_through_a_rename :: proc(t: ^testing.T) {
 	testing.expect_value(t, titles(&p)[0], "gamma")
 	testing.expect_value(t, p.results[0].id, u64(2))
 }
+
+// Changing a setting in place counts as a use, once per opening however many steps it takes; the order
+// stays as it opened until the palette opens again.
+@(test)
+palette_inline_setting_changes_count_once_per_opening :: proc(t: ^testing.T) {
+	v: Control_Values
+	p: ui.Palette
+	registry := control_palette(t, &p, &v)
+	defer commands.destroy(&registry)
+	defer ui.palette_destroy(&p)
+	alt_right := key({key = .Arrow_Right, modifiers = {.Alt}})
+	select_setting(&p, "pane.gap")
+	for _ in 0 ..< 5 {
+		outcome, _ := ui.palette_key(&p, &registry, alt_right)
+		testing.expect_value(t, outcome, ui.Outcome.Set_Setting)
+	}
+	testing.expect_value(t, p.usage.settings.entries["pane.gap"].count, 1)
+	testing.expect(t, ui.palette_used_take(&p))
+	testing.expect(t, !ui.palette_used_take(&p))
+	testing.expect_value(t, ui.palette_frecency(&p, p.results[p.selected]), 0.0)
+	// Ctrl+Enter flips a toggle, and opening a list counts even when nothing is chosen.
+	select_setting(&p, "cursor.blink")
+	ui.palette_key(&p, &registry, key({key = .Enter, modifiers = {.Control}}))
+	select_setting(&p, "cursor.style")
+	ui.palette_key(&p, &registry, key({key = .Enter, modifiers = {.Control}}))
+	testing.expect_value(t, ui.palette_editing(&p), ui.Palette_Edit_Kind.Choice)
+	ui.palette_key(&p, &registry, key({key = .Escape}))
+	testing.expect_value(t, p.usage.settings.entries["cursor.blink"].count, 1)
+	testing.expect_value(t, p.usage.settings.entries["cursor.style"].count, 1)
+	testing.expect(t, "status.ignore_apps" not_in p.usage.settings.entries)
+
+	// Another opening counts again.
+	ui.palette_open_mode(&p, &registry, .Settings)
+	select_setting(&p, "pane.gap")
+	ui.palette_key(&p, &registry, alt_right)
+	ui.palette_key(&p, &registry, alt_right)
+	testing.expect_value(t, p.usage.settings.entries["pane.gap"].count, 2)
+	ui.palette_open_mode(&p, &registry, .Settings)
+	testing.expect_value(t, ui.palette_result_name(&p, p.results[0]), "pane.gap")
+	testing.expect_value(t, ui.palette_result_name(&p, p.results[1]), "cursor.blink")
+	testing.expect_value(t, ui.palette_result_name(&p, p.results[2]), "cursor.style")
+}
+
+@(test)
+palette_shortcut_editor_counts_its_command :: proc(t: ^testing.T) {
+	registry := registry_create(t)
+	defer commands.destroy(&registry)
+	p: ui.Palette
+	if !testing.expect_value(t, ui.palette_init(&p, nil), nil) {return}
+	defer ui.palette_destroy(&p)
+	ui.palette_open(&p, &registry)
+	ui.palette_text(&p, &registry, "copy")
+	ui.palette_key(&p, &registry, key({key = .Enter, modifiers = {.Control}}))
+	testing.expect_value(t, ui.palette_editing(&p), ui.Palette_Edit_Kind.Shortcut)
+	testing.expect_value(t, p.usage.commands.entries["edit.copy"].count, 1)
+	testing.expect(t, ui.palette_used_take(&p))
+	ui.palette_close(&p)
+	ui.palette_open(&p, &registry)
+	testing.expect_value(t, titles(&p)[0], "Copy")
+}

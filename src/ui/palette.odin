@@ -245,6 +245,10 @@ Palette :: struct {
 	usage:        Palette_Usage,
 	// When the palette opened, in Unix seconds. Frecency scores against it and records uses at it.
 	opened_at:    i64,
+	// The items this opening has counted a use of, at most once each, and whether one was recorded since
+	// palette_used_take last asked.
+	counted:      [dynamic]Palette_Use,
+	used:         bool,
 }
 
 // What the last outcome names for the owner: the setting to reveal (Open_Setting), the value to save
@@ -320,6 +324,7 @@ palette_init :: proc(
 	p.positions = make([dynamic]int, allocator)
 	p.chosen_value = make([dynamic]u8, allocator)
 	p.chosen_key = make([dynamic]u8, allocator)
+	p.counted = make([dynamic]Palette_Use, allocator)
 	edit_init(&p.buffers, allocator)
 	p.settings = settings
 	p.visible_rows = PALETTE_MAX_ROWS
@@ -342,6 +347,7 @@ palette_destroy :: proc(p: ^Palette) {
 	palette_browse_end(p)
 	query_history_destroy(&p.history)
 	palette_usage_destroy(&p.usage)
+	delete(p.counted)
 	delete(p.chosen_key)
 	free(p.scratch, p.query.bytes.allocator)
 	delete(p.query.bytes)
@@ -373,6 +379,7 @@ palette_open_mode :: proc(p: ^Palette, registry: ^commands.Registry, mode: Palet
 	palette_browse_end(p)
 	field_set(&p.query, "")
 	p.opened_at = now
+	clear(&p.counted)
 	p.selected, p.scroll = 0, 0
 	p.mode = mode
 	p.mode_hover = -1

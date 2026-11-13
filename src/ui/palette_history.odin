@@ -14,6 +14,14 @@ Palette_Usage :: struct {
 	tabs, workspaces:   frecency.Table(u64),
 }
 
+// One item a palette opening has counted: a command name or setting key, which the registry and schema
+// own for longer than any opening, or a tab or workspace id.
+Palette_Use :: struct {
+	kind: Palette_Kind,
+	name: string,
+	id:   u64,
+}
+
 Palette_History :: Query_History(Palette_Mode)
 
 // Any of these held turns Up and Down back into list keys.
@@ -32,45 +40,93 @@ palette_usage_empty :: proc(u: ^Palette_Usage) -> bool {
 	return tables + len(u.tabs.entries) + len(u.workspaces.entries) == 0
 }
 
-// The result's frecency when the palette opened; 0 for one never run.
+// The result's frecency when the palette opened; 0 for one never used. A use this opening counted was
+// recorded at opened_at, where it weighs exactly 1, so taking it back keeps the order fixed while the
+// palette stays open and a row the user is adjusting does not move.
 palette_frecency :: proc(p: ^Palette, r: Palette_Result) -> f64 {
+	use, usable := palette_result_use(p, r)
+	if !usable {return 0}
 	now := p.opened_at
-	switch r.kind {
+	score: f64
+	switch use.kind {
 	case .Command:
-		if r.command != nil {return frecency.lookup(&p.usage.commands, r.command.name, now)}
+		score = frecency.lookup(&p.usage.commands, use.name, now)
 	case .Setting:
-		if r.setting >= 0 && r.setting < len(p.settings) {
-			return frecency.lookup(&p.usage.settings, p.settings[r.setting].key, now)
-		}
+		score = frecency.lookup(&p.usage.settings, use.name, now)
 	case .Tab:
-		return frecency.lookup(&p.usage.tabs, r.id, now)
+		score = frecency.lookup(&p.usage.tabs, use.id, now)
 	case .Workspace:
-		return frecency.lookup(&p.usage.workspaces, r.id, now)
+		score = frecency.lookup(&p.usage.workspaces, use.id, now)
 	case .Unassigned:
 	}
-	return 0
+	for counted in p.counted {
+		if counted == use {return max(0, score - 1)}
+	}
+	return score
+}
+
+// The identity a result's uses count under; false for the Unassigned row.
+@(private)
+palette_result_use :: proc(p: ^Palette, r: Palette_Result) -> (Palette_Use, bool) {
+	switch r.kind {
+	case .Command:
+		if r.command != nil {return {kind = .Command, name = r.command.name}, true}
+	case .Setting:
+		if r.setting >= 0 && r.setting < len(p.settings) {
+			return {kind = .Setting, name = p.settings[r.setting].key}, true
+		}
+	case .Tab, .Workspace:
+		return {kind = r.kind, id = r.id}, true
+	case .Unassigned:
+	}
+	return {}, false
+}
+
+// Counts one use of an item: running or opening it, changing its value in place, or opening its
+// shortcut editor. Each item counts at most once per opening, so ten Alt+Right steps on a slider are
+// one use, like one Enter.
+@(private)
+palette_use :: proc(p: ^Palette, use: Palette_Use) {
+	for counted in p.counted {
+		if counted == use {return}
+	}
+	if _, err := append(&p.counted, use); err != nil {
+		log.warn("palette: no room to note a use")
+		return
+	}
+	now := p.opened_at
+	recorded := true
+	switch use.kind {
+	case .Command:
+		recorded = frecency.record(&p.usage.commands, use.name, now)
+	case .Setting:
+		recorded = frecency.record(&p.usage.settings, use.name, now)
+	case .Tab:
+		recorded = frecency.record(&p.usage.tabs, use.id, now)
+	case .Workspace:
+		recorded = frecency.record(&p.usage.workspaces, use.id, now)
+	case .Unassigned:
+	}
+	if !recorded {
+		log.warn("palette: no room to record a use")
+		pop(&p.counted)
+		return
+	}
+	p.used = true
+}
+
+// Whether a use was recorded since the owner last asked, so it can schedule saving the usage.
+palette_used_take :: proc(p: ^Palette) -> bool {
+	used := p.used
+	p.used = false
+	return used
 }
 
 // Counts one run of the result and records the query that found it.
 @(private)
 palette_record :: proc(p: ^Palette, r: Palette_Result) {
 	if p.keys.state == .Off {query_history_add(&p.history, palette_query(p), p.mode)}
-	now := p.opened_at
-	recorded := true
-	switch r.kind {
-	case .Command:
-		if r.command != nil {recorded = frecency.record(&p.usage.commands, r.command.name, now)}
-	case .Setting:
-		if r.setting >= 0 && r.setting < len(p.settings) {
-			recorded = frecency.record(&p.usage.settings, p.settings[r.setting].key, now)
-		}
-	case .Tab:
-		recorded = frecency.record(&p.usage.tabs, r.id, now)
-	case .Workspace:
-		recorded = frecency.record(&p.usage.workspaces, r.id, now)
-	case .Unassigned:
-	}
-	if !recorded {log.warn("palette: no room to record a use")}
+	if use, usable := palette_result_use(p, r); usable {palette_use(p, use)}
 }
 
 // Leaves history browsing, freeing the draft; the query keeps what browsing put there.

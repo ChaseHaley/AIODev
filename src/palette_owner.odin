@@ -271,17 +271,17 @@ palette_key_input :: proc(app: ^App, w: ^Window, e, logical: input.Key_Event) {
 on_palette_outcome :: proc(app: ^App, w: ^Window, outcome: ui.Outcome, id: commands.Command_Id) {
 	// The outcome that names a choice is the only one that may act on it.
 	chosen := ui.palette_chosen_take(&app.palette)
+	// Every palette interaction comes through here, so any use it recorded is saved.
+	if ui.palette_used_take(&app.palette) {palette_usage_touch(app)}
 	switch outcome {
 	case .None:
 	case .Changed, .Closed:
 		w.dirty = true
 	case .Run:
 		w.dirty = true
-		palette_usage_touch(app)
 		run_action(app, w, Action(id))
 	case .Open_Setting:
 		w.dirty = true
-		palette_usage_touch(app)
 		if setting, ok := chosen.(ui.Chosen_Setting); ok {
 			settings_reveal(
 				app,
