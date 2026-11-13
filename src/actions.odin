@@ -187,6 +187,7 @@ Action :: enum u32 {
 	Move_Pane_Tab_9,
 	Move_Pane_New_Tab,
 	Move_Pane_New_Window,
+	Arrange_Panes,
 }
 
 // Everything one command is: its name and title, default shortcuts, what it does when a linked window
@@ -700,6 +701,7 @@ ACTIONS :: [Action]Command_Descriptor {
 	},
 	.Move_Pane_New_Tab = {"pane.move_new_tab", "Move pane to new tab", nil, .Local, {}},
 	.Move_Pane_New_Window = {"pane.move_new_window", "Move pane to new window", nil, .Local, {}},
+	.Arrange_Panes = {"pane.arrange", "Arrange panes", nil, .Local, {}},
 }
 
 // What help says about a command beyond its usage and title: a summary, and the command's own help for
@@ -1323,6 +1325,8 @@ command_execute :: proc(app: ^App, ctx: Command_Context, invocation: commands.In
 		_ = pane_move_to_new_tab(app, w)
 	case .Move_Pane_New_Window:
 		_ = pane_move_to_new_window(app, w, selected_tab(w.workspace), window_tree(w).focus)
+	case .Arrange_Panes:
+		arrange_open(app, w)
 	case .Resize_Left, .Resize_Right, .Resize_Up, .Resize_Down, .Resize_Left_Large, .Resize_Right_Large,
 	     .Resize_Up_Large, .Resize_Down_Large:
 		step := param.resize

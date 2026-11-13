@@ -20,6 +20,7 @@ Window_Motion :: enum u8 {
 	Panes,
 	Workspace_Overview,
 	Pane_Drag,
+	Arrange,
 	Settings_Page,
 	Pane_Headers,
 	Float_Header,
@@ -56,6 +57,8 @@ window_motion_advance :: proc(app: ^App, w: ^Window, part: Window_Motion, frame:
 	case .Pane_Drag:
 		// It marks the window itself.
 		pane_drag_animate(app, w, app.animations, frame)
+	case .Arrange:
+		return arrange_animate(app, w, frame)
 	case .Settings_Page:
 		return ui.editor_animate(&w.editor, app.animations, frame)
 	case .Pane_Headers:
@@ -101,6 +104,8 @@ window_motion_running :: proc(w: ^Window, part: Window_Motion) -> bool {
 		return workspace_overview_animating(w)
 	case .Pane_Drag:
 		return pane_drag_animating(w)
+	case .Arrange:
+		return ui.presence_active(w.arrange)
 	case .Settings_Page:
 		return ui.editor_animating(&w.editor)
 	case .Pane_Headers:

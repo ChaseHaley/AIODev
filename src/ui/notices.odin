@@ -6,13 +6,13 @@ import "core:time"
 
 @(private)
 NOTICE_WIDTH :: 520
-@(private)
+// Notices keep this far from the window's edges, as does Arrange mode's key card.
 NOTICE_MARGIN :: 16
 @(private)
 NOTICE_PADDING :: 12
 @(private)
 NOTICE_MAX_LINES :: 4
-@(private)
+// A notice fades and rises in, and fades out; Arrange mode's key card shows and leaves the same way.
 NOTICE_PRESENCE :: Presence_Spec {
 	open  = 160 * time.Millisecond,
 	close = 120 * time.Millisecond,
