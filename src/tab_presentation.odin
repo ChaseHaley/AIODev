@@ -7,7 +7,7 @@ import "core:log"
 
 // What tab `index` of the window's workspace shows in the strip and in the rail: its title, the
 // focused pane's content icon or program badge with the most telling other pane's stacked behind it,
-// and its program status.
+// its program status, and its label's turn while focus moves between its panes (tab_label.odin).
 tab_tile :: proc(app: ^App, w: ^Window, index: int) -> (ui.Tab_Tile, render.Build_Status) {
 	tab := w.workspace.tabs[index]
 	status := status_tab_mark(app, w, w.workspace, index)
@@ -24,11 +24,28 @@ tab_tile :: proc(app: ^App, w: ^Window, index: int) -> (ui.Tab_Tile, render.Buil
 	front, has_front := layout.focused_content(&tab.tree)
 	if !has_front {return t, .Ok}
 	behind, stacked := tab_pane_behind(app, tab, index)
-	size := (stacked ? ui.TAB_STACK_MARK : ui.ICON_BUTTON) * w.scale
 	result: render.Build_Status
-	t.badge, result = tab_content_badge(app, front, size)
-	if result == .Ok && stacked {t.behind, result = tab_content_badge(app, behind.content, size)}
-	return t, result
+	t.badge, t.behind, result = tab_marks(app, w, front, behind.content, stacked)
+	if result != .Ok {return t, result}
+	back: Maybe(layout.Content)
+	if stacked {back = behind.content}
+	return t, tab_label_turn_shown(app, w, index, front, back, &t)
+}
+
+// The badges of a label showing `front`, stacked over `behind` when `stacked`.
+tab_marks :: proc(
+	app: ^App,
+	w: ^Window,
+	front, behind: layout.Content,
+	stacked: bool,
+) -> (
+	badge, back: ui.Tab_Badge,
+	result: render.Build_Status,
+) {
+	size := (stacked ? ui.TAB_STACK_MARK : ui.ICON_BUTTON) * w.scale
+	badge = tab_content_badge(app, front, size) or_return
+	if stacked {back = tab_content_badge(app, behind, size) or_return}
+	return
 }
 
 @(private = "file")
@@ -103,6 +120,8 @@ Tab_Presentation :: struct {
 	tab_positions:    [dynamic]ui.Motion,
 	// Each tab's strip offset in DIPs, for the group chips before it.
 	tab_offsets:      [dynamic]ui.Motion,
+	// What each tab's label shows and how it turns, by the tab's id, in no particular order; see Tab_Label.
+	tab_labels:       [dynamic]Tab_Label,
 	new_tab_control:  ui.Control_Motion,
 	profiles_control: ui.Control_Motion,
 	// The orientation the motions last aimed for, none before the first. Slots mean different things in the
@@ -151,12 +170,14 @@ tab_presentation_init :: proc(presentation: ^Tab_Presentation) {
 	presentation.tab_controls = make([dynamic]Tab_Control)
 	presentation.tab_positions = make([dynamic]ui.Motion)
 	presentation.tab_offsets = make([dynamic]ui.Motion)
+	presentation.tab_labels = make([dynamic]Tab_Label)
 }
 
 tab_presentation_destroy :: proc(presentation: ^Tab_Presentation) {
 	delete(presentation.tab_controls)
 	delete(presentation.tab_positions)
 	delete(presentation.tab_offsets)
+	delete(presentation.tab_labels)
 	presentation^ = {}
 }
 
@@ -166,6 +187,7 @@ tab_presentation_clear :: proc(presentation: ^Tab_Presentation) {
 	clear(&presentation.tab_controls)
 	clear(&presentation.tab_positions)
 	clear(&presentation.tab_offsets)
+	clear(&presentation.tab_labels)
 	presentation.new_tab_control, presentation.profiles_control = {}, {}
 }
 
@@ -185,7 +207,8 @@ tab_presentation_resize :: proc(presentation: ^Tab_Presentation, tab_count: int)
 }
 
 // Advances the window's tab motion: tabs easing into their slots, the ghost of tabs arriving from
-// another window, the selection underline and the strip controls. True when the window must draw again.
+// another window, the selection underline, the strip controls and labels turning to another pane. True when
+// the window must draw again.
 tab_presentation_animate :: proc(app: ^App, w: ^Window, frame: ui.Frame_Time) -> bool {
 	changed := false
 	if shown, aimed := w.presentation.horizontal.?; aimed && shown != w.tabs_horizontal {
@@ -227,6 +250,7 @@ tab_presentation_animate :: proc(app: ^App, w: ^Window, frame: ui.Frame_Time) ->
 	changed = tab_strip_control_update(app, w, &w.new_tab_control, Tab_Chrome_New{}, frame) || changed
 	changed = tab_strip_control_update(app, w, &w.profiles_control, Tab_Chrome_Profiles{}, frame) || changed
 	changed = ui.motion_update(&w.tab_underline_offset, frame) || changed
+	changed = tab_labels_update(app, w, frame, animate) || changed
 	return ui.motion_update(&w.tab_underline, frame) || changed
 }
 
@@ -239,7 +263,7 @@ tab_presentation_animating :: proc(w: ^Window) -> bool {
 	if ui.control_active(w.new_tab_control) || ui.control_active(w.profiles_control) {return true}
 	for position in w.tab_positions {if ui.motion_active(position) {return true}}
 	for offset in w.tab_offsets {if ui.motion_active(offset) {return true}}
-	return false
+	return tab_labels_turning(w)
 }
 
 // Holds the strip's tab width and end, or the rail's footer, where they show now, so a fold starting eases
