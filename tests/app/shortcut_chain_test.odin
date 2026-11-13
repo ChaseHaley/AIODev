@@ -34,7 +34,7 @@ chain_expect_saved :: proc(t: ^testing.T, s: ^app.App, text: string) {
 	testing.expect(t, len(saved) > 0 && saved[len(saved) - 1].text == "Saved" && saved[len(saved) - 1].action == "Undo")
 }
 
-// Find takes Ctrl+Shift+P, Show command palette then takes Copy's Ctrl+Shift+C, and removing Copy's
+// Find takes Ctrl+Shift+P, Show everything palette then takes Copy's Ctrl+Shift+C, and removing Copy's
 // Ctrl+Shift+C saves all three in one write; Ctrl+Z puts the file back in one write.
 @(test)
 settings_conflict_chain_saves_the_owners_example_and_undoes_it_as_one_write :: proc(t: ^testing.T) {
@@ -48,7 +48,7 @@ settings_conflict_chain_saves_the_owners_example_and_undoes_it_as_one_write :: p
 	if !testing.expect_value(t, ui.editor_row(p).key, "keys.terminal.find") {return}
 	before := chain_file(t, &f)
 	chain_keys(s, {key = .Enter}, {key = .Enter}, {key = .P, modifiers = {.Control, .Shift}})
-	testing.expect_value(t, ui.shortcut_capture_used_by(&p.capture), "Used by Show command palette")
+	testing.expect_value(t, ui.shortcut_capture_used_by(&p.capture), "Used by Show everything palette")
 	testing.expect(t, !ui.editor_chained(p), "recording only notes the clash")
 	chain_keys(s, {key = .Enter})
 	if !testing.expect(t, ui.editor_chained(p)) {return}
@@ -87,7 +87,7 @@ palette_conflict_chain_saves_the_owners_example_and_undoes_it_as_one_write :: pr
 	p.selected = find
 	before := chain_file(t, &f)
 	chain_keys(s, {key = .Enter, modifiers = {.Control}}, {key = .Enter}, {key = .P, modifiers = {.Control, .Shift}})
-	testing.expect_value(t, ui.palette_used_by(p), "Used by Show command palette")
+	testing.expect_value(t, ui.palette_used_by(p), "Used by Show everything palette")
 	chain_keys(s, {key = .Enter})
 	if !testing.expect_value(t, ui.palette_editing(p), ui.Palette_Edit_Kind.Chain) {return}
 	testing.expect_value(t, len(p.results), 2)

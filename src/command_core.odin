@@ -537,7 +537,7 @@ control_workspace_rename :: proc(app: ^App, workspace: ^Workspace, name: string)
 		return {}
 	case .Empty:
 		return outcome_failure(.Usage, "a workspace name cannot be empty")
-	case .Missing, .Failed:
+	case .Missing, .Failed, .Taken:
 	}
 	return outcome_failure(.Failed, "could not rename the workspace")
 }

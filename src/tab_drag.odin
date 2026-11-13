@@ -135,15 +135,15 @@ tab_drag_move_strip :: proc(app: ^App, w: ^Window, x: f32) -> bool {
 	count := 0
 	for tab in d.order {if tab.marked {count += 1}}
 	if len(d.order) - count <= 0 {return true}
-	// Past a group at the strip's end the tabs may pull a little further, showing them coming loose.
-	room := max(0, bar.end - bar.x - f32(count) * bar.tab_width)
-	if tab_drag_end_grouped(w) {room += GROUP_DETACH_TRAVEL * bar.tab_width}
-	edge := clamp(x - bar.x - d.offset.x - f32(d.rank) * bar.tab_width, 0, room)
 	layout := tab_layout(app, w, true)
-	slot := tab_drag_slot(w, layout, edge, bar.tab_width, w.scale)
-	tab_drag_join(w, d, layout, edge, f32(count) * bar.tab_width, bar.tab_width, w.scale)
-	if !tab_drag_apply_slot(app, w, slot) {return true}
-	tab_drag_follow_pointer(w, edge / bar.tab_width)
+	items := tab_drag_items(w, layout, bar.tab_width, w.scale, d.whole)
+	// A whole group's block starts at its chip, before its first tab.
+	chip: f32
+	if d.whole {for run in layout.runs {if run.carried {chip = run.width * w.scale; break}}}
+	room := tab_drag_room(w, d, items, bar.tab_width)
+	start := clamp(x - bar.x - d.offset.x - f32(d.rank) * bar.tab_width - chip, 0, room)
+	if !tab_drag_aim(app, w, d, items, start, bar.tab_width) {return true}
+	tab_drag_follow_pointer(w, (start + chip) / bar.tab_width)
 	return true
 }
 
@@ -180,20 +180,103 @@ tab_drag_move_rail :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {
 	count := 0
 	for tab in d.order {if tab.marked {count += 1}}
 	if len(d.order) - count <= 0 {return true}
-	places := tab_layout(nil, w, false)
-	rows := f32(max(0, places.slots - count))
-	if tab_drag_end_grouped(w) {rows += GROUP_DETACH_TRAVEL}
+	items := tab_drag_items(w, tab_layout(nil, w, false), 1, 0, d.whole)
+	// A whole group's block starts at its chip's row, above its first tab.
+	chip := f32(d.whole ? 1 : 0)
+	room := tab_drag_room(w, d, items, 1)
 	first_row := ui.rail_row_rect(layout, 0)
-	first :=
-		(y - first_row.y) / layout.row_height -
-		d.offset.y -
-		f32(d.rank)
-	first = clamp(first, 0, rows)
-	tab_drag_join(w, d, places, first, f32(count), 1, 0)
-	if !tab_drag_apply_slot(app, w, tab_drag_slot(w, places, first, 1, 0)) {return true}
-	first = clamp(first + (w.rail_scroll - layout.scroll) / layout.row_height, 0, rows)
-	tab_drag_follow_pointer(w, first)
+	start := clamp((y - first_row.y) / layout.row_height - d.offset.y - f32(d.rank) - chip, 0, room)
+	if !tab_drag_aim(app, w, d, items, start, 1) {return true}
+	tab_drag_follow_pointer(w, start + chip + (w.rail_scroll - layout.scroll) / layout.row_height)
 	return true
+}
+
+// One thing dragged tabs pass among the tabs at rest (WORK-459): a group's chip, a tab, or in a whole
+// group's drag, an ungrouped tab or a whole other group, chip and all. `tabs` counts the tabs it stands
+// for, so a folded group's chip stands for its hidden tabs; `size` is its room in the strip's pixels or
+// the rail's rows.
+@(private = "file")
+Drag_Item :: struct {
+	group: u32,
+	chip:  bool,
+	tabs:  int,
+	size:  f32,
+}
+
+// The items the marked tabs pass, in order, in temporary memory: a tab is `unit` long, and in the strip, with
+// `scale`, a chip takes its run's room in `layout`; in the rail a chip takes a row.
+@(private = "file")
+tab_drag_items :: proc(w: ^Window, layout: Tab_Layout, unit, scale: f32, whole: bool) -> []Drag_Item {
+	workspace := w.workspace
+	items := make([dynamic]Drag_Item, 0, len(workspace.tabs) + len(layout.runs), context.temp_allocator)
+	previous: u32
+	for tab in workspace.tabs {
+		if tab.marked {continue}
+		group := tab_group_find(workspace, tab.group)
+		if group != nil && tab.group != previous {
+			size := unit
+			if scale > 0 {
+				for run in layout.runs {if run.group == group && !run.carried {size = run.width * scale}}
+			}
+			append(&items, Drag_Item{group = tab.group, chip = true, size = size})
+		}
+		previous = tab.group
+		if group != nil && (group.folded || whole) {
+			chip := &items[len(items) - 1]
+			chip.tabs += 1
+			if !group.folded {chip.size += unit}
+			continue
+		}
+		append(&items, Drag_Item{group = tab.group, tabs = 1, size = unit})
+	}
+	return items[:]
+}
+
+// How far along the items the dragged block may start: up to their end, and a little past a group ending
+// them, which tabs dragged on their own pull loose from.
+@(private = "file")
+tab_drag_room :: proc(w: ^Window, d: ^Tab_Carry, items: []Drag_Item, unit: f32) -> f32 {
+	room: f32
+	for item in items {room += item.size}
+	if !d.whole && tab_drag_end_grouped(w) {room += GROUP_DETACH_TRAVEL * unit}
+	return room
+}
+
+// Puts the dragged block, starting `start` along the items, where it passes them, and for tabs dragged on
+// their own, into the group it would join there. The block passes an item once its start passes the item's
+// middle, a chip as a tab. Just after a group's chip, or between two of its tabs, it is in that group. Just
+// after a group's last tab it stays in the group until its start is GROUP_DETACH_MARGIN of a tab past the
+// group's end, and comes into it only that far inside, so neither flickers. A folded group is passed whole.
+// False when the tabs could not be moved.
+@(private = "file")
+tab_drag_aim :: proc(app: ^App, w: ^Window, d: ^Tab_Carry, items: []Drag_Item, start, unit: f32) -> bool {
+	slot, passed := 0, 0
+	at: f32
+	for item in items {
+		if start < at + item.size / 2 {break}
+		at += item.size
+		slot += item.tabs
+		passed += 1
+	}
+	if !d.whole {
+		group: u32
+		if passed > 0 {
+			before := items[passed - 1]
+			switch {
+			case before.chip:
+				if before.tabs == 0 {group = before.group}
+			case before.group == 0:
+			case passed < len(items) && items[passed].group == before.group:
+				group = before.group
+			case:
+				margin := GROUP_DETACH_MARGIN * unit
+				if start < at + (d.group == before.group ? margin : -margin) {group = before.group}
+			}
+		}
+		if group != d.group {w.dirty = true}
+		d.group = group
+	}
+	return tab_drag_apply_slot(app, w, slot)
 }
 
 tab_drag_cancel :: proc(app: ^App, w: ^Window) {
@@ -263,8 +346,8 @@ tab_drag_finish :: proc(app: ^App, w: ^Window) {
 	if window_find(app, id) != nil {rail_overlay_dismiss(app, w)}
 }
 
-// How far dragged tabs may pull past a group ending the tabs, and how far past a group's edge, in tab widths
-// or rows, their block's middle must go to leave the group or to join another.
+// How far dragged tabs may pull past a group ending the tabs, and how far past a group's end, in tab widths
+// or rows, their block's start must go to leave the group or come inside to join it.
 GROUP_DETACH_TRAVEL :: f32(0.6)
 GROUP_DETACH_MARGIN :: f32(0.3)
 
@@ -293,38 +376,4 @@ tab_drag_group :: proc(app: ^App, w: ^Window, moved: []^Tab, carry: Tab_Carry) {
 	}
 	for tab in moved {tab.group = target}
 	tab_groups_tidy(workspace)
-}
-
-// Aims the dragged block, `size` long from `start`, at the group whose chip and tabs, as they rest without
-// it, surround its middle. The group it is in holds it until its middle passes the edge by a margin, and
-// another takes it only once its middle passes that much inside, so neither flickers at an edge. Units are
-// tab_drag_slot's.
-@(private = "file")
-tab_drag_join :: proc(w: ^Window, d: ^Tab_Carry, layout: Tab_Layout, start, size, unit, scale: f32) {
-	if d.whole {return}
-	middle := start + size / 2
-	found: u32
-	for run in layout.runs {
-		lifted, first, last: f32 = 0, -1, -1
-		for tab, i in w.workspace.tabs {
-			if tab.marked {
-				if tab_shown(w.workspace, i) {lifted += 1}
-				continue
-			}
-			if tab.group != run.group.id || i >= len(layout.places) {continue}
-			place := layout.places[i]
-			at := (place.slot - lifted) * unit + place.offset * scale
-			if first < 0 {first = at}
-			last = at
-		}
-		if first < 0 {continue}
-		chip := scale > 0 ? run.width * scale : unit
-		begin, end := first - chip, last + (run.group.folded ? 0 : unit)
-		reach := size / 2 + (run.group.id == d.group ? 1 : -1) * GROUP_DETACH_MARGIN * unit
-		if middle < begin - reach || middle >= end + reach {continue}
-		if run.group.id == d.group {return}
-		if found == 0 {found = run.group.id}
-	}
-	if d.group != found {w.dirty = true}
-	d.group = found
 }

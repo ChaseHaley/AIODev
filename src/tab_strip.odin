@@ -12,6 +12,19 @@ _ :: settings
 // workspace chip and the caption controls, so both the tab bar and the controls end read the same
 // layout. Vertical mode uses the rail instead.
 window_tab_bar :: proc(app: ^App, w: ^Window) -> ui.Tab_Bar {
+	bar := window_tab_bar_rest(app, w)
+	// While a group folds the tabs' width and the strip's end ease with the tabs, so the tabs start from where
+	// they were and New tab moves with them (WORK-454). They hold from the fold's first frame, before the
+	// motions take their targets.
+	if w.folding != 0 && w.strip_width.value > 0 {
+		bar.tab_width = w.strip_width.value
+		bar.end = w.strip_end.value
+	}
+	return bar
+}
+
+// The strip as the tabs will rest.
+window_tab_bar_rest :: proc(app: ^App, w: ^Window) -> ui.Tab_Bar {
 	if w.workspace == nil {return {}}
 	left := workspace_button_width(app, w)
 	layout := tab_layout(app, w, true)
@@ -36,9 +49,25 @@ tab_position :: proc(w: ^Window, index: int) -> f32 {
 	return index >= 0 && index < len(w.tab_positions) ? w.tab_positions[index].value : f32(index)
 }
 
-// Where tab `index` draws in the strip, following its motion.
+// Where tab `index` draws in the strip, following its motion. While a group folds, the tabs' width eases
+// with their places, and a place times a width would bow off a straight path, starting some tabs too far
+// right; each tab instead goes straight from where it drew to where it rests, at the fold's pace.
 tab_strip_x :: proc(w: ^Window, bar: ui.Tab_Bar, index: int) -> f32 {
 	offset := index >= 0 && index < len(w.tab_offsets) ? w.tab_offsets[index].value : 0
+	width := w.strip_width
+	if w.folding != 0 && width.value > 0 && ui.motion_active(width) && width.target != width.from &&
+	   index >= 0 && index < len(w.tab_positions) && index < len(w.tab_offsets) {
+		ends :: proc(m: ui.Motion) -> (from, to: f32) {
+			if ui.motion_active(m) {return m.from, m.target}
+			return m.value, m.value
+		}
+		slot_from, slot_to := ends(w.tab_positions[index])
+		offset_from, offset_to := ends(w.tab_offsets[index])
+		from := slot_from * width.from + offset_from * w.scale
+		to := slot_to * width.target + offset_to * w.scale
+		pace := (width.value - width.from) / (width.target - width.from)
+		return bar.x + from + (to - from) * pace
+	}
 	return bar.x + tab_position(w, index) * bar.tab_width + offset * w.scale
 }
 
@@ -149,12 +178,28 @@ window_tab_strip_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 	bar := window_tab_bar(app, w)
 	if bar.count == 0 {return .Ok}
 	dragging := tab_drag_active(w)
-	runs := tab_layout(app, w, true).runs
+	layout := tab_layout(app, w, true)
+	runs := layout.runs
+	// The folding group's tray and chip draw over its tabs, which the tray clips as it gathers.
+	folding: Maybe(Tab_Run)
 	if render.push_layer(&w.list, {bar.x, 0, bar.width, bar.height}) == .None {
 		for run in runs {
 			if run.carried {continue}
-			result := tab_chip_draw(app, w, run, tab_chip_strip_rect(w, bar, run))
+			if run.group.id == w.folding {folding = run; continue}
+			result := tab_chip_strip_draw(app, w, bar, run, tab_chip_strip_rect(w, bar, run))
 			if result != .Ok {return result}
+		}
+		// The gap a tab dragged on its own leaves lies on the tray of the group it would join.
+		y, height := ui.tab_tray_band(bar.height, w.scale)
+		_, carry := tab_drag_state(w)
+		for tab, i in w.workspace.tabs {
+			if carry == nil || carry.whole || !tab.marked || i >= len(layout.places) {continue}
+			color, ends := tab_tray_place(app, w, i)
+			if color.a <= 0 {continue}
+			x := bar.x + layout.places[i].slot * bar.tab_width + layout.places[i].offset * w.scale
+			if ui.tab_tray_draw(&w.list, {x, y, bar.tab_width, height}, color, ends, .Rest, false, w.scale) != .None {
+				return .Ok
+			}
 		}
 	}
 	// Tabs pulled out of a group ending the strip ride over the New Tab and profile buttons, which give way.
@@ -171,6 +216,12 @@ window_tab_strip_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 			if (dragging && tab.marked) != foreground {continue}
 			clip, sliding := tab_fold_clip(app, w, i)
 			if !tab_shown(w.workspace, i) && !sliding {continue}
+			if run, gathering := folding.?; gathering && sliding {
+				shape := strip_fold_rect(app, w, bar, layout, run)
+				left := max(clip.x, shape.x)
+				right := min(clip.x + clip.width, shape.x + shape.width)
+				clip = {left, clip.y, max(0, right - left), clip.height}
+			}
 			if sliding && render.push_layer(&w.list, clip) != .None {continue}
 			tile, built := tab_tile(app, w, i)
 			if built != .Ok {return built}
@@ -190,11 +241,19 @@ window_tab_strip_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 			if sliding {_ = render.push_layer(&w.list, {bar.x, 0, bar.width, bar.height})}
 		}
 	}
+	gather, gathering := folding.?
+	if gathering && render.push_layer(&w.list, {bar.x, 0, bar.width, bar.height}) == .None {
+		shape := strip_fold_rect(app, w, bar, layout, gather)
+		color, state := tab_group_color(app, gather.group), tab_group_state(w, gather.group.id)
+		ui.tab_tray_fold_draw(&w.list, shape, color, state, w.fold.value, w.scale)
+		if result := tab_chip_draw(app, w, gather, strip_chip_rest_rect(w, bar, layout, gather), bare = true);
+		   result != .Ok {return result}
+	}
 	// A dragged group's chip rides in front of its tabs.
 	if dragging && render.push_layer(&w.list, {bar.x, 0, bar.width, bar.height}) == .None {
 		for run in runs {
 			if !run.carried {continue}
-			result := tab_chip_draw(app, w, run, tab_chip_strip_rect(w, bar, run))
+			result := tab_chip_strip_draw(app, w, bar, run, tab_chip_strip_rect(w, bar, run))
 			if result != .Ok {return result}
 		}
 	}

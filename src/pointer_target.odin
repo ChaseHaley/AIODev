@@ -22,7 +22,7 @@ Pointer_Target :: enum u8 {
 	Caption,
 	// An open confirmation takes the rest of the window.
 	Confirmation,
-	// The command palette takes the rest of the window while it is open.
+	// The everything palette takes the rest of the window while it is open.
 	Palette,
 	Tab_Orientation,
 	Title_Action,

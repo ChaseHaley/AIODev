@@ -507,15 +507,19 @@ layout_workspace_restore :: proc(
 }
 
 // The saved groups, each kept on its own: one with an unknown colour, a damaged name or an id already taken
-// is skipped, and its tabs come back ungrouped.
+// is skipped, and its tabs come back ungrouped. One whose name and colour an earlier group has, as layouts
+// from before WORK-460 may hold, takes the next colour free for its name, and is skipped with none free.
 @(private)
 layout_groups_restore :: proc(workspace: ^Workspace, saved: []Saved_Tab_Group) {
 	for group in saved {
 		if group.id == 0 || tab_group_find(workspace, group.id) != nil {continue}
 		if group.color < 1 || group.color >= len(WORKSPACE_ICON_COLORS) || !utf8.valid_string(group.name) {continue}
+		color := group.color
+		if tab_group_taken(workspace, group.name, color) {color = tab_group_next_color(workspace, group.name)}
+		if color == 0 {continue}
 		name, err := strings.clone(group.name)
 		if err != nil {continue}
-		if _, err = append(&workspace.groups, Tab_Group{group.id, name, group.color, group.folded}); err != nil {
+		if _, err = append(&workspace.groups, Tab_Group{group.id, name, color, group.folded}); err != nil {
 			delete(name)
 			continue
 		}

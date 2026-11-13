@@ -7,8 +7,8 @@ Presence_Spec :: struct {
 	open, close: time.Duration,
 }
 
-// Surfaces centred over a scrim, the command palette and confirmations, open and close alike, and
-// sink RISE_DIALOG as they fade.
+// Surfaces centred over a scrim, the everything palette and confirmations, open and close alike,
+// and sink RISE_DIALOG as they fade.
 DIALOG_PRESENCE :: Presence_Spec {
 	open  = 120 * time.Millisecond,
 	close = 90 * time.Millisecond,
