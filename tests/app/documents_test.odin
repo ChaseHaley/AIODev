@@ -566,6 +566,8 @@ dragging_a_pinned_link_reorders_it_within_its_level :: proc(t: ^testing.T) {
 	move(s, w, x, y + 2 * r.height)
 	lift, lifted := menu.order.(app.Document_Order_Lift)
 	testing.expect(t, lifted && lift.row == first && lift.to == first + 2)
+	// The highlight is on the lifted row, not the row sliding into its slot.
+	testing.expect_value(t, ui.menu_selected(&menu.menu), first)
 	tab_order(t, scopes, {"https://a.example", "https://b.example", "https://c.example"})
 	button(s, w, x, y + 2 * r.height, false)
 	tab_order(t, scopes, {"https://b.example", "https://c.example", "https://a.example"})
