@@ -302,6 +302,122 @@ the_rail_gives_each_chip_the_row_above_its_tabs :: proc(t: ^testing.T) {
 }
 
 @(test)
+a_groups_tray_runs_from_its_chip_to_its_last_tab_and_goes_while_folded :: proc(t: ^testing.T) {
+	state: app.App
+	defer grouped_destroy(&state)
+	state.theme.text = {1, 1, 1, 1}
+	workspace := grouped_workspace(&state, {1, 1, 0, 2})
+	w := grouped_window(&state, workspace, true)
+	defer grouped_window_destroy(w)
+	Expected :: struct {
+		shown: bool,
+		ends:  ui.Tray_Ends,
+	}
+	trays :: proc(state: ^app.App, w: ^app.Window) -> (out: [4]Expected) {
+		for &tray, i in out {
+			color, ends := app.tab_tray(state, w, i)
+			tray = {color.a > 0, ends}
+		}
+		return
+	}
+	testing.expect_value(t, trays(&state, w), [4]Expected{{true, {}}, {true, {.End}}, {}, {true, {.End}}})
+	app.tab_group_find(workspace, 1).folded = true
+	testing.expect_value(t, trays(&state, w), [4]Expected{{}, {}, {}, {true, {.End}}})
+}
+
+@(test)
+a_dragged_tab_passes_a_chip_as_a_tab_and_joins_the_group_just_after_it :: proc(t: ^testing.T) {
+	state: app.App
+	defer grouped_destroy(&state)
+	workspace := grouped_workspace(&state, {0, 1, 1, 0})
+	w := grouped_window(&state, workspace, false)
+	defer grouped_window_destroy(w)
+	grouped_settle(&state, w)
+	row := app.rail_row_rect_for_tab(w, 0)
+	// The pointer for a block starting `start` rows down the rail, holding the tab by its middle.
+	at :: proc(row: render.Rect, start: f32) -> f32 {return row.y + (start + 0.5) * row.height}
+	workspace.tabs[3].marked = true
+	x := row.x + 20
+	app.tab_press(&state, w, 3, x, app.rail_row_rect_for_tab(w, 3).y + row.height / 2, false)
+	// Without the dragged tab the rail reads tab 1, the chip, tab 2, tab 3: 2.2 rows down the block has
+	// passed the chip's middle but not tab 2's, so it is in the group, its gap below the chip.
+	testing.expect(t, app.tab_drag_move(&state, w, x, at(row, 2.2)))
+	testing.expect_value(t, ids_of(workspace), [8]u32{1, 4, 2, 3, 0, 0, 0, 0})
+	testing.expect_value(t, app.tab_layout(nil, w, false).places[1].slot, 2)
+	// Back above the chip's middle it is outside the group, its gap above the chip.
+	testing.expect(t, app.tab_drag_move(&state, w, x, at(row, 1.4)))
+	testing.expect_value(t, ids_of(workspace), [8]u32{1, 4, 2, 3, 0, 0, 0, 0})
+	testing.expect_value(t, app.tab_layout(nil, w, false).places[1].slot, 1)
+	testing.expect(t, app.tab_drag_move(&state, w, x, at(row, 2.2)))
+	app.tab_drag_release(&state, w)
+	testing.expect_value(t, groups_of(workspace), [8]u32{0, 1, 1, 1, 0, 0, 0, 0})
+}
+
+@(test)
+a_dragged_chip_carries_its_group_past_a_tab_once_the_chip_passes_its_middle :: proc(t: ^testing.T) {
+	state: app.App
+	defer grouped_destroy(&state)
+	workspace := grouped_workspace(&state, {0, 0, 1, 1})
+	w := grouped_window(&state, workspace, false)
+	defer grouped_window_destroy(w)
+	grouped_settle(&state, w)
+	chip := app.tab_group_chip_rect(&state, w, 1)
+	x, y := chip.x + 20, chip.y + chip.height / 2
+	app.tab_chip_press(&state, w, 1, x, y)
+	// The chip's top 0.6 of a row up has passed the middle of the row of tab 2, but not of tab 1.
+	testing.expect(t, app.tab_drag_move(&state, w, x, y - 0.4 * chip.height))
+	testing.expect_value(t, ids_of(workspace), [8]u32{1, 2, 3, 4, 0, 0, 0, 0})
+	testing.expect(t, app.tab_drag_move(&state, w, x, y - 0.7 * chip.height))
+	testing.expect_value(t, ids_of(workspace), [8]u32{1, 3, 4, 2, 0, 0, 0, 0})
+	app.tab_drag_release(&state, w)
+	testing.expect_value(t, groups_of(workspace), [8]u32{0, 1, 1, 0, 0, 0, 0, 0})
+}
+
+@(test)
+a_dragged_group_keeps_the_rows_it_takes_at_rest :: proc(t: ^testing.T) {
+	state: app.App
+	defer grouped_destroy(&state)
+	workspace := grouped_workspace(&state, {0, 1, 1, 0})
+	w := grouped_window(&state, workspace, false)
+	defer grouped_window_destroy(w)
+	grouped_settle(&state, w)
+	// The carried chip keeps its row where the group would drop, so New tab below the rows stays put.
+	rows := app.rail_row_count(w)
+	chip := app.tab_group_chip_rect(&state, w, 1)
+	x, y := chip.x + 20, chip.y + chip.height / 2
+	app.tab_chip_press(&state, w, 1, x, y)
+	testing.expect(t, app.tab_drag_move(&state, w, x, y - 0.4 * chip.height))
+	testing.expect(t, app.tab_drag_active(w))
+	testing.expect_value(t, app.rail_row_count(w), rows)
+	app.tab_drag_release(&state, w)
+}
+
+@(test)
+no_two_groups_share_both_a_name_and_a_colour :: proc(t: ^testing.T) {
+	state: app.App
+	defer grouped_destroy(&state)
+	workspace := grouped_workspace(&state, {1, 0, 2, 0})
+	app.tab_group_find(workspace, 2).color = 2
+	w := grouped_window(&state, workspace, true)
+	defer grouped_window_destroy(w)
+	grouped_settle(&state, w)
+	// Both groups are nameless, so group 2 cannot take group 1's colour until their names differ.
+	testing.expect(t, !app.tab_group_color_set(&state, w, 2, 1))
+	rename :: proc(state: ^app.App, id: u32, name: string) -> app.Rename_Outcome {
+		return app.rename_target_commit(state, app.Rename_Group_Target{1, id}, name, .Automatic_Title)
+	}
+	testing.expect_value(t, rename(&state, 2, "Build"), app.Rename_Outcome.Saved)
+	testing.expect(t, app.tab_group_color_set(&state, w, 2, 1))
+	// Names compare exactly: a name differing only in case tells the groups apart.
+	testing.expect_value(t, rename(&state, 1, "Build"), app.Rename_Outcome.Taken)
+	testing.expect_value(t, app.tab_group_find(workspace, 1).name, "")
+	testing.expect_value(t, rename(&state, 1, "build"), app.Rename_Outcome.Saved)
+	// A new group of a taken name takes a colour free for it.
+	created := app.tab_group_create(&state, w, 3, "Build")
+	testing.expect(t, created != nil && created.color != 1)
+}
+
+@(test)
 the_group_menu_and_the_tab_menu_offer_folding_colours_and_groups_to_join :: proc(t: ^testing.T) {
 	f: Menu_Fixture
 	defer menu_fixture_destroy(&f)

@@ -9,12 +9,14 @@ Tab_Place :: struct {
 	slot, offset: f32,
 }
 
-// A group's chip, where a run of its tabs starts: just before tab `first`, the run's first laid-out tab. The
-// strip gives it `width` DIPs, margins included; the rail gives it the row above that tab. A `carried` chip
-// rides before the tabs of a whole group being dragged and takes no room among the others.
+// A group's chip, where a run of its tabs starts: just before tab `first`, the run's first laid-out tab at
+// rest, less `lead` tabs dragged into the run's start. The strip gives it `width` DIPs, margins included;
+// the rail gives it the row above. A `carried` chip rides before the tabs of a whole group being dragged,
+// and keeps its room where the group would drop, so the tabs take as much room in all as at rest.
 Tab_Run :: struct {
 	group:   ^Tab_Group,
 	first:   int,
+	lead:    int,
 	width:   f32,
 	carried: bool,
 }
@@ -28,40 +30,51 @@ Tab_Layout :: struct {
 	chips:  f32,
 }
 
-// Lays out w's tabs for the strip, or for the rail, where each chip takes a row; only the strip measures its
-// chips, with `app`. A folded group's tabs take no slot. Dragged tabs neither start nor end a group's run,
-// so a group they pass over keeps one chip; a whole group being dragged carries its own.
+// Lays out w's tabs for the strip, or for the rail, where each chip takes a row; only the strip measures
+// its chips, with `app`. A folded group's tabs take no slot. Tabs dragged on their own lie in the group
+// they would join (tab_laid_group), so the gap they leave opens on that group's tray, after its chip; a
+// whole group being dragged carries its own chip.
 tab_layout :: proc(app: ^App, w: ^Window, horizontal: bool) -> Tab_Layout {
 	workspace := w.workspace
 	if workspace == nil {return {}}
 	places, err := make([]Tab_Place, len(workspace.tabs), context.temp_allocator)
 	if err != nil {return {}}
 	runs := make([dynamic]Tab_Run, 0, len(workspace.groups), context.temp_allocator)
-	dragging := tab_drag_active(w)
+	_, carry := tab_drag_state(w)
+	whole := carry != nil && carry.whole
 	result := Tab_Layout{places = places}
 	previous, previous_carried: u32
 	for tab, i in workspace.tabs {
-		group := tab_group_find(workspace, tab.group)
-		carried := dragging && tab.marked
-		if group != nil && tab.group != (carried ? previous_carried : previous) {
+		id := tab_laid_group(w, i)
+		group := tab_group_find(workspace, id)
+		carried := whole && tab.marked
+		if group != nil && id != (carried ? previous_carried : previous) {
 			width: f32
 			if horizontal {
-				width = ui.tab_chip_width(&w.ui_text, tab_chip(app, w, group), w.scale) / w.scale
+				chip := tab_chip(app, w, group, group.folded)
+				width = ui.tab_chip_width(&w.ui_text, chip, w.scale, ui.TAB_CHIP_MAX_WIDTH * w.scale) / w.scale
 				if naming, editor := group_name_editing(w); naming == group && !editor {
 					width = max(width, GROUP_NAME_MIN_WIDTH)
 				}
 				width += 2 * ui.TAB_CHIP_MARGIN
 			}
-			if !carried {
-				if horizontal {result.chips += width} else {result.slots += 1}
-				append(&runs, Tab_Run{group = group, first = i, width = width})
-			} else if tab_group_carried_whole(workspace, tab.group) {
-				append(&runs, Tab_Run{group = group, first = i, width = width, carried = true})
-			}
+			if horizontal {result.chips += width} else {result.slots += 1}
+			append(&runs, Tab_Run{group = group, first = i, width = width, carried = carried})
 		}
-		if carried {previous_carried = tab.group} else {previous = tab.group}
+		if carried {previous_carried = id} else {previous = id}
 		places[i] = {f32(result.slots), horizontal ? result.chips : 0}
 		if group == nil || !group.folded {result.slots += 1}
+	}
+	// The dragged tabs follow the pointer, so a run they start takes its chip's place from its first tab at
+	// rest.
+	if carry != nil && !whole {
+		for &run in runs {
+			for run.first + 1 < len(workspace.tabs) && workspace.tabs[run.first].marked &&
+			    tab_laid_group(w, run.first + 1) == run.group.id {
+				run.first += 1
+				run.lead += 1
+			}
+		}
 	}
 	result.runs = runs[:]
 	// Chips take at most half the strip, shrinking together and fading their names, so tabs stay usable.
@@ -84,16 +97,16 @@ tab_group_carried_whole :: proc(workspace: ^Workspace, id: u32) -> bool {
 	return true
 }
 
-// Group `group`'s chip: its name, as typed while it is being named, its colour in the theme, and, folded,
-// its tab count and the most urgent status of its tabs. The spinner's phase is drawing's to add.
-tab_chip :: proc(app: ^App, w: ^Window, group: ^Tab_Group) -> ui.Tab_Chip {
+// Group `group`'s chip: its name, as typed while it is being named, its colour in the theme, and, shown
+// `folded`, its tab count and the most urgent status of its tabs. The spinner's phase is drawing's to add.
+tab_chip :: proc(app: ^App, w: ^Window, group: ^Tab_Group, folded: bool) -> ui.Tab_Chip {
 	chip := ui.Tab_Chip {
 		name   = group.name,
 		color  = tab_group_color(app, group),
-		folded = group.folded,
+		folded = folded,
 	}
 	if naming, _ := group_name_editing(w); naming == group {chip.name = ui.field_string(&w.rename)}
-	if !group.folded {return chip}
+	if !folded {return chip}
 	summary: Status_Summary
 	for tab, i in w.workspace.tabs {
 		if tab.group != group.id {continue}
@@ -112,24 +125,112 @@ tab_group_color :: proc(app: ^App, group: ^Tab_Group) -> render.Color {
 	return workspace_icon_tint(group.color, app.theme.text)
 }
 
-// The colour of tab `index`'s group band, transparent for an ungrouped tab. Dragged tabs take the band of
-// the group they would join if dropped now, so the drop's outcome shows before the release.
-tab_band_color :: proc(app: ^App, w: ^Window, index: int) -> render.Color {
-	group := tab_group_of(w.workspace, index)
-	if _, carry := tab_drag_state(w); carry != nil && !carry.whole && w.workspace.tabs[index].marked {
-		_, reordering := carry.destination.(Drop_Reorder)
-		group = reordering ? tab_group_find(w.workspace, carry.group) : nil
-	}
-	if group == nil {return {}}
-	return tab_group_color(app, group)
+// Whether group `group` shows its tray in pieces with its chip and tabs: while unfolded and at rest. While it
+// folds or unfolds its tray is drawn whole instead, gathering into the chip (tab_tray_fold_rect).
+tab_group_tray_shown :: proc(w: ^Window, group: ^Tab_Group) -> bool {
+	return !group.folded && w.folding != group.id
 }
 
-// Run `run`'s chip in the strip, before its first tab as that tab moves.
+// The group tab `index` lies in: its own, or for a tab dragged on its own, the group it would join if dropped
+// now (WORK-459).
+tab_laid_group :: proc(w: ^Window, index: int) -> u32 {
+	tab := w.workspace.tabs[index]
+	if _, carry := tab_drag_state(w); carry != nil && !carry.whole && tab.marked {return carry.group}
+	return tab.group
+}
+
+// The part of a group's tray at tab `index`'s place among the tabs at rest: transparent outside a group, else
+// its group's colour, closing the tray at the last tab of its group laid out together. A dragged tab's place
+// is the gap it leaves.
+tab_tray_place :: proc(app: ^App, w: ^Window, index: int) -> (render.Color, ui.Tray_Ends) {
+	workspace := w.workspace
+	id := tab_laid_group(w, index)
+	group := tab_group_find(workspace, id)
+	if group == nil || !tab_group_tray_shown(w, group) {return {}, {}}
+	// A whole group being dragged rides apart from the others, so each side's run ends at its own last tab.
+	_, carry := tab_drag_state(w)
+	apart := carry != nil && carry.whole
+	marked := workspace.tabs[index].marked
+	next := index + 1
+	for next < len(workspace.tabs) && apart && workspace.tabs[next].marked != marked {next += 1}
+	ends: ui.Tray_Ends
+	if next >= len(workspace.tabs) || tab_laid_group(w, next) != id {ends = {.End}}
+	return tab_group_color(app, group), ends
+}
+
+// Tab `index`'s part of a group's tray (WORK-454), drawn with the tab. A tab dragged on its own carries a
+// tray of the group it would join if dropped now, so the drop's outcome shows before the release.
+tab_tray :: proc(app: ^App, w: ^Window, index: int) -> (render.Color, ui.Tray_Ends) {
+	if _, carry := tab_drag_state(w); carry != nil && !carry.whole && w.workspace.tabs[index].marked {
+		_, reordering := carry.destination.(Drop_Reorder)
+		group := tab_group_find(w.workspace, carry.group)
+		if !reordering || group == nil {return {}, {}}
+		return tab_group_color(app, group), {.Start, .End}
+	}
+	return tab_tray_place(app, w, index)
+}
+
+// Draws run `run`'s chip at `chip` in the strip, on the start of its group's tray, which takes the chip's
+// room and the margin after it.
+tab_chip_strip_draw :: proc(
+	app: ^App,
+	w: ^Window,
+	bar: ui.Tab_Bar,
+	run: Tab_Run,
+	chip: render.Rect,
+) -> render.Build_Status {
+	if tab_group_tray_shown(w, run.group) {
+		y, height := ui.tab_tray_band(bar.height, w.scale)
+		slice := render.Rect{chip.x, y, chip.width + ui.TAB_CHIP_MARGIN * w.scale, height}
+		color, state := tab_group_color(app, run.group), tab_group_state(w, run.group.id)
+		if ui.tab_tray_draw(&w.list, slice, color, {.Start}, state, false, w.scale) != .None {
+			return .Ok
+		}
+	}
+	return tab_chip_draw(app, w, run, chip)
+}
+
+// Run `run`'s chip in the strip, before its first tab at rest as that tab moves, and the tabs dragged into
+// the run's start.
 tab_chip_strip_rect :: proc(w: ^Window, bar: ui.Tab_Bar, run: Tab_Run) -> render.Rect {
 	margin := ui.TAB_CHIP_MARGIN * w.scale
-	right := tab_strip_x(w, bar, run.first) - margin
+	right := tab_strip_x(w, bar, run.first) - f32(run.lead) * bar.tab_width - margin
 	width := max(0, run.width * w.scale - 2 * margin)
 	return {right - width, 0, width, bar.height}
+}
+
+// Run `run`'s chip in the strip where it rests in `layout`. Nothing before a folding group moves, so its chip
+// stays here while the room after it closes or opens.
+strip_chip_rest_rect :: proc(w: ^Window, bar: ui.Tab_Bar, layout: Tab_Layout, run: Tab_Run) -> render.Rect {
+	margin := ui.TAB_CHIP_MARGIN * w.scale
+	place := layout.places[run.first]
+	right := bar.x + place.slot * bar.tab_width + place.offset * w.scale - margin
+	width := max(0, run.width * w.scale - 2 * margin)
+	return {right - width, 0, width, bar.height}
+}
+
+// Where folding group `run`'s tray lies in the strip: from its tray at rest open, its chip and its tabs, to
+// its chip folded, by how open the group is, so it gathers from the bottom right into the chip's top left
+// corner and spreads back out the same way, closing its height as it closes its length (WORK-454).
+strip_fold_rect :: proc(
+	app: ^App,
+	w: ^Window,
+	bar: ui.Tab_Bar,
+	layout: Tab_Layout,
+	run: Tab_Run,
+) -> render.Rect {
+	s := w.scale
+	chip := strip_chip_rest_rect(w, bar, layout, run)
+	count := 0
+	for tab in w.workspace.tabs {if tab.group == run.group.id {count += 1}}
+	y, height := ui.tab_tray_band(bar.height, s)
+	widest := ui.TAB_CHIP_MAX_WIDTH * s
+	open := ui.tab_chip_width(&w.ui_text, tab_chip(app, w, run.group, false), s, widest)
+	tray := render.Rect{chip.x, y, open + ui.TAB_CHIP_MARGIN * s + f32(count) * bar.tab_width, height}
+	folded := ui.HEIGHT_COMPACT * s
+	width := ui.tab_chip_width(&w.ui_text, tab_chip(app, w, run.group, true), s, widest)
+	closed := render.Rect{chip.x, (bar.height - folded) / 2, width, folded}
+	return ui.tab_tray_fold_rect(closed, tray, w.fold.value)
 }
 
 // While tab `index`'s group folds or unfolds, its tabs slide into or out of the chip, shown only between the
@@ -173,21 +274,48 @@ tab_group_chip_rect :: proc(app: ^App, w: ^Window, id: u32) -> render.Rect {
 	return {}
 }
 
-// Run `run`'s chip in the rail, in the row above its first tab as that tab moves.
+// Run `run`'s chip in the rail, in the row above its first tab at rest as that tab moves, and the tabs
+// dragged into the run's start.
 tab_chip_rail_rect :: proc(w: ^Window, layout: ui.Rail_Layout, run: Tab_Run) -> render.Rect {
 	row := rail_tab_rect(w, layout, run.first)
-	row.y -= layout.row_height
+	row.y -= f32(1 + run.lead) * layout.row_height
 	return row
 }
 
-// Draws a chip and its hover, `rect` being its room in the strip or its row in the rail.
-tab_chip_draw :: proc(app: ^App, w: ^Window, run: Tab_Run, rect: render.Rect) -> render.Build_Status {
-	chip := tab_chip(app, w, run.group)
+// Draws a chip and its hover, `rect` being its room in the strip or its row in the rail. A `bare` chip lies
+// on the tray that folds into it, which stands in for its own tint and outline.
+tab_chip_draw :: proc(
+	app: ^App,
+	w: ^Window,
+	run: Tab_Run,
+	rect: render.Rect,
+	bare := false,
+) -> render.Build_Status {
+	chip := tab_chip(app, w, run.group, run.group.folded)
 	chip.status_phase = status_phase(app, w, chip.status)
+	chip.bare = bare
 	r := rect
-	r.width = min(r.width, ui.tab_chip_width(&w.ui_text, chip, w.scale))
-	hover := f32(int(w.tab_hover == Tab_Chrome_Group{run.group.id}))
-	return ui.tab_chip_draw(&w.list, &w.ui_text, app.theme, r, chip, hover, w.scale)
+	r.width = min(r.width, ui.tab_chip_width(&w.ui_text, chip, w.scale, r.width))
+	return ui.tab_chip_draw(&w.list, &w.ui_text, app.theme, r, chip, tab_group_state(w, run.group.id), w.scale)
+}
+
+// The group whose chip is held, pressed or dragging its group; 0 for none.
+tab_group_held :: proc(w: ^Window) -> u32 {
+	#partial switch d in w.drag {
+	case Drag_Pressed:
+		if grab, ok := d.grab.(Tab_Grab); ok {return grab.chip}
+	case Drag_Active:
+		if carry, ok := d.carry.(Tab_Carry); ok {return carry.grab.chip}
+	}
+	return 0
+}
+
+// How strongly group `id` shows its outline (WORK-454): its chip held, under the pointer, or neither.
+tab_group_state :: proc(w: ^Window, id: u32) -> ui.Tray_State {
+	if id == 0 {return .Rest}
+	if tab_group_held(w) == id {return .Pressed}
+	if w.tab_hover == (Tab_Chrome_Group{id}) {return .Hover}
+	return .Rest
 }
 
 when AIO_CONTROL {
@@ -198,6 +326,8 @@ when AIO_CONTROL {
 		naming, editor := group_name_editing(w)
 		state_value(r, "group_name.open", naming != nil)
 		state_value(r, "group_name.editor", editor)
+		overlay, _ := w.overlay.(Overlay_Group_Name)
+		state_value(r, "group_name.error", overlay.error)
 		state_rect(r, "group_name.field", naming != nil ? group_name_field_rect(app, w) : render.Rect{})
 		for color in 1 ..< len(WORKSPACE_ICON_COLORS) {
 			swatch := editor ? group_name_swatch_rect(app, w, color) : render.Rect{}
