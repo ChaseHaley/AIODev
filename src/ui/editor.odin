@@ -4141,13 +4141,9 @@ filter_draw :: proc(
 	}
 	if key := editor_search_key_rect(p, l); key.width > 0 {
 		keycap := text_styled(text, .Detail)
-		width := text_width(&keycap, SEARCH_KEY_LABEL) + 2 * KEYCAP_PADDING * s
-		height := min(KEYCAP_HEIGHT * s, key.height)
-		chip := render.Rect{key.x + key.width - width, key.y + (key.height - height) / 2, width, height}
-		draw_rect(list, {rect = chip, color = theme.border, radius = RADIUS_CONTROL * s, stroke = s})
-		baseline := chip.y + (chip.height - keycap.line_height) / 2 + keycap.ascent
-		if result := draw_text(&keycap, list, SEARCH_KEY_LABEL, chip.x + KEYCAP_PADDING * s, baseline,
-			   theme.muted, key.width); result != .Ok {return result}
+		x := key.x + key.width - keycap_width(&keycap, SEARCH_KEY_LABEL, s)
+		if result := keycap_draw(list, &keycap, theme, SEARCH_KEY_LABEL, x, key.y, key.height, s, key.width);
+		   result != .Ok {return result}
 	}
 	clear := editor_clear_rect(p, l)
 	if clear.width == 0 {return .Ok}

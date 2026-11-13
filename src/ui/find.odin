@@ -1,5 +1,6 @@
 package ui
 
+import "aio:commands"
 import "aio:input"
 import "aio:platform"
 import "aio:render"
@@ -62,6 +63,36 @@ Find_Button :: enum {
 	Close,
 	Case_Toggle,
 	Regex_Toggle,
+}
+
+// The key that does what each button does while the bar has the keyboard. find_key reads them through
+// find_key_button and the buttons' tooltips name them, so a change here reaches both.
+@(rodata)
+FIND_KEYS := #partial [Find_Button]commands.Shortcut {
+	.Up           = {.Enter, {.Shift}},
+	.Down         = {.Enter, {}},
+	.Close        = {.Escape, {}},
+	.Case_Toggle  = {.C, {.Alt}},
+	.Regex_Toggle = {.R, {.Alt}},
+}
+
+// The button a key presses: Numpad Enter counts as Enter, an Alt key needs Alt without Control (AltGr
+// types), and Shift picks between the buttons that share a key; other modifiers do not matter.
+@(private)
+find_key_button :: proc(e: input.Key_Event) -> Find_Button {
+	key := e.key == .Numpad_Enter ? input.Key.Enter : e.key
+	alt := .Alt in e.modifiers && .Control not_in e.modifiers
+	found := Find_Button.None
+	for shortcut, button in FIND_KEYS {
+		if button == .None || shortcut.key != key {continue}
+		if .Alt in shortcut.modifiers {
+			if alt {return button}
+			continue
+		}
+		if (.Shift in shortcut.modifiers) == (.Shift in e.modifiers) {return button}
+		if found == .None {found = button}
+	}
+	return found
 }
 
 find_init :: proc(f: ^Find_Bar, allocator := context.allocator) {
@@ -139,29 +170,28 @@ find_edit :: proc(f: ^Find_Bar) {
 	if _, browsing := f.state.(Find_Browsing); browsing { find_enter(f, Find_Editing{}) }
 }
 
-// Handles a key while the bar has the keyboard. Enter moves to the next match and Shift+Enter to the
-// previous; Up and Down browse earlier searches; Alt+C and Alt+R toggle case sensitivity and regular
-// expressions.
+// Handles a key while the bar has the keyboard: FIND_KEYS press the buttons, and Up and Down browse
+// earlier searches.
 find_key :: proc(f: ^Find_Bar, e: input.Key_Event, h: ^Find_History = nil) -> Find_Outcome {
 	if !e.pressed {
 		return Find_Change.None
 	}
-	alt := .Alt in e.modifiers && .Control not_in e.modifiers
-	#partial switch e.key {
-	case .Escape:
+	switch button := find_key_button(e); button {
+	case .Close:
 		return Find_Change.Closed
-	case .Enter, .Numpad_Enter:
+	case .Up, .Down:
 		find_history_add(h, f)
 		find_edit(f)
-		return .Shift in e.modifiers ? search.Step.Previous : search.Step.Next
+		return button == .Up ? search.Step.Previous : search.Step.Next
+	case .Case_Toggle, .Regex_Toggle:
+		return find_toggle(f, button)
+	case .None:
+	}
+	#partial switch e.key {
 	case .Arrow_Up:
 		return find_recall(f, h, true)
 	case .Arrow_Down:
 		return find_recall(f, h, false)
-	case .C:
-		if alt { return find_toggle(f, .Case_Toggle) }
-	case .R:
-		if alt { return find_toggle(f, .Regex_Toggle) }
 	}
 	outcome := find_change(field_key(&f.query, e))
 	if outcome == Find_Change.Changed { find_edit(f) }
