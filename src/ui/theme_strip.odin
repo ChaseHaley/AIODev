@@ -44,6 +44,9 @@ Theme_Strip :: struct {
 	// band they were placed in, in DIPs.
 	placed:                           bool,
 	width:                            f32,
+	// The strip's own scrollbar: its thumb drag and whether the pointer is over its track.
+	bar_drag:                         Scroll_Drag,
+	bar_hover:                        bool,
 }
 
 // What a rebuilt page keeps of its strip, by theme ID: each card's opening, the scroll and the
@@ -313,6 +316,37 @@ strip_view_at :: proc(p: ^Editor, l: Editor_Layout, y: f32) -> (view: render.Rec
 	return strip_view(editor_strip_rect(p, l, index - p.items[index].part), l.scale), true
 }
 
+// The strip row's first line, or -1 when the page has no strip.
+@(private)
+strip_head :: proc(p: ^Editor) -> int {
+	if len(p.strip.cards) == 0 {return -1}
+	for item, index in p.items {
+		if item.row >= 0 && item.part == 0 && p.rows[item.row].kind == .Theme_Strip {return index}
+	}
+	return -1
+}
+
+// The strip's scrollbar, in the gap below the cards of the strip row whose first line is `index`;
+// nothing when every card fits. Its extents are DIPs.
+editor_strip_scrollbar :: proc(p: ^Editor, l: Editor_Layout, index: int) -> (bar: Scrollbar, visible: bool) {
+	strip := &p.strip
+	s := l.scale
+	if index < 0 || len(strip.cards) == 0 || s <= 0 {return}
+	view := strip_view(editor_strip_rect(p, l, index), s)
+	area := render.Rect {
+		view.x + STRIP_PAD * s,
+		view.y + view.height + s,
+		max(0, view.width - 2 * STRIP_PAD * s),
+		SCROLLBAR_TRACK * s,
+	}
+	extent := Scroll_Extent {
+		int(strip_max_scroll(strip, 0, false) + 0.5),
+		int(strip_view_width(l)),
+		int(strip.scroll.value + 0.5),
+	}
+	return scrollbar_layout_horizontal(area, extent, scrollbar_state(strip.bar_hover, strip.bar_drag), s)
+}
+
 // Applies card `index`, as choosing it in a list does: the owner saves the row's value.
 @(private)
 strip_apply :: proc(p: ^Editor, index: int) -> Editor_Outcome {
@@ -381,9 +415,15 @@ editor_strip_key :: proc(p: ^Editor, row: ^Editor_Row, e: input.Key_Event) -> (E
 	return .Changed, true
 }
 
+// A press on the scrollbar pages toward the pointer, easing as the wheel does, or takes the thumb.
 @(private)
 editor_strip_press :: proc(p: ^Editor, l: Editor_Layout, index: int, x, y: f32) -> Editor_Outcome {
 	strip := &p.strip
+	if bar, visible := editor_strip_scrollbar(p, l, index); visible && scrollbar_contains(bar, x, y) {
+		offset := scrollbar_press(&strip.bar_drag, bar, x)
+		if !strip.bar_drag.active {strip.wheel = f32(offset) - strip.scroll.target}
+		return .Changed
+	}
 	view := strip_view(editor_strip_rect(p, l, index), l.scale)
 	if strip_customize_at(strip, view, l.scale, x, y) {
 		strip.focus, strip.customize_focus = strip.applied, true
@@ -393,19 +433,36 @@ editor_strip_press :: proc(p: ^Editor, l: Editor_Layout, index: int, x, y: f32) 
 	return .Changed
 }
 
-// Tracks the card and Customize under the pointer; true when that changed. `index` is the strip
-// row's first line, or -1 when the pointer is elsewhere.
+// A held thumb follows the pointer anywhere and scrolls at once; true when anything changed.
+@(private)
+editor_strip_bar_drag :: proc(p: ^Editor, l: Editor_Layout, x, y: f32) -> bool {
+	strip := &p.strip
+	bar, visible := editor_strip_scrollbar(p, l, strip_head(p))
+	if !visible {return false}
+	hover := scrollbar_contains(bar, x, y)
+	limit := strip_max_scroll(strip, strip_view_width(l), true)
+	to := clamp(f32(scrollbar_drag(strip.bar_drag, bar, x)), 0, limit)
+	changed := hover != strip.bar_hover || to != strip.scroll.value
+	strip.bar_hover = hover
+	strip.scroll = {value = to, target = to}
+	strip.wheel = 0
+	return changed
+}
+
+// Tracks the card, Customize and the scrollbar under the pointer; true when that changed. `index` is
+// the strip row's first line, or -1 when the pointer is elsewhere.
 @(private)
 editor_strip_hover :: proc(p: ^Editor, l: Editor_Layout, index: int, x, y: f32) -> bool {
 	strip := &p.strip
-	card, customize := -1, false
+	card, customize, over_bar := -1, false, false
 	if index >= 0 && len(strip.cards) > 0 {
 		view := strip_view(editor_strip_rect(p, l, index), l.scale)
 		customize = strip_customize_at(strip, view, l.scale, x, y)
 		if !customize {card = strip_card_at(strip, view, l.scale, x, y)}
+		if bar, visible := editor_strip_scrollbar(p, l, index); visible {over_bar = scrollbar_contains(bar, x, y)}
 	}
-	if card == strip.hover && customize == strip.customize_hover {return false}
-	strip.hover, strip.customize_hover = card, customize
+	if card == strip.hover && customize == strip.customize_hover && over_bar == strip.bar_hover {return false}
+	strip.hover, strip.customize_hover, strip.bar_hover = card, customize, over_bar
 	return true
 }
 
@@ -767,7 +824,7 @@ editor_strip_draw :: proc(
 	}
 	if len(strip.cards) == 0 {return .Ok}
 	view := strip_view(block, s)
-	// Focus rings reach SPACE_1 above the cards and the scroll thumb sits below them.
+	// Focus rings reach SPACE_1 above the cards and the scrollbar sits below them.
 	band := render.Rect{view.x, view.y - SPACE_1 * s, view.width, view.height + (SPACE_1 + SPACE_2) * s}
 	clip := strip_intersect(band, l.list)
 	scope, clipped := clip_scope_open(list, clip)
@@ -818,17 +875,8 @@ editor_strip_draw :: proc(
 		}
 		if ring {focus_ring_draw(list, r, theme, s)}
 	}
-	width := strip_view_width(l)
-	extent := strip_max_scroll(strip, 0, false)
-	if extent > width && extent > 0 {
-		track := view.width - 2 * STRIP_PAD * s
-		thumb := render.Rect {
-			view.x + STRIP_PAD * s + track * strip.scroll.value / extent,
-			view.y + view.height + SPACE_1 * s,
-			max(SPACE_6 * s, track * width / extent),
-			3 * s,
-		}
-		draw_rect(list, {rect = thumb, color = theme.scrollbar, radius = pill_radius(thumb)})
+	if bar, visible := editor_strip_scrollbar(p, l, index); visible {
+		scrollbar_draw(list, theme, bar, scrollbar_state(strip.bar_hover, strip.bar_drag))
 	}
 	return .Ok
 }

@@ -212,6 +212,7 @@ settings_pointer_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: 
 		// collapses on release because the pointer is no longer over it.
 		if w.editor.popup_bar_hover {w.editor.popup_bar_hover, w.dirty = false, true}
 		if w.editor.page_bar_hover {w.editor.page_bar_hover, w.dirty = false, true}
+		if w.editor.strip.bar_hover {w.editor.strip.bar_hover, w.dirty = false, true}
 		if ui.editor_scrollbar_dragging(&w.editor) && .Left in e.buttons &&
 		   ui.editor_drag(&w.editor, settings_layout(w), &w.ui_text, x, y) {w.dirty = true}
 		pointer_set(app, w, .Arrow)
