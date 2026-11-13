@@ -1,6 +1,7 @@
 package main
 
 import "core:fmt"
+import "aio:layout"
 
 // Finding and showing the pane a session runs in, wherever it is. Status lists and notices, focus
 // jumps and notification clicks name panes by session.
@@ -43,14 +44,22 @@ session_window :: proc(app: ^App, session: u32, fallback: ^Window) -> ^Window {
 	return fallback
 }
 
-// Shows the session's pane, switching workspace, tab and focus as needed. Looking at the pane
-// acknowledges its finished program status, as focusing it does; a failed reveal reports why.
+// Shows the session's pane, switching workspace, tab and focus as needed. A tiled pane is shown
+// uncovered: the tab's shown floats are minimized; a floating pane comes out of its capsule to the top.
+// Looking at the pane acknowledges its finished program status, as focusing it does; a failed reveal
+// reports why.
 session_show :: proc(app: ^App, w: ^Window, session: u32) -> bool {
 	workspace, pane, found := session_pane_find(app, session)
 	if found && workspace_eligible(app, workspace) && workspace_select(app, w, workspace) {
 		if owner := window_for_workspace(app, workspace); owner != nil {
 			if owner.workspace.selected != pane.tab {tab_select(app, owner, pane.tab)}
 			pane_focus(app, owner, pane.node)
+			tree := window_tree(owner)
+			// Focus is now on the pane, unless it shows in its own linked window.
+			if shown, _ := layout.float_counts(tree); shown > 0 && tree.focus == pane.node &&
+			   !layout.is_floating(tree, pane.node) {
+				floating_minimize_all(app, owner, true)
+			}
 			status_focus_enter(app, owner)
 			owner.dirty = true
 			return true
