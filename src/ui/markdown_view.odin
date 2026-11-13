@@ -26,6 +26,8 @@ Markdown_Face :: enum u8 {
 	H1,
 	H2,
 	H3,
+	// The frontmatter's properties, at the interface's body size.
+	Small,
 }
 
 @(private = "file")
@@ -44,6 +46,7 @@ FACE_SPECS := [Markdown_Face]Face_Spec {
 	.H1              = {1.75, 1.25, .Bold},
 	.H2              = {1.4, 1.3, .Bold},
 	.H3              = {1.15, 1.35, .Bold},
+	.Small           = {13.0 / 15, 1.45, .Regular},
 }
 
 @(private = "file")
@@ -227,6 +230,7 @@ markdown_view_fit :: proc(
 
 @(private = "file")
 face_of :: proc(block: markdown.Block, style: markdown.Style) -> Markdown_Face {
+	if block.property {return .Small}
 	if block.kind == .Code || .Code in style {return .Code}
 	if block.kind == .Heading {
 		switch block.level {
@@ -333,8 +337,8 @@ flow :: proc(
 		case .Center: pen += max(0, (width - line_width) / 2)
 		case .Right: pen += max(0, width - line_width)
 		}
-		fallback: Markdown_Face = block.kind == .Heading ? face_of(block, {}) : .Body
-		if block.kind == .Code {fallback = .Code}
+		// A header cell's bold has body metrics, so the block's own face sizes an empty line.
+		fallback := face_of(block, {})
 		height, baseline := v.faces[fallback].line_height, v.faces[fallback].baseline
 		if from < visible {height, baseline = 0, 0}
 		// Items come in runs of one span, and a span has one face.
@@ -505,6 +509,8 @@ layout_table :: proc(
 	s := v.scale
 	table := doc.blocks[index].table
 	columns := doc.tables[table].columns
+	// Frontmatter reads as a quiet block of key and value rows, without rules between them.
+	properties := doc.tables[table].properties
 	end := index
 	for end < len(doc.blocks) && doc.blocks[end].kind == .Table_Cell && doc.blocks[end].table == table {end += 1}
 	natural := make([]f32, columns, context.temp_allocator)
@@ -556,23 +562,36 @@ layout_table :: proc(
 	y := y
 	i := index
 	rule := max(1, math.round(s))
+	row_pad := pad
+	background := len(v.boxes)
+	if properties {
+		row_pad = math.round(3 * s)
+		layout_append(v, &v.boxes, Box{{x, y, width, 0}, .Fill, RADIUS_CONTROL * s})
+		y += row_pad
+	}
 	for i < end {
 		row := doc.blocks[i].row
 		first_line := len(v.lines)
 		row_top := y
-		bottom := y + pad
+		bottom := y + row_pad
 		cell_x := x
 		column := 0
 		for i < end && doc.blocks[i].row == row {
 			block := doc.blocks[i]
 			for column < block.column {cell_x += sizes[column] + 2 * pad; column += 1}
-			bottom = max(bottom, flow(v, doc, block, cell_x + pad, sizes[column], row_top + pad / 2, .Text))
+			color: Markdown_Color = properties && block.column == 0 ? .Muted : .Text
+			bottom = max(bottom, flow(v, doc, block, cell_x + pad, sizes[column], row_top + row_pad / 2, color))
 			i += 1
 		}
-		y = bottom + pad / 2
+		y = bottom + row_pad / 2
 		for &line in v.lines[first_line:] {line.band_top, line.band_bottom = row_top, y}
+		if properties {continue}
 		layout_append(v, &v.boxes, Box{{x, y, table_width, rule}, .Line, 0})
 		y += rule
+	}
+	if properties {
+		y += row_pad
+		if background < len(v.boxes) {v.boxes[background].rect.height = y - v.boxes[background].rect.y}
 	}
 	return end, y
 }
@@ -718,6 +737,23 @@ markdown_reveal :: proc(v: ^Markdown_View, start, end, visible: int) -> bool {
 	first, last := int(top + inset), int(math.ceil(bottom + inset))
 	if first >= v.scroll && last <= v.scroll + visible {return false}
 	return markdown_scroll_by(v, first - visible / 2 - v.scroll, visible)
+}
+
+// The top of the first line showing `offset` or text after it, in the view's own coordinates.
+markdown_offset_top :: proc(v: ^Markdown_View, offset: int) -> (top: f32, found: bool) {
+	for line in v.lines {
+		for i in 0 ..< line.run_count {
+			if int(v.runs[line.first_run + i].end) > offset {return line.top, true}
+		}
+	}
+	return 0, false
+}
+
+// Scrolls the line showing `offset` to the top of a viewport `visible` high, with the page's own
+// margin above it, as a jump to a heading does.
+markdown_scroll_to_offset :: proc(v: ^Markdown_View, offset, visible: int) -> bool {
+	top, found := markdown_offset_top(v, offset)
+	return found && markdown_scroll_by(v, int(top) - v.scroll, visible)
 }
 
 // Find's matches, in the colours a terminal gives its own.

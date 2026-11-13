@@ -31,6 +31,9 @@ Md_Span :: enum i32 {
 	Code,
 	Ins,
 	Del,
+	Latex_Math,
+	Latex_Math_Display,
+	Wikilink,
 }
 
 @(private)
@@ -108,6 +111,11 @@ Md_Img_Detail :: struct {
 }
 
 @(private)
+Md_Wikilink_Detail :: struct {
+	target: Md_Attribute,
+}
+
+@(private)
 Md_Parser :: struct {
 	abi_version: u32,
 	flags:       u32,
@@ -120,12 +128,13 @@ Md_Parser :: struct {
 	syntax:      proc "c" (),
 }
 
-// The GitHub dialect without footnotes or admonitions. Raw HTML stays literal text: file content is
-// untrusted and nothing here interprets it. E-mail autolinks are left out because the shared link
-// policy has no mailto target.
+// The GitHub dialect without footnotes or admonitions, plus Obsidian's [[wikilinks]]. Raw HTML stays
+// literal text: file content is untrusted and nothing here interprets it. E-mail autolinks are left out
+// because the shared link policy has no mailto target.
 @(private)
 MD_FLAGS: u32 : 0x1 /* collapse whitespace */ | 0x4 /* URL autolinks */ | 0x400 /* www autolinks */ |
-	0x60 /* no HTML */ | 0x100 /* tables */ | 0x200 /* strikethrough */ | 0x800 /* task lists */
+	0x60 /* no HTML */ | 0x100 /* tables */ | 0x200 /* strikethrough */ | 0x800 /* task lists */ |
+	0x2000 /* wikilinks */
 
 @(private, default_calling_convention = "c")
 foreign md4c {

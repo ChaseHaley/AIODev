@@ -108,11 +108,48 @@ empty_list_items_still_show_a_marker :: proc(t: ^testing.T) {
 task_lists_mark_their_state :: proc(t: ^testing.T) {
 	doc: markdown.Document
 	defer markdown.document_destroy(&doc)
-	testing.expect(t, markdown.parse("- [ ] open\n- [x] done\n", &doc))
+	source := "- [ ] open\n- [x] done\n"
+	testing.expect(t, markdown.parse(source, &doc))
 	testing.expect_value(t, string(doc.text[:]), "☐ open\n☑ done")
 	if !testing.expect_value(t, len(doc.blocks), 2) {return}
 	testing.expect_value(t, doc.blocks[0].task, markdown.Task.Open)
 	testing.expect_value(t, doc.blocks[1].task, markdown.Task.Done)
+	// A checkbox click writes its mark in place.
+	testing.expect_value(t, source[doc.blocks[0].task_source], ' ')
+	testing.expect_value(t, source[doc.blocks[1].task_source], 'x')
+}
+
+@(test)
+task_marks_point_into_the_file_past_a_bom_and_frontmatter :: proc(t: ^testing.T) {
+	doc: markdown.Document
+	defer markdown.document_destroy(&doc)
+	source := "\xef\xbb\xbf---\r\ntitle: x\r\n---\r\n\r\n1. [X] done\r\n"
+	testing.expect(t, markdown.parse(source, &doc))
+	task := -1
+	for block in doc.blocks {if block.task != .None {task = block.task_source}}
+	if !testing.expect(t, task >= 0) {return}
+	testing.expect_value(t, source[task - 1:task + 2], "[X]")
+}
+
+@(test)
+spans_map_back_to_the_file :: proc(t: ^testing.T) {
+	doc: markdown.Document
+	defer markdown.document_destroy(&doc)
+	source := "# Head\n\nsome **bold** &amp; [link](x.md)\nnext"
+	testing.expect(t, markdown.parse(source, &doc))
+	for span in doc.spans {
+		if span.source == markdown.NO_SOURCE {continue}
+		shown := string(doc.text[span.start:span.end])
+		if span.end - span.start == span.source_end - span.source {
+			testing.expect_value(t, source[span.source:span.source_end], shown)
+		} else {
+			testing.expect_value(t, source[span.source:span.source_end], "&amp;")
+		}
+	}
+	// The soft break's space is the parser's own, so it is a run of its own with no source.
+	soft := false
+	for span in doc.spans {soft ||= span.source == markdown.NO_SOURCE && string(doc.text[span.start:span.end]) == " "}
+	testing.expect(t, soft)
 }
 
 @(test)
@@ -150,8 +187,9 @@ links_keep_their_target_and_decoded_entities :: proc(t: ^testing.T) {
 	defer markdown.document_destroy(&doc)
 	testing.expect(t, markdown.parse("[here](https://a.example/?x=1&amp;y=2) and https://b.example", &doc))
 	testing.expect_value(t, len(doc.links), 2)
-	testing.expect_value(t, doc.links[0], "https://a.example/?x=1&y=2")
-	testing.expect_value(t, doc.links[1], "https://b.example")
+	testing.expect_value(t, doc.links[0].href, "https://a.example/?x=1&y=2")
+	testing.expect_value(t, doc.links[1].href, "https://b.example")
+	testing.expect(t, !doc.links[0].wiki)
 	testing.expect_value(t, doc.spans[0].link, 0)
 	testing.expect(t, .Link in doc.spans[0].style)
 	testing.expect_value(t, doc.spans[1].link, markdown.NO_LINK)
@@ -163,9 +201,61 @@ images_show_their_description_and_open_their_source :: proc(t: ^testing.T) {
 	defer markdown.document_destroy(&doc)
 	testing.expect(t, markdown.parse("![a chart](chart.png) ![](bare.png)", &doc))
 	testing.expect_value(t, string(doc.text[:]), "a chart bare.png")
-	testing.expect_value(t, doc.links[0], "chart.png")
+	testing.expect_value(t, doc.links[0].href, "chart.png")
 	testing.expect_value(t, doc.spans[0].link, 0)
-	testing.expect_value(t, doc.links[1], "bare.png")
+	testing.expect_value(t, doc.links[1].href, "bare.png")
+}
+
+@(test)
+wikilinks_show_their_label_and_keep_their_target :: proc(t: ^testing.T) {
+	doc: markdown.Document
+	defer markdown.document_destroy(&doc)
+	testing.expect(t, markdown.parse("See [[Note]], [[Folder/Other#Part|the part]] and ![[chart.png]].", &doc))
+	testing.expect_value(t, string(doc.text[:]), "See Note, the part and chart.png.")
+	if !testing.expect_value(t, len(doc.links), 3) {return}
+	testing.expect_value(t, doc.links[0], markdown.Link{"Note", true})
+	testing.expect_value(t, doc.links[1], markdown.Link{"Folder/Other#Part", true})
+	testing.expect_value(t, doc.links[2], markdown.Link{"chart.png", true})
+}
+
+@(test)
+frontmatter_reads_as_a_properties_table :: proc(t: ^testing.T) {
+	doc: markdown.Document
+	defer markdown.document_destroy(&doc)
+	source := "---\ntitle: \"A note\"\ntags:\n  - one\n  - two\nalso: [x, y]\narea: \"[[Areas/Work|Work]]\"\n---\n\n# Body\n"
+	testing.expect(t, markdown.parse(source, &doc))
+	if !testing.expect_value(t, len(doc.tables), 1) {return}
+	testing.expect(t, doc.tables[0].properties)
+	testing.expect_value(t, doc.tables[0].rows, 4)
+	testing.expect_value(t, string(doc.text[:]), "title\tA note\ntags\tone, two\nalso\tx, y\narea\tWork\n\nBody")
+	testing.expect(t, doc.blocks[0].property)
+	testing.expect_value(t, doc.links[0], markdown.Link{"Areas/Work", true})
+	last := doc.blocks[len(doc.blocks) - 1]
+	testing.expect_value(t, last.kind, markdown.Block_Kind.Heading)
+	testing.expect_value(t, last.level, 1)
+}
+
+@(test)
+an_unclosed_frontmatter_fence_is_ordinary_markdown :: proc(t: ^testing.T) {
+	doc: markdown.Document
+	defer markdown.document_destroy(&doc)
+	testing.expect(t, markdown.parse("---\n\ntext", &doc))
+	testing.expect_value(t, len(doc.tables), 0)
+	testing.expect_value(t, doc.blocks[0].kind, markdown.Block_Kind.Rule)
+}
+
+@(test)
+headings_are_found_by_text_or_slug :: proc(t: ^testing.T) {
+	doc: markdown.Document
+	defer markdown.document_destroy(&doc)
+	testing.expect(t, markdown.parse("intro\n\n## Next Steps: Now\n\ntext", &doc))
+	for name in ([?]string{"Next Steps: Now", "next-steps-now", "Next%20Steps%3A%20Now"}) {
+		offset, found := markdown.heading_find(&doc, name)
+		testing.expect(t, found)
+		testing.expect_value(t, string(doc.text[offset:offset + 4]), "Next")
+	}
+	_, found := markdown.heading_find(&doc, "missing")
+	testing.expect(t, !found)
 }
 
 @(test)

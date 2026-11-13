@@ -604,7 +604,7 @@ markdown_key :: proc(app: ^App, w: ^Window, e: input.Key_Event) {
 @(private)
 markdown_link_open :: proc(app: ^App, w: ^Window, pane: ^Markdown_Pane, link: int) {
 	buffer: [links.TARGET_BYTES]u8 = ---
-	target_open(app, w, target_from_href(markdown_document(pane).links[link], pane.path, buffer[:]))
+	target_open(app, w, target_from_href(markdown_document(pane).links[link].href, pane.path, buffer[:]))
 }
 
 // Ctrl+ or Shift+right-click on a link shows the link menu a terminal link shows. False when the point is on
@@ -622,7 +622,7 @@ markdown_link_menu :: proc(
 	link := ui.markdown_link_at(&pane.view, markdown_geometry_of(w, shown), x, y)
 	if link < 0 {return false}
 	buffer: [links.TARGET_BYTES]u8 = ---
-	target := target_from_href(document.links[link], pane.path, buffer[:])
+	target := target_from_href(document.links[link].href, pane.path, buffer[:])
 	document_menu_open_target(app, w, shown.content, target, x, y)
 	return true
 }
