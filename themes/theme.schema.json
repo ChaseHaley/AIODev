@@ -30,7 +30,7 @@
         "pane": {"type":"string","title":"Pane background","description":"Settings and other non-terminal panes.","pattern":"^#[0-9a-fA-F]{6}$"},
         "pane_border": {"type":"string","title":"Pane border","description":"Outline of unfocused panes and shared split dividers.","pattern":"^#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?$"},
         "pane_focus": {"type":"string","title":"Focused pane border","description":"Outline of the focused pane.","pattern":"^#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?$"},
-        "surface": {"type":"string","title":"Popup background","description":"Menus, the command palette, notices and dialogs.","pattern":"^#[0-9a-fA-F]{6}$"},
+        "surface": {"type":"string","title":"Popup background","description":"Menus, the everything palette, notices and dialogs.","pattern":"^#[0-9a-fA-F]{6}$"},
         "text": {"type":"string","title":"Text","description":"Primary interface text.","pattern":"^#[0-9a-fA-F]{6}$"},
         "muted": {"type":"string","title":"Secondary text","description":"Labels, descriptions and inactive controls.","pattern":"^#[0-9a-fA-F]{6}$"},
         "faint": {"type":"string","title":"Hint text","description":"Working directories, placeholders and hints.","pattern":"^#[0-9a-fA-F]{6}$"},

@@ -6,7 +6,8 @@ import "core:strings"
 
 // A name and a colour a person gives a run of adjacent tabs (D-093). A group is a label, not a container: it
 // keeps no tab of its own and changes no shortcut. Its tabs are always adjacent, which tab_groups_tidy
-// restores after any change to the tab list.
+// restores after any change to the tab list. Its name and colour together tell it apart in its workspace
+// (WORK-460): no two groups share both.
 Tab_Group :: struct {
 	id:     u32,
 	// Owned. Empty draws the chip as a dot of its colour.
@@ -127,9 +128,10 @@ Tab_Group_Carry :: struct {
 }
 
 // Takes the groups whose every tab is among `tabs` from `source` to `destination`, where they keep their
-// name, colour and fold under new ids; a tab leaving part of a group leaves the group. Room in
-// destination.groups was reserved. The pairs are in temporary memory; when they cannot be made, every
-// moved tab arrives ungrouped.
+// name, colour and fold under new ids; a tab leaving part of a group leaves the group. A group whose name
+// and colour a destination group has already takes the next colour free for its name there, and with none
+// free, its tabs arrive ungrouped. Room in destination.groups was reserved. The pairs are in temporary
+// memory; when they cannot be made, every moved tab arrives ungrouped.
 tab_groups_carry :: proc(source, destination: ^Workspace, tabs: []u32) -> []Tab_Group_Carry {
 	carried := make([dynamic]Tab_Group_Carry, 0, len(source.groups), context.temp_allocator)
 	for i := len(source.groups) - 1; i >= 0; i -= 1 {
@@ -139,6 +141,10 @@ tab_groups_carry :: proc(source, destination: ^Workspace, tabs: []u32) -> []Tab_
 			if tab.group == group.id && !slice.contains(tabs, tab.id) {whole = false; break}
 		}
 		if !whole {continue}
+		if tab_group_taken(destination, group.name, group.color) {
+			group.color = tab_group_next_color(destination, group.name)
+			if group.color == 0 {continue}
+		}
 		destination.next_group_id += 1
 		if _, err := append(&carried, Tab_Group_Carry{group.id, destination.next_group_id}); err != nil {break}
 		group.id = destination.next_group_id
@@ -226,32 +232,44 @@ tab_order_apply :: proc(app: ^App, w: ^Window, order: []^Tab) {
 	}
 }
 
-// A colour no group of the workspace uses yet, in palette order, else the next in turn.
-@(private = "file")
-tab_group_next_color :: proc(workspace: ^Workspace) -> int {
+// Whether a group of `workspace` other than `except` has exactly `name` and colour `color`, so the two would
+// look the same, as in the Add to group menu (WORK-460).
+tab_group_taken :: proc(workspace: ^Workspace, name: string, color: int, except: u32 = 0) -> bool {
+	for group in workspace.groups {
+		if group.id != except && group.color == color && group.name == name {return true}
+	}
+	return false
+}
+
+// A colour for a group named `name`, other than `except`: the first no group of the workspace uses, in
+// palette order, else the first no group of that name has; 0 when every colour has one.
+tab_group_next_color :: proc(workspace: ^Workspace, name: string, except: u32 = 0) -> int {
 	colors := len(WORKSPACE_ICON_COLORS) - 1
 	for color in 1 ..= colors {
 		used := false
-		for group in workspace.groups {used ||= group.color == color}
+		for group in workspace.groups {used ||= group.id != except && group.color == color}
 		if !used {return color}
 	}
-	return len(workspace.groups) % colors + 1
+	for color in 1 ..= colors {if !tab_group_taken(workspace, name, color, except) {return color}}
+	return 0
 }
 
 // Gathers tab `index`, or the marked tabs it is one of, into a new group named `name` where the first of
-// them was, or after the group that tab was in. Nil when it could not be made.
+// them was, or after the group that tab was in, in a colour free for its name. Nil when it could not be
+// made, as when every colour already has a group of that name.
 @(require_results)
 tab_group_create :: proc(app: ^App, w: ^Window, index: int, name := "") -> ^Tab_Group {
 	workspace := w.workspace
 	block := tab_group_scope(workspace, index)
-	if len(block) == 0 || reserve(&workspace.groups, len(workspace.groups) + 1) != nil {return nil}
+	color := tab_group_next_color(workspace, name)
+	if len(block) == 0 || color == 0 || reserve(&workspace.groups, len(workspace.groups) + 1) != nil {return nil}
 	order := tab_order_with_block(workspace, block, block[0].group)
 	if order == nil {return nil}
 	owned, err := strings.clone(name)
 	if err != nil {return nil}
 	workspace.next_group_id += 1
 	id := workspace.next_group_id
-	append(&workspace.groups, Tab_Group{id = id, name = owned, color = tab_group_next_color(workspace)})
+	append(&workspace.groups, Tab_Group{id = id, name = owned, color = color})
 	tab_order_apply(app, w, order)
 	for tab in block {tab.group = id}
 	tab_groups_changed(app, w)
@@ -297,16 +315,22 @@ tab_group_fold :: proc(app: ^App, w: ^Window, id: u32, folded: bool) -> bool {
 	workspace := w.workspace
 	group := tab_group_find(workspace, id)
 	if group == nil || group.folded == folded {return false}
-	if folded && workspace.tabs[workspace.selected].group == id {
-		next := tab_nearest_shown(workspace, workspace.selected, id)
-		if next < 0 {
-			notify(app, .Info, "Nothing else is open, so the group stays unfolded.")
-			return false
-		}
+	// Folding the shown tab's group shows the nearest tab outside it.
+	shown := folded && workspace.tabs[workspace.selected].group == id
+	next := shown ? tab_nearest_shown(workspace, workspace.selected, id) : -1
+	if shown && next < 0 {
+		notify(app, .Info, "Nothing else is open, so the group stays unfolded.")
+		return false
+	}
+	// The strip's tab width and end, or the rail's footer, ease from where they show now.
+	tab_fold_room_hold(app, w)
+	if shown {
 		group.folded = true
 		tab_select(app, w, next)
 	}
 	group.folded = folded
+	// A fold reversed on the way carries on from where the tray is; any other starts from the group as it was.
+	if w.folding != id {w.fold = {value = folded ? 1 : 0, target = folded ? 1 : 0}}
 	w.folding = id
 	tab_groups_changed(app, w)
 	return true
@@ -352,11 +376,14 @@ tab_group_new_tab :: proc(app: ^App, w: ^Window, id: u32) {
 	tab_group_add(app, w, len(workspace.tabs) - 1, id)
 }
 
-tab_group_color_set :: proc(app: ^App, w: ^Window, id: u32, color: int) {
+// Gives group `id` colour `color`, unless another group with its name has that colour; false then.
+tab_group_color_set :: proc(app: ^App, w: ^Window, id: u32, color: int) -> bool {
 	group := tab_group_find(w.workspace, id)
-	if group == nil || color < 1 || color >= len(WORKSPACE_ICON_COLORS) {return}
+	if group == nil || color < 1 || color >= len(WORKSPACE_ICON_COLORS) {return false}
+	if tab_group_taken(w.workspace, group.name, color, id) {return false}
 	group.color = color
 	tab_groups_changed(app, w)
+	return true
 }
 
 // Moves tab `index` one step left (`step` -1) or right (+1), stepping over groups at their edges. A tab at
@@ -435,14 +462,20 @@ tab_group_command :: proc(
 		target := Rename_Group_Target{workspace.id, id}
 		if !named {
 			tab_group_name_begin(app, w, id, false)
-		} else if rename_target_commit(app, target, invocation.text, .Automatic_Title) != .Saved {
-			return outcome_failure(.Failed, "could not rename the group")
+		} else {
+			#partial switch rename_target_commit(app, target, invocation.text, .Automatic_Title) {
+			case .Saved:
+			case .Taken: return outcome_failure(.Failed, "a group of this colour already has that name")
+			case: return outcome_failure(.Failed, "could not rename the group")
+			}
 		}
 	case .Tab_Group_Color:
 		@(static, rodata) colors := WORKSPACE_ICON_COLORS
 		for color, i in colors[1:] {
 			if !strings.equal_fold(color.name, invocation.text) {continue}
-			tab_group_color_set(app, w, id, i + 1)
+			if !tab_group_color_set(app, w, id, i + 1) {
+				return outcome_failure(.Failed, "a group of that colour already has this group's name")
+			}
 			return {}
 		}
 		return outcome_failure(.Failed, "no color of that name")

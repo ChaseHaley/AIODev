@@ -123,7 +123,7 @@ THEME_TOKENS :: [Theme_Token]Token_Info {
 	.Surface = {
 		"surface",
 		"Popup background",
-		"Menus, the command palette, notices and dialogs.",
+		"Menus, the everything palette, notices and dialogs.",
 		.Opaque,
 	},
 	.Text = {"text", "Text", "Primary interface text.", .Opaque},

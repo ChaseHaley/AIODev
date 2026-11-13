@@ -8,7 +8,7 @@ import "aio:render"
 @(private)
 DROPDOWN_SEARCH_HEIGHT :: OVERLAY_PADDING + HEIGHT_STANDARD
 
-// The one dropdown a setting's choices open in, on the Settings page and in the command palette.
+// The one dropdown a setting's choices open in, on the Settings page and in the everything palette.
 // It keeps what is open: the highlighted option and the first shown, the search a long list such
 // as the installed fonts filters by and its matches, whether the keyboard is on the Show all fonts
 // switch, what the pointer holds and whether it is over the scrollbar. The owner keeps the choices,

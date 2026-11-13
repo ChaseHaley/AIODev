@@ -1,6 +1,7 @@
 package ui
 
 import "aio:render"
+import "core:math"
 
 // The horizontal title-bar tab strip. It shares the title-bar height so the strip, the workspace
 // chip and the caption controls all sit in the same 40 DIP row.
@@ -12,6 +13,9 @@ Tab_Bar :: struct {
 	end:                                       f32,
 	count:                                     int,
 }
+
+// A strip tab is never wider than this; it shares the strip's room below it.
+TAB_MAX_WIDTH :: f32(220)
 
 // The strip spans `width` from `x`. Its `count` tabs show in `slots` places (a folded group's take none) and
 // share their width with `incoming` tabs a drag offers, which hold their space without counting as tabs
@@ -29,7 +33,7 @@ tab_bar_layout :: proc(
 	bar.width, bar.count = width, count
 	bar.button_width = min(width, TITLE_BUTTON_WIDTH * scale)
 	room := max(0, width - bar.button_width - chips)
-	bar.tab_width = min(220 * scale, room / f32(max(1, places)))
+	bar.tab_width = min(TAB_MAX_WIDTH * scale, room / f32(max(1, places)))
 	bar.end = x + f32(places - incoming) * bar.tab_width + chips
 	return bar
 }
@@ -83,9 +87,10 @@ Tab_Tile :: struct {
 	status_slot:  bool,
 	selected:     bool,
 	marked:       bool,
-	// The colour of the tab's group, drawn as a band along the strip's top or the rail's left edge;
-	// transparent for none.
-	group:        render.Color,
+	// The tab's part of its group's tray, transparent for none, closed at the ends in `tray_ends`.
+	tray:         render.Color,
+	tray_ends:    Tray_Ends,
+	tray_state:   Tray_State,
 }
 
 // Draws the badge in the leading icon column of `tile`, stacked over the mark behind it when the tab
@@ -188,11 +193,15 @@ tab_draw :: proc(
 	pointer: [2]f32 = {},
 ) -> render.Build_Status {
 	width := bar.tab_width
-	if render.push_layer(list, {x, 0, width, bar.height}) != .None {return .Ok}
-	draw_rect(list, {rect = {x, 0, width, bar.height}, color = theme.tab_bar})
-	if t.group.a > 0 {
-		band := render.Rect{x, (bar.height - HEIGHT_TOOLBAR * scale) / 2 - 4 * scale, width, 2 * scale}
-		draw_rect(list, {rect = band, color = t.group})
+	// The tab's room meets its neighbours' on a whole pixel, so a group's tray runs on through them evenly.
+	left := math.round(x)
+	room := render.Rect{left, 0, math.round(x + width) - left, bar.height}
+	if render.push_layer(list, room) != .None {return .Ok}
+	draw_rect(list, {rect = room, color = theme.tab_bar})
+	if t.tray.a > 0 {
+		y, height := tab_tray_band(bar.height, scale)
+		slice := render.Rect{room.x, y, room.width, height}
+		if tab_tray_draw(list, slice, t.tray, t.tray_ends, t.tray_state, false, scale) != .None {return .Ok}
 	}
 	// Every tab rises on hover; the selected tab keeps its pane fill while it moves.
 	lift := hover_lift_at(theme, hover, scale)
