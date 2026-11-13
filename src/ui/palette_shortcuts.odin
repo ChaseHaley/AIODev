@@ -71,11 +71,16 @@ palette_binding_outcome :: proc(
 	return .Changed
 }
 
-// Keep a refused binding available to correct; saving ends only the inline row.
-palette_binding_saved :: proc(p: ^Palette, saved: bool) {
-	binding, open := &p.edit.(Shortcut_Edit)
-	if !open {return}
-	if saved {edit_set(p, nil)} else {shortcut_capture_resume(&binding.capture)}
+// The owner reports whether the value the last Set_Setting named saved. A saved shortcut ends only
+// the inline row, and a refused one stays open to correct. A dropdown is open only when its Show all
+// fonts switch saved, and then lists the other filter's fonts.
+palette_saved :: proc(p: ^Palette, saved: bool) {
+	#partial switch &edit in p.edit {
+	case Shortcut_Edit:
+		if saved {edit_set(p, nil)} else {shortcut_capture_resume(&edit.capture)}
+	case Choice_Edit:
+		if saved {choice_reload(p, edit.setting)}
+	}
 }
 
 // The row stays open while its capture records, lists alternatives, or leaves the keyboard on the

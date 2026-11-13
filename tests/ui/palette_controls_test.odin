@@ -2,6 +2,7 @@ package ui_test
 
 import "aio:commands"
 import "aio:input"
+import "aio:platform"
 import "aio:settings"
 import "aio:ui"
 import "core:strconv"
@@ -51,7 +52,7 @@ CONTROL_ROWS := [?]ui.Palette_Setting {
 	{key = "input.leader", title = "Leader Key", group = "Input", control = .None, resettable = true,
 		default_value = "ctrl+b"},
 	{key = "font.family", title = "Font Family", group = "Font", control = .Choice,
-		searchable = true},
+		searchable = true, choice_min_width = 360, filter_key = "font.show_all"},
 }
 
 @(private)
@@ -198,6 +199,129 @@ palette_long_choice_list_filters_typed_text :: proc(t: ^testing.T) {
 	_, value := chosen_value(&p)
 	testing.expect_value(t, outcome, ui.Outcome.Set_Setting)
 	testing.expect_value(t, value, "JetBrains Mono")
+}
+
+@(private)
+LONG_FONTS := []string{"Aptos", "Bahnschrift", "Calibri", "Cambria", "Cascadia Code", "Cascadia Mono",
+	"Consolas", "Courier New", "Georgia", "JetBrains Mono", "Lucida Console", "Segoe UI", "Verdana"}
+
+// Opens the font list in a fitted 1000 x 800 palette, with its row selected.
+@(private)
+open_font_list :: proc(t: ^testing.T, p: ^ui.Palette, v: ^Control_Values) -> (commands.Registry, ui.Palette_Layout) {
+	v.fonts = LONG_FONTS
+	registry := control_palette(t, p, v)
+	ui.palette_fit(p, 1000, 800, 1)
+	select_setting(p, "font.family")
+	ui.palette_key(p, &registry, press(.Enter, {.Control}))
+	testing.expect_value(t, ui.palette_editing(p), ui.Palette_Edit_Kind.Choice)
+	return registry, ui.palette_layout(p, 1000, 800, 1)
+}
+
+// The palette opens the Settings page's dropdown: the same rows, search and Show all fonts switch,
+// so a font list is the same size in both, and its saved font is highlighted.
+@(test)
+palette_and_settings_open_the_same_font_dropdown :: proc(t: ^testing.T) {
+	page_editor: ui.Editor
+	defer ui.editor_destroy(&page_editor)
+	testing.expect_value(t, ui.editor_add(&page_editor, {
+		key = "font.family", title = "Shell Font", kind = .Choice, searchable = true, font_filter = true,
+		choice_min_width = 360, value = "Cascadia Mono", choices = LONG_FONTS,
+	}, "Font"), nil)
+	ui.editor_filter(&page_editor)
+	testing.expect(t, ui.editor_select_key(&page_editor, "font.family"))
+	page_layout := ui.editor_layout({0, 40, 1200, 1400}, 1)
+	ui.editor_fit(&page_editor, page_layout)
+	ui.editor_key(&page_editor, {key = .Enter, pressed = true})
+	page_popup := ui.editor_popup_rect(&page_editor, page_layout)
+
+	p: ui.Palette
+	v: Control_Values
+	registry, l := open_font_list(t, &p, &v)
+	defer commands.destroy(&registry)
+	defer ui.palette_destroy(&p)
+	popup := ui.palette_popup_rect(&p, l)
+	// Eight standard rows, the overlay padding, the search and the switch.
+	testing.expect_value(t, popup.height, f32(8 * 32 + 8 + 68))
+	testing.expect_value(t, popup.height, page_popup.height)
+	testing.expect_value(t, popup.width, page_popup.width)
+	testing.expect_value(t, p.buffers.dropdown.list.index, page_editor.dropdown.list.index)
+	testing.expect_value(t, LONG_FONTS[p.buffers.dropdown.list.index], "Cascadia Mono")
+	testing.expect_value(t, ui.palette_pointer(&p, l, popup.x + 14, popup.y + 14), platform.Cursor_Shape.Text)
+	testing.expect_value(t, ui.palette_pointer(&p, l, popup.x + 14, popup.y + 50), platform.Cursor_Shape.Hand)
+}
+
+// The palette's list has the shared scrollbar: hover, paging, a thumb drag and the wheel.
+@(test)
+palette_font_dropdown_scrollbar_pages_drags_and_wheels :: proc(t: ^testing.T) {
+	p: ui.Palette
+	v: Control_Values
+	registry, l := open_font_list(t, &p, &v)
+	defer commands.destroy(&registry)
+	defer ui.palette_destroy(&p)
+	d := &p.buffers.dropdown
+	popup := ui.palette_popup_rect(&p, l)
+	x := popup.x + popup.width - 4
+	top, bottom := popup.y + 68 + 6, popup.y + popup.height - 8
+
+	testing.expect_value(t, ui.palette_pointer_move(&p, l, nil, x, bottom, false), ui.Outcome.Changed)
+	testing.expect(t, d.bar_hover)
+	testing.expect_value(t, ui.palette_pointer(&p, l, x, bottom), platform.Cursor_Shape.Arrow)
+	d.list = {}
+	outcome, _ := ui.palette_mouse_press(&p, &registry, l, x, bottom)
+	testing.expect_value(t, outcome, ui.Outcome.Changed)
+	testing.expect(t, d.list.scroll > 0, "a press below the thumb pages down")
+	testing.expect_value(t, ui.palette_editing(&p), ui.Palette_Edit_Kind.Choice)
+
+	for d.list.scroll > 0 {_, _ = ui.palette_mouse_press(&p, &registry, l, x, top)}
+	_, _ = ui.palette_mouse_press(&p, &registry, l, x, top)
+	testing.expect(t, ui.dropdown_scrollbar_held(d), "a press on the thumb holds it")
+	testing.expect_value(t, ui.palette_pointer_move(&p, l, nil, x + 500, 10000, true), ui.Outcome.Changed)
+	testing.expect_value(t, d.list.scroll, len(LONG_FONTS) - 8)
+	testing.expect_value(t, ui.palette_pointer_release(&p), ui.Outcome.Changed)
+	testing.expect(t, !ui.dropdown_dragging(d))
+
+	testing.expect_value(t, ui.palette_scroll(&p, 3), ui.Outcome.Changed)
+	testing.expect_value(t, d.list.scroll, len(LONG_FONTS) - 11)
+	testing.expect(t, ui.palette_chosen_take(&p) == nil, "scrolling chooses nothing")
+}
+
+// The Show all fonts switch saves the other filter with the list open; once the owner saved it the
+// list shows that filter's fonts and keeps the search.
+@(test)
+palette_font_dropdown_show_all_switch_keeps_the_list_and_search :: proc(t: ^testing.T) {
+	p: ui.Palette
+	v: Control_Values
+	registry, _ := open_font_list(t, &p, &v)
+	defer commands.destroy(&registry)
+	defer ui.palette_destroy(&p)
+	ui.palette_text(&p, &registry, "ca")
+	// Calibri, Cambria and both Cascadias.
+	testing.expect_value(t, len(p.buffers.dropdown.matches), 4)
+	ui.palette_key(&p, &registry, press(.Tab))
+	testing.expect(t, p.buffers.dropdown.toggle_focus)
+	outcome, _ := ui.palette_key(&p, &registry, press(.Space))
+	key, value := chosen_value(&p)
+	testing.expect_value(t, outcome, ui.Outcome.Set_Setting)
+	testing.expect_value(t, key, "font.show_all")
+	testing.expect_value(t, value, "true")
+	testing.expect_value(t, ui.palette_editing(&p), ui.Palette_Edit_Kind.Choice)
+
+	// The owner saves the filter; its choices now list the other fonts.
+	control_set(&v, "font.show_all", "true")
+	v.fonts = {"Cascadia Mono", "Comic Sans MS", "Calibri"}
+	ui.palette_saved(&p, true)
+	testing.expect_value(t, ui.palette_editing(&p), ui.Palette_Edit_Kind.Choice)
+	testing.expect_value(t, ui.field_string(&p.buffers.dropdown.search), "ca")
+	testing.expect(t, p.buffers.dropdown.toggle_focus)
+	testing.expect_value(t, len(p.buffers.choices), 3)
+	testing.expect_value(t, len(p.buffers.dropdown.matches), 2)
+	ui.palette_key(&p, &registry, press(.Tab))
+	ui.palette_key(&p, &registry, press(.Arrow_Down))
+	outcome, _ = ui.palette_key(&p, &registry, press(.Enter))
+	_, value = chosen_value(&p)
+	testing.expect_value(t, outcome, ui.Outcome.Set_Setting)
+	testing.expect_value(t, value, "Calibri")
+	testing.expect_value(t, ui.palette_editing(&p), ui.Palette_Edit_Kind.None)
 }
 
 @(test)

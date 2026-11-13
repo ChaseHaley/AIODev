@@ -354,12 +354,12 @@ editor_choice_popup_highlights_the_option_under_the_pointer :: proc(t: ^testing.
 	popup := ui.editor_popup_rect(&p, l)
 	second := popup.y + 4 + 30 * 1.5
 	testing.expect(t, ui.editor_hover(&p, l, popup.x+10, second))
-	testing.expect_value(t, p.choice_list.index, 1)
+	testing.expect_value(t, p.dropdown.list.index, 1)
 	// The same option reports no change once it is already highlighted.
 	testing.expect(t, !ui.editor_hover(&p, l, popup.x+10, second))
 	// Below the popup must not steal the highlight from the open list.
 	testing.expect(t, !ui.editor_hover(&p, l, popup.x+10, popup.y+popup.height+40))
-	testing.expect_value(t, p.choice_list.index, 1)
+	testing.expect_value(t, p.dropdown.list.index, 1)
 }
 
 @(test)
@@ -701,7 +701,7 @@ editor_multiple_choice_toggles_options_and_stays_open :: proc(t: ^testing.T) {
 	testing.expect(t, ui.editor_select_key(&p, "status.notify_blocked"))
 	ui.editor_key(&p, key({key = .Enter}))
 	testing.expect_value(t, ui.editor_popup(&p), ui.Editor_Popup.Choice)
-	testing.expect_value(t, p.choice_list.index, 0)
+	testing.expect_value(t, p.dropdown.list.index, 0)
 	// Enter flips the highlighted option and leaves the list open for the next one.
 	testing.expect_value(t, ui.editor_key(&p, key({key = .Enter})), ui.Editor_Outcome.Save)
 	testing.expect_value(t, settings.set_text(row.choices, ui.editor_choice_set(&p)), "sound")
