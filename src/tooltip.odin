@@ -201,40 +201,49 @@ tooltip_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 	width := f32(0)
 	for line in lines {width = max(width, ui.text_width(&w.ui_text, line))}
 	width += 16 * s + aside
-	height := ui.HEIGHT_COMPACT * s + f32(len(lines) - 1) * w.ui_text.line_height
+	// The first line's band also holds the keycap; the usual padding stays around the lines.
+	line := w.ui_text.line_height
+	first := tooltip_line_band(w, line, shortcut)
+	block := first + f32(len(lines) - 1) * line
+	height := ui.HEIGHT_COMPACT * s - line + block
 	x := clamp(w.pointer.x + 12 * s, 4 * s, max(4 * s, f32(w.width) - width - 4 * s))
 	y := clamp(w.pointer.y + 16 * s, 4 * s, max(4 * s, f32(w.height) - height - 4 * s))
 	if render.push_layer(&w.list, {0, 0, f32(w.width), f32(w.height)}) != .None {return .Ok}
 	if ui.panel_draw(&w.list, {rect = {x, y, width, height}, radius = ui.RADIUS_CONTROL * s,
 	   scale = s, shadow_y = 2, softness = 8, border = .Stroked}, app.theme) != .None {return .Ok}
-	top := y + (height - f32(len(lines)) * w.ui_text.line_height) / 2
-	for line, i in lines {
-		baseline := top + f32(i) * w.ui_text.line_height + w.ui_text.ascent
-		if result := ui.draw_text(&w.ui_text, &w.list, line, x + 8 * s, baseline, app.theme.text);
-		   result != .Ok {return result}
+	top := y + (height - block) / 2
+	for text, i in lines {
+		line_top := i == 0 ? top + (first - line) / 2 : top + first + f32(i - 1) * line
+		if result := ui.draw_text(&w.ui_text, &w.list, text, x + 8 * s, line_top + w.ui_text.ascent,
+			   app.theme.text); result != .Ok {return result}
 	}
-	return tooltip_shortcut_draw(app, w, shortcut, x + width - 8 * s, top, w.ui_text.line_height)
+	return tooltip_shortcut_draw(app, w, shortcut, x + width - 8 * s, top, first)
 }
 
-// The room a shortcut takes beside a tooltip's first line: its detail text and the gap before it.
+// The height of a tooltip's first line: its text, or the shortcut's keycap where that is taller.
+@(private = "file")
+tooltip_line_band :: proc(w: ^Window, line_height: f32, shortcut: string) -> f32 {
+	return shortcut == "" ? line_height : max(line_height, ui.KEYCAP_HEIGHT * w.scale)
+}
+
+// The room a shortcut takes beside a tooltip's first line: its keycap and the gap before it.
 @(private = "file")
 tooltip_shortcut_width :: proc(w: ^Window, shortcut: string) -> f32 {
 	if shortcut == "" {return 0}
-	detail := ui.text_styled(&w.ui_text, .Detail)
-	return ui.SPACE_2 * w.scale + ui.text_width(&detail, shortcut)
+	keycap := ui.text_styled(&w.ui_text, .Detail)
+	return ui.SPACE_2 * w.scale + ui.keycap_width(&keycap, shortcut, w.scale)
 }
 
-// The shortcut in faint detail text, ending at `right` and centred on the first line, as a menu row
-// shows it.
+// The shortcut as a keycap, as the Settings search shows Ctrl+F: ending at `right`, centred in the first
+// line's band.
 @(private = "file")
 tooltip_shortcut_draw :: proc(
-	app: ^App, w: ^Window, shortcut: string, right, line_top, line_height: f32,
+	app: ^App, w: ^Window, shortcut: string, right, band_top, band_height: f32,
 ) -> render.Build_Status {
 	if shortcut == "" {return .Ok}
-	detail := ui.text_styled(&w.ui_text, .Detail)
-	baseline := line_top + (line_height - detail.line_height) / 2 + detail.ascent
-	return ui.draw_text(&detail, &w.list, shortcut, right - ui.text_width(&detail, shortcut), baseline,
-		app.theme.faint)
+	keycap := ui.text_styled(&w.ui_text, .Detail)
+	x := right - ui.keycap_width(&keycap, shortcut, w.scale)
+	return ui.keycap_draw(&w.list, &keycap, app.theme, shortcut, x, band_top, band_height, w.scale)
 }
 
 // The label in emphasis with the shortcut beside it, then the picture, then the sentence in detail text
@@ -256,7 +265,8 @@ tooltip_card_draw :: proc(
 	lines := make([dynamic]string, context.temp_allocator)
 	if card.description != "" {ui.wrap(&detail, card.description, inner, &lines)}
 	width := inner + 2 * pad
-	height := pad + strong.line_height + pad
+	band := tooltip_line_band(w, strong.line_height, shortcut)
+	height := pad + band + pad
 	if pictured {height += gap + picture.y}
 	if len(lines) > 0 {height += gap + f32(len(lines)) * detail.line_height}
 	x := clamp(w.pointer.x + 12 * s, 4 * s, max(4 * s, f32(w.width) - width - 4 * s))
@@ -265,11 +275,13 @@ tooltip_card_draw :: proc(
 	if ui.panel_draw(&w.list, {rect = {x, y, width, height}, radius = ui.RADIUS_CONTROL * s,
 	   scale = s, shadow_y = 2, softness = 8, border = .Stroked}, app.theme) != .None {return .Ok}
 	top := y + pad
-	if result := ui.draw_text(&strong, &w.list, label, x + pad, top + strong.ascent, app.theme.text,
+	label_baseline := top + (band - strong.line_height) / 2 + strong.ascent
+	if result := ui.draw_text(&strong, &w.list, label, x + pad, label_baseline, app.theme.text,
 		aside > 0 ? max(1, inner - aside) : 0); result != .Ok {return result}
-	if result := tooltip_shortcut_draw(app, w, shortcut, x + pad + inner, top, strong.line_height);
-	   result != .Ok {return result}
-	top += strong.line_height
+	if result := tooltip_shortcut_draw(app, w, shortcut, x + pad + inner, top, band); result != .Ok {
+		return result
+	}
+	top += band
 	if pictured {
 		top += gap
 		if ui.pane_preview_draw(&w.list, app.theme, {x + pad, top}, preview, s) != .None {return .Ok}

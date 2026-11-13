@@ -223,3 +223,38 @@ tooltip_shortcut_follows_the_commands_binding :: proc(t: ^testing.T) {
 	// Minimize belongs to Windows and runs no command.
 	testing.expect_value(t, app.tooltip_shortcut(&state, &w, .Caption, f32(w.width) - 130, 20, buffer[:]), "")
 }
+
+// A tooltip draws its shortcut as the Settings search draws Ctrl+F: the whole chord in one keycap, at the
+// tooltip's right inset and centred on its line, in a tooltip grown to hold it.
+@(test)
+tooltip_draws_its_shortcut_as_a_keycap :: proc(t: ^testing.T) {
+	f: Palette_Fixture
+	defer palette_fixture_destroy(t, &f)
+	if !palette_fixture_create(t, &f, "tooltip-keycap", second_window = false) {return}
+	s, w := &f.state, f.state.windows[0]
+	r := app.title_action_rect(w, .Palette)
+	x, y := r.x + r.width / 2, r.y + r.height / 2
+	w.pointer = {x, y}
+	app.tooltip_hover(s, w, .Title_Action, input.Mouse_Move_Event{x = i32(x), y = i32(y)})
+	app.tooltip_tick(w, time.tick_add(time.tick_now(), time.Second))
+	if !testing.expect(t, tooltip_visible(w)) {return}
+	render.draw_list_reset(&w.list)
+	if !testing.expect_value(t, app.tooltip_draw(s, w), render.Build_Status.Ok) {return}
+
+	scale := w.scale
+	keycap_text := ui.text_styled(&w.ui_text, .Detail)
+	keycap, panel: render.Rect
+	found_keycap, found_panel := false, false
+	for instance in w.list.rects {
+		if instance.color == s.theme.border && instance.stroke == scale &&
+		   instance.rect.height == ui.KEYCAP_HEIGHT * scale {keycap, found_keycap = instance.rect, true}
+		if instance.color == s.theme.surface {panel, found_panel = instance.rect, true}
+	}
+	if !testing.expect(t, found_keycap && found_panel, "the tooltip draws a panel and a keycap") {return}
+	testing.expect_value(t, keycap.width, ui.keycap_width(&keycap_text, "Ctrl+Shift+P", scale))
+	testing.expectf(t, abs(keycap.x + keycap.width - (panel.x + panel.width - 8 * scale)) < 0.5,
+		"the keycap ends at the right inset: %v in %v", keycap, panel)
+	testing.expectf(t, abs(keycap.y + keycap.height / 2 - (panel.y + panel.height / 2)) < 0.5,
+		"the keycap is centred on the line: %v in %v", keycap, panel)
+	testing.expect(t, panel.height >= ui.KEYCAP_HEIGHT * scale + 2 * scale, "the keycap fits inside the tooltip")
+}
