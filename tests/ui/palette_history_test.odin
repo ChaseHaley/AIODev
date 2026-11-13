@@ -377,3 +377,77 @@ palette_shortcut_editor_counts_its_command :: proc(t: ^testing.T) {
 	ui.palette_open(&p, &registry)
 	testing.expect_value(t, titles(&p)[0], "Copy")
 }
+
+// Any use of a row records the query that found it, as running one does, and once per opening for the
+// same text.
+@(test)
+palette_inline_change_records_its_query_in_history :: proc(t: ^testing.T) {
+	rows := [?]ui.Palette_Setting {
+		{key = "appearance.theme", title = "Theme", group = "Appearance", control = .Choice,
+			choices = {"dark", "light"}},
+		{key = "pane.gap", title = "Pane gap", group = "Panes", control = .Slider, minimum = 0, maximum = 24,
+			step = 1},
+	}
+	v: Control_Values
+	control_set(&v, "appearance.theme", "dark")
+	control_set(&v, "pane.gap", "5")
+	registry := commands.create()
+	defer commands.destroy(&registry)
+	p: ui.Palette
+	if !testing.expect_value(t, ui.palette_init(&p, rows[:]), nil) {return}
+	defer ui.palette_destroy(&p)
+	ui.palette_set_values(&p, {user = &v, value = control_value, choices = control_choices})
+	alt_right := key({key = .Arrow_Right, modifiers = {.Alt}})
+
+	ui.palette_open(&p, &registry)
+	ui.palette_text(&p, &registry, "theme")
+	for _ in 0 ..< 3 {
+		outcome, _ := ui.palette_key(&p, &registry, alt_right)
+		testing.expect_value(t, outcome, ui.Outcome.Set_Setting)
+	}
+	testing.expect_value(t, len(p.history.entries), 1)
+	outcome, _ := ui.palette_key(&p, &registry, key({key = .Escape}))
+	testing.expect_value(t, outcome, ui.Outcome.Closed)
+	ui.palette_open_mode(&p, &registry, .Commands)
+	press(&p, &registry, UP)
+	testing.expect_value(t, ui.palette_query(&p), "theme")
+	testing.expect_value(t, p.mode, ui.Palette_Mode.All)
+
+	// A second query records too; returning to the first in the same opening records nothing again.
+	ui.palette_open(&p, &registry)
+	ui.palette_text(&p, &registry, "theme")
+	ui.palette_key(&p, &registry, alt_right)
+	ui.palette_key(&p, &registry, key({key = .A, modifiers = {.Control}}))
+	ui.palette_text(&p, &registry, "gap")
+	ui.palette_key(&p, &registry, alt_right)
+	ui.palette_key(&p, &registry, key({key = .A, modifiers = {.Control}}))
+	ui.palette_text(&p, &registry, "theme")
+	ui.palette_key(&p, &registry, alt_right)
+	testing.expect_value(t, len(p.history.entries), 2)
+	testing.expect_value(t, p.history.entries[1].query, "gap")
+	// Opening a list counts as a use and records its query; an empty query records nothing.
+	ui.palette_open(&p, &registry)
+	ui.palette_text(&p, &registry, "them")
+	ui.palette_key(&p, &registry, key({key = .Enter, modifiers = {.Control}}))
+	testing.expect_value(t, ui.palette_editing(&p), ui.Palette_Edit_Kind.Choice)
+	testing.expect_value(t, p.history.entries[len(p.history.entries) - 1].query, "them")
+	ui.palette_open(&p, &registry)
+	ui.palette_key(&p, &registry, alt_right)
+	testing.expect_value(t, len(p.history.entries), 3)
+}
+
+@(test)
+palette_shortcut_editor_records_its_query_in_history :: proc(t: ^testing.T) {
+	registry := registry_create(t)
+	defer commands.destroy(&registry)
+	p: ui.Palette
+	if !testing.expect_value(t, ui.palette_init(&p, nil), nil) {return}
+	defer ui.palette_destroy(&p)
+	ui.palette_open(&p, &registry)
+	ui.palette_text(&p, &registry, "copy")
+	ui.palette_key(&p, &registry, key({key = .Enter, modifiers = {.Control}}))
+	ui.palette_close(&p)
+	ui.palette_open(&p, &registry)
+	press(&p, &registry, UP)
+	testing.expect_value(t, ui.palette_query(&p), "copy")
+}

@@ -84,9 +84,10 @@ palette_result_use :: proc(p: ^Palette, r: Palette_Result) -> (Palette_Use, bool
 
 // Counts one use of an item: running or opening it, changing its value in place, or opening its
 // shortcut editor. Each item counts at most once per opening, so ten Alt+Right steps on a slider are
-// one use, like one Enter.
+// one use, like one Enter. Every use also records the query that found the item, as it reads now.
 @(private)
 palette_use :: proc(p: ^Palette, use: Palette_Use) {
+	palette_note_query(p)
 	for counted in p.counted {
 		if counted == use {return}
 	}
@@ -122,11 +123,35 @@ palette_used_take :: proc(p: ^Palette) -> bool {
 	return used
 }
 
-// Counts one run of the result and records the query that found it.
+// Counts one run of the result.
 @(private)
 palette_record :: proc(p: ^Palette, r: Palette_Result) {
-	if p.keys.state == .Off {query_history_add(&p.history, palette_query(p), p.mode)}
 	if use, usable := palette_result_use(p, r); usable {palette_use(p, use)}
+}
+
+// Records the query in history with its mode, once per opening for the same text: using a second row
+// under the same query, or the same row again, records nothing new. An empty query and the hidden
+// text of a search by keys are not recorded.
+@(private)
+palette_note_query :: proc(p: ^Palette) {
+	query := palette_query(p)
+	if p.keys.state != .Off || strings.trim_space(query) == "" {return}
+	for noted in p.noted {
+		if noted == query {return}
+	}
+	copied, err := strings.clone(query, p.noted.allocator)
+	if err != nil {return}
+	if _, append_error := append(&p.noted, copied); append_error != nil {
+		delete(copied, p.noted.allocator)
+		return
+	}
+	query_history_add(&p.history, query, p.mode)
+}
+
+@(private)
+palette_noted_clear :: proc(p: ^Palette) {
+	for noted in p.noted {delete(noted, p.noted.allocator)}
+	clear(&p.noted)
 }
 
 // Leaves history browsing, freeing the draft; the query keeps what browsing put there.

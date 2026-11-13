@@ -249,6 +249,8 @@ Palette :: struct {
 	// palette_used_take last asked.
 	counted:      [dynamic]Palette_Use,
 	used:         bool,
+	// The query texts this opening has recorded in history, owned; see palette_note_query.
+	noted:        [dynamic]string,
 }
 
 // What the last outcome names for the owner: the setting to reveal (Open_Setting), the value to save
@@ -325,6 +327,7 @@ palette_init :: proc(
 	p.chosen_value = make([dynamic]u8, allocator)
 	p.chosen_key = make([dynamic]u8, allocator)
 	p.counted = make([dynamic]Palette_Use, allocator)
+	p.noted = make([dynamic]string, allocator)
 	edit_init(&p.buffers, allocator)
 	p.settings = settings
 	p.visible_rows = PALETTE_MAX_ROWS
@@ -348,6 +351,8 @@ palette_destroy :: proc(p: ^Palette) {
 	query_history_destroy(&p.history)
 	palette_usage_destroy(&p.usage)
 	delete(p.counted)
+	palette_noted_clear(p)
+	delete(p.noted)
 	delete(p.chosen_key)
 	free(p.scratch, p.query.bytes.allocator)
 	delete(p.query.bytes)
@@ -380,6 +385,7 @@ palette_open_mode :: proc(p: ^Palette, registry: ^commands.Registry, mode: Palet
 	field_set(&p.query, "")
 	p.opened_at = now
 	clear(&p.counted)
+	palette_noted_clear(p)
 	p.selected, p.scroll = 0, 0
 	p.mode = mode
 	p.mode_hover = -1
