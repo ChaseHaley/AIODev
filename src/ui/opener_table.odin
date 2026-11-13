@@ -119,6 +119,7 @@ editor_opener_draw :: proc(
 	list: ^render.Draw_List,
 	text: ^Text,
 	theme: Theme,
+	pointer: [2]f32,
 	scale: f32,
 ) -> render.Build_Status {
 	s, r := scale, parts.row
@@ -126,7 +127,9 @@ editor_opener_draw :: proc(
 	small := text_styled(text, .Detail)
 	grip_ink := selected || editor_order_dragging(p, .Openers) ? theme.muted : theme.faint
 	icon_draw(list, .Grip, cells.handle, grip_ink, ICON_BUTTON, s)
-	icon_draw(list, .Trash, cells.remove, theme.muted, ICON_BUTTON, s)
+	remove_hovered := editor_row_control_hovered(p, row, cells.remove, pointer)
+	if table_button_draw(list, cells.remove, .Trash, ICON_BUTTON, theme, s, false, remove_hovered, selected,
+		   pointer) != .None {return .Ok}
 	chevron := render.Rect{cells.remove.x - HEIGHT_COMPACT * s, r.y, HEIGHT_COMPACT * s, r.height}
 	expanded := p.opener_expanded == row.opener
 	icon_draw(list, expanded ? .Chevron_Down : .Chevron_Right, chevron, theme.muted, ICON_INDICATOR, s)

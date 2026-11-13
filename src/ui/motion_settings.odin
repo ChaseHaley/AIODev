@@ -879,7 +879,8 @@ editor_motion_draw :: proc(
 	   result != .Ok {return result}
 	shown := theme
 	if row.motion_inherited && (!selected || field_string(&p.value) == row.value) {shown.text = theme.faint}
-	if result := control_draw(p, row, parts, selected, list, text, shown, page, s); result != .Ok {return result}
+	if result := control_draw(p, row, parts, selected, list, text, shown, page, pointer, s);
+	   result != .Ok {return result}
 	if render.push_layer(list, page) != .None {return .Ok}
 	if row.motion_part == .Duration && !selected {
 		unit := "ms"
