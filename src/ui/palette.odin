@@ -26,14 +26,16 @@ import "core:unicode/utf8"
 @(private) PALETTE_NO_RANK :: 99
 // The band a "Used by" line opens under the row whose chord another command holds.
 @(private) PALETTE_NOTE_HEIGHT :: 16
-// Shortcut matches rank after label matches (exact, prefix, substring) and before a label's scattered
-// letters: an exact chord, then a partial one, then letters through a shortcut's parts ("al8"); other
-// fields follow.
+// Shortcut matches rank after label matches (exact, prefix, substring) and before a label's word starts
+// and scattered letters: an exact chord, then a partial one, then letters through a shortcut's parts
+// ("al8"); other fields follow, each with every match class in turn.
 @(private) PALETTE_RANK_CHORD :: 3
 @(private) PALETTE_RANK_PARTIAL :: 4
 @(private) PALETTE_RANK_LABEL :: 5
-@(private) PALETTE_RANK_FUZZY :: 6
-@(private) PALETTE_RANK_FIELDS :: 7
+@(private) PALETTE_RANK_WORDS :: 6
+@(private) PALETTE_RANK_FUZZY :: 7
+@(private) PALETTE_RANK_FIELDS :: 8
+@(private) PALETTE_FIELD_CLASSES :: len(fuzzy.Class) - 1
 
 // What activating a result does.
 Outcome :: enum {
@@ -192,6 +194,9 @@ Palette_Result :: struct {
 	score:       f64,
 	positions:   []int,
 	title_match: bool,
+	// The label of the setting's choice the query matched when nothing else of the row did; `positions`
+	// then lights its letters rather than the title's.
+	value:       string,
 	shortcut:    Shortcut_Highlight,
 	chord:       commands.Shortcut,
 	// A command that cannot run now, listed because a shortcut search matched it; drawn disabled.
@@ -645,70 +650,70 @@ setting_header_match :: proc(p: ^Palette, setting: int, query: string, highlight
 	return combined, highlights[:count]
 }
 
-@(private)
-fold_prefix :: proc(value, prefix: string) -> bool {
-	s, p := value, prefix
-	for len(p) > 0 {
-		if len(s) == 0 {return false}
-		_, s_size := utf8.decode_rune_in_string(s)
-		_, p_size := utf8.decode_rune_in_string(p)
-		if !strings.equal_fold(s[:s_size], p[:p_size]) {return false}
-		s, p = s[s_size:], p[p_size:]
-	}
-	return true
-}
-
-@(private)
-fold_contains :: proc(value, needle: string) -> bool {
-	if len(needle) == 0 {return true}
-	for offset := 0; offset < len(value); {
-		if fold_prefix(value[offset:], needle) {return true}
-		_, size := utf8.decode_rune_in_string(value[offset:])
-		offset += size
-	}
-	return false
-}
-
-// The explainable match class of one field: exact, prefix, substring, then fuzzy.
-@(private)
-match_class :: proc(query, value: string) -> int {
-	if strings.equal_fold(query, value) {return 0}
-	if fold_prefix(value, query) {return 1}
-	if fold_contains(value, query) {return 2}
-	return 3
-}
-
 // Label matches always outrank secondary-field matches, keeping the palette's title-first rule.
-// Within a field the classes run exact, prefix, substring, fuzzy; fields run label, then the
-// caller's order, so a settings key match ranks below any label match but above a group match.
+// The label's exact, prefix and substring classes lead; its word-start and scattered classes follow the
+// shortcut classes. Fields run in the caller's order, each through every class, so a settings key
+// match ranks below any label match but above a group match. `loosest` is the loosest class that
+// counts: tabs and workspaces stop at word starts, since the scattered letters of a long process title
+// match nearly any query.
 @(private)
 rank_fields :: proc(
 	query, primary: string,
 	secondary: []string,
 	scratch: ^fuzzy.Scratch,
-	fuzzy_matches: bool,
+	loosest: fuzzy.Class,
 ) -> (
 	rank: int,
 	score: f64,
 	matched, title_match: bool,
 ) {
-	by_primary, primary_error := fuzzy.score(query, primary, scratch)
+	by_primary, primary_error := fuzzy.score(query, primary, scratch, loosest)
 	if primary_error != .None {return}
 	if by_primary.matched {
-		class := match_class(query, primary)
-		if class < 3 {return class, by_primary.score, true, true}
-		if fuzzy_matches {return PALETTE_RANK_FUZZY, by_primary.score, true, true}
+		rank = int(by_primary.class)
+		#partial switch by_primary.class {
+		case .Words:
+			rank = PALETTE_RANK_WORDS
+		case .Scattered:
+			rank = PALETTE_RANK_FUZZY
+		}
+		return rank, by_primary.score, true, true
 	}
 	for field, i in secondary {
-		by_field, field_error := fuzzy.score(query, field, scratch)
-		if field_error != .None {continue}
-		if !by_field.matched {continue}
-		class := match_class(query, field)
-		if class == 3 && !fuzzy_matches {continue}
-		base := PALETTE_RANK_FIELDS + 3 * i
-		return base + class, by_field.score, true, false
+		by_field, field_error := fuzzy.score(query, field, scratch, loosest)
+		if field_error != .None || !by_field.matched {continue}
+		return field_rank(i, by_field.class), by_field.score, true, false
 	}
 	return 0, 0, false, false
+}
+
+@(private)
+field_rank :: proc(field: int, class: fuzzy.Class) -> int {
+	return PALETTE_RANK_FIELDS + PALETTE_FIELD_CLASSES * field + int(class)
+}
+
+// A setting's choices match as its last field, by the label each displays, up to word starts: "comfy"
+// finds Activity panel view. Scattered letters across dozens of short labels would match almost
+// anything. The best class wins, then the better score, then the first choice.
+@(private)
+choice_field_match :: proc(
+	query: string,
+	choices, labels: []string,
+	scratch: ^fuzzy.Scratch,
+) -> (
+	best: fuzzy.Result,
+	label: string,
+) {
+	for _, i in choices {
+		text := dropdown_label({choices = choices, labels = labels}, i)
+		by_choice, err := fuzzy.score(query, text, scratch, .Words)
+		if err != .None || !by_choice.matched {continue}
+		if !best.matched || by_choice.class < best.class ||
+		   (by_choice.class == best.class && by_choice.score > best.score) {
+			best, label = by_choice, text
+		}
+	}
+	return
 }
 
 @(private)
@@ -745,22 +750,15 @@ command_shortcut_match :: proc(
 	return best
 }
 
+// `lit` is the text whose matched letters the row lights: the title, a matched choice's label, or none.
 @(private)
-append_result :: proc(
-	p: ^Palette,
-	result: Palette_Result,
-	width: int,
-	query, primary: string,
-	title_match: bool,
-) {
+append_result :: proc(p: ^Palette, result: Palette_Result, width: int, query, lit: string) {
 	copy := result
-	if width > 0 {
+	if width > 0 && lit != "" {
 		start := len(p.ordered) * width
 		highlights := p.positions[start:start + width]
-		if title_match {
-			if _, err := fuzzy.match_positions(query, primary, highlights, p.scratch); err == .None {
-				copy.positions = highlights
-			}
+		if _, err := fuzzy.match_positions(query, lit, highlights, p.scratch); err == .None {
+			copy.positions = highlights
 		}
 	}
 	append(&p.ordered, copy)
@@ -777,7 +775,7 @@ consider_item :: proc(
 	query: string,
 	width: int,
 	secondary: []string,
-	fuzzy_matches: bool,
+	loosest: fuzzy.Class,
 	shortcut: Shortcut_Highlight = {},
 ) {
 	rank, score, matched, title_match := rank_fields(
@@ -785,7 +783,7 @@ consider_item :: proc(
 		title,
 		secondary,
 		p.scratch,
-		fuzzy_matches,
+		loosest,
 	)
 	if by_shortcut := shortcut_rank(shortcut.hit.match); by_shortcut >= 0 && (!matched || by_shortcut < rank) {
 		rank, matched = by_shortcut, true
@@ -802,20 +800,16 @@ consider_item :: proc(
 		title_match = title_match,
 		shortcut    = shortcut,
 	}
-	append_result(p, result, width, query, title, title_match)
+	append_result(p, result, width, query, title_match ? title : "")
 }
 
-// Settings carry the existing title/group matcher's header alias and add the key as a field.
+// A setting matches by its title, then its key and group, then the labels of its static choices, and
+// last by the existing title/group matcher's header alias.
 @(private)
 consider_setting :: proc(p: ^Palette, setting: int, query: string, width: int) {
 	s := p.settings[setting]
-	rank, score, matched, title_match := rank_fields(
-		query,
-		s.title,
-		[]string{s.key, s.group},
-		p.scratch,
-		true,
-	)
+	fields := [?]string{s.key, s.group}
+	rank, score, matched, title_match := rank_fields(query, s.title, fields[:], p.scratch, .Scattered)
 	result := Palette_Result {
 		kind        = .Setting,
 		command     = nil,
@@ -826,7 +820,12 @@ consider_setting :: proc(p: ^Palette, setting: int, query: string, width: int) {
 		title_match = title_match,
 	}
 	if matched {
-		append_result(p, result, width, query, s.title, title_match)
+		append_result(p, result, width, query, title_match ? s.title : "")
+		return
+	}
+	if by_choice, label := choice_field_match(query, s.choices, s.choice_labels, p.scratch); by_choice.matched {
+		result.rank, result.score, result.value = field_rank(len(fields), by_choice.class), by_choice.score, label
+		append_result(p, result, width, query, label)
 		return
 	}
 	start := len(p.ordered) * width
@@ -846,12 +845,12 @@ count_of :: proc(source: Palette_Source) -> int {
 
 // Match class first. Within the label classes (exact, prefix, substring) and the shortcut classes, the
 // more frecent result leads and then the better score, since every match there answers the query
-// equally plainly. Scattered letters and secondary fields vary in how well they match, so there the
-// score leads and frecency only breaks ties.
+// equally plainly. Word starts, scattered letters and secondary fields vary in how well they match, so
+// there the score leads and frecency only breaks ties.
 @(private)
 less_result :: proc(a, b: Palette_Result) -> bool {
 	if a.rank != b.rank {return a.rank < b.rank}
-	if a.rank < PALETTE_RANK_FUZZY && a.frecency != b.frecency {return a.frecency > b.frecency}
+	if a.rank < PALETTE_RANK_WORDS && a.frecency != b.frecency {return a.frecency > b.frecency}
 	if a.score != b.score {return a.score > b.score}
 	return a.frecency > b.frecency
 }
@@ -916,7 +915,7 @@ refresh :: proc(p: ^Palette, registry: ^commands.Registry) {
 					query,
 					width,
 					[]string{item.detail, item.owner},
-					false,
+					.Words,
 				)
 			}
 		}
@@ -941,7 +940,7 @@ refresh :: proc(p: ^Palette, registry: ^commands.Registry) {
 					query,
 					width,
 					[]string{item.detail},
-					false,
+					.Words,
 				)
 			}
 		}
@@ -984,7 +983,7 @@ refresh :: proc(p: ^Palette, registry: ^commands.Registry) {
 				query,
 				width,
 				[]string{commands.category(command.name).title},
-				true,
+				.Scattered,
 				match,
 			)
 			if len(p.ordered) > before {p.ordered[before].unavailable = !available}
@@ -1958,18 +1957,22 @@ palette_draw :: proc(
 				row_baseline,
 				item.unavailable ? theme.faint : theme.text,
 				title_width,
-				item.positions,
+				item.value == "" ? item.positions : nil,
 				theme.accent,
 			)
 			if result != .Ok {
 				return result
 			}
+			after := title_x + title_width + SPACE_2 * scale
 			if kind_word != "" && room - title_width - SPACE_2 * scale > 0 {
-				if kind_result := draw_text(&kind_text, list, kind_word, title_x + title_width + SPACE_2 * scale,
+				if kind_result := draw_text(&kind_text, list, kind_word, after,
 					row_baseline, theme.faint, max(0, room - title_width - SPACE_2 * scale)); kind_result != .Ok {
 					return kind_result
 				}
+				after += kind_width
 			}
+			if hint := choice_hint_draw(text, list, theme, item.value, item.positions, after, row_baseline,
+				title_x + room - after); hint != .Ok {return hint}
 		}
 		// The line under a recording field whose chord another command holds.
 		if note, line := palette_note(p); note >= 0 {

@@ -1,10 +1,10 @@
 package ui
 
+import "aio:fuzzy"
 import "aio:render"
 import "aio:settings"
 import "core:fmt"
 import "core:math"
-import "core:strings"
 
 // The narrowest a font list's popup gets, in DIPs, so long family names stay readable.
 @(private)
@@ -53,8 +53,11 @@ schema_row :: proc(entry: settings.Schema_Entry) -> Editor_Row {
 	}
 	if entry.step > 0 {row.step = entry.step}
 	switch entry.live_choices {
-	case .None, .Themes:
+	case .None:
+	case .Themes:
+		row.flags += {.Live_Choices}
 	case .Shell_Fonts, .Interface_Fonts:
+		row.flags += {.Live_Choices}
 		row.searchable, row.choice_min_width = true, FONT_CHOICE_WIDTH
 	}
 	row.font_filter = entry.choice_filter != ""
@@ -153,9 +156,26 @@ reset_button_draw :: proc(
 @(private)
 choice_matches_filter :: proc(matches: ^[dynamic]int, choices, labels: []string, query: string) {
 	clear(matches)
-	needle := strings.to_lower(query, context.temp_allocator)
-	for choice, i in choices {
-		label := i < len(labels) && labels[i] != "" ? labels[i] : choice
-		if strings.contains(strings.to_lower(label, context.temp_allocator), needle) {append(matches, i)}
+	for _, i in choices {
+		label := dropdown_label({choices = choices, labels = labels}, i)
+		if fuzzy.classify(query, label) <= .Substring {append(matches, i)}
 	}
+}
+
+// The label of the choice a search matched, after a row's title in the detail style with its matched
+// letters lit, so a row found by one of its values says which. Nothing is drawn without room for it.
+@(private)
+choice_hint_draw :: proc(
+	text: ^Text,
+	list: ^render.Draw_List,
+	theme: Theme,
+	value: string,
+	positions: []int,
+	x, baseline, room: f32,
+) -> render.Build_Status {
+	if value == "" {return .Ok}
+	small := text_styled(text, .Detail)
+	if room <= text_width(&small, ELLIPSIS) {return .Ok}
+	width := min(text_width(&small, value), room)
+	return draw_text(&small, list, value, x, baseline, theme.muted, width, positions, theme.accent)
 }
