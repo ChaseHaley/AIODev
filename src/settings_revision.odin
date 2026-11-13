@@ -180,6 +180,7 @@ settings_apply_running :: proc(app: ^App) {
 		&app.ui_text, app.fonts, &app.cache, app.ui_text.size_px, app.settings.interface.font_family,
 	) {notify(app, .Error, "Could not load an interface font.")}
 	apply_fonts(app)
+	markdown_style_apply(app)
 	apply_theme(app)
 	for entry in app.sessions {
 		term.set_colors(entry.session, terminal_colors(app.settings.colors))

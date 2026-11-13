@@ -4,7 +4,9 @@ import "aio:font"
 import "aio:glyphs"
 import "aio:markdown"
 import "aio:render"
+import "aio:settings"
 import "aio:ui"
+import "core:math"
 import "core:strings"
 import "core:testing"
 
@@ -33,8 +35,22 @@ fixture_destroy :: proc(f: ^Fixture) {
 }
 
 @(private = "file")
-fit :: proc(f: ^Fixture, width: f32, revision: u64 = 1) {
-	ui.markdown_view_fit(&f.view, &f.doc, revision, &f.text, f.text.family, width, 1)
+fit :: proc(f: ^Fixture, width: f32, revision: u64 = 1, style := ui.MARKDOWN_STYLE_DEFAULT) {
+	ui.markdown_view_fit(&f.view, &f.doc, revision, &f.text, f.text.family, width, 1, nil, style)
+}
+
+// The top and height of the line showing text offset `offset`.
+@(private = "file")
+line_of :: proc(f: ^Fixture, offset: int) -> (top, height: f32) {
+	rect, _, found := ui.markdown_caret_at(&f.view, &f.doc, offset)
+	if !found {return -1, -1}
+	return rect.y, rect.height
+}
+
+// Where `s` first shows in the document's text, which is what offsets count.
+@(private = "file")
+text_index :: proc(f: ^Fixture, s: string) -> int {
+	return strings.index(string(f.doc.text[:]), s)
 }
 
 @(private = "file")
@@ -291,4 +307,141 @@ the_column_centers_and_never_overflows_a_narrow_pane :: proc(t: ^testing.T) {
 	testing.expect_value(t, narrow.width, f32(48))
 	gone := ui.markdown_geometry({0, 40, 10, 800}, 1)
 	testing.expect_value(t, gone.width, f32(0))
+}
+
+@(test)
+the_text_width_setting_sets_the_column :: proc(t: ^testing.T) {
+	testing.expect_value(t, ui.markdown_geometry({0, 40, 2000, 800}, 1, 1000).width, f32(1000))
+	testing.expect_value(t, ui.markdown_geometry({0, 40, 2000, 800}, 2, 500).width, f32(1000))
+	// Zero fills the pane between the outline's margins.
+	full := ui.markdown_geometry({0, 40, 2000, 800}, 1, 0)
+	testing.expect_value(t, full.width, f32(2000 - 2 * 38))
+	testing.expect_value(t, full.left, f32(38))
+}
+
+// The defaults are the settings' defaults, so a file that sets nothing draws as before.
+@(test)
+the_default_style_is_the_settings_defaults :: proc(t: ^testing.T) {
+	defaults, err := settings.defaults()
+	if !testing.expect_value(t, err, nil) {return}
+	defer settings.destroy(&defaults)
+	testing.expect_value(t, ui.markdown_style_from(defaults.markdown, {}, {}, {}), ui.MARKDOWN_STYLE_DEFAULT)
+}
+
+@(test)
+heading_sizes_follow_the_style_at_every_level :: proc(t: ^testing.T) {
+	f: Fixture
+	defer fixture_destroy(&f)
+	source := "# One\n\n## Two\n\n### Three\n\n#### Four\n\n##### Five\n\n###### Six\n\nbody\n"
+	if !fixture_init(t, &f, source) {return}
+	starts: [6]int
+	for name, level in ([6]string{"One", "Two", "Three", "Four", "Five", "Six"}) {
+		starts[level] = text_index(&f, name)
+	}
+	body := text_index(&f, "body")
+	fit(&f, 700)
+	defaults: [6]f32
+	for start, level in starts {_, defaults[level] = line_of(&f, start)}
+	_, body_height := line_of(&f, body)
+	// D-080: H1 to H3 step down, though H3's tighter leading can give it the body's line height, and H4
+	// to H6 are bold body text.
+	testing.expect(t, defaults[0] > defaults[1] && defaults[1] > defaults[2] && defaults[2] >= body_height)
+	testing.expect_value(t, defaults[3], body_height)
+	testing.expect_value(t, defaults[5], body_height)
+	for level in 0 ..< 6 {
+		style := ui.MARKDOWN_STYLE_DEFAULT
+		style.headings[level] = 3
+		fit(&f, 700, 1, style)
+		for start, other in starts {
+			_, height := line_of(&f, start)
+			if other == level {
+				testing.expectf(t, height > defaults[level] && height >= 3 * body_height / 1.5 * 1.2,
+					"H%d at 3x: %v from %v", level + 1, height, defaults[level])
+			} else {
+				testing.expect_value(t, height, defaults[other])
+			}
+		}
+	}
+	// The body below moves down with a taller heading above it.
+	fit(&f, 700)
+	body_top, _ := line_of(&f, body)
+	style := ui.MARKDOWN_STYLE_DEFAULT
+	style.headings[0] = 3
+	fit(&f, 700, 1, style)
+	moved, _ := line_of(&f, body)
+	testing.expect(t, moved > body_top)
+}
+
+@(test)
+text_size_line_height_and_spacing_follow_the_style :: proc(t: ^testing.T) {
+	f: Fixture
+	defer fixture_destroy(&f)
+	source := "first\n\nsecond\n"
+	if !fixture_init(t, &f, source) {return}
+	second := text_index(&f, "second")
+	fit(&f, 700)
+	line := f32(ui.markdown_line(&f.view))
+	gap_top, _ := line_of(&f, second)
+	testing.expect_value(t, gap_top, line + math.round(line * 0.7))
+
+	style := ui.MARKDOWN_STYLE_DEFAULT
+	style.paragraph_spacing = 2
+	fit(&f, 700, 1, style)
+	wide_top, _ := line_of(&f, second)
+	testing.expect_value(t, wide_top, line + 2 * line)
+	style.paragraph_spacing = 0
+	fit(&f, 700, 1, style)
+	flush_top, _ := line_of(&f, second)
+	testing.expect_value(t, flush_top, line)
+
+	style = ui.MARKDOWN_STYLE_DEFAULT
+	style.line_height = 2.5
+	fit(&f, 700, 1, style)
+	testing.expect(t, f32(ui.markdown_line(&f.view)) > line)
+
+	// 24 pt is 32 px at 96 DPI, and the line keeps the 1.5 leading.
+	style = ui.MARKDOWN_STYLE_DEFAULT
+	style.size = 24
+	fit(&f, 700, 1, style)
+	testing.expect_value(t, ui.markdown_line(&f.view), 48)
+}
+
+@(test)
+code_size_follows_the_style :: proc(t: ^testing.T) {
+	f: Fixture
+	defer fixture_destroy(&f)
+	source := "```\ncode\n```\n"
+	if !fixture_init(t, &f, source) {return}
+	code := text_index(&f, "code")
+	fit(&f, 700)
+	_, small := line_of(&f, code)
+	style := ui.MARKDOWN_STYLE_DEFAULT
+	style.code_size = 1.8
+	fit(&f, 700, 1, style)
+	_, large := line_of(&f, code)
+	testing.expect(t, large > small)
+}
+
+@(test)
+code_fills_take_the_code_background_token :: proc(t: ^testing.T) {
+	f: Fixture
+	defer fixture_destroy(&f)
+	if !fixture_init(t, &f, "text `inline`\n\n```\nblock\n```\n") {return}
+	device, device_error := render.device_create(.Warp)
+	if !testing.expect_value(t, device_error, render.Error.None) {return}
+	defer render.device_destroy(device)
+	cache: glyphs.Cache
+	glyphs.init(&cache, f.fonts, device)
+	defer glyphs.destroy(&cache)
+	if !testing.expect(t, ui.text_init(&f.text, f.fonts, &cache, 14)) {return}
+	list := render.draw_list_init()
+	defer render.draw_list_destroy(&list)
+	g := ui.markdown_geometry(WIDE_AREA, 1)
+	fit(&f, g.width)
+	theme: ui.Theme
+	theme.code_background = {0.25, 0.5, 0.75, 0.125}
+	testing.expect_value(t, ui.markdown_draw(&f.view, &f.doc, g, &list, &f.text, theme), render.Build_Status.Ok)
+	fills := 0
+	for rect in list.rects {if rect.color == theme.code_background {fills += 1}}
+	testing.expect_value(t, fills, 2)
 }
