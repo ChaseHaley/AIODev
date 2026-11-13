@@ -56,7 +56,7 @@ editor_chain_open :: proc(p: ^Editor, row: ^Editor_Row) {
 	editor_message(p, "", false)
 	editor_error_clear(p)
 	editor_rebuild(p)
-	p.scroll = 0
+	p.scroll, p.scroll_fraction = 0, 0
 	editor_chain_sync(p)
 }
 
@@ -80,6 +80,7 @@ editor_chain_items :: proc(p: ^Editor) {
 editor_chain_sync :: proc(p: ^Editor) {
 	editor_chain_items(p)
 	visible := max(1, p.visible_rows)
+	p.scroll_fraction = 0
 	if p.selected == 1 {p.scroll = 0}
 	if p.selected < p.scroll {p.scroll = p.selected}
 	if p.selected >= p.scroll + visible {p.scroll = p.selected - visible + 1}
@@ -99,7 +100,7 @@ editor_chain_close :: proc(p: ^Editor) {
 	shortcut_chain_destroy(&p.chain)
 	editor_filter(p)
 	_ = editor_select_key(p, view.key)
-	p.scroll = clamp(view.scroll, 0, max_scroll(p))
+	editor_scroll_keep(p, f32(view.scroll))
 	editor_mode_set(p, Editor_Browsing{})
 }
 
@@ -138,7 +139,7 @@ editor_chain_row :: proc(
 	shown: bool,
 ) {
 	index := member + 1
-	if index < p.scroll || index >= min(len(p.items), p.scroll + p.visible_rows) {return}
+	if index < p.scroll || index >= editor_shown_end(p, p.visible_rows) {return}
 	row = editor_row_parts(p, l, index).row
 	return row, editor_chain_right(row, l.scale), true
 }
@@ -160,7 +161,7 @@ editor_chain_cancel_rect :: proc(l: Editor_Layout, text: ^Text) -> render.Rect {
 editor_chain_hit :: proc(p: ^Editor, l: Editor_Layout, text: ^Text, x, y: f32) -> Chain_Hit {
 	if render.rect_contains(editor_chain_cancel_rect(l, text), x, y) {return {member = -1, part = .Cancel}}
 	if !render.rect_contains(l.list, x, y) {return {}}
-	member := p.scroll + int((y - l.list.y) / l.row_height) - 1
+	member := editor_line_at(p, l, y) - 1
 	if member < 0 || member >= len(p.chain.members) {return {}}
 	row, right, shown := editor_chain_row(p, l, member)
 	if !shown {return {}}
@@ -208,7 +209,7 @@ editor_chain_draw :: proc(
 		return result
 	}
 	if render.push_layer(list, l.list) != .None {return .Ok}
-	for index in p.scroll ..< min(len(p.items), p.scroll + p.visible_rows) {
+	for index in p.scroll ..< editor_shown_end(p, p.visible_rows) {
 		r := editor_row_parts(p, l, index).row
 		if index == 0 {
 			baseline := r.y + r.height - SPACE_3 * s

@@ -31,7 +31,7 @@ Workspace :: struct {
 	next_tab_id: u32,
 	selection_anchor: u32,
 	// The settings page's reading position and open rows while no window shows this workspace.
-	settings_scroll: int,
+	settings_scroll: f32,
 	settings_view: ui.Editor_View,
 	documents: Document_List,
 	// The labels on runs of tabs, in no particular order; tabs name them by id.

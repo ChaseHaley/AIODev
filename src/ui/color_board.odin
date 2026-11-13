@@ -351,7 +351,7 @@ color_board_layout :: proc(p: ^Editor, l: Editor_Layout) -> (b: Board_Layout) {
 	height := board_flow(p, &b, board_tiling(board), board, s)
 	content := stacked ? top + height : max(height, b.inspector.rect.height)
 	b.lines = int(math.ceil(content / l.row_height - 0.001))
-	scroll := f32(p.scroll) * l.row_height
+	scroll := editor_scroll_lines(p) * l.row_height
 	b.origin = {l.list.x + edge * s, l.list.y + top - scroll}
 	for &tile in b.tiles[:b.tile_count] {tile.rect = board_move_rect(tile.rect, b.origin.x, b.origin.y)}
 	for &heading in b.headings[:b.heading_count] {
@@ -756,7 +756,7 @@ color_board_lines :: proc(p: ^Editor, l: Editor_Layout) -> int {
 // The pixel distance from the top of the content to `y` on screen.
 @(private)
 board_content_y :: proc(p: ^Editor, l: Editor_Layout, y: f32) -> f32 {
-	return y - l.list.y + f32(p.scroll) * l.row_height
+	return y - l.list.y + editor_scroll_lines(p) * l.row_height
 }
 
 // Scrolls the selected tile into view, with its group's heading when it is the first line.
@@ -769,11 +769,13 @@ color_board_reveal :: proc(p: ^Editor) {
 		if tile.item != p.selected {continue}
 		top := board_content_y(p, l, tile.rect.y) - BOARD_GROUP_HEADING * l.scale
 		bottom := board_content_y(p, l, tile.rect.y + tile.rect.height)
-		if top < f32(p.scroll) * l.row_height {p.scroll = int(math.floor(top / l.row_height))}
-		if bottom > f32(p.scroll + l.rows) * l.row_height {
-			p.scroll = int(math.ceil(bottom / l.row_height - 0.001)) - l.rows
+		if top < editor_scroll_lines(p) * l.row_height {
+			p.scroll, p.scroll_fraction = int(math.floor(top / l.row_height)), 0
 		}
-		p.scroll = clamp(p.scroll, 0, max(0, b.lines - l.rows))
+		if bottom > (editor_scroll_lines(p) + f32(l.rows)) * l.row_height {
+			p.scroll, p.scroll_fraction = int(math.ceil(bottom / l.row_height - 0.001)) - l.rows, 0
+		}
+		editor_scroll_keep(p, editor_scroll_lines(p))
 		return
 	}
 }
@@ -801,12 +803,12 @@ color_board_line :: proc(p: ^Editor, header: int) -> int {
 color_board_group_at :: proc(p: ^Editor) -> int {
 	l := p.fit_layout
 	active := p.items[0].group
-	if p.scroll == 0 || l.row_height <= 0 {return active}
+	if editor_scroll_lines(p) == 0 || l.row_height <= 0 {return active}
 	b := color_board_layout(p, l)
 	best := f32(-1)
 	for heading in b.headings[:b.heading_count] {
 		y := board_content_y(p, l, heading.rect.y)
-		if y <= f32(p.scroll + 1) * l.row_height + 1 && y > best {
+		if y <= (editor_scroll_lines(p) + 1) * l.row_height + 1 && y > best {
 			active, best = p.items[heading.item].group, y
 		}
 	}

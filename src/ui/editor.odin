@@ -459,6 +459,9 @@ Editor :: struct {
 	groups:                                                            [dynamic]Editor_Group,
 	items:                                                             [dynamic]Editor_Item,
 	selected, scroll, visible_rows:                                    int,
+	// How far into line `scroll` the page has scrolled, from 0 up to 1. The wheel and the scrollbar
+	// stop partway through a line; whole-line moves (keys, jumps, reveals) leave it at 0.
+	scroll_fraction:                                                   f32,
 	// Geometry is fitted explicitly before input/rendering, never learned from drawing.
 	fit_layout:                                                        Editor_Layout,
 	filter, value:                                                     Text_Field,
@@ -550,6 +553,9 @@ Row_Parts :: struct {
 
 @(private)
 ROW_HEIGHT :: 52
+// What one wheel row scrolls the page by: a line of text, as a Markdown pane scrolls, not a whole row.
+@(private)
+PAGE_WHEEL_LINE :: 20
 @(private)
 CHOICE_HEIGHT :: HEIGHT_STANDARD
 @(private)
@@ -721,6 +727,7 @@ editor_adopt :: proc(p, next: ^Editor, adoption: Editor_Adoption) -> Editor_Adop
 	next.filter.cursor, next.filter.anchor = p.filter.cursor, p.filter.anchor
 	next.fit_layout, next.visible_rows = p.fit_layout, p.visible_rows
 	next.scroll = clamp(p.scroll, 0, max(0, len(next.items) - max(1, p.visible_rows)))
+	if next.scroll == p.scroll {next.scroll_fraction = p.scroll_fraction}
 	if selected {
 		editor_carry(next, p, draft)
 		color_board_carry(next, p)
@@ -729,7 +736,7 @@ editor_adopt :: proc(p, next: ^Editor, adoption: Editor_Adoption) -> Editor_Adop
 		next.chain, p.chain = p.chain, {}
 		next.chain_view, p.chain_view = p.chain_view, {}
 		editor_rebuild(next)
-		next.scroll = clamp(p.scroll, 0, max_scroll(next))
+		editor_scroll_keep(next, editor_scroll_lines(p))
 	}
 	// A field left mid-gesture waits on the page to be saved; the rebuilt page keeps it.
 	next.kept, p.kept = p.kept, {}
@@ -787,9 +794,28 @@ editor_carry :: proc(to, from: ^Editor, draft: bool) {
 	editor_mode_set(to, mode)
 }
 
-// Keeps the page scrolled to `scroll` as far as its current lines allow.
-editor_scroll_keep :: proc(p: ^Editor, scroll: int) {
-	p.scroll = clamp(scroll, 0, max_scroll(p))
+// How far the page is scrolled, in lines.
+editor_scroll_lines :: proc(p: ^Editor) -> f32 {
+	return f32(p.scroll) + p.scroll_fraction
+}
+
+// Keeps the page scrolled to `lines` as far as its current lines allow.
+editor_scroll_keep :: proc(p: ^Editor, lines: f32) {
+	to := clamp(lines, 0, f32(max_scroll(p)))
+	p.scroll = int(to)
+	p.scroll_fraction = to - f32(p.scroll)
+}
+
+// The page line under `y`; it may lie past the last item.
+@(private)
+editor_line_at :: proc(p: ^Editor, l: Editor_Layout, y: f32) -> int {
+	return p.scroll + int((y - l.list.y) / l.row_height + p.scroll_fraction)
+}
+
+// One past the last page line that shows, wholly or in part.
+@(private)
+editor_shown_end :: proc(p: ^Editor, rows: int) -> int {
+	return min(len(p.items), p.scroll + rows + (p.scroll_fraction > 0 ? 1 : 0))
 }
 
 // The page's theme state: the active theme of its revision, and Delete Theme's two-press prompt.
@@ -1217,10 +1243,13 @@ editor_select :: proc(p: ^Editor, index: int) {
 		color_board_reveal(p)
 		return
 	}
-	if p.selected < p.scroll {p.scroll = p.selected}
+	if p.selected < p.scroll || (p.selected == p.scroll && p.scroll_fraction > 0) {
+		p.scroll, p.scroll_fraction = p.selected, 0
+	}
 	// A row taller than a line comes wholly into view when the page has room for it.
-	if end := p.selected + editor_item_span(p, p.selected); end > p.scroll + max(1, p.visible_rows) {
-		p.scroll = min(p.selected, end - max(1, p.visible_rows))
+	visible := max(1, p.visible_rows)
+	if end := p.selected + editor_item_span(p, p.selected); f32(end) > editor_scroll_lines(p) + f32(visible) {
+		p.scroll, p.scroll_fraction = min(p.selected, end - visible), 0
 	}
 }
 
@@ -1485,7 +1514,7 @@ editor_list_top :: proc(p: ^Editor) {
 	first := 0
 	for item, index in p.items {if item.row >= 0 {first = index; break}}
 	if board := color_board_first(p); board >= 0 && color_board_shown(p) {first = board}
-	p.scroll, p.outline_scroll = 0, 0
+	p.scroll, p.scroll_fraction, p.outline_scroll = 0, 0, 0
 	editor_select(p, first)
 }
 
@@ -1521,7 +1550,7 @@ editor_section_reach :: proc(p: ^Editor, section: int) {
 		if section == p.section {return}
 		p.section = section
 	}
-	p.scroll, p.outline_scroll = 0, 0
+	p.scroll, p.scroll_fraction, p.outline_scroll = 0, 0, 0
 	editor_rebuild(p)
 }
 
@@ -1848,7 +1877,7 @@ profile_drag_move :: proc(p: ^Editor, l: Editor_Layout, y: f32) -> bool {
 	first := blocks[0].start
 	last := blocks[len(blocks) - 1].start + blocks[len(blocks) - 1].count
 	top := clamp(
-		(y - l.list.y) / l.row_height + f32(p.scroll) - drag.grab,
+		(y - l.list.y) / l.row_height + editor_scroll_lines(p) - drag.grab,
 		f32(first),
 		f32(last - grabbed.count),
 	)
@@ -1905,7 +1934,7 @@ editor_profiles_animate :: proc(p: ^Editor, enabled: bool, frame: Frame_Time) ->
 // lines, so every block line is considered and the lifted block paints last.
 @(private)
 editor_drawn_lines :: proc(p: ^Editor, l: Editor_Layout) -> []int {
-	first, last := p.scroll, min(len(p.items), p.scroll + l.rows)
+	first, last := p.scroll, editor_shown_end(p, l.rows)
 	if len(p.profile_positions) == 0 {
 		lines := make([]int, max(0, last - first), context.temp_allocator)
 		for &line, i in lines {line = first + i}
@@ -1919,7 +1948,7 @@ editor_drawn_lines :: proc(p: ^Editor, l: Editor_Layout) -> []int {
 	for lifted in ([?]bool{false, true}) {
 		for index in first ..< last {
 			if editor_line_lifted(p, index) != lifted {continue}
-			drawn := f32(index - p.scroll) + editor_line_shift(p, index)
+			drawn := f32(index - p.scroll) - p.scroll_fraction + editor_line_shift(p, index)
 			if drawn <= -1 || drawn >= f32(l.rows) {continue}
 			append(&lines, index)
 		}
@@ -2027,7 +2056,7 @@ editor_wheel :: proc(p: ^Editor, l: Editor_Layout, x, y: f32, rows: int) {
 	}
 	if editor_strip_wheel(p, l, x, y, rows) {return}
 	p.jump_group = -1
-	p.scroll = clamp(p.scroll - rows, 0, max_scroll(p))
+	editor_scroll_keep(p, editor_scroll_lines(p) - f32(rows) * PAGE_WHEEL_LINE / ROW_HEIGHT)
 }
 
 // The page lines of every group header, in page order; the outline lists them.
@@ -2058,9 +2087,9 @@ editor_jump :: proc(p: ^Editor, entry: int) {
 	header := entries[entry]
 	if editor_focus(p) != .Search {editor_keep(p); stop_editing(p)}
 	top := color_board_shown(p) ? color_board_line(p, header) : header
-	p.scroll = clamp(top, 0, max_scroll(p))
+	editor_scroll_keep(p, f32(top))
 	editor_select(p, header + 1)
-	p.scroll = clamp(top, 0, max_scroll(p))
+	editor_scroll_keep(p, f32(top))
 	p.jump_group = p.items[header].group
 }
 
@@ -2731,7 +2760,13 @@ editor_page_scrollbar :: proc(p: ^Editor, l: Editor_Layout) -> (bar: Scrollbar, 
 	width := SCROLLBAR_TRACK * s
 	x := min(l.list.x + l.list.width + SPACE_1 * s, l.page.x + l.page.width - width)
 	area := render.Rect{x, l.list.y, width, l.list.height}
-	extent := Scroll_Extent{color_board_shown(p) ? color_board_lines(p, l) : len(p.items), l.rows, p.scroll}
+	// In pixels, so the thumb moves with a page scrolled partway through a line.
+	lines := color_board_shown(p) ? color_board_lines(p, l) : len(p.items)
+	extent := Scroll_Extent {
+		int(f32(lines) * l.row_height),
+		int(f32(l.rows) * l.row_height),
+		int(math.round(editor_scroll_lines(p) * l.row_height)),
+	}
 	return scrollbar_layout(area, extent, scrollbar_state(p.page_bar_hover, p.page_drag), s)
 }
 
@@ -2741,7 +2776,7 @@ editor_fit :: proc(p: ^Editor, l: Editor_Layout) {
 	p.fit_layout = l
 	p.visible_rows = l.rows
 	p.profile_menu.bounds = l.page
-	p.scroll = clamp(p.scroll, 0, max_scroll(p))
+	editor_scroll_keep(p, editor_scroll_lines(p))
 	entries := outline_entries(p)
 	rows := outline_rows(l)
 	active := editor_active_group(p)
@@ -2826,7 +2861,7 @@ editor_row_parts :: proc(p: ^Editor, l: Editor_Layout, index: int) -> Row_Parts 
 	if parts, board := color_board_row_parts(p, l, index); board {return parts}
 	r := render.Rect {
 		l.list.x,
-		l.list.y + (f32(index - p.scroll) + editor_line_shift(p, index)) * l.row_height,
+		l.list.y + (f32(index - p.scroll) - p.scroll_fraction + editor_line_shift(p, index)) * l.row_height,
 		l.list.width,
 		l.row_height,
 	}
@@ -3128,7 +3163,7 @@ editor_press :: proc(
 	}
 	if bar, visible := editor_page_scrollbar(p, l); visible && scrollbar_contains(bar, x, y) {
 		p.jump_group = -1
-		p.scroll = scrollbar_press(&p.page_drag, bar, y)
+		editor_scroll_keep(p, f32(scrollbar_press(&p.page_drag, bar, y)) / l.row_height)
 		return .Changed
 	}
 	if render.rect_contains(editor_keys_rect(l), x, y) {return editor_key_search_toggle(p)}
@@ -3158,7 +3193,7 @@ editor_press :: proc(
 		return .Changed
 	}
 	// As in a browser, a press anywhere else on the page takes the keyboard from the search.
-	index := p.scroll + int((y - l.list.y) / l.row_height)
+	index := editor_line_at(p, l, y)
 	if !render.rect_contains(l.list, x, y) || index >= len(p.items) || p.items[index].row < 0 {
 		editor_blur(p)
 		return .Changed
@@ -3282,9 +3317,9 @@ editor_drag :: proc(p: ^Editor, l: Editor_Layout, text: ^Text, x, y: f32) -> boo
 		bar, visible := editor_page_scrollbar(p, l)
 		if !visible {return false}
 		p.page_bar_hover = scrollbar_contains(bar, x, y)
-		before := p.scroll
-		p.scroll = clamp(scrollbar_drag(p.page_drag, bar, y), 0, max_scroll(p))
-		return p.scroll != before
+		before := editor_scroll_lines(p)
+		editor_scroll_keep(p, f32(scrollbar_drag(p.page_drag, bar, y)) / l.row_height)
+		return editor_scroll_lines(p) != before
 	}
 	if browsing, ok := p.mode.(Editor_Browsing); ok && browsing.selecting {
 		return field_pointer(&p.filter, field_box_offset(filter_box(p, l, text), x), false, true) != .None
@@ -3463,7 +3498,7 @@ editor_hover :: proc(p: ^Editor, l: Editor_Layout, x, y: f32, text: ^Text = nil)
 	strip_item := -1
 	if popup_open == .None && !editor_order_dragging(p, .Profiles) && !color_board_shown(p) &&
 	   render.rect_contains(l.list, x, y) {
-		index := p.scroll + int((y - l.list.y) / l.row_height)
+		index := editor_line_at(p, l, y)
 		if index < len(p.items) && p.items[index].row >= 0 {
 			index -= p.items[index].part
 			if p.rows[p.items[index].row].kind == .Theme_Strip {strip_item = index}
@@ -3546,7 +3581,7 @@ editor_over_text :: proc(p: ^Editor, l: Editor_Layout, x, y: f32) -> bool {
 	if render.rect_contains(editor_popup_rect(p, l), x, y) {return false}
 	if render.rect_contains(filter_text_rect(p, l), x, y) {return true}
 	if !render.rect_contains(l.list, x, y) {return false}
-	index := p.scroll + int((y - l.list.y) / l.row_height)
+	index := editor_line_at(p, l, y)
 	if index >= len(p.items) || p.items[index].row < 0 {return false}
 	kind := p.rows[p.items[index].row].kind
 	return text_kind(kind) && render.rect_contains(editor_row_parts(p, l, index).field, x, y)
@@ -3600,7 +3635,7 @@ editor_pointer :: proc(p: ^Editor, l: Editor_Layout, x, y: f32, text: ^Text = ni
 		return entry < len(outline_entries(p)) ? .Hand : .Arrow
 	}
 	if !render.rect_contains(l.list, x, y) {return .Arrow}
-	index := p.scroll + int((y - l.list.y) / l.row_height)
+	index := editor_line_at(p, l, y)
 	if index >= len(p.items) || p.items[index].row < 0 {return .Arrow}
 	index -= p.items[index].part
 	row := &p.rows[p.items[index].row]

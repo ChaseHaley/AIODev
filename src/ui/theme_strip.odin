@@ -310,7 +310,7 @@ strip_customize_at :: proc(strip: ^Theme_Strip, view: render.Rect, s, x, y: f32)
 @(private)
 strip_view_at :: proc(p: ^Editor, l: Editor_Layout, y: f32) -> (view: render.Rect, ok: bool) {
 	if len(p.strip.cards) == 0 {return}
-	index := p.scroll + int((y - l.list.y) / l.row_height)
+	index := editor_line_at(p, l, y)
 	if y < l.list.y || index >= len(p.items) || p.items[index].row < 0 {return}
 	if p.rows[p.items[index].row].kind != .Theme_Strip {return}
 	return strip_view(editor_strip_rect(p, l, index - p.items[index].part), l.scale), true

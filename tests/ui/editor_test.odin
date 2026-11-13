@@ -186,6 +186,25 @@ editor_page_scrollbar_drags_to_the_last_line :: proc(t: ^testing.T) {
 }
 
 @(test)
+editor_wheel_scrolls_by_a_line_of_text :: proc(t: ^testing.T) {
+	p: ui.Editor
+	defer ui.editor_destroy(&p)
+	editor_fixture(t, &p)
+	l := ui.editor_layout({0, 40, 1200, 400}, 1)
+	ui.editor_fit(&p, l)
+	before := ui.editor_row_parts(&p, l, 4).row
+	ui.editor_wheel(&p, l, l.list.x + 10, l.list.y + 10, -1)
+	ui.editor_fit(&p, l)
+	after := ui.editor_row_parts(&p, l, 4).row
+	// One wheel row moves the rows by a line of text, partway through a page line.
+	testing.expect(t, abs(before.y - 20 - after.y) < 0.01)
+	testing.expect_value(t, p.scroll, 0)
+	// The pointer still lands on the row drawn under it.
+	_ = ui.editor_press(&p, l, nil, after.x + 10, after.y + 2, false)
+	testing.expect_value(t, p.selected, 4)
+}
+
+@(test)
 editor_outline_jumps_without_filtering_and_tracks_scroll :: proc(t: ^testing.T) {
 	p: ui.Editor
 	defer ui.editor_destroy(&p)
@@ -203,8 +222,8 @@ editor_outline_jumps_without_filtering_and_tracks_scroll :: proc(t: ^testing.T) 
 	testing.expect_value(t, p.scroll, 5)
 	testing.expect_value(t, len(p.items), browse)
 	testing.expect_value(t, len(p.filter.bytes), 0)
-	ui.editor_wheel(&p, l, l.list.x+10, l.list.y+10, 3)
-	testing.expect_value(t, p.scroll, 2)
+	ui.editor_wheel(&p, l, l.list.x+10, l.list.y+10, 8)
+	testing.expect_value(t, p.scroll, 1)
 	testing.expect_value(t, ui.editor_active_group(&p), 0)
 	ui.editor_key(&p, key({key = .Arrow_Down, modifiers = {.Alt}}))
 	testing.expect_value(t, ui.editor_active_group(&p), 1)

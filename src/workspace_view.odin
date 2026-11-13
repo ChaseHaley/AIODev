@@ -31,7 +31,8 @@ workspace_view_init :: proc(app: ^App, resources: ^Workspace_View_Resources, wor
 		return false
 	}
 	ui.editor_view_destroy(&workspace.settings_view)
-	resources.editor.scroll = workspace.settings_scroll
+	resources.editor.scroll = int(workspace.settings_scroll)
+	resources.editor.scroll_fraction = workspace.settings_scroll - f32(resources.editor.scroll)
 	return true
 }
 
@@ -117,7 +118,7 @@ workspace_adopt :: proc(
 	overlay_close(app, w)
 	workspace_picker_cancel(w)
 	// Editor storage belongs to the window; its reading position and open rows belong to the workspace.
-	w.workspace.settings_scroll = w.editor.scroll
+	w.workspace.settings_scroll = ui.editor_scroll_lines(&w.editor)
 	ui.editor_view_destroy(&w.workspace.settings_view)
 	view, view_error := ui.editor_view_take(&w.editor)
 	if view_error == nil {w.workspace.settings_view = view} else {ui.editor_view_destroy(&view)}

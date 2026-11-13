@@ -73,7 +73,7 @@ settings_reveal :: proc(app: ^App, w: ^Window, reveal: Settings_Reveal) {
 settings_reveal_page :: proc(p: ^ui.Editor, reveal: Settings_Reveal) {
 	// Going to another setting leaves a conflict chain, dropping what it did not save.
 	ui.editor_chain_close(p)
-	scroll := p.scroll
+	scroll := ui.editor_scroll_lines(p)
 	query, search := reveal.query, reveal.search
 	if search == .Clear {
 		query = ""
