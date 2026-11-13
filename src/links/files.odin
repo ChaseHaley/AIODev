@@ -115,6 +115,32 @@ resolve_file :: proc(target, cwd: string, hosts: []string, buffer: []u8) -> (str
 	return string(buffer[:len(base) + 1 + len(path)]), true
 }
 
+// Resolve a Markdown link's path beside the document's folder. Unlike printed text, a Markdown href
+// is URL-encoded (Obsidian writes a space as %20), so its escapes decode once first; a '%' that starts
+// no escape stays as written. File URIs decode in resolve_file, as printed ones do. The returned
+// string borrows buffer.
+@(require_results)
+resolve_href :: proc(href, directory: string, hosts: []string, buffer: []u8) -> (string, bool) {
+	if (len(href) >= 5 && strings.equal_fold(href[:5], "file:")) || strings.index_byte(href, '%') < 0 {
+		return resolve_file(href, directory, hosts, buffer)
+	}
+	decoded: [TARGET_BYTES]u8 = ---
+	at := 0
+	for i := 0; i < len(href); i += 1 {
+		if at >= len(decoded) {return "", false}
+		c := href[i]
+		if c == '%' && i + 2 < len(href) {
+			if hi, lo := hex_digit(href[i + 1]), hex_digit(href[i + 2]); hi >= 0 && lo >= 0 {
+				c = u8(hi * 16 + lo)
+				i += 2
+			}
+		}
+		decoded[at] = c
+		at += 1
+	}
+	return resolve_file(string(decoded[:at]), directory, hosts, buffer)
+}
+
 // Quoted paths may contain spaces, and a drive path extends across spaces when later words show it
 // goes on. The original byte range retains compiler location suffixes and row breaks.
 // Printed file URIs need an empty or localhost authority; machine names are honoured in OSC 8.

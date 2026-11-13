@@ -97,6 +97,9 @@ Markdown_Pane :: struct {
 	search:                 markdown.Search,
 	// Counts loads, so a view lays out each new document once.
 	revision:               u64,
+	// A heading a link asked to show, scrolled to the top by the next draw once the document is laid
+	// out; empty for none. Owned.
+	heading:                string,
 }
 
 @(require_results)
@@ -114,6 +117,7 @@ markdown_pane_destroy :: proc(pane: ^Markdown_Pane) {
 	delete(pane.path)
 	delete(pane.title)
 	delete(pane.directory)
+	delete(pane.heading)
 	free(pane)
 }
 
@@ -141,6 +145,17 @@ markdown_path_set :: proc(pane: ^Markdown_Pane, path: string) -> bool {
 	delete(pane.directory)
 	pane.path, pane.title, pane.directory = owned, title, directory
 	return true
+}
+
+// Asks the pane's next draw to scroll `heading` to the top; an empty heading asks nothing. A pane
+// opened by the same link has no layout to scroll until it draws.
+@(private)
+markdown_heading_request :: proc(pane: ^Markdown_Pane, heading: string) {
+	if heading == "" {return}
+	owned, err := strings.clone(heading)
+	if err != nil {return}
+	delete(pane.heading)
+	pane.heading = owned
 }
 
 // Registers a pane for `path`. The poll loads anything that is not loaded now.
@@ -307,12 +322,15 @@ markdown_open_at :: proc(
 	ratio: f32 = commands.SPLIT_DEFAULT.ratio,
 	focus := commands.SPLIT_DEFAULT.focus,
 	floating := false,
+	heading := "",
 ) -> bool {
 	walk := workspace_panes(app, workspace)
 	for shown, ok := workspace_pane_next(&walk); ok; shown, ok = workspace_pane_next(&walk) {
 		if shown.content.kind != .Markdown {continue}
 		pane := markdown_find(app, shown.content.id)
 		if pane == nil || !document_same(pane.path, path) {continue}
+		markdown_heading_request(pane, heading)
+		if heading != "" && w != nil {w.dirty = true}
 		if focus && w != nil {
 			if workspace.selected != shown.tab {tab_select(app, w, shown.tab)}
 			pane_focus(app, w, shown.node)
@@ -321,6 +339,7 @@ markdown_open_at :: proc(
 	}
 	pane := markdown_pane_create(app, path, true)
 	if pane == nil {return false}
+	markdown_heading_request(pane, heading)
 	placement: Pane_Placement = floating ? .Float : .Split_Right
 	content := layout.Content{.Markdown, pane.id}
 	return pane_place(app, w, workspace, tab_index, node, content, placement, focus, ratio, direction)
@@ -345,13 +364,21 @@ markdown_open_placed :: proc(
 	return pane_place(app, acting, acting.workspace, tab, beside, content, placement, true)
 }
 
-// Shows a file the focused pane asked for. The caller has verified the path.
-markdown_open_focused :: proc(app: ^App, w: ^Window, path: string) {
+// Shows a file the focused pane asked for, scrolled to `heading` when it names one. The caller has
+// verified the path.
+markdown_open_focused :: proc(app: ^App, w: ^Window, path, heading: string) {
 	acting := pane_link_acting_window(app, w)
 	workspace := acting.workspace
 	floating := app.settings.pane.markdown_floating
 	if !markdown_open_at(
-		app, acting, workspace, workspace.selected, window_tree(acting).focus, path, floating = floating,
+		app,
+		acting,
+		workspace,
+		workspace.selected,
+		window_tree(acting).focus,
+		path,
+		floating = floating,
+		heading = heading,
 	) {
 		notify(app, .Error, "Could not open the file.")
 	}
@@ -484,7 +511,16 @@ markdown_pane_draw :: proc(
 	if document == nil {return false, markdown_message_draw(app, w, pane, g)}
 	view := &pane.view
 	ui.markdown_view_fit(view, document, pane.revision, &w.ui_text, app.family, g.width, w.scale)
-	ui.markdown_scroll_by(view, 0, int(g.area.height))
+	visible := int(g.area.height)
+	// Applied once: a heading the document does not have leaves the view where it was.
+	if pane.heading != "" {
+		if offset, found := markdown.heading_find(document, pane.heading); found {
+			ui.markdown_scroll_to_offset(view, offset, visible)
+		}
+		delete(pane.heading)
+		pane.heading = ""
+	}
+	ui.markdown_scroll_by(view, 0, visible)
 	find: ui.Markdown_Find
 	if pane.search.phase != .Off {
 		c := app.settings.colors
@@ -599,12 +635,23 @@ markdown_key :: proc(app: ^App, w: ^Window, e: input.Key_Event) {
 	}
 }
 
-// Web links open in the browser. Anything else is a file next to the document, which then takes the
-// same path as a file link printed in a terminal.
+// Web links open in the browser. Anything else is a file the link resolves to from the document, which
+// then takes the same path as a file link printed in a terminal; a heading in this same document
+// scrolls this pane instead.
 @(private)
 markdown_link_open :: proc(app: ^App, w: ^Window, pane: ^Markdown_Pane, link: int) {
 	buffer: [links.TARGET_BYTES]u8 = ---
-	target_open(app, w, target_from_href(markdown_document(pane).links[link].href, pane.path, buffer[:]))
+	target, heading := target_from_link(markdown_document(pane).links[link], pane.path, buffer[:])
+	file, local := target.(File_Target)
+	switch {
+	case !local:
+		target_open(app, w, target)
+	case document_same(file.path, pane.path):
+		markdown_heading_request(pane, heading)
+		w.dirty = true
+	case:
+		target_open_file(app, w, file.path, heading)
+	}
 }
 
 // Ctrl+ or Shift+right-click on a link shows the link menu a terminal link shows. False when the point is on
@@ -622,7 +669,7 @@ markdown_link_menu :: proc(
 	link := ui.markdown_link_at(&pane.view, markdown_geometry_of(w, shown), x, y)
 	if link < 0 {return false}
 	buffer: [links.TARGET_BYTES]u8 = ---
-	target := target_from_href(document.links[link].href, pane.path, buffer[:])
+	target, _ := target_from_link(document.links[link], pane.path, buffer[:])
 	document_menu_open_target(app, w, shown.content, target, x, y)
 	return true
 }
