@@ -649,7 +649,6 @@ initial_geometry :: proc(app: ^App) -> term.Geometry {
 		metrics            = fields.metrics,
 		rail_default_width = fields.rail_default_width,
 		tabs_horizontal    = fields.tabs_horizontal,
-		header_height      = fields.header_height,
 	}
 	box, width, height, _ := pane_box_for_grid(
 		app,

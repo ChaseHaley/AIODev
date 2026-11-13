@@ -113,7 +113,7 @@ pointer_settings_controls_use_hand :: proc(t: ^testing.T) {
 	app.editor_open(s, w)
 	if !testing.expect(t, app.settings_active(w)) {return}
 	l := app.settings_layout(w)
-	if !testing.expect(t, pointer_settings_select_top(w, "pane.show_headers")) {return}
+	if !testing.expect(t, pointer_settings_select_top(w, "pane.markdown_floating")) {return}
 	x, y := pointer_center(ui.editor_row_parts(&w.editor, l, w.editor.selected).toggle)
 	pointer_expect_move(t, s, w, x, y, .Hand)
 	if !testing.expect(t, pointer_settings_select_top(w, "font.family")) {return}

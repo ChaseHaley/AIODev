@@ -74,11 +74,6 @@ try {
     $scale = [double]$s['window.scale']
     Assert-Value $s['panes.header_height'] (28*$scale) 'single pane has a persistent header row'
     $r = Focused-Rect
-    Invoke-Aio mouse move (Px ($r[0]+$r[2]/2) ($r[1]+$r[3]/2)) --px
-    Assert-Value (Read-State)['panes.split_overlay'] 'false' 'split controls stay hidden away from the top'
-    Invoke-Aio mouse move (Px ($r[0]+$r[2]-30*$scale) ($r[1]+12*$scale)) --px
-    Assert-Value (Read-State)['panes.split_overlay'] 'false' 'persistent header supplies split controls'
-    Assert-Value $s['panes.header_height'] (28*$scale) 'header reserves terminal rows'
     Shot 'single-pane-split-controls'
     Invoke-Aio mouse click (Px ($r[0]+$r[2]-187*$scale) ($r[1]+14*$scale)) --px
     Assert-Value (Read-State)['panes.count'] 2 'single-pane split right button'

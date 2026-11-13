@@ -128,22 +128,3 @@ headers_divide_groups_only_where_a_later_group_shows :: proc(t: ^testing.T) {
 	down := only_splits.buttons[.Split_Down]
 	testing.expect_value(t, down.x + down.width, end)
 }
-
-@(test)
-the_split_overlay_carries_the_documents_button_first :: proc(t: ^testing.T) {
-	scale := f32(1)
-	area := render.Rect{0, 0, 600, 400}
-	shown := bit_set[Header_Button]{.Documents, .Split_Right, .Split_Down}
-	l := ui.split_overlay_layout(area, scale, shown, GROUP_ENDS)
-	documents, right, down := l.buttons[.Documents], l.buttons[.Split_Right], l.buttons[.Split_Down]
-	divider := l.dividers[.Documents]
-	testing.expect(t, documents.x > l.title.x && divider.x > documents.x)
-	testing.expect(t, right.x > divider.x && down.x > right.x)
-	testing.expect_value(t, l.dividers[.Split_Down].width, f32(0))
-	testing.expect(t, down.x + down.width <= l.panel.x + l.panel.width)
-	split := ui.header_hit_test(l, right.x + 2, right.y + 2)
-	testing.expect_value(t, split, ui.Header_Target(Header_Button)(Header_Button.Split_Right))
-	without := ui.split_overlay_layout(area, scale, shown - {.Documents}, GROUP_ENDS)
-	testing.expect_value(t, without.buttons[.Documents].width, f32(0))
-	testing.expect(t, without.panel.width < l.panel.width)
-}

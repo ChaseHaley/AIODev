@@ -676,8 +676,7 @@ when AIO_CONTROL {
 		state_value(r, "panes.count", len(window_tiled_rects(w)))
 		state_value(r, "panes.focused", window_tree(w).focus)
 		state_valuef(r, "panes.gap", "%g", window_gap(app, w))
-		state_valuef(r, "panes.header_height", "%g", w.header_height)
-		state_value(r, "panes.split_overlay", w.split_overlay)
+		state_valuef(r, "panes.header_height", "%g", pane_header_height(w.scale))
 		state_value(r, "panes.moving", pane_motion_animating(w))
 		for view in w.views {
 			if !pane_owns_session(view.content.kind) {continue}
@@ -903,7 +902,7 @@ when AIO_CONTROL {
 		if entry == nil {return {}, "the selected window has no focused pane; address the region in pixels"}
 		for pane in w.panes {
 			if pane.content != {.Terminal, entry.id} {continue}
-			return pane_box(w.metrics, pane.rect, pane_insets(app, w, entry, pane)), ""
+			return pane_box(w.metrics, pane.rect, pane_insets(app, w, entry)), ""
 		}
 		return {}, "the focused pane is not visible; select its tab or use --region"
 	}

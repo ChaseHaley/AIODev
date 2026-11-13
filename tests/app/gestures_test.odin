@@ -108,7 +108,7 @@ gestures_selection_and_editor_release_outside_their_surface :: proc(t: ^testing.
 	s, w := &f.state, f.state.windows[0]
 	app.pane_split(s, w, .Right)
 	r := w.panes[0].rect
-	gesture_button(s, w, .Left, true, r.x+30, r.y+w.header_height+40)
+	gesture_button(s, w, .Left, true, r.x+30, r.y+app.pane_header_height(w.scale)+40)
 	if !testing.expect(t, app.selection_active(w)) {return}
 	focus := app.window_tree(w).focus
 	ui.find_open(&w.find)
@@ -153,7 +153,7 @@ gestures_menu_kept_open_releases_its_swallowed_button :: proc(t: ^testing.T) {
 	if !testing.expect(t, !app.tab_menu_shown(w)) {return}
 	testing.expect(t, gesture_captured(w) == {})
 	p := w.panes[0].rect
-	x, y := p.x + 30, p.y + w.header_height + 40
+	x, y := p.x + 30, p.y + app.pane_header_height(w.scale) + 40
 	pointer_expect_move(t, s, w, x, y, .Text)
 	gesture_button(s, w, .Left, true, x, y)
 	if !testing.expect(t, app.selection_active(w)) {return}

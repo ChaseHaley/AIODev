@@ -111,7 +111,6 @@ linked_window_follows_its_tab :: proc(t: ^testing.T) {
 	testing.expect_value(t, len(f.state.windows), 2)
 	testing.expect_value(t, len(f.state.workspaces), 1)
 	testing.expect_value(t, len(w.panes), 1)
-	testing.expect(t, w.header_height > 0)
 	testing.expect_value(t, app.tab_pane_count(f.tab), 2)
 	app.pane_links_sync(f.state)
 	testing.expect(t, w.phase == .Shown)
@@ -552,7 +551,6 @@ linked_window_splits_keep_their_panes_in_the_tab :: proc(t: ^testing.T) {
 	app.pane_links_sync(f.state)
 	testing.expect_value(t, layout.pane_count(app.window_tree(w)), 2)
 	testing.expect_value(t, len(w.panes), 2)
-	testing.expect(t, w.header_height > 0)
 }
 
 @(test)

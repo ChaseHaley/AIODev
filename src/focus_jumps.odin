@@ -1,6 +1,7 @@
 package main
 
 import "aio:input"
+import "aio:layout"
 
 // Pane focus as a jump list, like an editor's back and forward. Entries are session ids, so a pane
 // keeps its place as it moves between tabs, workspaces and windows.
@@ -12,7 +13,8 @@ Focus_Jumps :: struct {
 	// The entry the user is on; entries after it are the forward path.
 	index: int,
 	// The window the user last worked in. It is tracked here rather than read from window focus
-	// events, which arrive a tick after a jump asks for activation.
+	// events, which arrive a tick after a jump asks for activation, and for a linked window only once
+	// it is shown.
 	window: input.Window_Id,
 }
 
@@ -72,6 +74,15 @@ focus_jumps_window_closed :: proc(app: ^App, id: input.Window_Id) {
 	app.focus_jumps.window = next != nil ? next.id : 0
 }
 
+// A reveal moved the keyboard to `content`, so the jump list follows the window that holds the pane: its
+// linked window when it has one, else `owner`, the window showing its workspace. Following `owner` for a
+// linked pane would record the pane focused there, which the user never landed on, and drop the forward
+// path (WORK-457).
+focus_jumps_follow :: proc(app: ^App, owner: ^Window, content: layout.Content) {
+	holder := pane_link_window_of(app, content)
+	app.focus_jumps.window = (holder != nil ? holder : owner).id
+}
+
 @(private)
 focus_jump_reachable :: proc(data: rawptr, session: u32) -> bool {
 	app := (^App)(data)
@@ -80,14 +91,12 @@ focus_jump_reachable :: proc(data: rawptr, session: u32) -> bool {
 	return workspace != nil && workspace_eligible(app, workspace)
 }
 
-// Steps back or forward along the focus path, crossing tabs, workspaces and windows.
+// Steps back or forward along the focus path, crossing tabs, workspaces and windows. The reveal points
+// the jump list at the window holding the pane.
 focus_jump :: proc(app: ^App, w: ^Window, step: int) {
 	session, ok := focus_jumps_step(&app.focus_jumps, step, focus_jump_reachable, app)
 	if !ok {return}
 	target := session_window(app, session, w)
 	if target != w && !window_activate(app, target) {return}
-	if !session_show(app, target, session) {return}
-	if owner := window_for_workspace(app, session_workspace(app, session)); owner != nil {
-		app.focus_jumps.window = owner.id
-	}
+	_ = session_show(app, target, session)
 }
