@@ -142,6 +142,8 @@ control_cli_reply :: proc(outcome: Outcome, json_output: bool) -> control.Respon
 			document.pane = payload.pane
 		case Outcome_Text:
 			document.text = string(payload)
+		case Outcome_Process:
+			document.process = cli_protocol.Process_Report(payload)
 		case Outcome_Panes:
 			document.panes = ([]cli_protocol.Pane_Report)(payload)
 		case Outcome_Layout:
@@ -210,6 +212,10 @@ control_cli_reply :: proc(outcome: Outcome, json_output: bool) -> control.Respon
 			}
 		case Outcome_Text:
 			strings.write_string(&b, string(payload))
+		case Outcome_Process:
+			data, err := json.marshal(cli_protocol.Process_Report(payload), {}, context.temp_allocator)
+			if err != nil {return cli_protocol.response(.Failed, "not enough memory for the reply")}
+			strings.write_string(&b, string(data))
 		}
 	}
 	response.text = strings.to_string(b)

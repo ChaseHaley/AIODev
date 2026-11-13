@@ -33,6 +33,7 @@ Outcome :: struct {
 		Outcome_Catalogue,
 		Outcome_Usage,
 		Outcome_Layout,
+		Outcome_Process,
 	},
 }
 Outcome_Created :: struct {pane: u32}
@@ -45,6 +46,7 @@ Outcome_Catalogue :: distinct []cli_protocol.Command_Report
 Outcome_Usage :: distinct cli_protocol.Command_Report
 // The panes a layout opened, in the file's order.
 Outcome_Layout :: distinct []cli_protocol.Pane_Report
+Outcome_Process :: distinct cli_protocol.Process_Report
 
 // A pane a control invocation acts on, with the identity mutation needs.
 Pane_Target :: struct {

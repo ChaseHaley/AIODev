@@ -167,6 +167,13 @@ Action :: enum u32 {
 	App_Version,
 	Install_Agent_Hooks,
 	Update,
+	Pane_Send_Keys,
+	Pane_Process,
+	App_Notify,
+	Clipboard_Read,
+	Clipboard_Write,
+	Settings_Get,
+	Settings_Set,
 }
 
 // Everything one command is: its name and title, default shortcuts, what it does when a linked window
@@ -627,6 +634,32 @@ ACTIONS :: [Action]Command_Descriptor {
 	},
 	.Install_Agent_Hooks = {"app.install_agent_hooks", "Install agent session hooks", nil, .Local, {}},
 	.Update = {"app.update", "Update AIODev", nil, .Local, {}},
+	.Pane_Send_Keys = {
+		"pane.send_keys", "Send keys to pane", nil, .Host,
+		{accepted = {.Keys}, required = {.Keys}, hidden = true, control = .Pane},
+	},
+	.Pane_Process = {
+		"pane.process", "Show pane process", nil, .Host, {hidden = true, control = .Pane},
+	},
+	.App_Notify = {
+		"app.notify", "Show notification", nil, .Host,
+		{accepted = {.Title, .Text}, required = {.Text}, hidden = true, control = .Unnamed},
+	},
+	.Clipboard_Read = {
+		"edit.clipboard_read", "Read clipboard", nil, .Host, {hidden = true, control = .Unnamed},
+	},
+	.Clipboard_Write = {
+		"edit.clipboard_write", "Write clipboard", nil, .Host,
+		{accepted = {.Text}, required = {.Text}, hidden = true, control = .Unnamed},
+	},
+	.Settings_Get = {
+		"settings.get", "Read setting", nil, .Host,
+		{accepted = {.Name}, required = {.Name}, hidden = true, control = .Unnamed},
+	},
+	.Settings_Set = {
+		"settings.set", "Write setting", nil, .Host,
+		{accepted = {.Name, .Text}, required = {.Name, .Text}, hidden = true, control = .Unnamed},
+	},
 }
 
 // What help says about a command beyond its usage and title: a summary, and the command's own help for
@@ -695,6 +728,30 @@ COMMAND_HELP :: #partial [Action]Command_Help {
 	.Pane_Send = {
 		"Types text into the pane's program as a person at the keyboard would.",
 		{{.Text, {description = "the text to type", example = `"git status"`}}},
+	},
+	.Pane_Send_Keys = {
+		"Sends each chord through the pane's negotiated keyboard protocol. Invalid chords send nothing.",
+		nil,
+	},
+	.Pane_Process = {
+		"Reports the pane's current program, its executable path and directory when available, and its " +
+		"ancestors from nearest parent back to the pane's shell.",
+		nil,
+	},
+	.App_Notify = {
+		"Shows an Info notice; with no visible window, also uses the notification preferences for done programs.",
+		nil,
+	},
+	.Clipboard_Read = {"Returns the clipboard's text.", nil},
+	.Clipboard_Write = {"Replaces the clipboard's text; empty text clears it.", nil},
+	.Settings_Get = {
+		"Returns a current schema setting in its settings.ini form, including quotes around strings.",
+		{{.Name, {"the schema setting's key", "none (required)", "--name font.size"}}},
+	},
+	.Settings_Set = {
+		"Validates, saves and applies a setting exactly as the Settings page does. String values are " +
+		"given without settings.ini's surrounding quotes.",
+		{{.Name, {"the schema setting's key", "none (required)", "--name font.size"}}},
 	},
 	.Pane_Read = {
 		"Prints the pane's visible text; --scrollback adds the history above it and --unwrap joins rows the " +
@@ -951,6 +1008,26 @@ command_execute :: proc(app: ^App, ctx: Command_Context, invocation: commands.In
 	case .Pane_Send:
 		named := target.?
 		return pane_send(named.pane.session, invocation.text, invocation.enter)
+	case .Pane_Send_Keys:
+		named := target.?
+		return control_pane_send_keys(named.pane.session, invocation.keys)
+	case .Pane_Process:
+		named := target.?
+		return control_pane_process(app, named.pane.session)
+	case .App_Notify:
+		control_app_notify(app, invocation.title, invocation.text)
+		return {}
+	case .Clipboard_Read:
+		text, ok := platform.clipboard_get_text(&app.platform, context.temp_allocator)
+		if !ok {return outcome_failure(.Failed, "could not read the clipboard")}
+		return {payload = Outcome_Text(text)}
+	case .Clipboard_Write:
+		if !clipboard_write(app, invocation.text) {
+			return outcome_failure(.Failed, "could not write the clipboard")
+		}
+		return {}
+	case .Settings_Get, .Settings_Set:
+		return control_settings_value(app, invocation, action == .Settings_Set)
 	case .Pane_Focus:
 		return control_pane_focus(app, target.?)
 	case .Close_Pane:

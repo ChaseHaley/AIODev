@@ -166,6 +166,20 @@ Pane_Report :: struct {
 	grid:           Maybe(Grid) `json:"grid,omitempty"`,
 }
 
+// The foreground program selected by pane.list, and its parent chain within the pane's process tree.
+Process_Report :: struct {
+	name:      string,
+	pid:       u32,
+	path:      string `json:"path,omitempty"`,
+	directory: string `json:"directory,omitempty"`,
+	ancestors: []Process_Ancestor,
+}
+
+Process_Ancestor :: struct {
+	name: string,
+	pid:  u32,
+}
+
 // A pane's place in DIPs from the top left of its window's pane area, as the split view lays out its
 // tab; zoom and fill do not change it, and a floating pane keeps its own place.
 Rect :: struct {
@@ -268,4 +282,5 @@ Reply_Json :: struct {
 	commands:   []Command_Report `json:"commands,omitempty"`,
 	tabs:       []Tab_Report `json:"tabs,omitempty"`,
 	workspaces: []Workspace_Report `json:"workspaces,omitempty"`,
+	process:    Maybe(Process_Report) `json:"process,omitempty"`,
 }

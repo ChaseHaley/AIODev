@@ -30,6 +30,8 @@ Argument :: enum u8 {
 	Text_File,
 	Scrollback,
 	Unwrap,
+	Keys,
+	Title,
 }
 Arguments :: bit_set[Argument;u32]
 
@@ -50,6 +52,7 @@ Invocation :: struct {
 	tab_name, workspace:                     string,
 	lines:                                   int,
 	scrollback, unwrap:                      bool,
+	keys, title:                            string,
 }
 
 Parse_Error :: struct {
@@ -194,6 +197,18 @@ argument_grammar := [Argument]struct {
 	.Unwrap    = {
 		"--unwrap", "",
 		{"joins rows the terminal soft-wrapped into one line", "off (one line per row)", "--unwrap"},
+	},
+	.Keys = {
+		"--keys", " <chords>",
+		{
+			"space-separated shortcut chords, or a JSON array of chord strings",
+			"none (required)",
+			`--keys "Ctrl+C Escape Up"`,
+		},
+	},
+	.Title = {
+		"--title", " <title>",
+		{"the notification's title", "AIODev", `--title "Build finished"`},
 	},
 }
 #assert(layout.SPLIT_SHARE_MIN == 0.05 && layout.SPLIT_SHARE_MAX == 0.95)
@@ -376,6 +391,10 @@ parse_invocation :: proc(
 				return {}, {value, fmt.tprintf("use a row count from 1 to %d", MAX_LINES)}
 			}
 			result.lines = lines
+		case .Keys:
+			result.keys = value
+		case .Title:
+			result.title = value
 		case .Directory, .Name, .Profile, .Tab_Name, .Workspace, .Command_File, .Text_File:
 			if value == "" {return {}, {option, "supply a nonempty value"}}
 			#partial switch argument {
