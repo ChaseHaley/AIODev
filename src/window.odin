@@ -449,7 +449,7 @@ window_relayout :: proc(app: ^App, w: ^Window) {
 		return
 	}
 	bar_height := window_title_height(w)
-	tab_presentation_fit(w)
+	tab_presentation_fit(app, w)
 	platform.window_title_bar(
 		&app.platform,
 		w.id,

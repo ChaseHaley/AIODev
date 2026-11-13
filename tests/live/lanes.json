@@ -215,6 +215,9 @@
     "tab_controls": {
       "lane": "headless"
     },
+    "tab_group_chips": {
+      "lane": "headless"
+    },
     "tab_groups": {
       "lane": "headless"
     },
