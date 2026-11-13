@@ -8,6 +8,7 @@ import "aio:settings"
 import "core:log"
 import "core:math"
 import "core:slice"
+import "core:unicode/utf8"
 
 // Every interface color, resolved from the settings theme. Most fields are theme tokens; the
 // hover, pressed, shadow, scrim and rim effects derive from them because they model light rather
@@ -202,32 +203,56 @@ draw_glyph :: proc(
 // Splits `s` into lines no wider than `width`, breaking at spaces where possible.
 wrap :: proc(t: ^Text, s: string, width: f32, out: ^[dynamic]string) {
 	clear(out)
-	line_start, last_space := 0, -1
-	line_width, width_through_space: f32
-	for r, offset in s {
+	lines := Wrap_Lines{text = t, s = s, width = width, last_space = -1}
+	for start, end in wrap_next(&lines) {append(out, s[start:end])}
+}
+
+// Walks the lines `wrap` splits a string into, without storing them. Start with `last_space = -1`.
+@(private)
+Wrap_Lines :: struct {
+	text:                            ^Text,
+	s:                               string,
+	width:                           f32,
+	offset, line_start, last_space:  int,
+	line_width, width_through_space: f32,
+}
+
+// The next line's byte range; the space a line breaks at belongs to neither line.
+@(private)
+wrap_next :: proc(w: ^Wrap_Lines) -> (start, end: int, ok: bool) {
+	for w.offset < len(w.s) {
+		offset := w.offset
+		r, size := utf8.decode_rune_in_string(w.s[offset:])
+		w.offset += size
 		advance: f32
-		if g, found := font.glyph_lookup(t.fonts, t.family, .Regular, r); found {
-			advance = font.glyph_advance(t.fonts, g, t.size_px)
+		if g, found := font.glyph_lookup(w.text.fonts, w.text.family, .Regular, r); found {
+			advance = font.glyph_advance(w.text.fonts, g, w.text.size_px)
 		}
-		if line_width + advance > width && offset > line_start {
-			if last_space > line_start {
-				append(out, s[line_start:last_space])
-				line_start = last_space + 1
-				line_width -= width_through_space
+		broke := false
+		if w.line_width + advance > w.width && offset > w.line_start {
+			broke, start = true, w.line_start
+			if w.last_space > w.line_start {
+				end = w.last_space
+				w.line_start = w.last_space + 1
+				w.line_width -= w.width_through_space
 			} else {
-				append(out, s[line_start:offset])
-				line_start, line_width = offset, 0
+				end = offset
+				w.line_start, w.line_width = offset, 0
 			}
-			last_space = -1
+			w.last_space = -1
 		}
-		line_width += advance
+		w.line_width += advance
 		if r == ' ' {
-			last_space, width_through_space = offset, line_width
+			w.last_space, w.width_through_space = offset, w.line_width
 		}
+		if broke {return start, end, true}
 	}
-	if line_start < len(s) {
-		append(out, s[line_start:])
+	if w.line_start < len(w.s) {
+		start, end = w.line_start, len(w.s)
+		w.line_start = len(w.s)
+		return start, end, true
 	}
+	return 0, 0, false
 }
 
 draw_rect :: proc(list: ^render.Draw_List, instance: render.Rect_Instance) {

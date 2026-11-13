@@ -200,7 +200,7 @@ motion_preset_label :: proc(name: string) -> string {
 }
 
 // Panes sits at depth 0 and every context below it one step further in.
-@(private = "file")
+@(private)
 motion_depth :: proc(c: settings.Motion_Context) -> int {
 	depth, at := 0, c
 	for {
@@ -872,14 +872,14 @@ editor_motion_draw :: proc(
 	row := &p.rows[index]
 	if row.kind == .Motion_Context {return motion_header_draw(p, index, parts, list, text, theme, scale)}
 	s, r := scale, parts.row
-	x := r.x + ITEM_INSET * s
-	if row.motion_part in MOTION_FIELD_PARTS {x += f32(motion_depth(row.motion_context) + 1) * SPACE_6 * s}
+	band := row_band(r, s)
+	x := row_text_x(row, r, s)
 	small := text_styled(text, .Detail)
 	limit := max(1, parts.text_right - x)
-	baseline, detail_baseline := stacked_baselines(r, text, &small, s)
-	if row.description == "" {baseline = r.y + (r.height - text.line_height) / 2 + text.ascent}
+	baseline, detail_baseline := stacked_baselines(band, text, &small, s)
+	if row.description == "" {baseline = band.y + (band.height - text.line_height) / 2 + text.ascent}
 	if result := draw_text(text, list, row.title, x, baseline, theme.text, limit); result != .Ok {return result}
-	if result := draw_text(&small, list, row.description, x, detail_baseline, theme.muted, limit);
+	if result := description_draw(&small, list, row, x, detail_baseline, limit, theme.muted);
 	   result != .Ok {return result}
 	shown := theme
 	if row.motion_inherited && (!selected || field_string(&p.value) == row.value) {shown.text = theme.faint}
