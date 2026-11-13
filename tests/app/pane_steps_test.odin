@@ -265,6 +265,37 @@ move_crosses_into_a_linked_window_as_a_drop_there :: proc(t: ^testing.T) {
 	testing.expect_value(t, steps_last_notice(s), refused)
 }
 
+// A wide window shows the key card in three columns and at about 700 px in fewer, inside the panes. At 360 px
+// the panes beside the Activity panel are narrower than one column, so the card takes one column and stays
+// inside the window.
+@(test)
+arrange_card_flows_into_fewer_columns_in_a_narrow_window :: proc(t: ^testing.T) {
+	f: Steps_Fixture
+	defer palette_fixture_destroy(t, &f.palette)
+	if !steps_fixture_create(t, &f, "steps-card") {return}
+	s, w := &f.palette.state, f.w
+	app.run_action(s, w, .Arrange_Panes)
+	columns := 4
+	for width in ([?]i32{1600, 700, 360}) {
+		app.handle_event(s, platform.Resize_Event{window = w.id, width = width, height = w.height})
+		card := app.arrange_card(s, w)
+		r := card.rect
+		testing.expectf(t, card.columns < columns, "%v px: %v columns after %v", width, card.columns, columns)
+		bounds := app.window_content_area(s, w)
+		if width == 360 {bounds = {0, bounds.y, f32(w.width), bounds.height}}
+		testing.expectf(t, r.x >= bounds.x && r.x + r.width <= bounds.x + bounds.width,
+			"%v px: card %v outside %v", width, r, bounds)
+		testing.expectf(t, r.y >= bounds.y && r.y + r.height <= bounds.y + bounds.height,
+			"%v px: card %v outside %v", width, r, bounds)
+		switch width {
+		case 1600: testing.expect_value(t, card.columns, 3)
+		case 360: testing.expect_value(t, card.columns, 1)
+		}
+		columns = card.columns
+	}
+	testing.expect_value(t, app.overlay_kind(s, w), app.Overlay_Kind.Arrange)
+}
+
 // Arrange Panes takes the keys: arrows move, Shift swaps, Ctrl resizes, R rotates and = balances, while
 // typing reaches nothing. Esc and Enter leave, keeping every change.
 @(test)

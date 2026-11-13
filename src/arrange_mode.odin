@@ -77,40 +77,32 @@ ARRANGE_KEYS := [?]Arrange_Key {
 	{.W, .Move_Pane_Workspace, true},
 }
 
-// The card's columns of key hints, matching the keys above; an empty label ends a column.
+// The card's key hints in reading order, matching the keys above. On a wide window they stand in three
+// columns, each ending before its entry in ARRANGE_CARD_ENDS; narrower, they flow evenly into fewer.
 @(private = "file")
 ARRANGE_CARD_COLUMNS :: 3
 
-@(private = "file")
-ARRANGE_CARD_ROWS :: 6
+@(private = "file", rodata)
+ARRANGE_HINTS := [?]ui.Key_Hint {
+	{{"←↑→↓", "HJKL"}, "Move"},
+	{{"Shift+←↑→↓", ""}, "Swap"},
+	{{"Ctrl+←↑→↓", ""}, "Resize"},
+	{{"Ctrl+Shift+←↑→↓", ""}, "Resize more"},
+	{{"Alt+←↑→↓", ""}, "Pick pane"},
+	{{"Alt+Shift+←↑→↓", ""}, "Dock to edge"},
+	{{"R", ""}, "Rotate split"},
+	{{"=", ""}, "Balance"},
+	{{"1-9", ""}, "Move to tab"},
+	{{"T", ""}, "New tab"},
+	{{"N", ""}, "New window"},
+	{{"O", ""}, "Linked window"},
+	{{"F", ""}, "Float or dock"},
+	{{"W", ""}, "Workspace…"},
+	{{"Enter", "Esc"}, "Done"},
+}
 
 @(private = "file", rodata)
-ARRANGE_HINTS := [ARRANGE_CARD_COLUMNS][ARRANGE_CARD_ROWS]ui.Key_Hint {
-	{
-		{{"←↑→↓", "HJKL"}, "Move"},
-		{{"Shift+←↑→↓", ""}, "Swap"},
-		{{"Ctrl+←↑→↓", ""}, "Resize"},
-		{{"Ctrl+Shift+←↑→↓", ""}, "Resize more"},
-		{{"Alt+←↑→↓", ""}, "Pick pane"},
-		{{"Alt+Shift+←↑→↓", ""}, "Dock to edge"},
-	},
-	{
-		{{"R", ""}, "Rotate split"},
-		{{"=", ""}, "Balance"},
-		{{"1-9", ""}, "Move to tab"},
-		{{"T", ""}, "New tab"},
-		{{"N", ""}, "New window"},
-		{},
-	},
-	{
-		{{"O", ""}, "Linked window"},
-		{{"F", ""}, "Float or dock"},
-		{{"W", ""}, "Workspace…"},
-		{{"Enter", "Esc"}, "Done"},
-		{},
-		{},
-	},
-}
+ARRANGE_CARD_ENDS := [ARRANGE_CARD_COLUMNS]int{6, 11, len(ARRANGE_HINTS)}
 
 @(private = "file")
 ARRANGE_TITLE :: "Arrange panes"
@@ -247,50 +239,88 @@ arrange_outline_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 	return .Ok
 }
 
-// The card of the mode's keys, centred along the bottom of w's panes, fading and rising as a notice does.
+// Where the key card stands in w and how its hints flow: `columns` columns, column c holding the hints
+// before ends[c], `widths[c]` wide, under a heading `heading` tall, with `row` for each hint.
+Arrange_Card :: struct {
+	rect:                       render.Rect,
+	columns:                    int,
+	ends:                       [ARRANGE_CARD_COLUMNS]int,
+	widths:                     [ARRANGE_CARD_COLUMNS]f32,
+	padding, gap, row, heading: f32,
+}
+
+// The card centred along the bottom of w's panes, in as many columns as their width holds, down to one, so a
+// narrow window still shows every key. Panes narrower than one column leave it centred on them but inside
+// the window, over the chrome beside them.
+arrange_card :: proc(app: ^App, w: ^Window) -> Arrange_Card {
+	s := w.scale
+	keycap := ui.text_styled(&w.ui_text, .Detail)
+	title := ui.text_styled(&w.ui_text, .Strong)
+	card := Arrange_Card {
+		padding = ui.DIALOG_PADDING * s,
+		gap     = ui.SPACE_6 * s,
+		row     = max(ui.KEYCAP_HEIGHT * s, keycap.line_height) + ui.SPACE_1 * s,
+		heading = title.line_height + ui.SPACE_2 * s,
+	}
+	area := window_content_area(app, w)
+	margin := ui.NOTICE_MARGIN * s
+	title_width := ui.text_width(&title, ARRANGE_TITLE)
+	rows := 0
+	width := f32(0)
+	for columns := ARRANGE_CARD_COLUMNS; columns >= 1; columns -= 1 {
+		card.columns, card.ends, card.widths = columns, ARRANGE_CARD_ENDS, {}
+		if columns < ARRANGE_CARD_COLUMNS {
+			per := (len(ARRANGE_HINTS) + columns - 1) / columns
+			for &end, c in card.ends {end = min(len(ARRANGE_HINTS), (c + 1) * per)}
+		}
+		content, start := f32(0), 0
+		rows = 0
+		for c in 0 ..< columns {
+			for hint in ARRANGE_HINTS[start:card.ends[c]] {
+				card.widths[c] = max(card.widths[c], ui.key_hint_width(&keycap, &keycap, hint, s))
+			}
+			rows = max(rows, card.ends[c] - start)
+			content += card.widths[c] + (c > 0 ? card.gap : 0)
+			start = card.ends[c]
+		}
+		width = max(content, title_width) + 2 * card.padding
+		if width <= area.width - 2 * margin {break}
+	}
+	height := 2 * card.padding + card.heading + f32(rows) * card.row
+	x := area.x + (area.width - width) / 2
+	x = max(0, min(x, f32(w.width) - width))
+	y := max(area.y, area.y + area.height - margin - height)
+	card.rect = {x, y, width, height}
+	return card
+}
+
+// The card of the mode's keys, fading and rising as a notice does.
 arrange_card_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 	if !ui.presence_visible(w.arrange) {return .Ok}
 	s := w.scale
 	keycap := ui.text_styled(&w.ui_text, .Detail)
-	label := ui.text_styled(&w.ui_text, .Detail)
 	title := ui.text_styled(&w.ui_text, .Strong)
-	padding, gap := ui.DIALOG_PADDING * s, ui.SPACE_6 * s
-	row := max(ui.KEYCAP_HEIGHT * s, label.line_height) + ui.SPACE_1 * s
-	widths: [ARRANGE_CARD_COLUMNS]f32
-	rows := 0
-	content_width := f32(0)
-	for column, c in ARRANGE_HINTS {
-		for hint, r in column {
-			if hint.label == "" {break}
-			widths[c] = max(widths[c], ui.key_hint_width(&keycap, &label, hint, s))
-			rows = max(rows, r + 1)
-		}
-		content_width += widths[c] + (c > 0 ? gap : 0)
-	}
-	heading := title.line_height + ui.SPACE_2 * s
-	area := window_content_area(app, w)
-	width := content_width + 2 * padding
-	height := 2 * padding + heading + f32(rows) * row
-	x := max(area.x, area.x + (area.width - width) / 2)
-	y := area.y + area.height - ui.NOTICE_MARGIN * s - height
+	card := arrange_card(app, w)
+	r := card.rect
 	if render.push_layer(&w.list, {0, 0, f32(w.width), f32(w.height)}) != .None {return .Ok}
 	mark := render.draw_mark(&w.list)
 	defer ui.fade_draw(&w.list, mark, ui.presence_fade(w.arrange, ui.RISE_NOTICE * s))
-	if ui.panel_draw(&w.list, ui.popover_panel({x, y, width, height}, s), app.theme) != .None {return .Ok}
-	baseline := y + padding + title.ascent
-	if result := ui.draw_text(&title, &w.list, ARRANGE_TITLE, x + padding, baseline, app.theme.text);
+	if ui.panel_draw(&w.list, ui.popover_panel(r, s), app.theme) != .None {return .Ok}
+	baseline := r.y + card.padding + title.ascent
+	if result := ui.draw_text(&title, &w.list, ARRANGE_TITLE, r.x + card.padding, baseline, app.theme.text);
 	   result != .Ok {return result}
-	top := y + padding + heading
-	left := x + padding
-	for column, c in ARRANGE_HINTS {
-		for hint, r in column {
-			if hint.label == "" {break}
-			band := render.Rect{left, top + f32(r) * row, widths[c], row}
-			line := band.y + (band.height - label.line_height) / 2 + label.ascent
-			if result := ui.key_hint_draw(&w.list, &keycap, &label, app.theme, hint, left, band, line, s);
+	top := r.y + card.padding + card.heading
+	left := r.x + card.padding
+	start := 0
+	for c in 0 ..< card.columns {
+		for hint, i in ARRANGE_HINTS[start:card.ends[c]] {
+			band := render.Rect{left, top + f32(i) * card.row, card.widths[c], card.row}
+			line := band.y + (band.height - keycap.line_height) / 2 + keycap.ascent
+			if result := ui.key_hint_draw(&w.list, &keycap, &keycap, app.theme, hint, left, band, line, s);
 			   result != .Ok {return result}
 		}
-		left += widths[c] + gap
+		left += card.widths[c] + card.gap
+		start = card.ends[c]
 	}
 	return .Ok
 }

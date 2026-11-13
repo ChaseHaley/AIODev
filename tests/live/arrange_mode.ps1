@@ -141,5 +141,31 @@ try {
     Aio expect state tabs.count=1 | Out-Null
     Aio command pane.move_new_window | Out-Null
     Aio expect state windows.count=2 | Out-Null
-    Write-Output 'PASS new tab, tab 2 and new window'
+    Write-Output 'PASS new tab, tab 1 and new window'
+
+    # The new window took focus; the rest of the journey works in the first one.
+    Aio window select ((State)['window.1.id']) | Out-Null
+
+    # About 700 px wide the card flows into fewer columns and stays inside the panes. Resize sizes the
+    # focused terminal, so a tab of one pane gives it a known width per column.
+    Aio command tab.new | Out-Null
+    Aio wait text 'PS ' | Out-Null
+    $s = State
+    $grid = @($s['grid.size'] -split 'x' | ForEach-Object { [int]$_ })
+    $wide = [int]($s['window.size'] -split 'x')[0]
+    Aio resize "$($grid[0] - 40)x$($grid[1])" | Out-Null
+    $narrower = [int]((State)['window.size'] -split 'x')[0]
+    $cell = ($wide - $narrower) / 40
+    $columns = [int]($grid[0] - 40 - ($narrower - 700) / $cell)
+    Aio resize "$($columns)x$($grid[1])" | Out-Null
+    $size = [int]((State)['window.size'] -split 'x')[0]
+    Check ([math]::Abs($size - 700) -le 40) "window about 700 px wide ($size)"
+    foreach ($theme in @('studio-light', 'studio-dark')) {
+        Set-Theme $theme
+        Aio command pane.arrange | Out-Null
+        Aio expect state overlay=arrange | Out-Null
+        Aio wait idle | Out-Null
+        Aio capture --out "$captures/$theme-narrow-card.png" | Out-Null
+        Aio key Esc | Out-Null
+    }
 } finally { & $ctl --name $name stop | Out-Null }
