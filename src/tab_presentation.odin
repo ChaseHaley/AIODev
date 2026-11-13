@@ -201,6 +201,7 @@ tab_presentation_animate :: proc(app: ^App, w: ^Window, frame: ui.Frame_Time) ->
 		ui.motion_target(&w.fold, group.folded ? 0 : 1, ui.REORDER_DURATION, .Decelerate, animate)
 	}
 	changed = ui.motion_update(&w.fold, frame) || changed
+	changed = rail_scroll_animate(app, w, frame) || changed
 	if !tab_presentation_animating(w) {w.folding = 0}
 	changed = ui.motion_update(&w.tab_incoming.ghost, frame) || changed
 	if selected := w.workspace.selected; selected >= 0 && selected < len(layout.places) {

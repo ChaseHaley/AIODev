@@ -32,11 +32,15 @@ Rail_Overlay_Phase :: enum {
 
 // A window's vertical tab rail, which Window embeds: its presentation, whether the window is wide enough
 // to dock it, its list's scroll, the width a rail-edge drag chose (0 for none) and tabs.rail_width, the
-// width a double-click on the rail edge returns to.
+// width a double-click on the rail edge returns to. The scroll glides where the wheel or the scrollbar's
+// track sends it, and the scrollbar keeps its hover and held thumb (rail_scroll.odin).
 Rail_State :: struct {
 	rail:               Rail_Presentation,
 	rail_wide:          bool,
 	rail_scroll:        f32,
+	rail_glide:         ui.Motion,
+	rail_bar_hover:     bool,
+	rail_bar_drag:      ui.Scroll_Drag,
 	rail_width:         f32,
 	rail_default_width: f32,
 }
@@ -96,6 +100,9 @@ when AIO_CONTROL {
 		layout, ok := rail_layout_query(w)
 		state_rect(r, "rail.new_tab", ok ? ui.rail_new_tab_tile(layout) : render.Rect{})
 		state_rect(r, "rail.profile", ok ? ui.rail_profile_rect(layout) : render.Rect{})
+		bar, bar_shown := rail_scrollbar(w)
+		state_rect(r, "rail.scrollbar", bar_shown ? bar.track : render.Rect{})
+		state_rect(r, "rail.scrollbar.thumb", bar_shown ? bar.thumb : render.Rect{})
 		if !ok {return}
 		places := tab_layout(nil, w, false).places
 		for tab, i in w.workspace.tabs {
@@ -232,17 +239,17 @@ rail_layout_query :: proc(w: ^Window) -> (layout: ui.Rail_Layout, ok: bool) {
 	return ui.rail_layout(area, w.scale, rail_row_count(w) + w.tab_incoming.count, w.rail_scroll), true
 }
 
+// Scrolls the rail just enough to show the selected tab. A tab drag reorders the tabs one step at a time,
+// so while one goes on the rail stays where the pointer and the drag's own edge scrolling put it.
 rail_reveal_active :: proc(w: ^Window) {
-	if w.tabs_horizontal {return}
+	if w.tabs_horizontal || tab_drag_active(w) {return}
 	layout, ok := rail_current_layout(w)
 	if !ok {return}
 	index := w.workspace.selected
 	places := tab_layout(nil, w, false).places
 	if index < 0 || index >= rail_tab_count(w) || index >= len(places) {return}
 	scroll := ui.rail_reveal_row(layout, int(places[index].slot))
-	if scroll != w.rail_scroll {
-		w.rail_scroll, w.dirty = scroll, true
-	}
+	if scroll != w.rail_scroll {rail_scroll_set(w, scroll)}
 }
 
 // Empty while the window has no title bar, as in Fullscreen, so the title controls after it take no clicks
@@ -408,8 +415,6 @@ rail_row_draw :: proc(
 	}
 	t, built := tab_tile(app, w, index)
 	if built != .Ok {return built}
-	// A folding group's tray is drawn whole, gathering into its chip (rail_fold_rect).
-	if w.folding != 0 && w.workspace.tabs[index].group == w.folding {t.tray = {}}
 	has_badge := ui.tab_badge_shown(t.badge)
 	close := rail_tab_close_rect(w, layout, index)
 	show_close := hover || pressed || ui.armed_is(w.tab_close_armed, index)
@@ -616,6 +621,10 @@ rail_body_draw :: proc(app: ^App, w: ^Window, laid: ui.Rail_Layout) -> render.Bu
 		}
 	}
 	rail_selection_mark_draw(app, w, layout, moving)
+	if bar, visible := rail_scrollbar_place(w, layout); visible {
+		if render.push_layer(&w.list, layout.list) != .None {return .Ok}
+		ui.scrollbar_draw(&w.list, app.theme, bar, rail_scrollbar_state(w))
+	}
 	if render.push_layer(&w.list, layout.footer) != .None {return .Ok}
 	tile := ui.rail_new_tab_tile(layout)
 	hover := w.tab_hover == Tab_Chrome_New{}

@@ -107,8 +107,19 @@ tab_reorder_scrolling_groups_and_cancellation_keep_pointer_and_identity :: proc(
 	app.tab_press(&state, &w, 0, x, y, false)
 	y += 2.75 * first.height
 	testing.expect(t, app.tab_drag_move(&state, &w, x, y))
+	// Held at the rows' bottom edge, the drag scrolls the rail frame by frame (WORK-468), the dragged tab
+	// staying under the still pointer.
+	w.pointer = {x, y}
+	at := time.tick_now()
+	for step in 0 ..< 10 {
+		frame := ui.Frame_Time{display = time.tick_add(at, time.Duration(step) * 16 * time.Millisecond)}
+		frame.period = 16 * time.Millisecond
+		_ = app.tab_presentation_animate(&state, &w, frame)
+	}
 	testing.expect(t, w.rail_scroll > 0)
-	moved = app.rail_row_rect_for_tab(&w, 3)
-	testing.expect_value(t, moved.y + moved.height / 2, y)
+	dragged := -1
+	for tab, i in workspace.tabs {if tab == &tabs[0] {dragged = i}}
+	moved = app.rail_row_rect_for_tab(&w, dragged)
+	testing.expect(t, abs(moved.y + moved.height / 2 - y) < 0.01)
 	app.tab_drag_cancel(&state, &w)
 }

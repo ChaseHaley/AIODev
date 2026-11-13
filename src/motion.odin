@@ -92,7 +92,7 @@ window_motion_running :: proc(w: ^Window, part: Window_Motion) -> bool {
 	case .Panel_Wrap:
 		return panel_wrap_animating(w)
 	case .Tabs:
-		return tab_presentation_animating(w)
+		return tab_presentation_animating(w) || rail_scroll_animating(w)
 	case .Activity:
 		return status_panel_mark_animating(w)
 	case .Panes:
