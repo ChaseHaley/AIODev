@@ -18,6 +18,8 @@ Content_Policy :: struct {
 	documents:         bool,
 	// Has a Commands button: saved commands type into it and run beside it (D-092).
 	commands:          bool,
+	// Shows a file, so it has Edit and Open in Default App buttons (D-094).
+	file:              bool,
 	// The badge a tab, float capsule or pane header shows for the content; terminals show their shell's
 	// instead.
 	icon:              ui.Icon,
@@ -31,7 +33,7 @@ CONTENT_POLICY := [layout.Content_Kind]Content_Policy {
 		owns_session = true, linkable = true, documents = true, commands = true, display_name = "Terminal",
 	},
 	.Settings = {one_per_workspace = true, icon = .Settings, display_name = "Settings"},
-	.Markdown = {linkable = true, documents = true, icon = .Markdown, display_name = "Markdown"},
+	.Markdown = {linkable = true, documents = true, file = true, icon = .Markdown, display_name = "Markdown"},
 }
 
 // The title of content that does not title itself through a session.

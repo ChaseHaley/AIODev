@@ -286,8 +286,9 @@ the_column_centers_and_never_overflows_a_narrow_pane :: proc(t: ^testing.T) {
 	wide := ui.markdown_geometry({0, 40, 2000, 800}, 1)
 	testing.expect_value(t, wide.width, f32(720))
 	testing.expect_value(t, wide.left, f32(640))
+	// Both sides keep the outline's 38 DIP margin.
 	narrow := ui.markdown_geometry({0, 40, 200, 800}, 2)
-	testing.expect_value(t, narrow.width, f32(104))
+	testing.expect_value(t, narrow.width, f32(48))
 	gone := ui.markdown_geometry({0, 40, 10, 800}, 1)
 	testing.expect_value(t, gone.width, f32(0))
 }

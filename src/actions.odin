@@ -80,6 +80,8 @@ Action :: enum u32 {
 	Rename_Pane,
 	Change_Pane_Shell,
 	Open_Markdown,
+	Edit_Markdown,
+	Open_Markdown_Default_App,
 	Duplicate_Tab,
 	Move_Tab_Left,
 	Move_Tab_Right,
@@ -399,6 +401,10 @@ ACTIONS :: [Action]Command_Descriptor {
 		"pane.open_markdown", "Open Markdown File…", nil, .Host,
 		{accepted = {.File, .Direction, .Ratio, .Focus}, control = .Pane},
 	},
+	.Edit_Markdown = {"pane.edit_markdown", "Toggle Markdown Editing", nil, .Local, {}},
+	.Open_Markdown_Default_App = {
+		"pane.open_markdown_default_app", "Open Markdown in Default App", nil, .Local, {},
+	},
 	.Duplicate_Tab = {"tab.duplicate", "Duplicate Tab", nil, .Host, {}},
 	.Move_Tab_Left = {"tab.move_left", "Move Tab Left", nil, .Host, {}},
 	.Move_Tab_Right = {"tab.move_right", "Move Tab Right", nil, .Host, {}},
@@ -650,6 +656,15 @@ COMMAND_HELP :: #partial [Action]Command_Help {
 		"Shows a Markdown file beside the pane and updates it when the file changes.",
 		{{.Direction, {default = "right, or a float when pane.markdown_floating is on"}}},
 	},
+	.Edit_Markdown = {
+		"Edits the focused Markdown pane's file in place, every line but the caret's shown rendered; edits " +
+		"save a moment after typing stops. Run again to read it.",
+		nil,
+	},
+	.Open_Markdown_Default_App = {
+		"Opens the focused Markdown pane's file in the program Windows opens Markdown files with.",
+		nil,
+	},
 	.Pane_Send = {
 		"Types text into the pane's program as a person at the keyboard would.",
 		{{.Text, {description = "the text to type", example = `"git status"`}}},
@@ -832,6 +847,8 @@ action_available :: proc(app: ^App, w: ^Window, action: Action) -> bool {
 		if ui.find_has_keyboard(&w.find) {return false}
 		entry := focused_session(app, w)
 		return entry != nil && entry.status != .Running
+	case .Edit_Markdown, .Open_Markdown_Default_App:
+		return markdown_focused(app, w) != nil
 	}
 	return true
 }
@@ -929,6 +946,10 @@ command_execute :: proc(app: ^App, ctx: Command_Context, invocation: commands.In
 			return control_markdown_open(app, window_for_workspace(app, t.workspace), t, invocation)
 		}
 		markdown_open_picker(app, w)
+	case .Edit_Markdown:
+		markdown_edit_toggle(app, w)
+	case .Open_Markdown_Default_App:
+		markdown_open_external(app, w)
 	case .New_Floating:
 		if t, named := target.?; named {
 			return control_floating_new(app, window_for_workspace(app, t.workspace), t, invocation)

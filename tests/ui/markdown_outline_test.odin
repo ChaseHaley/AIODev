@@ -75,7 +75,7 @@ bars_shorten_with_depth_below_the_shallowest_heading :: proc(t: ^testing.T) {
 }
 
 @(test)
-the_outline_hides_without_headings_or_room :: proc(t: ^testing.T) {
+the_outline_hides_without_headings_and_stays_clear_of_the_column :: proc(t: ^testing.T) {
 	{
 		f: Fixture
 		defer fixture_destroy(&f)
@@ -86,10 +86,11 @@ the_outline_hides_without_headings_or_room :: proc(t: ^testing.T) {
 	{
 		f: Fixture
 		defer fixture_destroy(&f)
-		// The column takes all but 20 DIPs each side: the bars would sit over its text.
+		// A narrow page keeps the outline's margin beside its column, so the bars still show, clear of it.
 		if !fixture_init(t, &f, sections(3), {0, 0, 760, 800}) {return}
-		_, shown := ui.markdown_outline_column(&f.outline, f.g, 1)
-		testing.expect(t, !shown, "a narrow page has no outline")
+		column, shown := ui.markdown_outline_column(&f.outline, f.g, 1)
+		testing.expect(t, shown, "a narrow page keeps its outline")
+		testing.expect(t, column.right - 14 >= f.g.left + f.g.width, "the bars stand clear of the text")
 	}
 }
 

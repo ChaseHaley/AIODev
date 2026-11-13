@@ -39,6 +39,8 @@ Markdown_Missing :: struct {}
 Markdown_Loaded :: struct {
 	stamp:    Markdown_Stamp,
 	document: markdown.Document,
+	// The file's bytes as read, which a checkbox click and edit mode change (WORK-437, WORK-441).
+	source:   []u8,
 }
 Markdown_Too_Large :: struct {
 	stamp: Markdown_Stamp,
@@ -103,11 +105,14 @@ Markdown_Pane :: struct {
 	view:                   ui.Markdown_View,
 	outline:                ui.Markdown_Outline,
 	search:                 markdown.Search,
-	// Counts loads, so a view lays out each new document once.
+	// Counts the documents the pane has shown, loads and edit view rebuilds alike, so a view lays out
+	// each once.
 	revision:               u64,
 	// A heading a link asked to show, scrolled to the top by the next draw once the document is laid
 	// out; empty for none. Owned.
 	heading:                string,
+	// Edit mode, or nil while the pane reads the file (markdown_edit.odin).
+	editor:                 ^Markdown_Editor,
 }
 
 @(require_results)
@@ -119,7 +124,19 @@ markdown_find :: proc(app: ^App, id: u32) -> ^Markdown_Pane {
 @(private)
 markdown_pane_destroy :: proc(pane: ^Markdown_Pane) {
 	documents_destroy(&pane.documents)
-	if document := markdown_document(pane); document != nil {markdown.document_destroy(document)}
+	if e := pane.editor; e != nil {
+		// The pane closing is the last chance to keep its edits.
+		if e.save_at != {} {
+			if err := os.write_entire_file(pane.path, e.buffer.text[:]); err != nil {
+				log.errorf("saving the Markdown file as its pane closed failed: %v", err)
+			}
+		}
+		markdown_editor_destroy(e)
+	}
+	if loaded, ok := &pane.load.(Markdown_Loaded); ok {
+		markdown.document_destroy(&loaded.document)
+		delete(loaded.source)
+	}
 	ui.markdown_view_destroy(&pane.view)
 	ui.markdown_outline_destroy(&pane.outline)
 	markdown.search_destroy(&pane.search)
@@ -136,9 +153,14 @@ markdown_app_destroy :: proc(state: ^Markdown_App) {
 	state^ = {}
 }
 
-// When the poll next reads the panes' files; false while no pane is registered.
-markdown_poll_deadline :: proc(app: ^App) -> (time.Tick, bool) {
-	return app.markdown_deadline, app.markdown_deadline != {}
+// When the poll next reads the panes' files or an edit saves; false while no pane is registered.
+markdown_poll_deadline :: proc(app: ^App) -> (next: time.Tick, pending: bool) {
+	if app.markdown_deadline == {} {return}
+	next, pending = app.markdown_deadline, true
+	for pane in app.markdown_panes {
+		if e := pane.editor; e != nil && e.save_at != {} {next, pending = earliest(next, pending, e.save_at)}
+	}
+	return
 }
 
 @(private)
@@ -184,9 +206,11 @@ markdown_pane_create :: proc(app: ^App, path: string, verified: bool) -> ^Markdo
 	return pane
 }
 
-// The document the pane shows, or nil while it shows a message instead.
+// The document the pane shows: the edit view while editing, else the file as read; nil while it shows
+// a message instead.
 @(require_results)
 markdown_document :: proc(pane: ^Markdown_Pane) -> ^markdown.Document {
+	if pane.editor != nil {return &pane.editor.document}
 	loaded, ok := &pane.load.(Markdown_Loaded)
 	return ok ? &loaded.document : nil
 }
@@ -200,6 +224,7 @@ markdown_load_enter :: proc(pane: ^Markdown_Pane, next: Markdown_Load) -> bool {
 	switch &current in pane.load {
 	case Markdown_Loaded:
 		markdown.document_destroy(&current.document)
+		delete(current.source)
 	case Markdown_Missing:
 		_, same := next.(Markdown_Missing)
 		changed = !same
@@ -266,13 +291,27 @@ markdown_pane_load :: proc(pane: ^Markdown_Pane) -> bool {
 		log.errorf("reading the Markdown file failed: %v", read_error)
 		return false
 	}
-	defer delete(data)
 	next: markdown.Document
 	if !markdown.parse(string(data), &next) {
+		delete(data)
 		log.error("parsing the Markdown file ran out of memory")
 		return markdown_load_enter(pane, Markdown_Failed{stamp})
 	}
-	return markdown_load_enter(pane, Markdown_Loaded{stamp, next})
+	changed := markdown_load_enter(pane, Markdown_Loaded{stamp, next, data})
+	markdown_edit_reloaded(pane)
+	return changed
+}
+
+// Reads the file now if it changed, as the next poll would.
+@(private, require_results)
+markdown_pane_reload :: proc(pane: ^Markdown_Pane) -> bool {
+	return pane.load != nil && markdown_pane_load(pane)
+}
+
+// Has the poll read the panes' files at the next tick.
+@(private)
+markdown_poll_soon :: proc(app: ^App) {
+	if app.markdown_deadline != {} {app.markdown_deadline = clock_now(&app.clock)}
 }
 
 // A pane not showing its document has nothing to find, whatever it last searched.
@@ -302,6 +341,7 @@ markdown_referenced :: proc(app: ^App, id: u32) -> bool {
 markdown_tick :: proc(app: ^App) {
 	if app.markdown_deadline == {} {return}
 	now := clock_now(&app.clock)
+	markdown_saves_due(app, now)
 	if time.tick_diff(now, app.markdown_deadline) > 0 {return}
 	changed := false
 	for i := len(app.markdown_panes) - 1; i >= 0; i -= 1 {
@@ -312,6 +352,10 @@ markdown_tick :: proc(app: ^App) {
 			continue
 		}
 		changed = markdown_pane_poll(pane) || changed
+		// A file gone from disk ends editing, unless edits wait to bring it back.
+		if e := pane.editor; e != nil && e.save_at == {} {
+			if _, loaded := pane.load.(Markdown_Loaded); !loaded {markdown_edit_end(app, pane)}
+		}
 	}
 	app.markdown_deadline = len(app.markdown_panes) > 0 ? time.tick_add(now, MARKDOWN_POLL) : {}
 	if changed {mark_all_dirty(app)}
@@ -611,6 +655,13 @@ markdown_pane_draw :: proc(
 		delete(pane.heading)
 		pane.heading = ""
 	}
+	if e := pane.editor; e != nil && e.reveal {
+		e.reveal = false
+		caret := markdown.live_display(document, e.buffer.caret)
+		if rect, _, found := ui.markdown_caret_at(view, document, caret); found {
+			_ = ui.markdown_scroll_to_show(view, rect, visible)
+		}
+	}
 	ui.markdown_scroll_by(view, 0, visible)
 	find: ui.Markdown_Find
 	if pane.search.phase != .Off {
@@ -624,7 +675,8 @@ markdown_pane_draw :: proc(
 		}
 	}
 	hover := markdown_link_hovered(w, pane.id)
-	result = ui.markdown_draw(view, document, g, &w.list, &w.ui_text, app.theme, find, hover)
+	caret := markdown_caret_shown(w, pane, shown)
+	result = ui.markdown_draw(view, document, g, &w.list, &w.ui_text, app.theme, find, hover, caret)
 	if result != .Ok {return true, result}
 	ui.markdown_outline_sync(&pane.outline, view, document)
 	outline, open := w.markdown_hover.(Markdown_Outline_Hover)
@@ -666,6 +718,8 @@ markdown_page :: proc(app: ^App, w: ^Window, pages: f64) {
 markdown_selected :: proc(app: ^App, w: ^Window) -> string {
 	pane := markdown_focused(app, w)
 	if pane == nil {return ""}
+	// An editor copies the file's own text, markup included.
+	if e := pane.editor; e != nil {return markdown.edit_selected_text(&e.buffer)}
 	document := markdown_document(pane)
 	return document == nil ? "" : ui.markdown_selected_text(&pane.view, document)
 }
@@ -675,12 +729,15 @@ markdown_copy :: proc(app: ^App, w: ^Window) {
 }
 
 markdown_select_all :: proc(app: ^App, w: ^Window) {
-	if pane := markdown_focused(app, w); pane != nil {
-		if document := markdown_document(pane); document != nil {
-			ui.markdown_select_all(&pane.view, document)
-			w.dirty = true
-		}
+	pane := markdown_focused(app, w)
+	if pane == nil {return}
+	if e := pane.editor; e != nil {
+		markdown.edit_select_all(&e.buffer)
+		markdown_editor_sync(pane)
+	} else if document := markdown_document(pane); document != nil {
+		ui.markdown_select_all(&pane.view, document)
 	}
+	w.dirty = true
 }
 
 markdown_key :: proc(app: ^App, w: ^Window, e: input.Key_Event) {
@@ -690,11 +747,16 @@ markdown_key :: proc(app: ^App, w: ^Window, e: input.Key_Event) {
 	if consumed {return}
 	logical := key.logical
 	has_find := ui.find_has_keyboard(&w.find)
-	if !has_find && key.clipboard == .Copy {
+	editing := markdown_focused(app, w)
+	if !markdown_editing(editing) {editing = nil}
+	if !has_find && editing == nil && key.clipboard == .Copy {
 		markdown_copy(app, w)
 		return
 	}
 	if !e.pressed {return}
+	// An editor's keys come before shortcuts, as a terminal's program would want them, except the chords
+	// it has no use for.
+	if !has_find && editing != nil && markdown_edit_key(app, w, editing, key) {return}
 	if key.found && action_available(app, w, key.action) {
 		run_action(app, w, key.action)
 		return
@@ -817,10 +879,13 @@ markdown_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: input.Mo
 		if heading, over := markdown_outline_under(app, w, pane, shown, x, y); over {
 			hover = Markdown_Outline_Hover{pane.id, heading}
 			if heading >= 0 {shape = .Hand}
-		} else if markdown_document(pane) != nil {
+		} else if document := markdown_document(pane); document != nil {
+			g := markdown_geometry_of(w, shown)
 			shape = .Text
-			if link := ui.markdown_link_at(&pane.view, markdown_geometry_of(w, shown), x, y); link >= 0 {
+			if link := ui.markdown_link_at(&pane.view, g, x, y); link >= 0 {
 				hover, shape = Markdown_Link_Hover{pane.id, link}, .Hand
+			} else if ui.markdown_task_at(&pane.view, document, g, x, y) != markdown.NO_SOURCE {
+				shape = .Hand
 			}
 		}
 	}
@@ -844,7 +909,11 @@ markdown_held_move :: proc(app: ^App, w: ^Window, x, y: f32) {
 	g := markdown_geometry_of(w, shown)
 	if y < g.area.y {markdown_scroll(w, pane, shown, int(y - g.area.y))}
 	if y > g.area.y + g.area.height {markdown_scroll(w, pane, shown, int(y - g.area.y - g.area.height))}
-	ui.markdown_select_at(&pane.view, ui.markdown_offset_at(&pane.view, document, g, x, y), true)
+	if markdown_editing(pane) {
+		markdown_edit_point(w, pane, g, x, y, true)
+	} else {
+		ui.markdown_select_at(&pane.view, ui.markdown_offset_at(&pane.view, document, g, x, y), true)
+	}
 	w.dirty = true
 	pointer_set(app, w, .Text)
 }
@@ -879,8 +948,16 @@ markdown_press :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) {
 			return
 		}
 	}
-	offset := ui.markdown_offset_at(&pane.view, document, g, x, y)
-	ui.markdown_select_at(&pane.view, offset, .Shift in e.modifiers)
+	if mark := ui.markdown_task_at(&pane.view, document, g, x, y); mark != markdown.NO_SOURCE {
+		markdown_task_toggle(app, pane, mark)
+		return
+	}
+	if markdown_editing(pane) {
+		markdown_edit_point(w, pane, g, x, y, .Shift in e.modifiers)
+	} else {
+		offset := ui.markdown_offset_at(&pane.view, document, g, x, y)
+		ui.markdown_select_at(&pane.view, offset, .Shift in e.modifiers)
+	}
 	w.markdown_gesture = Markdown_Selecting{pane.id}
 }
 
@@ -910,7 +987,8 @@ when AIO_CONTROL {
 		path, selected := "", ""
 		state := "Missing"
 		outline, current := 0, -1
-		open := false
+		open, editing, unsaved := false, false, false
+		caret := -1
 		if pane := markdown_focused(app, w); pane != nil {
 			scroll, total = pane.view.scroll, ui.markdown_total(&pane.view)
 			path = pane.path
@@ -926,7 +1004,10 @@ when AIO_CONTROL {
 				state = "Failed"
 			}
 			if document := markdown_document(pane); document != nil {
-				selected = ui.markdown_selected_text(&pane.view, document)
+				selected = markdown_selected(app, w)
+				if e := pane.editor; e != nil {
+					editing, unsaved, caret = true, e.save_at != {}, e.buffer.caret
+				}
 				if shown, found := markdown_pane_rect(w, pane.id); found {
 					column, visible := markdown_outline_of(app, w, pane, markdown_geometry_of(w, shown))
 					if visible {outline = column.count}
@@ -945,5 +1026,8 @@ when AIO_CONTROL {
 		state_value(r, "markdown.outline", outline)
 		state_value(r, "markdown.outline_open", open)
 		state_value(r, "markdown.outline_current", current)
+		state_value(r, "markdown.editing", editing)
+		state_value(r, "markdown.unsaved", unsaved)
+		state_value(r, "markdown.caret", caret)
 	}
 }

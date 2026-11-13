@@ -74,6 +74,10 @@ pane_header_card :: proc(
 	}
 	switch button {
 	case .Links, .Commands, .Close:
+	case .Edit:
+		return {description = "Edit the file here; only the caret's line shows its markup. Edits save as you go."}
+	case .Default_App:
+		return {description = "Open the file in the program Windows opens Markdown files with."}
 	case .Split_Right:
 		return pane_preview_split(app, w, pane.node, .Right, "A new pane to the right of this one.")
 	case .Split_Down:

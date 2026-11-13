@@ -578,7 +578,7 @@ window_timer_deadline :: proc(w: ^Window, timer: Window_Timer) -> (time.Tick, bo
 }
 
 // The earlier of a deadline found so far, if any, and `next`.
-@(private = "file")
+@(private)
 earliest :: proc(current: time.Tick, found: bool, next: time.Tick) -> (time.Tick, bool) {
 	if found && time.tick_diff(next, current) <= 0 {return current, true}
 	return next, true

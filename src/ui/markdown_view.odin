@@ -180,11 +180,12 @@ markdown_view_destroy :: proc(v: ^Markdown_View) {
 }
 
 markdown_geometry :: proc(area: render.Rect, scale: f32) -> Markdown_Geometry {
-	inset := SPACE_6 * scale
+	// Both sides keep the outline's margin, so the column stays centred.
+	inset := max(SPACE_6, OUTLINE_MARGIN) * scale
 	width := max(0, min(MARKDOWN_COLUMN * scale, area.width - 2 * inset))
 	return {
 		area = area,
-		left = math.round(area.x + (area.width - width) / 2),
+		left = math.floor(area.x + (area.width - width) / 2),
 		top = area.y + SPACE_4 * scale,
 		width = width,
 	}

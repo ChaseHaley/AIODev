@@ -902,7 +902,7 @@ document_link_open_in :: proc(
 
 // Hands a Markdown file to the system instead of a pane. A type that needs confirming takes the usual
 // confirmation.
-@(private = "file")
+@(private)
 document_link_open_external :: proc(app: ^App, w: ^Window, path: string) {
 	file, ok := localpath.prepare_open(path)
 	if !ok {

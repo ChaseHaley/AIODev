@@ -11,7 +11,13 @@ import "core:math"
 
 // Bar lengths by depth below the document's shallowest heading level; deeper headings share the last.
 @(private = "file", rodata)
-BAR_LENGTHS := [?]f32{14, 11, 8, 5}
+BAR_LENGTHS := [?]f32{BAR_LONGEST, 11, 8, 5}
+@(private = "file")
+BAR_LONGEST :: f32(14)
+// How far the reading column keeps from each side of the page, so the bars stand clear of it in a
+// narrow pane too.
+@(private)
+OUTLINE_MARGIN :: OUTLINE_INSET + BAR_LONGEST + SPACE_2
 @(private = "file")
 BAR_THICKNESS :: f32(2)
 // The bar pitch while the column fits the page. More headings squeeze it down to the minimum, and past

@@ -9,19 +9,28 @@ import "aio:render"
 import "aio:ui"
 
 // A pane in a float keeps its split, view and close controls; floating and linking belong to tiled panes.
+// Edit and Open in Default App belong to a pane showing a file.
 @(test)
 pane_headers_in_a_float_drop_float_and_linked_window :: proc(t: ^testing.T) {
 	w := new(app.Window)
 	defer free(w)
 	w.scale, w.header_height = 1, 28
-	tiled := layout.Pane_Rect{content = {.Terminal, 1}, rect = {0, 0, 480, 200}}
-	floating := tiled
-	floating.floating = true
-	in_tile, in_float := app.pane_header_layout(w, tiled), app.pane_header_layout(w, floating)
-	for button in app.Pane_Header_Button {
-		testing.expectf(t, in_tile.buttons[button].width > 0, "a tiled header shows %v", button)
-		kept := button != .Dock && button != .Linked_Window
-		testing.expectf(t, (in_float.buttons[button].width > 0) == kept, "a floating header and %v", button)
+	for kind in ([?]layout.Content_Kind{.Terminal, .Markdown}) {
+		tiled := layout.Pane_Rect{content = {kind, 1}, rect = {0, 0, 640, 200}}
+		floating := tiled
+		floating.floating = true
+		in_tile, in_float := app.pane_header_layout(w, tiled), app.pane_header_layout(w, floating)
+		for button in app.Pane_Header_Button {
+			owned := true
+			#partial switch button {
+			case .Edit, .Default_App: owned = kind == .Markdown
+			case .Commands: owned = kind == .Terminal
+			}
+			testing.expectf(t, (in_tile.buttons[button].width > 0) == owned, "a tiled %v header and %v", kind, button)
+			kept := owned && button != .Dock && button != .Linked_Window
+			testing.expectf(t, (in_float.buttons[button].width > 0) == kept, "a floating %v header and %v", kind,
+				button)
+		}
 	}
 }
 
@@ -73,7 +82,7 @@ pane_header_previews_show_what_the_buttons_do :: proc(t: ^testing.T) {
 		case .Linked_Window:
 			testing.expect_value(t, preview.pane, -1)
 			testing.expect_value(t, preview.away, [2]f32{pane.rect.width, pane.rect.height})
-		case .Links, .Commands, .Zoom, .Fill_Window, .Dock, .Close:
+		case .Links, .Commands, .Edit, .Default_App, .Zoom, .Fill_Window, .Dock, .Close:
 			testing.expectf(t, w.panes[preview.pane].content == pane.content, "%v picks its pane", c.button)
 		}
 	}

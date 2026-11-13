@@ -76,6 +76,9 @@ pane_header_title :: proc(header: ^Pane_Header_Metadata) -> string {
 Pane_Header_Button :: enum u8 {
 	Links,
 	Commands,
+	// A file's own controls: Edit turns edit mode on and off, Default App hands the file to Windows.
+	Edit,
+	Default_App,
 	Split_Right,
 	Split_Down,
 	Zoom,
@@ -93,23 +96,28 @@ Pane_Header_Layout :: ui.Header_Layout(Pane_Header_Button)
 
 @(private = "file")
 PANE_HEADER_TILED :: bit_set[Pane_Header_Button] {
-	.Links, .Commands, .Split_Right, .Split_Down, .Zoom, .Fill_Window, .Linked_Window, .Dock, .Close,
+	.Links, .Commands, .Edit, .Default_App, .Split_Right, .Split_Down, .Zoom, .Fill_Window, .Linked_Window,
+	.Dock, .Close,
 }
 @(private = "file")
 PANE_HEADER_FLOATING :: bit_set[Pane_Header_Button] {
-	.Links, .Commands, .Split_Right, .Split_Down, .Zoom, .Fill_Window, .Close,
+	.Links, .Commands, .Edit, .Default_App, .Split_Right, .Split_Down, .Zoom, .Fill_Window, .Close,
 }
 @(private = "file")
 PANE_HEADER_OVERLAY :: bit_set[Pane_Header_Button]{.Links, .Commands, .Split_Right, .Split_Down}
 // The last button of each group, which a divider sets apart from the next group.
 @(private = "file")
-PANE_HEADER_GROUP_ENDS :: bit_set[Pane_Header_Button]{.Commands, .Split_Down, .Fill_Window, .Linked_Window}
+PANE_HEADER_GROUP_ENDS :: bit_set[Pane_Header_Button] {
+	.Commands, .Default_App, .Split_Down, .Fill_Window, .Linked_Window,
+}
 
-// The order buttons give way in a narrow header: the Links and Commands buttons first, then the tiled view
-// controls, so splitting, floating and closing stay longest.
+// The order buttons give way in a narrow header: the Links and Commands buttons first, then a file's
+// controls, which the palette also runs, then the tiled view controls, so splitting, floating and closing
+// stay longest.
 @(private = "file", rodata)
 PANE_HEADER_DROP_ORDER := [?]Pane_Header_Button {
-	.Links, .Commands, .Fill_Window, .Linked_Window, .Zoom, .Split_Down, .Split_Right, .Dock, .Close,
+	.Links, .Commands, .Default_App, .Edit, .Fill_Window, .Linked_Window, .Zoom, .Split_Down, .Split_Right,
+	.Dock, .Close,
 }
 
 // Whether a pane shows a header row. A tiled pane without one carries its split controls in the split
@@ -141,6 +149,7 @@ pane_header_layout :: proc(w: ^Window, pane: layout.Pane_Rect) -> Pane_Header_La
 	}
 	if !CONTENT_POLICY[pane.content.kind].documents {shown -= {.Links}}
 	if !CONTENT_POLICY[pane.content.kind].commands {shown -= {.Commands}}
+	if !CONTENT_POLICY[pane.content.kind].file {shown -= {.Edit, .Default_App}}
 	ends := PANE_HEADER_GROUP_ENDS
 	// Without a Commands button, Links ends the first group.
 	if .Commands not_in shown {ends += {.Links}}
@@ -164,6 +173,10 @@ pane_header_icon :: proc(w: ^Window, pane: layout.Pane_Rect, button: Pane_Header
 		return .Link
 	case .Commands:
 		return .Command
+	case .Edit:
+		return .Pencil
+	case .Default_App:
+		return .Launch
 	case .Split_Right:
 		return .Split_Right
 	case .Split_Down:
@@ -201,6 +214,10 @@ pane_header_command :: proc(button: Pane_Header_Button) -> (Action, bool) {
 		return .Float_Pane, true
 	case .Close:
 		return .Close_Pane, true
+	case .Edit:
+		return .Edit_Markdown, true
+	case .Default_App:
+		return .Open_Markdown_Default_App, true
 	case .Links, .Commands:
 	}
 	return {}, false
@@ -216,6 +233,10 @@ pane_header_tooltip :: proc(w: ^Window, pane: layout.Pane_Rect, target: Pane_Hea
 		return "Links"
 	case .Commands:
 		return "Saved commands"
+	case .Edit:
+		return "Edit file"
+	case .Default_App:
+		return "Open in default app"
 	case .Split_Right:
 		return "Split right"
 	case .Split_Down:
@@ -254,6 +275,9 @@ pane_header_draw :: proc(
 	}
 	buttons[.Links].selected = open
 	buttons[.Commands].selected = commands_open
+	if pane.content.kind == .Markdown {
+		buttons[.Edit].selected = markdown_editing(markdown_find(app, pane.content.id))
+	}
 	buttons[.Close].danger = true
 	open ||= commands_open
 	if !pane_header_row(w, pane) {

@@ -125,8 +125,8 @@ live_build_into :: proc(l: ^Live, source: string, from, to: int, doc: ^Document)
 	for at <= len(source) {
 		newline := strings.index_byte(source[at:], '\n')
 		end := newline < 0 ? len(source) : at + newline
-		if table, region := live_table_region(&b, at, end); region > 0 {
-			if !live_table(&b, table, at, region) {return false}
+		if cell, region := live_table_region(&b, at, end); region > 0 {
+			if !live_table(&b, cell, at, region) {return false}
 			if region >= len(source) {break}
 			at = region + 1
 			continue
@@ -415,10 +415,10 @@ live_line :: proc(b: ^Live_Builder, at, line_end: int) -> bool {
 	return live_raw(b, block, first, last, false)
 }
 
-// The table starting on the line at..end: its index in `parsed` and where its last line ends, or a
-// zero region when no table starts there.
+// The table starting on the line at..end: a block of `parsed` among its cells and where its last line
+// ends, or a zero region when no table starts there.
 @(private = "file")
-live_table_region :: proc(b: ^Live_Builder, at, end: int) -> (table, region: int) {
+live_table_region :: proc(b: ^Live_Builder, at, end: int) -> (cell, region: int) {
 	if b.fence.count > 0 {return}
 	order := b.l.order[:]
 	index := b.cursor
@@ -426,6 +426,7 @@ live_table_region :: proc(b: ^Live_Builder, at, end: int) -> (table, region: int
 	if index >= len(order) || order[index].source >= end {return}
 	owner := live_owner(b, index)
 	if owner.kind != .Table_Cell || owner.property {return}
+	cell = b.l.owner[order[index].span]
 	region = end
 	for region < len(b.source) {
 		next := region + 1
@@ -435,12 +436,12 @@ live_table_region :: proc(b: ^Live_Builder, at, end: int) -> (table, region: int
 		if strings.trim_space(line) == "" || strings.index_byte(line, '|') < 0 {break}
 		region = next_end
 	}
-	return owner.table, region
+	return cell, region
 }
 
 // A table, lines at..region: rendered whole, or as source whole while the caret is in it.
 @(private = "file", require_results)
-live_table :: proc(b: ^Live_Builder, table, at, region: int) -> bool {
+live_table :: proc(b: ^Live_Builder, cell, at, region: int) -> bool {
 	if at <= b.to && region >= b.from {
 		line := at
 		for line <= region {
@@ -457,28 +458,35 @@ live_table :: proc(b: ^Live_Builder, table, at, region: int) -> bool {
 		return true
 	}
 	_, _ = live_spans_in(b, region, region)
-	return live_cells(b, table, at)
+	return live_cells(b, cell, at)
 }
 
-// Copies the cells of `table` from `parsed`. `at` stands in for the file offset of a cell with no text.
+// Copies the cells of the table holding block `cell` of `parsed`, which sit together. `at` stands in
+// for the file offset of a cell with no text.
 @(private = "file", require_results)
-live_cells :: proc(b: ^Live_Builder, table, at: int) -> bool {
+live_cells :: proc(b: ^Live_Builder, cell, at: int) -> bool {
 	parsed := &b.l.parsed
+	table := parsed.blocks[cell].table
+	first := cell
+	for first > 0 && parsed.blocks[first - 1].kind == .Table_Cell && parsed.blocks[first - 1].table == table {
+		first -= 1
+	}
 	if _, err := append(&b.doc.tables, parsed.tables[table]); err != nil {return false}
 	copied := len(b.doc.tables) - 1
-	for cell in parsed.blocks {
-		if cell.kind != .Table_Cell || cell.table != table {continue}
-		block := cell
+	for original in parsed.blocks[first:] {
+		if original.kind != .Table_Cell || original.table != table {break}
+		block := original
 		block.table = copied
 		block.marker_start, block.marker_end = 0, 0
 		block.source_start, block.source_end = at, at
-		for span in parsed.spans[cell.first_span:][:cell.span_count] {
+		spans := parsed.spans[original.first_span:][:original.span_count]
+		for span in spans {
 			if span.source == NO_SOURCE {continue}
 			if block.source_start == at {block.source_start = span.source}
 			block.source_end = span.source_end
 		}
-		if !live_block_begin(b, block, "", cell.column > 0 ? "\t" : "\n") {return false}
-		for span in parsed.spans[cell.first_span:][:cell.span_count] {
+		if !live_block_begin(b, block, "", original.column > 0 ? "\t" : "\n") {return false}
+		for span in spans {
 			text := string(parsed.text[span.start:span.end])
 			if !live_text(b, text, span.source, span.source_end, span.style, span.link) {return false}
 		}
@@ -490,14 +498,12 @@ live_cells :: proc(b: ^Live_Builder, table, at: int) -> bool {
 // when it holds no properties.
 @(private = "file", require_results)
 live_frontmatter :: proc(b: ^Live_Builder, at, end: int) -> bool {
-	properties := -1
-	for table, index in b.l.parsed.tables {
-		if table.properties {properties = index}
-	}
+	// The properties are the first table and their cells the first blocks (properties_append).
+	properties := len(b.l.parsed.tables) > 0 && b.l.parsed.tables[0].properties
 	revealed := at <= b.to && end > b.from
-	if !revealed && properties >= 0 {
+	if !revealed && properties {
 		_, _ = live_spans_in(b, end, end)
-		return live_cells(b, properties, at)
+		return live_cells(b, 0, at)
 	}
 	line := at
 	for line < end {
@@ -565,4 +571,16 @@ live_display :: proc(doc: ^Document, source: int) -> int {
 		return source == span.source_end ? span.end : span.start
 	}
 	return after
+}
+
+// The file offset of the text at text offset `offset` of a parsed document; where the parser made the
+// text up, such as a list marker, the offset of the text after it.
+document_source :: proc(doc: ^Document, offset: int) -> int {
+	for span in doc.spans {
+		if span.source == NO_SOURCE || span.end <= offset {continue}
+		linear := span.end - span.start == span.source_end - span.source
+		if offset >= span.start && linear {return span.source + offset - span.start}
+		return span.source
+	}
+	return 0
 }

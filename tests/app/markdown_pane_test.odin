@@ -374,6 +374,7 @@ a_file_that_failed_to_parse_is_read_again_only_once_it_changes :: proc(t: ^testi
 	loaded, ok := pane.load.(app.Markdown_Loaded)
 	if !testing.expect(t, ok) {return}
 	markdown.document_destroy(&loaded.document)
+	delete(loaded.source)
 	// Parse OOM cannot be triggered deterministically here without also failing the file read, so
 	// install its result for the unchanged file and exercise the real poll from that state.
 	pane.load = app.Markdown_Failed{loaded.stamp}

@@ -59,6 +59,9 @@ Icon :: enum {
 	Link,
 	Minimize,
 	Keyboard,
+	Pencil,
+	// A program's window with an arrow leaving it: open in another program.
+	Launch,
 }
 
 ICON_STROKE :: f32(1.25)
@@ -147,6 +150,14 @@ icon_draw :: proc(
 		pen_box(p, 1, 3.5, 14, 9, 2)
 		for x in ([?]f32{4, 6.67, 9.33, 12}) {pen_dot(p, x, 6.5)}
 		pen_path(p, {5, 9.5}, {11, 9.5})
+	case .Pencil:
+		pen_path(p, {2.5, 13.5}, {3, 10.5}, {10.5, 3}, {13, 5.5}, {5.5, 13}, {2.5, 13.5})
+		pen_path(p, {9, 4.5}, {11.5, 7})
+	case .Launch:
+		pen_box(p, 1.5, 2.5, 13, 11, 2)
+		pen_path(p, {1.5, 5.5}, {14.5, 5.5})
+		pen_path(p, {6, 11.5}, {10, 7.5})
+		pen_path(p, {7, 7.5}, {10, 7.5}, {10, 10.5})
 	case .Minimize:
 		pen_path(p, {3, 12}, {13, 12})
 	case .Float_Pane:
