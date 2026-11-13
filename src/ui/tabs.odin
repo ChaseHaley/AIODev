@@ -95,9 +95,9 @@ Tab_Tile :: struct {
 }
 
 // A tab's label turning to the pane focus moved to (WORK-483): its marks ride a small sphere that spins along
-// the move, the front mark going round toward `toward` and back while the mark behind comes round from the
-// other side to the front, and the old title slides out of its line while the new one slides in from the
-// side `toward` points to.
+// the move, the front mark going round away from `toward` and back, the way the old title leaves, while the
+// mark behind comes round from the side `toward` points to, to the front; and the old title slides out of its
+// line while the new one slides in from that side.
 Tab_Turn :: struct {
 	turning:  bool,
 	// The label turned away from: its title and marks, drawn as the tile's own are.
@@ -106,8 +106,8 @@ Tab_Turn :: struct {
 	behind:   Tab_Badge,
 	// Eased from 0 to 1, so it may overshoot.
 	progress: f32,
-	// A unit step along x or y: the side the pane focus moved to lies on, which the new title enters from
-	// and the front mark spins toward.
+	// A unit step along x or y: the side the pane focus moved to lies on, which the new title and the mark
+	// coming to the front enter from.
 	toward:   [2]f32,
 	// Where the old title starts, in title lines from its place: away from zero when a turn took over from
 	// another part way through.
@@ -147,8 +147,8 @@ tab_mark_places :: proc(tile: render.Rect, stacked: bool, scale: f32) -> (front,
 Tab_Spin_Mark :: struct {
 	badge:    Tab_Badge,
 	from, to: render.Rect,
-	// 1 goes from the front round the sphere toward `toward` to the back, -1 comes from the back round the
-	// other side to the front, 0 stays on its side of the sphere.
+	// 1 goes from the front round the sphere away from `toward` to the back, -1 comes from the back round the
+	// side `toward` points to, to the front, 0 stays on its side of the sphere.
 	path:     f32,
 	// 1 front or -1 back, for a mark that stays on its side.
 	side:     f32,
@@ -232,7 +232,7 @@ tab_spin_sample :: proc(mark: ^Tab_Spin_Mark, turn: Tab_Turn, scale: f32) {
 	mark.depth = mark.side
 	if mark.path != 0 {
 		mark.depth = mark.path * math.cos(angle)
-		centre += mark.path * TAB_SPIN_RADIUS * scale * swing * turn.toward
+		centre -= mark.path * TAB_SPIN_RADIUS * scale * swing * turn.toward
 		away := (1 - mark.depth) / 2 * swing
 		size *= 1 - TAB_SPIN_SHRINK * away
 		mark.opacity = 1 - TAB_SPIN_DIM * away

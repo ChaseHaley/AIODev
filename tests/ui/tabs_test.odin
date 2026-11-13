@@ -182,9 +182,10 @@ tab_draw_stacks_the_focused_mark_over_the_one_behind :: proc(t: ^testing.T) {
 }
 
 // WORK-483: while a tab's label turns, its marks ride a sphere spinning along the move. The front mark swings
-// out toward the side focus moved to and goes to the back, smaller and dimmer on the far side, while the mark
-// behind comes round the other way to the front; at the end they have traded places. A mark new to the stack
-// rides in from the hidden back, fading in, as the old front goes out.
+// out away from the side focus moved to, the way the old title leaves, and goes to the back, smaller and
+// dimmer on the far side, while the mark behind comes round from the side focus moved to, to the front; at the
+// end they have traded places. A mark new to the stack rides in from the hidden back, fading in, as the old
+// front goes out.
 @(test)
 tab_turn_spins_the_marks_on_a_sphere :: proc(t: ^testing.T) {
 	fonts, err := font.system_create()
@@ -223,13 +224,13 @@ tab_turn_spins_the_marks_on_a_sphere :: proc(t: ^testing.T) {
 				angle := f32(math.PI) * progress
 				travel := (1 - math.cos(angle)) / 2
 				swing := ui.TAB_SPIN_RADIUS * scale * math.sin(angle)
-				// Each swings out along the move from the straight way between its places: the old front toward
-				// the side focus moved to, the old back from the other side.
+				// Each swings out along the move from the straight way between its places: the old front away
+				// from the side focus moved to, the old back from that side.
 				went := centre(going.rect) - (centre(front) + (centre(back) - centre(front)) * travel)
 				came := centre(coming.rect) - (centre(back) + (centre(front) - centre(back)) * travel)
-				testing.expectf(t, abs(went.x - toward.x * swing) < 0.01 && abs(went.y - toward.y * swing) < 0.01,
+				testing.expectf(t, abs(went.x + toward.x * swing) < 0.01 && abs(went.y + toward.y * swing) < 0.01,
 					"scale %v toward %v at %v: the front mark swung %v", scale, toward, progress, went)
-				testing.expectf(t, abs(came.x + toward.x * swing) < 0.01 && abs(came.y + toward.y * swing) < 0.01,
+				testing.expectf(t, abs(came.x - toward.x * swing) < 0.01 && abs(came.y - toward.y * swing) < 0.01,
 					"scale %v toward %v at %v: the back mark swung %v", scale, toward, progress, came)
 				switch progress {
 				case 0:
