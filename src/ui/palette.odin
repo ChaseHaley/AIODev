@@ -1715,10 +1715,9 @@ palette_key_hints :: proc(p: ^Palette, out: ^[PALETTE_HINT_CAP]Palette_Key_Hint)
 
 @(private)
 key_hint_width :: proc(keycap, label: ^Text, hint: Palette_Key_Hint, scale: f32) -> f32 {
-	pad := KEYCAP_PADDING * scale
-	width := text_width(keycap, hint.keys[0]) + 2 * pad
+	width := keycap_width(keycap, hint.keys[0], scale)
 	if hint.keys[1] != "" {
-		width += text_width(label, "/") + 2 * SPACE_1 * scale + text_width(keycap, hint.keys[1]) + 2 * pad
+		width += text_width(label, "/") + 2 * SPACE_1 * scale + keycap_width(keycap, hint.keys[1], scale)
 	}
 	return width + SPACE_1 * scale + text_width(label, hint.label)
 }
@@ -1735,8 +1734,6 @@ draw_key_hint :: proc(
 	scale: f32,
 ) -> render.Build_Status {
 	pen := x
-	height := min(KEYCAP_HEIGHT * scale, footer.height)
-	top := footer.y + (footer.height - height) / 2
 	for key, i in hint.keys {
 		if key == "" {continue}
 		if i > 0 {
@@ -1744,19 +1741,10 @@ draw_key_hint :: proc(
 			if result := draw_text(label, list, "/", pen, baseline, theme.faint); result != .Ok {return result}
 			pen += text_width(label, "/") + 4 * scale
 		}
-		width := text_width(keycap, key) + 2 * KEYCAP_PADDING * scale
-		draw_rect(list, {
-			rect   = {pen, top, width, height},
-			color  = theme.border,
-			radius = RADIUS_CONTROL * scale,
-			stroke = scale,
-		})
-		key_baseline := top + (height - keycap.line_height) / 2 + keycap.ascent
-		key_x := pen + KEYCAP_PADDING * scale
-		if result := draw_text(keycap, list, key, key_x, key_baseline, theme.muted); result != .Ok {
+		if result := keycap_draw(list, keycap, theme, key, pen, footer.y, footer.height, scale); result != .Ok {
 			return result
 		}
-		pen += width
+		pen += keycap_width(keycap, key, scale)
 	}
 	return draw_text(label, list, hint.label, pen + SPACE_1 * scale, baseline, theme.muted)
 }
