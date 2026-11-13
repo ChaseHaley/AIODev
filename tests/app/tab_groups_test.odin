@@ -387,9 +387,10 @@ no_two_groups_share_both_a_name_and_a_colour :: proc(t: ^testing.T) {
 	}
 	testing.expect_value(t, rename(&state, 2, "Build"), app.Rename_Outcome.Saved)
 	testing.expect(t, app.tab_group_color_set(&state, w, 2, 1))
-	// Names compare ignoring case.
-	testing.expect_value(t, rename(&state, 1, "build"), app.Rename_Outcome.Taken)
+	// Names compare exactly: a name differing only in case tells the groups apart.
+	testing.expect_value(t, rename(&state, 1, "Build"), app.Rename_Outcome.Taken)
 	testing.expect_value(t, app.tab_group_find(workspace, 1).name, "")
+	testing.expect_value(t, rename(&state, 1, "build"), app.Rename_Outcome.Saved)
 	// A new group of a taken name takes a colour free for it.
 	created := app.tab_group_create(&state, w, 3, "Build")
 	testing.expect(t, created != nil && created.color != 1)

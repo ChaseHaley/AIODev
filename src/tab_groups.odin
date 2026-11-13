@@ -232,10 +232,11 @@ tab_order_apply :: proc(app: ^App, w: ^Window, order: []^Tab) {
 	}
 }
 
-// Whether a group of `workspace` other than `except` has both `name`, ignoring case, and colour `color`.
+// Whether a group of `workspace` other than `except` has exactly `name` and colour `color`, so the two would
+// look the same, as in the Add to group menu (WORK-460).
 tab_group_taken :: proc(workspace: ^Workspace, name: string, color: int, except: u32 = 0) -> bool {
 	for group in workspace.groups {
-		if group.id != except && group.color == color && strings.equal_fold(group.name, name) {return true}
+		if group.id != except && group.color == color && group.name == name {return true}
 	}
 	return false
 }
