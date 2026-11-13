@@ -76,3 +76,148 @@ closed_panes_and_tabs_reopen_in_place :: proc(t: ^testing.T) {
 	layout.contents(&workspace.tabs[0].tree, workspace.tabs[0].tree.root, &panes)
 	testing.expect_value(t, len(panes), 3)
 }
+
+// The owner's report: a tab of five panes closed pane by pane, the last close closing the tab, came back
+// as five tabs. Reopening each pane rebuilds the one tab, in its arrangement and at its position.
+@(test)
+panes_of_a_closed_tab_reopen_into_one_tab :: proc(t: ^testing.T) {
+	state: app.App
+	w, directory, ready := reopen_app(t, &state)
+	defer delete(directory)
+	defer testing.expect_value(t, os.remove_all(directory), nil)
+	defer app.app_destroy(&state)
+	if !ready {return}
+	workspace := w.workspace
+	original, ok := reopen_five_pane_tab(t, &state, w)
+	if !ok {return}
+
+	// Closed one by one; the last close closes the tab.
+	for name in ([]string{"A", "E", "B", "C", "D"}) {
+		tree := &workspace.tabs[1].tree
+		node := reopen_node_named(&state, tree, name)
+		if !testing.expectf(t, node != layout.INVALID_NODE, "pane %s", name) {return}
+		app.pane_close_at(&state, workspace, 1, node)
+	}
+	testing.expect_value(t, len(workspace.tabs), 2)
+	testing.expect_value(t, len(state.closed), 5)
+
+	// The last pane closed comes back first as the tab, at its position; the rest join it.
+	for _ in 0 ..< 5 {app.closed_reopen(&state, w)}
+	testing.expect_value(t, len(state.closed), 0)
+	if !testing.expect_value(t, len(workspace.tabs), 3) {return}
+	testing.expect_value(t, workspace.selected, 1)
+	testing.expect_value(t, reopen_describe(&state, &workspace.tabs[1].tree), original)
+}
+
+// A tab closed whole still returns in one step, and a pane closed from it before then rejoins it.
+@(test)
+panes_closed_before_their_tab_rejoin_it :: proc(t: ^testing.T) {
+	state: app.App
+	w, directory, ready := reopen_app(t, &state)
+	defer delete(directory)
+	defer testing.expect_value(t, os.remove_all(directory), nil)
+	defer app.app_destroy(&state)
+	if !ready {return}
+	workspace := w.workspace
+	original, ok := reopen_five_pane_tab(t, &state, w)
+	if !ok {return}
+	app.pane_close_at(&state, workspace, 1, reopen_node_named(&state, &workspace.tabs[1].tree, "E"))
+	app.tab_close(&state, w, 1)
+	testing.expect_value(t, len(workspace.tabs), 2)
+
+	app.closed_reopen(&state, w)
+	if !testing.expect_value(t, len(workspace.tabs), 3) {return}
+	testing.expect_value(t, workspace.selected, 1)
+	panes := make([dynamic]layout.Content, context.temp_allocator)
+	layout.contents(&workspace.tabs[1].tree, workspace.tabs[1].tree.root, &panes)
+	testing.expect_value(t, len(panes), 4)
+
+	app.closed_reopen(&state, w)
+	testing.expect_value(t, len(workspace.tabs), 3)
+	testing.expect_value(t, reopen_describe(&state, &workspace.tabs[1].tree), original)
+}
+
+// An app with three tabs, the middle one shown, whose shells idle.
+@(private = "file")
+reopen_app :: proc(t: ^testing.T, state: ^app.App) -> (w: ^app.Window, directory: string, ok: bool) {
+	directory_error: os.Error
+	directory, directory_error = os.make_directory_temp("", "aio-reopen-*", context.allocator)
+	if !testing.expect_value(t, directory_error, nil) {return}
+	settings_path := strings.concatenate({directory, "/settings.ini"}, context.temp_allocator)
+	settings := idle_shell_settings(t, "cursor.blink = false\ninterface.confirm = shell_switch, multiline_paste\n")
+	if !testing.expect_value(t, os.write_entire_file(settings_path, settings), nil) {return}
+	state.options = {data_dir = directory, inactive = true}
+	state.app_id = fmt.aprintf("AIODev.Test.ReopenTab.%d.%p", os.get_pid(), state)
+	if !testing.expect_value(t, platform.init(&state.platform, state.app_id), platform.Init_Result.Primary) {
+		return
+	}
+	state.platform_ready = true
+	if !testing.expect(t, app.app_init(state)) {return}
+	w = state.windows[0]
+	// Room for five panes above the minimum size.
+	app.window_resize(state, w, 3000, 1200)
+	for _ in 0 ..< 2 {
+		_, created := app.tab_create(state, w.workspace)
+		if !testing.expect(t, created) {return}
+	}
+	app.tab_select(state, w, 1)
+	return w, directory, true
+}
+
+// Splits the shown tab into A | (B / (C | (D / E))), panes named by letter, and describes it.
+@(private = "file")
+reopen_five_pane_tab :: proc(t: ^testing.T, state: ^app.App, w: ^app.Window) -> (string, bool) {
+	tree := &w.workspace.tabs[w.workspace.selected].tree
+	directions := []layout.Direction{.Right, .Down, .Right, .Down}
+	ratios := []f32{0.4, 0.5, 0.6, 0.3}
+	for direction, i in directions {app.pane_split(state, w, direction, ratios[i])}
+	panes := make([dynamic]layout.Content, context.temp_allocator)
+	layout.contents(tree, tree.root, &panes)
+	if !testing.expect_value(t, len(panes), 5) {return "", false}
+	// Pane order follows the tree, left to right and top to bottom.
+	names := []string{"A", "B", "C", "D", "E"}
+	for content, i in panes {
+		entry := app.session_find(state, content.id)
+		entry.name = strings.clone(names[i])
+	}
+	described := reopen_describe(state, tree)
+	testing.expect_value(t, described, "(H 0.60 A (V 0.50 B (H 0.40 C (V 0.70 D E))))")
+	return described, true
+}
+
+@(private = "file")
+reopen_node_named :: proc(state: ^app.App, tree: ^layout.Layout, name: string) -> layout.Node_Id {
+	for node, id in tree.nodes {
+		pane, is_pane := node.(layout.Pane)
+		if !is_pane {continue}
+		if entry := app.session_find(state, pane.content.id); entry != nil && entry.name == name {
+			return layout.Node_Id(id)
+		}
+	}
+	return layout.INVALID_NODE
+}
+
+// The tree's shape with splits' axes and ratios and panes' names, in temporary memory.
+@(private = "file")
+reopen_describe :: proc(state: ^app.App, tree: ^layout.Layout) -> string {
+	b := strings.builder_make(context.temp_allocator)
+	reopen_describe_node(state, tree, tree.root, &b)
+	return strings.to_string(b)
+}
+
+@(private = "file")
+reopen_describe_node :: proc(state: ^app.App, tree: ^layout.Layout, node: layout.Node_Id, b: ^strings.Builder) {
+	switch n in tree.nodes[node] {
+	case layout.Vacant:
+		strings.write_string(b, "?")
+	case layout.Pane:
+		entry := app.session_find(state, n.content.id)
+		strings.write_string(b, entry != nil ? entry.name : "?")
+	case layout.Split:
+		fmt.sbprintf(b, "(%s %.2f ", n.axis == .Horizontal ? "H" : "V", n.ratio)
+		reopen_describe_node(state, tree, n.first, b)
+		strings.write_string(b, " ")
+		reopen_describe_node(state, tree, n.second, b)
+		strings.write_string(b, ")")
+	}
+}
