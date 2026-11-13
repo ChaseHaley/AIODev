@@ -248,7 +248,7 @@ pane_header_draw :: proc(
 	entry: ^Session_Entry,
 ) -> render.Build_Status {
 	l := pane_header_layout(w, pane)
-	open := CONTENT_POLICY[pane.content.kind].documents && document_menu_shown_for(w, pane.content)
+	open := pane_header_documents_open(w, pane)
 	commands_open := command_menu_shown_for(w, pane.content)
 	buttons: [Pane_Header_Button]ui.Header_Button
 	view := pane_view(w, pane.content)
@@ -276,6 +276,11 @@ pane_header_draw :: proc(
 	if entry != nil && .Pane_Headers in app.settings.status.surfaces {
 		status, status_text = pane_status_line(app, entry)
 	}
+	aside: f32
+	if view != nil {
+		view.header_status_drawn = status.glyph != .None
+		aside = view.header_status.value
+	}
 	r := pane.rect
 	result = ui.header_draw(
 		&w.list,
@@ -298,6 +303,7 @@ pane_header_draw :: proc(
 		status_text,
 		status_phase(app, w, status),
 		badge.icon,
+		aside,
 	)
 	if result == .Ok && l.widget.width > 0 {hidden_panes_glyph_draw(app, w, l.widget)}
 	return result
@@ -320,11 +326,16 @@ pane_status_line :: proc(app: ^App, entry: ^Session_Entry) -> (ui.Status_Mark, s
 
 // A header row shows its buttons on the focused pane, the pane under the pointer and a pane whose Links or
 // Commands menu is open. The others keep the buttons' space, so their titles stay put when the buttons
-// appear.
+// appear; their program status moves to the header's right end instead (header_status_layout).
 @(private = "file")
 pane_header_buttons_shown :: proc(w: ^Window, pane: layout.Pane_Rect, menu_open: bool) -> bool {
 	hovered, found := w.header_pane.?
 	return menu_open || pane_shows_focus(w, pane) || (found && hovered == pane.content)
+}
+
+@(private = "file")
+pane_header_documents_open :: proc(w: ^Window, pane: layout.Pane_Rect) -> bool {
+	return CONTENT_POLICY[pane.content.kind].documents && document_menu_shown_for(w, pane.content)
 }
 
 // The surfaces that lie on a pane's card, so the pointer over one is over that pane.
@@ -380,7 +391,9 @@ pane_header_relayout_reset :: proc(w: ^Window) {
 	for &view in w.views {view.header_controls = {}}
 }
 
-// Advances every header button's hover and press; true when the window must draw again.
+// Advances every header button's hover and press, and slides each placed header's program status to
+// where its buttons leave room for it; true when the window must draw again. A status the header did
+// not draw last time lands at once, so it appears in place.
 pane_header_controls_animate :: proc(app: ^App, w: ^Window, frame: ui.Frame_Time) -> bool {
 	changed := false
 	for &pane in w.views {
@@ -388,12 +401,23 @@ pane_header_controls_animate :: proc(app: ^App, w: ^Window, frame: ui.Frame_Time
 			hovered, armed := pane.header_hover == button, ui.armed_is(pane.header_armed, button)
 			changed = ui.control_update(&control, hovered, armed, app.animations, frame) || changed
 		}
+		placed: Maybe(layout.Pane_Rect)
+		for rect in w.panes {if rect.content == pane.content {placed = rect}}
+		rect, found := placed.?
+		if !found {pane.header_status_drawn = false; continue}
+		menu_open := pane_header_documents_open(w, rect) || command_menu_shown_for(w, rect.content)
+		aside := !pane_header_buttons_shown(w, rect, menu_open)
+		animate := app.animations && pane.header_status_drawn
+		changed = ui.header_status_update(&pane.header_status, aside, animate, frame) || changed
 	}
 	return changed
 }
 
 pane_header_controls_animating :: proc(w: ^Window) -> bool {
-	for pane in w.views {for control in pane.header_controls {if ui.control_active(control) {return true}}}
+	for pane in w.views {
+		if ui.motion_active(pane.header_status) {return true}
+		for control in pane.header_controls {if ui.control_active(control) {return true}}
+	}
 	return false
 }
 
