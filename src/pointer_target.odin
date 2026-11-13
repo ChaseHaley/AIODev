@@ -205,9 +205,8 @@ pointer_surfaces := [Pointer_Target]Pointer_Surface {
 	},
 	.Status_Panel     = {
 		claims = status_panel_claims, hover = status_panel_hover, press = status_panel_press,
-		release = status_panel_release, tooltip = status_panel_tooltip, shortcut = status_panel_shortcut,
-		cancel = status_panel_cancel, leave = status_panel_leave, holds = true, blurs_find = true,
-		under_floats = true,
+		release = status_panel_release, tooltip = status_panel_tooltip, cancel = status_panel_cancel,
+		leave = status_panel_leave, holds = true, blurs_find = true, under_floats = true,
 	},
 	.Tabs             = {
 		claims = tabs_claims, hover = tabs_hover, press = tab_interaction_press, release = tabs_release,

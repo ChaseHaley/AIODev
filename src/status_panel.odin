@@ -29,10 +29,9 @@ STATUS_PANEL_HEADER :: ui.HEIGHT_STANDARD
 // One wheel notch, independent of the views' row heights.
 @(private) STATUS_PANEL_WHEEL :: f32(96)
 
-// The header's buttons, listed from the right edge: hide, dock side, view, grouping, then what rows show.
+// The header's buttons, listed from the right edge: dock side, view, grouping, then what rows show.
 Status_Panel_Button :: enum {
 	None,
-	Hide,
 	Side,
 	View,
 	Group,
@@ -133,13 +132,13 @@ status_panel_rect :: proc(app: ^App, w: ^Window) -> render.Rect {
 	return {content.x + content.width + gap, content.y, max(0, width), content.height}
 }
 
-// A header button's square: Hide at the right edge, each later button one step further left.
+// A header button's square: Side at the right edge, each later button one step further left.
 status_panel_button_rect :: proc(app: ^App, w: ^Window, button: Status_Panel_Button) -> render.Rect {
 	r := status_panel_rect(app, w)
 	if r.width <= 0 || button == .None {return {}}
 	size := ui.HEIGHT_COMPACT * w.scale
 	top := (STATUS_PANEL_HEADER * w.scale - size) / 2
-	step := f32(int(button) - int(Status_Panel_Button.Hide)) * (size + ui.SPACE_1 * w.scale)
+	step := f32(int(button) - int(Status_Panel_Button.Side)) * (size + ui.SPACE_1 * w.scale)
 	return {r.x + r.width - ui.SPACE_1 * w.scale - size - step, r.y + top, size, size}
 }
 
@@ -156,10 +155,6 @@ status_panel_view_toggle :: proc(app: ^App) {
 status_panel_button_fire :: proc(app: ^App, w: ^Window, button: Status_Panel_Button) {
 	switch button {
 	case .None:
-	case .Hide:
-		// The panel goes, so nothing under the pointer is its button when it comes back.
-		w.status.panel_button_hover = .None
-		run_action(app, w, .Status_Panel)
 	case .Side:
 		status_panel_side_toggle(app)
 	case .View:
@@ -555,8 +550,6 @@ status_panel_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 		switch button {
 		case .None:
 			continue
-		case .Hide:
-			icon = .Close
 		case .Side:
 			icon = side_icon
 		case .View:
@@ -718,8 +711,6 @@ status_panel_hover_clear :: proc(w: ^Window) {
 // Header buttons, then the row under the pointer.
 status_panel_tooltip :: proc(app: ^App, w: ^Window, x, y: f32) -> string {
 	switch status_panel_button_at(app, w, x, y) {
-	case .Hide:
-		return "Hide Activity panel"
 	case .Side:
 		return "Move Activity panel"
 	case .View:
@@ -733,13 +724,6 @@ status_panel_tooltip :: proc(app: ^App, w: ^Window, x, y: f32) -> string {
 	case .None:
 	}
 	return status_panel_row_tooltip(app, w, x, y)
-}
-
-// Hide runs the command that shows and hides the panel, so its tooltip names that command's key.
-@(private)
-status_panel_shortcut :: proc(app: ^App, w: ^Window, x, y: f32) -> Tooltip_Shortcut {
-	if status_panel_button_at(app, w, x, y) == .Hide {return Action.Status_Panel}
-	return nil
 }
 
 // A press on the panel, which owns the pointer: header buttons arm, rows open the pane they came
@@ -810,7 +794,6 @@ when AIO_CONTROL {
 		area := status_panel_rect(app, w)
 		state_rect(r, "activity.rect", area)
 		state_value(r, "activity.panel", s.panel)
-		state_rect(r, "activity.hide_button", status_panel_button_rect(app, w, .Hide))
 		state_rect(r, "activity.toggle", status_panel_toggle_rect(app, w))
 		state_rect(r, "activity.side_button", status_panel_button_rect(app, w, .Side))
 		@(static, rodata)

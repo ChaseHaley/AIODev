@@ -606,11 +606,19 @@ toggle_tooltip_expect :: proc(
 	testing.expect_value(t, app.tooltip_shortcut(s, w, owner, x, y, buffer[:]), "Ctrl+Shift+Y", loc)
 }
 
-// WORK-476: the header's right-most button hides the panel and the title bar button beside the tab
-// orientation button brings it back, on either side and in either tab orientation. Both name the
-// command's key, cancel a release elsewhere or a lost capture, and save the one visibility setting.
+// The window gets Ctrl+Shift+Y, the Show or hide the Activity panel key.
+@(private = "file")
+panel_key :: proc(s: ^app.App, w: ^app.Window) {
+	app.handle_event(s, input.Key_Event{window = w.id, key = .Y, modifiers = {.Control, .Shift}, pressed = true})
+	app.handle_event(s, input.Key_Event{window = w.id, key = .Y, modifiers = {.Control, .Shift}})
+}
+
+// WORK-476: the title bar button beside the tab orientation button hides the panel and brings it back,
+// on either side and in either tab orientation, as Ctrl+Shift+Y does. It names the command's key,
+// cancels a release elsewhere or a lost capture, and saves the one visibility setting. The panel's
+// header keeps its own buttons only, Side at its right edge.
 @(test)
-activity_hide_button_and_title_toggle_hide_and_show_the_panel :: proc(t: ^testing.T) {
+activity_title_toggle_and_key_hide_and_show_the_panel :: proc(t: ^testing.T) {
 	f: Palette_Fixture
 	defer palette_fixture_destroy(t, &f)
 	if !palette_fixture_create(t, &f, "activity-toggle", second_window = false) {return}
@@ -643,21 +651,16 @@ activity_hide_button_and_title_toggle_hide_and_show_the_panel :: proc(t: ^testin
 		testing.expect_value(t, app.workspace_button_left(s, w), pill.x + pill.width)
 		tx, ty := toggle.x + toggle.width / 2, toggle.y + toggle.height / 2
 		toggle_tooltip_expect(t, s, w, .Activity_Toggle, tx, ty, "Hide Activity panel")
-
-		hide := app.status_panel_button_rect(s, w, .Hide)
-		beside := app.status_panel_button_rect(s, w, .Side)
 		panel := app.status_panel_rect(s, w)
-		testing.expect(t, hide.width > 0 && beside.x + beside.width <= hide.x)
-		testing.expect(t, hide.x + hide.width <= panel.x + panel.width)
-		x, y := hide.x + hide.width / 2, hide.y + hide.height / 2
-		toggle_tooltip_expect(t, s, w, .Status_Panel, x, y, "Hide Activity panel")
-		gesture_button(s, w, .Left, true, x, y)
+		side_button := app.status_panel_button_rect(s, w, .Side)
+		testing.expect_value(t, side_button.x + side_button.width, panel.x + panel.width - 4 * w.scale)
+		gesture_button(s, w, .Left, true, tx, ty)
 		gesture_button(s, w, .Left, false, 0, 0)
-		gesture_button(s, w, .Left, true, x, y)
+		gesture_button(s, w, .Left, true, tx, ty)
 		app.handle_event(s, platform.Capture_Lost_Event{w.id})
-		gesture_button(s, w, .Left, false, x, y)
+		gesture_button(s, w, .Left, false, tx, ty)
 		testing.expect(t, s.settings.status.panel, "a release elsewhere or a lost capture keeps the panel")
-		click_at(s, w, x, y)
+		click_at(s, w, tx, ty)
 		testing.expect(t, !s.settings.status.panel)
 		testing.expect_value(t, app.status_panel_rect(s, w).width, f32(0))
 		testing.expect_value(t, w.dock_left_width, f32(0))
@@ -678,6 +681,15 @@ activity_hide_button_and_title_toggle_hide_and_show_the_panel :: proc(t: ^testin
 		testing.expect_value(t, w.dock_left_width > 0, side == .Left && orientation == "horizontal")
 		settings_file_has(t, f.path, "status.panel = true")
 		testing.expect_value(t, s.settings.status.panel_side, side)
+
+		// The key does the same, and the button stays put.
+		panel_key(s, w)
+		testing.expect(t, !s.settings.status.panel)
+		testing.expect_value(t, app.status_panel_rect(s, w).width, f32(0))
+		testing.expect_value(t, app.status_panel_toggle_rect(s, w), toggle)
+		panel_key(s, w)
+		testing.expect(t, s.settings.status.panel)
+		testing.expect_value(t, app.status_panel_rect(s, w), panel)
 	}
 	// Without Activity there is no panel to show, so no button either, and Settings moves back beside
 	// the tab orientation button.
