@@ -150,11 +150,21 @@ window_tab_strip_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 			if result != .Ok {return result}
 		}
 	}
+	// Tabs pulled out of a group ending the strip ride over the New Tab and profile buttons, which give way.
+	pulled := false
+	for tab, i in w.workspace.tabs {
+		pulled ||= dragging && tab.marked && tab_strip_x(w, bar, i) + bar.tab_width > bar.end + w.scale
+	}
 	for pass in 0 ..< (dragging ? 2 : 1) {
 		foreground := pass == 1
+		if pulled && foreground {
+			_ = render.push_layer(&w.list, {bar.x, 0, bar.end + 2 * bar.button_width - bar.x, bar.height})
+		}
 		for tab, i in w.workspace.tabs {
 			if (dragging && tab.marked) != foreground {continue}
-			if !tab_shown(w.workspace, i) {continue}
+			clip, sliding := tab_fold_clip(app, w, i)
+			if !tab_shown(w.workspace, i) && !sliding {continue}
+			if sliding && render.push_layer(&w.list, clip) != .None {continue}
 			tile, built := tab_tile(app, w, i)
 			if built != .Ok {return built}
 			control := tab_control(w, Tab_Chrome_Tab{i})
@@ -170,6 +180,7 @@ window_tab_strip_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 				w.scale,
 				w.pointer,
 			); result != .Ok {return result}
+			if sliding {_ = render.push_layer(&w.list, {bar.x, 0, bar.width, bar.height})}
 		}
 	}
 	// A dragged group's chip rides in front of its tabs.
@@ -203,7 +214,7 @@ window_tab_strip_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 		   .None {return .Ok}
 	}
 	drop, placed := pane_drag_destination(w).(Pane_Drop)
-	if (placed && drop.place == .New_Tab) || w.tab_incoming.count > 0 {return .Ok}
+	if (placed && drop.place == .New_Tab) || w.tab_incoming.count > 0 || pulled {return .Ok}
 	new_tab := tab_control(w, Tab_Chrome_New{})
 	if result := ui.tab_new_draw(
 		&w.list,

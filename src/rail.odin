@@ -507,8 +507,16 @@ rail_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 		foreground := pass == 1
 		for tab, index in w.workspace.tabs {
 			if (dragging && tab.marked) != foreground {continue}
-			if !tab_shown(w.workspace, index) {continue}
-			if result := rail_row_draw(app, w, layout, index, moving); result != .Ok {return result}
+			clip, sliding := tab_fold_clip(app, w, index)
+			if !tab_shown(w.workspace, index) && !sliding {continue}
+			if sliding {
+				if render.push_layer(&w.list, clip) != .None {continue}
+				// Opaque, so the rows stacking into the chip cover one another.
+				tile := rail_tab_rect(w, layout, index)
+				if rail_docked(w) {ui.draw_rect(&w.list, {rect = tile, color = app.theme.tab_bar})}
+			}
+			if result := rail_row_draw(app, w, layout, index, moving && !sliding); result != .Ok {return result}
+			if sliding {_ = render.push_layer(&w.list, layout.list)}
 		}
 	}
 	// A dragged group's chip rides in front of its tabs.

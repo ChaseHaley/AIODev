@@ -101,6 +101,11 @@ Tab_Carry :: struct {
 	order:       [dynamic]^Tab,
 	// The grabbed tab's place among the marked tabs.
 	rank:        int,
+	// The dragged tabs are whole groups, which they keep.
+	whole:       bool,
+	// Otherwise the group they join where they would drop now, 0 for none; their own holds them a little past
+	// its edge, so leaving it takes a deliberate pull.
+	group:       u32,
 }
 
 // Where a pane drop would land now. Nil lands nowhere and puts the pane back.

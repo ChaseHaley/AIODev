@@ -100,6 +100,8 @@ Tab_Presentation :: struct {
 	// The next update puts every tab straight in its place instead of easing it there: after a change of
 	// orientation or workspace.
 	jump:             bool,
+	// The group whose tabs are sliding into or out of its chip, until they rest.
+	folding:          u32,
 }
 
 // The window's tab chrome beside the per-tab arrays, which Window embeds: the selection underline's
@@ -192,6 +194,7 @@ tab_presentation_animate :: proc(app: ^App, w: ^Window, frame: ui.Frame_Time) ->
 		changed = ui.motion_update(&position, frame) || changed
 		changed = ui.motion_update(offset, frame) || changed
 	}
+	if !tab_presentation_animating(w) {w.folding = 0}
 	changed = ui.motion_update(&w.tab_incoming.ghost, frame) || changed
 	if selected := w.workspace.selected; selected >= 0 && selected < len(layout.places) {
 		place := layout.places[selected]

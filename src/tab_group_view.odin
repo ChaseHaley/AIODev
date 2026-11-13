@@ -112,9 +112,14 @@ tab_group_color :: proc(app: ^App, group: ^Tab_Group) -> render.Color {
 	return workspace_icon_tint(group.color, app.theme.text)
 }
 
-// The colour of tab `index`'s group band, transparent for an ungrouped tab.
+// The colour of tab `index`'s group band, transparent for an ungrouped tab. Dragged tabs take the band of
+// the group they would join if dropped now, so the drop's outcome shows before the release.
 tab_band_color :: proc(app: ^App, w: ^Window, index: int) -> render.Color {
 	group := tab_group_of(w.workspace, index)
+	if _, carry := tab_drag_state(w); carry != nil && !carry.whole && w.workspace.tabs[index].marked {
+		_, reordering := carry.destination.(Drop_Reorder)
+		group = reordering ? tab_group_find(w.workspace, carry.group) : nil
+	}
 	if group == nil {return {}}
 	return tab_group_color(app, group)
 }
@@ -125,6 +130,30 @@ tab_chip_strip_rect :: proc(w: ^Window, bar: ui.Tab_Bar, run: Tab_Run) -> render
 	right := tab_strip_x(w, bar, run.first) - margin
 	width := max(0, run.width * w.scale - 2 * margin)
 	return {right - width, 0, width, bar.height}
+}
+
+// While tab `index`'s group folds or unfolds, its tabs slide into or out of the chip, shown only between the
+// group's first tab, which rides on the chip, and whatever follows the group, so they vanish into the chip
+// as that closes up and come out of it as it opens. False when the tab is not sliding so.
+tab_fold_clip :: proc(app: ^App, w: ^Window, index: int) -> (clip: render.Rect, sliding: bool) {
+	workspace := w.workspace
+	if w.folding == 0 || index >= len(workspace.tabs) || workspace.tabs[index].group != w.folding {return}
+	if tab_drag_active(w) {return}
+	first, next := index, index + 1
+	for first > 0 && workspace.tabs[first - 1].group == w.folding {first -= 1}
+	for next < len(workspace.tabs) && workspace.tabs[next].group == w.folding {next += 1}
+	if w.tabs_horizontal {
+		bar := window_tab_bar(app, w)
+		left := tab_strip_x(w, bar, first)
+		right := next < len(workspace.tabs) ? tab_strip_x(w, bar, next) : bar.x + bar.width
+		return {left, 0, max(0, right - left), bar.height}, true
+	}
+	rail, ok := rail_layout_query(w)
+	if !ok {return}
+	top := max(rail_tab_rect(w, rail, first).y, rail.list.y)
+	bottom := next < len(workspace.tabs) ? rail_tab_rect(w, rail, next).y : rail.list.y + rail.list.height
+	bottom = min(bottom, rail.list.y + rail.list.height)
+	return {rail.list.x, top, rail.list.width, max(0, bottom - top)}, true
 }
 
 // Group `id`'s chip where it shows, in the strip or the rail; empty while it shows none.

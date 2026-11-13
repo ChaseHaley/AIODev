@@ -92,7 +92,7 @@ tab_groups_tidy :: proc(workspace: ^Workspace) {
 
 // What a block of tabs that just moved together keeps or joins, where it now lies. Landing between two tabs
 // of one group joins that group, and a block holding all of a group keeps it, moving it as a whole; any
-// other tab leaves its group. A drag decides by the pointer instead (tab_drag_group).
+// other tab leaves its group. A drag decides as it goes instead (tab_drag_group).
 tab_groups_settle :: proc(workspace: ^Workspace, moved: []^Tab) {
 	if len(moved) == 0 {return}
 	first, _ := slice.linear_search(workspace.tabs[:], moved[0])
@@ -307,6 +307,7 @@ tab_group_fold :: proc(app: ^App, w: ^Window, id: u32, folded: bool) -> bool {
 		tab_select(app, w, next)
 	}
 	group.folded = folded
+	w.folding = id
 	tab_groups_changed(app, w)
 	return true
 }
