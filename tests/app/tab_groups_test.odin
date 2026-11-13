@@ -372,6 +372,25 @@ a_dragged_chip_carries_its_group_past_a_tab_once_the_chip_passes_its_middle :: p
 }
 
 @(test)
+a_dragged_group_keeps_the_rows_it_takes_at_rest :: proc(t: ^testing.T) {
+	state: app.App
+	defer grouped_destroy(&state)
+	workspace := grouped_workspace(&state, {0, 1, 1, 0})
+	w := grouped_window(&state, workspace, false)
+	defer grouped_window_destroy(w)
+	grouped_settle(&state, w)
+	// The carried chip keeps its row where the group would drop, so New tab below the rows stays put.
+	rows := app.rail_row_count(w)
+	chip := app.tab_group_chip_rect(&state, w, 1)
+	x, y := chip.x + 20, chip.y + chip.height / 2
+	app.tab_chip_press(&state, w, 1, x, y)
+	testing.expect(t, app.tab_drag_move(&state, w, x, y - 0.4 * chip.height))
+	testing.expect(t, app.tab_drag_active(w))
+	testing.expect_value(t, app.rail_row_count(w), rows)
+	app.tab_drag_release(&state, w)
+}
+
+@(test)
 no_two_groups_share_both_a_name_and_a_colour :: proc(t: ^testing.T) {
 	state: app.App
 	defer grouped_destroy(&state)

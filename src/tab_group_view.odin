@@ -11,8 +11,8 @@ Tab_Place :: struct {
 
 // A group's chip, where a run of its tabs starts: just before tab `first`, the run's first laid-out tab at
 // rest, less `lead` tabs dragged into the run's start. The strip gives it `width` DIPs, margins included;
-// the rail gives it the row above. A `carried` chip rides before the tabs of a whole group being dragged
-// and takes no room among the others.
+// the rail gives it the row above. A `carried` chip rides before the tabs of a whole group being dragged,
+// and keeps its room where the group would drop, so the tabs take as much room in all as at rest.
 Tab_Run :: struct {
 	group:   ^Tab_Group,
 	first:   int,
@@ -57,12 +57,8 @@ tab_layout :: proc(app: ^App, w: ^Window, horizontal: bool) -> Tab_Layout {
 				}
 				width += 2 * ui.TAB_CHIP_MARGIN
 			}
-			if !carried {
-				if horizontal {result.chips += width} else {result.slots += 1}
-				append(&runs, Tab_Run{group = group, first = i, width = width})
-			} else {
-				append(&runs, Tab_Run{group = group, first = i, width = width, carried = true})
-			}
+			if horizontal {result.chips += width} else {result.slots += 1}
+			append(&runs, Tab_Run{group = group, first = i, width = width, carried = carried})
 		}
 		if carried {previous_carried = id} else {previous = id}
 		places[i] = {f32(result.slots), horizontal ? result.chips : 0}
