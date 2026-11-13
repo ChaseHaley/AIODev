@@ -103,8 +103,6 @@ PANE_HEADER_TILED :: bit_set[Pane_Header_Button] {
 PANE_HEADER_FLOATING :: bit_set[Pane_Header_Button] {
 	.Links, .Commands, .Edit, .Default_App, .Split_Right, .Split_Down, .Zoom, .Fill_Window, .Close,
 }
-@(private = "file")
-PANE_HEADER_OVERLAY :: bit_set[Pane_Header_Button]{.Links, .Commands, .Split_Right, .Split_Down}
 // The last button of each group, which a divider sets apart from the next group.
 @(private = "file")
 PANE_HEADER_GROUP_ENDS :: bit_set[Pane_Header_Button] {
@@ -120,12 +118,6 @@ PANE_HEADER_DROP_ORDER := [?]Pane_Header_Button {
 	.Dock, .Close,
 }
 
-// Whether a pane shows a header row. A tiled pane without one carries its split controls in the split
-// overlay, which shows while the pointer is near its top or its document menu is open.
-pane_header_row :: proc(w: ^Window, pane: layout.Pane_Rect) -> bool {
-	return pane_in_float(w, pane) || w.header_height > 0
-}
-
 // Whether the pane belongs to a float, whether drawn in its frame or alone in a fill.
 @(private = "file")
 pane_in_float :: proc(w: ^Window, pane: layout.Pane_Rect) -> bool {
@@ -133,27 +125,20 @@ pane_in_float :: proc(w: ^Window, pane: layout.Pane_Rect) -> bool {
 	return pane.floating || (tree != nil && layout.is_floating(tree, pane.node))
 }
 
-// The header row or split overlay of a pane, which drawing and hit testing share. Every pane can split,
-// zoom, fill and close; Float and Linked window apply only to the tiled layout, a pane that takes no pins
-// has no Links button and a pane without a shell no Commands button. A pane shown alone by its view
-// carries the hidden panes glyph after its badge.
+// The header row of a pane, which drawing and hit testing share. Every pane can split, zoom, fill and
+// close; Float and Linked window apply only to the tiled layout, a pane that takes no pins has no Links
+// button and a pane without a shell no Commands button. A pane shown alone by its view carries the hidden
+// panes glyph after its badge.
 pane_header_layout :: proc(w: ^Window, pane: layout.Pane_Rect) -> Pane_Header_Layout {
 	r := pane.rect
 	area := render.Rect{r.x, r.y, r.width, r.height}
-	row := pane_header_row(w, pane)
-	shown := PANE_HEADER_TILED
-	if !row {
-		shown = PANE_HEADER_OVERLAY
-	} else if pane_in_float(w, pane) {
-		shown = PANE_HEADER_FLOATING
-	}
+	shown := pane_in_float(w, pane) ? PANE_HEADER_FLOATING : PANE_HEADER_TILED
 	if !CONTENT_POLICY[pane.content.kind].documents {shown -= {.Links}}
 	if !CONTENT_POLICY[pane.content.kind].commands {shown -= {.Commands}}
 	if !CONTENT_POLICY[pane.content.kind].file {shown -= {.Edit, .Default_App}}
 	ends := PANE_HEADER_GROUP_ENDS
 	// Without a Commands button, Links ends the first group.
 	if .Commands not_in shown {ends += {.Links}}
-	if !row {return ui.split_overlay_layout(area, w.scale, shown, ends)}
 	widget := hidden_panes_glyph_shown(w, pane) ? ui.HIDDEN_PANES_GLYPH_BOX : [2]f32{}
 	return ui.header_layout(area, w.scale, shown, ends, PANE_HEADER_DROP_ORDER[:], widget)
 }
@@ -263,7 +248,7 @@ pane_header_draw :: proc(
 	entry: ^Session_Entry,
 ) -> render.Build_Status {
 	l := pane_header_layout(w, pane)
-	open := CONTENT_POLICY[pane.content.kind].documents && document_menu_shown_for(w, pane.content)
+	open := pane_header_documents_open(w, pane)
 	commands_open := command_menu_shown_for(w, pane.content)
 	buttons: [Pane_Header_Button]ui.Header_Button
 	view := pane_view(w, pane.content)
@@ -280,10 +265,6 @@ pane_header_draw :: proc(
 	}
 	buttons[.Close].danger = true
 	open ||= commands_open
-	if !pane_header_row(w, pane) {
-		if !w.split_overlay && !open {return .Ok}
-		return ui.split_overlay_draw(&w.list, app.theme, l, buttons, w.scale, w.pointer)
-	}
 	if !pane_header_buttons_shown(w, pane, open) {l.buttons, l.dividers = {}, {}}
 	// Only a directory the shell reported (OSC 7) is shown; the launch directory may be stale.
 	title := content_pane_title(app, entry, pane.content)
@@ -294,6 +275,11 @@ pane_header_draw :: proc(
 	status_text: string
 	if entry != nil && .Pane_Headers in app.settings.status.surfaces {
 		status, status_text = pane_status_line(app, entry)
+	}
+	aside: f32
+	if view != nil {
+		view.header_status_drawn = status.glyph != .None
+		aside = view.header_status.value
 	}
 	r := pane.rect
 	result = ui.header_draw(
@@ -317,6 +303,7 @@ pane_header_draw :: proc(
 		status_text,
 		status_phase(app, w, status),
 		badge.icon,
+		aside,
 	)
 	if result == .Ok && l.widget.width > 0 {hidden_panes_glyph_draw(app, w, l.widget)}
 	return result
@@ -339,11 +326,16 @@ pane_status_line :: proc(app: ^App, entry: ^Session_Entry) -> (ui.Status_Mark, s
 
 // A header row shows its buttons on the focused pane, the pane under the pointer and a pane whose Links or
 // Commands menu is open. The others keep the buttons' space, so their titles stay put when the buttons
-// appear.
+// appear; their program status moves to the header's right end instead (header_status_layout).
 @(private = "file")
 pane_header_buttons_shown :: proc(w: ^Window, pane: layout.Pane_Rect, menu_open: bool) -> bool {
 	hovered, found := w.header_pane.?
 	return menu_open || pane_shows_focus(w, pane) || (found && hovered == pane.content)
+}
+
+@(private = "file")
+pane_header_documents_open :: proc(w: ^Window, pane: layout.Pane_Rect) -> bool {
+	return CONTENT_POLICY[pane.content.kind].documents && document_menu_shown_for(w, pane.content)
 }
 
 // The surfaces that lie on a pane's card, so the pointer over one is over that pane.
@@ -367,33 +359,23 @@ header_pane_update :: proc(w: ^Window, owner: Pointer_Target, x, y: f32) {
 // The header under the point, on the topmost pane there: a floating pane covers the headers below it.
 pane_header_hit :: proc(w: ^Window, x, y: f32) -> (layout.Pane_Rect, Pane_Header_Target, bool) {
 	pane, found := layout.hit_test(w.panes[:], x, y)
-	if !found || (!pane_header_row(w, pane) && !w.split_overlay) {return {}, nil, false}
+	if !found {return {}, nil, false}
 	l := pane_header_layout(w, pane)
 	if ui.header_contains(l, x, y) {return pane, ui.header_hit_test(l, x, y), true}
 	return {}, nil, false
 }
 
-// Where a pane's Links or Commands menu hangs from: under its button, or inside its corner without one.
-// A split pane with headers off shows no controls, so its menu sits in the corner the header would use.
+// Where a pane's Links or Commands menu hangs from: under its button, or under the header's right end
+// when a narrow header has dropped the button.
 pane_header_menu_anchor :: proc(w: ^Window, pane: layout.Pane_Rect, button: Pane_Header_Button) -> [2]f32 {
 	r := pane.rect
 	s := w.scale
 	width := ui.MENU_WIDTH * s
-	if !pane_header_row(w, pane) && !pane_single_tiled(w) {
-		return {r.x + r.width - width - ui.SPACE_2 * s, r.y + ui.SPACE_2 * s}
-	}
 	face := pane_header_layout(w, pane).buttons[button]
 	if face.width == 0 {
 		return {r.x + r.width - width - ui.SPACE_2 * s, r.y + ui.HEADER_HEIGHT * s + ui.SPACE_1 * s}
 	}
 	return {face.x + face.width - width, face.y + face.height + ui.SPACE_1 * s}
-}
-
-// One tiled pane alone, which shows split controls while headers are off. Floating panes follow
-// the tiled ones.
-@(private)
-pane_single_tiled :: proc(w: ^Window) -> bool {
-	return len(w.panes) > 0 && !w.panes[0].floating && (len(w.panes) == 1 || w.panes[1].floating)
 }
 
 pane_header_cancel :: proc(w: ^Window) {
@@ -409,29 +391,33 @@ pane_header_relayout_reset :: proc(w: ^Window) {
 	for &view in w.views {view.header_controls = {}}
 }
 
-// Header buttons animate only while some header shows: a header row, a single pane's split controls or
-// a float's panes.
-@(private = "file")
-pane_header_controls_shown :: proc(w: ^Window) -> bool {
-	return w.header_height > 0 || w.split_overlay || window_floats_shown(w)
-}
-
-// Advances every header button's hover and press; true when the window must draw again.
+// Advances every header button's hover and press, and slides each placed header's program status to
+// where its buttons leave room for it; true when the window must draw again. A status the header did
+// not draw last time lands at once, so it appears in place.
 pane_header_controls_animate :: proc(app: ^App, w: ^Window, frame: ui.Frame_Time) -> bool {
-	if !pane_header_controls_shown(w) {return false}
 	changed := false
 	for &pane in w.views {
 		for &control, button in pane.header_controls {
 			hovered, armed := pane.header_hover == button, ui.armed_is(pane.header_armed, button)
 			changed = ui.control_update(&control, hovered, armed, app.animations, frame) || changed
 		}
+		placed: Maybe(layout.Pane_Rect)
+		for rect in w.panes {if rect.content == pane.content {placed = rect}}
+		rect, found := placed.?
+		if !found {pane.header_status_drawn = false; continue}
+		menu_open := pane_header_documents_open(w, rect) || command_menu_shown_for(w, rect.content)
+		aside := !pane_header_buttons_shown(w, rect, menu_open)
+		animate := app.animations && pane.header_status_drawn
+		changed = ui.header_status_update(&pane.header_status, aside, animate, frame) || changed
 	}
 	return changed
 }
 
 pane_header_controls_animating :: proc(w: ^Window) -> bool {
-	if !pane_header_controls_shown(w) {return false}
-	for pane in w.views {for control in pane.header_controls {if ui.control_active(control) {return true}}}
+	for pane in w.views {
+		if ui.motion_active(pane.header_status) {return true}
+		for control in pane.header_controls {if ui.control_active(control) {return true}}
+	}
 	return false
 }
 
@@ -504,23 +490,7 @@ pane_header_pointer :: proc(w: ^Window, x, y: f32, enabled: bool) -> (bool, Pane
 	return true, target
 }
 
-// Shows a single pane's split controls while the pointer is within the top band of its card.
-split_overlay_update :: proc(w: ^Window, x, y: f32, enabled: bool) {
-	shown := false
-	single := pane_single_tiled(w)
-	if enabled && single && !pane_header_row(w, w.panes[0]) {
-		r := w.panes[0].rect
-		top, found := layout.hit_test(w.panes[:], x, y)
-		shown = found && !top.floating && x >= r.x && x < r.x + r.width && y >= r.y && y < r.y + 40 * w.scale
-	}
-	if shown == w.split_overlay {return}
-	w.split_overlay = shown
-	pane_header_cancel(w)
-	w.dirty = true
-}
-
-// Pane header pointer surface: pane headers, and a single pane's split controls, which show while the
-// pointer is in the pane's top band and no surface above the pane covers it.
+// Pane header pointer surface: the header row on every pane.
 
 @(private)
 header_claims :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {
@@ -532,8 +502,6 @@ header_claims :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {
 header_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: input.Mouse_Move_Event) {
 	x, y := f32(e.x), f32(e.y)
 	header_pane_update(w, owner, x, y)
-	in_pane := pointer_surfaces[owner].in_pane
-	split_overlay_update(w, x, y, in_pane && !selection_active(w))
 	over, target := pane_header_pointer(w, x, y, owner == .Pane_Header && !selection_active(w))
 	if owner != .Pane_Header {return}
 	pointer_set(app, w, over && target != nil && !gesture_swallowing(w) ? .Hand : .Arrow)
@@ -553,6 +521,21 @@ header_tooltip_card :: proc(app: ^App, w: ^Window, x, y: f32) -> Tooltip_Card {
 	return pane_header_card(app, w, pane, button)
 }
 
+// The command a header button runs, or for Links and Commands the one that opens the same menu on the
+// focused pane, which the press makes this one. A refused button names it too: the keyboard still runs it.
+@(private)
+header_shortcut :: proc(_: ^App, w: ^Window, x, y: f32) -> Tooltip_Shortcut {
+	_, target, hit := pane_header_hit(w, x, y)
+	button, is_button := target.(Pane_Header_Button)
+	if !hit || !is_button {return nil}
+	#partial switch button {
+	case .Links: return Action.Show_Links
+	case .Commands: return Action.Show_Commands
+	}
+	if action, runs := pane_header_command(button); runs {return action}
+	return nil
+}
+
 // The header swallows its presses, so it also finishes a release that lands anywhere.
 @(private)
 header_release :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) -> bool {
@@ -564,7 +547,6 @@ header_release :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) -> bo
 @(private)
 header_cancel :: proc(_: ^App, w: ^Window) {
 	pane_header_cancel(w)
-	w.split_overlay = false
 }
 
 // The pointer left the window, so no pane is under it. Capture loss keeps the hovered pane, which stays

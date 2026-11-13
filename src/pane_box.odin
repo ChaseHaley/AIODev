@@ -22,37 +22,20 @@ Pane_Box :: struct {
 	origin:  [2]f32,
 }
 
-// D-050 keeps a header on every pane unless headers are off; content kind never changes the
-// geometry a pane receives. A floating pane keeps its header either way, since it moves by it.
-pane_header_height :: proc(scale: f32, show_headers: bool) -> f32 {
-	if !show_headers {return 0}
+// Every pane, tiled or floating, has a header row (D-050); content kind never changes the geometry a
+// pane receives.
+pane_header_height :: proc(scale: f32) -> f32 {
 	return math.round(ui.HEADER_HEIGHT * scale)
 }
 
-// The header row height tiled panes get under the settings; relayout caches it in w.header_height, which
-// every later question about a pane's header reads.
-pane_header_row_height :: proc(app: ^App, scale: f32) -> f32 {
-	return pane_header_height(scale, app.settings.pane.show_headers)
-}
-
-// A shown pane's padding and header; a pane not yet placed is taken as tiled.
-pane_insets :: proc(
-	app: ^App,
-	w: ^Window,
-	entry: ^Session_Entry,
-	pane: layout.Pane_Rect = {},
-) -> Pane_Insets {
-	return {padding = pane_padding(app, w.scale, entry), header = pane_header_of(w, pane)}
-}
-
-// The header height of a pane the window shows: a header row's, or none under an overlay.
-pane_header_of :: proc(w: ^Window, pane: layout.Pane_Rect) -> f32 {
-	return pane_header_height(w.scale, pane_header_row(w, pane))
+// A shown pane's padding and header.
+pane_insets :: proc(app: ^App, w: ^Window, entry: ^Session_Entry) -> Pane_Insets {
+	return {padding = pane_padding(app, w.scale, entry), header = pane_header_height(w.scale)}
 }
 
 // The pane below its header; a pane shorter than its header has no body.
 pane_body_rect :: proc(w: ^Window, pane: layout.Pane_Rect) -> render.Rect {
-	r, header := pane.rect, pane_header_of(w, pane)
+	r, header := pane.rect, pane_header_height(w.scale)
 	return {r.x, r.y + header, r.width, max(0, r.height - header)}
 }
 

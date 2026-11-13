@@ -42,7 +42,7 @@ tab_reorder_motion_follows_pointer_and_displaces_rows_in_both_orientations :: pr
 			close := ui.rail_close_rect(l, 1, w.scale)
 			close.y += 0.25 * first.height
 			hit := app.rail_tab_interaction_hit(&w, close.x + close.width / 2, close.y + close.height / 2, .Left)
-			testing.expect(t, hit.close && hit.target == app.Tab_Chrome_Tab{1})
+			testing.expect(t, hit.close && hit.target == app.Tab_Chrome_Tab{workspace.tabs[1].id})
 			testing.expect_value(t, app.rail_tab_hit(&w, l, moved.x, l.footer.y + 1), -1)
 		}
 		app.update_motion(&state)

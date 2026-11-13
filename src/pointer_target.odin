@@ -22,7 +22,7 @@ Pointer_Target :: enum u8 {
 	Caption,
 	// An open confirmation takes the rest of the window.
 	Confirmation,
-	// The command palette takes the rest of the window while it is open.
+	// The everything palette takes the rest of the window while it is open.
 	Palette,
 	Tab_Orientation,
 	Title_Action,
@@ -40,7 +40,7 @@ Pointer_Target :: enum u8 {
 	// A floating pane's resize edges and the capsules of minimized floating panes. A floating pane also
 	// hides the dividers below it.
 	Floating,
-	// Pane headers and a single pane's floating split controls.
+	// Pane headers.
 	Pane_Header,
 	Scrollbar,
 	// A settings page shown in a pane.
@@ -80,6 +80,10 @@ Pointer_Surface :: struct {
 	tooltip:      proc(app: ^App, w: ^Window, x, y: f32) -> string,
 	// Optional: what the labelled control would do, drawn under the label while the tooltip shows.
 	tooltip_card: proc(app: ^App, w: ^Window, x, y: f32) -> Tooltip_Card,
+	// Optional: the command or fixed key that does what the labelled control does, for a tooltip that
+	// names its shortcut. A control names it here, never in its label, so the tooltip shows the key the
+	// handler uses and a rebinding at once.
+	shortcut:     proc(app: ^App, w: ^Window, x, y: f32) -> Tooltip_Shortcut,
 	// Capture loss: the surface drops its hover, armed control and drag, whether or not it holds a button.
 	cancel:       proc(app: ^App, w: ^Window),
 	// The pointer left the window: the surface drops its hover, as a move another surface owns does.
@@ -96,8 +100,6 @@ Pointer_Surface :: struct {
 	holds:        bool,
 	// A press here hands the keyboard back from the find bar to the pane; the bar and its matches stay.
 	blurs_find:   bool,
-	// Lies in a pane, so a single pane's split controls show while the pointer is over it.
-	in_pane:      bool,
 	// A floating pane over the point hides the surface.
 	under_floats: bool,
 }
@@ -111,7 +113,8 @@ pointer_surfaces := [Pointer_Target]Pointer_Surface {
 	.Workspace_Picker = {
 		claims = workspace_picker_claims, hover = workspace_picker_pointer_hover,
 		press = workspace_picker_button, tooltip = workspace_picker_tooltip,
-		cancel = workspace_picker_pointer_cancel, leave = workspace_picker_leave, modal = true,
+		shortcut = workspace_picker_shortcut, cancel = workspace_picker_pointer_cancel,
+		leave = workspace_picker_leave, modal = true,
 	},
 	.Tab_Menu         = {
 		claims = tab_menu_claims, hover = tab_menu_hover, press = tab_menu_button, modal = true,
@@ -149,7 +152,7 @@ pointer_surfaces := [Pointer_Target]Pointer_Surface {
 	// native caption moves keep; a caption move outside the client area clears it instead.
 	.Caption          = {
 		claims = caption_claims, hover = caption_hover, press = caption_press, release = caption_release,
-		tooltip = caption_tooltip, cancel = caption_cancel, holds = true,
+		tooltip = caption_tooltip, shortcut = caption_shortcut, cancel = caption_cancel, holds = true,
 	},
 	.Confirmation     = {
 		claims = confirmation_claims, hover = confirmation_pointer_hover, press = confirmation_press,
@@ -157,17 +160,17 @@ pointer_surfaces := [Pointer_Target]Pointer_Surface {
 	},
 	.Palette          = {
 		claims = palette_claims, hover = palette_hover, press = palette_press, tooltip = palette_tooltip,
-		cancel = palette_pointer_cancel,
+		shortcut = palette_shortcut, cancel = palette_pointer_cancel,
 	},
 	.Tab_Orientation  = {
 		claims = orientation_claims, hover = orientation_hover, press = orientation_press,
-		release = orientation_release, tooltip = orientation_tooltip, cancel = orientation_cancel,
-		leave = orientation_leave, holds = true,
+		release = orientation_release, tooltip = orientation_tooltip, shortcut = orientation_shortcut,
+		cancel = orientation_cancel, leave = orientation_leave, holds = true,
 	},
 	.Title_Action     = {
 		claims = title_action_claims, hover = title_action_pointer_hover, press = title_action_press,
-		release = title_action_release, tooltip = title_action_tooltip, cancel = title_action_cancel,
-		leave = title_action_leave, holds = true,
+		release = title_action_release, tooltip = title_action_tooltip, shortcut = title_action_shortcut,
+		cancel = title_action_cancel, leave = title_action_leave, holds = true,
 	},
 	.Hidden_Panes     = {
 		claims = hidden_panes_claims, hover = hidden_panes_hover, press = hidden_panes_press,
@@ -175,16 +178,18 @@ pointer_surfaces := [Pointer_Target]Pointer_Surface {
 	},
 	.Find             = {
 		claims = find_claims, hover = find_pointer_hover, press = find_press, release = find_release,
-		tooltip = find_tooltip, cancel = find_pointer_cancel, leave = find_leave, holds = true,
+		tooltip = find_tooltip, shortcut = find_shortcut, cancel = find_pointer_cancel, leave = find_leave,
+		holds = true,
 	},
 	.Workspace_Button = {
 		claims = workspace_button_claims, hover = workspace_button_hover, press = workspace_button_press,
-		tooltip = workspace_button_tooltip, leave = workspace_button_leave, holds = true, blurs_find = true,
+		tooltip = workspace_button_tooltip, shortcut = workspace_button_shortcut, leave = workspace_button_leave,
+		holds = true, blurs_find = true,
 	},
 	.Status_Pill      = {
 		claims = status_pill_claims, hover = status_pill_hover, press = status_pill_press,
-		tooltip = status_pill_tooltip, leave = status_pill_leave, holds = true, blurs_find = true,
-		under_floats = true,
+		tooltip = status_pill_tooltip, shortcut = status_pill_shortcut, leave = status_pill_leave, holds = true,
+		blurs_find = true, under_floats = true,
 	},
 	.Divider          = {
 		claims = divider_claims, hover = divider_hover, press = divider_pointer_press, release = divider_release,
@@ -197,37 +202,36 @@ pointer_surfaces := [Pointer_Target]Pointer_Surface {
 	},
 	.Tabs             = {
 		claims = tabs_claims, hover = tabs_hover, press = tab_interaction_press, release = tabs_release,
-		tooltip = tabs_tooltip, cancel = tabs_cancel, leave = tabs_leave, held = tabs_held, holds = true,
-		blurs_find = true, under_floats = true,
+		tooltip = tabs_tooltip, shortcut = tabs_shortcut, cancel = tabs_cancel, leave = tabs_leave,
+		held = tabs_held, holds = true, blurs_find = true, under_floats = true,
 	},
 	.Floating         = {
 		claims = floating_claims, hover = floating_hover, press = floating_press, release = floating_release,
-		tooltip = floating_tooltip, cancel = floating_pointer_cancel, leave = floating_leave,
-		held = floating_held, holds = true, blurs_find = true,
+		tooltip = floating_tooltip, shortcut = floating_shortcut, cancel = floating_pointer_cancel,
+		leave = floating_leave, held = floating_held, holds = true, blurs_find = true,
 	},
 	.Pane_Header      = {
 		claims = header_claims, hover = header_hover, press = pane_header_press, release = header_release,
-		tooltip = header_tooltip, tooltip_card = header_tooltip_card, cancel = header_cancel,
-		leave = header_leave, held = pane_drag_held, holds = true, blurs_find = true, in_pane = true,
+		tooltip = header_tooltip, tooltip_card = header_tooltip_card, shortcut = header_shortcut,
+		cancel = header_cancel, leave = header_leave, held = pane_drag_held, holds = true, blurs_find = true,
 	},
 	.Scrollbar        = {
 		claims = scrollbar_claims, hover = scrollbar_hover, press = scrollbar_press,
 		release = scrollbar_release, cancel = scrollbar_cancel, leave = scrollbar_leave,
-		held = scrollbar_held, holds = true, blurs_find = true, in_pane = true,
+		held = scrollbar_held, holds = true, blurs_find = true,
 	},
 	.Settings_Page    = {
 		claims = settings_claims, hover = settings_pointer_hover, press = settings_press,
-		release = settings_release, tooltip = settings_tooltip, cancel = settings_pointer_cancel,
-		leave = settings_leave, holds = true, blurs_find = true, in_pane = true,
+		release = settings_release, tooltip = settings_tooltip, shortcut = settings_shortcut,
+		cancel = settings_pointer_cancel, leave = settings_leave, holds = true, blurs_find = true,
 	},
-	// Not in_pane: a lone Markdown pane's content does not reveal its split controls, as it never has.
 	.Markdown_Page    = {
 		claims = markdown_claims, hover = markdown_hover, press = markdown_press, release = markdown_release,
 		cancel = markdown_gesture_clear, leave = markdown_leave, holds = true, blurs_find = true,
 	},
 	.Content          = {
 		claims = content_claims, hover = content_hover, press = content_press, release = content_release,
-		cancel = content_cancel, leave = content_leave, holds = true, blurs_find = true, in_pane = true,
+		cancel = content_cancel, leave = content_leave, holds = true, blurs_find = true,
 	},
 }
 
@@ -242,11 +246,24 @@ POINTER_LINKED_ABSENT :: bit_set[Pointer_Target] {
 	.Tabs,
 }
 
+// The chrome Fullscreen hides: the title bar's caption buttons and controls, and the tabs. The caption
+// buttons and the tab strip keep their places while hidden, over the pane header at the top edge.
+@(private = "file")
+POINTER_SCREEN_ABSENT :: bit_set[Pointer_Target] {
+	.Caption,
+	.Tab_Orientation,
+	.Title_Action,
+	.Workspace_Button,
+	.Status_Pill,
+	.Tabs,
+}
+
 // The topmost surface whose area holds the point. Below the modal surfaces, callers handle presses
 // and drags that already hold the pointer before acting on the answer.
 pointer_target :: proc(app: ^App, w: ^Window, x, y: f32) -> Pointer_Target {
 	for target in Pointer_Target {
 		if window_linked(w) && target in POINTER_LINKED_ABSENT {continue}
+		if w.pane_fill == .Screen && target in POINTER_SCREEN_ABSENT {continue}
 		if pointer_surfaces[target].under_floats && floating_covers(w, x, y) {continue}
 		if pointer_surfaces[target].claims(app, w, x, y) {return target}
 	}

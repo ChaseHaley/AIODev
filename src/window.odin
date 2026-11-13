@@ -43,6 +43,10 @@ Pane_View :: struct {
 	header_armed:   ui.Armed(Pane_Header_Target),
 	// The header buttons the window would refuse for this pane, measured at the last relayout.
 	header_refused: [Pane_Header_Button]Pane_Header_Refusal,
+	// Where the header's program status sits: 0 beside the buttons, 1 at the header's right end while
+	// they are hidden; and whether the last draw showed a status, without which it lands at once.
+	header_status:       ui.Motion,
+	header_status_drawn: bool,
 }
 
 Window :: struct {
@@ -64,15 +68,12 @@ Window :: struct {
 	drag: Drag,
 	using floats: Float_Window_State,
 	tab_incoming: Tab_Incoming,
-	// A single pane has no header row, so its split controls appear while the pointer is near its top.
-	split_overlay: bool,
 	// The pane under the pointer. Its header shows its buttons, as the focused pane's does.
 	header_pane: Maybe(layout.Content),
 	// The glyph's map of the panes the view hides, while it shows.
 	hidden_panes: Hidden_Panes_State,
 	list: render.Draw_List,
 	width, height: i32,
-	header_height: f32,
 	scale: f32,
 	metrics: term_view.Metrics,
 	focused, dirty: bool,
@@ -373,13 +374,11 @@ window_sync_placement :: proc(app: ^App, w: ^Window) -> bool {
 }
 
 // What a window derives from the settings at a scale, without side effects. window_apply_settings
-// stores it, apart from header_height, which window_relayout stores as it places the panes;
-// initial_geometry sizes the first window by it before any window exists.
+// stores it; initial_geometry sizes the first window by it before any window exists.
 Window_Settings_Fields :: struct {
 	metrics:            term_view.Metrics,
 	rail_default_width: f32,
 	tabs_horizontal:    bool,
-	header_height:      f32,
 }
 
 window_settings_fields :: proc(app: ^App, scale: f32, linked: bool) -> Window_Settings_Fields {
@@ -388,7 +387,6 @@ window_settings_fields :: proc(app: ^App, scale: f32, linked: bool) -> Window_Se
 		rail_default_width = f32(app.settings.tabs.rail_width),
 		// A linked window has no tabs to place, and the rail is the only placement that takes pane space.
 		tabs_horizontal = linked || app.settings.tabs.orientation == .Horizontal,
-		header_height = pane_header_row_height(app, scale),
 	}
 }
 
@@ -459,7 +457,6 @@ window_relayout :: proc(app: ^App, w: ^Window) {
 	// The rail owner stores its scroll clamp for the new size.
 	_, _ = rail_current_layout(w)
 	pane_header_relayout_reset(w)
-	w.header_height = pane_header_row_height(app, w.scale)
 	shown := pane_motion_shown(w)
 	layout.place_shown(window_tree(w), window_geometry(app, w, w.pane_fill), pane_view_solo(w), &w.panes)
 	// After the capsules are placed, which a float shrinking into one heads for.
@@ -541,7 +538,7 @@ pane_fit :: proc(app: ^App, w: ^Window, pane: layout.Pane_Rect) {
 	box := pane_box(
 		w.metrics,
 		pane.rect,
-		pane_insets(app, w, entry, pane),
+		pane_insets(app, w, entry),
 	)
 	g := pane_box_geometry(box, w.metrics, w.width, w.height)
 	// A floating pane that only moved keeps its grid, so its program sees no resize.
@@ -892,7 +889,7 @@ terminal_pane_draw :: proc(
 		cursor_effects = cursor_effects(app),
 		hover = link_hover_range(w, pane.content),
 	}
-	box := pane_box(w.metrics, pane.rect, pane_insets(app, w, entry, pane))
+	box := pane_box(w.metrics, pane.rect, pane_insets(app, w, entry))
 	frame, result := build_pane(app, w, pane, entry, view, box.origin, style)
 	if result != .Ok {return frame, result}
 	if term_view.cursor_animating(view) && !w.frame.resuming {w.frame_moved = true}

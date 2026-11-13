@@ -524,11 +524,29 @@ workspace_picker_pointer_hover :: proc(
 
 @(private)
 workspace_picker_tooltip :: proc(_: ^App, w: ^Window, x, y: f32) -> string {
-	_, icons := w.workspace_picker.state.(Workspace_Picker_Icons)
-	if icons && render.rect_contains(workspace_icon_color_button(w), x, y) {
-		return "Change icon color"
-	}
+	if workspace_picker_on_color(w, x, y) {return "Change icon color"}
+	if workspace_picker_on_more(w, x, y) {return "More actions"}
 	return ""
+}
+
+// The "…" button names the first key that opens the selected row's menu.
+@(private)
+workspace_picker_shortcut :: proc(_: ^App, w: ^Window, x, y: f32) -> Tooltip_Shortcut {
+	if workspace_picker_on_more(w, x, y) {return WORKSPACE_ROW_MENU_KEYS[0]}
+	return nil
+}
+
+@(private = "file")
+workspace_picker_on_color :: proc(w: ^Window, x, y: f32) -> bool {
+	_, icons := w.workspace_picker.state.(Workspace_Picker_Icons)
+	return icons && render.rect_contains(workspace_icon_color_button(w), x, y)
+}
+
+// The row's "…" button, as the hover found it; it opens the row's menu.
+@(private = "file")
+workspace_picker_on_more :: proc(w: ^Window, x, y: f32) -> bool {
+	p := &w.workspace_picker
+	return !workspace_picker_on_color(w, x, y) && p.menu_hover != 0 && workspace_row_index(w, p.menu_hover) >= 0
 }
 
 @(private)

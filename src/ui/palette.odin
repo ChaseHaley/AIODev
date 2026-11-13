@@ -26,14 +26,16 @@ import "core:unicode/utf8"
 @(private) PALETTE_NO_RANK :: 99
 // The band a "Used by" line opens under the row whose chord another command holds.
 @(private) PALETTE_NOTE_HEIGHT :: 16
-// Shortcut matches rank after label matches (exact, prefix, substring) and before a label's scattered
-// letters: an exact chord, then a partial one, then letters through a shortcut's parts ("al8"); other
-// fields follow.
+// Shortcut matches rank after label matches (exact, prefix, substring) and before a label's word starts
+// and scattered letters: an exact chord, then a partial one, then letters through a shortcut's parts
+// ("al8"); other fields follow, each with every match class in turn.
 @(private) PALETTE_RANK_CHORD :: 3
 @(private) PALETTE_RANK_PARTIAL :: 4
 @(private) PALETTE_RANK_LABEL :: 5
-@(private) PALETTE_RANK_FUZZY :: 6
-@(private) PALETTE_RANK_FIELDS :: 7
+@(private) PALETTE_RANK_WORDS :: 6
+@(private) PALETTE_RANK_FUZZY :: 7
+@(private) PALETTE_RANK_FIELDS :: 8
+@(private) PALETTE_FIELD_CLASSES :: len(fuzzy.Class) - 1
 
 // What activating a result does.
 Outcome :: enum {
@@ -75,7 +77,7 @@ Palette_Mode_Info :: struct {
 }
 
 @(private) PALETTE_MODES := [Palette_Mode]Palette_Mode_Info {
-	.All         = {"All", "all", "", "Search anything", .Grid},
+	.All         = {"All", "all", "", "Search everything", .Grid},
 	.Tabs        = {"Tabs", "tabs", "t:", "Search tabs", .Layout_Top},
 	.Workspaces  = {"Workspaces", "workspaces", "w:", "Search workspaces", .Workspace},
 	.Settings    = {"Settings", "settings", "s:", "Search settings", .Settings},
@@ -98,7 +100,7 @@ Palette_Mode_Info :: struct {
 	.Commands = 120,
 }
 
-// The order of an empty query's list and of equal-ranked matches: the original domains first.
+// The order of an empty query's never-run results and of equal-ranked matches: the original domains first.
 @(private) PALETTE_DOMAIN_ORDER := [?]Palette_Kind{.Command, .Setting, .Tab, .Workspace}
 
 @(private) PALETTE_KIND_WORDS := [Palette_Kind]string {
@@ -147,8 +149,12 @@ Palette_Setting :: struct {
 	control:                Palette_Control,
 	minimum, maximum, step: f64,
 	choices, choice_labels: []string,
-	// The choice list has a filter field, as the Settings page gives font pickers.
+	// The dropdown has a search field, as the Settings page gives font pickers, and is at least
+	// `choice_min_width` DIPs wide.
 	searchable:             bool,
+	choice_min_width:       f32,
+	// The setting the dropdown's Show all fonts switch saves, or "" for a list without one.
+	filter_key:             string,
 	// A reset button restores `default_value`, as on the Settings page.
 	resettable:             bool,
 	default_value:          string,
@@ -188,10 +194,15 @@ Palette_Result :: struct {
 	score:       f64,
 	positions:   []int,
 	title_match: bool,
+	// The label of the setting's choice the query matched when nothing else of the row did; `positions`
+	// then lights its letters rather than the title's.
+	value:       string,
 	shortcut:    Shortcut_Highlight,
 	chord:       commands.Shortcut,
 	// A command that cannot run now, listed because a shortcut search matched it; drawn disabled.
 	unavailable: bool,
+	// How often and recently it was run, from Palette_Usage when the palette opened.
+	frecency:    f64,
 }
 
 // The identity activation needs, independent of the current result ordering.
@@ -237,6 +248,18 @@ Palette :: struct {
 	keys_hover:   bool,
 	// The chord the Unassigned row offered: the next command chosen opens its shortcut editor with it.
 	assign:       Maybe(commands.Shortcut),
+	// Queries that ran a result, and the Up and Down walk through them; see palette_recall_key.
+	history:      Palette_History,
+	browse:       Maybe(Query_Browse(Palette_Mode)),
+	usage:        Palette_Usage,
+	// When the palette opened, in Unix seconds. Frecency scores against it and records uses at it.
+	opened_at:    i64,
+	// The items this opening has counted a use of, at most once each, and whether one was recorded since
+	// palette_used_take last asked.
+	counted:      [dynamic]Palette_Use,
+	used:         bool,
+	// The query texts this opening has recorded in history, owned; see palette_note_query.
+	noted:        [dynamic]string,
 }
 
 // What the last outcome names for the owner: the setting to reveal (Open_Setting), the value to save
@@ -312,6 +335,8 @@ palette_init :: proc(
 	p.positions = make([dynamic]int, allocator)
 	p.chosen_value = make([dynamic]u8, allocator)
 	p.chosen_key = make([dynamic]u8, allocator)
+	p.counted = make([dynamic]Palette_Use, allocator)
+	p.noted = make([dynamic]string, allocator)
 	edit_init(&p.buffers, allocator)
 	p.settings = settings
 	p.visible_rows = PALETTE_MAX_ROWS
@@ -331,6 +356,12 @@ palette_init :: proc(
 
 palette_destroy :: proc(p: ^Palette) {
 	edit_set(p, nil)
+	palette_browse_end(p)
+	query_history_destroy(&p.history)
+	palette_usage_destroy(&p.usage)
+	delete(p.counted)
+	palette_noted_clear(p)
+	delete(p.noted)
 	delete(p.chosen_key)
 	free(p.scratch, p.query.bytes.allocator)
 	delete(p.query.bytes)
@@ -352,13 +383,18 @@ palette_set_availability :: proc(p: ^Palette, availability: Palette_Availability
 	p.availability = availability
 }
 
-palette_open :: proc(p: ^Palette, registry: ^commands.Registry) {
-	palette_open_mode(p, registry, .All)
+palette_open :: proc(p: ^Palette, registry: ^commands.Registry, now: i64 = 0) {
+	palette_open_mode(p, registry, .All, now)
 }
 
-palette_open_mode :: proc(p: ^Palette, registry: ^commands.Registry, mode: Palette_Mode) {
+// `now`, in Unix seconds, dates the uses this opening records and ages the ones before it.
+palette_open_mode :: proc(p: ^Palette, registry: ^commands.Registry, mode: Palette_Mode, now: i64 = 0) {
 	presence_open(&p.presence, DIALOG_PRESENCE)
+	palette_browse_end(p)
 	field_set(&p.query, "")
+	p.opened_at = now
+	clear(&p.counted)
+	palette_noted_clear(p)
 	p.selected, p.scroll = 0, 0
 	p.mode = mode
 	p.mode_hover = -1
@@ -372,6 +408,7 @@ palette_open_mode :: proc(p: ^Palette, registry: ^commands.Registry, mode: Palet
 
 palette_close :: proc(p: ^Palette) {
 	edit_set(p, nil)
+	palette_browse_end(p)
 	presence_close(&p.presence)
 
 	p.mode_hover = -1
@@ -440,6 +477,7 @@ palette_next_mode :: proc(mode: Palette_Mode, reverse: bool = false) -> Palette_
 // become typed text, which every mode can search, and a pending assignment ends.
 palette_set_mode :: proc(p: ^Palette, registry: ^commands.Registry, mode: Palette_Mode) {
 	if p.mode == mode {return}
+	palette_browse_end(p)
 	if p.keys.state != .Off {key_search_leave(&p.keys, &p.query)}
 	p.assign = nil
 	p.mode = mode
@@ -458,6 +496,7 @@ palette_recording :: proc(p: ^Palette) -> bool {return p.keys.state == .Recordin
 palette_key_search_toggle :: proc(p: ^Palette, registry: ^commands.Registry) -> Outcome {
 	edit_set(p, nil)
 	drag_set(p, nil)
+	palette_browse_end(p)
 	if p.keys.state != .Off {
 		key_search_leave(&p.keys, &p.query)
 	} else {
@@ -487,6 +526,7 @@ palette_key_search_step :: proc(p: ^Palette, registry: ^commands.Registry, step:
 // its shortcut editor with the chord added, and Enter there saves it.
 palette_assign :: proc(p: ^Palette, registry: ^commands.Registry, chord: commands.Shortcut) -> Outcome {
 	edit_set(p, nil)
+	palette_browse_end(p)
 	p.keys = {}
 	field_set(&p.query, "")
 	p.mode = .Commands
@@ -610,70 +650,70 @@ setting_header_match :: proc(p: ^Palette, setting: int, query: string, highlight
 	return combined, highlights[:count]
 }
 
-@(private)
-fold_prefix :: proc(value, prefix: string) -> bool {
-	s, p := value, prefix
-	for len(p) > 0 {
-		if len(s) == 0 {return false}
-		_, s_size := utf8.decode_rune_in_string(s)
-		_, p_size := utf8.decode_rune_in_string(p)
-		if !strings.equal_fold(s[:s_size], p[:p_size]) {return false}
-		s, p = s[s_size:], p[p_size:]
-	}
-	return true
-}
-
-@(private)
-fold_contains :: proc(value, needle: string) -> bool {
-	if len(needle) == 0 {return true}
-	for offset := 0; offset < len(value); {
-		if fold_prefix(value[offset:], needle) {return true}
-		_, size := utf8.decode_rune_in_string(value[offset:])
-		offset += size
-	}
-	return false
-}
-
-// The explainable match class of one field: exact, prefix, substring, then fuzzy.
-@(private)
-match_class :: proc(query, value: string) -> int {
-	if strings.equal_fold(query, value) {return 0}
-	if fold_prefix(value, query) {return 1}
-	if fold_contains(value, query) {return 2}
-	return 3
-}
-
 // Label matches always outrank secondary-field matches, keeping the palette's title-first rule.
-// Within a field the classes run exact, prefix, substring, fuzzy; fields run label, then the
-// caller's order, so a settings key match ranks below any label match but above a group match.
+// The label's exact, prefix and substring classes lead; its word-start and scattered classes follow the
+// shortcut classes. Fields run in the caller's order, each through every class, so a settings key
+// match ranks below any label match but above a group match. `loosest` is the loosest class that
+// counts: tabs and workspaces stop at word starts, since the scattered letters of a long process title
+// match nearly any query.
 @(private)
 rank_fields :: proc(
 	query, primary: string,
 	secondary: []string,
 	scratch: ^fuzzy.Scratch,
-	fuzzy_matches: bool,
+	loosest: fuzzy.Class,
 ) -> (
 	rank: int,
 	score: f64,
 	matched, title_match: bool,
 ) {
-	by_primary, primary_error := fuzzy.score(query, primary, scratch)
+	by_primary, primary_error := fuzzy.score(query, primary, scratch, loosest)
 	if primary_error != .None {return}
 	if by_primary.matched {
-		class := match_class(query, primary)
-		if class < 3 {return class, by_primary.score, true, true}
-		if fuzzy_matches {return PALETTE_RANK_FUZZY, by_primary.score, true, true}
+		rank = int(by_primary.class)
+		#partial switch by_primary.class {
+		case .Words:
+			rank = PALETTE_RANK_WORDS
+		case .Scattered:
+			rank = PALETTE_RANK_FUZZY
+		}
+		return rank, by_primary.score, true, true
 	}
 	for field, i in secondary {
-		by_field, field_error := fuzzy.score(query, field, scratch)
-		if field_error != .None {continue}
-		if !by_field.matched {continue}
-		class := match_class(query, field)
-		if class == 3 && !fuzzy_matches {continue}
-		base := PALETTE_RANK_FIELDS + 3 * i
-		return base + class, by_field.score, true, false
+		by_field, field_error := fuzzy.score(query, field, scratch, loosest)
+		if field_error != .None || !by_field.matched {continue}
+		return field_rank(i, by_field.class), by_field.score, true, false
 	}
 	return 0, 0, false, false
+}
+
+@(private)
+field_rank :: proc(field: int, class: fuzzy.Class) -> int {
+	return PALETTE_RANK_FIELDS + PALETTE_FIELD_CLASSES * field + int(class)
+}
+
+// A setting's choices match as its last field, by the label each displays, up to word starts: "comfy"
+// finds Activity panel view. Scattered letters across dozens of short labels would match almost
+// anything. The best class wins, then the better score, then the first choice.
+@(private)
+choice_field_match :: proc(
+	query: string,
+	choices, labels: []string,
+	scratch: ^fuzzy.Scratch,
+) -> (
+	best: fuzzy.Result,
+	label: string,
+) {
+	for _, i in choices {
+		text := dropdown_label({choices = choices, labels = labels}, i)
+		by_choice, err := fuzzy.score(query, text, scratch, .Words)
+		if err != .None || !by_choice.matched {continue}
+		if !best.matched || by_choice.class < best.class ||
+		   (by_choice.class == best.class && by_choice.score > best.score) {
+			best, label = by_choice, text
+		}
+	}
+	return
 }
 
 @(private)
@@ -710,22 +750,15 @@ command_shortcut_match :: proc(
 	return best
 }
 
+// `lit` is the text whose matched letters the row lights: the title, a matched choice's label, or none.
 @(private)
-append_result :: proc(
-	p: ^Palette,
-	result: Palette_Result,
-	width: int,
-	query, primary: string,
-	title_match: bool,
-) {
+append_result :: proc(p: ^Palette, result: Palette_Result, width: int, query, lit: string) {
 	copy := result
-	if width > 0 {
+	if width > 0 && lit != "" {
 		start := len(p.ordered) * width
 		highlights := p.positions[start:start + width]
-		if title_match {
-			if _, err := fuzzy.match_positions(query, primary, highlights, p.scratch); err == .None {
-				copy.positions = highlights
-			}
+		if _, err := fuzzy.match_positions(query, lit, highlights, p.scratch); err == .None {
+			copy.positions = highlights
 		}
 	}
 	append(&p.ordered, copy)
@@ -742,7 +775,7 @@ consider_item :: proc(
 	query: string,
 	width: int,
 	secondary: []string,
-	fuzzy_matches: bool,
+	loosest: fuzzy.Class,
 	shortcut: Shortcut_Highlight = {},
 ) {
 	rank, score, matched, title_match := rank_fields(
@@ -750,7 +783,7 @@ consider_item :: proc(
 		title,
 		secondary,
 		p.scratch,
-		fuzzy_matches,
+		loosest,
 	)
 	if by_shortcut := shortcut_rank(shortcut.hit.match); by_shortcut >= 0 && (!matched || by_shortcut < rank) {
 		rank, matched = by_shortcut, true
@@ -767,20 +800,16 @@ consider_item :: proc(
 		title_match = title_match,
 		shortcut    = shortcut,
 	}
-	append_result(p, result, width, query, title, title_match)
+	append_result(p, result, width, query, title_match ? title : "")
 }
 
-// Settings carry the existing title/group matcher's header alias and add the key as a field.
+// A setting matches by its title, then its key and group, then the labels of its static choices, and
+// last by the existing title/group matcher's header alias.
 @(private)
 consider_setting :: proc(p: ^Palette, setting: int, query: string, width: int) {
 	s := p.settings[setting]
-	rank, score, matched, title_match := rank_fields(
-		query,
-		s.title,
-		[]string{s.key, s.group},
-		p.scratch,
-		true,
-	)
+	fields := [?]string{s.key, s.group}
+	rank, score, matched, title_match := rank_fields(query, s.title, fields[:], p.scratch, .Scattered)
 	result := Palette_Result {
 		kind        = .Setting,
 		command     = nil,
@@ -791,7 +820,12 @@ consider_setting :: proc(p: ^Palette, setting: int, query: string, width: int) {
 		title_match = title_match,
 	}
 	if matched {
-		append_result(p, result, width, query, s.title, title_match)
+		append_result(p, result, width, query, title_match ? s.title : "")
+		return
+	}
+	if by_choice, label := choice_field_match(query, s.choices, s.choice_labels, p.scratch); by_choice.matched {
+		result.rank, result.score, result.value = field_rank(len(fields), by_choice.class), by_choice.score, label
+		append_result(p, result, width, query, label)
 		return
 	}
 	start := len(p.ordered) * width
@@ -809,16 +843,26 @@ count_of :: proc(source: Palette_Source) -> int {
 	return max(0, source.count(source.user))
 }
 
+// Match class first. Within the label classes (exact, prefix, substring) and the shortcut classes, the
+// more frecent result leads and then the better score, since every match there answers the query
+// equally plainly. Word starts, scattered letters and secondary fields vary in how well they match, so
+// there the score leads and frecency only breaks ties.
 @(private)
 less_result :: proc(a, b: Palette_Result) -> bool {
 	if a.rank != b.rank {return a.rank < b.rank}
-	return a.score > b.score
+	if a.rank < PALETTE_RANK_WORDS && a.frecency != b.frecency {return a.frecency > b.frecency}
+	if a.score != b.score {return a.score > b.score}
+	return a.frecency > b.frecency
 }
 
-// Rebuilds the visible result list for the active mode as one flat ranking. An empty query lists
-// each domain in natural order; otherwise label matches rank first, then shortcut and secondary fields,
-// by match class and score, with the palette's domain order and then insertion order breaking ties. A
-// complete chord no command uses leads the list as the Unassigned row.
+@(private)
+more_frecent :: proc(a, b: Palette_Result) -> bool {return a.frecency > b.frecency}
+
+// Rebuilds the visible result list for the active mode as one flat ranking. An empty query lists the
+// results run before by frecency, then the rest of each domain in natural order; otherwise label matches
+// rank first, then shortcut and secondary fields, by match class, frecency and score (see less_result),
+// with the palette's domain order and then insertion order breaking ties. A complete chord no command
+// uses leads the list as the Unassigned row.
 @(private)
 refresh :: proc(p: ^Palette, registry: ^commands.Registry) {
 	query := palette_query(p)
@@ -871,7 +915,7 @@ refresh :: proc(p: ^Palette, registry: ^commands.Registry) {
 					query,
 					width,
 					[]string{item.detail, item.owner},
-					false,
+					.Words,
 				)
 			}
 		}
@@ -896,7 +940,7 @@ refresh :: proc(p: ^Palette, registry: ^commands.Registry) {
 					query,
 					width,
 					[]string{item.detail},
-					false,
+					.Words,
 				)
 			}
 		}
@@ -939,7 +983,7 @@ refresh :: proc(p: ^Palette, registry: ^commands.Registry) {
 				query,
 				width,
 				[]string{commands.category(command.name).title},
-				true,
+				.Scattered,
 				match,
 			)
 			if len(p.ordered) > before {p.ordered[before].unavailable = !available}
@@ -956,7 +1000,10 @@ refresh :: proc(p: ^Palette, registry: ^commands.Registry) {
 		for kind in PALETTE_DOMAIN_ORDER {
 			append(&p.results, ..p.ordered[spans[kind][0]:spans[kind][1]])
 		}
-		if !empty {slice.stable_sort_by(p.results[first:], less_result)}
+		if !palette_usage_empty(&p.usage) {
+			for &result in p.results[first:] {result.frecency = palette_frecency(p, result)}
+		}
+		slice.stable_sort_by(p.results[first:], empty ? more_frecent : less_result)
 	}
 	p.selected = clamp(p.selected, 0, max(0, len(p.results) - 1))
 	keep_selection_visible(p)
@@ -1031,6 +1078,7 @@ run :: proc(p: ^Palette, registry: ^commands.Registry, index: int) -> (Outcome, 
 		return palette_binding_assign(p, registry, index), 0
 	}
 	if result.kind == .Command && !palette_available(p, result.command) {return .None, 0}
+	palette_record(p, result)
 	palette_close(p)
 	switch result.kind {
 	case .Command:
@@ -1068,6 +1116,7 @@ edited :: proc(p: ^Palette, registry: ^commands.Registry, change: Field_Change) 
 		return .Changed
 	case .Edited:
 	}
+	palette_browse_end(p)
 	if mode, length := palette_parse_prefix(field_string(&p.query)); length > 0 {
 		strip_prefix(&p.query, length)
 		p.mode = mode
@@ -1141,7 +1190,11 @@ palette_key :: proc(
 			if PALETTE_OPERATE in e.modifiers {return control_activate(p, setting), 0}
 		}
 	}
-	if step := list_key_step(e, p.visible_rows, len(p.results)); step != 0 {return move(p, step), 0}
+	if outcome, recalled := palette_recall_key(p, registry, e); recalled {return outcome, 0}
+	if step := list_key_step(e, p.visible_rows, len(p.results)); step != 0 {
+		palette_browse_end(p)
+		return move(p, step), 0
+	}
 	#partial switch e.key {
 	case PALETTE_CANCEL_KEY:
 		palette_close(p)
@@ -1356,10 +1409,8 @@ palette_mouse_move :: proc(p: ^Palette, l: Palette_Layout, x, y: f32, text: ^Tex
 	case Chain_Edit:
 		return palette_chain_hover(p, &edit, l, text, x, y)
 	case Choice_Edit:
-		hover := popup_row_at(p, &edit, l, x, y)
-		if hover == edit.hover {return .None}
-		edit.hover = hover
-		return .Changed
+		c, a, _ := palette_dropdown(p, l)
+		return dropdown_hover(&p.buffers.dropdown, c, a, x, y, l.scale) ? .Changed : .None
 	case Text_Edit:
 		return .None
 	}
@@ -1511,7 +1562,10 @@ palette_scroll :: proc(p: ^Palette, rows: int) -> Outcome {
 		return .None
 	case Chain_Edit:
 	case Choice_Edit:
-		return popup_wheel(p, &edit, rows)
+		// The wheel has no layout; the list fits the window the last palette_fit measured.
+		a := Dropdown_Anchor{bounds = p.fit_page, align_end = true}
+		moved := dropdown_wheel(&p.buffers.dropdown, choice_dropdown(p, edit.setting), a, rows, p.fit_scale)
+		return moved ? .Changed : .None
 	case Text_Edit:
 		edit_set(p, nil)
 	}
@@ -1660,10 +1714,9 @@ palette_key_hints :: proc(p: ^Palette, out: ^[PALETTE_HINT_CAP]Palette_Key_Hint)
 
 @(private)
 key_hint_width :: proc(keycap, label: ^Text, hint: Palette_Key_Hint, scale: f32) -> f32 {
-	pad := KEYCAP_PADDING * scale
-	width := text_width(keycap, hint.keys[0]) + 2 * pad
+	width := keycap_width(keycap, hint.keys[0], scale)
 	if hint.keys[1] != "" {
-		width += text_width(label, "/") + 2 * SPACE_1 * scale + text_width(keycap, hint.keys[1]) + 2 * pad
+		width += text_width(label, "/") + 2 * SPACE_1 * scale + keycap_width(keycap, hint.keys[1], scale)
 	}
 	return width + SPACE_1 * scale + text_width(label, hint.label)
 }
@@ -1680,8 +1733,6 @@ draw_key_hint :: proc(
 	scale: f32,
 ) -> render.Build_Status {
 	pen := x
-	height := min(KEYCAP_HEIGHT * scale, footer.height)
-	top := footer.y + (footer.height - height) / 2
 	for key, i in hint.keys {
 		if key == "" {continue}
 		if i > 0 {
@@ -1689,19 +1740,10 @@ draw_key_hint :: proc(
 			if result := draw_text(label, list, "/", pen, baseline, theme.faint); result != .Ok {return result}
 			pen += text_width(label, "/") + 4 * scale
 		}
-		width := text_width(keycap, key) + 2 * KEYCAP_PADDING * scale
-		draw_rect(list, {
-			rect   = {pen, top, width, height},
-			color  = theme.border,
-			radius = RADIUS_CONTROL * scale,
-			stroke = scale,
-		})
-		key_baseline := top + (height - keycap.line_height) / 2 + keycap.ascent
-		key_x := pen + KEYCAP_PADDING * scale
-		if result := draw_text(keycap, list, key, key_x, key_baseline, theme.muted); result != .Ok {
+		if result := keycap_draw(list, keycap, theme, key, pen, footer.y, footer.height, scale); result != .Ok {
 			return result
 		}
-		pen += width
+		pen += keycap_width(keycap, key, scale)
 	}
 	return draw_text(label, list, hint.label, pen + SPACE_1 * scale, baseline, theme.muted)
 }
@@ -1903,18 +1945,22 @@ palette_draw :: proc(
 				row_baseline,
 				item.unavailable ? theme.faint : theme.text,
 				title_width,
-				item.positions,
+				item.value == "" ? item.positions : nil,
 				theme.accent,
 			)
 			if result != .Ok {
 				return result
 			}
+			after := title_x + title_width + SPACE_2 * scale
 			if kind_word != "" && room - title_width - SPACE_2 * scale > 0 {
-				if kind_result := draw_text(&kind_text, list, kind_word, title_x + title_width + SPACE_2 * scale,
+				if kind_result := draw_text(&kind_text, list, kind_word, after,
 					row_baseline, theme.faint, max(0, room - title_width - SPACE_2 * scale)); kind_result != .Ok {
 					return kind_result
 				}
+				after += kind_width
 			}
+			if hint := choice_hint_draw(text, list, theme, item.value, item.positions, after, row_baseline,
+				title_x + room - after); hint != .Ok {return hint}
 		}
 		// The line under a recording field whose chord another command holds.
 		if note, line := palette_note(p); note >= 0 {
@@ -1930,6 +1976,6 @@ palette_draw :: proc(
 	if binding, open := &p.edit.(Shortcut_Edit); open {
 		return palette_binding_popup_draw(p, binding, l, list, text, theme, pointer)
 	}
-	if result := draw_popup(p, list, text, theme, l); result != .Ok {return result}
+	if result := draw_popup(p, list, text, theme, l, pointer); result != .Ok {return result}
 	return .Ok
 }

@@ -6,9 +6,9 @@ import "aio:render"
 // Dropdowns show at most this many options and scroll the rest.
 CHOICE_LIST_ROWS :: 8
 
-// The highlighted option and the first option shown of an open dropdown: the palette's choice list,
-// the Settings choice popup and the shortcut alternatives. Owners keep the options and their count,
-// and draw them in their own surface's style.
+// The highlighted option and the first option shown of an open list: a setting's Dropdown, the
+// motion curve popover's list and the shortcut alternatives. Owners keep the options and their
+// count.
 Choice_List :: struct {
 	index, scroll: int,
 }

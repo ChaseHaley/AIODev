@@ -135,6 +135,48 @@ header_contains :: proc(l: Header_Layout($E), x, y: f32) -> bool {
 	return render.rect_contains(l.panel, x, y)
 }
 
+// Where a header's program status pill of `status_width` sits, and how wide the title may then be.
+// Beside the buttons (`aside` 0) the pill ends where the title's room ends, taking at most half of it.
+// At the header's right end (`aside` 1), for a header whose buttons are hidden, the pill also takes their
+// room, never reaching left of its place beside them nor over the owner's widget; a header without that
+// room keeps it beside them. In between it slides. The title's width never depends on `aside`, so the
+// title neither moves nor re-truncates when the buttons come and go. A header too narrow for a pill
+// shows none.
+header_status_layout :: proc(
+	l: Header_Layout($E),
+	status_width, scale, aside: f32,
+) -> (
+	pill: render.Rect,
+	title_width: f32,
+) {
+	width := l.title.width
+	if status_width <= 0 || width < 120 * scale {return {}, width}
+	beside := min(status_width, width * 0.5)
+	pill = {
+		l.title.x + width - beside,
+		l.panel.y + SPACE_1 * scale,
+		beside,
+		max(0, l.panel.height - 2 * SPACE_1 * scale),
+	}
+	title_width = max(0, width - beside - SPACE_2 * scale)
+	// The pill's fill ends where the last button's does.
+	right := l.panel.x + l.panel.width - SPACE_1 * scale
+	left := pill.x
+	if l.widget.width > 0 {left = max(left, l.widget.x + l.widget.width + SPACE_2 * scale)}
+	edge := min(status_width, right - left)
+	if aside <= 0 || edge < beside {return}
+	pill.width = beside + (edge - beside) * aside
+	pill.x += (right - edge - pill.x) * aside
+	return
+}
+
+// Slides a header's program status toward the header's right end while its buttons are hidden and back
+// beside them when they show, with the header controls' own motion. `enabled` false lands it at once.
+header_status_update :: proc(m: ^Motion, aside, enabled: bool, frame: Frame_Time) -> bool {
+	motion_target(m, aside ? 1 : 0, CONTROL_MOTION_DURATION, .Linear, enabled)
+	return motion_update(m, frame)
+}
+
 shell_badge_draw :: proc(
 	list: ^render.Draw_List,
 	text: ^Text,
@@ -189,6 +231,8 @@ header_draw :: proc(
 	status_text: string = "",
 	status_phase: f32 = 0,
 	content_icon: Icon = .None,
+	// 0 for the status beside the buttons, 1 at the header's right end; see header_status_layout.
+	status_aside: f32 = 0,
 ) -> render.Build_Status {
 	if render.push_layer(list, area, radius) != .None {return .Ok}
 	draw_rect(list, {rect = l.panel, color = background})
@@ -210,39 +254,36 @@ header_draw :: proc(
 	strong := text_styled(text, focused ? .Strong : .Body)
 	small := text_styled(text, .Detail)
 	width := l.title.width
-	if status.glyph != .None && width >= 120 * scale {
+	if status.glyph != .None {
 		// A pill pads its ends by SPACE_2: glyph, SPACE_1, then the status text.
-		pill_width := min(text_width(&small, status_text) + (SPACE_2 + 12 + SPACE_1 + SPACE_2) * scale, width * 0.5)
-		pill := render.Rect {
-			l.title.x + width - pill_width,
-			l.panel.y + SPACE_1 * scale,
-			pill_width,
-			max(0, l.panel.height - 2 * SPACE_1 * scale),
+		pad := (SPACE_2 + 12 + SPACE_1 + SPACE_2) * scale
+		pill: render.Rect
+		pill, width = header_status_layout(l, text_width(&small, status_text) + pad, scale, status_aside)
+		if pill.width > 0 {
+			tint := status_color(theme, status.glyph)
+			tint.a *= status.dim ? 0.08 : 0.16
+			draw_rect(list, {rect = pill, color = tint, radius = pill.height / 2})
+			if result := status_glyph_draw(
+				list,
+				text,
+				theme,
+				{pill.x + SPACE_2 * scale, pill.y + (pill.height - 12 * scale) / 2, 12 * scale, 12 * scale},
+				status,
+				status_phase,
+				scale,
+			); result != .Ok {return result}
+			ink := theme.muted
+			if status.urgent {ink = status_color(theme, status.glyph)}
+			if result := draw_fading_text(
+				&small,
+				list,
+				status_text,
+				pill.x + (SPACE_2 + 12 + SPACE_1) * scale,
+				pill.y + (pill.height - small.line_height) / 2 + small.ascent,
+				ink,
+				max(0, pill.width - pad),
+			); result != .Ok {return result}
 		}
-		tint := status_color(theme, status.glyph)
-		tint.a *= status.dim ? 0.08 : 0.16
-		draw_rect(list, {rect = pill, color = tint, radius = pill.height / 2})
-		if result := status_glyph_draw(
-			list,
-			text,
-			theme,
-			{pill.x + SPACE_2 * scale, pill.y + (pill.height - 12 * scale) / 2, 12 * scale, 12 * scale},
-			status,
-			status_phase,
-			scale,
-		); result != .Ok {return result}
-		ink := theme.muted
-		if status.urgent {ink = status_color(theme, status.glyph)}
-		if result := draw_fading_text(
-			&small,
-			list,
-			status_text,
-			pill.x + (SPACE_2 + 12 + SPACE_1) * scale,
-			pill.y + (pill.height - small.line_height) / 2 + small.ascent,
-			ink,
-			max(0, pill.width - (SPACE_2 + 12 + SPACE_1 + SPACE_2) * scale),
-		); result != .Ok {return result}
-		width = max(0, width - pill_width - SPACE_2 * scale)
 	}
 	title_width := directory == "" ? width : min(width * 0.55, text_width(&strong, title))
 	baseline := l.panel.y + (l.panel.height - strong.line_height) / 2 + strong.ascent
@@ -304,59 +345,4 @@ header_buttons_draw :: proc(
 	for divider in l.dividers {
 		if divider.width > 0 {draw_rect(list, {rect = divider, color = theme.border})}
 	}
-}
-
-// Single-pane tabs keep their full terminal height, so their split controls float in a small pill at the
-// pane's top-right corner instead of a header row: a grip in `title`, then the `shown` buttons, each
-// `separated` button set apart from those after it.
-split_overlay_layout :: proc(
-	area: render.Rect,
-	scale: f32,
-	shown, separated: bit_set[$E],
-) -> Header_Layout(E) {
-	// A grip and compact buttons in a toolbar-height pill, SPACE_2 from the pane's corner.
-	button := HEIGHT_COMPACT * scale
-	inset := (HEIGHT_TOOLBAR - HEIGHT_COMPACT) / 2 * scale
-	gap := 2 * SPACE_1 * scale + scale
-	// The grip takes a button's room.
-	width := button + header_buttons_width(shown, separated, button, gap) + 2 * inset
-	height := HEIGHT_TOOLBAR * scale
-	l := Header_Layout(E) {
-		panel = {
-			max(area.x, area.x + area.width - width - SPACE_2 * scale),
-			area.y + SPACE_2 * scale,
-			min(width, area.width),
-			min(height, area.height),
-		},
-	}
-	l.title = {l.panel.x + inset, l.panel.y + inset, button, button}
-	x := l.title.x + button
-	previous: Maybe(E)
-	for &rect, action in l.buttons {
-		if action not_in shown {continue}
-		rect = {x, l.title.y, button, button}
-		if before, ok := previous.?; ok && before in separated {
-			l.dividers[before] = header_divider(rect, l.panel.y, l.panel.height, scale)
-		}
-		previous = action
-		x += header_divided(action, shown, separated) ? button + gap : button
-	}
-	return l
-}
-
-split_overlay_draw :: proc(
-	list: ^render.Draw_List,
-	theme: Theme,
-	l: Header_Layout($E),
-	buttons: [E]Header_Button,
-	scale: f32,
-	pointer: [2]f32 = {},
-) -> render.Build_Status {
-	radius := RADIUS_OVERLAY * scale
-	if render.push_layer(list, l.panel, radius) != .None {return .Ok}
-	draw_rect(list, {rect = l.panel, color = theme.surface, radius = radius})
-	draw_rect(list, {rect = l.panel, color = theme.border, radius = radius, stroke = scale})
-	icon_draw(list, .Grip, l.title, theme.muted, ICON_BUTTON, scale)
-	header_buttons_draw(list, theme, l, buttons, scale, pointer)
-	return .Ok
 }

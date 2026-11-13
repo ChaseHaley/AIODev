@@ -102,7 +102,7 @@ window_tab_hit :: proc(app: ^App, w: ^Window, bar: ui.Tab_Bar, x, y: f32) -> Tab
 			foreground := tab_drag_active(w) && w.workspace.tabs[i].marked
 			if foreground != (pass == 0) || !tab_shown(w.workspace, i) {continue}
 			r := tab_strip_rect(w, bar, i)
-			if x >= r.x && x < r.x + r.width {return Tab_Chrome_Tab{i}}
+			if x >= r.x && x < r.x + r.width {return tab_chrome_tab(w, i)}
 		}
 	}
 	for run in tab_layout(app, w, true).runs {
@@ -116,8 +116,9 @@ window_tab_hit :: proc(app: ^App, w: ^Window, bar: ui.Tab_Bar, x, y: f32) -> Tab
 window_tab_close_hit :: proc(app: ^App, w: ^Window, bar: ui.Tab_Bar, x, y: f32) -> int {
 	tab, ok := window_tab_hit(app, w, bar, x, y).(Tab_Chrome_Tab)
 	if !ok {return -1}
-	r := window_tab_close_rect(app, w, tab.index)
-	if r.width > 0 && render.rect_contains(r, x, y) {return tab.index}
+	index := tab_index_by_id(w.workspace, tab.id)
+	r := window_tab_close_rect(app, w, index)
+	if r.width > 0 && render.rect_contains(r, x, y) {return index}
 	return -1
 }
 
@@ -159,12 +160,18 @@ window_title_controls_end :: proc(app: ^App, w: ^Window) -> f32 {
 tab_control :: proc(w: ^Window, target: Tab_Chrome_Target) -> ui.Control_Motion {
 	switch t in target {
 	case Tab_Chrome_Tab:
-		if t.index >= 0 && t.index < len(w.tab_controls) {return w.tab_controls[t.index]}
+		if entry := tab_control_find(&w.presentation, t.id); entry != nil {return entry.control}
 	case Tab_Chrome_New: return w.new_tab_control
 	case Tab_Chrome_Profiles: return w.profiles_control
 	case Tab_Chrome_Group:
 	}
 	return {}
+}
+
+// The hover and press motion tab `index` of the window's workspace draws with in the strip.
+tab_motion :: proc(w: ^Window, index: int) -> ui.Control_Motion {
+	if index < 0 || index >= len(w.workspace.tabs) {return {}}
+	return tab_control(w, tab_chrome_tab(w, index))
 }
 
 window_tab_strip_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
@@ -218,7 +225,7 @@ window_tab_strip_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 			if sliding && render.push_layer(&w.list, clip) != .None {continue}
 			tile, built := tab_tile(app, w, i)
 			if built != .Ok {return built}
-			control := tab_control(w, Tab_Chrome_Tab{i})
+			control := tab_motion(w, i)
 			if result := ui.tab_draw(
 				&w.list,
 				&w.ui_text,
@@ -258,7 +265,7 @@ window_tab_strip_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 		// The selected tab rises with its hover, so its underline rises with it.
 		lift := ui.hover_lift_at(
 			app.theme,
-			tab_control(w, Tab_Chrome_Tab{w.workspace.selected}).hover.value,
+			tab_motion(w, w.workspace.selected).hover.value,
 			w.scale,
 		)
 		underline := ui.tab_underline_rect(bar, x, lift, w.scale)

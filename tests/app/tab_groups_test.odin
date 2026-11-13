@@ -264,7 +264,8 @@ the_strip_puts_each_chip_before_its_tabs_and_folds_them_into_it :: proc(t: ^test
 	testing.expect_value(t, second.x, bar.x + bar.tab_width + chip)
 	middle := second.x - chip / 2
 	testing.expect(t, app.window_tab_hit(&state, w, bar, middle, 20) == app.Tab_Chrome_Group{1})
-	testing.expect(t, app.window_tab_hit(&state, w, bar, second.x + 2, 20) == app.Tab_Chrome_Tab{1})
+	second_tab := app.Tab_Chrome_Tab{workspace.tabs[1].id}
+	testing.expect(t, app.window_tab_hit(&state, w, bar, second.x + 2, 20) == second_tab)
 
 	// Folded, the group's tabs take no room and no clicks; the chip stays, the tabs after it close up.
 	app.tab_group_find(workspace, 1).folded = true
@@ -272,7 +273,8 @@ the_strip_puts_each_chip_before_its_tabs_and_folds_them_into_it :: proc(t: ^test
 	bar = app.window_tab_bar(&state, w)
 	last := app.window_tab_rect(&state, w, 3)
 	testing.expect(t, last.x < bar.x + 2 * bar.tab_width + 2 * chip)
-	testing.expect(t, app.window_tab_hit(&state, w, bar, last.x + 2, 20) == app.Tab_Chrome_Tab{3})
+	last_tab := app.Tab_Chrome_Tab{workspace.tabs[3].id}
+	testing.expect(t, app.window_tab_hit(&state, w, bar, last.x + 2, 20) == last_tab)
 	folded := app.tab_layout(&state, w, true).runs[0]
 	testing.expect(t, app.window_tab_hit(&state, w, bar, app.tab_chip_strip_rect(w, bar, folded).x + 2, 20) ==
 		app.Tab_Chrome_Group{1})

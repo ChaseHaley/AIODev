@@ -23,6 +23,26 @@ palette_profiles_result_jumps_to_the_profile_table :: proc(t: ^testing.T) {
 	testing.expect_value(t, ui.editor_row(&w.editor).kind, ui.Row_Kind.Profile)
 }
 
+// Comfy is one of Activity panel view's values: the palette finds the setting by it and names the
+// value, and Settings search lists the same row.
+@(test)
+palette_and_settings_find_a_setting_by_a_choice_label :: proc(t: ^testing.T) {
+	f: Palette_Fixture
+	defer palette_fixture_destroy(t, &f)
+	if !palette_fixture_create(t, &f, "choice-label", second_window = false) {return}
+	s := &f.state
+	w := s.windows[0]
+	app.palette_open_mode(s, w, .All)
+	ui.palette_text(&s.palette, &s.registry, "comfy")
+	if !testing.expect(t, len(s.palette.results) > 0) {return}
+	testing.expect_value(t, ui.palette_result_name(&s.palette, s.palette.results[0]), "status.panel_view")
+	testing.expect_value(t, s.palette.results[0].value, "Comfy")
+	app.settings_reveal(s, w, {key = "pane.gap", search = .Clear})
+	ui.field_set(&w.editor.filter, "comfy")
+	ui.editor_filter(&w.editor)
+	testing.expect_value(t, ui.editor_row(&w.editor).key, "status.panel_view")
+}
+
 @(test)
 palette_toggle_saves_through_the_settings_file_and_stays_open :: proc(t: ^testing.T) {
 	f: Palette_Fixture

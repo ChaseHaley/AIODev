@@ -354,12 +354,12 @@ editor_choice_popup_highlights_the_option_under_the_pointer :: proc(t: ^testing.
 	popup := ui.editor_popup_rect(&p, l)
 	second := popup.y + 4 + 30 * 1.5
 	testing.expect(t, ui.editor_hover(&p, l, popup.x+10, second))
-	testing.expect_value(t, p.choice_list.index, 1)
+	testing.expect_value(t, p.dropdown.list.index, 1)
 	// The same option reports no change once it is already highlighted.
 	testing.expect(t, !ui.editor_hover(&p, l, popup.x+10, second))
 	// Below the popup must not steal the highlight from the open list.
 	testing.expect(t, !ui.editor_hover(&p, l, popup.x+10, popup.y+popup.height+40))
-	testing.expect_value(t, p.choice_list.index, 1)
+	testing.expect_value(t, p.dropdown.list.index, 1)
 }
 
 @(test)
@@ -701,7 +701,7 @@ editor_multiple_choice_toggles_options_and_stays_open :: proc(t: ^testing.T) {
 	testing.expect(t, ui.editor_select_key(&p, "status.notify_blocked"))
 	ui.editor_key(&p, key({key = .Enter}))
 	testing.expect_value(t, ui.editor_popup(&p), ui.Editor_Popup.Choice)
-	testing.expect_value(t, p.choice_list.index, 0)
+	testing.expect_value(t, p.dropdown.list.index, 0)
 	// Enter flips the highlighted option and leaves the list open for the next one.
 	testing.expect_value(t, ui.editor_key(&p, key({key = .Enter})), ui.Editor_Outcome.Save)
 	testing.expect_value(t, settings.set_text(row.choices, ui.editor_choice_set(&p)), "sound")
@@ -760,4 +760,80 @@ settings_page_revision_tracks_edits_navigation_and_external_conflicts :: proc(t:
 	testing.expect_value(t, stale.reason, ui.Editor_Stale_Reason.Changed_Outside)
 	testing.expect_value(t, ui.field_string(&p.value), "Pending")
 	testing.expect_value(t, ui.editor_source(&p), source)
+}
+
+@(private)
+search_rows :: proc(p: ^ui.Editor) -> []string {
+	keys := make([dynamic]string, context.temp_allocator)
+	for item in p.items {
+		if item.row >= 0 && item.part == 0 {append(&keys, p.rows[item.row].key)}
+	}
+	return keys[:]
+}
+
+@(private, rodata)
+panel_view_names := [?]string{"comfy", "dense"}
+@(private, rodata)
+panel_view_labels := [?]string{"Comfy", "Dense"}
+
+// Settings search finds a row by one of its schema choices, as the palette does, and says which. Its
+// own text still wins: only the best tier is listed. Live lists (themes, fonts) are not searched.
+@(test)
+settings_search_matches_choice_labels_below_the_rows_own_text :: proc(t: ^testing.T) {
+	p: ui.Editor
+	defer ui.editor_destroy(&p)
+	rows := [?]struct {
+		row:   ui.Editor_Row,
+		group: string,
+	}{
+		{{key = "status.panel_view", title = "Activity panel view", description = "How tasks show.",
+			value = "comfy", default_value = "comfy", kind = .Choice, choices = panel_view_names[:],
+			choice_labels = panel_view_labels[:]}, "Activity"},
+		{{key = "theme.name", title = "Theme", description = "Colors.", value = "comfy", kind = .Choice,
+			choices = panel_view_names[:], choice_labels = panel_view_labels[:], flags = {.Live_Choices}},
+			"Theme"},
+		{{key = "pane.gap", title = "Pane Gap", description = "Space between panes.", value = "5",
+			kind = .Integer, minimum = 0, maximum = 24}, "Panes"},
+	}
+	for r in rows {testing.expect_value(t, ui.editor_add(&p, r.row, r.group), nil)}
+	ui.field_set(&p.filter, "comfy")
+	ui.editor_filter(&p)
+	keys := search_rows(&p)
+	if testing.expect_value(t, len(keys), 1) {testing.expect_value(t, keys[0], "status.panel_view")}
+	testing.expect_value(t, ui.editor_row(&p).key, "status.panel_view")
+	testing.expect_value(t, p.items[p.selected].value, "Comfy")
+	// Two words: one in the row's own text, one in a choice.
+	ui.field_set(&p.filter, "activity dense")
+	ui.editor_filter(&p)
+	keys = search_rows(&p)
+	if testing.expect_value(t, len(keys), 1) {testing.expect_value(t, keys[0], "status.panel_view")}
+	testing.expect_value(t, p.items[p.selected].value, "Dense")
+	// The row's own text matching lists it without a value.
+	ui.field_set(&p.filter, "panel")
+	ui.editor_filter(&p)
+	testing.expect_value(t, ui.editor_row(&p).key, "status.panel_view")
+	testing.expect_value(t, p.items[p.selected].value, "")
+}
+
+// "c1" starts "card" and "1": the title's word starts outrank another title's scattered letters.
+@(test)
+settings_search_ranks_title_word_starts_above_scattered_letters :: proc(t: ^testing.T) {
+	p: ui.Editor
+	defer ui.editor_destroy(&p)
+	rows := [?]struct {
+		row:   ui.Editor_Row,
+		group: string,
+	}{
+		{{key = "a.scattered", title = "Record 1", value = "", kind = .Text}, "Records"},
+		{{key = "a.words", title = "(card 1) foo", value = "", kind = .Text}, "Cards"},
+	}
+	for r in rows {testing.expect_value(t, ui.editor_add(&p, r.row, r.group), nil)}
+	ui.field_set(&p.filter, "c1")
+	ui.editor_filter(&p)
+	keys := search_rows(&p)
+	if testing.expect_value(t, len(keys), 1) {testing.expect_value(t, keys[0], "a.words")}
+	ui.field_set(&p.filter, "rc1")
+	ui.editor_filter(&p)
+	keys = search_rows(&p)
+	if testing.expect_value(t, len(keys), 1) {testing.expect_value(t, keys[0], "a.scattered")}
 }

@@ -3,6 +3,7 @@ package app_test
 import "aio:input"
 import "core:testing"
 import app "../../src"
+import "aio:layout"
 import "aio:platform"
 import "aio:render"
 import "aio:ui"
@@ -113,7 +114,7 @@ pointer_settings_controls_use_hand :: proc(t: ^testing.T) {
 	app.editor_open(s, w)
 	if !testing.expect(t, app.settings_active(w)) {return}
 	l := app.settings_layout(w)
-	if !testing.expect(t, pointer_settings_select_top(w, "pane.show_headers")) {return}
+	if !testing.expect(t, pointer_settings_select_top(w, "pane.markdown_floating")) {return}
 	x, y := pointer_center(ui.editor_row_parts(&w.editor, l, w.editor.selected).toggle)
 	pointer_expect_move(t, s, w, x, y, .Hand)
 	if !testing.expect(t, pointer_settings_select_top(w, "font.family")) {return}
@@ -134,4 +135,58 @@ pointer_settings_select_top :: proc(w: ^app.Window, key: string) -> bool {
 	if !ui.editor_select_key(&w.editor, key) {return false}
 	w.editor.scroll = w.editor.selected
 	return true
+}
+
+// Fullscreen hides the title bar and tabs, so the pane header at the top edge owns the pointer there, with
+// either tab orientation: each button takes the hand, its hover and its press, and a click runs it. The
+// hidden caption buttons and tab strip once kept claiming that strip, so the header showed the arrow and no
+// hover, Split right did nothing and Close closed the window.
+@(test)
+pointer_fullscreen_pane_header_owns_the_top_edge :: proc(t: ^testing.T) {
+	for horizontal in ([?]bool{false, true}) {
+		f: Palette_Fixture
+		defer palette_fixture_destroy(t, &f)
+		if !palette_fixture_create(t, &f, "pointer-fullscreen-header", second_window = false) {return}
+		s, w := &f.state, f.state.windows[0]
+		s.animations = false
+		w.tabs_horizontal = horizontal
+		app.window_relayout(s, w)
+		app.pane_split(s, w, .Right)
+		app.run_action(s, w, .Fullscreen_Pane)
+		if !testing.expect_value(t, app.pane_view_current(w), layout.Pane_View.Screen) {return}
+		if !testing.expect_value(t, len(w.panes), 1) {return}
+		pane := w.panes[0]
+		view: ^app.Pane_View
+		for &candidate in w.views {if candidate.content == pane.content {view = &candidate}}
+		if !testing.expect(t, view != nil) {return}
+		l := app.pane_header_layout(w, pane)
+		for r, button in l.buttons {
+			if r.width <= 0 || app.pane_header_refused(w, pane, button) != .None {continue}
+			x, y := pointer_center(r)
+			testing.expectf(t, app.pointer_target(s, w, x, y) == .Pane_Header,
+				"horizontal tabs %v: %v belongs to the header, not %v", horizontal, button,
+				app.pointer_target(s, w, x, y))
+			pointer_expect_move(t, s, w, x, y, .Hand)
+			testing.expectf(t, view.header_hover == button, "horizontal tabs %v: %v hovers", horizontal, button)
+			testing.expectf(t, w.caption_hover == nil && w.tab_hover == nil,
+				"horizontal tabs %v: no hidden caption button or tab hovers over %v", horizontal, button)
+		}
+
+		// A press arms the button and a release away from it runs nothing.
+		x, y := pointer_center(l.buttons[.Zoom])
+		gesture_button(s, w, .Left, true, x, y)
+		testing.expectf(t, ui.armed_is(view.header_armed, app.Pane_Header_Target(app.Pane_Header_Button.Zoom)),
+			"horizontal tabs %v: Zoom shows its press", horizontal)
+		gesture_button(s, w, .Left, false, pane.rect.x + pane.rect.width / 2, pane.rect.y + pane.rect.height / 2)
+		testing.expect_value(t, app.pane_view_current(w), layout.Pane_View.Screen)
+
+		gesture_click_header(s, w, .Split_Right, l)
+		testing.expectf(t, len(w.panes) == 3, "horizontal tabs %v: Split right splits", horizontal)
+
+		app.run_action(s, w, .Fullscreen_Pane)
+		if !testing.expect_value(t, app.pane_view_current(w), layout.Pane_View.Screen) {return}
+		gesture_click_header(s, w, .Close, app.pane_header_layout(w, w.panes[0]))
+		testing.expect_value(t, len(s.windows), 1)
+		testing.expectf(t, len(w.panes) == 2, "horizontal tabs %v: Close closes the pane", horizontal)
+	}
 }

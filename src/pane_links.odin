@@ -272,6 +272,12 @@ pane_link_open :: proc(app: ^App, w: ^Window, node: layout.Node_Id) -> bool {
 	return true
 }
 
+// The OS asked the window to close. Its host may be closing in the same burst, as the taskbar's Close All
+// Windows does in its own order, so the answer waits for pane_links_sync.
+pane_link_close_request :: proc(w: ^Window) {
+	if link, linked := &w.link.?; linked {link.close = true}
+}
+
 // Closing a linked window keeps its panes: they go back to their slot in the tab, arranged as they were.
 pane_link_return :: proc(app: ^App, w: ^Window) {
 	pane_link_reconcile(app, w)
@@ -378,6 +384,12 @@ pane_links_sync :: proc(app: ^App) {
 		if !window_linked(w) {continue}
 		home, found := pane_link_locate(app, w)
 		if !found {pane_link_end(app, w); continue}
+		// Closed alone, it returns its panes; closed with its host, as when every window closes, it only
+		// hides, so the link lasts into the layout a later quit saves.
+		if link := &w.link.?; link.close {
+			link.close = false
+			if window_for_workspace(app, home.workspace) != nil {pane_link_return(app, w); continue}
+		}
 		pane_link_reconcile(app, w)
 		pane_link_track(w, home)
 		host := window_for_workspace(app, home.workspace)

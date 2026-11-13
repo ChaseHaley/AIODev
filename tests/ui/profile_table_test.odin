@@ -2,9 +2,12 @@ package ui_test
 
 import "core:testing"
 import "core:time"
+import "aio:font"
+import "aio:glyphs"
 import "aio:render"
 import "aio:settings"
 import "aio:ui"
+import fixtures "../fixtures"
 
 @(test)
 profile_overflow_click_targets_stay_inside_a_narrow_right_pane :: proc(t: ^testing.T) {
@@ -567,4 +570,88 @@ profile_trash_requests_shared_confirmation_and_protects_detected :: proc(t: ^tes
 	ui.editor_row(&p).flags += {.Protected}
 	testing.expect_value(t, ui.editor_press(&p, layout, nil, x, y, false), ui.Editor_Outcome.Changed)
 	testing.expect(t, p.request == nil)
+}
+
+// Every icon in a profile row names what it does under the pointer, and a two-way control names
+// the way it would go.
+@(test)
+editor_profile_controls_have_tooltips :: proc(t: ^testing.T) {
+	p: ui.Editor
+	defer ui.editor_destroy(&p)
+	profile_editor_fixture(t, &p)
+	l := ui.editor_layout({0, 40, 1200, 1400}, 1)
+	hover :: proc(t: ^testing.T, p: ^ui.Editor, l: ui.Editor_Layout, r: render.Rect) -> string {
+		testing.expect(t, r.width > 0)
+		x, y := profile_center(r)
+		_ = ui.editor_hover(p, l, x, y)
+		return ui.editor_profile_tooltip(p)
+	}
+	alpha := ui.editor_profile_parts(&p, l, profile_item_index(&p, "profile.alpha"))
+	testing.expect_value(t, hover(t, &p, l, alpha.radio), "Default profile")
+	testing.expect_value(t, hover(t, &p, l, alpha.toggle), "Hide from menus")
+	testing.expect_value(t, hover(t, &p, l, alpha.expand), "Edit profile")
+	testing.expect_value(t, hover(t, &p, l, alpha.duplicate), "Duplicate profile")
+	testing.expect_value(t, hover(t, &p, l, alpha.remove), "Delete profile")
+	testing.expect_value(t, alpha.more.width, 0)
+
+	beta_index := profile_item_index(&p, "profile.beta")
+	p.rows[p.items[beta_index].row].flags += {.Hidden}
+	beta := ui.editor_profile_parts(&p, l, beta_index)
+	testing.expect_value(t, hover(t, &p, l, beta.radio), "Use as default")
+	testing.expect_value(t, hover(t, &p, l, beta.toggle), "Show in menus")
+	ui.editor_profile_expand(&p, "beta")
+	beta = ui.editor_profile_parts(&p, l, profile_item_index(&p, "profile.beta"))
+	testing.expect_value(t, hover(t, &p, l, beta.expand), "Collapse profile")
+
+	// Off the controls, the row names nothing.
+	x, y := profile_center(beta.name)
+	_ = ui.editor_hover(&p, l, x, y)
+	testing.expect_value(t, ui.editor_profile_tooltip(&p), "")
+
+	// A narrow page folds the actions into More.
+	narrow := ui.editor_layout({0, 40, 480, 1400}, 1)
+	ui.editor_fit(&p, narrow)
+	more := ui.editor_profile_parts(&p, narrow, profile_item_index(&p, "profile.alpha")).more
+	testing.expect_value(t, hover(t, &p, narrow, more), "More actions")
+}
+
+// Every control in a profile row rises on the shared button surface under the pointer: it lifts on a
+// seat shadow and takes the pointer light, as the app's other icon buttons do.
+@(test)
+editor_profile_buttons_lift_under_the_pointer :: proc(t: ^testing.T) {
+	fonts, font_error := font.system_create()
+	if !testing.expect_value(t, font_error, font.Error.None) {return}
+	defer font.system_destroy(fonts)
+	device, device_error := render.device_create(.Warp)
+	if !testing.expect_value(t, device_error, render.Error.None) {return}
+	defer render.device_destroy(device)
+	cache: glyphs.Cache
+	glyphs.init(&cache, fonts, device)
+	defer glyphs.destroy(&cache)
+	text: ui.Text
+	if !testing.expect(t, ui.text_init(&text, fonts, &cache, 14)) {return}
+	list := render.draw_list_init()
+	defer render.draw_list_destroy(&list)
+	theme := ui.theme_from(fixtures.shipped_theme("studio-dark"), fixtures.default_interface())
+	p: ui.Editor
+	defer ui.editor_destroy(&p)
+	profile_editor_fixture(t, &p)
+	l := ui.editor_layout({0, 40, 1200, 1400}, 1)
+	beta := ui.editor_profile_parts(&p, l, profile_item_index(&p, "profile.beta"))
+	for button in ([?]render.Rect{beta.radio, beta.toggle, beta.expand, beta.duplicate, beta.remove}) {
+		if !testing.expect(t, button.width > 0) {continue}
+		x, y := profile_center(button)
+		_ = ui.editor_hover(&p, l, x, y)
+		render.draw_list_reset(&list)
+		testing.expect_value(t, ui.editor_draw(&p, l, &list, &text, theme, true, {x, y}), render.Build_Status.Ok)
+		seat, light := false, false
+		for r in list.rects {
+			// The button's own surface, not the row's: it holds the pointer and is no wider than a button.
+			own := r.rect.width <= 32 && render.rect_contains(r.rect, x, y)
+			if own && r.softness > 0 && r.rect.y > button.y - 4 {seat = true}
+			if own && r.fill == render.RECT_FILL_RIM {light = true}
+		}
+		testing.expectf(t, seat, "control at %v lifts on a seat shadow", button)
+		testing.expectf(t, light, "control at %v takes the pointer light", button)
+	}
 }

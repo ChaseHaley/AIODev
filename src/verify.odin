@@ -620,18 +620,28 @@ when AIO_CONTROL {
 		state_value(r, "tabs.count", len(workspace.tabs))
 		state_value(r, "tabs.selected", len(workspace.tabs) == 0 ? 0 : workspace.selected + 1)
 		state_value(r, "sessions.count", len(app.sessions))
+		// The tab under the pointer and the tab drawn pressed, by tab id; 0 is none.
+		hovered, pressed: Tab_Chrome_Tab
+		if w != nil {
+			hovered, _ = w.tab_hover.(Tab_Chrome_Tab)
+			pressed, _ = gesture_tab_pressed(w).(Tab_Chrome_Tab)
+		}
+		state_value(r, "tabs.hover", hovered.id)
+		state_value(r, "tabs.pressed", pressed.id)
 		for tab, i in workspace.tabs {
 			n := i + 1
 			row_index := -1
 			row_rect, close_rect, strip_rect, strip_close: render.Rect
-			position := f32(i)
+			position, hover := f32(i), f32(0)
 			if w != nil {
 				row_index, row_rect, close_rect = rail_tab_report_rects(w, i)
 				position = tab_position(w, i)
+				hover = tab_motion(w, i).hover.value
 				strip_rect = window_tab_rect(app, w, i)
 				strip_close = window_tab_close_rect(app, w, i)
 			}
 			state_value(r, state_key("tab.%d.id", n), tab.id)
+			state_valuef(r, state_key("tab.%d.hover", n), "%g", hover)
 			state_value(r, state_key("tab.%d.marked", n), tab.marked)
 			state_value(r, state_key("tab.%d.group", n), tab.group)
 			state_value(r, state_key("tab.%d.shown", n), tab_shown(workspace, i))
@@ -676,8 +686,7 @@ when AIO_CONTROL {
 		state_value(r, "panes.count", len(window_tiled_rects(w)))
 		state_value(r, "panes.focused", window_tree(w).focus)
 		state_valuef(r, "panes.gap", "%g", window_gap(app, w))
-		state_valuef(r, "panes.header_height", "%g", w.header_height)
-		state_value(r, "panes.split_overlay", w.split_overlay)
+		state_valuef(r, "panes.header_height", "%g", pane_header_height(w.scale))
 		state_value(r, "panes.moving", pane_motion_animating(w))
 		for view in w.views {
 			if !pane_owns_session(view.content.kind) {continue}
@@ -903,7 +912,7 @@ when AIO_CONTROL {
 		if entry == nil {return {}, "the selected window has no focused pane; address the region in pixels"}
 		for pane in w.panes {
 			if pane.content != {.Terminal, entry.id} {continue}
-			return pane_box(w.metrics, pane.rect, pane_insets(app, w, entry, pane)), ""
+			return pane_box(w.metrics, pane.rect, pane_insets(app, w, entry)), ""
 		}
 		return {}, "the focused pane is not visible; select its tab or use --region"
 	}

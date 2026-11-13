@@ -2,6 +2,7 @@ package ui
 
 import "aio:colour"
 import "aio:commands"
+import "aio:fuzzy"
 import "aio:input"
 import "aio:platform"
 import "aio:render"
@@ -11,7 +12,6 @@ import "core:fmt"
 import "core:math"
 import "core:strconv"
 import "core:strings"
-import "core:unicode/utf8"
 
 Row_Kind :: enum {
 	Text,
@@ -61,6 +61,9 @@ Editor_Row_Flag :: enum {
 	Builtin,
 	// A profile Settings may not delete (settings.profile_can_remove is false).
 	Protected,
+	// The choices come from installed themes or fonts, not the schema, so search leaves them out as the
+	// palette does.
+	Live_Choices,
 }
 
 // Strings, `choices` and `choice_labels` are owned by the editor. `choice_labels`, when present,
@@ -82,9 +85,9 @@ Editor_Row :: struct {
 	multiple:                                      bool,
 	choice_mask:                                   u32,
 	choices, choice_labels:                        []string,
-	// The narrowest the choice popup gets, in DIPs; zero follows the field.
+	// The narrowest the dropdown gets, in DIPs; zero follows the field.
 	choice_min_width:                              f32,
-	// The choice popup carries the Show all fonts switch, which reports .Font_Filter.
+	// The dropdown carries the Show all fonts switch, which reports .Font_Filter.
 	font_filter:                                   bool,
 	show_all_fonts:                                bool,
 	shortcut_mode:                                 Shortcut_Mode,
@@ -131,6 +134,8 @@ Editor_Item :: struct {
 	// A row taller than one line lists a line per `part`, counting from 0 at its first.
 	part:              int,
 	shortcut:          Shortcut_Highlight,
+	// The label of the choice the search matched when the row's own text did not; drawn after the title.
+	value:             string,
 }
 
 // Keyboard focus as readers see it: the search field, the selected row's control, its key-position
@@ -196,19 +201,8 @@ Editor_Page :: struct {}
 // A shortcut row's field has the keyboard; `capture` records chords or lists the alternatives.
 Editor_Shortcut :: struct {}
 
-Editor_Choice_Popup :: struct {
-	// Tab moves the keyboard from the font search to its Show All Fonts switch.
-	toggle_focus: bool,
-	drag:         Choice_Drag,
-}
-
-// The pointer drags a selection in the popup's search field, or holds its scrollbar thumb.
-Choice_Drag :: union {
-	Choice_Search_Drag,
-	Scroll_Drag,
-}
-
-Choice_Search_Drag :: struct {}
+// The selected row's dropdown is open; `dropdown` keeps what it shows.
+Editor_Choice_Popup :: struct {}
 
 Editor_Color_Popup :: struct {
 	drag: Color_Drag,
@@ -434,7 +428,7 @@ Editor :: struct {
 	chain_view:                                                        Editor_Chain_View,
 	mode:                                                              Editor_Mode,
 	hover_item, hover_reset, hover_outline:                            int,
-	choice_list:                                                       Choice_List,
+	dropdown:                                                          Dropdown,
 	// The options a multiple choice has on while its popup edits them.
 	choice_set:                                                        u32,
 	// The group last chosen in the outline stays highlighted until the page scrolls or the selection moves,
@@ -465,9 +459,6 @@ Editor :: struct {
 	// Geometry is fitted explicitly before input/rendering, never learned from drawing.
 	fit_layout:                                                        Editor_Layout,
 	filter, value:                                                     Text_Field,
-	choice_search:                                                     Text_Field,
-	popup_bar_hover:                                                   bool,
-	choice_matches:                                                    [dynamic]int,
 	// The picker keeps hue and saturation while value is zero, where RGB alone would lose them.
 	hsv:                                                               [3]f32,
 	message:                                                           string,
@@ -604,8 +595,7 @@ editor_destroy :: proc(p: ^Editor) {
 	delete(p.items)
 	delete(p.filter.bytes)
 	delete(p.value.bytes)
-	delete(p.choice_search.bytes)
-	delete(p.choice_matches)
+	dropdown_destroy(&p.dropdown)
 	delete(p.process_source)
 	motion_editor_destroy(&p.motions)
 	editor_revision_close(p)
@@ -757,7 +747,7 @@ editor_carry :: proc(to, from: ^Editor, draft: bool) {
 	popup := editor_popup(from)
 	if popup == .Choice && row.multiple && next.multiple {
 		mode = Editor_Choice_Popup{}
-		to.choice_list = from.choice_list
+		to.dropdown.list = from.dropdown.list
 	}
 	// A picker keeps its hue and saturation even at black, where rebuilding them from RGB loses both.
 	if popup == .Color && next.kind == row.kind {
@@ -777,7 +767,8 @@ editor_carry :: proc(to, from: ^Editor, draft: bool) {
 	}
 	if draft {
 		shortcut_capture_carry(&to.capture, &from.capture)
-		to.choice_list = from.choice_list
+		to.dropdown.list = from.dropdown.list
+		to.motion_list = from.motion_list
 		to.choice_set = from.choice_set
 		to.hsv = from.hsv
 		#partial switch _ in from.mode {
@@ -1077,8 +1068,8 @@ editor_editing :: proc(p: ^Editor) -> bool {return editor_focus(p) == .Control}
 
 // Whether the keyboard is on the font search's Show All Fonts switch.
 editor_choice_toggle_focused :: proc(p: ^Editor) -> bool {
-	choice, open := p.mode.(Editor_Choice_Popup)
-	return open && choice.toggle_focus
+	_, open := p.mode.(Editor_Choice_Popup)
+	return open && p.dropdown.toggle_focus
 }
 
 // Whether the pointer holds anything on the page: a selection, a slider, a picker, a scrollbar thumb
@@ -1093,7 +1084,7 @@ editor_dragging :: proc(p: ^Editor) -> bool {
 	case Editor_Editing:
 		return m.drag != .None
 	case Editor_Choice_Popup:
-		return m.drag != nil
+		return dropdown_dragging(&p.dropdown)
 	case Editor_Color_Popup:
 		return m.drag != .None
 	case Editor_Curve_Popup:
@@ -1103,13 +1094,11 @@ editor_dragging :: proc(p: ^Editor) -> bool {
 	return false
 }
 
-// Whether the pointer holds the page's, the theme strip's or the choice list's scrollbar thumb.
+// Whether the pointer holds the page's, the theme strip's or the dropdown's scrollbar thumb.
 editor_scrollbar_dragging :: proc(p: ^Editor) -> bool {
 	if p.page_drag.active || p.strip.bar_drag.active {return true}
-	choice, open := p.mode.(Editor_Choice_Popup)
-	if !open {return false}
-	_, holding := choice.drag.(Scroll_Drag)
-	return holding
+	_, open := p.mode.(Editor_Choice_Popup)
+	return open && dropdown_scrollbar_held(&p.dropdown)
 }
 
 // Moves the keyboard to the search field, closing whatever the selected row had open.
@@ -1134,6 +1123,8 @@ editor_blur :: proc(p: ^Editor) {
 @(private)
 editor_mode_set :: proc(p: ^Editor, next: Editor_Mode) {
 	p.mode = next
+	// The dropdown's switch focus, pointer hold and hover end with its list.
+	if _, choice := next.(Editor_Choice_Popup); !choice {dropdown_close(&p.dropdown)}
 	// The capture's state means something only while its field has the keyboard.
 	if _, shortcut := next.(Editor_Shortcut); !shortcut {p.capture.state = .Idle}
 	// An unsaved curve edit lives only in its popover.
@@ -1326,26 +1317,92 @@ editor_reveal :: proc(p: ^Editor, target: Reveal_Target) -> bool {
 	return editor_select_key(p, key)
 }
 
-// Each query word matches as written or, for plurals such as "panes", without its final s.
+// How a search answers a row, best last; the page lists only the rows of the best tier any row reaches.
+// A query word matches the row's own text (key, title, group, description, detail, badge, shortcut)
+// as written or, for plurals such as "panes", without its final s; a recorded or typed chord its
+// shortcut holds counts the same. Then a shortcut label's letters; then words the row's text lacks
+// found in the labels of its schema choices, up to word starts, so "comfy" finds Activity panel view;
+// then the title by word starts ("c1" in "(card 1) foo"), the title by scattered letters, and any of
+// the row's text by scattered letters. Every comparison is the palette's fuzzy.classify.
 @(private)
-row_matches :: proc(words: []string, haystack: string, fuzzy: bool = false) -> bool {
-	for word in words {
-		if strings.contains(haystack, word) {continue}
-		if len(word) > 3 &&
-		   word[len(word) - 1] == 's' &&
-		   strings.contains(haystack, word[:len(word) - 1]) {
-			continue
-		}
-		if !fuzzy {return false}
-		at := 0
-		for c in haystack {
-			if at >= len(word) {break}
-			wanted, size := utf8.decode_rune(word[at:])
-			if wanted == c {at += size}
-		}
-		if at != len(word) {return false}
+Search_Tier :: enum u8 {
+	None,
+	Text_Scattered,
+	Title_Scattered,
+	Title_Words,
+	Choice,
+	Shortcut_Label,
+	Text,
+}
+
+// The best class `word` reaches in any of `fields`. A word found only without its final s counts as a
+// substring.
+@(private)
+word_class :: proc(word: string, fields: []string) -> fuzzy.Class {
+	best := fuzzy.Class.None
+	for field in fields {
+		if class := fuzzy.classify(word, field); class < best {best = class}
+		if best <= .Substring {return best}
 	}
-	return true
+	if last := len(word) - 1; len(word) > 3 && (word[last] == 's' || word[last] == 'S') {
+		for field in fields {
+			if fuzzy.classify(word[:last], field) <= .Substring {return .Substring}
+		}
+	}
+	return best
+}
+
+// The loosest class among the query's words, each taking its best field.
+@(private)
+words_class :: proc(query: string, fields: []string) -> fuzzy.Class {
+	loosest := fuzzy.Class.Exact
+	rest := query
+	for word in strings.fields_iterator(&rest) {
+		if class := word_class(word, fields); class > loosest {loosest = class}
+		if loosest == .None {break}
+	}
+	return loosest
+}
+
+// Whether every word the row's own text lacks starts words of one of its schema choices' labels, as the
+// palette matches them, and the label the first such word found.
+@(private)
+choice_words_match :: proc(
+	query: string,
+	fields: []string,
+	row: ^Editor_Row,
+) -> (
+	label: string,
+	matched: bool,
+) {
+	if .Live_Choices in row.flags || len(row.choices) == 0 {return}
+	rest := query
+	for word in strings.fields_iterator(&rest) {
+		if word_class(word, fields) <= .Substring {continue}
+		best, best_label := fuzzy.Class.None, ""
+		for _, i in row.choices {
+			text := dropdown_label({choices = row.choices, labels = row.choice_labels}, i)
+			if class := fuzzy.classify(word, text); class < best {best, best_label = class, text}
+		}
+		if best > .Words {return "", false}
+		if label == "" {label = best_label}
+	}
+	return label, true
+}
+
+// The row's own text a search reads. A query in the shortcut grammar leaves out shortcut values, which
+// it compares by the grammar only.
+@(private)
+row_search_fields :: proc(p: ^Editor, row: ^Editor_Row, chord: bool) -> [7]string {
+	return {
+		row.key,
+		row.title,
+		p.groups[row.group].title,
+		row.description,
+		row.detail,
+		row.badge,
+		row.kind == .Shortcut && !chord ? row.value : "",
+	}
 }
 
 // Whether a row belongs to the page in the current expansion state, before search ranks it.
@@ -1390,10 +1447,9 @@ row_shortcut_match :: proc(p: ^Editor, q: ^commands.Shortcut_Query, row: Editor_
 }
 
 // Rebuilds the visible lines, keeping the current selection when it stays visible. A conflict chain
-// shows only its own rows. Otherwise only the best match class is listed: words in a row's text or a
-// chord its shortcut holds, then a shortcut label's letters, then fuzzy title and row text. A query in
-// the shortcut grammar compares shortcuts by the grammar only, and record mode lists the shortcuts the
-// recorded keys run.
+// shows only its own rows. Otherwise only the rows of the best Search_Tier any row reaches are listed,
+// in page order. A query in the shortcut grammar compares shortcuts by the grammar only, and record
+// mode lists the shortcuts the recorded keys run.
 editor_rebuild :: proc(p: ^Editor) {
 	if editor_chained(p) {
 		p.free = nil
@@ -1404,17 +1460,16 @@ editor_rebuild :: proc(p: ^Editor) {
 	if p.selected >= 0 && p.selected < len(p.items) {selected = p.items[p.selected]}
 	clear(&p.items)
 	p.free = nil
-	query := strings.to_lower(strings.trim_space(field_string(&p.filter)), context.temp_allocator)
-	words := strings.fields(query, context.temp_allocator)
+	query := strings.trim_space(field_string(&p.filter))
 	recording := p.keys.state != .Off
 	shortcuts: commands.Shortcut_Query
 	if !recording && query != "" {shortcuts = commands.shortcut_query(query)}
 	searching := recording || query != ""
-	ranks := make([]u8, len(p.rows), context.temp_allocator)
+	ranks := make([]Search_Tier, len(p.rows), context.temp_allocator)
 	matches := make([]Shortcut_Highlight, len(p.rows), context.temp_allocator)
 	used := false
-	best: u8
-	for row, i in p.rows {
+	best: Search_Tier
+	for &row, i in p.rows {
 		if !row_available(p, row) {continue}
 		if searching && row.kind == .Shortcut {
 			matches[i] = row_shortcut_match(p, &shortcuts, row)
@@ -1422,33 +1477,28 @@ editor_rebuild :: proc(p: ^Editor) {
 		}
 		match := matches[i].hit.match
 		if recording {
-			if match != .None {ranks[i] = 4}
+			if match != .None {ranks[i] = .Text}
 			best = max(best, ranks[i])
 			continue
 		}
-		haystack := strings.to_lower(
-			fmt.tprintf(
-				"%s %s %s %s %s %s %s",
-				row.key,
-				row.title,
-				p.groups[row.group].title,
-				row.description,
-				row.detail,
-				row.badge,
-				row.kind == .Shortcut && !shortcuts.chord ? row.value : "",
-			),
-			context.temp_allocator,
-		)
+		fields := row_search_fields(p, &row, shortcuts.chord)
+		text := words_class(query, fields[:])
 		switch {
-		case row_matches(words, haystack) || match >= .Modifiers:
-			ranks[i] = 4
+		case text <= .Substring || match >= .Modifiers:
+			ranks[i] = .Text
 		case match == .Label:
-			ranks[i] = 3
+			ranks[i] = .Shortcut_Label
 		case shortcuts.chord:
-		case row_matches(words, strings.to_lower(row.title, context.temp_allocator), true):
-			ranks[i] = 2
-		case row_matches(words, haystack, true):
-			ranks[i] = 1
+		case:
+			if _, found := choice_words_match(query, fields[:], &row); found {
+				ranks[i] = .Choice
+			} else if title := words_class(query, []string{row.title}); title <= .Words {
+				ranks[i] = .Title_Words
+			} else if title == .Scattered {
+				ranks[i] = .Title_Scattered
+			} else if text == .Scattered {
+				ranks[i] = .Text_Scattered
+			}
 		}
 		best = max(best, ranks[i])
 	}
@@ -1464,14 +1514,19 @@ editor_rebuild :: proc(p: ^Editor) {
 		clear(&matched)
 		for row, i in p.rows {
 			if row.group != g {continue}
-			if best > 0 && ranks[i] == best {append(&matched, i)}
+			if best > .None && ranks[i] == best {append(&matched, i)}
 		}
 		if len(matched) == 0 {continue}
 		if section >= 0 && section < EDITOR_SECTION_LIMIT {p.section_matches[section] += len(matched)}
 		if len(p.sections) > 0 && shown >= 0 && section != shown {continue}
 		append(&p.items, Editor_Item{group = g, row = -1, count = len(matched)})
 		for i in matched {
-			append(&p.items, Editor_Item{group = g, row = i, shortcut = matches[i]})
+			value := ""
+			if best == .Choice {
+				fields := row_search_fields(p, &p.rows[i], shortcuts.chord)
+				value, _ = choice_words_match(query, fields[:], &p.rows[i])
+			}
+			append(&p.items, Editor_Item{group = g, row = i, shortcut = matches[i], value = value})
 			for part in 1 ..< row_lines(p.rows[i]) {
 				append(&p.items, Editor_Item{group = g, row = i, part = part})
 			}
@@ -2032,8 +2087,8 @@ max_scroll :: proc(p: ^Editor) -> int {
 // Scrolls the page, or the outline under the pointer, without moving the selection.
 editor_wheel :: proc(p: ^Editor, l: Editor_Layout, x, y: f32, rows: int) {
 	if profile_menu_shown(p) {menu_wheel(&p.profile_menu, rows); return}
-	if editor_popup(p) == .Choice && render.rect_contains(editor_popup_rect(p, l), x, y) {
-		if row := editor_row(p); row != nil {choice_scroll_to(p, row, l, p.choice_list.scroll - rows)}
+	if c, a, open := editor_dropdown(p, l); open && dropdown_contains(&p.dropdown, c, a, x, y, l.scale) {
+		_ = dropdown_wheel(&p.dropdown, c, a, rows, l.scale)
 		return
 	}
 	if editor_popup(p) == .Shortcuts && render.rect_contains(editor_popup_rect(p, l), x, y) {
@@ -2134,13 +2189,7 @@ choose :: proc(p: ^Editor, row: ^Editor_Row, index: int) -> Editor_Outcome {
 @(private)
 open_choices :: proc(p: ^Editor, row: ^Editor_Row) {
 	editor_mode_set(p, Editor_Choice_Popup{})
-	if choice_searchable(row) {
-		field_set(&p.choice_search, "")
-		choice_filter(p, row)
-	}
-	p.choice_list.index = row.multiple ? 0 : choice_index(row, field_string(&p.value))
-	p.choice_list.scroll = p.choice_list.index
-	p.popup_bar_hover = false
+	dropdown_open(&p.dropdown, editor_dropdown_choices(p, row))
 }
 
 @(private)
@@ -2339,56 +2388,32 @@ editor_tab_row :: proc(p: ^Editor, from, step: int) -> int {
 
 @(private)
 popup_key :: proc(p: ^Editor, row: ^Editor_Row, e: input.Key_Event) -> (Editor_Outcome, bool) {
-	popup := editor_popup(p)
-	choice, open := p.mode.(Editor_Choice_Popup)
-	searchable := open && choice_searchable(row)
-	if searchable {
-		if row.font_filter && e.key == .Tab {
-			choice.toggle_focus = !choice.toggle_focus
-			editor_mode_set(p, choice)
+	if c, a, open := editor_dropdown(p, p.fit_layout); open {
+		outcome, taken := dropdown_key(&p.dropdown, c, a, e, p.fit_layout.scale)
+		switch outcome {
+		case .None:
+			return .None, taken
+		case .Changed:
 			return .Changed, true
-		}
-		if choice.toggle_focus {
+		case .Chosen:
+			return choice_choose(p, row), true
+		case .Closed:
+			editor_mode_set(p, Editor_Editing{})
+			return .Changed, true
+		case .Font_Filter:
 			// The page owner saves the other filter; the page it publishes lists those fonts.
-			if e.key == .Space || e.key == .Enter || e.key == .Numpad_Enter {return .Font_Filter, true}
-			if e.key != .Escape && e.key != .Arrow_Down && e.key != .Arrow_Up {return .None, true}
-			choice.toggle_focus = false
-			editor_mode_set(p, choice)
-		}
-	}
-	if popup == .Choice {
-		count := editor_choice_count(p, row)
-		visible := choice_popup_rows(p, row, p.fit_layout)
-		if choice_list_key(&p.choice_list, e, count, visible) {return .Changed, true}
-		// Without a search field the list has no caret to give Home and End to.
-		if !searchable && (e.key == .Home || e.key == .End) {
-			choice_list_move(&p.choice_list, e.key == .Home ? -count : count, count, visible)
-			return .Changed, true
-		}
-	}
-	if searchable {
-		// Every key the list did not take, but Escape and Enter, edits the search as in any field.
-		#partial switch e.key {
-		case .Escape, .Enter, .Numpad_Enter:
-		case:
-			change := field_key(&p.choice_search, e)
-			if change == .Edited {choice_filter(p, row)}
-			return change == .None ? .None : .Changed, true
+			return .Font_Filter, true
 		}
 	}
 	#partial switch e.key {
 	case .Escape:
 		editor_mode_set(p, Editor_Editing{})
 		return .Changed, true
-	case .Arrow_Up, .Arrow_Down, .P, .N, .Home, .End, .Page_Up, .Page_Down:
-		return .None, false
-	case .Enter, .Numpad_Enter, .Space:
-		if popup == .Choice {return choice_choose(p, row, p.choice_list.index), true}
-		if e.key == .Space {return .None, false}
+	case .Enter, .Numpad_Enter:
 		editor_mode_set(p, Editor_Editing{})
 		return .Save, true
 	}
-	return .None, popup == .Choice
+	return .None, false
 }
 
 // Takes the raw key event: capture needs the physical key, and navigation uses the layout's key.
@@ -2633,12 +2658,11 @@ editor_text :: proc(p: ^Editor, text: string) {
 	if color_board_text(p) {return}
 	row := editor_row(p)
 	if curve, open := p.mode.(Editor_Curve_Popup); open && curve.naming {
-		_ = field_text(&p.choice_search, text)
+		_ = field_text(&p.motion_name, text)
 		return
 	}
-	if choice, open := p.mode.(Editor_Choice_Popup); open && choice_searchable(row) {
-		if choice.toggle_focus {return}
-		if field_text(&p.choice_search, text) == .Edited {choice_filter(p, row)}
+	if _, open := p.mode.(Editor_Choice_Popup); open && row != nil {
+		_ = dropdown_text(&p.dropdown, editor_dropdown_choices(p, row), text)
 		return
 	}
 	focus := editor_focus(p)
@@ -2663,8 +2687,8 @@ editor_paste :: proc(p: ^Editor, text: string) {
 // The selected text of the focused field, for copying.
 editor_selection :: proc(p: ^Editor) -> string {
 	if editor_chained(p) {return ""}
-	if editor_popup(p) == .Choice && choice_searchable(editor_row(p)) {
-		return field_selected_text(&p.choice_search)
+	if c, _, open := editor_dropdown(p, p.fit_layout); open && c.searchable {
+		return dropdown_selection(&p.dropdown, c)
 	}
 	switch editor_focus(p) {
 	case .Search:
@@ -2680,9 +2704,8 @@ editor_selection :: proc(p: ^Editor) -> string {
 // Removes the selected text of the focused field after it was copied.
 editor_cut :: proc(p: ^Editor) {
 	if editor_selection(p) == "" {return}
-	if row := editor_row(p); editor_popup(p) == .Choice && choice_searchable(row) {
-		field_text(&p.choice_search, "")
-		choice_filter(p, row)
+	if c, _, open := editor_dropdown(p, p.fit_layout); open && c.searchable {
+		_ = dropdown_text(&p.dropdown, c, "")
 		return
 	}
 	if editor_focus(p) == .Control {
@@ -2791,9 +2814,6 @@ editor_fit :: proc(p: ^Editor, l: Editor_Layout) {
 	p.outline_scroll = clamp(p.outline_scroll, 0, max(0, len(entries) - rows))
 	editor_strip_fit(p, l)
 	if row := editor_row(p); row != nil {
-		if editor_popup(p) == .Choice {
-			choice_list_keep_visible(&p.choice_list, editor_choice_count(p, row), choice_popup_rows(p, row, l))
-		}
 		if editor_popup(p) == .Shortcuts {
 			choice_list_keep_visible(&p.capture.alternatives,
 				len(commands.shortcut_alternatives(row.value, context.temp_allocator)) + 1,
@@ -2951,46 +2971,6 @@ editor_profile_parts :: proc(p: ^Editor, l: Editor_Layout, index: int) -> Profil
 	return profile_row_parts(row.kind, editor_row_parts(p, l, index).row, l.scale)
 }
 
-@(private)
-choice_popup_rows :: proc(p: ^Editor, row: ^Editor_Row, l: Editor_Layout) -> int {
-	header := choice_search_height(row, l.scale)
-	return choice_list_rows(editor_choice_count(p, row), l.page.height, l.scale, header)
-}
-
-// Scrolls the choice list, keeping the highlighted option on a visible row.
-@(private)
-choice_scroll_to :: proc(p: ^Editor, row: ^Editor_Row, l: Editor_Layout, offset: int) {
-	visible := choice_popup_rows(p, row, l)
-	_ = choice_list_scroll_to(&p.choice_list, offset, editor_choice_count(p, row), visible)
-}
-
-@(private)
-choice_scrollbar :: proc(p: ^Editor, l: Editor_Layout) -> (bar: Scrollbar, visible: bool) {
-	row := editor_row(p)
-	if editor_popup(p) != .Choice || row == nil {return}
-	r := editor_popup_rect(p, l)
-	if r.width == 0 {return}
-	s := l.scale
-	header := choice_search_height(row, s)
-	area := render.Rect{r.x, r.y + header + 4 * s, r.width - s, r.height - header - 8 * s}
-	extent := Scroll_Extent{editor_choice_count(p, row), choice_popup_rows(p, row, l), p.choice_list.scroll}
-	return scrollbar_layout(area, extent, scrollbar_state(p.popup_bar_hover, choice_bar_drag(p)), s)
-}
-
-// The choice list's scrollbar thumb drag; inactive unless the pointer holds it.
-@(private)
-choice_bar_drag :: proc(p: ^Editor) -> Scroll_Drag {
-	choice, _ := p.mode.(Editor_Choice_Popup)
-	bar, _ := choice.drag.(Scroll_Drag)
-	return bar
-}
-
-@(private)
-choice_option_right :: proc(p: ^Editor, l: Editor_Layout, popup: render.Rect) -> f32 {
-	if bar, visible := choice_scrollbar(p, l); visible {return bar.track.x}
-	return popup.x + popup.width - 4 * l.scale
-}
-
 editor_popup_rect :: proc(p: ^Editor, l: Editor_Layout) -> render.Rect {
 	row := editor_row(p)
 	if color_board_shown(p) {return color_board_popup_rect(p, l)}
@@ -3003,18 +2983,8 @@ editor_popup_rect :: proc(p: ^Editor, l: Editor_Layout) -> render.Rect {
 	if popup == .Shortcuts {return shortcut_capture_popup_rect(&p.capture, parts, l.page, row.value, s)}
 	if popup == .Curve {return motion_popover_rect(parts, l.page, s)}
 	if popup == .Choice {
-		count := choice_popup_rows(p, row, l)
-		shown := &p.choice_list
-		shown.scroll = clamp(shown.scroll, max(0, shown.index - max(1, count) + 1), shown.index)
-		shown.scroll = min(shown.scroll, max(0, editor_choice_count(p, row) - count))
-		width := max(parts.field.width, row.choice_min_width * s)
-		r := render.Rect {
-			parts.field.x,
-			parts.field.y + parts.field.height + 4 * s,
-			width,
-			f32(max(1, count)) * CHOICE_HEIGHT * s + 8 * s + choice_search_height(row, s),
-		}
-		return dropdown_place(r, parts.row, l.page, s)
+		c, a, _ := editor_dropdown(p, l)
+		return dropdown_rect(&p.dropdown, c, a, s)
 	}
 	r := render.Rect {
 		parts.field.x + parts.field.width - 292 * s,
@@ -3104,33 +3074,17 @@ editor_press :: proc(
 			editor_mode_set(p, Editor_Editing{})
 			return .Changed
 		}
-		if choice, open := p.mode.(Editor_Choice_Popup); open {
-			if render.rect_contains(choice_font_toggle_rect(p, l), x, y) {
-				choice.toggle_focus = true
-				editor_mode_set(p, choice)
+		if c, a, open := editor_dropdown(p, l); open {
+			switch dropdown_press(&p.dropdown, c, a, text, x, y, extend, s) {
+			case .None, .Closed:
+				return .None
+			case .Changed:
+				return .Changed
+			case .Chosen:
+				return choice_choose(p, row)
+			case .Font_Filter:
 				return .Font_Filter
 			}
-			if choice_searchable(row) && y < r.y + 4 * s + choice_search_height(row, s) {
-				box := choice_search_box(p, l, text)
-				if text != nil {
-					field_pointer(&p.choice_search, field_box_offset(box, x), true, extend)
-				} else {field_select_all(&p.choice_search)}
-				editor_mode_set(p, Editor_Choice_Popup{drag = Choice_Search_Drag{}})
-				return .Changed
-			}
-			if bar, visible := choice_scrollbar(p, l); visible && scrollbar_contains(bar, x, y) {
-				held: Scroll_Drag
-				choice_scroll_to(p, row, l, scrollbar_press(&held, bar, y))
-				if held.active {
-					choice.drag = held
-					editor_mode_set(p, choice)
-				}
-				return .Changed
-			}
-			r.y += choice_search_height(row, s)
-			index := int((y - r.y - 4 * s) / (CHOICE_HEIGHT * s))
-			if y < r.y + 4 * s || index >= choice_popup_rows(p, row, l) {return .None}
-			return choice_choose(p, row, index + p.choice_list.scroll)
 		}
 		if popup == .Shortcuts {
 			return shortcut_outcome(p, shortcut_capture_press(&p.capture, &p.value, row.value, r, x, y, s))
@@ -3348,17 +3302,8 @@ editor_drag :: proc(p: ^Editor, l: Editor_Layout, text: ^Text, x, y: f32) -> boo
 			return true
 		}
 	case Editor_Choice_Popup:
-		switch drag in m.drag {
-		case Choice_Search_Drag:
-			box := choice_search_box(p, l, text)
-			return field_pointer(&p.choice_search, field_box_offset(box, x), false, true) != .None
-		case Scroll_Drag:
-			bar, visible := choice_scrollbar(p, l)
-			if !visible {return false}
-			before := p.choice_list.scroll
-			choice_scroll_to(p, row, l, scrollbar_drag(drag, bar, y))
-			return p.choice_list.scroll != before
-		}
+		c, a, _ := editor_dropdown(p, l)
+		return dropdown_drag(&p.dropdown, c, a, text, x, y, l.scale)
 	case Editor_Color_Popup:
 		if m.drag == .None {return false}
 		pick_color(p, color_parts(editor_popup_rect(p, l), row.kind == .Optional_Color, l.scale), m.drag, x, y)
@@ -3375,7 +3320,6 @@ editor_drag :: proc(p: ^Editor, l: Editor_Layout, text: ^Text, x, y: f32) -> boo
 editor_release :: proc(p: ^Editor) -> Editor_Outcome {
 	field_release(&p.filter)
 	field_release(&p.value)
-	field_release(&p.choice_search)
 	if p.page_drag.active {
 		p.page_drag = {}
 		return .Changed
@@ -3393,9 +3337,7 @@ editor_release :: proc(p: ^Editor) -> Editor_Outcome {
 		settled = m.drag == .Slider
 		if m.drag != .None {editor_mode_set(p, Editor_Editing{})}
 	case Editor_Choice_Popup:
-		if m.drag == nil {break}
-		editor_mode_set(p, Editor_Choice_Popup{toggle_focus = m.toggle_focus})
-		if _, bar := m.drag.(Scroll_Drag); bar {return .Changed}
+		if dropdown_release(&p.dropdown) {return .Changed}
 	case Editor_Color_Popup:
 		settled = m.drag != .None
 		if settled {editor_mode_set(p, Editor_Color_Popup{})}
@@ -3466,10 +3408,9 @@ editor_hover :: proc(p: ^Editor, l: Editor_Layout, x, y: f32, text: ^Text = nil)
 	board_changed := color_board_hover(p, l, x, y)
 	if color_board_shown(p) {popup_open = .None}
 	if popup_open != .None {
-		bar, bar_visible := choice_scrollbar(p, l)
-		over := bar_visible && scrollbar_contains(bar, x, y)
-		bar_changed = over != p.popup_bar_hover
-		p.popup_bar_hover = over
+		if c, a, open := editor_dropdown(p, l); open {
+			bar_changed = dropdown_hover(&p.dropdown, c, a, x, y, l.scale)
+		}
 		row := editor_row(p)
 		if row != nil && popup_open == .Shortcuts &&
 		   shortcut_capture_hover(&p.capture, editor_popup_rect(p, l), l.page, row.value, x, y, l.scale) {
@@ -3478,19 +3419,6 @@ editor_hover :: proc(p: ^Editor, l: Editor_Layout, x, y: f32, text: ^Text = nil)
 		if row != nil && popup_open == .Curve &&
 		   editor_motion_popup_hover(p, editor_popup_rect(p, l), x, y, l.scale) {
 			return true
-		}
-		if row != nil && popup_open == .Choice {
-			popup := editor_popup_rect(p, l)
-			right := choice_option_right(p, l, popup)
-			top := popup.y + choice_search_height(row, l.scale) + 4 * l.scale
-			if render.rect_contains(popup, x, y) && x >= popup.x + 4 * l.scale && x < right {
-				index := choice_list_at(p.choice_list, top, CHOICE_HEIGHT * l.scale, y,
-				                        editor_choice_count(p, row), choice_popup_rows(p, row, l))
-				if index >= 0 && index != p.choice_list.index {
-					p.choice_list.index = index
-					return true
-				}
-			}
 		}
 	}
 	item, reset, outline := -1, -1, -1
@@ -3561,17 +3489,27 @@ editor_hover :: proc(p: ^Editor, l: Editor_Layout, x, y: f32, text: ^Text = nil)
 editor_hover_clear :: proc(p: ^Editor) -> (changed: bool) {
 	changed =
 		p.hover_item >= 0 || p.hover_reset >= 0 || p.hover_outline >= 0 || p.hover_clear ||
-		p.hover_profile_item >= 0 || p.popup_bar_hover || p.keys_hover || p.hover_section >= 0 ||
+		p.hover_profile_item >= 0 || p.dropdown.bar_hover || p.keys_hover || p.hover_section >= 0 ||
 		p.page_bar_hover
 	p.hover_item, p.hover_reset, p.hover_outline, p.hover_clear = -1, -1, -1, false
 	p.keys_hover = false
-	p.popup_bar_hover = false
+	p.dropdown.bar_hover = false
 	p.hover_section, p.page_bar_hover = -1, false
 	p.hover_profile_item, p.hover_profile_control = -1, .Radio
 	changed = shortcut_chain_hover(&p.chain, {}) || changed
 	changed = editor_strip_hover_clear(p) || changed
 	changed = board_hover_set(p, {}) || changed
 	return
+}
+
+// Whether the pointer is over `rect`, a control drawn in `row`, while the page hover is on that row.
+// The hover leaves rows under a popup, a drag or the color board, so neither do their controls; a
+// hovered row carries the pointer light, so the window repaints as the pointer crosses the control.
+@(private)
+editor_row_control_hovered :: proc(p: ^Editor, row: ^Editor_Row, rect: render.Rect, pointer: [2]f32) -> bool {
+	if p.hover_item < 0 || p.hover_item >= len(p.items) {return false}
+	item := p.items[p.hover_item]
+	return item.row >= 0 && &p.rows[item.row] == row && render.rect_contains(rect, pointer.x, pointer.y)
 }
 
 // Whether the pointer is over editable text, which shows a text cursor.
@@ -3597,16 +3535,9 @@ editor_pointer :: proc(p: ^Editor, l: Editor_Layout, x, y: f32, text: ^Text = ni
 	if popup := editor_popup_rect(p, l); render.rect_contains(popup, x, y) {
 		row := editor_row(p)
 		if row == nil {return .Arrow}
-		if editor_popup(p) == .Choice {
-			if bar, visible := choice_scrollbar(p, l); visible && scrollbar_contains(bar, x, y) {return .Arrow}
-			if render.rect_contains(choice_font_toggle_rect(p, l), x, y) {return .Hand}
-			if choice_searchable(row) && y < popup.y + 4 * s + choice_search_height(row, s) {return .Text}
-			popup.y += choice_search_height(row, s)
-		}
+		if c, a, open := editor_dropdown(p, l); open {return dropdown_pointer(&p.dropdown, c, a, x, y, s)}
 		option := int((y - popup.y - 4 * s) / (CHOICE_HEIGHT * s))
 		#partial switch editor_popup(p) {
-		case .Choice:
-			if option >= 0 && option + p.choice_list.scroll < editor_choice_count(p, row) {return .Hand}
 		case .Shortcuts:
 			count := len(commands.shortcut_alternatives(row.value, context.temp_allocator))
 			if option >= 0 && option + p.capture.alternatives.scroll <= count {return .Hand}
@@ -3752,28 +3683,28 @@ profile_badge_draw :: proc(
 	)
 }
 
-// A 22px radio dot with a pointer and keyboard focus state.
+// A 22px radio dot with a pointer and keyboard focus state. Under the pointer it rises on the shared
+// button surface, a disc 4 DIPs wider than the dot's cell; `on_tint` is the row's selection tint.
 @(private)
 profile_radio_draw :: proc(
 	list: ^render.Draw_List,
 	rect: render.Rect,
-	on, focused, hovered: bool,
+	on, focused, hovered, on_tint: bool,
 	theme: Theme,
 	scale: f32,
-) {
-	if rect.width <= 0 {return}
-	if hovered {
-		hover := render.Rect {
-			rect.x - 4 * scale,
-			rect.y - 4 * scale,
-			rect.width + 8 * scale,
-			rect.height + 8 * scale,
-		}
-		draw_rect(list, {rect = hover, color = theme.hover, radius = hover.width / 2})
+	pointer: [2]f32,
+) -> render.Error {
+	if rect.width <= 0 {return .None}
+	b := Button {
+		rect    = {rect.x - 4 * scale, rect.y - 4 * scale, rect.width + 8 * scale, rect.height + 8 * scale},
+		hover   = hovered ? 1 : 0,
+		radius  = rect.width / scale / 2 + 4,
+		on_tint = on_tint,
 	}
+	face, _, err := button_draw(list, theme, b, scale, pointer)
 	dot := render.Rect {
-		rect.x + rect.width / 2 - 8 * scale,
-		rect.y + rect.height / 2 - 8 * scale,
+		face.x + face.width / 2 - 8 * scale,
+		face.y + face.height / 2 - 8 * scale,
 		16 * scale,
 		16 * scale,
 	}
@@ -3784,30 +3715,34 @@ profile_radio_draw :: proc(
 		draw_rect(list, {rect = inner, color = theme.accent_text, radius = pill_radius(inner)})
 	}
 	if focused {focus_ring_draw(list, dot, theme, scale)}
+	return err
 }
 
-// A small icon button inside a table row.
+// A small icon button inside a table row, on the shared button surface. `focused` is the keyboard's
+// place among the row's controls; `on_tint` is the row's selection tint under the button.
 @(private)
-profile_button_draw :: proc(
+table_button_draw :: proc(
 	list: ^render.Draw_List,
 	rect: render.Rect,
 	icon: Icon,
 	size: f32,
 	theme: Theme,
 	scale: f32,
-	focused, hovered, enabled: bool,
-) {
-	if rect.width <= 0 {return}
-	if enabled && (hovered || focused) {
-		draw_rect(
-			list,
-			{rect = rect, color = hovered ? theme.hover : theme.selection, radius = RADIUS_CONTROL * scale},
-		)
+	focused, hovered, on_tint: bool,
+	pointer: [2]f32,
+) -> render.Error {
+	if rect.width <= 0 {return .None}
+	b := Button {
+		rect     = rect,
+		hover    = hovered ? 1 : 0,
+		radius   = RADIUS_CONTROL,
+		selected = focused,
+		on_tint  = on_tint,
 	}
-	color := enabled ? theme.muted : theme.faint
-	if hovered || focused {color = theme.text}
-	if focused {focus_ring_draw(list, rect, theme, scale)}
-	icon_draw(list, icon, rect, color, size, scale)
+	face, ink, err := button_draw(list, theme, b, scale, pointer)
+	if focused {focus_ring_draw(list, face, theme, scale)}
+	icon_draw(list, icon, face, ink, size, scale)
+	return err
 }
 
 @(private)
@@ -3821,6 +3756,7 @@ profile_row_draw :: proc(
 	text: ^Text,
 	theme: Theme,
 	scale: f32,
+	pointer: [2]f32,
 ) -> render.Build_Status {
 	table := profile_row_parts(.Profile, parts.row, scale)
 	small := text_styled(text, .Detail)
@@ -3881,27 +3817,14 @@ profile_row_draw :: proc(
 			max(1, table.directory.width),
 		); result != .Ok {return result}
 	}
-	radio_focus := focused && p.profile_control == .Radio
-	if table.radio.width > 0 {profile_radio_draw(
-		list,
-		table.radio,
-		.Default in row.flags,
-		radio_focus,
-		hovered && p.hover_profile_control == .Radio,
-		theme,
-		scale,
-	)}
-	profile_button_draw(
-		list,
-		table.toggle,
-		.Hidden in row.flags ? .Eye_Off : .Eye,
-		ICON_BUTTON,
-		theme,
-		scale,
-		focused && p.profile_control == .Hidden,
-		hovered && p.hover_profile_control == .Hidden,
-		true,
-	)
+	radio_focused := focused && p.profile_control == .Radio
+	radio_hovered := hovered && p.hover_profile_control == .Radio
+	if err := profile_radio_draw(list, table.radio, .Default in row.flags, radio_focused, radio_hovered,
+		selected, theme, scale, pointer); err != .None {return .Ok}
+	eye: Icon = .Hidden in row.flags ? .Eye_Off : .Eye
+	eye_hovered := hovered && p.hover_profile_control == .Hidden
+	if err := table_button_draw(list, table.toggle, eye, ICON_BUTTON, theme, scale,
+		focused && p.profile_control == .Hidden, eye_hovered, selected, pointer); err != .None {return .Ok}
 	if table.expand.width > 0 {
 		controls := [?]struct {
 			rect: render.Rect,
@@ -3917,17 +3840,10 @@ profile_row_draw :: proc(
 		for control in controls {
 			if control.rect.width <= 0 {continue}
 			if control.kind == .Remove && .Protected in row.flags {continue}
-			profile_button_draw(
-				list,
-				control.rect,
-				control.icon,
-				control.size,
-				theme,
-				scale,
-				focused && p.profile_control == control.kind,
-				hovered && p.hover_profile_control == control.kind,
-				true,
-			)
+			control_hovered := hovered && p.hover_profile_control == control.kind
+			if err := table_button_draw(list, control.rect, control.icon, control.size, theme, scale,
+				focused && p.profile_control == control.kind, control_hovered, selected, pointer);
+			   err != .None {return .Ok}
 		}
 	}
 	if p.error_profile != "" && p.error_profile == row.profile {
@@ -3978,6 +3894,7 @@ control_draw :: proc(
 	text: ^Text,
 	theme: Theme,
 	page: render.Rect,
+	pointer: [2]f32,
 	scale: f32,
 	match: Shortcut_Highlight = {},
 ) -> render.Build_Status {
@@ -3992,8 +3909,13 @@ control_draw :: proc(
 	case .Toggle:
 		on := value == "true"
 		if row.profile != "" {
-			profile_button_draw(list, parts.toggle, on ? .Eye : .Eye_Off, ICON_BUTTON,
-			                    theme, scale, focused, false, true)
+			// The eye is the same square icon button as the profile line's, centred in the switch's cell.
+			size := HEIGHT_COMPACT * scale
+			cell := parts.toggle
+			eye := render.Rect{cell.x + (cell.width - size) / 2, cell.y + (cell.height - size) / 2, size, size}
+			hovered := editor_row_control_hovered(p, row, cell, pointer)
+			_ = table_button_draw(list, eye, on ? .Eye : .Eye_Off, ICON_BUTTON, theme, scale, focused, hovered,
+				selected, pointer)
 			return .Ok
 		}
 		switch_draw(list, parts.toggle, on, focused, theme, scale)
@@ -4009,24 +3931,8 @@ control_draw :: proc(
 	case .Curve:
 		return motion_curve_field_draw(p, row, parts, selected, list, text, theme, scale)
 	case .Choice:
-		box_draw(list, parts.field, theme, focused, scale)
-		if r := draw_text(
-			&input_text,
-			list,
-			choice_text(p, row, selected, value),
-			parts.field.x + CONTROL_INSET * scale,
-			baseline,
-			theme.text,
-			max(1, parts.field.width - (2 * CONTROL_INSET + ICON_INDICATOR + SPACE_1) * scale),
-		); r != .Ok {return r}
-		chevron := render.Rect {
-			parts.field.x + parts.field.width - (CONTROL_INSET + ICON_INDICATOR) * scale,
-			parts.field.y,
-			ICON_INDICATOR * scale,
-			parts.field.height,
-		}
-		icon_draw(list, .Chevron_Down, chevron, theme.muted, ICON_INDICATOR, scale)
-		return .Ok
+		label := choice_text(p, row, selected, value)
+		return dropdown_field_draw(list, text, theme, parts.field, label, focused, scale)
 	case .Integer, .Number:
 		number, ok := strconv.parse_f64(value)
 		if !ok {number, _ = strconv.parse_f64(row.value)}
@@ -4105,85 +4011,13 @@ popup_draw :: proc(
 	if editor_popup(p) == .Shortcuts {
 		return shortcut_capture_popup_draw(&p.capture, list, text, theme, r, l.page, row.value, pointer, s)
 	}
+	if c, a, open := editor_dropdown(p, l); open {
+		return dropdown_draw(&p.dropdown, c, a, list, text, theme, pointer, s)
+	}
 	if render.push_layer(list, l.page) != .None {return .Ok}
 	frame := popover_panel(r, s)
 	if panel_draw(list, frame, theme) != .None {return .Ok}
 	if editor_popup(p) == .Curve {return editor_motion_popup_draw(p, l, r, list, text, theme, pointer)}
-	if editor_popup(p) == .Choice {
-		count := choice_popup_rows(p, row, l)
-		if choice_searchable(row) {
-			box := choice_search_box(p, l, text)
-			toggle_focus := editor_choice_toggle_focused(p)
-			box_draw(list, box.rect, theme, !toggle_focus, s)
-			if result := field_box_draw(box, list, theme, field_box_baseline(box),
-			                           !toggle_focus, "Search fonts");
-			   result != .Ok {return result}
-			if render.push_layer(list, l.page) != .None {return .Ok}
-			if row.font_filter {
-				toggle := choice_font_toggle_rect(p, l)
-				switch_w, switch_h := SWITCH_WIDTH * s, SWITCH_HEIGHT * s
-				switch_rect := render.Rect {
-					toggle.x + toggle.width - CONTROL_INSET * s - switch_w,
-					toggle.y + (toggle.height - switch_h) / 2,
-					switch_w,
-					switch_h,
-				}
-				switch_draw(list, switch_rect, row.show_all_fonts, toggle_focus, theme, s)
-				if result := draw_text(text, list, "Show all fonts", toggle.x + CONTROL_INSET * s,
-				                       toggle.y + (toggle.height - text.line_height) / 2 + text.ascent,
-				                       theme.text, switch_rect.x - toggle.x - 2 * CONTROL_INSET * s);
-				   result != .Ok {return result}
-			}
-			r.y += choice_search_height(row, s)
-			r.height -= choice_search_height(row, s)
-			if count == 0 {
-				return draw_text(text, list, "No fonts found", r.x + SPACE_3 * s,
-				                 r.y + (r.height - text.line_height) / 2 + text.ascent,
-				                 theme.muted, r.width - 28 * s)
-			}
-		}
-		right := choice_option_right(p, l, r)
-		for visible in 0 ..< count {
-			i := p.choice_list.scroll + visible
-			name := row.choices[choice_source_index(p, row, i)]
-			option := render.Rect {
-				r.x + 4 * s,
-				r.y + 4 * s + f32(visible) * CHOICE_HEIGHT * s,
-				right - r.x - 4 * s,
-				CHOICE_HEIGHT * s,
-			}
-			if i == p.choice_list.index {
-				draw_rect(list, {rect = option, color = theme.selection, radius = RADIUS_CONTROL * s})
-			}
-			if render.rect_contains(option, pointer.x, pointer.y) {
-				// Options carry the selection tint, not the paper fill, so no hairline.
-				if result := hover_rim_draw(list, theme, option, RADIUS_CONTROL * s, 1, s, pointer, false);
-				   result != .None {return .Ok}
-			}
-			if row.multiple {
-				if choice_set_has(p.choice_set, choice_source_index(p, row, i)) {
-					check := render.Rect{option.x + option.width - 28 * s, option.y, 24 * s, option.height}
-					icon_draw(list, .Check, check, theme.accent, ICON_INDICATOR, s)
-				}
-			} else if name == field_string(&p.value) {
-				mark := render.Rect{option.x, option.y + 8 * s, 3 * s, option.height - 16 * s}
-				draw_rect(list, {rect = mark, color = theme.accent, radius = pill_radius(mark)})
-			}
-			if result := draw_text(
-				text,
-				list,
-				row.multiple ? row.choice_labels[i] : choice_label(row, name),
-				option.x + 12 * s,
-				option.y + (option.height - text.line_height) / 2 + text.ascent,
-				theme.text,
-				option.width - (row.multiple ? 44 : 24) * s,
-			); result != .Ok {return result}
-		}
-		if bar, visible := choice_scrollbar(p, l); visible {
-			scrollbar_draw(list, theme, bar, scrollbar_state(p.popup_bar_hover, choice_bar_drag(p)))
-		}
-		return .Ok
-	}
 	c := color_parts(r, row.kind == .Optional_Color, s)
 	color_picker_draw(list, theme, c, p.hsv, field_string(&p.value), s)
 	small := text_styled(text, .Detail)
@@ -4307,22 +4141,20 @@ filter_draw :: proc(
 	}
 	if key := editor_search_key_rect(p, l); key.width > 0 {
 		keycap := text_styled(text, .Detail)
-		width := text_width(&keycap, SEARCH_KEY_LABEL) + 2 * KEYCAP_PADDING * s
-		height := min(KEYCAP_HEIGHT * s, key.height)
-		chip := render.Rect{key.x + key.width - width, key.y + (key.height - height) / 2, width, height}
-		draw_rect(list, {rect = chip, color = theme.border, radius = RADIUS_CONTROL * s, stroke = s})
-		baseline := chip.y + (chip.height - keycap.line_height) / 2 + keycap.ascent
-		if result := draw_text(&keycap, list, SEARCH_KEY_LABEL, chip.x + KEYCAP_PADDING * s, baseline,
-			   theme.muted, key.width); result != .Ok {return result}
+		x := key.x + key.width - keycap_width(&keycap, SEARCH_KEY_LABEL, s)
+		if result := keycap_draw(list, &keycap, theme, SEARCH_KEY_LABEL, x, key.y, key.height, s, key.width);
+		   result != .Ok {return result}
 	}
 	clear := editor_clear_rect(p, l)
 	if clear.width == 0 {return .Ok}
-	if p.hover_clear {
-		draw_rect(list, {rect = clear, color = theme.hover, radius = RADIUS_CONTROL * s})
-		if result := hover_rim_draw(list, theme, clear, RADIUS_CONTROL * s, 1, s, pointer);
-		   result != .None {return .Ok}
+	b := Button {
+		rect   = clear,
+		hover  = p.hover_clear ? 1 : 0,
+		radius = RADIUS_CONTROL,
 	}
-	icon_draw(list, .Close, clear, p.hover_clear ? theme.text : theme.muted, ICON_INDICATOR, s)
+	face, ink, err := button_draw(list, theme, b, s, pointer)
+	if err != .None {return .Ok}
+	icon_draw(list, .Close, face, ink, ICON_INDICATOR, s)
 	return .Ok
 }
 
@@ -4568,12 +4400,12 @@ editor_draw :: proc(
 		}
 		row := &p.rows[item.row]
 		if row.process_field != .None {
-			if result := editor_process_draw(p, row, parts, selected, list, text, theme, s);
+			if result := editor_process_draw(p, row, parts, selected, list, text, theme, pointer, s);
 			   result != .Ok {return result}
 			continue
 		}
 		if row.kind == .Opener {
-			if result := editor_opener_draw(p, row, parts, selected, list, text, theme, s);
+			if result := editor_opener_draw(p, row, parts, selected, list, text, theme, pointer, s);
 			   result != .Ok {return result}
 			continue
 		}
@@ -4583,7 +4415,7 @@ editor_draw :: proc(
 			continue
 		}
 		if row.kind == .Profile {
-			if result := profile_row_draw(p, row, parts, index, selected, list, text, theme, s);
+			if result := profile_row_draw(p, row, parts, index, selected, list, text, theme, s, pointer);
 			   result != .Ok {
 				return result
 			}
@@ -4616,6 +4448,11 @@ editor_draw :: proc(
 			theme.text,
 			text_width_limit,
 		); result != .Ok {return result}
+		if item.value != "" {
+			hint_x := r.x + inset + min(text_width(text, row.title), text_width_limit) + SPACE_2 * s
+			if result := choice_hint_draw(text, list, theme, item.value, nil, hint_x, baseline,
+				r.x + inset + text_width_limit - hint_x); result != .Ok {return result}
+		}
 		note := row.note
 		note_error := note != ""
 		if p.error_key == row.key && p.error_text != "" {
@@ -4640,7 +4477,8 @@ editor_draw :: proc(
 			theme.muted,
 			text_width_limit,
 		); result != .Ok {return result}
-		if result := control_draw(p, row, parts, selected, list, text, theme, l.list, s, item.shortcut);
+		if result := control_draw(p, row, parts, selected, list, text, theme, l.list, pointer, s,
+			   item.shortcut);
 		   result != .Ok {
 			return result
 		}
