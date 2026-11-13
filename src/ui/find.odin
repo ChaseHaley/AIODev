@@ -11,7 +11,6 @@ import "core:strings"
 @(private) FIND_MARGIN :: 12
 @(private) FIND_PADDING :: 12
 @(private) FIND_TOGGLE :: 28
-@(private) FIND_HISTORY_LIMIT :: 100
 
 Find_Bar :: struct {
 	// Only the procedures in this file write it.
@@ -34,24 +33,14 @@ Find_State :: union {
 Find_Editing :: struct {}
 
 // Up and Down step through history like a shell prompt.
-Find_Browsing :: struct {
-	// The history entry the query shows.
-	index: int,
-	// What was being typed before browsing began, restored by moving past the newest entry. Owned.
-	draft: Find_Entry,
-}
+Find_Browsing :: Query_Browse(search.Options)
 
 Find_Blurred :: struct {}
 
-Find_Entry :: struct {
-	query:   string,
-	options: search.Options,
-}
+Find_Entry :: Query_Entry(search.Options)
 
 // Searches shared by every window, oldest first.
-Find_History :: struct {
-	entries: [dynamic]Find_Entry,
-}
+Find_History :: Query_History(search.Options)
 
 Find_Layout :: struct { panel, query, case_toggle, regex_toggle, status, up, down, close: render.Rect }
 
@@ -104,43 +93,9 @@ find_enter :: proc(f: ^Find_Bar, to: Find_State) {
 	f.state = to
 }
 
-find_history_destroy :: proc(h: ^Find_History) {
-	for entry in h.entries { delete(entry.query) }
-	delete(h.entries)
-	h^ = {}
-}
-
-find_history_newest :: proc(h: ^Find_History) -> (Find_Entry, bool) {
-	if h == nil || len(h.entries) == 0 { return {}, false }
-	return h.entries[len(h.entries) - 1], true
-}
-
 // Records the query as the newest search, moving an earlier copy of it.
 find_history_add :: proc(h: ^Find_History, f: ^Find_Bar) {
-	query := field_string(&f.query)
-	if h == nil || len(query) == 0 { return }
-	if last := len(h.entries) - 1; last >= 0 && h.entries[last].query == query {
-		h.entries[last].options = f.options
-		return
-	}
-	// The copy and its slot come first, so a search that cannot be recorded leaves the history as it was.
-	copied, err := strings.clone(query)
-	if err != nil { return }
-	if reserve(&h.entries, len(h.entries) + 1) != nil {
-		delete(copied)
-		return
-	}
-	for entry, i in h.entries {
-		if entry.query != query { continue }
-		delete(entry.query)
-		ordered_remove(&h.entries, i)
-		break
-	}
-	if len(h.entries) >= FIND_HISTORY_LIMIT {
-		delete(h.entries[0].query)
-		ordered_remove(&h.entries, 0)
-	}
-	append(&h.entries, Find_Entry{copied, f.options})
+	query_history_add(h, field_string(&f.query), f.options)
 }
 
 // Opens with the keyboard. `restore` refills the newest search, and `select` also selects it so typing
@@ -150,7 +105,7 @@ find_open :: proc(f: ^Find_Bar, h: ^Find_History = nil, restore := false, select
 	f.hover = .None
 	f.motion = {}
 	armed_cancel(&f.armed)
-	newest, found := find_history_newest(h)
+	newest, found := query_history_newest(h)
 	field_set(&f.query, (restore || select) && found ? newest.query : "")
 	if select { field_select_all(&f.query) }
 }
@@ -226,35 +181,27 @@ find_toggle :: proc(f: ^Find_Bar, target: Find_Button) -> Find_Change {
 	return Find_Change.Changed
 }
 
-// Steps through history like a shell prompt. The first step skips an entry equal to the current query, and
-// stepping past the newest entry restores the draft and ends browsing.
+// Steps through history like a shell prompt; stepping past the newest entry restores the draft and ends
+// browsing.
 @(private)
 find_recall :: proc(f: ^Find_Bar, h: ^Find_History, older: bool) -> Find_Change {
-	if h == nil || len(h.entries) == 0 { return Find_Change.None }
-	count := len(h.entries)
 	browsing, is_browsing := &f.state.(Find_Browsing)
+	next, ok := query_history_step(h, is_browsing ? browsing.index : -1, field_string(&f.query), older)
 	switch {
-	case older && !is_browsing:
-		next := count - 1
-		if h.entries[next].query == field_string(&f.query) { next -= 1 }
-		if next < 0 { return Find_Change.None }
-		// Browsing must be able to restore the draft, so without a copy of it nothing is recalled.
-		copied, err := strings.clone(field_string(&f.query))
-		if err != nil { return Find_Change.None }
-		find_enter(f, Find_Browsing{next, {copied, f.options}})
-		find_show(f, h.entries[next])
-	case older:
-		if browsing.index == 0 { return Find_Change.None }
-		browsing.index -= 1
-		find_show(f, h.entries[browsing.index])
-	case !is_browsing:
+	case !ok:
 		return Find_Change.None
-	case browsing.index + 1 < count:
-		browsing.index += 1
-		find_show(f, h.entries[browsing.index])
-	case:
+	case next < 0:
 		find_show(f, browsing.draft)
 		find_enter(f, Find_Editing{})
+	case is_browsing:
+		browsing.index = next
+		find_show(f, h.entries[next])
+	case:
+		// Browsing must be able to restore the draft, so without a copy of it nothing is recalled.
+		copied, err := strings.clone(field_string(&f.query))
+		if err != nil {return Find_Change.None}
+		find_enter(f, Find_Browsing{next, {copied, f.options}})
+		find_show(f, h.entries[next])
 	}
 	return Find_Change.Changed
 }

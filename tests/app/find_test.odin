@@ -266,7 +266,7 @@ find_headless_blur_keeps_matches_and_close_keeps_viewport :: proc(t: ^testing.T)
 	ui.find_init(&w.find)
 	defer ui.find_destroy(&w.find)
 	state: app.App
-	defer ui.find_history_destroy(&state.find_history)
+	defer ui.query_history_destroy(&state.find_history)
 	append(&state.windows, &w)
 	defer delete(state.windows)
 	append(&state.sessions, app.Session_Entry{id = 140, session = session})

@@ -51,6 +51,7 @@ palette_binding_open :: proc(p: ^Palette, index: int) -> Outcome {
 	shortcut_capture_open(&binding.capture)
 	p.selected = index
 	edit_set(p, binding)
+	palette_use(p, {kind = .Command, name = command.name})
 	return .Changed
 }
 

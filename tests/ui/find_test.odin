@@ -207,7 +207,7 @@ find_toggles_close_and_focus_respond_without_matches :: proc(t: ^testing.T) {
 @(test)
 find_history_recalls_searches_like_a_prompt :: proc(t: ^testing.T) {
 	h: ui.Find_History
-	defer ui.find_history_destroy(&h)
+	defer ui.query_history_destroy(&h)
 	f: ui.Find_Bar
 	ui.find_init(&f)
 	defer ui.find_destroy(&f)
@@ -263,7 +263,7 @@ find_history_recalls_searches_like_a_prompt :: proc(t: ^testing.T) {
 @(test)
 find_history_browsing_frees_its_draft_when_it_ends :: proc(t: ^testing.T) {
 	h: ui.Find_History
-	defer ui.find_history_destroy(&h)
+	defer ui.query_history_destroy(&h)
 	f: ui.Find_Bar
 	ui.find_init(&f)
 	defer ui.find_destroy(&f)

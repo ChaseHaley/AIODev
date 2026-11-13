@@ -299,6 +299,7 @@ workspace_tabs_transfer :: proc(app: ^App, transfer: Workspace_Tab_Transfer) {
 		for w in app.windows {if w.workspace == source {tab_presentation_remove(&w.presentation, index)}}
 		destination.next_tab_id += 1
 		tab.id = destination.next_tab_id
+		closed_retarget(app, source.id, id, destination.id, tab.id)
 		tab.marked = true
 		tab.group = tab_group_carried(carried, tab.group)
 		inject_at(&destination.tabs, at + i, tab)

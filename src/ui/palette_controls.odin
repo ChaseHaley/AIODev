@@ -262,6 +262,7 @@ choose_value :: proc(p: ^Palette, s: ^Palette_Setting, value: string) -> Outcome
 	current, _ := setting_value(p, s)
 	edit_set(p, nil)
 	if value == current {return .Changed}
+	palette_use(p, {kind = .Setting, name = s.key})
 	return choose_setting(p, s.key, value)
 }
 
@@ -342,6 +343,7 @@ open_choice :: proc(p: ^Palette, setting: int) -> Outcome {
 	choice_filter_update(p, c)
 	for match, i in b.matches {if b.choices[match] == current {c.list.index = i}}
 	choice_list_keep_visible(&c.list, len(b.matches), CHOICE_LIST_ROWS)
+	palette_use(p, {kind = .Setting, name = s.key})
 	return .Changed
 }
 
@@ -353,6 +355,7 @@ open_text :: proc(p: ^Palette, setting: int) -> Outcome {
 	field_set(&p.buffers.field, value)
 	field_select_all(&p.buffers.field)
 	edit_set(p, Text_Edit{setting})
+	palette_use(p, {kind = .Setting, name = s.key})
 	return .Changed
 }
 

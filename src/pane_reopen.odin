@@ -10,18 +10,25 @@ import "core:log"
 CLOSED_LIMIT :: 20
 
 Closed_Item :: struct {
-	// The workspace it was closed from, and for a pane the tab it left (zero for a whole tab).
+	// The workspace and tab it was closed from. Closed panes follow their tab when it moves to another
+	// workspace or is itself reopened, so they return to it.
 	workspace, tab: u32,
+	// A pane rather than its whole tab.
+	pane:           bool,
 	// The encoded Closed_Record.
 	text:           string,
 }
 
 Closed_Record :: struct {
-	// A whole tab and its position, or a tab holding just the closed pane.
+	// The tab's position, and the whole tab or, for a pane, a tab holding just it to bring back when
+	// its own tab is gone.
 	index:  int,
 	tab:    Saved_Tab,
 	// For a pane: the panes it was split from, and how it sat against them.
 	beside: []layout.Content,
+	// The lasting keys of the terminals among `beside`, empty for other panes, so they are found
+	// again after they too were closed and reopened as new sessions.
+	keys:   []string `json:"keys,omitempty"`,
 	axis:   layout.Axis,
 	before: bool,
 	share:  f32,
@@ -49,7 +56,7 @@ closed_record_tab :: proc(app: ^App, workspace: ^Workspace, index: int) {
 	if !terminal {return}
 	saved, encoded := layout_tab_encode(app, tab, pane_processes(app))
 	if !encoded {return}
-	closed_push(app, {workspace = workspace.id}, {index = index, tab = saved})
+	closed_push(app, {workspace = workspace.id, tab = tab.id}, {index = index, tab = saved})
 }
 
 // Remembers a pane before it closes; a tab's only pane is remembered as the tab.
@@ -65,18 +72,25 @@ closed_record_pane :: proc(app: ^App, workspace: ^Workspace, tab_index: int, nod
 	}
 	beside := make([dynamic]layout.Content, context.temp_allocator)
 	layout.contents(&tab.tree, sibling, &beside)
+	keys := make([]string, len(beside), context.temp_allocator)
+	for neighbour, i in beside {
+		if !pane_owns_session(neighbour.kind) {continue}
+		if entry := session_find(app, neighbour.id); entry != nil {keys[i] = entry.key}
+	}
 	nodes := []Saved_Node{layout_pane_encode(app, content, pane_processes(app))}
 	floating, is_floating := layout.float_of(&tab.tree, node)
 	record := Closed_Record {
-		tab    = {nodes = nodes},
+		index  = tab_index,
+		tab    = {name = tab.name, nodes = nodes},
 		beside = beside[:],
+		keys   = keys,
 		axis   = axis,
 		before = before,
 		share  = share,
 		linked = layout.link_root(&tab.tree, node) != layout.INVALID_NODE,
 		float  = layout_float_encode(is_floating, floating),
 	}
-	closed_push(app, {workspace = workspace.id, tab = tab.id}, record)
+	closed_push(app, {workspace = workspace.id, tab = tab.id, pane = true}, record)
 }
 
 @(private)
@@ -116,25 +130,33 @@ closed_reopen :: proc(app: ^App, w: ^Window) {
 		notify(app, .Error, "Could not reopen the pane.")
 		return
 	}
-	if item.tab != 0 {
+	if item.pane && item.workspace == w.workspace.id {
 		if tab := tab_index_by_id(w.workspace, item.tab); tab >= 0 {
 			closed_reopen_pane(app, w, tab, &record)
 			return
 		}
-		// The tab it left is gone, so the pane comes back as a tab of its own at the end.
-		record.index = len(w.workspace.tabs)
 	}
-	closed_reopen_tab(app, w, &record)
+	// A pane whose tab is gone brings the tab back, holding just it, for the rest closed from it to join.
+	closed_reopen_tab(app, w, item, &record)
+}
+
+// Points the closed panes of a tab at where it is now: its new place after a move between workspaces, or
+// the tab that reopened in its place.
+closed_retarget :: proc(app: ^App, workspace, tab, to_workspace, to_tab: u32) {
+	for &item in app.closed {
+		if item.workspace == workspace && item.tab == tab {item.workspace, item.tab = to_workspace, to_tab}
+	}
 }
 
 @(private)
-closed_reopen_tab :: proc(app: ^App, w: ^Window, record: ^Closed_Record) {
+closed_reopen_tab :: proc(app: ^App, w: ^Window, item: Closed_Item, record: ^Closed_Record) {
 	if !pane_minimum_single(app, w) {return}
 	if !layout_tab_restore(app, w.workspace, &record.tab) {
 		notify(app, .Error, "Could not reopen the tab.")
 		return
 	}
 	last := len(w.workspace.tabs) - 1
+	closed_retarget(app, item.workspace, item.tab, w.workspace.id, w.workspace.tabs[last].id)
 	to := clamp(record.index, 0, last)
 	tab_move(app, w, last, to)
 	// Back between two tabs of a group, the tab joins it.
@@ -150,6 +172,13 @@ closed_reopen_pane :: proc(app: ^App, w: ^Window, tab_index: int, record: ^Close
 	if len(record.float) == 1 {
 		closed_reopen_floating(app, w, tab_index, record)
 		return
+	}
+	// Neighbours that were closed and reopened since are new sessions under the same keys.
+	for key, i in record.keys {
+		if key == "" || i >= len(record.beside) {continue}
+		for &entry in app.sessions {
+			if entry.key == key {record.beside[i].id = entry.id; break}
+		}
 	}
 	target := layout.find_group(&tab.tree, record.beside)
 	for content in record.beside {
