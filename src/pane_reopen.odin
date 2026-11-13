@@ -137,6 +137,8 @@ closed_reopen_tab :: proc(app: ^App, w: ^Window, record: ^Closed_Record) {
 	last := len(w.workspace.tabs) - 1
 	to := clamp(record.index, 0, last)
 	tab_move(app, w, last, to)
+	// Back between two tabs of a group, the tab joins it.
+	tab_groups_tidy(w.workspace)
 	tab_show(app, w, to)
 }
 

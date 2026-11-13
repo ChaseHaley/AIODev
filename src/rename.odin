@@ -7,7 +7,7 @@ import "aio:ui"
 // The dialog or the chip's name field shows.
 rename_shown :: proc(w: ^Window) -> bool {
 	#partial switch _ in w.overlay {
-	case Overlay_Rename, Overlay_Chip_Name: return true
+	case Overlay_Rename, Overlay_Chip_Name, Overlay_Group_Name: return true
 	}
 	return false
 }
@@ -61,6 +61,8 @@ rename_finish :: proc(app: ^App, w: ^Window, save: bool) {
 			current.error, w.dirty = true, true
 			return
 		}
+	case Overlay_Group_Name:
+		if save {group_name_save(app, w, current.group)}
 	case:
 		return
 	}
@@ -85,6 +87,7 @@ rename_metrics :: proc(w: ^Window) -> (heading, hint: ui.Text) {
 rename_rect :: proc(app: ^App, w: ^Window) -> render.Rect {
 	s := w.scale
 	if chip_name_shown(w) {return workspace_button_rect(app, w)}
+	if _, group := w.overlay.(Overlay_Group_Name); group {return group_name_rect(app, w)}
 	heading, hint := rename_metrics(w)
 	height :=
 		2 * ui.DIALOG_PADDING * s +
@@ -103,6 +106,7 @@ rename_rect :: proc(app: ^App, w: ^Window) -> render.Rect {
 
 rename_field_rect :: proc(app: ^App, w: ^Window) -> render.Rect {
 	r, s := rename_rect(app, w), w.scale
+	if _, group := w.overlay.(Overlay_Group_Name); group {return group_name_field_rect(app, w)}
 	if chip_name_shown(w) {
 		// The field's inset puts the text exactly where the chip draws its label.
 		lead := (ui.CONTROL_INSET + ui.ICON_BUTTON) * s
@@ -172,6 +176,7 @@ rename_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 	if ui.panel_draw(&w.list, frame, app.theme) != .None {return .Ok}
 	_, tab := dialog.target.(Rename_Tab_Target)
 	title := tab ? "Rename Tab" : "Rename Pane"
+	empty, advice := "Automatic title", "Enter saves · Esc cancels · Empty restores automatic titles"
 	if result := ui.draw_text(
 		&heading,
 		&w.list,
@@ -192,13 +197,13 @@ rename_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 		app.theme,
 		ui.field_box_baseline(box),
 		true,
-		"Automatic title",
+		empty,
 	); result != .Ok {return result}
 	if render.push_layer(&w.list, r) != .None {return .Ok}
 	return ui.draw_text(
 		&hint,
 		&w.list,
-		"Enter saves · Esc cancels · Empty restores automatic titles",
+		advice,
 		r.x + pad,
 		field.y + field.height + 8 * s + hint.ascent,
 		app.theme.muted,
@@ -235,7 +240,9 @@ rename_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: input.Mous
 rename_button :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) {
 	if !e.pressed {ui.field_release(&w.rename); return}
 	x, y := f32(e.x), f32(e.y)
-	if chip_name_shown(w) && !render.rect_contains(rename_rect(app, w), x, y) {
+	_, group := w.overlay.(Overlay_Group_Name)
+	if group && group_name_swatch_press(app, w, x, y) {return}
+	if (chip_name_shown(w) || group) && !render.rect_contains(rename_rect(app, w), x, y) {
 		overlay_close(app, w, .Leave)
 		target := pointer_target(app, w, x, y)
 		gesture_hand_off(w, e.button, target)

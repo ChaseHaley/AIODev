@@ -13,8 +13,8 @@ tab_selection_update :: proc(marked: []bool, index, anchor: int, toggle, range: 
 	}
 }
 
-// `slot` counts unselected tabs preceding the group. The result indexes the original list.
-tab_group_order :: proc(marked: []bool, slot: int, out: []int) -> bool {
+// `slot` counts unmarked tabs preceding the marked ones. The result indexes the original list.
+tab_marked_order :: proc(marked: []bool, slot: int, out: []int) -> bool {
 	if len(out) != len(marked) {return false}
 	count := 0
 	for value in marked {if value {count += 1}}
