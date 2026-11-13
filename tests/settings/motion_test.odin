@@ -429,3 +429,46 @@ motion_names_come_from_free_text :: proc(t: ^testing.T) {
 	testing.expect_value(t, settings.motion_name_from("--__x--y"), "x-y")
 	testing.expect_value(t, settings.motion_name_from("!!!"), "")
 }
+
+// Tab Label (WORK-483) sits under Panes like the other contexts: it inherits what it leaves unset, its own
+// line and preset entry override that, and no built-in default sets it.
+@(test)
+motion_tab_label_inherits_from_panes_and_takes_its_own_line :: proc(t: ^testing.T) {
+	parent, has_parent := settings.motion_context_parent(.Tab_Label)
+	testing.expect(t, has_parent && parent == .Panes)
+	inherited := mutation_parse(t, "motion.panes = off 300ms smooth\n")
+	defer settings.destroy(&inherited)
+	label := settings.motion_resolve(&inherited, .Tab_Label)
+	testing.expect(t, !label.on)
+	testing.expect_value(t, label.duration, 300)
+	testing.expect_value(t, label.curve_name, "smooth")
+	for field in settings.Motion_Field {
+		testing.expect_value(t, label.from[field], settings.Motion_Context.Panes)
+	}
+	testing.expect_value(t, settings.motion_duration(&inherited, label), 0)
+
+	own := mutation_parse(t, "motion.panes = off 300ms smooth\nmotion.panes.tablabel = on 240ms linear\n")
+	defer settings.destroy(&own)
+	label = settings.motion_resolve(&own, .Tab_Label)
+	testing.expect(t, label.on)
+	testing.expect_value(t, label.duration, 240)
+	testing.expect_value(t, label.curve_name, "linear")
+	testing.expect_value(t, label.from[.Duration], settings.Motion_Context.Tab_Label)
+	testing.expect_value(t, settings.motion_duration(&own, label), 240 * time.Millisecond)
+	switch_pane := settings.motion_resolve(&own, .Switch)
+	testing.expect(t, !switch_pane.on)
+
+	defaults := mutation_parse(t, "")
+	defer settings.destroy(&defaults)
+	label = settings.motion_resolve(&defaults, .Tab_Label)
+	testing.expect(t, label.on)
+	testing.expect_value(t, label.duration, 160)
+	testing.expect_value(t, label.curve_name, "decelerate")
+	testing.expect_value(t, defaults.motion.contexts[.Tab_Label], "")
+
+	preset := mutation_parse(t, "motion.preset.mine = panes: 200ms; tablabel: 90ms quick\n")
+	defer settings.destroy(&preset)
+	if testing.expect_value(t, len(preset.motion.presets), 1) {
+		testing.expect_value(t, preset.motion.presets[0].specs[.Tab_Label], "90ms quick")
+	}
+}

@@ -410,13 +410,33 @@ pane_slide_toward :: proc(app: ^App, w: ^Window, before, now: Pane_Stage) -> May
 		return w.tabs_horizontal ? [2]f32{along, 0} : [2]f32{0, along}
 	}
 	if !before.solo || !now.solo || before.pane == now.pane {return nil}
+	return pane_side(app, w, window_tree(w), before.pane, now.pane)
+}
+
+// The side the pane keyed `to` lies on from the pane keyed `from` in `tree`'s split view in `w`: along the
+// larger of the horizontal and vertical offsets between their centres. A floating pane counts from its
+// float's frame. Nil when either pane is not in the tree or the two share a centre. Zoom slides between
+// panes this way, and a tab's label turns this way (WORK-483).
+pane_side :: proc(app: ^App, w: ^Window, tree: ^layout.Layout, from, to: u64) -> Maybe([2]f32) {
+	area := window_content_area_in(app, w, .None)
 	split := make([dynamic]layout.Pane_Rect, context.temp_allocator)
-	layout.compute(window_tree(w), window_content_area_in(app, w, .None), window_gap(app, w), &split)
+	layout.compute(tree, area, window_gap(app, w), &split)
 	old, new: Maybe(layout.Rect)
 	for pane in split {
 		key := pane_motion_key(pane.content)
-		if key == before.pane {old = pane.rect}
-		if key == now.pane {new = pane.rect}
+		if key == from {old = pane.rect}
+		if key == to {new = pane.rect}
+	}
+	for _, i in tree.nodes {
+		if old != nil && new != nil {break}
+		content, is_pane := layout.pane_content(tree, layout.Node_Id(i))
+		if !is_pane {continue}
+		key := pane_motion_key(content)
+		if key != from && key != to {continue}
+		frame, floating := layout.float_rect(tree, layout.Node_Id(i), area)
+		if !floating {continue}
+		if key == from && old == nil {old = frame}
+		if key == to && new == nil {new = frame}
 	}
 	a, had := old.?
 	b, has := new.?
@@ -787,7 +807,7 @@ pane_places_add :: proc(w: ^Window, places: ^[dynamic]ui.Layout_Place, drawn: bo
 	}
 }
 
-@(private = "file")
+@(private)
 pane_motion_key :: proc(content: layout.Content) -> u64 {
 	return u64(content.kind) << 32 | u64(content.id)
 }
