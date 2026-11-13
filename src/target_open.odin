@@ -2,6 +2,7 @@ package main
 
 import "aio:links"
 import "aio:localpath"
+import "aio:markdown"
 import "core:log"
 import "core:path/filepath"
 import "core:strings"
@@ -68,18 +69,36 @@ target_from_document :: proc(document: string) -> Target {
 	return File_Target{document}
 }
 
-// A Markdown href. A '#' fragment is link syntax there, so it is dropped before a local path resolves
-// beside the document; a printed terminal path may contain '#' literally and keeps it. The path
-// borrows buffer.
+// A Markdown link. A wikilink names a note in the document's vault (links.resolve_wiki); any other
+// href is a web address or a URL-encoded path beside the document. A '#' fragment is link syntax in
+// both, so it is split off before a local path resolves (a printed terminal path may contain '#'
+// literally and keeps it) and comes back as the heading a Markdown file opens at: empty for none and
+// for an Obsidian block reference '#^id', which opens the note at its top. An empty path is the
+// document itself. The path borrows buffer and the heading borrows the link.
 @(require_results)
-target_from_href :: proc(href, document_path: string, buffer: []u8) -> Target {
-	if links.allowed(href) {return Web_Target{href}}
-	spelling := href
-	if fragment := strings.index_byte(spelling, '#'); fragment >= 0 {spelling = spelling[:fragment]}
-	directory := filepath.dir(document_path)
-	path, ok := links.resolve_file(spelling, directory, localpath.local_hosts(), buffer)
-	if !ok {return Missing_Target{}}
-	return File_Target{path}
+target_from_link :: proc(
+	link: markdown.Link,
+	document_path: string,
+	buffer: []u8,
+) -> (
+	target: Target,
+	heading: string,
+) {
+	if !link.wiki && links.allowed(link.href) {return Web_Target{link.href}, ""}
+	spelling := link.href
+	if fragment := strings.index_byte(spelling, '#'); fragment >= 0 {
+		spelling, heading = spelling[:fragment], spelling[fragment + 1:]
+		if strings.has_prefix(heading, "^") {heading = ""}
+	}
+	path, ok := document_path, true
+	switch {
+	case link.wiki:
+		path, ok = links.resolve_wiki(spelling, document_path, buffer)
+	case spelling != "":
+		path, ok = links.resolve_href(spelling, filepath.dir(document_path), localpath.local_hosts(), buffer)
+	}
+	if !ok {return Missing_Target{}, ""}
+	return File_Target{path}, heading
 }
 
 target_open :: proc(app: ^App, w: ^Window, target: Target) {
@@ -87,7 +106,7 @@ target_open :: proc(app: ^App, w: ^Window, target: Target) {
 	case Web_Target:
 		if !target_open_url(app, t.uri) {notify(app, .Error, "Could not open the link.")}
 	case File_Target:
-		target_open_file(app, w, t.path)
+		target_open_file(app, w, t.path, "")
 	case Missing_Target:
 		target_unavailable(app)
 	}
@@ -102,15 +121,15 @@ Pending_File :: struct {
 	file: localpath.Open_File,
 }
 
-// A Markdown file opens in a pane; any other file goes to the system, after a confirmation when its
-// type is active.
+// A Markdown file opens in a pane, scrolled to `heading` when it names one; any other file goes to the
+// system, after a confirmation when its type is active.
 @(private)
-target_open_file :: proc(app: ^App, w: ^Window, path: string) {
+target_open_file :: proc(app: ^App, w: ^Window, path, heading: string) {
 	file, ok := localpath.prepare_open(path)
 	if !ok {target_unavailable(app); return}
 	if !file.confirm && markdown_is_path(file.target) {
 		defer localpath.open_file_destroy(&file)
-		markdown_open_focused(app, w, file.target)
+		markdown_open_focused(app, w, file.target, heading)
 		return
 	}
 	if !file.confirm {

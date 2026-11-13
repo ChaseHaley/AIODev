@@ -605,3 +605,122 @@ a_markdown_link_offers_the_link_menu_and_opens_its_file_in_a_linked_window :: pr
 	if !testing.expect(t, opened != nil) {return}
 	testing.expect_value(t, opened.title, "other.md")
 }
+
+// Where w shows `pane`, laid out as its draw lays it out.
+@(private = "file")
+fitted :: proc(state: ^app.App, w: ^app.Window, pane: ^app.Markdown_Pane) -> (g: ui.Markdown_Geometry, found: bool) {
+	for shown in w.panes {
+		if shown.content != {.Markdown, pane.id} {continue}
+		r := shown.rect
+		g = ui.markdown_geometry({r.x, r.y + w.header_height, r.width, r.height - w.header_height}, w.scale)
+		document := app.markdown_document(pane)
+		ui.markdown_view_fit(&pane.view, document, pane.revision, &w.ui_text, state.family, g.width, w.scale)
+		return g, true
+	}
+	return {}, false
+}
+
+// Ctrl+clicks link `link` of the pane, wherever its text shows.
+@(private = "file")
+link_click :: proc(t: ^testing.T, state: ^app.App, w: ^app.Window, pane: ^app.Markdown_Pane, link: int) {
+	g, found := fitted(state, w, pane)
+	if !testing.expect(t, found) {return}
+	for y := g.top; y < g.area.y + g.area.height; y += 1 {
+		for x := g.left; x < g.left + g.width; x += 2 {
+			if ui.markdown_link_at(&pane.view, g, x, y) != link {continue}
+			for pressed in ([?]bool{true, false}) {
+				app.handle_event(state, input.Mouse_Button_Event{window = w.id, x = i32(x), y = i32(y),
+					button = .Left, pressed = pressed, modifiers = {.Control}})
+			}
+			return
+		}
+	}
+	testing.expect(t, false, "the link is not on screen")
+}
+
+// The view scrolled so the heading's line is at the top.
+@(private = "file")
+expect_heading_at_top :: proc(t: ^testing.T, pane: ^app.Markdown_Pane, heading: string) {
+	document := app.markdown_document(pane)
+	if !testing.expect(t, document != nil) {return}
+	offset, found := markdown.heading_find(document, heading)
+	if !testing.expect(t, found, heading) {return}
+	top, shown := ui.markdown_offset_top(&pane.view, offset)
+	if !testing.expect(t, shown) {return}
+	testing.expect(t, pane.view.scroll > 0)
+	testing.expect_value(t, pane.view.scroll, int(top))
+	testing.expect_value(t, pane.heading, "")
+}
+
+// An Obsidian link to a heading opens its note, found in the vault by name, scrolled to that heading;
+// a link to a heading of the same document scrolls the pane showing it.
+@(test)
+wikilinks_to_headings_open_and_scroll_to_them :: proc(t: ^testing.T) {
+	f: Fixture
+	defer fixture_destroy(t, &f)
+	if !fixture_start(t, &f, "Wikilink") {return}
+	f.state.settings.pane.markdown_floating = false
+	// Panes appear at once, so each frame draws them where the layout puts them.
+	f.state.animations = false
+	filler := strings.repeat("paragraph\n\n", 60, context.temp_allocator)
+	source := strings.concatenate({"# Top\n\n[[Other#Second]] then [[#Lower]]\n\n", filler, "## Lower\n\n", filler},
+		context.temp_allocator)
+	if !testing.expect_value(t, os.write_entire_file(f.file, source), nil) {return}
+	other := strings.concatenate({f.directory, "\\Other.md"}, context.temp_allocator)
+	other_source := strings.concatenate({"# Other\n\n", filler, "## Second\n\n", filler}, context.temp_allocator)
+	if !testing.expect_value(t, os.write_entire_file(other, other_source), nil) {return}
+	testing.expect_value(t, open(&f.state, f.file, true).status, cli_protocol.Status.Ok)
+	w := f.state.windows[0]
+	if !testing.expect_value(t, len(f.state.markdown_panes), 1) {return}
+	pane := f.state.markdown_panes[0]
+
+	link_click(t, &f.state, w, pane, 0)
+	if !testing.expect_value(t, len(f.state.markdown_panes), 2) {return}
+	opened := f.state.markdown_panes[1]
+	testing.expect_value(t, opened.title, "Other.md")
+	content, _ := layout.focused_content(app.window_tree(w))
+	testing.expect_value(t, content, layout.Content{.Markdown, opened.id})
+	if !testing.expect(t, app.window_build_frame(&f.state, w)) {return}
+	expect_heading_at_top(t, opened, "Second")
+	testing.expect_value(t, pane.view.scroll, 0)
+
+	link_click(t, &f.state, w, pane, 1)
+	testing.expect_value(t, len(f.state.markdown_panes), 2)
+	if !testing.expect(t, app.window_build_frame(&f.state, w)) {return}
+	expect_heading_at_top(t, pane, "Lower")
+}
+
+// Both link spellings split off their fragment as the heading to show; a block reference shows none.
+@(test)
+markdown_links_carry_their_heading_apart_from_the_path :: proc(t: ^testing.T) {
+	directory, err := os.make_directory_temp("", "aio-links-*", context.allocator)
+	if !testing.expect_value(t, err, nil) {return}
+	defer delete(directory)
+	defer testing.expect_value(t, os.remove_all(directory), nil)
+	document := strings.concatenate({directory, `\doc.md`}, context.temp_allocator)
+	note := strings.concatenate({directory, `\My Note.md`}, context.temp_allocator)
+	if !testing.expect_value(t, os.write_entire_file(note, "# Part Two\n"), nil) {return}
+	cases := [?]struct {
+		link:          markdown.Link,
+		path, heading: string,
+	} {
+		{{"My Note#Part Two", true}, note, "Part Two"},
+		{{"my note#^block", true}, note, ""},
+		{{"#Part Two", true}, document, "Part Two"},
+		{{"My%20Note.md#Part%20Two", false}, note, "Part%20Two"},
+		{{"#part-two", false}, document, "part-two"},
+		{{"Missing#Part", true}, "", ""},
+	}
+	for c in cases {
+		buffer: [4096]u8
+		target, heading := app.target_from_link(c.link, document, buffer[:])
+		file, local := target.(app.File_Target)
+		if c.path == "" {
+			_, missing := target.(app.Missing_Target)
+			testing.expectf(t, missing, "%s resolved to %v", c.link.href, target)
+			continue
+		}
+		testing.expectf(t, local && strings.equal_fold(file.path, c.path), "%s resolved to %v", c.link.href, target)
+		testing.expect_value(t, heading, c.heading)
+	}
+}
