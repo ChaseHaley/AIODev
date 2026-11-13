@@ -174,3 +174,48 @@ editor_search_matches_words_on_a_wrapped_line :: proc(t: ^testing.T) {
 	testing.expect(t, near(ui.editor_row_parts(&p, l, index).row.height,
 		l.row_height + f32(len(lines) - 1) * small.line_height))
 }
+
+// The pointer over the first description line of the row at page line `index`, and the tooltip
+// the page offers there.
+@(private = "file")
+description_tooltip_at :: proc(p: ^ui.Editor, l: ui.Editor_Layout, text: ^ui.Text, index: int) -> string {
+	r := ui.editor_row_parts(p, l, index).row
+	small := ui.text_styled(text, .Detail)
+	top := r.y + (l.row_height - text.line_height - 2 - small.line_height) / 2
+	x := r.x + ui.CONTROL_INSET + ui.SPACE_6 + 6
+	_ = ui.editor_hover(p, l, x, top + text.line_height + 2 + small.line_height / 2, text)
+	return ui.editor_description_tooltip(p)
+}
+
+@(test)
+editor_cut_description_offers_its_whole_text_as_a_tooltip :: proc(t: ^testing.T) {
+	fonts, err := font.system_create()
+	if !testing.expect_value(t, err, font.Error.None) {return}
+	defer font.system_destroy(fonts)
+	p: ui.Editor
+	defer ui.editor_destroy(&p)
+	text: ui.Text
+	if !wrap_fixture(t, &p, &text, fonts) {return}
+	huge := strings.repeat(LONG_DESCRIPTION + " ", 6, context.temp_allocator)
+	capped := ui.Editor_Row{key = "capped", title = "Capped", description = huge, kind = .Toggle, value = "false"}
+	if !testing.expect_value(t, ui.editor_add(&p, capped, "Group"), nil) {return}
+	ui.editor_filter(&p)
+	// Wrapped whole, or short enough for one line: nothing to show.
+	l := ui.editor_layout({0, 0, 560, 4000}, 1)
+	ui.editor_fit(&p, l, &text)
+	testing.expect_value(t, description_tooltip_at(&p, l, &text, item_of(&p, "control.enabled")), "")
+	testing.expect_value(t, description_tooltip_at(&p, l, &text, item_of(&p, "after")), "")
+	// Past the line cap the last line ends in an ellipsis, and the tooltip holds all of it.
+	testing.expect_value(t, description_tooltip_at(&p, l, &text, item_of(&p, "capped")), huge)
+	// Left under 80 DIP the description keeps one ellipsized line.
+	narrow := ui.editor_layout({0, 0, 300, 4000}, 1)
+	ui.editor_fit(&p, narrow, &text)
+	long := item_of(&p, "control.enabled")
+	testing.expect(t, near(ui.editor_row_parts(&p, narrow, long).row.height, narrow.row_height))
+	testing.expect_value(t, description_tooltip_at(&p, narrow, &text, long), LONG_DESCRIPTION)
+	testing.expect_value(t, description_tooltip_at(&p, narrow, &text, item_of(&p, "after")), "")
+	// Off the description, even on its row, there is none.
+	r := ui.editor_row_parts(&p, narrow, long).row
+	_ = ui.editor_hover(&p, narrow, r.x + 40, r.y + 6, &text)
+	testing.expect_value(t, ui.editor_description_tooltip(&p), "")
+}

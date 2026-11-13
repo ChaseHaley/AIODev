@@ -441,6 +441,8 @@ Editor :: struct {
 	chain_view:                                                        Editor_Chain_View,
 	mode:                                                              Editor_Mode,
 	hover_item, hover_reset, hover_outline:                            int,
+	// The page line whose cut-short description the pointer is over, which the tooltip shows whole.
+	hover_description:                                                 int,
 	dropdown:                                                          Dropdown,
 	// The options a multiple choice has on while its popup edits them.
 	choice_set:                                                        u32,
@@ -3492,7 +3494,7 @@ editor_hover :: proc(p: ^Editor, l: Editor_Layout, x, y: f32, text: ^Text = nil)
 			return true
 		}
 	}
-	item, reset, outline := -1, -1, -1
+	item, reset, outline, description := -1, -1, -1, -1
 	browse := false
 	profile_item, profile_control := -1, Profile_Control.Radio
 	strip_item := -1
@@ -3505,6 +3507,10 @@ editor_hover :: proc(p: ^Editor, l: Editor_Layout, x, y: f32, text: ^Text = nil)
 			item = index
 			parts := editor_row_parts(p, l, index)
 			if render.rect_contains(parts.reset, x, y) {reset = index}
+			if text != nil {
+				box, cut := editor_description_box(p, l, index, text)
+				if cut && render.rect_contains(box, x, y) {description = index}
+			}
 			browse = render.rect_contains(parts.browse, x, y)
 			row := &p.rows[p.items[index].row]
 			if row.kind == .Profile {
@@ -3541,6 +3547,7 @@ editor_hover :: proc(p: ^Editor, l: Editor_Layout, x, y: f32, text: ^Text = nil)
 	over_page_bar := popup_open == .None && page_bar_visible && scrollbar_contains(page_bar, x, y)
 	strip_changed := editor_strip_hover(p, l, strip_item, x, y)
 	if item == p.hover_item &&
+	   description == p.hover_description &&
 	   reset == p.hover_reset &&
 	   outline == p.hover_outline &&
 	   clear == p.hover_clear &&
@@ -3553,6 +3560,7 @@ editor_hover :: proc(p: ^Editor, l: Editor_Layout, x, y: f32, text: ^Text = nil)
 		return bar_changed || strip_changed || board_changed
 	}
 	p.hover_item, p.hover_reset, p.hover_outline, p.hover_clear = item, reset, outline, clear
+	p.hover_description = description
 	p.hover_browse = browse
 	p.keys_hover = keys
 	p.hover_section, p.page_bar_hover = section, over_page_bar
@@ -3567,6 +3575,7 @@ editor_hover_clear :: proc(p: ^Editor) -> (changed: bool) {
 		p.hover_profile_item >= 0 || p.dropdown.bar_hover || p.keys_hover || p.hover_section >= 0 ||
 		p.page_bar_hover
 	p.hover_item, p.hover_reset, p.hover_outline, p.hover_clear = -1, -1, -1, false
+	p.hover_description = -1
 	p.hover_browse = false
 	p.keys_hover = false
 	p.dropdown.bar_hover = false

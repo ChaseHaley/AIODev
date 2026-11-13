@@ -17,11 +17,13 @@ DESCRIPTION_LINES :: 12
 @(private)
 DESCRIPTION_MIN_WIDTH :: 80
 
-// Where a row's description breaks, for the width and type size it was last wrapped at. Wrapping
-// happens when either changes; drawing reads the stored breaks.
+// Where a row's description breaks, for the width and type size it was last wrapped at, and whether
+// it is `cut`: past the line cap, or on one line too narrow to wrap and still too wide. Wrapping
+// happens when the width or type size changes; drawing and the hover tooltip read what is stored.
 Description_Wrap :: struct {
 	width, size: f32,
 	count:       int,
+	cut:         bool,
 	lines:       [DESCRIPTION_LINES][2]i32,
 }
 
@@ -30,17 +32,27 @@ Description_Wrap :: struct {
 description_wrap :: proc(w: ^Description_Wrap, small: ^Text, s: string, width: f32) -> bool {
 	if w.width == width && w.size == small.size_px {return false}
 	count := w.count
-	w.width, w.size, w.count = width, small.size_px, 0
+	w.width, w.size, w.count, w.cut = width, small.size_px, 0, false
 	lines := Wrap_Lines{text = small, s = s, width = width, last_space = -1}
 	for start, end in wrap_next(&lines) {
 		if w.count == DESCRIPTION_LINES {
 			w.lines[w.count - 1][1] = i32(len(s))
+			w.cut = true
 			break
 		}
 		w.lines[w.count] = {i32(start), i32(end)}
 		w.count += 1
 	}
 	return w.count != count
+}
+
+// Measures a description that stays on one line at `width`; true when it had been wrapped before.
+@(private)
+description_one_line :: proc(w: ^Description_Wrap, small: ^Text, s: string, width: f32) -> bool {
+	if w.width == width && w.size == small.size_px && w.count == 0 {return false}
+	wrapped := w.count > 0
+	w^ = {width = width, size = small.size_px, cut = text_width(small, s) > width}
+	return wrapped
 }
 
 // Draws a description on the lines it was wrapped to, the first on `baseline`. One that was never
@@ -76,12 +88,12 @@ row_text_x :: proc(row: ^Editor_Row, r: render.Rect, s: f32) -> f32 {
 	return x
 }
 
-// The width a row's description wraps to, or false for a row whose description stays on one line:
-// tables, headers and the theme strip lay their text out in columns of their own, and a row left
-// too narrow ellipsizes. A shortcut row leaves room for the key-position switch it shows while
-// selected, so selecting it keeps its height.
+// The width a row's description runs to under its title, and whether it wraps there. `under` is
+// false for a row whose description has a column of its own: tables, headers and the theme strip
+// keep it on one line. A row left too narrow keeps it on one ellipsized line. A shortcut row leaves
+// room for the key-position switch it shows while selected, so selecting it keeps its height.
 @(private)
-row_description_width :: proc(p: ^Editor, l: Editor_Layout, index: int) -> (width: f32, wraps: bool) {
+row_description_width :: proc(p: ^Editor, l: Editor_Layout, index: int) -> (width: f32, under, wraps: bool) {
 	row := &p.rows[p.items[index].row]
 	if row.description == "" || row.process_field != .None {return}
 	#partial switch row.kind {
@@ -89,8 +101,8 @@ row_description_width :: proc(p: ^Editor, l: Editor_Layout, index: int) -> (widt
 		return
 	}
 	parts := row_parts_at(p, l, index, true)
-	width = parts.text_right - row_text_x(row, parts.row, l.scale)
-	return width, width >= DESCRIPTION_MIN_WIDTH * l.scale
+	width = max(1, parts.text_right - row_text_x(row, parts.row, l.scale))
+	return width, true, width >= DESCRIPTION_MIN_WIDTH * l.scale
 }
 
 // Wraps the shown rows' descriptions for this layout and type size, then measures the page again
@@ -108,11 +120,11 @@ editor_wrap_fit :: proc(p: ^Editor, l: Editor_Layout, text: ^Text) {
 	for item, index in p.items {
 		if item.row < 0 || item.part > 0 {continue}
 		row := &p.rows[item.row]
-		width, wraps := row_description_width(p, l, index)
+		width, under, wraps := row_description_width(p, l, index)
 		if wraps {
 			changed = description_wrap(&row.wrap, &small, row.description, width) || changed
-		} else if row.wrap.count > 0 {
-			row.wrap, changed = {}, true
+		} else if under {
+			changed = description_one_line(&row.wrap, &small, row.description, width) || changed
 		}
 	}
 	if changed {editor_tops_build(p)}
@@ -176,4 +188,65 @@ editor_offset_position :: proc(p: ^Editor, offset: f32) -> f32 {
 @(private)
 editor_scroll_offset :: proc(p: ^Editor) -> f32 {
 	return editor_position_offset(p, editor_scroll_lines(p))
+}
+
+// Where the row at page line `index` draws its description, and whether that cuts it short: past
+// the line cap, ellipsized on one line, or faded out at the end of a table column. A row showing a
+// note or an error in its place shows no description.
+@(private)
+editor_description_box :: proc(
+	p: ^Editor, l: Editor_Layout, index: int, text: ^Text,
+) -> (box: render.Rect, cut: bool) {
+	row := &p.rows[p.items[index].row]
+	if row.description == "" || row.process_field != .None {return}
+	s := l.scale
+	small := text_styled(text, .Detail)
+	parts := editor_row_parts(p, l, index)
+	r := parts.row
+	x, baseline, width: f32
+	lines := 1
+	#partial switch row.kind {
+	case .Profile_Add, .Process_Group:
+		return
+	case .Profile:
+		column := profile_row_parts(.Profile, r, s).command
+		x, width = column.x, max(1, column.width)
+		baseline = r.y + r.height / 2 - small.line_height / 2 + small.ascent
+	case .Opener:
+		line := opener_line(row, r, &small, s)
+		x, width = line.x, line.width
+		_, baseline = stacked_baselines(r, text, &small, s)
+	case .Motion_Context:
+		buffer: [128]u8
+		h := motion_header_layout(p, p.items[index].row, r, &small, s, buffer[:])
+		x, width = h.x, h.limit
+		_, baseline = stacked_baselines(r, text, &small, s)
+	case .Theme_Strip:
+		keyboard := index == p.selected && editor_focus(p) == .Control
+		header, _, header_width := strip_header(editor_strip_rect(p, l, index), &small, keyboard, s)
+		x, width = header.x + ITEM_INSET * s, header_width
+		_, baseline = stacked_baselines(header, text, &small, s)
+	case:
+		if row.note != "" || (p.error_key == row.key && p.error_text != "") {return}
+		x = row_text_x(row, r, s)
+		width = max(1, parts.text_right - x)
+		_, baseline = stacked_baselines(row_band(r, s), text, &small, s)
+		if row.wrap.count > 1 {
+			lines = row.wrap.count
+			return {x, baseline - small.ascent, width, f32(lines) * small.line_height}, row.wrap.cut
+		}
+		if !row.wrap.cut {return}
+	}
+	shown := text_width(&small, row.description)
+	// A column narrower than the ellipsis still draws the ellipsis.
+	drawn := max(min(shown, width), text_width(&small, ELLIPSIS))
+	return {x, baseline - small.ascent, drawn, small.line_height}, shown > width
+}
+
+// The full description of the row the pointer rests on while that row shows it cut short, for the
+// window's tooltip; "" otherwise.
+editor_description_tooltip :: proc(p: ^Editor) -> string {
+	if p.hover_description < 0 || p.hover_description >= len(p.items) {return ""}
+	item := p.items[p.hover_description]
+	return item.row >= 0 ? p.rows[item.row].description : ""
 }

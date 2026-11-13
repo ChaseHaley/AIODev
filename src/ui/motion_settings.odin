@@ -908,48 +908,66 @@ motion_header_draw :: proc(
 ) -> render.Build_Status {
 	s, r := scale, parts.row
 	row := &p.rows[index]
-	c := row.motion_context
+	small := text_styled(text, .Detail)
+	buffer: [128]u8
+	h := motion_header_layout(p, index, r, &small, s, buffer[:])
+	icon := row.motion_context in p.motion_expanded ? Icon.Chevron_Down : Icon.Chevron_Right
+	icon_draw(list, icon, h.chevron, theme.muted, ICON_INDICATOR, s)
+	ink := h.inherited ? theme.faint : theme.muted
+	cy := r.y + r.height / 2
+	if result := draw_text(&small, list, h.summary, h.summary_x, cy - small.line_height / 2 + small.ascent, ink);
+	   result != .Ok {return result}
+	if h.on {motion_spark_draw(list, motion_curve_named(p, h.curve), h.spark, ink, s)}
+	baseline, detail_baseline := stacked_baselines(r, text, &small, s)
+	if result := draw_text(text, list, row.title, h.x, baseline, theme.text, h.limit);
+	   result != .Ok {return result}
+	return draw_text(&small, list, row.description, h.x, detail_baseline, theme.muted, h.limit)
+}
+
+// Where a context header's parts go in `r`: its chevron, the summary of the values in effect
+// (written into `buffer`) with the curve's sparkline, and the column its title and description share.
+@(private)
+Motion_Header :: struct {
+	chevron, spark:      render.Rect,
+	summary, curve:      string,
+	summary_x, x, limit: f32,
+	on, inherited:       bool,
+}
+
+@(private)
+motion_header_layout :: proc(
+	p: ^Editor, index: int, r: render.Rect, small: ^Text, s: f32, buffer: []u8,
+) -> (h: Motion_Header) {
+	c := p.rows[index].motion_context
 	depth := f32(motion_depth(c))
-	chevron := render.Rect{r.x + (CONTROL_INSET + depth * SPACE_6) * s, r.y, SPACE_6 * s, r.height}
-	icon := c in p.motion_expanded ? Icon.Chevron_Down : Icon.Chevron_Right
-	icon_draw(list, icon, chevron, theme.muted, ICON_INDICATOR, s)
-	on, inherited := true, true
-	duration, curve, effect := "", "", ""
+	h.chevron = {r.x + (CONTROL_INSET + depth * SPACE_6) * s, r.y, SPACE_6 * s, r.height}
+	h.on, h.inherited = true, true
+	duration, effect := "", ""
 	for &field in p.rows[index + 1:] {
 		if field.motion_context != c || field.motion_part not_in MOTION_FIELD_PARTS {break}
-		inherited = inherited && field.motion_inherited
+		h.inherited = h.inherited && field.motion_inherited
 		#partial switch field.motion_part {
 		case .On:
-			on = field.value == "true"
+			h.on = field.value == "true"
 		case .Duration:
 			duration = field.value
 		case .Curve:
-			curve = field.value
+			h.curve = field.value
 		case .Effect:
 			effect = choice_label(&field, field.value)
 		}
 	}
-	buffer: [128]u8
-	summary := "Off"
-	if on && effect != "" {
-		summary = fmt.bprintf(buffer[:], "%s ms · %s · %s", duration, curve, effect)
-	} else if on {
-		summary = fmt.bprintf(buffer[:], "%s ms · %s", duration, curve)
+	h.summary = "Off"
+	if h.on && effect != "" {
+		h.summary = fmt.bprintf(buffer, "%s ms · %s · %s", duration, h.curve, effect)
+	} else if h.on {
+		h.summary = fmt.bprintf(buffer, "%s ms · %s", duration, h.curve)
 	}
-	ink := inherited ? theme.faint : theme.muted
-	small := text_styled(text, .Detail)
-	right := r.x + r.width - SPACE_3 * s
-	cy := r.y + r.height / 2
-	summary_x := right - text_width(&small, summary)
-	if result := draw_text(&small, list, summary, summary_x, cy - small.line_height / 2 + small.ascent, ink);
-	   result != .Ok {return result}
-	spark := motion_spark_rect(summary_x - (SPACE_2 + MOTION_SPARK_WIDTH) * s, cy, s)
-	if on {motion_spark_draw(list, motion_curve_named(p, curve), spark, ink, s)}
-	x := chevron.x + chevron.width
-	limit := max(1, spark.x - SPACE_3 * s - x)
-	baseline, detail_baseline := stacked_baselines(r, text, &small, s)
-	if result := draw_text(text, list, row.title, x, baseline, theme.text, limit); result != .Ok {return result}
-	return draw_text(&small, list, row.description, x, detail_baseline, theme.muted, limit)
+	h.summary_x = r.x + r.width - SPACE_3 * s - text_width(small, h.summary)
+	h.spark = motion_spark_rect(h.summary_x - (SPACE_2 + MOTION_SPARK_WIDTH) * s, r.y + r.height / 2, s)
+	h.x = h.chevron.x + h.chevron.width
+	h.limit = max(1, h.spark.x - SPACE_3 * s - h.x)
+	return
 }
 
 // The curve list with sparklines, and the shown curve's plot with its handles or bounce slider.

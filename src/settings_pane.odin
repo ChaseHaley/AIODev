@@ -242,7 +242,9 @@ settings_tooltip :: proc(_: ^App, w: ^Window, _, _: f32) -> string {
 	if w.editor.hover_reset >= 0 {return "Reset setting"}
 	if w.editor.hover_browse {return "Choose icon…"}
 	if w.editor.keys_hover {return ui.key_search_tooltip(&w.editor.keys)}
-	return ui.editor_profile_tooltip(&w.editor)
+	if label := ui.editor_profile_tooltip(&w.editor); label != "" {return label}
+	// A description cut short by its row's width shows whole; the tooltip wraps it.
+	return ui.editor_description_tooltip(&w.editor)
 }
 
 @(private)

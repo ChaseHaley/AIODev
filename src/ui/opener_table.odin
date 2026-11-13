@@ -130,18 +130,17 @@ editor_opener_draw :: proc(
 	remove_hovered := editor_row_control_hovered(p, row, cells.remove, pointer)
 	if table_button_draw(list, cells.remove, .Trash, ICON_BUTTON, theme, s, false, remove_hovered, selected,
 		   pointer) != .None {return .Ok}
-	chevron := render.Rect{cells.remove.x - HEIGHT_COMPACT * s, r.y, HEIGHT_COMPACT * s, r.height}
+	line := opener_line(row, r, &small, s)
 	expanded := p.opener_expanded == row.opener
-	icon_draw(list, expanded ? .Chevron_Down : .Chevron_Right, chevron, theme.muted, ICON_INDICATOR, s)
-	placement := chevron.x - 8 * s - text_width(&small, row.value)
+	icon_draw(list, expanded ? .Chevron_Down : .Chevron_Right, line.chevron, theme.muted, ICON_INDICATOR, s)
 	if result := draw_text(
 		&small,
 		list,
 		row.value,
-		placement,
+		line.placement,
 		r.y + (r.height - small.line_height) / 2 + small.ascent,
 		theme.muted,
-		max(1, chevron.x - placement),
+		max(1, line.chevron.x - line.placement),
 	); result != .Ok {return result}
 	icon := render.Rect{cells.expand.x, r.y + (r.height - ICON_BUTTON * s) / 2, ICON_BUTTON * s, ICON_BUTTON * s}
 	if row.icon_atlas.width > 0 {
@@ -149,10 +148,25 @@ editor_opener_draw :: proc(
 	} else {
 		icon_draw(list, .Terminal, {icon.x, r.y, icon.width, r.height}, theme.muted, ICON_BUTTON, s)
 	}
-	x := icon.x + icon.width + SPACE_2 * s
-	width := max(1, placement - x - 12 * s)
 	name_baseline, command_baseline := stacked_baselines(r, text, &small, s)
-	if result := draw_text(text, list, row.title, x, name_baseline, theme.text, width);
+	if result := draw_text(text, list, row.title, line.x, name_baseline, theme.text, line.width);
 	   result != .Ok {return result}
-	return draw_fading_text(&small, list, row.description, x, command_baseline, theme.muted, width)
+	return draw_fading_text(&small, list, row.description, line.x, command_baseline, theme.muted, line.width)
+}
+
+// A link program line's text: its chevron, where its "opens in" label starts, and the column its
+// name and command line share, which fades the command line out where it runs past.
+@(private)
+Opener_Line :: struct {
+	chevron:            render.Rect,
+	placement, x, width: f32,
+}
+
+@(private)
+opener_line :: proc(row: ^Editor_Row, r: render.Rect, small: ^Text, s: f32) -> Opener_Line {
+	cells := editor_block_parts(r, s)
+	chevron := render.Rect{cells.remove.x - HEIGHT_COMPACT * s, r.y, HEIGHT_COMPACT * s, r.height}
+	placement := chevron.x - 8 * s - text_width(small, row.value)
+	x := cells.expand.x + (ICON_BUTTON + SPACE_2) * s
+	return {chevron, placement, x, max(1, placement - x - 12 * s)}
 }
