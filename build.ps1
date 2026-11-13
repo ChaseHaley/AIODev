@@ -253,6 +253,7 @@ switch ($Task) {
         Copy-Item -LiteralPath 'build/release/aio.exe' -Destination "$stage/aio.exe"
         Copy-Item -LiteralPath 'tools/install.ps1' -Destination "$stage/install.ps1"
         Copy-Item -LiteralPath 'tools/uninstall.ps1' -Destination "$stage/uninstall.ps1"
+        Copy-Item -LiteralPath 'tools/update.ps1' -Destination "$stage/update.ps1"
         Copy-Item -LiteralPath 'LICENSE' -Destination "$stage/LICENSE.txt"
         Copy-Item -LiteralPath 'THIRD_PARTY_NOTICES.txt' -Destination "$stage/THIRD_PARTY_NOTICES.txt"
         Copy-Conpty $stage

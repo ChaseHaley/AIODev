@@ -40,6 +40,7 @@ Notice_Key :: enum u32 {
 	Paste,
 	Build_Info,
 	Shortcut_Undo,
+	Update,
 }
 
 // What every window shares. Each feature's own state is a struct declared beside that feature's procs
@@ -111,6 +112,8 @@ App :: struct {
 	closed_sessions:       Closed_Sessions,
 	// Panes and tabs closed explicitly, newest last, for Reopen Closed.
 	closed:                [dynamic]Closed_Item,
+	// Update AIODev's updater while it runs; see app_update.odin.
+	update:                App_Update,
 }
 
 // Creates the graphics device on a thread of its own. The driver takes longer to create one than
@@ -308,6 +311,7 @@ app_destroy :: proc(app: ^App) {
 	delete(app.log_path)
 	layout_state_destroy(app)
 	closed_destroy(app)
+	app_update_destroy(app)
 	delete(app.app_id)
 	if app.platform_ready {
 		if platform_api.destroy(&app.platform) != .None {
@@ -438,6 +442,7 @@ App_Timer :: enum u8 {
 	Layout_Save,
 	File_Dialogs,
 	Markdown,
+	Update,
 }
 
 // Before the windows draw, a timer's change shows in this tick's frame; after, verify counts the
@@ -453,7 +458,7 @@ app_timer_phase :: proc(timer: App_Timer) -> Timer_Phase {
 	switch timer {
 	case .Processes, .Notices, .Drag_Hover:
 		return .Before_Draw
-	case .Verify, .Layout_Save, .File_Dialogs, .Markdown:
+	case .Verify, .Layout_Save, .File_Dialogs, .Markdown, .Update:
 		return .After_Draw
 	}
 	return .Before_Draw
@@ -478,6 +483,8 @@ app_timers_advance :: proc(app: ^App, phase: Timer_Phase) {
 			file_dialogs_tick(app)
 		case .Markdown:
 			markdown_tick(app)
+		case .Update:
+			app_update_tick(app)
 		}
 	}
 }
@@ -501,6 +508,8 @@ app_timer_deadline :: proc(app: ^App, timer: App_Timer) -> (next: time.Tick, pen
 		// A finished dialog wakes the loop itself.
 	case .Markdown:
 		return markdown_poll_deadline(app)
+	case .Update:
+		// A finished updater wakes the loop itself.
 	}
 	return
 }

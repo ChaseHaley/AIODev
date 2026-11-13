@@ -42,7 +42,7 @@ foreach ($section in $sections.GetEnumerator()) {
 $notes.AddRange([string[]] @(
     '## Install',
     '',
-    'Quit AIODev, then in PowerShell, to install or upgrade:',
+    'In PowerShell, to install or upgrade:',
     '',
     '```powershell',
     'irm https://github.com/ChaseHaley/AIODev/releases/latest/download/install.ps1 | iex',
@@ -53,6 +53,8 @@ $notes.AddRange([string[]] @(
     'Either way it installs per user to `%LOCALAPPDATA%\Programs\AIODev`, adds `aio` to your PATH and creates a',
     'Start menu shortcut. To uninstall, run',
     '`powershell -ExecutionPolicy Bypass -File "$env:LOCALAPPDATA\Programs\AIODev\uninstall.ps1"`.',
+    '',
+    'An installed AIODev also updates itself: run Update AIODev from the command palette.',
     '',
     "SHA256: ``$hash``",
     '',

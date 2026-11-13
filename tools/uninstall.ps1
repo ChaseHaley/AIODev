@@ -16,11 +16,13 @@
         throw 'AIODev is running. Quit it, including from the notification area, then uninstall again.'
     }
 
-    # Only the files the receipt names, never the whole folder, so anything else kept there survives.
+    # Only the files the receipt names, never the whole folder, so anything else kept there survives, and the
+    # previous versions install.ps1 moved aside under .replaced while they ran.
     $names = @(Get-Content -LiteralPath $receipt | Where-Object { $_ -ne '' })
     foreach ($name in $names + 'files.txt') {
         Remove-Item -LiteralPath (Join-Path $destination $name) -Force -ErrorAction SilentlyContinue
     }
+    Remove-Item -LiteralPath (Join-Path $destination '.replaced') -Recurse -Force -ErrorAction SilentlyContinue
     foreach ($directory in @($names | ForEach-Object { Split-Path $_ } | Where-Object { $_ } | Sort-Object -Unique -Descending) + '') {
         $path = Join-Path $destination $directory
         if ((Test-Path -LiteralPath $path) -and -not (Get-ChildItem -LiteralPath $path -Force)) {
