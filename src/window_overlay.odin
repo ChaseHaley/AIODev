@@ -81,6 +81,8 @@ Overlay_Chip_Name :: struct {
 Overlay_Group_Name :: struct {
 	group:  u32,
 	editor: bool,
+	// The last save found another group with the name in the group's colour. Editing clears it.
+	error:  bool,
 }
 
 // The right-clicked tab, or the right-clicked chip's group and that group's first tab. The menu acts on the
@@ -197,7 +199,9 @@ overlay_close :: proc(app: ^App, w: ^Window, exit := Overlay_Exit.Cancel) {
 	case Overlay_Rename:
 		ui.field_release(&w.rename)
 	case Overlay_Group_Name:
-		if exit == .Leave {group_name_save(app, w, current.group)}
+		if exit == .Leave && !group_name_save(app, w, current.group) {
+			notify(app, .Warning, "Another group of this colour has that name, so the name was not changed.")
+		}
 		ui.field_release(&w.rename)
 	case Overlay_Document_Menu:
 		document_menu_close(&w.document_menu, current.mode)

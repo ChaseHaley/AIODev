@@ -26,10 +26,18 @@ group_name_editing :: proc(w: ^Window) -> (^Tab_Group, bool) {
 	return tab_group_find(w.workspace, naming.group), naming.editor
 }
 
-// Stores the typed name; an empty one leaves the chip as a dot of its colour.
-group_name_save :: proc(app: ^App, w: ^Window, id: u32) {
+// Stores the typed name; an empty one leaves the chip as a dot of its colour. False, storing nothing, when
+// another group of the workspace has the name in this group's colour (WORK-460).
+group_name_save :: proc(app: ^App, w: ^Window, id: u32) -> bool {
 	target := Rename_Group_Target{w.workspace.id, id}
-	_ = rename_target_commit(app, target, ui.field_string(&w.rename), .Automatic_Title)
+	return rename_target_commit(app, target, ui.field_string(&w.rename), .Automatic_Title) != .Taken
+}
+
+// Whether colour `color` would give the group being named a name and colour another group has, with the
+// name as typed.
+@(private = "file")
+group_name_color_taken :: proc(w: ^Window, group: ^Tab_Group, color: int) -> bool {
+	return tab_group_taken(w.workspace, rename_clean(ui.field_string(&w.rename)), color, group.id)
 }
 
 // In place, the chip; in the editor, a panel below the chip aligned with its left edge, kept in the window.
@@ -65,15 +73,19 @@ group_name_swatch_rect :: proc(app: ^App, w: ^Window, color: int) -> render.Rect
 	return {x, field.y + field.height + ui.SPACE_3 * s, size, size}
 }
 
-// A press on one of the editor's swatches colours the group; true when it landed on one.
+// A press on one of the editor's swatches colours the group, unless another group has the typed name in that
+// colour; true when it landed on one.
 group_name_swatch_press :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {
 	group, editor := group_name_editing(w)
 	if group == nil || !editor {return false}
 	for color in 1 ..< len(WORKSPACE_ICON_COLORS) {
-		if render.rect_contains(group_name_swatch_rect(app, w, color), x, y) {
-			tab_group_color_set(app, w, group.id, color)
-			return true
+		if !render.rect_contains(group_name_swatch_rect(app, w, color), x, y) {continue}
+		if !group_name_color_taken(w, group, color) {
+			group.color = color
+			tab_groups_changed(app, w)
+			if naming, ok := &w.overlay.(Overlay_Group_Name); ok {naming.error = false}
 		}
+		return true
 	}
 	return false
 }
@@ -95,6 +107,22 @@ group_name_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 	box := rename_field_box(app, w)
 	if result := ui.field_box_draw(box, &w.list, app.theme, ui.field_box_baseline(box), true, "Name this group");
 	   result != .Ok {return result}
+	if naming, _ := w.overlay.(Overlay_Group_Name); naming.error {
+		message := "Another group of this colour has that name."
+		detail := ui.text_styled(&w.ui_text, .Detail)
+		pad := ui.SPACE_2 * s
+		below := editor ? group_name_rect(app, w) : field
+		panel := render.Rect {
+			below.x,
+			below.y + below.height + ui.SPACE_1 * s,
+			ui.text_width(&detail, message) + 2 * pad,
+			detail.line_height + 2 * pad,
+		}
+		if ui.panel_draw(&w.list, ui.popover_panel(panel, s), app.theme) != .None {return .Ok}
+		baseline := panel.y + pad + detail.ascent
+		if result := ui.draw_text(&detail, &w.list, message, panel.x + pad, baseline, app.theme.error);
+		   result != .Ok {return result}
+	}
 	if !editor {return .Ok}
 	for index in 1 ..< len(WORKSPACE_ICON_COLORS) {
 		r := group_name_swatch_rect(app, w, index)
@@ -103,7 +131,9 @@ group_name_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 			if render.push_rect(&w.list, {rect = ring, color = app.theme.text, radius = ring.width / 2, stroke = s}) !=
 			   .None {return .Ok}
 		}
+		// A colour another group has with the typed name is taken, and draws disabled (WORK-460).
 		swatch := workspace_icon_tint(index, app.theme.text)
+		if group_name_color_taken(w, group, index) {swatch.a *= 0.45}
 		if render.push_rect(&w.list, {rect = r, color = swatch, radius = r.width / 2}) != .None {return .Ok}
 	}
 	return .Ok

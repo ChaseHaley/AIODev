@@ -247,7 +247,7 @@ RESIZE_LARGE_LABEL :: "50"
 @(private)
 ACTIONS :: [Action]Command_Descriptor {
 	.Command_Palette = {
-		"app.command_palette", "Show command palette", {{.P, {.Control, .Shift}}}, .Local, {},
+		"app.command_palette", "Show everything palette", {{.P, {.Control, .Shift}}}, .Local, {},
 	},
 	.Copy = {"edit.copy", "Copy", {{.C, {.Control, .Shift}}, {.Insert, {.Control}}}, .Local, {}},
 	.Paste = {"edit.paste", "Paste", {{.V, {.Control, .Shift}}, {.Insert, {.Shift}}}, .Local, {}},
@@ -1245,15 +1245,7 @@ command_execute :: proc(app: ^App, ctx: Command_Context, invocation: commands.In
 			_ = pane_rearrange(app, w, swap)
 		}
 	case .Focus_Left, .Focus_Right, .Focus_Up, .Focus_Down:
-		start := pane_action_focus(w)
-		other := layout.focus_direction(pane_action_rects(app, w), start, param.direction)
-		// Leaving a floating group's outer edge continues from the tiled pane behind it.
-		tree := window_tree(w)
-		if other == start && layout.is_floating(tree, start) {
-			tiled := pane_tiled_action_rects(app, w)
-			other = layout.focus_direction(tiled, layout.focus_tiled(tree), param.direction)
-		}
-		pane_focus(app, w, other)
+		pane_focus_toward(app, w, param.direction)
 	case .Resize_Left, .Resize_Right, .Resize_Up, .Resize_Down, .Resize_Left_Large, .Resize_Right_Large,
 	     .Resize_Up_Large, .Resize_Down_Large:
 		step := param.resize

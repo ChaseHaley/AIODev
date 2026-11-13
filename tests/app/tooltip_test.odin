@@ -203,7 +203,7 @@ tooltip_shortcut_follows_the_commands_binding :: proc(t: ^testing.T) {
 	r := app.title_action_rect(&w, .Palette)
 	x, y := r.x + r.width / 2, r.y + r.height / 2
 	app.tooltip_hover(&state, &w, .Title_Action, input.Mouse_Move_Event{x = i32(x), y = i32(y)})
-	testing.expect_value(t, app.tooltip_current(&w), "Command palette")
+	testing.expect_value(t, app.tooltip_current(&w), "Everything palette")
 	buffer: [commands.SHORTCUT_TEXT_CAP]u8
 	testing.expect_value(t, app.tooltip_shortcut(&state, &w, .Title_Action, x, y, buffer[:]), "Ctrl+Shift+P")
 
