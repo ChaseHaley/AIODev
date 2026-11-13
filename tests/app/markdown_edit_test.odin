@@ -195,6 +195,50 @@ the_caret_line_shows_its_markup_while_the_rest_renders :: proc(t: ^testing.T) {
 	testing.expect(t, strings.contains(text, "Some bold text"), text)
 }
 
+// Clicks link `link` of the pane where it first shows, and says whether it was on screen.
+@(private = "file")
+edit_link_click :: proc(state: ^app.App, w: ^app.Window, pane: ^app.Markdown_Pane, link: int) -> bool {
+	g := edit_fitted(state, w, pane)
+	for y := g.top; y < g.area.y + g.area.height; y += 1 {
+		for x := g.left; x < g.left + g.width; x += 2 {
+			if ui.markdown_link_at(&pane.view, g, x, y) != link {continue}
+			for pressed in ([?]bool{true, false}) {
+				app.handle_event(state, input.Mouse_Button_Event{window = w.id, x = i32(x), y = i32(y),
+					button = .Left, pressed = pressed})
+			}
+			return true
+		}
+	}
+	return false
+}
+
+// While editing, a click opens a rendered link, but on the caret's line, shown as source, it moves the
+// caret into the link's text instead.
+@(test)
+a_click_opens_a_rendered_link_but_edits_one_shown_as_source :: proc(t: ^testing.T) {
+	sync.mutex_lock(&Link_Test_Lock)
+	defer sync.mutex_unlock(&Link_Test_Lock)
+	f: Edit_Fixture
+	defer edit_fixture_destroy(t, &f)
+	w, pane := edit_fixture_start(t, &f, "EditLink", "See [site](https://example.com)\n\nend")
+	if pane == nil {return}
+	Open_Stub_State = {}
+	f.state.opener.url = link_open_stub
+	defer f.state.opener.url = nil
+	app.run_action(&f.state, w, .Edit_Markdown)
+	if !testing.expect(t, app.markdown_editing(pane)) {return}
+	edit_press(&f.state, w, .Home, {.Control})
+	if !testing.expect(t, edit_link_click(&f.state, w, pane, 0)) {return}
+	testing.expect_value(t, Open_Stub_State.calls, 0)
+	caret := pane.editor.buffer.caret
+	testing.expect(t, caret >= len("See [") && caret <= len("See [site"), fmt.tprint(caret))
+
+	edit_press(&f.state, w, .End, {.Control})
+	if !testing.expect(t, edit_link_click(&f.state, w, pane, 0)) {return}
+	testing.expect_value(t, Open_Stub_State.calls, 1)
+	testing.expect_value(t, Open_Stub_State.uri, "https://example.com")
+}
+
 // A change on disk replaces the editor's text when nothing waits to save, and loses to edits that do.
 @(test)
 a_file_changed_on_disk_reloads_unless_edits_wait :: proc(t: ^testing.T) {

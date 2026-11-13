@@ -828,8 +828,8 @@ markdown_link_open :: proc(app: ^App, w: ^Window, pane: ^Markdown_Pane, link: in
 	}
 }
 
-// Ctrl+ or Shift+right-click on a link shows the link menu a terminal link shows. False when the point is on
-// no link.
+// A right-click on a link shows the link menu a terminal link shows. False when the point is on no
+// link.
 @(private = "file", require_results)
 markdown_link_menu :: proc(
 	app: ^App,
@@ -846,6 +846,23 @@ markdown_link_menu :: proc(
 	target, _ := target_from_link(document.links[link], pane.path, buffer[:])
 	document_menu_open_target(app, w, shown.content, target, x, y)
 	return true
+}
+
+// The link a click at a point opens, or -1. A link on a line the editor shows as source is text to
+// edit there, so only Ctrl+click opens it.
+@(private = "file", require_results)
+markdown_link_clicked :: proc(
+	pane: ^Markdown_Pane,
+	document: ^markdown.Document,
+	g: ui.Markdown_Geometry,
+	x, y: f32,
+	control: bool,
+) -> int {
+	link := ui.markdown_link_at(&pane.view, g, x, y)
+	if link < 0 || control || !markdown_editing(pane) {return link}
+	e := pane.editor
+	source := markdown.live_source(document, ui.markdown_offset_at(&pane.view, document, g, x, y))
+	return source >= e.built_from && source <= e.built_to ? -1 : link
 }
 
 // Pointer surface
@@ -895,7 +912,7 @@ markdown_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: input.Mo
 		} else if document := markdown_document(pane); document != nil {
 			g := markdown_geometry_of(w, shown)
 			shape = .Text
-			if link := ui.markdown_link_at(&pane.view, g, x, y); link >= 0 {
+			if link := markdown_link_clicked(pane, document, g, x, y, .Control in e.modifiers); link >= 0 {
 				hover, shape = Markdown_Link_Hover{pane.id, link}, .Hand
 			} else if ui.markdown_task_at(&pane.view, document, g, x, y) != markdown.NO_SOURCE {
 				shape = .Hand
@@ -940,7 +957,7 @@ markdown_press :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) {
 	if shown.content.kind != .Markdown {return}
 	pane_focus(app, w, shown.node)
 	if pane == nil {return}
-	if e.button == .Right && (.Control in e.modifiers || .Shift in e.modifiers) {
+	if e.button == .Right {
 		if markdown_link_menu(app, w, pane, shown, x, y) {gesture_swallow(w, .Right, .Markdown_Page)}
 		return
 	}
@@ -963,8 +980,8 @@ markdown_press :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) {
 		markdown_fold_toggle(pane, heading)
 		return
 	}
-	if .Control in e.modifiers {
-		if link := ui.markdown_link_at(&pane.view, g, x, y); link >= 0 {
+	if .Shift not_in e.modifiers || .Control in e.modifiers {
+		if link := markdown_link_clicked(pane, document, g, x, y, .Control in e.modifiers); link >= 0 {
 			markdown_link_open(app, w, pane, link)
 			return
 		}

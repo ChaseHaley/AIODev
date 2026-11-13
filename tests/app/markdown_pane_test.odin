@@ -558,17 +558,15 @@ a_markdown_link_offers_the_link_menu_and_opens_its_file_in_a_linked_window :: pr
 	ui.markdown_view_fit(&pane.view, document, pane.revision, &w.ui_text, f.state.family, g.width, w.scale)
 	x, y := g.left + 5, g.top
 	for ui.markdown_link_at(&pane.view, g, x, y) < 0 && y < g.area.y + g.area.height {y += 1}
-	right_click := proc(state: ^app.App, w: ^app.Window, x, y: f32, modifiers: input.Modifiers) {
+	right_click := proc(state: ^app.App, w: ^app.Window, x, y: f32) {
 		for pressed in ([?]bool{true, false}) {
 			app.handle_event(state, input.Mouse_Button_Event{window = w.id, x = i32(x), y = i32(y),
-				button = .Right, pressed = pressed, modifiers = modifiers})
+				button = .Right, pressed = pressed})
 		}
 	}
 
-	// A plain right-click leaves the menu closed; Ctrl or Shift shows it.
-	right_click(&f.state, w, x, y, {})
-	testing.expect(t, !app.document_menu_shown(w))
-	right_click(&f.state, w, x, y, {.Shift})
+	// A right-click needs no Ctrl or Shift, unlike a terminal's.
+	right_click(&f.state, w, x, y)
 	if !testing.expect(t, app.document_menu_shown(w)) {return}
 	state, _ := w.overlay.(app.Overlay_Document_Menu)
 	link, is_link := state.mode.(app.Document_Menu_Link)
@@ -621,7 +619,7 @@ fitted :: proc(state: ^app.App, w: ^app.Window, pane: ^app.Markdown_Pane) -> (g:
 	return {}, false
 }
 
-// Ctrl+clicks link `link` of the pane, wherever its text shows.
+// Clicks link `link` of the pane, wherever its text shows.
 @(private = "file")
 link_click :: proc(t: ^testing.T, state: ^app.App, w: ^app.Window, pane: ^app.Markdown_Pane, link: int) {
 	g, found := fitted(state, w, pane)
@@ -631,7 +629,7 @@ link_click :: proc(t: ^testing.T, state: ^app.App, w: ^app.Window, pane: ^app.Ma
 			if ui.markdown_link_at(&pane.view, g, x, y) != link {continue}
 			for pressed in ([?]bool{true, false}) {
 				app.handle_event(state, input.Mouse_Button_Event{window = w.id, x = i32(x), y = i32(y),
-					button = .Left, pressed = pressed, modifiers = {.Control}})
+					button = .Left, pressed = pressed})
 			}
 			return
 		}
