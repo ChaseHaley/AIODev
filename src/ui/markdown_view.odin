@@ -192,7 +192,9 @@ markdown_geometry :: proc(area: render.Rect, scale: f32) -> Markdown_Geometry {
 	}
 }
 
-// Brings the layout up to date for this document revision, width and set of fonts.
+// Brings the layout up to date for this document revision, width and set of fonts. `folded`, by block,
+// marks the headings whose sections are collapsed: everything up to the next heading of the same level
+// or above is left out. A change to it must come with a new revision.
 markdown_view_fit :: proc(
 	v: ^Markdown_View,
 	doc: ^markdown.Document,
@@ -200,6 +202,7 @@ markdown_view_fit :: proc(
 	t: ^Text,
 	mono: font.Family,
 	width, scale: f32,
+	folded: []bool = nil,
 ) {
 	body_px := math.round(t.size_px * MARKDOWN_BODY_RATIO)
 	if v.width == width && v.body_px == body_px && v.family == t.family && v.mono == mono &&
@@ -228,7 +231,13 @@ markdown_view_fit :: proc(
 	v.failed = false
 	y: f32
 	for i := 0; i < len(doc.blocks); {
+		block := doc.blocks[i]
+		heading := i
 		i, y = layout_block(v, doc, i, y)
+		if block.kind != .Heading || heading >= len(folded) || !folded[heading] {continue}
+		for i < len(doc.blocks) && !(doc.blocks[i].kind == .Heading && doc.blocks[i].level <= block.level) {
+			i += 1
+		}
 	}
 	v.height = y
 	if v.failed {
@@ -734,6 +743,50 @@ markdown_link_at :: proc(v: ^Markdown_View, g: Markdown_Geometry, x, y: f32) -> 
 	return -1
 }
 
+// Where a heading's fold chevron stands, left of the line, in the view's own coordinates.
+@(private = "file")
+fold_box :: proc(v: ^Markdown_View, line: Line) -> render.Rect {
+	size := (ICON_INDICATOR + SPACE_1) * v.scale
+	return {line.left - size - SPACE_1 * v.scale, line.top + (line.height - size) / 2, size, size}
+}
+
+// Whether line `index` starts its block, so a heading's chevron goes beside it.
+@(private = "file")
+block_starts :: proc(v: ^Markdown_View, index: int) -> bool {
+	return index == 0 || v.lines[index - 1].block != v.lines[index].block
+}
+
+// The heading whose line is under a point, or -1, and whether the point is on its fold chevron.
+markdown_fold_at :: proc(
+	v: ^Markdown_View,
+	doc: ^markdown.Document,
+	g: Markdown_Geometry,
+	x, y: f32,
+) -> (
+	heading: int,
+	on_chevron: bool,
+) {
+	lx, ly := local_point(v, g, x, y)
+	index := line_at(v, ly)
+	if index >= len(v.lines) || ly < v.lines[index].top || ly >= v.lines[index].top + v.lines[index].height {
+		return -1, false
+	}
+	block := int(v.lines[index].block)
+	if doc.blocks[block].kind != .Heading {return -1, false}
+	for !block_starts(v, index) {index -= 1}
+	box := fold_box(v, v.lines[index])
+	slack := SPACE_1 * v.scale
+	on_chevron = lx >= box.x - slack && lx < box.x + box.width + slack && ly >= v.lines[index].top &&
+		ly < v.lines[index].top + v.lines[index].height
+	return block, on_chevron
+}
+
+// The headings whose sections are collapsed, by block, and the one whose chevron the pointer shows.
+Markdown_Folds :: struct {
+	folded: []bool,
+	hover:  int,
+}
+
 // The file offset of the task mark whose checkbox is under a point, or markdown.NO_SOURCE.
 markdown_task_at :: proc(
 	v: ^Markdown_View,
@@ -949,6 +1002,7 @@ markdown_draw :: proc(
 	hover_link := -1,
 	// The edit caret's text offset, or -1 for none.
 	caret := -1,
+	folds: Markdown_Folds = {hover = -1},
 ) -> render.Build_Status {
 	if render.push_layer(list, g.area, 0) != .None {return .Ok}
 	origin_y := g.top - f32(v.scroll)
@@ -972,6 +1026,15 @@ markdown_draw :: proc(
 	    index += 1 {
 		line := v.lines[index]
 		baseline := line.baseline + origin_y
+		block := int(line.block)
+		if doc.blocks[block].kind == .Heading && block_starts(v, index) {
+			folded := block < len(folds.folded) && folds.folded[block]
+			if folded || folds.hover == block {
+				box := fold_box(v, line)
+				box.x, box.y = box.x + g.left, box.y + origin_y
+				icon_draw(list, folded ? .Chevron_Right : .Chevron_Down, box, theme.muted, ICON_INDICATOR, v.scale)
+			}
+		}
 		for i in 0 ..< line.run_count {
 			run := v.runs[line.first_run + i]
 			x := run.x + g.left

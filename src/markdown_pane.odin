@@ -70,6 +70,7 @@ Markdown_Selecting :: struct {
 Markdown_Hover :: union {
 	Markdown_Link_Hover,
 	Markdown_Outline_Hover,
+	Markdown_Fold_Hover,
 }
 Markdown_Link_Hover :: struct {
 	pane: u32,
@@ -77,6 +78,11 @@ Markdown_Link_Hover :: struct {
 }
 // The pointer is on the outline's bars or its open panel; `heading` is the one under it, -1 for none.
 Markdown_Outline_Hover :: struct {
+	pane:    u32,
+	heading: int,
+}
+// The pointer is on a heading's line, which shows the chevron that folds it (markdown_folds.odin).
+Markdown_Fold_Hover :: struct {
 	pane:    u32,
 	heading: int,
 }
@@ -104,6 +110,7 @@ Markdown_Pane :: struct {
 	load:                   Markdown_Load,
 	view:                   ui.Markdown_View,
 	outline:                ui.Markdown_Outline,
+	folds:                  Markdown_Folds,
 	search:                 markdown.Search,
 	// Counts the documents the pane has shown, loads and edit view rebuilds alike, so a view lays out
 	// each once.
@@ -139,6 +146,7 @@ markdown_pane_destroy :: proc(pane: ^Markdown_Pane) {
 	}
 	ui.markdown_view_destroy(&pane.view)
 	ui.markdown_outline_destroy(&pane.outline)
+	markdown_folds_destroy(&pane.folds)
 	markdown.search_destroy(&pane.search)
 	delete(pane.path)
 	delete(pane.title)
@@ -541,7 +549,7 @@ markdown_outline_of :: proc(
 ) {
 	document := markdown_document(pane)
 	if document == nil {return {}, false}
-	ui.markdown_view_fit(&pane.view, document, pane.revision, &w.ui_text, app.family, g.width, w.scale)
+	markdown_view_fitted(app, w, pane, document, g)
 	ui.markdown_outline_sync(&pane.outline, &pane.view, document)
 	return ui.markdown_outline_column(&pane.outline, g, w.scale)
 }
@@ -645,11 +653,12 @@ markdown_pane_draw :: proc(
 	document := pane != nil ? markdown_document(pane) : nil
 	if document == nil {return false, markdown_message_draw(app, w, pane, g)}
 	view := &pane.view
-	ui.markdown_view_fit(view, document, pane.revision, &w.ui_text, app.family, g.width, w.scale)
+	markdown_view_fitted(app, w, pane, document, g)
 	visible := int(g.area.height)
 	// Applied once: a heading the document does not have leaves the view where it was.
 	if pane.heading != "" {
 		if offset, found := markdown.heading_find(document, pane.heading); found {
+			if markdown_fold_reveal(pane, offset) {markdown_view_fitted(app, w, pane, document, g)}
 			ui.markdown_scroll_to_offset(view, offset, visible)
 		}
 		delete(pane.heading)
@@ -676,7 +685,11 @@ markdown_pane_draw :: proc(
 	}
 	hover := markdown_link_hovered(w, pane.id)
 	caret := markdown_caret_shown(w, pane, shown)
-	result = ui.markdown_draw(view, document, g, &w.list, &w.ui_text, app.theme, find, hover, caret)
+	folds := ui.Markdown_Folds{pane.folds.folded[:], -1}
+	if fold, over := w.markdown_hover.(Markdown_Fold_Hover); over && fold.pane == pane.id {
+		folds.hover = fold.heading
+	}
+	result = ui.markdown_draw(view, document, g, &w.list, &w.ui_text, app.theme, find, hover, caret, folds)
 	if result != .Ok {return true, result}
 	ui.markdown_outline_sync(&pane.outline, view, document)
 	outline, open := w.markdown_hover.(Markdown_Outline_Hover)
@@ -886,6 +899,9 @@ markdown_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: input.Mo
 				hover, shape = Markdown_Link_Hover{pane.id, link}, .Hand
 			} else if ui.markdown_task_at(&pane.view, document, g, x, y) != markdown.NO_SOURCE {
 				shape = .Hand
+			} else if folding, on_chevron := ui.markdown_fold_at(&pane.view, document, g, x, y); folding >= 0 {
+				hover = Markdown_Fold_Hover{pane.id, folding}
+				if on_chevron {shape = .Hand}
 			}
 		}
 	}
@@ -938,8 +954,13 @@ markdown_press :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) {
 	if heading, over := markdown_outline_under(app, w, pane, shown, x, y); over {
 		if heading >= 0 {
 			start := pane.outline.headings[heading].start
+			if markdown_fold_reveal(pane, start) {markdown_view_fitted(app, w, pane, document, g)}
 			ui.markdown_scroll_to_offset(&pane.view, start, int(g.area.height))
 		}
+		return
+	}
+	if heading, on_chevron := ui.markdown_fold_at(&pane.view, document, g, x, y); on_chevron {
+		markdown_fold_toggle(pane, heading)
 		return
 	}
 	if .Control in e.modifiers {
@@ -988,7 +1009,7 @@ when AIO_CONTROL {
 		state := "Missing"
 		outline, current := 0, -1
 		open, editing, unsaved := false, false, false
-		caret := -1
+		caret, folds := -1, 0
 		if pane := markdown_focused(app, w); pane != nil {
 			scroll, total = pane.view.scroll, ui.markdown_total(&pane.view)
 			path = pane.path
@@ -1029,5 +1050,7 @@ when AIO_CONTROL {
 		state_value(r, "markdown.editing", editing)
 		state_value(r, "markdown.unsaved", unsaved)
 		state_value(r, "markdown.caret", caret)
+		if pane := markdown_focused(app, w); pane != nil {folds = len(pane.folds.folds)}
+		state_value(r, "markdown.folds", folds)
 	}
 }

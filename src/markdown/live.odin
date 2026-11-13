@@ -519,22 +519,31 @@ live_frontmatter :: proc(b: ^Live_Builder, at, end: int) -> bool {
 	return true
 }
 
-// The block of a live document holding text offset `offset`.
-@(private = "file")
-live_block_at :: proc(doc: ^Document, offset: int) -> int {
-	low, high := 0, len(doc.blocks)
-	for low < high {
-		middle := (low + high) / 2
-		if doc.blocks[middle].marker_start <= offset {low = middle + 1} else {high = middle}
+// The block holding text offset `offset`, or -1 when none does.
+block_at :: proc(doc: ^Document, offset: int) -> int {
+	if len(doc.blocks) == 0 {return -1}
+	// A live block's marker_start is where it starts, so the blocks can be searched.
+	if doc.live {
+		low, high := 0, len(doc.blocks)
+		for low < high {
+			middle := (low + high) / 2
+			if doc.blocks[middle].marker_start <= offset {low = middle + 1} else {high = middle}
+		}
+		return max(low - 1, 0)
 	}
-	return max(low - 1, 0)
+	for block, index in doc.blocks {
+		if block.span_count == 0 {continue}
+		first, last := doc.spans[block.first_span], doc.spans[block.first_span + block.span_count - 1]
+		if offset >= first.start && offset < last.end {return index}
+	}
+	return -1
 }
 
 // The file offset shown at text offset `offset` of a live document; where markup hid the file's own
 // text, the offset of the text after it.
 live_source :: proc(doc: ^Document, offset: int) -> int {
 	if len(doc.blocks) == 0 {return 0}
-	block := doc.blocks[live_block_at(doc, offset)]
+	block := doc.blocks[block_at(doc, offset)]
 	last := block.source_end
 	for span in doc.spans[block.first_span:][:block.span_count] {
 		if span.source == NO_SOURCE {continue}

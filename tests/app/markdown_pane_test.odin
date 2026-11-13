@@ -795,7 +795,8 @@ when app.AIO_CONTROL {
 		testing.expect_value(t, state_of(&f.state, "markdown.outline_open"), "true")
 
 		move(&f.state, w, g.left + g.width - 10, g.top + 10)
-		testing.expect(t, w.markdown_hover == nil, "the page beside the panel closes it")
+		_, still := w.markdown_hover.(app.Markdown_Outline_Hover)
+		testing.expect(t, !still, "the page beside the panel closes it")
 		testing.expect_value(t, state_of(&f.state, "markdown.outline_open"), "false")
 	}
 }

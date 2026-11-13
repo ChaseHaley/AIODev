@@ -154,7 +154,10 @@ markdown_editor_sync :: proc(pane: ^Markdown_Pane) {
 		markdown.search_restart(&pane.search)
 	}
 	ui.markdown_select_at(&pane.view, markdown.live_display(&e.document, b.anchor), false)
-	ui.markdown_select_at(&pane.view, markdown.live_display(&e.document, b.caret), true)
+	caret := markdown.live_display(&e.document, b.caret)
+	ui.markdown_select_at(&pane.view, caret, true)
+	// A caret has nowhere to show in a folded section, so moving into one unfolds it.
+	_ = markdown_fold_reveal(pane, caret)
 }
 
 // After an edit: the live view follows and the file saves once typing pauses.
@@ -280,8 +283,7 @@ markdown_edit_fitted :: proc(app: ^App, w: ^Window, pane: ^Markdown_Pane) -> (ui
 	shown, found := markdown_pane_rect(w, pane.id)
 	if !found {return {}, false}
 	g := markdown_geometry_of(w, shown)
-	document := &pane.editor.document
-	ui.markdown_view_fit(&pane.view, document, pane.revision, &w.ui_text, app.family, g.width, w.scale)
+	markdown_view_fitted(app, w, pane, &pane.editor.document, g)
 	return g, true
 }
 

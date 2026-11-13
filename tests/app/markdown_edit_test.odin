@@ -80,8 +80,7 @@ edit_fitted :: proc(state: ^app.App, w: ^app.Window, pane: ^app.Markdown_Pane) -
 		if shown.content != {.Markdown, pane.id} {continue}
 		r := shown.rect
 		g = ui.markdown_geometry({r.x, r.y + w.header_height, r.width, r.height - w.header_height}, w.scale)
-		document := app.markdown_document(pane)
-		ui.markdown_view_fit(&pane.view, document, pane.revision, &w.ui_text, state.family, g.width, w.scale)
+		app.markdown_view_fitted(state, w, pane, app.markdown_document(pane), g)
 	}
 	return
 }
@@ -241,6 +240,60 @@ keys_type_the_text_windows_gives_them :: proc(t: ^testing.T) {
 		app.handle_event(&f.state, input.Key_Event{window = w.id, key = k.key, modifiers = k.modifiers})
 	}
 	testing.expect_value(t, markdown.edit_string(&pane.editor.buffer), "ha!€")
+}
+
+// Clicks the fold chevron of the heading whose text starts at `offset`, wherever it shows.
+@(private = "file")
+chevron_click :: proc(t: ^testing.T, state: ^app.App, w: ^app.Window, pane: ^app.Markdown_Pane, offset: int) {
+	g := edit_fitted(state, w, pane)
+	document := app.markdown_document(pane)
+	heading := markdown.block_at(document, offset)
+	for y := g.top; y < g.area.y + g.area.height; y += 1 {
+		for x := g.area.x; x < g.left; x += 1 {
+			found, on := ui.markdown_fold_at(&pane.view, document, g, x, y)
+			if found != heading || !on {continue}
+			for pressed in ([?]bool{true, false}) {
+				app.handle_event(state, input.Mouse_Button_Event{window = w.id, x = i32(x), y = i32(y),
+					button = .Left, pressed = pressed})
+			}
+			return
+		}
+	}
+	testing.expect(t, false, "the chevron is not on screen")
+}
+
+// A heading's chevron folds its section, up to the next heading of its level, and folds it back out.
+// While editing, the caret moving into a folded section unfolds it.
+@(test)
+headings_fold_their_sections :: proc(t: ^testing.T) {
+	f: Edit_Fixture
+	defer edit_fixture_destroy(t, &f)
+	source := "# Top\n\n## One\n\nhidden text\n\n### Deeper\n\nalso hidden\n\n## Two\n\nshown\n"
+	w, pane := edit_fixture_start(t, &f, "Fold", source)
+	if pane == nil {return}
+	edit_fitted(&f.state, w, pane)
+	tall := pane.view.height
+	chevron_click(t, &f.state, w, pane, strings.index(string(app.markdown_document(pane).text[:]), "One"))
+	testing.expect_value(t, len(pane.folds.folds), 1)
+	edit_fitted(&f.state, w, pane)
+	testing.expect(t, pane.view.height < tall, "the section's lines are gone")
+	// A hidden offset finds the first shown line after it: the next heading of the folded one's level.
+	document := app.markdown_document(pane)
+	hidden, _ := ui.markdown_offset_top(&pane.view, strings.index(string(document.text[:]), "also hidden"))
+	two, _ := ui.markdown_offset_top(&pane.view, strings.index(string(document.text[:]), "Two"))
+	testing.expect_value(t, hidden, two)
+
+	app.run_action(&f.state, w, .Edit_Markdown)
+	if !testing.expect(t, app.markdown_editing(pane)) {return}
+	testing.expect_value(t, len(pane.folds.folds), 1)
+	// From the start of "## Two", Left steps back into the folded section above it.
+	edit_press(&f.state, w, .End, {.Control})
+	for _ in 0 ..< 3 {edit_press(&f.state, w, .Arrow_Up)}
+	edit_press(&f.state, w, .Home)
+	testing.expect(t, strings.has_prefix(source[pane.editor.buffer.caret:], "## Two"))
+	testing.expect_value(t, len(pane.folds.folds), 1)
+	edit_press(&f.state, w, .Arrow_Left)
+	testing.expect_value(t, len(pane.folds.folds), 0)
 }
 
 // Open in Default App hands the pane's file to the system's handler.

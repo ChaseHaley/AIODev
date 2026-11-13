@@ -96,6 +96,11 @@ markdown_outline_sync :: proc(o: ^Markdown_Outline, v: ^Markdown_View, doc: ^mar
 	for block in doc.blocks {
 		if block.kind != .Heading {continue}
 		text, start := markdown.block_text(doc, block)
+		// The caret's line in the edit view shows its `#` marks; the outline names the heading without them.
+		for span in doc.spans[block.first_span:][:block.span_count] {
+			if .Markup not_in span.style {break}
+			text, start = text[span.end - span.start:], span.end
+		}
 		if text == "" {continue}
 		// Headings come in document order, so each one's line is at or after the previous one's.
 		for line < len(v.lines) && !line_reaches(v, line, start) {line += 1}
