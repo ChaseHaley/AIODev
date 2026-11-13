@@ -76,7 +76,7 @@ binding_report_keeps_default_origin_for_a_rejected_override :: proc(t: ^testing.
 	testing.expect_value(t, duplicate.conflict.winner.line, 0)
 	testing.expect_value(t, app.binding_issue_text(duplicate, "settings.ini"),
 		"shortcut \"Ctrl+Shift+P\" for New tab (tab.new at settings.ini:2) " +
-		"already used by Show command palette (app.command_palette at defaults)")
+		"already used by Show everything palette (app.command_palette at defaults)")
 	leader := report.issues[1]
 	testing.expect_value(t, leader.kind, app.Binding_Issue_Kind.Leader_Prefix)
 	testing.expect_value(t, leader.conflict.loser.name, "tab.new")
@@ -186,5 +186,5 @@ settings_inline_duplicate_names_the_winner_without_reading_prose :: proc(t: ^tes
 	app.editor_outcome(s, w, .Save)
 	testing.expect(t, w.editor.error)
 	testing.expect_value(t, w.editor.message,
-		"Assigned to \"Show command palette\". Choose another shortcut.")
+		"Assigned to \"Show everything palette\". Choose another shortcut.")
 }

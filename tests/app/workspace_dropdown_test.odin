@@ -106,7 +106,7 @@ workspace_navigation_wraps_actions_and_consumes_closing_key_release :: proc(t: ^
 	w.overlay = app.Overlay_Tab_Menu{tab = 1}
 	defer app.tab_menu_destroy(&w.tab_menu)
 	for _ in 0 ..< 3 {
-		row := ui.Menu_Item{label = "Command palette", payload = u32(app.Action.Command_Palette)}
+		row := ui.Menu_Item{label = "Everything palette", payload = u32(app.Action.Command_Palette)}
 		added, err := ui.menu_add(&w.tab_menu.menu, row)
 		testing.expect(t, added && err == nil)
 	}

@@ -9,9 +9,9 @@ import "core:slice"
 import "core:strings"
 import "core:time"
 
-// What the command palette has run survives restarts in its own file beside the layout, so its frecency
-// order does too (WORK-455). Only command and setting uses are saved: tab and workspace ids are handed
-// out again at each launch and would name other tabs.
+// What the everything palette has run survives restarts in its own file beside the layout, so its
+// frecency order does too (WORK-455). Only command and setting uses are saved: tab and workspace ids
+// are handed out again at each launch and would name other tabs.
 PALETTE_USAGE_VERSION :: 1
 // Uses are written this long after the first one, so a burst of palette runs costs one write.
 PALETTE_USAGE_SAVE_DELAY :: 2 * time.Second

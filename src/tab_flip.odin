@@ -239,7 +239,8 @@ tab_flip_piece_draw :: proc(
 	switch piece.kind {
 	case .Chip:
 		margin := ui.TAB_CHIP_MARGIN * w.scale
-		return tab_chip_draw(app, w, piece.run, {x + margin, 0, max(0, piece.width - 2 * margin), bar.height})
+		chip := render.Rect{x + margin, 0, max(0, piece.width - 2 * margin), bar.height}
+		return tab_chip_strip_draw(app, w, bar, piece.run, chip)
 	case .New_Tab:
 		new_tab := tab_control(w, Tab_Chrome_New{})
 		hover, press := new_tab.hover.value, new_tab.press.value

@@ -95,7 +95,7 @@ popover_open :: proc(
 	return render.push_layer(list, surface, RADIUS_OVERLAY * scale) == .None
 }
 
-// The frame for a centred surface over a scrim: the command palette, confirmations and rename.
+// The frame for a centred surface over a scrim: the everything palette, confirmations and rename.
 dialog_panel :: proc(rect: render.Rect, scale: f32) -> Panel {
 	return {
 		rect = rect,

@@ -26,7 +26,7 @@ try {
   Click $s[$key]
   Aio expect state profile_menu.open=true
   $s=State
-  foreach($k in $s.Keys) { if ($k -match '^profile_menu.row.\d+.label$' -and $s[$k] -in @('Settings','Command palette')) {throw 'App action remains in profile menu'} }
+  foreach($k in $s.Keys) { if ($k -match '^profile_menu.row.\d+.label$' -and $s[$k] -in @('Settings','Everything palette')) {throw 'App action remains in profile menu'} }
   Aio key Esc
   Aio capture --out "build/verify/title-actions/$mode.png"
   Write-Output "PASS $mode geometry, settings, palette and profile-only dropdown"

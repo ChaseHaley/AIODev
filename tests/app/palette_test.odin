@@ -28,7 +28,7 @@ palette_fixture_create :: proc(t: ^testing.T, f: ^Palette_Fixture, name: string,
 	f.directory, err = os.make_directory_temp("", "aio-palette-*", context.allocator)
 	if !testing.expect_value(t, err, nil) { return false }
 	f.path = strings.concatenate({f.directory, "/settings.ini"})
-	settings := idle_shell_settings(t, "interface.font_size = 12\ncursor.blink = false\n")
+	settings := idle_shell_settings(t, "interface.font_size = 12\ncursor.style = block\ncursor.blink = false\n")
 	if !testing.expect_value(t, os.write_entire_file(f.path, settings), nil) { return false }
 	f.state.options = {data_dir = f.directory, inactive = true}
 	f.state.render_driver = .Warp

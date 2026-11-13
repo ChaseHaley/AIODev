@@ -247,7 +247,7 @@ RESIZE_LARGE_LABEL :: "50"
 @(private)
 ACTIONS :: [Action]Command_Descriptor {
 	.Command_Palette = {
-		"app.command_palette", "Show command palette", {{.P, {.Control, .Shift}}}, .Local, {},
+		"app.command_palette", "Show everything palette", {{.P, {.Control, .Shift}}}, .Local, {},
 	},
 	.Copy = {"edit.copy", "Copy", {{.C, {.Control, .Shift}}, {.Insert, {.Control}}}, .Local, {}},
 	.Paste = {"edit.paste", "Paste", {{.V, {.Control, .Shift}}, {.Insert, {.Shift}}}, .Local, {}},

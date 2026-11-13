@@ -19,7 +19,7 @@ Title_Control :: struct {
 @(private = "file", rodata)
 TITLE_CONTROLS := #partial [Title_Action]Title_Control {
 	.Settings = {.Settings, "Settings", .Settings_UI},
-	.Palette = {.Command, "Command palette", .Command_Palette},
+	.Palette = {.Command, "Everything palette", .Command_Palette},
 }
 
 // The right edge of the last title button. Controls after them start here with no gap.

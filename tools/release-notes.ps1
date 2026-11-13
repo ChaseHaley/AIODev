@@ -54,7 +54,7 @@ $notes.AddRange([string[]] @(
     'Start menu shortcut. To uninstall, run',
     '`powershell -ExecutionPolicy Bypass -File "$env:LOCALAPPDATA\Programs\AIODev\uninstall.ps1"`.',
     '',
-    'An installed AIODev also updates itself: run Update AIODev from the command palette.',
+    'An installed AIODev also updates itself: run Update AIODev from the everything palette.',
     '',
     "SHA256: ``$hash``",
     '',
