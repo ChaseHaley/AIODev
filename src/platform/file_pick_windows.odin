@@ -3,7 +3,6 @@ package platform
 @(require) import "aio:com"
 @(require) import "aio:input"
 @(require) import "core:log"
-@(require) import "core:strings"
 @(require) import "core:sync"
 @(require) import w "core:sys/windows"
 @(require) import "core:thread"
@@ -59,7 +58,8 @@ when !AIO_HEADLESS {
 	Open_Dialog_Vtable :: struct {
 		using unknown_vtable: w.IUnknown_VTable,
 		Show: proc "system" (this: ^Open_Dialog, owner: w.HWND) -> w.HRESULT,
-		SetFileTypes, SetFileTypeIndex, GetFileTypeIndex, Advise, Unadvise: rawptr,
+		SetFileTypes: proc "system" (this: ^Open_Dialog, count: u32, types: ^w.COMDLG_FILTERSPEC) -> w.HRESULT,
+		SetFileTypeIndex, GetFileTypeIndex, Advise, Unadvise: rawptr,
 		SetOptions: proc "system" (this: ^Open_Dialog, options: u32) -> w.HRESULT,
 		GetOptions: proc "system" (this: ^Open_Dialog, options: ^u32) -> w.HRESULT,
 		SetDefaultFolder: rawptr,
@@ -70,15 +70,15 @@ when !AIO_HEADLESS {
 	}
 
 	// A file dialog open on its own thread. The system dialog runs a modal loop, which on the UI thread
-	// would stop every terminal from drawing until it closed.
+	// would stop every terminal from drawing until it closed; it disables only its owner window.
 	File_Pick :: struct {
-		thread:            ^thread.Thread,
-		owner:             w.HWND,
-		filter, directory: cstring16,
-		folders:           bool,
-		path:              string,
-		thread_id:         w.DWORD,
-		done:              bool,
+		thread:                         ^thread.Thread,
+		owner:                          w.HWND,
+		filter_name, pattern, directory: cstring16,
+		folders:                        bool,
+		path:                           string,
+		thread_id:                      w.DWORD,
+		done:                           bool,
 	}
 
 	@(private)
@@ -90,38 +90,15 @@ when !AIO_HEADLESS {
 			// Wakes the UI thread's event wait so it collects the result. A closed owner needs no waking.
 			w.PostMessageW(pick.owner, w.WM_NULL, 0, 0)
 		}
-		// The Explorer dialog needs an apartment on the thread that shows it. Without one the folder dialog
-		// fails to start and says so, and the classic file dialog still runs.
+		// The shell's item dialog needs an apartment on the thread that shows it.
 		initialized, _ := com.apartment()
 		defer if initialized {w.CoUninitialize()}
-		if pick.folders {
-			file_pick_folder(pick)
-			return
-		}
-		buffer: [4096]u16
-		dialog := w.OPENFILENAMEW {
-			lStructSize     = size_of(w.OPENFILENAMEW),
-			hwndOwner       = pick.owner,
-			lpstrFile       = cstring16(&buffer[0]),
-			nMaxFile        = u32(len(buffer)),
-			lpstrFilter     = pick.filter,
-			lpstrInitialDir = pick.directory,
-			// The dialog otherwise changes the process's working directory, which new shells inherit.
-			Flags           = w.OFN_EXPLORER | w.OFN_PATHMUSTEXIST | w.OFN_FILEMUSTEXIST | w.OFN_NOCHANGEDIR,
-		}
-		if !bool(w.GetOpenFileNameW(&dialog)) {
-			if code := w.CommDlgExtendedError(); code != 0 {log.errorf("GetOpenFileNameW failed: %d", code)}
-			return
-		}
-		length := 0
-		for length < len(buffer) && buffer[length] != 0 {length += 1}
-		path, err := w.utf16_to_utf8(buffer[:length], context.allocator)
-		if err == nil {pick.path = path}
+		file_pick_show(pick)
 	}
 
-	// The classic dialog cannot choose a folder, so this one asks the shell's item dialog for one.
+	// Shows the shell's item dialog (IFileOpenDialog) for a file of the pick's type, or a folder.
 	@(private)
-	file_pick_folder :: proc(pick: ^File_Pick) {
+	file_pick_show :: proc(pick: ^File_Pick) {
 		class_id := w.GUID{0xdc1c5a9c, 0xe88a, 0x4dde, {0xa5, 0xa1, 0x60, 0xf8, 0x2a, 0x20, 0xae, 0xf7}}
 		dialog_id := w.GUID{0xd57c7288, 0xd4ad, 0x4768, {0xbe, 0x02, 0x9d, 0x96, 0x95, 0x32, 0xd9, 0x60}}
 		item_id := w.GUID{0x43826d1e, 0xe718, 0x42ee, {0xbc, 0x55, 0xa1, 0xe2, 0x61, 0xc3, 0x7b, 0xfe}}
@@ -133,18 +110,30 @@ when !AIO_HEADLESS {
 		}
 		dialog := (^Open_Dialog)(object)
 		defer dialog->Release()
+		// Without FOS_NOCHANGEDIR the dialog changes the process's working directory, which new shells
+		// inherit.
 		FOS_NOCHANGEDIR :: 0x8
 		FOS_PICKFOLDERS :: 0x20
 		FOS_FORCEFILESYSTEM :: 0x40
+		FOS_PATHMUSTEXIST :: 0x800
+		FOS_FILEMUSTEXIST :: 0x1000
 		options: u32
 		if result = dialog->GetOptions(&options); result < 0 {
 			log.errorf("IFileDialog.GetOptions failed: %x", u32(result))
 			return
 		}
-		options |= FOS_NOCHANGEDIR | FOS_PICKFOLDERS | FOS_FORCEFILESYSTEM
+		options |= FOS_NOCHANGEDIR | FOS_FORCEFILESYSTEM | FOS_PATHMUSTEXIST
+		options |= pick.folders ? FOS_PICKFOLDERS : FOS_FILEMUSTEXIST
 		if result = dialog->SetOptions(options); result < 0 {
 			log.errorf("IFileDialog.SetOptions failed: %x", u32(result))
 			return
+		}
+		if !pick.folders {
+			types := w.COMDLG_FILTERSPEC{pick.filter_name, pick.pattern}
+			if result = dialog->SetFileTypes(1, &types); result < 0 {
+				log.errorf("IFileDialog.SetFileTypes failed: %x", u32(result))
+				return
+			}
 		}
 		if pick.directory != nil {
 			start: rawptr
@@ -182,7 +171,8 @@ when !AIO_HEADLESS {
 		if err == nil {pick.path = path}
 	}
 
-	// Opens a dialog owned by the window. Returns nil when it could not start. With `folders`, it chooses
+	// Opens a dialog owned by the window. Returns nil when it could not start. `pattern` is the
+	// semicolon-separated file types `filter_name` describes, such as *.png; with `folders`, it chooses
 	// a folder, and the filter is unused.
 	@(require_results)
 	file_pick_start :: proc(
@@ -196,11 +186,11 @@ when !AIO_HEADLESS {
 		pick, err := new(File_Pick)
 		if err != nil {return nil}
 		pick.owner, pick.folders = window.hwnd, folders
-		filter := strings.concatenate({filter_name, "\x00", pattern, "\x00"}, context.temp_allocator)
-		pick.filter = w.utf8_to_wstring(filter, context.allocator)
+		pick.filter_name = w.utf8_to_wstring(filter_name, context.allocator)
+		pick.pattern = w.utf8_to_wstring(pattern, context.allocator)
 		if directory != "" {pick.directory = w.utf8_to_wstring(directory, context.allocator)}
 		pick.thread = thread.create(file_pick_run)
-		if pick.filter == nil || pick.thread == nil {
+		if pick.filter_name == nil || pick.pattern == nil || pick.thread == nil {
 			file_pick_destroy(pick)
 			return nil
 		}
@@ -236,7 +226,8 @@ when !AIO_HEADLESS {
 			thread.destroy(pick.thread)
 		}
 		delete(pick.path)
-		if pick.filter != nil {free(rawptr(pick.filter))}
+		if pick.filter_name != nil {free(rawptr(pick.filter_name))}
+		if pick.pattern != nil {free(rawptr(pick.pattern))}
 		if pick.directory != nil {free(rawptr(pick.directory))}
 		free(pick)
 	}

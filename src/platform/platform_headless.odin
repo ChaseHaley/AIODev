@@ -69,6 +69,15 @@ when AIO_HEADLESS {
 		tray_menu:        [dynamic]Tray_Menu_Item,
 		// How many times a drag thumbnail was placed on the desktop.
 		thumbnail_places: int,
+		// Every file dialog opened, oldest first.
+		file_picks:       [dynamic]File_Pick_Record,
+	}
+
+	// A file dialog as the app asked for it, and what the script chose; an empty path is a cancel.
+	File_Pick_Record :: struct {
+		window:                                input.Window_Id,
+		filter_name, pattern, directory, path: string,
+		folders:                               bool,
 	}
 
 	// A notification or tray balloon, with the token a click on it reports.
@@ -143,6 +152,7 @@ when AIO_HEADLESS {
 		p.record = {
 			notifications = make([dynamic]Notification_Record, allocator),
 			tray_menu     = make([dynamic]Tray_Menu_Item, allocator),
+			file_picks    = make([dynamic]File_Pick_Record, allocator),
 		}
 		if _, err := append(&p.displays, DEFAULT_DISPLAY); err != nil {return .Failed}
 		success = true
@@ -166,6 +176,7 @@ when AIO_HEADLESS {
 		record_clear(p)
 		delete(p.record.notifications)
 		delete(p.record.tray_menu)
+		delete(p.record.file_picks)
 		if p.wake_event != nil && !os_ok(w.CloseHandle(p.wake_event), "CloseHandle(wake)") {
 			first_error = .Os
 		}
@@ -182,8 +193,15 @@ when AIO_HEADLESS {
 		}
 		for item in p.record.tray_menu {delete(item.title, p.allocator)}
 		delete(p.record.tray_tooltip, p.allocator)
+		for pick in p.record.file_picks {
+			delete(pick.filter_name, p.allocator)
+			delete(pick.pattern, p.allocator)
+			delete(pick.directory, p.allocator)
+			delete(pick.path, p.allocator)
+		}
 		clear(&p.record.notifications)
 		clear(&p.record.tray_menu)
+		clear(&p.record.file_picks)
 		p.record.tray_tooltip = ""
 		p.record.flashes, p.record.thumbnail_places = 0, 0
 	}

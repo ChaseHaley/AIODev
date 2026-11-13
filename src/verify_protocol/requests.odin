@@ -124,6 +124,10 @@ Tray_Action :: enum {
 Tray :: struct {
 	action: Tray_Action,
 }
+// What the next file dialog of a headless instance chooses; an empty path cancels it.
+Pick :: struct {
+	path: string,
+}
 Command :: struct {
 	name:      string,
 	direction: layout.Direction,
@@ -187,6 +191,7 @@ Request :: union {
 	Resize,
 	Dpi,
 	Tray,
+	Pick,
 	Command,
 	Window_Select,
 	Window_Move,
@@ -222,6 +227,7 @@ Verb :: enum {
 	Resize,
 	Dpi,
 	Tray,
+	Pick,
 	Command,
 	Window,
 	Help,
@@ -249,6 +255,7 @@ VERB_NAMES := [Verb]string {
 	.Resize  = "resize",
 	.Dpi     = "dpi",
 	.Tray    = "tray",
+	.Pick    = "pick",
 	.Command = "command",
 	.Window  = "window",
 	.Help    = "help",
@@ -627,6 +634,10 @@ parse :: proc(args: []string, allocator := context.allocator) -> (Request, Parse
 			seen[index] = true
 		}
 		return r, {}
+	case .Pick:
+		if len(args) != 2 || args[1] == "" {return {}, {args[0], "use pick <path> or pick --cancel"}}
+		if args[1] == "--cancel" {return Pick{}, {}}
+		return Pick{args[1]}, {}
 	case .Type, .Focus, .Tray, .Resize, .Dpi:
 		if len(args) != 2 {return {}, bad}
 		s := args[1]
