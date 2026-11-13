@@ -70,6 +70,8 @@ Run_Flag :: enum u8 {
 	Strike,
 	Task_Open,
 	Task_Done,
+	// A list item's marker, which hangs before the text.
+	Marker,
 }
 
 @(private = "file")
@@ -89,6 +91,9 @@ Line :: struct {
 	top, height, baseline:  f32,
 	band_top, band_bottom:  f32,
 	first_run, run_count:   i32,
+	// The block the line belongs to, and where its text starts, which places a caret on an empty line.
+	block:                  i32,
+	left:                   f32,
 }
 
 @(private = "file")
@@ -136,6 +141,8 @@ Markdown_View :: struct {
 	failed:     bool,
 	// Each face's ASCII glyphs as found so far; see face_glyph. Reset whenever the faces change.
 	ascii:      [Markdown_Face][128]Ascii_Glyph,
+	// The edit caret's motion between frames.
+	caret:      Field_Caret,
 }
 
 @(private = "file")
@@ -312,23 +319,27 @@ items_collect :: proc(v: ^Markdown_View, doc: ^markdown.Document, block: markdow
 flow :: proc(
 	v: ^Markdown_View,
 	doc: ^markdown.Document,
-	block: markdown.Block,
+	index: int,
 	x, width, y: f32,
 	color: Markdown_Color,
 ) -> f32 {
 	y := y
-	items_collect(v, doc, block)
+	items_collect(v, doc, doc.blocks[index])
 	emit :: proc(
 		v: ^Markdown_View,
 		doc: ^markdown.Document,
-		block: markdown.Block,
+		index: int,
 		from, to: int,
 		x, width, y: f32,
 		color: Markdown_Color,
 		first: bool,
 	) -> f32 {
+		block := doc.blocks[index]
 		visible := to
-		for visible > from && (v.items[visible - 1].r == ' ' || v.items[visible - 1].r == '\t') {visible -= 1}
+		// An editor keeps trailing spaces, so a caret after one shows where the next character goes.
+		for !doc.live && visible > from && (v.items[visible - 1].r == ' ' || v.items[visible - 1].r == '\t') {
+			visible -= 1
+		}
 		line_width: f32
 		for item in v.items[from:visible] {line_width += item.advance}
 		pen := x
@@ -356,14 +367,16 @@ flow :: proc(
 			band_top = y,
 			band_bottom = y + height,
 			first_run = i32(len(v.runs)),
+			block = i32(index),
+			left = x,
 		}
 		if first && block.marker_end > block.marker_start {
 			text := string(doc.text[block.marker_start:block.marker_end])
 			marker_width := string_advance(v, .Body, text)
-			flags: bit_set[Run_Flag;u8]
+			flags: bit_set[Run_Flag;u8] = {.Marker}
 			if block.task != .None {
 				marker_width = CHECKBOX_SIZE * v.scale
-				flags = block.task == .Open ? {.Task_Open} : {.Task_Done}
+				flags += block.task == .Open ? {.Task_Open} : {.Task_Done}
 			}
 			layout_append(
 				v,
@@ -380,16 +393,16 @@ flow :: proc(
 				},
 			)
 		}
-		index := from
-		for index < visible {
-			span := v.items[index].span
-			start := index
+		item := from
+		for item < visible {
+			span := v.items[item].span
+			start := item
 			run_width: f32
-			for index < visible && v.items[index].span == span {
-				run_width += v.items[index].advance
-				index += 1
+			for item < visible && v.items[item].span == span {
+				run_width += v.items[item].advance
+				item += 1
 			}
-			end := index < len(v.items) ? int(v.items[index].offset) : int(doc.spans[span].end)
+			end := item < len(v.items) ? int(v.items[item].offset) : int(doc.spans[span].end)
 			style := doc.spans[span].style
 			run := Run {
 				x = pen,
@@ -398,7 +411,7 @@ flow :: proc(
 				end = i32(end),
 				link = i32(doc.spans[span].link),
 				face = face_of(block, style),
-				color = .Link in style ? .Accent : color,
+				color = .Link in style ? .Accent : .Markup in style ? .Muted : color,
 			}
 			if .Strike in style {run.flags += {.Strike}}
 			layout_append(v, &v.runs, run)
@@ -419,7 +432,7 @@ flow :: proc(
 	for i < len(v.items) {
 		item := v.items[i]
 		if item.r == '\n' {
-			y = emit(v, doc, block, start, i, x, width, y, color, first)
+			y = emit(v, doc, index, start, i, x, width, y, color, first)
 			first, start, pen, last_break = false, i + 1, 0, -1
 			i += 1
 			ended_on_break = true
@@ -428,7 +441,7 @@ flow :: proc(
 		ended_on_break = false
 		if pen + item.advance > width && i > start && item.r != ' ' {
 			split := last_break > start ? last_break : i
-			y = emit(v, doc, block, start, split, x, width, y, color, first)
+			y = emit(v, doc, index, start, split, x, width, y, color, first)
 			first, start, pen, last_break, i = false, split, 0, -1, split
 			continue
 		}
@@ -437,14 +450,15 @@ flow :: proc(
 		i += 1
 	}
 	if start < len(v.items) || first || ended_on_break {
-		y = emit(v, doc, block, start, len(v.items), x, width, y, color, first)
+		y = emit(v, doc, index, start, len(v.items), x, width, y, color, first)
 	}
 	return y
 }
 
 @(private = "file")
 gap_before :: proc(v: ^Markdown_View, doc: ^markdown.Document, index: int) -> f32 {
-	if index == 0 {return 0}
+	// An editor's lines sit flush, as the file's own lines do; blank lines are the spacing.
+	if index == 0 || doc.live {return 0}
 	block, previous := doc.blocks[index], doc.blocks[index - 1]
 	line := v.faces[.Body].line_height
 	if block.kind == .Heading {return math.round(line * (block.level <= 2 ? 1.5 : 1.15))}
@@ -475,17 +489,29 @@ layout_block :: proc(
 	next = index + 1
 	switch block.kind {
 	case .Paragraph, .Heading:
-		y = flow(v, doc, block, x, width, y, color)
+		y = flow(v, doc, index, x, width, y, color)
 	case .Code:
+		// An editor's code lines are blocks of their own, so each draws a flush band of the box.
 		pad := SPACE_3 * s
+		inset, radius := pad, RADIUS_CONTROL * s
+		if doc.live {inset, radius = 0, 0}
 		box := len(v.boxes)
-		layout_append(v, &v.boxes, Box{{x, y, width, 0}, .Fill, RADIUS_CONTROL * s})
-		y = flow(v, doc, block, x + pad, max(width - 2 * pad, 1), y + pad, .Text) + pad
+		layout_append(v, &v.boxes, Box{{x, y, width, 0}, .Fill, radius})
+		y = flow(v, doc, index, x + pad, max(width - 2 * pad, 1), y + inset, .Text) + inset
 		if box < len(v.boxes) {v.boxes[box].rect.height = y - top}
 	case .Rule:
 		height := max(1, math.round(s))
-		layout_append(v, &v.boxes, Box{{x, y, width, height}, .Line, 0})
-		y += height
+		// An editor's rule is a line of the file, so it takes a line's height.
+		room := doc.live ? v.faces[.Body].line_height : height
+		rule := y + math.round((room - height) / 2)
+		layout_append(v, &v.boxes, Box{{x, rule, width, height}, .Line, 0})
+		if doc.live {
+			// A line with no text, so a click on it still finds its block.
+			line := Line{top = y, height = room, baseline = y, band_top = y, band_bottom = y + room}
+			line.first_run, line.block, line.left = i32(len(v.runs)), i32(index), x
+			layout_append(v, &v.lines, line)
+		}
+		y += room
 	case .Table_Cell:
 		next, y = layout_table(v, doc, index, x, width, y)
 	}
@@ -580,7 +606,7 @@ layout_table :: proc(
 			block := doc.blocks[i]
 			for column < block.column {cell_x += sizes[column] + 2 * pad; column += 1}
 			color: Markdown_Color = properties && block.column == 0 ? .Muted : .Text
-			bottom = max(bottom, flow(v, doc, block, cell_x + pad, sizes[column], row_top + row_pad / 2, color))
+			bottom = max(bottom, flow(v, doc, i, cell_x + pad, sizes[column], row_top + row_pad / 2, color))
 			i += 1
 		}
 		y = bottom + row_pad / 2
@@ -657,10 +683,17 @@ markdown_offset_at :: proc(
 	x, y: f32,
 ) -> int {
 	lx, ly := local_point(v, g, x, y)
+	return offset_at_local(v, doc, lx, ly)
+}
+
+@(private = "file")
+offset_at_local :: proc(v: ^Markdown_View, doc: ^markdown.Document, lx, ly: f32) -> int {
 	index := nearest_line(v, lx, ly)
 	if index < 0 {return 0}
 	line := v.lines[index]
 	if ly < line.top && index == 0 {return 0}
+	// An editor's empty line is a place of its own, not the start of the next.
+	if doc.live && line.run_count == 0 {return doc.blocks[line.block].marker_start}
 	offset := len(doc.text)
 	if index + 1 < len(v.lines) && v.lines[index + 1].run_count > 0 {
 		offset = int(v.runs[v.lines[index + 1].first_run].start)
@@ -693,6 +726,75 @@ markdown_link_at :: proc(v: ^Markdown_View, g: Markdown_Geometry, x, y: f32) -> 
 		}
 	}
 	return -1
+}
+
+// The file offset of the task mark whose checkbox is under a point, or markdown.NO_SOURCE.
+markdown_task_at :: proc(
+	v: ^Markdown_View,
+	doc: ^markdown.Document,
+	g: Markdown_Geometry,
+	x, y: f32,
+) -> int {
+	lx, ly := local_point(v, g, x, y)
+	// A little room around the box, which is smaller than a fingertip of pointer error.
+	slack := SPACE_1 * v.scale
+	for index := line_at(v, ly); index < len(v.lines) && v.lines[index].band_top <= ly; index += 1 {
+		line := v.lines[index]
+		if ly < line.top || ly >= line.top + line.height {continue}
+		for i in 0 ..< line.run_count {
+			run := v.runs[line.first_run + i]
+			if run.flags & {.Task_Open, .Task_Done} == {} {continue}
+			if lx >= run.x - slack && lx < run.x + run.width + slack {return doc.blocks[line.block].task_source}
+		}
+	}
+	return markdown.NO_SOURCE
+}
+
+// Where a caret at text offset `offset` stands, in the view's own coordinates, and the index of its
+// line. At a wrap the caret starts the next line; on an empty line it stands where text would start.
+markdown_caret_at :: proc(
+	v: ^Markdown_View,
+	doc: ^markdown.Document,
+	offset: int,
+) -> (
+	rect: render.Rect,
+	line_index: int,
+	found: bool,
+) {
+	width := max(1, math.round(1.5 * v.scale))
+	for line, index in v.lines {
+		text_runs := 0
+		for i in 0 ..< line.run_count {
+			run := v.runs[line.first_run + i]
+			if .Marker in run.flags {continue}
+			text_runs += 1
+			if offset < int(run.start) || offset > int(run.end) {continue}
+			x := run.x + string_advance(v, run.face, string(doc.text[run.start:offset]))
+			rect, line_index, found = {x, line.top, width, line.height}, index, true
+			if offset < int(run.end) {return}
+		}
+		block := doc.blocks[line.block]
+		content := block.marker_end > block.marker_start ? block.marker_end + 1 : block.marker_end
+		if text_runs == 0 && offset == content && !found {
+			return {line.left, line.top, width, line.height}, index, true
+		}
+	}
+	return
+}
+
+// The text offset nearest a point in the view's own coordinates, as markdown_caret_at gives them, for
+// moving a caret up and down lines.
+markdown_offset_near :: proc(v: ^Markdown_View, doc: ^markdown.Document, lx, ly: f32) -> int {
+	return offset_at_local(v, doc, lx, ly)
+}
+
+// Scrolls just enough to show a rect in the view's own coordinates, as a caret that moves does.
+markdown_scroll_to_show :: proc(v: ^Markdown_View, rect: render.Rect, visible: int) -> bool {
+	inset := SPACE_4 * v.scale
+	top, bottom := int(rect.y + inset), int(math.ceil(rect.y + rect.height + inset))
+	if top < v.scroll {return markdown_scroll_by(v, top - v.scroll, visible)}
+	if bottom > v.scroll + visible {return markdown_scroll_by(v, bottom - v.scroll - visible, visible)}
+	return false
 }
 
 markdown_selection :: proc(v: ^Markdown_View) -> (from, to: int) {
@@ -839,6 +941,8 @@ markdown_draw :: proc(
 	theme: Theme,
 	find: Markdown_Find = {},
 	hover_link := -1,
+	// The edit caret's text offset, or -1 for none.
+	caret := -1,
 ) -> render.Build_Status {
 	if render.push_layer(list, g.area, 0) != .None {return .Ok}
 	origin_y := g.top - f32(v.scroll)
@@ -890,6 +994,14 @@ markdown_draw :: proc(
 				middle := math.round(baseline - v.faces[run.face].size_px * 0.3)
 				draw_rect(list, {rect = {x, middle, run.width, thickness}, color = color})
 			}
+		}
+	}
+	if caret >= 0 {
+		if rect, _, found := markdown_caret_at(v, doc, caret); found {
+			target := render.Rect{rect.x + g.left, rect.y + origin_y, rect.width, rect.height}
+			head := field_caret_pose(&v.caret, text.carets, {g.left, origin_y}, target)
+			field_caret_body(&v.caret, list, theme.accent)
+			draw_rect(list, {rect = head, color = theme.accent})
 		}
 	}
 	return .Ok

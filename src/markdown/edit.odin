@@ -73,7 +73,8 @@ edit_text_adopted :: proc(b: ^Edit_Buffer) {
 	text := string(b.text[:])
 	b.floor = strings.has_prefix(text, BOM) ? len(BOM) : 0
 	b.newline = "\n"
-	if line_end := strings.index_byte(text, '\n'); line_end > 0 && text[line_end - 1] == '\r' {b.newline = "\r\n"}
+	line_end := strings.index_byte(text, '\n')
+	if line_end > 0 && text[line_end - 1] == '\r' {b.newline = "\r\n"}
 	b.revision += 1
 }
 
@@ -402,8 +403,8 @@ line_prefix :: proc(line: string) -> Line_Prefix {
 	}
 	p.end = min(marker_end + 1, len(line))
 	rest := line[p.end:]
-	if len(rest) >= 3 && rest[0] == '[' && rest[2] == ']' && (rest[1] == ' ' || rest[1] == 'x' || rest[1] == 'X') &&
-	   (len(rest) == 3 || rest[3] == ' ') {
+	mark := len(rest) >= 3 && rest[0] == '[' && rest[2] == ']' && strings.index_byte(" xX", rest[1]) >= 0
+	if mark && (len(rest) == 3 || rest[3] == ' ') {
 		p.task = true
 		p.end += min(4, len(rest))
 	}
