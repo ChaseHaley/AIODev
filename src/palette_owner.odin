@@ -5,6 +5,7 @@ import "aio:input"
 import "aio:platform"
 import "aio:settings"
 import "aio:ui"
+import "core:time"
 
 // Presence owns the palette's Open/Closing phase; the app owns only its window. This view is the one
 // mapping between them, so keeping a window through a closing fade needs no second hand-synced phase.
@@ -97,7 +98,7 @@ palette_open_mode :: proc(app: ^App, w: ^Window, mode: ui.Palette_Mode) {
 	window_overlays_cancel(app, w)
 	app.palette_owner = w.id
 	app.palette.leader = app.leader
-	ui.palette_open_mode(&app.palette, &app.registry, mode)
+	ui.palette_open_mode(&app.palette, &app.registry, mode, time.time_to_unix(clock_wall(&app.clock)))
 	ui.palette_fit(&app.palette, f32(w.width), f32(w.height), w.scale)
 	w.dirty = true
 }
@@ -270,6 +271,8 @@ palette_key_input :: proc(app: ^App, w: ^Window, e, logical: input.Key_Event) {
 on_palette_outcome :: proc(app: ^App, w: ^Window, outcome: ui.Outcome, id: commands.Command_Id) {
 	// The outcome that names a choice is the only one that may act on it.
 	chosen := ui.palette_chosen_take(&app.palette)
+	// Every palette interaction comes through here, so any use it recorded is saved.
+	if ui.palette_used_take(&app.palette) {palette_usage_touch(app)}
 	switch outcome {
 	case .None:
 	case .Changed, .Closed:

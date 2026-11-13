@@ -118,6 +118,8 @@ Paths :: struct {
 	logs:     string,
 	log:      string,
 	layout:   string,
+	// What the command palette has run, for its frecency order.
+	palette:  string,
 	// The record each pane's agent session hook writes, one file per pane key.
 	agents:   string,
 	// <--data-dir>\settings.ini, else the roaming AIODev\settings.ini, which named instances share
@@ -164,6 +166,9 @@ paths_resolve :: proc(
 	layout_name := strings.concatenate({"layout", suffix, options.name, ".json"}, allocator) or_return
 	defer delete(layout_name, allocator)
 	p.layout = filepath.join({p.local, layout_name}, allocator) or_return
+	palette_name := strings.concatenate({"palette", suffix, options.name, ".json"}, allocator) or_return
+	defer delete(palette_name, allocator)
+	p.palette = filepath.join({p.local, palette_name}, allocator) or_return
 	agents_name := strings.concatenate({AGENTS_DIRECTORY, suffix, options.name}, allocator) or_return
 	defer delete(agents_name, allocator)
 	p.agents = filepath.join({p.local, agents_name}, allocator) or_return
@@ -175,6 +180,7 @@ paths_destroy :: proc(p: ^Paths, allocator := context.allocator) {
 	delete(p.logs, allocator)
 	delete(p.log, allocator)
 	delete(p.layout, allocator)
+	delete(p.palette, allocator)
 	delete(p.agents, allocator)
 	delete(p.settings, allocator)
 	delete(p.captures, allocator)
