@@ -160,6 +160,9 @@ when AIO_HEADLESS {
 		return record_opened(&headless_program_directories, directory)
 	}
 
+	// No foreground to pass on.
+	foreground_pass_on :: proc() {}
+
 	// open_path, open_url and open_program take no Platform, so what they opened is kept per process.
 	@(private)
 	headless_opened_paths, headless_opened_urls: [dynamic]string
@@ -242,6 +245,22 @@ when AIO_HEADLESS {
 		delete(pick.path)
 		free(pick)
 	}
+
+	// Nothing runs: the headless backend starts no programs of its own on the machine.
+	Program_Run :: struct {}
+
+	@(require_results)
+	program_run_start :: proc(p: ^Platform, command_line, directory: string) -> ^Program_Run {
+		log.warnf("platform: the headless backend runs no programs")
+		return nil
+	}
+
+	@(require_results)
+	program_run_finished :: proc(run: ^Program_Run) -> (exit_code: u32, finished: bool) {
+		return 0, true
+	}
+
+	program_run_destroy :: proc(run: ^Program_Run) {}
 
 	// Every executable has the same plain square icon.
 	@(require_results)

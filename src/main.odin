@@ -64,6 +64,10 @@ start :: proc() -> int {
 		if logger.file.data != nil {log.destroy_file_logger(logger.file)}
 		log.destroy_console_logger(logger.console)
 	}
+	// Declared before app, so it runs after app_destroy has let go of the single-instance mutex that the
+	// started AIODev takes.
+	restart := false
+	defer if restart {app_relaunch(options)}
 	app := App {
 		options = options,
 		opener = {url = platform.open_url, file = localpath.open_file, program = platform.open_program},
@@ -105,7 +109,39 @@ start :: proc() -> int {
 	if !app_init(&app) {return 1}
 	run(&app)
 	layout_state_save(&app, fresh = true)
+	restart = app.run == .Restart
 	return 0
+}
+
+// Starts this executable again as the same instance, in this process's working directory. An update moves
+// the running executable aside, but the path Windows reports for it stays the installed one, which now
+// holds the new build.
+@(private)
+app_relaunch :: proc(options: instance.Options) {
+	executable, executable_error := os.get_executable_path(context.temp_allocator)
+	directory, directory_error := os.get_working_directory(context.temp_allocator)
+	if executable_error != nil || directory_error != nil {
+		log.errorf("restarting AIODev failed: %v %v", executable_error, directory_error)
+		return
+	}
+	line := strings.builder_make(context.temp_allocator)
+	argument_write(&line, executable)
+	if options.name != "" {
+		fmt.sbprintf(&line, " %s %s", instance.FLAG_INSTANCE, options.name)
+	}
+	if options.data_dir != "" {
+		fmt.sbprintf(&line, " %s ", instance.FLAG_DATA_DIR)
+		argument_write(&line, options.data_dir)
+	}
+	if !platform.open_program(strings.to_string(line), directory) {log.error("restarting AIODev failed")}
+}
+
+// Writes a quoted command-line argument. A path holds no quotes, but backslashes before the closing quote
+// would escape it unless doubled.
+@(private)
+argument_write :: proc(b: ^strings.Builder, argument: string) {
+	trailing := len(argument) - len(strings.trim_right(argument, `\`))
+	fmt.sbprintf(b, `"%s%s"`, argument, argument[len(argument) - trailing:])
 }
 
 @(private, require_results)
