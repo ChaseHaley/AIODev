@@ -67,8 +67,15 @@ tab_interaction_press :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event
 	case Tab_Chrome_Group:
 		#partial switch e.button {
 		case .Left:
+			// A click folds the group when it ends without a drag; a drag carries the whole group. An
+			// overlay rail, which cannot reorder, folds at once.
 			group := tab_group_find(w.workspace, target.id)
-			if group != nil {_ = tab_group_fold(app, w, target.id, !group.folded)}
+			if group == nil {return}
+			if w.tabs_horizontal || rail_docked(w) {
+				tab_chip_press(app, w, target.id, x, y)
+			} else {
+				_ = tab_group_fold(app, w, target.id, !group.folded)
+			}
 		case .Right:
 			tab_group_menu_open(app, w, target.id, x, y)
 			rail_overlay_dismiss(app, w)

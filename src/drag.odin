@@ -47,6 +47,8 @@ Tab_Grab :: struct {
 	offset:   [2]f32,
 	// A press that changed the marks keeps them when it ends without a drag.
 	modified: bool,
+	// A press on this group's chip: it carries the group's tabs, and a click without a drag folds the group.
+	chip:     u32,
 }
 
 Drag_Active :: struct {

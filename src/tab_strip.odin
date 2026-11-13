@@ -71,7 +71,7 @@ window_tab_hit :: proc(app: ^App, w: ^Window, bar: ui.Tab_Bar, x, y: f32) -> Tab
 	for pass in 0 ..< 2 {
 		for i := bar.count - 1; i >= 0; i -= 1 {
 			foreground := tab_drag_active(w) && w.workspace.tabs[i].marked
-			if foreground != (pass == 0) || !foreground && !tab_shown(w.workspace, i) {continue}
+			if foreground != (pass == 0) || !tab_shown(w.workspace, i) {continue}
 			r := tab_strip_rect(w, bar, i)
 			if x >= r.x && x < r.x + r.width {return Tab_Chrome_Tab{i}}
 		}
@@ -142,8 +142,10 @@ window_tab_strip_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 	bar := window_tab_bar(app, w)
 	if bar.count == 0 {return .Ok}
 	dragging := tab_drag_active(w)
+	runs := tab_layout(app, w, true).runs
 	if render.push_layer(&w.list, {bar.x, 0, bar.width, bar.height}) == .None {
-		for run in tab_layout(app, w, true).runs {
+		for run in runs {
+			if run.carried {continue}
 			result := tab_chip_draw(app, w, run, tab_chip_strip_rect(w, bar, run))
 			if result != .Ok {return result}
 		}
@@ -152,7 +154,7 @@ window_tab_strip_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 		foreground := pass == 1
 		for tab, i in w.workspace.tabs {
 			if (dragging && tab.marked) != foreground {continue}
-			if !foreground && !tab_shown(w.workspace, i) {continue}
+			if !tab_shown(w.workspace, i) {continue}
 			tile, built := tab_tile(app, w, i)
 			if built != .Ok {return built}
 			control := tab_control(w, Tab_Chrome_Tab{i})
@@ -168,6 +170,14 @@ window_tab_strip_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 				w.scale,
 				w.pointer,
 			); result != .Ok {return result}
+		}
+	}
+	// A dragged group's chip rides in front of its tabs.
+	if dragging && render.push_layer(&w.list, {bar.x, 0, bar.width, bar.height}) == .None {
+		for run in runs {
+			if !run.carried {continue}
+			result := tab_chip_draw(app, w, run, tab_chip_strip_rect(w, bar, run))
+			if result != .Ok {return result}
 		}
 	}
 	if render.push_layer(&w.list, {0, 0, f32(w.width), bar.height}) == .None {

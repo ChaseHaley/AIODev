@@ -91,9 +91,8 @@ tab_groups_tidy :: proc(workspace: ^Workspace) {
 }
 
 // What a block of tabs that just moved together keeps or joins, where it now lies. Landing between two tabs
-// of one group joins that group. Otherwise a tab keeps its group while an unbroken run of that group joins
-// it to the tab beside the block that shares it, or while the block holds all of that group, which then
-// moves as a whole; any other tab leaves its group.
+// of one group joins that group, and a block holding all of a group keeps it, moving it as a whole; any
+// other tab leaves its group. A drag decides by the pointer instead (tab_drag_group).
 tab_groups_settle :: proc(workspace: ^Workspace, moved: []^Tab) {
 	if len(moved) == 0 {return}
 	first, _ := slice.linear_search(workspace.tabs[:], moved[0])
@@ -103,22 +102,23 @@ tab_groups_settle :: proc(workspace: ^Workspace, moved: []^Tab) {
 	if left != 0 && left == right {
 		for tab in moved {tab.group = left}
 	} else {
-		keep := make([]bool, len(moved), context.temp_allocator)
-		for tab, i in moved {
-			group := tab.group
-			if group == 0 {continue}
-			touching_left, touching_right := group == left, group == right
-			for before in moved[:i] {touching_left &&= before.group == group}
-			for after in moved[i + 1:] {touching_right &&= after.group == group}
-			whole := true
-			for other in workspace.tabs {
-				if other.group == group && !slice.contains(moved, other) {whole = false; break}
-			}
-			if keep != nil {keep[i] = touching_left || touching_right || whole}
-		}
-		for tab, i in moved {if keep == nil || !keep[i] {tab.group = 0}}
+		tab_groups_keep_whole(workspace, moved)
 	}
 	tab_groups_tidy(workspace)
+}
+
+// Every tab of `moved` leaves its group unless `moved` holds all of that group.
+tab_groups_keep_whole :: proc(workspace: ^Workspace, moved: []^Tab) {
+	keep := make([]bool, len(moved), context.temp_allocator)
+	for tab, i in moved {
+		if tab.group == 0 || keep == nil {continue}
+		whole := true
+		for other in workspace.tabs {
+			if other.group == tab.group && !slice.contains(moved, other) {whole = false; break}
+		}
+		keep[i] = whole
+	}
+	for tab, i in moved {if keep == nil || !keep[i] {tab.group = 0}}
 }
 
 // A group of `source` the tabs `tabs` names wholly, as its id there and its id in `destination`.
@@ -413,7 +413,7 @@ tab_group_command :: proc(
 	case .New_Tab_Group:
 		group := tab_group_create(app, w, index, named ? rename_clean(invocation.text) : "")
 		if group == nil {return outcome_failure(.Failed, "could not make the group")}
-		if !named {rename_open(app, w, Rename_Group_Target{workspace.id, group.id})}
+		if !named {tab_group_name_begin(app, w, group.id, true)}
 		return {}
 	case .Add_Tab_To_Group:
 		for group in workspace.groups {
@@ -433,7 +433,7 @@ tab_group_command :: proc(
 	case .Rename_Tab_Group:
 		target := Rename_Group_Target{workspace.id, id}
 		if !named {
-			rename_open(app, w, target)
+			tab_group_name_begin(app, w, id, false)
 		} else if rename_target_commit(app, target, invocation.text, .Automatic_Title) != .Saved {
 			return outcome_failure(.Failed, "could not rename the group")
 		}

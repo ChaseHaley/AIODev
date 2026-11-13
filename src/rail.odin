@@ -315,7 +315,7 @@ rail_tab_hit :: proc(w: ^Window, layout: ui.Rail_Layout, x, y: f32) -> int {
 	for pass in 0 ..< 2 {
 		for index := rail_tab_count(w) - 1; index >= 0; index -= 1 {
 			foreground := tab_drag_active(w) && w.workspace.tabs[index].marked
-			if foreground != (pass == 0) || !foreground && !tab_shown(w.workspace, index) {continue}
+			if foreground != (pass == 0) || !tab_shown(w.workspace, index) {continue}
 			if render.rect_contains(rail_tab_rect(w, layout, index), x, y) {return index}
 		}
 	}
@@ -449,7 +449,7 @@ rail_selection_mark_draw :: proc(app: ^App, w: ^Window, layout: ui.Rail_Layout, 
 }
 
 // A group's chip in the row above its tabs, aligned with their tiles, and the start of the band down the
-// group's rows from the chip's middle; a folded chip has no rows below it.
+// group's rows from the chip row's top; a folded chip has no rows below it.
 @(private)
 rail_chip_draw :: proc(app: ^App, w: ^Window, layout: ui.Rail_Layout, run: Tab_Run) -> render.Build_Status {
 	row := tab_chip_rail_rect(w, layout, run)
@@ -457,7 +457,7 @@ rail_chip_draw :: proc(app: ^App, w: ^Window, layout: ui.Rail_Layout, run: Tab_R
 		return .Ok
 	}
 	if !run.group.folded {
-		band := render.Rect{layout.list.x + w.scale, row.y + row.height / 2, 2 * w.scale, row.height / 2}
+		band := render.Rect{layout.list.x + w.scale, row.y, 2 * w.scale, row.height}
 		ui.draw_rect(&w.list, {rect = band, color = tab_group_color(app, run.group)})
 	}
 	return tab_chip_draw(app, w, run, row)
@@ -495,7 +495,9 @@ rail_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 	}
 	pane_motion_region_content(w, &region)
 	if render.push_layer(&w.list, layout.list) != .None {return .Ok}
-	for run in tab_layout(nil, w, false).runs {
+	runs := tab_layout(nil, w, false).runs
+	for run in runs {
+		if run.carried {continue}
 		if result := rail_chip_draw(app, w, layout, run); result != .Ok {return result}
 	}
 	dragging := tab_drag_active(w)
@@ -505,8 +507,15 @@ rail_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 		foreground := pass == 1
 		for tab, index in w.workspace.tabs {
 			if (dragging && tab.marked) != foreground {continue}
-			if !foreground && !tab_shown(w.workspace, index) {continue}
+			if !tab_shown(w.workspace, index) {continue}
 			if result := rail_row_draw(app, w, layout, index, moving); result != .Ok {return result}
+		}
+	}
+	// A dragged group's chip rides in front of its tabs.
+	if dragging && render.push_layer(&w.list, layout.list) == .None {
+		for run in runs {
+			if !run.carried {continue}
+			if result := rail_chip_draw(app, w, layout, run); result != .Ok {return result}
 		}
 	}
 	rail_selection_mark_draw(app, w, layout, moving)

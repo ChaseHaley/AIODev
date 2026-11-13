@@ -289,7 +289,7 @@ tab_submenu_choose :: proc(app: ^App, w: ^Window, index: int) {
 	case action == .Add_Tab_To_Group && payload == 0:
 		created := tab_group_create(app, w, target)
 		if created == nil {notify(app, .Error, "Could not make the group."); return}
-		rename_open(app, w, Rename_Group_Target{w.workspace.id, created.id})
+		tab_group_name_begin(app, w, created.id, true)
 	case action == .Add_Tab_To_Group:
 		tab_group_add(app, w, target, payload)
 	}

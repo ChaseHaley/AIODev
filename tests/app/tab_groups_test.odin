@@ -124,11 +124,11 @@ tab_groups_settle_joins_between_members_and_keeps_whole_groups :: proc(t: ^testi
 	app.tab_groups_settle(away, moved[:])
 	testing.expect_value(t, groups_of(away), [8]u32{1, 1, 0, 0, 0, 0, 0, 0})
 
-	// Beside the rest of its group, a tab keeps it.
+	// At its group's edge, a moved tab leaves it: only landing between two of its tabs keeps it there.
 	beside := grouped_workspace(&state, {0, 1, 1})
 	moved[0] = beside.tabs[1]
 	app.tab_groups_settle(beside, moved[:])
-	testing.expect_value(t, groups_of(beside), [8]u32{0, 1, 1, 0, 0, 0, 0, 0})
+	testing.expect_value(t, groups_of(beside), [8]u32{0, 0, 1, 0, 0, 0, 0, 0})
 
 	// A tab keeps its group only through an unbroken run to the neighbour sharing it.
 	broken := grouped_workspace(&state, {1, 0, 1})

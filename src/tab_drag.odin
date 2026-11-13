@@ -2,8 +2,9 @@ package main
 
 import "aio:render"
 import "aio:ui"
+import "core:slice"
 
-tab_press :: proc(app: ^App, w: ^Window, index: int, x, y: f32, modified: bool) {
+tab_press :: proc(app: ^App, w: ^Window, index: int, x, y: f32, modified: bool, chip: u32 = 0) {
 	if index < 0 || index >= len(w.workspace.tabs) || !w.workspace.tabs[index].marked {return}
 	offset: [2]f32
 	if w.tabs_horizontal {
@@ -15,7 +16,19 @@ tab_press :: proc(app: ^App, w: ^Window, index: int, x, y: f32, modified: bool) 
 		if row.height <= 0 {return}
 		offset.y = (y - row.y) / row.height
 	}
-	drag_press(w, x, y, Tab_Grab{w.workspace.tabs[index], offset, modified})
+	drag_press(w, x, y, Tab_Grab{w.workspace.tabs[index], offset, modified, chip})
+}
+
+// A press on group `id`'s chip marks the group's tabs, so a drag carries them all; tab_drag_release folds the
+// group instead when the press ends without one.
+tab_chip_press :: proc(app: ^App, w: ^Window, id: u32, x, y: f32) {
+	first := -1
+	for tab, i in w.workspace.tabs {
+		tab.marked = tab.group == id
+		if tab.marked && first < 0 {first = i}
+	}
+	w.dirty = true
+	tab_press(app, w, first, x, y, false, id)
 }
 
 // Moves a tab and everything indexed by tab position, keeping the selected tab selected.
@@ -92,7 +105,10 @@ tab_drag_apply_slot :: proc(app: ^App, w: ^Window, slot: int) -> bool {
 tab_drag_slot :: proc(w: ^Window, layout: Tab_Layout, edge, unit, scale: f32, carried := true) -> int {
 	slot, lifted := 0, 0
 	for tab, i in w.workspace.tabs {
-		if carried && tab.marked {lifted += 1; continue}
+		if carried && tab.marked {
+			if tab_shown(w.workspace, i) {lifted += 1}
+			continue
+		}
 		if i >= len(layout.places) {break}
 		place := layout.places[i]
 		start := (place.slot - f32(lifted)) * unit + place.offset * scale
@@ -188,7 +204,11 @@ tab_drag_release :: proc(app: ^App, w: ^Window) {
 	d := drag_end(w)
 	switch &state in d {
 	case Drag_Pressed:
-		if !state.grab.(Tab_Grab).modified {workspace_tab_choose(w.workspace, w.workspace.selected)}
+		grab := state.grab.(Tab_Grab)
+		if !grab.modified {workspace_tab_choose(w.workspace, w.workspace.selected)}
+		if group := tab_group_find(w.workspace, grab.chip); group != nil {
+			_ = tab_group_fold(app, w, grab.chip, !group.folded)
+		}
 	case Drag_Active:
 		a := &state
 		drag_thumbnail_destroy(&a.thumbnail)
@@ -206,20 +226,18 @@ tab_drag_release :: proc(app: ^App, w: ^Window) {
 			tab_drag_abandon(app, w, a)
 			if ready {notify(app, .Error, "Could not move the tabs. The source was preserved.")}
 		case Drop_Reorder:
-			// Dropped on a chip, the tabs join that group, folded or not; elsewhere their neighbours decide.
-			if chip := tab_chip_at(app, w, w.pointer.x, w.pointer.y); chip != 0 {
-				for tab, i in w.workspace.tabs {
-					if tab.marked {tab_group_add(app, w, i, chip); break}
-				}
-			} else {
-				moved := make([dynamic]^Tab, 0, len(w.workspace.tabs), context.temp_allocator)
-				for tab in w.workspace.tabs {if tab.marked {append(&moved, tab)}}
-				tab_groups_settle(w.workspace, moved[:])
-				layout_state_touch(app)
-			}
+			moved := make([dynamic]^Tab, 0, len(w.workspace.tabs), context.temp_allocator)
+			for tab in w.workspace.tabs {if tab.marked {append(&moved, tab)}}
+			tab_drag_group(app, w, moved[:])
+			layout_state_touch(app)
+			chip := a.carry.(Tab_Carry).grab.chip
 			drag_let_go(app, w, a)
+			// A chip's drag marked the group only to carry it; the marks go back to the shown tab.
+			if chip != 0 {workspace_tab_choose(w.workspace, w.workspace.selected)}
 		case nil:
+			chip := a.carry.(Tab_Carry).grab.chip
 			tab_drag_abandon(app, w, a)
+			if chip != 0 {workspace_tab_choose(w.workspace, w.workspace.selected)}
 		}
 	}
 }
@@ -229,4 +247,61 @@ tab_drag_finish :: proc(app: ^App, w: ^Window) {
 	id := w.id
 	tab_drag_release(app, w)
 	if window_find(app, id) != nil {rail_overlay_dismiss(app, w)}
+}
+
+// The group dropped tabs belong to. A block holding all of its groups keeps them, as when a chip is dragged.
+// Otherwise the tabs join the group whose chip or tabs lie under the pointer, folded or not, and leave any
+// other, so a tab dragged past its group's edge leaves it.
+@(private)
+tab_drag_group :: proc(app: ^App, w: ^Window, moved: []^Tab) {
+	workspace := w.workspace
+	whole := true
+	for tab in moved {
+		if tab.group == 0 {whole = false; break}
+		for other in workspace.tabs {
+			if other.group == tab.group && !slice.contains(moved, other) {whole = false; break}
+		}
+	}
+	if whole {
+		tab_groups_tidy(workspace)
+		return
+	}
+	target := tab_drag_group_under(app, w, moved)
+	group := tab_group_find(workspace, target)
+	if group != nil && group.folded {
+		for tab, i in workspace.tabs {if tab == moved[0] {tab_group_add(app, w, i, target); return}}
+	}
+	for tab in moved {tab.group = target}
+	tab_groups_tidy(workspace)
+}
+
+// The group whose chip or tabs, as they rest without `moved`, lie under the pointer; 0 for none.
+@(private = "file")
+tab_drag_group_under :: proc(app: ^App, w: ^Window, moved: []^Tab) -> u32 {
+	horizontal := w.tabs_horizontal
+	layout := tab_layout(app, w, horizontal)
+	unit, origin, point, scale: f32
+	if horizontal {
+		bar := window_tab_bar(app, w)
+		unit, origin, point, scale = bar.tab_width, bar.x, w.pointer.x, w.scale
+	} else {
+		rail, ok := rail_layout_query(w)
+		if !ok || rail.row_height <= 0 {return 0}
+		unit, origin, point = rail.row_height, ui.rail_row_rect(rail, 0).y, w.pointer.y
+	}
+	for run in layout.runs {
+		first, last := -1, -1
+		for tab, i in w.workspace.tabs {
+			if tab.group != run.group.id || slice.contains(moved, tab) || i >= len(layout.places) {continue}
+			if first < 0 {first = i}
+			last = i
+		}
+		if first < 0 {continue}
+		at :: proc(place: Tab_Place, unit, scale: f32) -> f32 {return place.slot * unit + place.offset * scale}
+		chip := horizontal ? run.width * scale : unit
+		start := origin + at(layout.places[first], unit, scale) - chip
+		end := origin + at(layout.places[last], unit, scale) + (run.group.folded ? 0 : unit)
+		if point >= start && point < end {return run.group.id}
+	}
+	return 0
 }

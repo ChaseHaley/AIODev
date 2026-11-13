@@ -45,14 +45,26 @@ try {
     foreach ($i in 2..4) { Invoke-Aio command tab.new }
     Invoke-Aio wait text 'PS '
     Invoke-Aio command tab.select_2
-    # Add to Group > New Group from the tab menu, named in the dialog that follows.
+    # Add to Group > New Group from the tab menu opens an editor below the new chip for its name and colour.
     Invoke-Aio mouse click (Center 'tab.2.strip_rect') --px --button right
     Invoke-Aio key Down Down Right Enter
-    Assert-Equal (Read-State)['rename.open'] 'true' 'a new group opens its name field'
+    $s = Read-State
+    Assert-Equal "$($s['group_name.open']),$($s['group_name.editor'])" 'true,true' 'a new group opens its editor'
+    Invoke-Aio mouse click (Center 'group_name.swatch.6') --px
+    Assert-Equal (Read-State)['group.1.color'] 'Blue' 'a swatch in the editor colours the group'
     Invoke-Aio type 'Build'
     Invoke-Aio key Enter
     Assert-Equal (Groups) '0,1,0,0' 'the tab is in the new group'
     Assert-Equal (Read-State)['group.1.name'] 'Build' 'the group takes its name'
+    # Rename Group names the group in its chip.
+    Invoke-Aio mouse click (Center 'group.1.chip') --px --button right
+    Invoke-Aio key Enter
+    $s = Read-State
+    Assert-Equal "$($s['group_name.open']),$($s['group_name.editor'])" 'true,false' 'Rename Group edits in the chip'
+    Invoke-Aio key Ctrl+A
+    Invoke-Aio type 'Build tools'
+    Invoke-Aio key Enter
+    Assert-Equal (Read-State)['group.1.name'] 'Build tools' 'the chip keeps the typed name'
     # The tab menu adds the next tab to the group.
     Invoke-Aio mouse click (Center 'tab.3.strip_rect') --px --button right
     Invoke-Aio key Down Down Right Down Enter
@@ -79,18 +91,30 @@ try {
     Invoke-Aio mouse drag $from $to --px
     Assert-Equal (Groups) '0,1,1,1' 'a drop between two tabs of a group joins it'
     Assert-Equal (Order) '1,2,4,3' 'the dropped tab lands between them'
+    # Dragged past the group's end, the tab leaves it.
+    $from = Center 'tab.4.strip_rect'
+    Invoke-Aio mouse drag $from (Center 'tabs.new_tab') --px
+    Assert-Equal (Groups) '0,1,1,0' 'a tab dragged past its group leaves it'
+    # Dragging the chip carries every tab of the group, which stays a group.
+    $start = (Read-State)['tab.1.strip_rect'] -split ','
+    Invoke-Aio mouse drag (Center 'group.1.chip') "$([int]$start[0] + 4),20" --px
+    Assert-Equal (Order) '2,4,1,3' 'a chip drag moves the whole group'
+    Assert-Equal (Groups) '1,1,0,0' 'the moved group keeps its tabs'
     # Move Tab Left at the group's start leaves the group where it is.
-    Invoke-Aio command tab.select_2
+    Invoke-Aio command tab.select_1
     Invoke-Aio command tab.move_left
-    Assert-Equal (Groups) '0,0,1,1' 'a keyboard move at the edge leaves the group'
+    Assert-Equal (Groups) '0,1,0,0' 'a keyboard move at the edge leaves the group'
+    Invoke-Aio command tab.select_3
+    Invoke-Aio command tab.move_left
+    Assert-Equal (Groups) '0,1,1,0' 'a keyboard move beside a group joins it'
 
     # The rail gives the chip a row of its own above the group's tabs.
     Invoke-Aio key Ctrl+Shift+L
     $s = Read-State
     Assert-Equal $s['rail.rows'] '5' 'the rail adds a row for the chip'
     $chip = $s['group.1.chip'] -split ','
-    $third = $s['tab.3.rect'] -split ','
-    Assert-Equal ([double]$third[1] - [double]$chip[1]) $chip[3] 'the chip row sits just above its first tab'
+    $first = $s['tab.2.rect'] -split ','
+    Assert-Equal ([double]$first[1] - [double]$chip[1]) $chip[3] 'the chip row sits just above its first tab'
     Shot 'rail'
     Invoke-Aio key Ctrl+Shift+L
 

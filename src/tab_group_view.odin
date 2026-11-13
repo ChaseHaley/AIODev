@@ -10,11 +10,13 @@ Tab_Place :: struct {
 }
 
 // A group's chip, where a run of its tabs starts: just before tab `first`, the run's first laid-out tab. The
-// strip gives it `width` DIPs, margins included; the rail gives it the row above that tab.
+// strip gives it `width` DIPs, margins included; the rail gives it the row above that tab. A `carried` chip
+// rides before the tabs of a whole group being dragged and takes no room among the others.
 Tab_Run :: struct {
-	group: ^Tab_Group,
-	first: int,
-	width: f32,
+	group:   ^Tab_Group,
+	first:   int,
+	width:   f32,
+	carried: bool,
 }
 
 // The tabs' places and the group chips among them, in the strip or the rail, in temporary memory. `slots`
@@ -28,7 +30,7 @@ Tab_Layout :: struct {
 
 // Lays out w's tabs for the strip, or for the rail, where each chip takes a row; only the strip measures its
 // chips, with `app`. A folded group's tabs take no slot. Dragged tabs neither start nor end a group's run,
-// so a group they pass over keeps one chip.
+// so a group they pass over keeps one chip; a whole group being dragged carries its own.
 tab_layout :: proc(app: ^App, w: ^Window, horizontal: bool) -> Tab_Layout {
 	workspace := w.workspace
 	if workspace == nil {return {}}
@@ -37,26 +39,29 @@ tab_layout :: proc(app: ^App, w: ^Window, horizontal: bool) -> Tab_Layout {
 	runs := make([dynamic]Tab_Run, 0, len(workspace.groups), context.temp_allocator)
 	dragging := tab_drag_active(w)
 	result := Tab_Layout{places = places}
-	previous: u32
+	previous, previous_carried: u32
 	for tab, i in workspace.tabs {
 		group := tab_group_find(workspace, tab.group)
 		carried := dragging && tab.marked
-		if !carried {
-			if group != nil && tab.group != previous {
-				width: f32
-				if horizontal {
-					width = ui.tab_chip_width(&w.ui_text, tab_chip(app, w, group), w.scale) / w.scale
-					width += 2 * ui.TAB_CHIP_MARGIN
-					result.chips += width
-				} else {
-					result.slots += 1
+		if group != nil && tab.group != (carried ? previous_carried : previous) {
+			width: f32
+			if horizontal {
+				width = ui.tab_chip_width(&w.ui_text, tab_chip(app, w, group), w.scale) / w.scale
+				if naming, editor := group_name_editing(w); naming == group && !editor {
+					width = max(width, GROUP_NAME_MIN_WIDTH)
 				}
-				append(&runs, Tab_Run{group, i, width})
+				width += 2 * ui.TAB_CHIP_MARGIN
 			}
-			previous = tab.group
+			if !carried {
+				if horizontal {result.chips += width} else {result.slots += 1}
+				append(&runs, Tab_Run{group = group, first = i, width = width})
+			} else if tab_group_carried_whole(workspace, tab.group) {
+				append(&runs, Tab_Run{group = group, first = i, width = width, carried = true})
+			}
 		}
+		if carried {previous_carried = tab.group} else {previous = tab.group}
 		places[i] = {f32(result.slots), horizontal ? result.chips : 0}
-		if carried || group == nil || !group.folded {result.slots += 1}
+		if group == nil || !group.folded {result.slots += 1}
 	}
 	result.runs = runs[:]
 	// Chips take at most half the strip, shrinking together and fading their names, so tabs stay usable.
@@ -73,14 +78,21 @@ tab_layout :: proc(app: ^App, w: ^Window, horizontal: bool) -> Tab_Layout {
 	return result
 }
 
-// Group `group`'s chip: its name, its colour in the theme, and, folded, its tab count and the most urgent
-// status of its tabs. The spinner's phase is drawing's to add.
+// Whether every tab of group `id` is marked, as when its chip is dragged.
+tab_group_carried_whole :: proc(workspace: ^Workspace, id: u32) -> bool {
+	for tab in workspace.tabs {if tab.group == id && !tab.marked {return false}}
+	return true
+}
+
+// Group `group`'s chip: its name, as typed while it is being named, its colour in the theme, and, folded,
+// its tab count and the most urgent status of its tabs. The spinner's phase is drawing's to add.
 tab_chip :: proc(app: ^App, w: ^Window, group: ^Tab_Group) -> ui.Tab_Chip {
 	chip := ui.Tab_Chip {
 		name   = group.name,
 		color  = tab_group_color(app, group),
 		folded = group.folded,
 	}
+	if naming, _ := group_name_editing(w); naming == group {chip.name = ui.field_string(&w.rename)}
 	if !group.folded {return chip}
 	summary: Status_Summary
 	for tab, i in w.workspace.tabs {
@@ -115,21 +127,21 @@ tab_chip_strip_rect :: proc(w: ^Window, bar: ui.Tab_Bar, run: Tab_Run) -> render
 	return {right - width, 0, width, bar.height}
 }
 
-// The group whose chip lies under the point, in the strip or the rail, or 0.
-tab_chip_at :: proc(app: ^App, w: ^Window, x, y: f32) -> u32 {
+// Group `id`'s chip where it shows, in the strip or the rail; empty while it shows none.
+tab_group_chip_rect :: proc(app: ^App, w: ^Window, id: u32) -> render.Rect {
 	if w.tabs_horizontal {
 		bar := window_tab_bar(app, w)
 		for run in tab_layout(app, w, true).runs {
-			if render.rect_contains(tab_chip_strip_rect(w, bar, run), x, y) {return run.group.id}
+			if run.group.id == id && !run.carried {return tab_chip_strip_rect(w, bar, run)}
 		}
-		return 0
+		return {}
 	}
 	rail, ok := rail_layout_query(w)
-	if !ok {return 0}
+	if !ok {return {}}
 	for run in tab_layout(nil, w, false).runs {
-		if render.rect_contains(tab_chip_rail_rect(w, rail, run), x, y) {return run.group.id}
+		if run.group.id == id && !run.carried {return tab_chip_rail_rect(w, rail, run)}
 	}
-	return 0
+	return {}
 }
 
 // Run `run`'s chip in the rail, in the row above its first tab as that tab moves.
@@ -154,6 +166,14 @@ when AIO_CONTROL {
 	// count and chip, in the strip or the rail.
 	tab_groups_state_report :: proc(r: ^State_Report, app: ^App, w: ^Window) {
 		state_value(r, "groups.count", len(w.workspace.groups))
+		naming, editor := group_name_editing(w)
+		state_value(r, "group_name.open", naming != nil)
+		state_value(r, "group_name.editor", editor)
+		state_rect(r, "group_name.field", naming != nil ? group_name_field_rect(app, w) : render.Rect{})
+		for color in 1 ..< len(WORKSPACE_ICON_COLORS) {
+			swatch := editor ? group_name_swatch_rect(app, w, color) : render.Rect{}
+			state_rect(r, state_key("group_name.swatch.%d", color), swatch)
+		}
 		bar := window_tab_bar(app, w)
 		rail, _ := rail_layout_query(w)
 		@(static, rodata) colors := WORKSPACE_ICON_COLORS

@@ -54,6 +54,7 @@ overlay_surfaces_destroy :: proc(w: ^Window) {
 Window_Overlay :: union {
 	Overlay_Rename,
 	Overlay_Chip_Name,
+	Overlay_Group_Name,
 	Overlay_Tab_Menu,
 	Overlay_Divider_Menu,
 	Overlay_Activity_Menu,
@@ -73,6 +74,13 @@ Overlay_Chip_Name :: struct {
 	workspace: u32,
 	// The last save found the name in use. Editing the field clears it.
 	error:     bool,
+}
+
+// A tab group names in place, in its chip, or, just made, in an editor below the chip that also picks its
+// colour. The text is w.rename.
+Overlay_Group_Name :: struct {
+	group:  u32,
+	editor: bool,
 }
 
 // The right-clicked tab, or the right-clicked chip's group and that group's first tab. The menu acts on the
@@ -135,7 +143,7 @@ overlay_kind :: proc(app: ^App, w: ^Window) -> Overlay_Kind {
 	if workspace_picker_active(&w.workspace_picker) {return .Workspace_Picker}
 	switch _ in w.overlay {
 	case Overlay_Rename: return .Rename
-	case Overlay_Chip_Name: return .Chip_Name
+	case Overlay_Chip_Name, Overlay_Group_Name: return .Chip_Name
 	case Overlay_Tab_Menu: return .Tab_Menu
 	case Overlay_Divider_Menu: return .Divider_Menu
 	case Overlay_Activity_Menu: return .Activity_Menu
@@ -188,6 +196,9 @@ overlay_close :: proc(app: ^App, w: ^Window, exit := Overlay_Exit.Cancel) {
 		ui.field_release(&w.rename)
 	case Overlay_Rename:
 		ui.field_release(&w.rename)
+	case Overlay_Group_Name:
+		if exit == .Leave {group_name_save(app, w, current.group)}
+		ui.field_release(&w.rename)
 	case Overlay_Document_Menu:
 		document_menu_close(&w.document_menu, current.mode)
 	case Overlay_Command_Menu:
@@ -205,6 +216,8 @@ overlay_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 	#partial switch _ in w.overlay {
 	case Overlay_Rename, Overlay_Chip_Name:
 		if result := rename_draw(app, w); result != .Ok {return result}
+	case Overlay_Group_Name:
+		if result := group_name_draw(app, w); result != .Ok {return result}
 	}
 	if result := confirmation_draw(app, w); result != .Ok {return result}
 	menu: render.Build_Status
@@ -223,7 +236,7 @@ overlay_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 		menu = document_menu_draw(app, w)
 	case Overlay_Command_Menu:
 		menu = command_menu_draw(app, w)
-	case nil, Overlay_Rename, Overlay_Chip_Name:
+	case nil, Overlay_Rename, Overlay_Chip_Name, Overlay_Group_Name:
 	}
 	if menu != .Ok {return menu}
 	if !workspace_picker_active(&w.workspace_picker) {return .Ok}
