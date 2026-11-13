@@ -333,7 +333,10 @@ color_board_layout :: proc(p: ^Editor, l: Editor_Layout) -> (b: Board_Layout) {
 	s := l.scale
 	if s <= 0 || l.row_height <= 0 {return}
 	b.scale = s
-	width := l.list.width / s
+	// The board starts where the other tabs' group titles do, which also leaves room left of the
+	// first tile for its selection ring and hover lift, which the list's clip would cut.
+	edge := f32(CONTROL_INSET)
+	width := l.list.width / s - edge
 	inspector := BOARD_INSPECTOR_WIDTH
 	narrow := width - BOARD_INSPECTOR_MIN - BOARD_GAP
 	if board_tiling(narrow).fit > board_tiling(width - inspector - BOARD_GAP).fit {
@@ -349,16 +352,16 @@ color_board_layout :: proc(p: ^Editor, l: Editor_Layout) -> (b: Board_Layout) {
 	content := stacked ? top + height : max(height, b.inspector.rect.height)
 	b.lines = int(math.ceil(content / l.row_height - 0.001))
 	scroll := f32(p.scroll) * l.row_height
-	b.origin = {l.list.x, l.list.y + top - scroll}
+	b.origin = {l.list.x + edge * s, l.list.y + top - scroll}
 	for &tile in b.tiles[:b.tile_count] {tile.rect = board_move_rect(tile.rect, b.origin.x, b.origin.y)}
 	for &heading in b.headings[:b.heading_count] {
 		heading.rect = board_move_rect(heading.rect, b.origin.x, b.origin.y)
 	}
 	for &side in b.sides[:b.side_count] {side.rect = board_move_rect(side.rect, b.origin.x, b.origin.y)}
-	x, y := l.list.x, l.list.y - scroll
+	x, y := l.list.x + edge * s, l.list.y - scroll
 	if !stacked {
 		overflow := max(0, b.inspector.rect.height - l.list.height)
-		x = l.list.x + (board + BOARD_GAP) * s
+		x = l.list.x + (edge + board + BOARD_GAP) * s
 		y = l.list.y + clamp(scroll - overflow, 0, max(0, content - b.inspector.rect.height)) - scroll
 	}
 	board_inspector_move(&b.inspector, x, y)
@@ -1405,15 +1408,21 @@ board_card_draw :: proc(
 		if r := draw_text(&small, list, card.badge, pill.x + SPACE_2 * s, pill_baseline, ink); r != .Ok {return r}
 	}
 	detail_baseline := b.detail_y + small.ascent
-	if r := draw_text(&small, list, card.detail, x, detail_baseline, theme.faint, right - x); r != .Ok {return r}
 	changed := 0
 	for item, index in p.items {
 		if board_tile_item(p, index) && board_modified(&p.rows[item.row]) {changed += 1}
 	}
+	// The changed count always shows; a long theme ID gives way to it.
+	buffer: [32]u8
+	parts := [?]string{" · ", strconv.write_int(buffer[:], i64(changed), 10), " changed"}
+	count_width: f32
+	if changed > 0 {for part in parts {count_width += text_width(&small, part)}}
+	detail_room := max(1, right - x - count_width)
+	if r := draw_text(&small, list, card.detail, x, detail_baseline, theme.faint, detail_room); r != .Ok {
+		return r
+	}
 	if changed > 0 {
-		buffer: [32]u8
-		parts := [?]string{" · ", strconv.write_int(buffer[:], i64(changed), 10), " changed"}
-		left := x + text_width(&small, card.detail)
+		left := x + min(text_width(&small, card.detail), detail_room)
 		if _, r := board_text_run(&small, list, parts[:], left, detail_baseline, theme.accent); r != .Ok {return r}
 	}
 	if card.note != "" {
