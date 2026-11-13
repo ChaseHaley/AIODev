@@ -242,7 +242,7 @@ pane_header_tooltip :: proc(w: ^Window, pane: layout.Pane_Rect, target: Pane_Hea
 	case .Split_Down:
 		return "Split down"
 	case .Zoom:
-		return "Zoom"
+		return pane_header_view(w, pane) == .Zoom ? "Unzoom" : "Zoom"
 	case .Fill_Window:
 		fill, _ := layout.pane_view_parts(pane_header_view(w, pane))
 		return fill == .Content ? "Exit fill window" : "Fill window"
