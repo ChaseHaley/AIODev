@@ -1,10 +1,13 @@
 package app_test
 
 import "core:fmt"
+import "core:os"
 import "core:slice"
+import "core:strings"
 import "core:testing"
 import "core:time"
 import app "../../src"
+import "aio:commands"
 import "aio:layout"
 import "aio:render"
 import "aio:term"
@@ -168,6 +171,40 @@ settings_pane_header_shows_the_settings_icon :: proc(t: ^testing.T) {
 		if slice.equal(w.list.rects[start:start + len(icon.rects)], icon.rects[:]) {drawn = true}
 	}
 	testing.expect(t, drawn, "the Settings icon is drawn in the badge")
+}
+
+// A header button's tooltip shows the shortcut of the command the button runs, as Settings binds it now: a
+// refused button keeps its shortcut beside the reason, and a button whose command is unbound shows none.
+@(test)
+pane_header_tooltips_show_their_commands_shortcuts :: proc(t: ^testing.T) {
+	f: Palette_Fixture
+	defer palette_fixture_destroy(t, &f)
+	if !palette_fixture_create(t, &f, "header-shortcuts", second_window = false) {return}
+	s, w := &f.state, f.state.windows[0]
+	if !testing.expect_value(t, len(w.panes), 1) {return}
+	header_shortcut :: proc(s: ^app.App, w: ^app.Window, button: app.Pane_Header_Button) -> string {
+		r := app.pane_header_layout(w, w.panes[0]).buttons[button]
+		buffer: [commands.SHORTCUT_TEXT_CAP]u8
+		shortcut := app.tooltip_shortcut(s, w, .Pane_Header, r.x + r.width / 2, r.y + r.height / 2, buffer[:])
+		return strings.clone(shortcut, context.temp_allocator)
+	}
+	testing.expect_value(t, app.pane_header_refused(w, w.panes[0], .Dock), app.Pane_Header_Refusal.Last_Tiled)
+	testing.expect_value(t, header_shortcut(s, w, .Split_Right), "Ctrl+Shift+O")
+	testing.expect_value(t, header_shortcut(s, w, .Split_Down), "Ctrl+Shift+E")
+	testing.expect_value(t, header_shortcut(s, w, .Fill_Window), "Ctrl+Shift+Enter")
+	testing.expect_value(t, header_shortcut(s, w, .Dock), "Ctrl+Alt+Enter")
+	testing.expect_value(t, header_shortcut(s, w, .Links), "")
+	testing.expect_value(t, header_shortcut(s, w, .Close), "")
+
+	existing, read_error := os.read_entire_file(f.path, context.temp_allocator)
+	if !testing.expect_value(t, read_error, nil) {return}
+	keys := "\nkeys.pane.split_right = Ctrl+Alt+F9\nkeys.pane.close = Ctrl+Alt+F4\n"
+	rebound := strings.concatenate({string(existing), keys}, context.temp_allocator)
+	if !testing.expect_value(t, os.write_entire_file(f.path, transmute([]u8)rebound), nil) {return}
+	app.reload_settings(s, false)
+	testing.expect_value(t, header_shortcut(s, w, .Split_Right), "Ctrl+Alt+F9")
+	testing.expect_value(t, header_shortcut(s, w, .Close), "Ctrl+Alt+F4")
+	testing.expect_value(t, header_shortcut(s, w, .Split_Down), "Ctrl+Shift+E")
 }
 
 // The status pill `pane`'s header draws for a working program, found by its tint.

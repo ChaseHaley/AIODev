@@ -1053,6 +1053,21 @@ floating_tooltip :: proc(app: ^App, w: ^Window, x, y: f32) -> string {
 	return "Move float"
 }
 
+// The float commands act on the focused float; restoring a capsule brings back the float the minimize
+// command would.
+floating_shortcut :: proc(app: ^App, w: ^Window, x, y: f32) -> Tooltip_Shortcut {
+	if _, capsule := floating_capsule_at(w, x, y).?; capsule {return Action.Minimize_Floating}
+	_, action, header := floating_header_at(app, w, x, y)
+	if !header {return nil}
+	switch action {
+	case .Minimize: return Action.Minimize_Floating
+	case .Dock: return Action.Float_Pane
+	case .Close: return Action.Close_Pane
+	case .Move, .None:
+	}
+	return nil
+}
+
 when AIO_CONTROL {
 	floating_state_report :: proc(r: ^State_Report, w: ^Window) {
 		hover := (w.float_header_hover.? or_else Float_Header_Spot{}).action

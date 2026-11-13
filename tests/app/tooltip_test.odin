@@ -1,8 +1,11 @@
 package app_test
 
 import app "../../src"
+import "aio:commands"
 import "aio:input"
 import "aio:render"
+import "aio:search"
+import "aio:settings"
 import "aio:ui"
 import "core:testing"
 import "core:time"
@@ -28,13 +31,19 @@ tooltip_covers_scrollback_find_buttons :: proc(t: ^testing.T) {
 	defer ui.find_destroy(&w.find)
 	ui.find_open(&w.find)
 	l := ui.find_layout(900, 1, 50)
-	buttons := [?]struct{rect: render.Rect, label: string} {
-		{l.case_toggle, "Match case"},
-		{l.regex_toggle, "Use regular expression"},
-		{l.up, "Previous match"},
-		{l.down, "Next match"},
-		{l.close, "Close find"},
+	// Each button's tooltip names the key that does the same while the bar has the keyboard.
+	buttons := [?]struct {
+		rect:            render.Rect,
+		label, shortcut: string,
+		outcome:         ui.Find_Outcome,
+	} {
+		{l.case_toggle, "Match case", "Alt+C", ui.Find_Change.Changed},
+		{l.regex_toggle, "Use regular expression", "Alt+R", ui.Find_Change.Changed},
+		{l.up, "Previous match", "Shift+Enter", search.Step.Previous},
+		{l.down, "Next match", "Enter", search.Step.Next},
+		{l.close, "Close find", "Esc", ui.Find_Change.Closed},
 	}
+	buffer: [commands.SHORTCUT_TEXT_CAP]u8
 	for button in buttons {
 		x := i32(button.rect.x + button.rect.width / 2)
 		y := i32(button.rect.y + button.rect.height / 2)
@@ -42,7 +51,41 @@ tooltip_covers_scrollback_find_buttons :: proc(t: ^testing.T) {
 		app.tooltip_hover(&state, &w, .Find, input.Mouse_Move_Event{x = x, y = y})
 		testing.expect_value(t, app.tooltip_current(&w), button.label)
 		testing.expect(t, !tooltip_visible(&w) && tooltip_pending(&w))
+		testing.expect_value(t, app.tooltip_shortcut(&state, &w, .Find, f32(x), f32(y), buffer[:]), button.shortcut)
+		key := ui.FIND_KEYS[w.find.hover]
+		testing.expect_value(t, ui.find_key(&w.find, {key = key.key, modifiers = key.modifiers, pressed = true}),
+			button.outcome)
 	}
+}
+
+// The palette's and the Settings search's keyboard button say what they do and name Alt+K, the key that
+// does the same, in the shortcut slot rather than in the words.
+@(test)
+tooltip_key_search_names_its_toggle_key :: proc(t: ^testing.T) {
+	state: app.App
+	w: app.Window
+	buffer: [commands.SHORTCUT_TEXT_CAP]u8
+	toggle := ui.KEY_SEARCH_TOGGLE
+	testing.expect(t, ui.key_search_toggles({key = toggle.key, modifiers = toggle.modifiers, pressed = true,
+		unshifted = 'k'}))
+
+	state.palette.keys_hover = true
+	app.tooltip_hover(&state, &w, .Palette, input.Mouse_Move_Event{})
+	testing.expect_value(t, app.tooltip_current(&w), "Search by pressing a shortcut")
+	testing.expect_value(t, app.tooltip_shortcut(&state, &w, .Palette, 0, 0, buffer[:]), "Alt+K")
+	state.palette.keys.state = .Recording
+	app.tooltip_hover(&state, &w, .Palette, input.Mouse_Move_Event{})
+	testing.expect_value(t, app.tooltip_current(&w), "Search by typing")
+	testing.expect_value(t, app.tooltip_shortcut(&state, &w, .Palette, 0, 0, buffer[:]), "Alt+K")
+	state.palette.keys_hover = false
+	testing.expect_value(t, app.tooltip_shortcut(&state, &w, .Palette, 0, 0, buffer[:]), "")
+
+	w.editor.hover_reset = -1
+	w.editor.hover_profile_item = -1
+	w.editor.keys_hover = true
+	app.tooltip_hover(&state, &w, .Settings_Page, input.Mouse_Move_Event{})
+	testing.expect_value(t, app.tooltip_current(&w), "Search by pressing a shortcut")
+	testing.expect_value(t, app.tooltip_shortcut(&state, &w, .Settings_Page, 0, 0, buffer[:]), "Alt+K")
 }
 
 @(test)
@@ -147,4 +190,71 @@ tooltip_profile_chevron_uses_shared_hit_bounds :: proc(t: ^testing.T) {
 	app.tooltip_hover(&state, &w, .Tabs,
 		input.Mouse_Move_Event{x = i32(r.x + r.width / 2), y = i32(r.y + r.height + 1)})
 	testing.expect_value(t, app.tooltip_current(&w), "")
+}
+
+// A control that runs a command shows that command's first shortcut beside its label, read from the
+// registry at each draw: Settings rebinding it changes the tooltip at once, and unbinding it removes it.
+@(test)
+tooltip_shortcut_follows_the_commands_binding :: proc(t: ^testing.T) {
+	state := app.App{registry = commands.create()}
+	defer commands.destroy(&state.registry)
+	if !testing.expect_value(t, app.register_actions(&state.registry), commands.Error.None) {return}
+	w := app.Window{width = 900, height = 600, scale = 1}
+	r := app.title_action_rect(&w, .Palette)
+	x, y := r.x + r.width / 2, r.y + r.height / 2
+	app.tooltip_hover(&state, &w, .Title_Action, input.Mouse_Move_Event{x = i32(x), y = i32(y)})
+	testing.expect_value(t, app.tooltip_current(&w), "Command palette")
+	buffer: [commands.SHORTCUT_TEXT_CAP]u8
+	testing.expect_value(t, app.tooltip_shortcut(&state, &w, .Title_Action, x, y, buffer[:]), "Ctrl+Shift+P")
+
+	steps := [?]struct {
+		setting, shortcut: string,
+	}{{"keys.app.command_palette = Ctrl+Alt+K\n", "Ctrl+Alt+K"}, {"keys.app.command_palette =\n", ""}}
+	for step in steps {
+		parsed, diagnostics, parse_error := settings.parse(step.setting)
+		settings.diagnostics_destroy(&diagnostics)
+		if !testing.expect_value(t, parse_error, nil) {return}
+		_, report_error := app.binding_report(&state.registry, &parsed)
+		settings.destroy(&parsed)
+		if !testing.expect_value(t, report_error, nil) {return}
+		testing.expect_value(t, app.tooltip_shortcut(&state, &w, .Title_Action, x, y, buffer[:]), step.shortcut)
+	}
+
+	// Minimize belongs to Windows and runs no command.
+	testing.expect_value(t, app.tooltip_shortcut(&state, &w, .Caption, f32(w.width) - 130, 20, buffer[:]), "")
+}
+
+// A tooltip draws its shortcut as the Settings search draws Ctrl+F: the whole chord in one keycap, at the
+// tooltip's right inset and centred on its line, in a tooltip grown to hold it.
+@(test)
+tooltip_draws_its_shortcut_as_a_keycap :: proc(t: ^testing.T) {
+	f: Palette_Fixture
+	defer palette_fixture_destroy(t, &f)
+	if !palette_fixture_create(t, &f, "tooltip-keycap", second_window = false) {return}
+	s, w := &f.state, f.state.windows[0]
+	r := app.title_action_rect(w, .Palette)
+	x, y := r.x + r.width / 2, r.y + r.height / 2
+	w.pointer = {x, y}
+	app.tooltip_hover(s, w, .Title_Action, input.Mouse_Move_Event{x = i32(x), y = i32(y)})
+	app.tooltip_tick(w, time.tick_add(time.tick_now(), time.Second))
+	if !testing.expect(t, tooltip_visible(w)) {return}
+	render.draw_list_reset(&w.list)
+	if !testing.expect_value(t, app.tooltip_draw(s, w), render.Build_Status.Ok) {return}
+
+	scale := w.scale
+	keycap_text := ui.text_styled(&w.ui_text, .Detail)
+	keycap, panel: render.Rect
+	found_keycap, found_panel := false, false
+	for instance in w.list.rects {
+		if instance.color == s.theme.border && instance.stroke == scale &&
+		   instance.rect.height == ui.KEYCAP_HEIGHT * scale {keycap, found_keycap = instance.rect, true}
+		if instance.color == s.theme.surface {panel, found_panel = instance.rect, true}
+	}
+	if !testing.expect(t, found_keycap && found_panel, "the tooltip draws a panel and a keycap") {return}
+	testing.expect_value(t, keycap.width, ui.keycap_width(&keycap_text, "Ctrl+Shift+P", scale))
+	testing.expectf(t, abs(keycap.x + keycap.width - (panel.x + panel.width - 8 * scale)) < 0.5,
+		"the keycap ends at the right inset: %v in %v", keycap, panel)
+	testing.expectf(t, abs(keycap.y + keycap.height / 2 - (panel.y + panel.height / 2)) < 0.5,
+		"the keycap is centred on the line: %v in %v", keycap, panel)
+	testing.expect(t, panel.height >= ui.KEYCAP_HEIGHT * scale + 2 * scale, "the keycap fits inside the tooltip")
 }
