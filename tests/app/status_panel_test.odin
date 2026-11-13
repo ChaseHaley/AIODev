@@ -1,6 +1,7 @@
 package app_test
 
 import app "../../src"
+import "aio:commands"
 import "aio:input"
 import "aio:platform"
 import "aio:render"
@@ -577,4 +578,150 @@ activity_working_rows_stay_unread_out_of_view :: proc(t: ^testing.T) {
 	read_at := entry.status_read_at
 	inbox_press(s, w, .U)
 	testing.expect(t, !entry.status_unread && entry.status_read_at == read_at)
+}
+
+// The settings file holds `line`.
+@(private = "file")
+settings_file_has :: proc(t: ^testing.T, path, line: string, loc := #caller_location) {
+	text, err := os.read_entire_file(path, context.temp_allocator)
+	testing.expect_value(t, err, nil, loc)
+	testing.expectf(t, strings.contains(string(text), line), "settings lack %q", line, loc = loc)
+}
+
+// The pointer over (x, y) shows `label` with the Show or hide the Activity panel key.
+@(private = "file")
+toggle_tooltip_expect :: proc(
+	t: ^testing.T,
+	s: ^app.App,
+	w: ^app.Window,
+	owner: app.Pointer_Target,
+	x, y: f32,
+	label: string,
+	loc := #caller_location,
+) {
+	testing.expect_value(t, app.pointer_target(s, w, x, y), owner, loc)
+	app.tooltip_hover(s, w, owner, input.Mouse_Move_Event{window = w.id, x = i32(x), y = i32(y)})
+	testing.expect_value(t, app.tooltip_current(w), label, loc)
+	buffer: [commands.SHORTCUT_TEXT_CAP]u8
+	testing.expect_value(t, app.tooltip_shortcut(s, w, owner, x, y, buffer[:]), "Ctrl+Shift+Y", loc)
+}
+
+// WORK-476: the header's right-most button hides the panel and the title bar button after the Activity
+// inbox brings it back, on either side. Both name the command's key, cancel a release elsewhere or a
+// lost capture, and save the one visibility setting.
+@(test)
+activity_hide_button_and_title_toggle_hide_and_show_the_panel :: proc(t: ^testing.T) {
+	f: Palette_Fixture
+	defer palette_fixture_destroy(t, &f)
+	if !palette_fixture_create(t, &f, "activity-toggle", second_window = false) {return}
+	s, w := &f.state, f.state.windows[0]
+	s.animations = false
+	if !testing.expect(t, app.settings_save_value(s, "status.panel", "true", "enable panel")) {return}
+	names := settings.STATUS_PANEL_SIDE_NAME
+	for side in ([?]settings.Status_Panel_Side{.Left, .Right}) {
+		if !testing.expect(t, app.settings_save_value(s, "status.panel_side", names[side], "set side")) {return}
+		// The title bar button sits after the inbox button, and the workspace chip after it.
+		toggle := app.status_panel_toggle_rect(s, w)
+		pill := app.status_pill_rect(s, w)
+		testing.expect(t, toggle.width > 0 && pill.width > 0)
+		testing.expect_value(t, toggle.x, pill.x + pill.width)
+		testing.expect_value(t, app.workspace_button_left(s, w), toggle.x + toggle.width)
+		tx, ty := toggle.x + toggle.width / 2, toggle.y + toggle.height / 2
+		toggle_tooltip_expect(t, s, w, .Activity_Toggle, tx, ty, "Hide Activity panel")
+
+		hide := app.status_panel_button_rect(s, w, .Hide)
+		beside := app.status_panel_button_rect(s, w, .Side)
+		panel := app.status_panel_rect(s, w)
+		testing.expect(t, hide.width > 0 && beside.x + beside.width <= hide.x)
+		testing.expect(t, hide.x + hide.width <= panel.x + panel.width)
+		x, y := hide.x + hide.width / 2, hide.y + hide.height / 2
+		toggle_tooltip_expect(t, s, w, .Status_Panel, x, y, "Hide Activity panel")
+		gesture_button(s, w, .Left, true, x, y)
+		gesture_button(s, w, .Left, false, 0, 0)
+		gesture_button(s, w, .Left, true, x, y)
+		app.handle_event(s, platform.Capture_Lost_Event{w.id})
+		gesture_button(s, w, .Left, false, x, y)
+		testing.expect(t, s.settings.status.panel, "a release elsewhere or a lost capture keeps the panel")
+		click_at(s, w, x, y)
+		testing.expect(t, !s.settings.status.panel)
+		testing.expect_value(t, app.status_panel_rect(s, w).width, f32(0))
+		testing.expect_value(t, w.dock_left_width, f32(0))
+		settings_file_has(t, f.path, "status.panel = false")
+
+		// Hidden, the title bar button stays where it was and says it shows the panel.
+		testing.expect_value(t, app.status_panel_toggle_rect(s, w), toggle)
+		toggle_tooltip_expect(t, s, w, .Activity_Toggle, tx, ty, "Show Activity panel")
+		gesture_button(s, w, .Left, true, tx, ty)
+		gesture_button(s, w, .Left, false, 0, 0)
+		gesture_button(s, w, .Left, true, tx, ty)
+		app.handle_event(s, platform.Capture_Lost_Event{w.id})
+		gesture_button(s, w, .Left, false, tx, ty)
+		testing.expect(t, !s.settings.status.panel, "a release elsewhere or a lost capture keeps it hidden")
+		click_at(s, w, tx, ty)
+		testing.expect(t, s.settings.status.panel)
+		testing.expect_value(t, app.status_panel_rect(s, w), panel)
+		testing.expect_value(t, w.dock_left_width > 0, side == .Left)
+		settings_file_has(t, f.path, "status.panel = true")
+		testing.expect_value(t, s.settings.status.panel_side, side)
+	}
+	// Without Activity there is no panel to show, so no button either, and the chip moves up to the inbox.
+	if !testing.expect(t, app.settings_save_value(s, "status.enabled", "false", "Activity off")) {return}
+	testing.expect_value(t, app.status_panel_toggle_rect(s, w).width, f32(0))
+}
+
+// WORK-476: Show or hide the Activity panel is a palette command on Ctrl+Shift+Y. It slides the panel
+// out and back with the Rail and Activity panel motion, at once with that motion off, and the choice is
+// in the settings file the next start reads.
+@(test)
+activity_panel_command_toggles_with_motion_and_persists :: proc(t: ^testing.T) {
+	f: Palette_Fixture
+	defer palette_fixture_destroy(t, &f)
+	if !palette_fixture_create(t, &f, "activity-command", second_window = false) {return}
+	s, w := &f.state, f.state.windows[0]
+	if !testing.expect(t, app.settings_save_value(s, "status.panel", "true", "enable panel")) {return}
+	command := commands.find(&s.registry, "status.panel")
+	if !testing.expect(t, command != nil) {return}
+	testing.expect(t, !command.hidden, "the palette lists the command")
+	testing.expect_value(t, command.title, "Show or hide the Activity panel")
+	testing.expect(t, commands.find_by_shortcut(&s.registry, {.Y, {.Control, .Shift}}) == command)
+
+	s.animations = true
+	w.dirty = true
+	app.window_render(s, w)
+	panel := app.status_panel_rect(s, w)
+	if !testing.expect(t, panel.width > 0) {return}
+	app.handle_event(s, input.Key_Event{window = w.id, key = .Y, modifiers = {.Control, .Shift}, pressed = true})
+	app.handle_event(s, input.Key_Event{window = w.id, key = .Y, modifiers = {.Control, .Shift}})
+	testing.expect(t, !s.settings.status.panel)
+	testing.expect_value(t, app.status_panel_rect(s, w).width, f32(0))
+	testing.expect(t, app.pane_motion_animating(w), "the panel slides out")
+	testing.expect_value(t, app.pane_motion_region_begin(w, app.PANE_MOTION_PANEL, {}).shown, panel)
+	first := ui.Frame_Time{display = time.tick_now(), period = 16 * time.Millisecond}
+	app.window_motion_update(s, w, first)
+	app.window_motion_update(s, w, {display = time.tick_add(first.display, 80 * time.Millisecond),
+		period = 16 * time.Millisecond})
+	sliding := app.pane_motion_region_begin(w, app.PANE_MOTION_PANEL, {}).shown
+	testing.expect(t, sliding.width > 0 && sliding.x > panel.x, "halfway, the panel is on its way into the right edge")
+	app.window_motion_update(s, w, {display = time.tick_add(first.display, time.Second),
+		period = 16 * time.Millisecond})
+	testing.expect(t, !app.pane_motion_animating(w))
+	settings_file_has(t, f.path, "status.panel = false")
+	text, err := os.read_entire_file(f.path, context.temp_allocator)
+	if !testing.expect_value(t, err, nil) {return}
+	parsed, diagnostics, parse_error := settings.parse(string(text))
+	settings.diagnostics_destroy(&diagnostics)
+	if !testing.expect_value(t, parse_error, nil) {return}
+	testing.expect(t, !parsed.status.panel, "the next start reads the panel as hidden")
+	settings.destroy(&parsed)
+
+	// With the Rail and Activity panel motion off it comes back at once. Saving a setting reads the Windows
+	// animations switch again, which goes through the same gate.
+	if !testing.expect(t, app.settings_save_value(s, "motion.panes.chrome", "off", "chrome motion off")) {return}
+	w.dirty = true
+	app.window_render(s, w)
+	app.run_action(s, w, .Status_Panel)
+	testing.expect(t, s.settings.status.panel)
+	testing.expect(t, !app.pane_motion_animating(w))
+	testing.expect_value(t, app.status_panel_rect(s, w), panel)
+	settings_file_has(t, f.path, "status.panel = true")
 }
