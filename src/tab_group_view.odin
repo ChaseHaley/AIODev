@@ -125,9 +125,10 @@ tab_group_color :: proc(app: ^App, group: ^Tab_Group) -> render.Color {
 	return workspace_icon_tint(group.color, app.theme.text)
 }
 
-// Whether group `group` shows its tray: while unfolded, and while its tabs slide into the chip as it folds.
+// Whether group `group` shows its tray in pieces with its chip and tabs: while unfolded and at rest. While it
+// folds or unfolds its tray is drawn whole instead, gathering into the chip (tab_tray_fold_rect).
 tab_group_tray_shown :: proc(w: ^Window, group: ^Tab_Group) -> bool {
-	return !group.folded || w.folding == group.id
+	return !group.folded && w.folding != group.id
 }
 
 // The group tab `index` lies in: its own, or for a tab dragged on its own, the group it would join if dropped
@@ -196,6 +197,39 @@ tab_chip_strip_rect :: proc(w: ^Window, bar: ui.Tab_Bar, run: Tab_Run) -> render
 	right := tab_strip_x(w, bar, run.first) - f32(run.lead) * bar.tab_width - margin
 	width := max(0, run.width * w.scale - 2 * margin)
 	return {right - width, 0, width, bar.height}
+}
+
+// Run `run`'s chip in the strip where it rests in `layout`. Nothing before a folding group moves, so its chip
+// stays here while the room after it closes or opens.
+strip_chip_rest_rect :: proc(w: ^Window, bar: ui.Tab_Bar, layout: Tab_Layout, run: Tab_Run) -> render.Rect {
+	margin := ui.TAB_CHIP_MARGIN * w.scale
+	place := layout.places[run.first]
+	right := bar.x + place.slot * bar.tab_width + place.offset * w.scale - margin
+	width := max(0, run.width * w.scale - 2 * margin)
+	return {right - width, 0, width, bar.height}
+}
+
+// Where folding group `run`'s tray lies in the strip: from its tray at rest open, its chip and its tabs, to
+// its chip folded, by how open the group is, so it gathers from the bottom right into the chip's top left
+// corner and spreads back out the same way, closing its height as it closes its length (WORK-454).
+strip_fold_rect :: proc(
+	app: ^App,
+	w: ^Window,
+	bar: ui.Tab_Bar,
+	layout: Tab_Layout,
+	run: Tab_Run,
+) -> render.Rect {
+	s := w.scale
+	chip := strip_chip_rest_rect(w, bar, layout, run)
+	count := 0
+	for tab in w.workspace.tabs {if tab.group == run.group.id {count += 1}}
+	y, height := ui.tab_tray_band(bar.height, s)
+	open := ui.tab_chip_width(&w.ui_text, tab_chip(app, w, run.group, false), s)
+	tray := render.Rect{chip.x, y, open + ui.TAB_CHIP_MARGIN * s + f32(count) * bar.tab_width, height}
+	folded := ui.HEIGHT_COMPACT * s
+	width := ui.tab_chip_width(&w.ui_text, tab_chip(app, w, run.group, true), s)
+	closed := render.Rect{chip.x, (bar.height - folded) / 2, width, folded}
+	return ui.tab_tray_fold_rect(closed, tray, w.fold.value)
 }
 
 // While tab `index`'s group folds or unfolds, its tabs slide into or out of the chip, shown only between the

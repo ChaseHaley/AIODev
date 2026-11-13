@@ -144,9 +144,12 @@ window_tab_strip_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 	dragging := tab_drag_active(w)
 	layout := tab_layout(app, w, true)
 	runs := layout.runs
+	// The folding group's tray and chip draw over its tabs, which the tray clips as it gathers.
+	folding: Maybe(Tab_Run)
 	if render.push_layer(&w.list, {bar.x, 0, bar.width, bar.height}) == .None {
 		for run in runs {
 			if run.carried {continue}
+			if run.group.id == w.folding {folding = run; continue}
 			result := tab_chip_strip_draw(app, w, bar, run, tab_chip_strip_rect(w, bar, run))
 			if result != .Ok {return result}
 		}
@@ -177,6 +180,12 @@ window_tab_strip_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 			if (dragging && tab.marked) != foreground {continue}
 			clip, sliding := tab_fold_clip(app, w, i)
 			if !tab_shown(w.workspace, i) && !sliding {continue}
+			if run, gathering := folding.?; gathering && sliding {
+				shape := strip_fold_rect(app, w, bar, layout, run)
+				left := max(clip.x, shape.x)
+				right := min(clip.x + clip.width, shape.x + shape.width)
+				clip = {left, clip.y, max(0, right - left), clip.height}
+			}
 			if sliding && render.push_layer(&w.list, clip) != .None {continue}
 			tile, built := tab_tile(app, w, i)
 			if built != .Ok {return built}
@@ -195,6 +204,14 @@ window_tab_strip_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 			); result != .Ok {return result}
 			if sliding {_ = render.push_layer(&w.list, {bar.x, 0, bar.width, bar.height})}
 		}
+	}
+	gather, gathering := folding.?
+	if gathering && render.push_layer(&w.list, {bar.x, 0, bar.width, bar.height}) == .None {
+		shape := strip_fold_rect(app, w, bar, layout, gather)
+		color, state := tab_group_color(app, gather.group), tab_group_state(w, gather.group.id)
+		ui.tab_tray_fold_draw(&w.list, shape, color, state, w.fold.value, w.scale)
+		if result := tab_chip_draw(app, w, gather, strip_chip_rest_rect(w, bar, layout, gather), bare = true);
+		   result != .Ok {return result}
 	}
 	// A dragged group's chip rides in front of its tabs.
 	if dragging && render.push_layer(&w.list, {bar.x, 0, bar.width, bar.height}) == .None {
