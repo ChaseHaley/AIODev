@@ -605,3 +605,77 @@ a_markdown_link_offers_the_link_menu_and_opens_its_file_in_a_linked_window :: pr
 	if !testing.expect(t, opened != nil) {return}
 	testing.expect_value(t, opened.title, "other.md")
 }
+
+when app.AIO_CONTROL {
+	@(private = "file")
+	state_of :: proc(state: ^app.App, key: string) -> string {
+		entries, _ := app.verify_state(state)
+		return app.verify_value(entries, key)
+	}
+
+	// The bars at a wide page's edge open the heading outline; a row of its panel scrolls that heading to
+	// the top without selecting, and the pointer leaving bars and panel closes it (WORK-439).
+	@(test)
+	the_outline_opens_on_hover_jumps_to_a_heading_and_closes_on_leave :: proc(t: ^testing.T) {
+		f: Fixture
+		defer fixture_destroy(t, &f)
+		if !fixture_start(t, &f, "Outline") {return}
+		b := strings.builder_make(context.temp_allocator)
+		for part in 0 ..< 12 {
+			fmt.sbprintf(&b, "## Part %d\n\n", part)
+			for _ in 0 ..< 6 {strings.write_string(&b, "A paragraph that fills a line of the page.\n\n")}
+		}
+		if !testing.expect_value(t, os.write_entire_file(f.file, strings.to_string(b)), nil) {return}
+		testing.expect_value(t, open(&f.state, f.file, true).status, cli_protocol.Status.Ok)
+		w := f.state.windows[0]
+		// Wide enough that the Markdown half of the split has room for the bars beside its text.
+		app.window_resize(&f.state, w, 3000, 1200)
+		pane := f.state.markdown_panes[0]
+		document := app.markdown_document(pane)
+		if !testing.expect(t, document != nil) {return}
+		shown: layout.Pane_Rect
+		for candidate in w.panes {if candidate.content.kind == .Markdown {shown = candidate}}
+		if !testing.expect_value(t, shown.content.kind, layout.Content_Kind.Markdown) {return}
+		g := ui.markdown_geometry(app.pane_body_rect(w, shown), w.scale)
+		ui.markdown_view_fit(&pane.view, document, pane.revision, &w.ui_text, f.state.family, g.width, w.scale)
+		ui.markdown_outline_sync(&pane.outline, &pane.view, document)
+		column, visible := ui.markdown_outline_column(&pane.outline, g, w.scale)
+		if !testing.expect(t, visible, "the wide page shows its outline") {return}
+		testing.expect_value(t, state_of(&f.state, "markdown.outline"), "12")
+		testing.expect_value(t, state_of(&f.state, "markdown.outline_open"), "false")
+		testing.expect_value(t, state_of(&f.state, "markdown.outline_current"), "0")
+
+		move := proc(state: ^app.App, w: ^app.Window, x, y: f32) {
+			app.handle_event(state, input.Mouse_Move_Event{window = w.id, x = i32(x), y = i32(y)})
+		}
+		button := proc(state: ^app.App, w: ^app.Window, x, y: f32, pressed: bool) {
+			app.handle_event(state, input.Mouse_Button_Event{window = w.id, x = i32(x), y = i32(y),
+				button = .Left, pressed = pressed})
+		}
+		bar := ui.markdown_outline_bar_rect(&pane.outline, column, 2, w.scale)
+		move(&f.state, w, bar.x + bar.width / 2, bar.y + bar.height / 2)
+		hover, over := w.markdown_hover.(app.Markdown_Outline_Hover)
+		testing.expect(t, over && hover.pane == pane.id && hover.heading == 2, "the bar names its heading")
+		testing.expect_value(t, state_of(&f.state, "markdown.outline_open"), "true")
+
+		panel := ui.markdown_outline_panel(&pane.outline, document, column, g.area, &w.ui_text, w.scale)
+		row := ui.markdown_outline_row_rect(&pane.outline, panel, 5, w.scale)
+		x, y := row.x + row.width / 2, row.y + row.height / 2
+		move(&f.state, w, x, y)
+		hover, over = w.markdown_hover.(app.Markdown_Outline_Hover)
+		testing.expect(t, over && hover.heading == 5, "the panel stays open under the pointer")
+		button(&f.state, w, x, y, true)
+		button(&f.state, w, x, y, false)
+		top, found := ui.markdown_offset_top(&pane.view, pane.outline.headings[5].start)
+		testing.expect(t, found)
+		testing.expect_value(t, pane.view.scroll, int(top))
+		testing.expect(t, w.markdown_gesture == nil, "a press on the outline holds no selection")
+		testing.expect_value(t, ui.markdown_selected_text(&pane.view, document), "")
+		testing.expect_value(t, state_of(&f.state, "markdown.outline_current"), "5")
+		testing.expect_value(t, state_of(&f.state, "markdown.outline_open"), "true")
+
+		move(&f.state, w, g.left + 10, g.top + 10)
+		testing.expect(t, w.markdown_hover == nil, "the page beside the panel closes it")
+		testing.expect_value(t, state_of(&f.state, "markdown.outline_open"), "false")
+	}
+}

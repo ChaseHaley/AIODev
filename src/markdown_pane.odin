@@ -62,14 +62,21 @@ Markdown_Selecting :: struct {
 	pane: u32,
 }
 
-// The link the pointer is over among a window's Markdown panes; one value, so one pane at most shows
-// it. The scrollbar under the pointer is a pane scrollbar hover.
+// What the pointer is over among a window's Markdown panes: a link, or a pane's heading outline, whose
+// panel is open while it is. One value, so one pane at most shows either. The scrollbar under the
+// pointer is a pane scrollbar hover.
 Markdown_Hover :: union {
 	Markdown_Link_Hover,
+	Markdown_Outline_Hover,
 }
 Markdown_Link_Hover :: struct {
 	pane: u32,
 	link: int,
+}
+// The pointer is on the outline's bars or its open panel; `heading` is the one under it, -1 for none.
+Markdown_Outline_Hover :: struct {
+	pane:    u32,
+	heading: int,
 }
 
 // A window's pointer state over its Markdown panes; Window embeds it and this file is its only writer.
@@ -94,6 +101,7 @@ Markdown_Pane :: struct {
 	documents: Document_List,
 	load:                   Markdown_Load,
 	view:                   ui.Markdown_View,
+	outline:                ui.Markdown_Outline,
 	search:                 markdown.Search,
 	// Counts loads, so a view lays out each new document once.
 	revision:               u64,
@@ -110,6 +118,7 @@ markdown_pane_destroy :: proc(pane: ^Markdown_Pane) {
 	documents_destroy(&pane.documents)
 	if document := markdown_document(pane); document != nil {markdown.document_destroy(document)}
 	ui.markdown_view_destroy(&pane.view)
+	ui.markdown_outline_destroy(&pane.outline)
 	markdown.search_destroy(&pane.search)
 	delete(pane.path)
 	delete(pane.title)
@@ -440,6 +449,88 @@ markdown_link_hovered :: proc(w: ^Window, id: u32) -> int {
 	return -1
 }
 
+// Whether pane `id` shows its outline's panel.
+@(private = "file", require_results)
+markdown_outline_open :: proc(w: ^Window, id: u32) -> bool {
+	hover, over := w.markdown_hover.(Markdown_Outline_Hover)
+	return over && hover.pane == id
+}
+
+// Where the pane's outline bars sit on its page at `g`, with the view laid out and the headings
+// measured for the document it shows now. Not shown while the pane shows a message.
+@(private = "file", require_results)
+markdown_outline_of :: proc(
+	app: ^App,
+	w: ^Window,
+	pane: ^Markdown_Pane,
+	g: ui.Markdown_Geometry,
+) -> (
+	ui.Markdown_Outline_Column,
+	bool,
+) {
+	document := markdown_document(pane)
+	if document == nil {return {}, false}
+	ui.markdown_view_fit(&pane.view, document, pane.revision, &w.ui_text, app.family, g.width, w.scale)
+	ui.markdown_outline_sync(&pane.outline, &pane.view, document)
+	return ui.markdown_outline_column(&pane.outline, g, w.scale)
+}
+
+// The heading under a point on the pane's outline: on a bar, or on a row while the panel is open.
+// `over` is whether the point is on the bars' strip or the open panel at all. The panel, about to open
+// when the point is on the strip, is first scrolled to show the section being read.
+@(private = "file", require_results)
+markdown_outline_under :: proc(
+	app: ^App,
+	w: ^Window,
+	pane: ^Markdown_Pane,
+	shown: layout.Pane_Rect,
+	x, y: f32,
+) -> (
+	heading: int,
+	over: bool,
+) {
+	g := markdown_geometry_of(w, shown)
+	column, visible := markdown_outline_of(app, w, pane, g)
+	if !visible {return -1, false}
+	outline := &pane.outline
+	open := markdown_outline_open(w, pane.id)
+	bar := ui.markdown_outline_bar_at(column, x, y)
+	if !open && bar < 0 {return -1, false}
+	panel := ui.markdown_outline_panel(outline, markdown_document(pane), column, g.area, &w.ui_text, w.scale)
+	if !open {
+		ui.markdown_outline_reveal(outline, panel, ui.markdown_outline_current(outline, &pane.view), w.scale)
+	}
+	if bar >= 0 {return ui.markdown_outline_bar_heading(outline, column, bar), true}
+	return ui.markdown_outline_row_at(outline, panel, x, y, w.scale)
+}
+
+// The wheel over an open panel whose rows overflow scrolls them rather than the page.
+@(private = "file", require_results)
+markdown_outline_wheel :: proc(
+	app: ^App,
+	w: ^Window,
+	pane: ^Markdown_Pane,
+	shown: layout.Pane_Rect,
+	x, y: f32,
+	rows: int,
+) -> bool {
+	if !markdown_outline_open(w, pane.id) {return false}
+	g := markdown_geometry_of(w, shown)
+	column, visible := markdown_outline_of(app, w, pane, g)
+	if !visible {return false}
+	outline := &pane.outline
+	panel := ui.markdown_outline_panel(outline, markdown_document(pane), column, g.area, &w.ui_text, w.scale)
+	if _, inside := ui.markdown_outline_row_at(outline, panel, x, y, w.scale); !inside {return false}
+	if !ui.markdown_outline_scrollable(panel) {return false}
+	if ui.markdown_outline_wheel(outline, panel, rows, w.scale) {
+		// The rows moved under the pointer.
+		row, _ := ui.markdown_outline_row_at(outline, panel, x, y, w.scale)
+		markdown_hover_set(w, Markdown_Outline_Hover{pane.id, row})
+		w.dirty = true
+	}
+	return true
+}
+
 // A pane that is not showing a document says why, once.
 @(private, require_results)
 markdown_message_draw :: proc(
@@ -497,7 +588,13 @@ markdown_pane_draw :: proc(
 		}
 	}
 	hover := markdown_link_hovered(w, pane.id)
-	return true, ui.markdown_draw(view, document, g, &w.list, &w.ui_text, app.theme, find, hover)
+	result = ui.markdown_draw(view, document, g, &w.list, &w.ui_text, app.theme, find, hover)
+	if result != .Ok {return true, result}
+	ui.markdown_outline_sync(&pane.outline, view, document)
+	outline, open := w.markdown_hover.(Markdown_Outline_Hover)
+	open &&= outline.pane == pane.id
+	return true, ui.markdown_outline_draw(&pane.outline, view, document, g, &w.list, &w.ui_text, app.theme, open,
+		open ? outline.heading : -1, w.scale)
 }
 
 @(private)
@@ -511,7 +608,9 @@ markdown_scroll :: proc(w: ^Window, pane: ^Markdown_Pane, shown: layout.Pane_Rec
 markdown_wheel :: proc(app: ^App, w: ^Window, x, y: f32, rows: int) -> bool {
 	pane, shown := markdown_under_pointer(app, w, x, y)
 	if shown.content.kind != .Markdown {return false}
-	if pane != nil {markdown_scroll(w, pane, shown, -rows * ui.markdown_line(&pane.view))}
+	if pane == nil {return true}
+	if markdown_outline_wheel(app, w, pane, shown, x, y, rows) {return true}
+	markdown_scroll(w, pane, shown, -rows * ui.markdown_line(&pane.view))
 	return true
 }
 
@@ -668,7 +767,10 @@ markdown_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: input.Mo
 		pane_scrollbar_hover_set(w, shown.content)
 	} else {
 		pane_scrollbar_hover_leave(w, .Markdown)
-		if markdown_document(pane) != nil {
+		if heading, over := markdown_outline_under(app, w, pane, shown, x, y); over {
+			hover = Markdown_Outline_Hover{pane.id, heading}
+			if heading >= 0 {shape = .Hand}
+		} else if markdown_document(pane) != nil {
 			shape = .Text
 			if link := ui.markdown_link_at(&pane.view, markdown_geometry_of(w, shown), x, y); link >= 0 {
 				hover, shape = Markdown_Link_Hover{pane.id, link}, .Hand
@@ -716,6 +818,14 @@ markdown_press :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) {
 	w.dirty = true
 	if pane_scrollbar_press(app, w, shown, x, y) {return}
 	g := markdown_geometry_of(w, shown)
+	// A press on the outline jumps to a heading and never starts a selection.
+	if heading, over := markdown_outline_under(app, w, pane, shown, x, y); over {
+		if heading >= 0 {
+			start := pane.outline.headings[heading].start
+			ui.markdown_scroll_to_offset(&pane.view, start, int(g.area.height))
+		}
+		return
+	}
 	if .Control in e.modifiers {
 		if link := ui.markdown_link_at(&pane.view, g, x, y); link >= 0 {
 			markdown_link_open(app, w, pane, link)
@@ -752,6 +862,8 @@ when AIO_CONTROL {
 		scroll, total := 0, 0
 		path, selected := "", ""
 		state := "Missing"
+		outline, current := 0, -1
+		open := false
 		if pane := markdown_focused(app, w); pane != nil {
 			scroll, total = pane.view.scroll, ui.markdown_total(&pane.view)
 			path = pane.path
@@ -768,6 +880,12 @@ when AIO_CONTROL {
 			}
 			if document := markdown_document(pane); document != nil {
 				selected = ui.markdown_selected_text(&pane.view, document)
+				if shown, found := markdown_pane_rect(w, pane.id); found {
+					column, visible := markdown_outline_of(app, w, pane, markdown_geometry_of(w, shown))
+					if visible {outline = column.count}
+					current = ui.markdown_outline_current(&pane.outline, &pane.view)
+				}
+				open = markdown_outline_open(w, pane.id)
 			}
 		}
 		state_value(r, "markdown.count", len(app.markdown_panes))
@@ -777,5 +895,8 @@ when AIO_CONTROL {
 		state_value(r, "markdown.scroll", scroll)
 		state_value(r, "markdown.total", total)
 		state_text(r, "markdown.selection", selected)
+		state_value(r, "markdown.outline", outline)
+		state_value(r, "markdown.outline_open", open)
+		state_value(r, "markdown.outline_current", current)
 	}
 }
