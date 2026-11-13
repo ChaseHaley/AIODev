@@ -40,7 +40,7 @@ Pointer_Target :: enum u8 {
 	// A floating pane's resize edges and the capsules of minimized floating panes. A floating pane also
 	// hides the dividers below it.
 	Floating,
-	// Pane headers and a single pane's floating split controls.
+	// Pane headers.
 	Pane_Header,
 	Scrollbar,
 	// A settings page shown in a pane.
@@ -96,8 +96,6 @@ Pointer_Surface :: struct {
 	holds:        bool,
 	// A press here hands the keyboard back from the find bar to the pane; the bar and its matches stay.
 	blurs_find:   bool,
-	// Lies in a pane, so a single pane's split controls show while the pointer is over it.
-	in_pane:      bool,
 	// A floating pane over the point hides the surface.
 	under_floats: bool,
 }
@@ -208,26 +206,25 @@ pointer_surfaces := [Pointer_Target]Pointer_Surface {
 	.Pane_Header      = {
 		claims = header_claims, hover = header_hover, press = pane_header_press, release = header_release,
 		tooltip = header_tooltip, tooltip_card = header_tooltip_card, cancel = header_cancel,
-		leave = header_leave, held = pane_drag_held, holds = true, blurs_find = true, in_pane = true,
+		leave = header_leave, held = pane_drag_held, holds = true, blurs_find = true,
 	},
 	.Scrollbar        = {
 		claims = scrollbar_claims, hover = scrollbar_hover, press = scrollbar_press,
 		release = scrollbar_release, cancel = scrollbar_cancel, leave = scrollbar_leave,
-		held = scrollbar_held, holds = true, blurs_find = true, in_pane = true,
+		held = scrollbar_held, holds = true, blurs_find = true,
 	},
 	.Settings_Page    = {
 		claims = settings_claims, hover = settings_pointer_hover, press = settings_press,
 		release = settings_release, tooltip = settings_tooltip, cancel = settings_pointer_cancel,
-		leave = settings_leave, holds = true, blurs_find = true, in_pane = true,
+		leave = settings_leave, holds = true, blurs_find = true,
 	},
-	// Not in_pane: a lone Markdown pane's content does not reveal its split controls, as it never has.
 	.Markdown_Page    = {
 		claims = markdown_claims, hover = markdown_hover, press = markdown_press, release = markdown_release,
 		cancel = markdown_gesture_clear, leave = markdown_leave, holds = true, blurs_find = true,
 	},
 	.Content          = {
 		claims = content_claims, hover = content_hover, press = content_press, release = content_release,
-		cancel = content_cancel, leave = content_leave, holds = true, blurs_find = true, in_pane = true,
+		cancel = content_cancel, leave = content_leave, holds = true, blurs_find = true,
 	},
 }
 

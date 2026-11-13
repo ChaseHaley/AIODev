@@ -21,15 +21,13 @@ shell_badges_follow_the_launched_executable :: proc(t: ^testing.T) {
 }
 
 @(test)
-header_settings_reload_and_serialize_through_the_shared_schema :: proc(t: ^testing.T) {
-	s, diagnostics, err := settings.parse("pane.show_headers=false\nshell.icon=λ\n")
+header_icon_setting_reloads_through_the_shared_schema :: proc(t: ^testing.T) {
+	s, diagnostics, err := settings.parse("shell.icon=λ\n")
 	defer settings.destroy(&s)
 	defer settings.diagnostics_destroy(&diagnostics)
 	testing.expect_value(t, err, nil)
 	testing.expect_value(t, len(diagnostics), 0)
-	testing.expect(t, !s.pane.show_headers)
 	testing.expect_value(t, settings.profile_base(&s.profiles).icon, "λ")
-	testing.expect_value(t, settings.value_text(&s, settings.schema_find("pane.show_headers")^), "false")
 }
 
 @(test)

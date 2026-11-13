@@ -25,13 +25,10 @@ when app.AIO_CONTROL {
 		defer delete(state.windows)
 		state.settings.pane.gap = 5
 		state.settings.window.padding = 8
-		state.settings.pane.show_headers = true
 		state.settings.status.enabled = true
 		state.settings.status.panel_width = 192
 		for scale in ([?]f32{1, 1.1, 1.5, 2}) {
 			w.scale = scale
-			// What relayout would cache for this scale and the header setting.
-			w.header_height = app.pane_header_row_height(&state, scale)
 			w.metrics = term_view.Metrics{cell_width = 9.2 * scale, cell_height = 20 * scale}
 			for horizontal in ([?]bool{false, true}) {
 				w.tabs_horizontal = horizontal

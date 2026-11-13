@@ -14,7 +14,7 @@ import "aio:ui"
 pane_headers_in_a_float_drop_float_and_linked_window :: proc(t: ^testing.T) {
 	w := new(app.Window)
 	defer free(w)
-	w.scale, w.header_height = 1, 28
+	w.scale = 1
 	for kind in ([?]layout.Content_Kind{.Terminal, .Markdown}) {
 		tiled := layout.Pane_Rect{content = {kind, 1}, rect = {0, 0, 640, 200}}
 		floating := tiled
@@ -147,7 +147,6 @@ settings_pane_header_shows_the_settings_icon :: proc(t: ^testing.T) {
 		if candidate.content.kind == .Settings {pane, found = candidate, true}
 	}
 	if !testing.expect(t, found, "the settings pane is laid out") {return}
-	if !testing.expect(t, app.pane_header_row(w, pane), "the settings pane has a header") {return}
 	badge := app.pane_header_layout(w, pane).badge
 	area := render.Rect{0, 0, f32(w.width), f32(w.height)}
 	render.draw_list_reset(&w.list)

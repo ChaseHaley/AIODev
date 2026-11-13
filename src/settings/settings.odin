@@ -118,7 +118,6 @@ CONFIRM_PROMPT_LABELS :: []string {
 }
 Pane_Settings :: struct {
 	gap, corner_radius:            int,
-	show_headers:                  bool,
 	markdown_floating:             bool,
 	resume_agents:                 bool,
 	minimum_columns, minimum_rows: int,
@@ -791,14 +790,6 @@ SCHEMA :: [?]Schema_Entry {
 			"pane keeps full contrast. Zero disables dimming.",
 	},
 	{
-		key = "pane.show_headers",
-		title = "Show pane headers",
-		kind = .Bool,
-		offset = offset_of(Settings, pane) + offset_of(Pane_Settings, show_headers),
-		default_value = "true",
-		description = "Show a header and controls on every terminal pane.",
-	},
-	{
 		key = "pane.markdown_floating",
 		title = "Open Markdown files in a float",
 		kind = .Bool,
@@ -1029,8 +1020,7 @@ SCHEMA :: [?]Schema_Entry {
 		labels = STATUS_SURFACE_LABELS,
 		description = "Where program status shows: a spinner, progress bar or symbol on tabs and on the " +
 			"tab you are looking at, what a pane's program reports in its header and a summary of " +
-			"each workspace in the workspace picker. \"Active tab\" needs \"Tabs\"; \"Pane headers\" needs " +
-			"\"Show pane headers\".",
+			"each workspace in the workspace picker. \"Active tab\" needs \"Tabs\".",
 	},
 	{
 		key = "status.inbox",
@@ -2020,8 +2010,9 @@ parse :: proc(
 		}
 		key := line.key
 		value := line.value
-		// Retired keys must not make an existing settings file invalid.
-		if key == "tabs.vertical_scope" || key == "theme.mode" {continue}
+		// Retired keys must not make an existing settings file invalid. Pane headers are always shown
+		// (WORK-456), so pane.show_headers no longer has an effect.
+		if key == "tabs.vertical_scope" || key == "theme.mode" || key == "pane.show_headers" {continue}
 		if strings.has_prefix(key, KEY_BINDING_PREFIX) {
 			binding_error := parse_key_binding(&s, &diagnostics, key, value, line.number)
 			if binding_error != nil {return {}, {}, binding_error}

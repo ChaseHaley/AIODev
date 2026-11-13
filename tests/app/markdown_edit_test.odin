@@ -78,8 +78,7 @@ file_text :: proc(t: ^testing.T, path: string) -> string {
 edit_fitted :: proc(state: ^app.App, w: ^app.Window, pane: ^app.Markdown_Pane) -> (g: ui.Markdown_Geometry) {
 	for shown in w.panes {
 		if shown.content != {.Markdown, pane.id} {continue}
-		r := shown.rect
-		g = ui.markdown_geometry({r.x, r.y + w.header_height, r.width, r.height - w.header_height}, w.scale)
+		g = ui.markdown_geometry(app.pane_body_rect(w, shown), w.scale)
 		app.markdown_view_fitted(state, w, pane, app.markdown_document(pane), g)
 	}
 	return
