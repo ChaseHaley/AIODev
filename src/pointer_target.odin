@@ -33,6 +33,8 @@ Pointer_Target :: enum u8 {
 	Find,
 	Workspace_Button,
 	Status_Pill,
+	// The title bar button that shows and hides the Activity panel.
+	Activity_Toggle,
 	Divider,
 	Status_Panel,
 	// The tab strip band or the rail, including an overlay rail above the panes.
@@ -191,6 +193,12 @@ pointer_surfaces := [Pointer_Target]Pointer_Surface {
 		tooltip = status_pill_tooltip, shortcut = status_pill_shortcut, leave = status_pill_leave, holds = true,
 		blurs_find = true, under_floats = true,
 	},
+	.Activity_Toggle  = {
+		claims = status_panel_toggle_claims, hover = status_panel_toggle_hover,
+		press = status_panel_toggle_press, release = status_panel_toggle_release,
+		tooltip = status_panel_toggle_tooltip, shortcut = status_panel_toggle_shortcut,
+		cancel = status_panel_toggle_cancel, leave = status_panel_toggle_leave, holds = true, blurs_find = true,
+	},
 	.Divider          = {
 		claims = divider_claims, hover = divider_hover, press = divider_pointer_press, release = divider_release,
 		cancel = divider_pointer_cancel, held = divider_held, holds = true, blurs_find = true,
@@ -242,6 +250,7 @@ POINTER_LINKED_ABSENT :: bit_set[Pointer_Target] {
 	.Title_Action,
 	.Workspace_Button,
 	.Status_Pill,
+	.Activity_Toggle,
 	.Status_Panel,
 	.Tabs,
 }
@@ -255,6 +264,7 @@ POINTER_SCREEN_ABSENT :: bit_set[Pointer_Target] {
 	.Title_Action,
 	.Workspace_Button,
 	.Status_Pill,
+	.Activity_Toggle,
 	.Tabs,
 }
 

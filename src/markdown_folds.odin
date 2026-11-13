@@ -143,5 +143,6 @@ markdown_view_fitted :: proc(
 	markdown_folds_sync(pane)
 	ui.markdown_view_fit(
 		&pane.view, document, pane.revision, &w.ui_text, app.family, g.width, w.scale, pane.folds.folded[:],
+		app.markdown_style,
 	)
 }

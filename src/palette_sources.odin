@@ -90,7 +90,7 @@ palette_setting_value :: proc(user: rawptr, key: string) -> (value, label: strin
 	if entry == nil {return}
 	value = settings.value_text(&app.settings, entry^)
 	choices, labels := entry.names, entry.labels
-	// Font choices carry no labels, so a value's label never needs the installed families.
+	// A font list always holds the current family, so a value's label never needs the installed families.
 	if entry.live_choices != .None {
 		choices, labels, _ = setting_live_choices(&app.settings, nil, entry.live_choices)
 	}
@@ -107,7 +107,7 @@ palette_setting_choices :: proc(user: rawptr, key: string) -> (choices, labels: 
 	if entry == nil {return}
 	if entry.live_choices == .None {return entry.names, entry.labels}
 	fonts: []font.Family_Info
-	if entry.live_choices == .Shell_Fonts || entry.live_choices == .Interface_Fonts {
+	if entry.live_choices != .Themes {
 		fonts, _ = font.installed_families(app.fonts)
 	}
 	choices, labels, _ = setting_live_choices(&app.settings, fonts, entry.live_choices)

@@ -112,6 +112,7 @@ window_chrome_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 	if window_linked(w) {return pane_link_title_draw(app, w)}
 	if result := workspace_button_draw(app, w); result != .Ok {return result}
 	if result := status_pill_draw(app, w); result != .Ok {return result}
+	status_panel_toggle_draw(app, w)
 	title_actions_draw(app, w)
 	if result := tab_orientation_button_draw(app, w); result != .Ok {return result}
 	if tab_flip_active(w) {return tab_flip_strip_draw(app, w)}
