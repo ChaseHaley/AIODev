@@ -603,8 +603,6 @@ stop_started :: proc(s: ^Session) {
 	if err := pty.terminate(&s.pty); err != .None {
 		log.errorf("term: terminating the process tree failed: %v", err)
 	}
-	// Joins the waiter without waiting for the terminated tree to exit, which a loading shell can hold
-	// up for hundreds of milliseconds.
 	pty.stop_waiting(&s.pty)
 	join_thread(&s.waiter)
 	// A waiter that saw the process exit has closed the console; otherwise this closes it.

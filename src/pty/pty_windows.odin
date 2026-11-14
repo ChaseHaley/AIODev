@@ -13,7 +13,7 @@ import "core:unicode/utf8"
 Pty :: struct {
 	output, input, process, job: w.HANDLE,
 	// A manual-reset event stop_waiting sets, releasing wait_exit without the process's exit.
-	waiting_stopped:             w.HANDLE,
+	wait_stop:                   w.HANDLE,
 	id:                          u32,
 	console_mutex:               sync.Mutex, // Guards console.
 	console_changed:             sync.Cond,
@@ -399,10 +399,6 @@ spawn :: proc(options: Spawn_Options, allocator := context.allocator) -> (Pty, S
 	if p.job == nil {
 		return {}, spawn_failure("CreateJobObjectW", .Job, u32(w.GetLastError()))
 	}
-	p.waiting_stopped = w.CreateEventW(nil, true, false, nil)
-	if p.waiting_stopped == nil {
-		return {}, spawn_failure("CreateEventW", .Job, u32(w.GetLastError()))
-	}
 	limits := JOBOBJECT_EXTENDED_LIMIT_INFORMATION {
 		BasicLimitInformation = {LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE},
 	}
@@ -415,6 +411,10 @@ spawn :: proc(options: Spawn_Options, allocator := context.allocator) -> (Pty, S
 		),
 	) {
 		return {}, spawn_failure("SetInformationJobObject", .Job, u32(w.GetLastError()))
+	}
+	p.wait_stop = w.CreateEventW(nil, true, false, nil)
+	if p.wait_stop == nil {
+		return {}, spawn_failure("CreateEventW", .Wait_Event, u32(w.GetLastError()))
 	}
 	startup := STARTUPINFOEXW {
 		StartupInfo = {
@@ -585,7 +585,7 @@ wait_exit :: proc(p: ^Pty) -> (code: u32, err: Error) {
 	if p.process == nil {
 		return 0, .Closed
 	}
-	handles := [2]w.HANDLE{p.process, p.waiting_stopped}
+	handles := [2]w.HANDLE{p.process, p.wait_stop}
 	switch w.WaitForMultipleObjects(len(handles), &handles[0], false, w.INFINITE) {
 	case w.WAIT_OBJECT_0:
 	case w.WAIT_OBJECT_0 + 1:
@@ -600,10 +600,10 @@ wait_exit :: proc(p: ^Pty) -> (code: u32, err: Error) {
 }
 
 // Makes wait_exit, current or later, return Closed without waiting for the process. A stop calls it
-// after terminate: a terminated tree can take the kernel hundreds of milliseconds to finish exiting
-// while a program is loading, and nothing a stop does needs that exit (WORK-486).
+// after terminate: a terminated process can take the kernel hundreds of milliseconds to finish
+// exiting while it is loading, and nothing a stop does needs that exit (WORK-486).
 stop_waiting :: proc(p: ^Pty) {
-	if p.waiting_stopped != nil && !bool(w.SetEvent(p.waiting_stopped)) {
+	if p.wait_stop != nil && !bool(w.SetEvent(p.wait_stop)) {
 		log.errorf("pty: SetEvent failed: %v", w.GetLastError())
 	}
 }
@@ -657,7 +657,7 @@ destroy :: proc(p: ^Pty) {
 	close_handle(&p.output)
 	close_handle(&p.process)
 	close_handle(&p.job)
-	close_handle(&p.waiting_stopped)
+	close_handle(&p.wait_stop)
 	p.id = 0
 }
 
@@ -693,6 +693,8 @@ error_message :: proc(
 		prefix = "Could not configure shell process attributes"
 	case .Job:
 		prefix = "Could not configure the shell process job"
+	case .Wait_Event:
+		prefix = "Could not prepare to watch the shell process"
 	case .Start_Process:
 		prefix, subject = "Could not start", options.command_line
 	case .Resume_Process:

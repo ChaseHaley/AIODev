@@ -384,6 +384,8 @@ stop_waiting_releases_wait_exit_before_the_exit :: proc(t: ^testing.T) {
 	wait := Exit_Wait{p = &p}
 	waiter := thread.create_and_start_with_poly_data(&wait, wait_for_exit)
 	if !testing.expect(t, waiter != nil) {return}
+	// wait_exit blocks while cmd runs; stop_waiting must release the wait already pending, as a stop does.
+	testing.expect_value(t, w.WaitForSingleObject(waiter.win32_thread, 100), w.WAIT_TIMEOUT)
 	pty.stop_waiting(&p)
 	if !testing.expect_value(t, w.WaitForSingleObject(waiter.win32_thread, 5000), w.WAIT_OBJECT_0) {
 		testing.expect_value(t, pty.terminate(&p), pty.Error.None)

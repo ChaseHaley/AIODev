@@ -28,6 +28,7 @@ Spawn_Error_Kind :: enum {
 	Console,
 	Attributes,
 	Job,
+	Wait_Event,
 	Start_Process,
 	Resume_Process,
 }
