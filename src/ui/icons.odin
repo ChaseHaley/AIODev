@@ -13,6 +13,8 @@ Icon :: enum {
 	Chevron_Right,
 	Arrow_Up,
 	Arrow_Down,
+	// The middle-click scroll anchor: a dot between up and down chevrons.
+	Autoscroll,
 	Split_Right,
 	Split_Down,
 	Zoom,
@@ -253,6 +255,10 @@ icon_draw :: proc(
 	case .Arrow_Down:
 		pen_path(p, {8, 3}, {8, 13})
 		pen_path(p, {4, 9}, {8, 13}, {12, 9})
+	case .Autoscroll:
+		pen_path(p, {5, 5}, {8, 2}, {11, 5})
+		pen_dot(p, 8, 8)
+		pen_path(p, {5, 11}, {8, 14}, {11, 11})
 	case .Split_Right:
 		pen_box(p, 2, 2, 12, 12, 2)
 		pen_path(p, {8, 2}, {8, 14})

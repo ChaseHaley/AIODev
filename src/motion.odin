@@ -28,6 +28,7 @@ Window_Motion :: enum u8 {
 	Cursor,
 	Field_Carets,
 	Confirmation,
+	Autoscroll,
 }
 
 // Advances one part to `frame`; true when the window must draw again.
@@ -75,6 +76,8 @@ window_motion_advance :: proc(app: ^App, w: ^Window, part: Window_Motion, frame:
 		return w.carets.moving
 	case .Confirmation:
 		confirmation_advance(app, w, frame)
+	case .Autoscroll:
+		return autoscroll_animate(app, w, frame)
 	}
 	return false
 }
@@ -120,6 +123,8 @@ window_motion_running :: proc(w: ^Window, part: Window_Motion) -> bool {
 		return w.carets.moving
 	case .Confirmation:
 		return confirmation_active(w)
+	case .Autoscroll:
+		return autoscroll_moving(w)
 	}
 	return false
 }

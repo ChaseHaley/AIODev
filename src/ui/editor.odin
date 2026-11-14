@@ -2151,11 +2151,14 @@ editor_wheel :: proc(p: ^Editor, l: Editor_Layout, x, y: f32, rows: int) {
 		return
 	}
 	if editor_strip_wheel(p, l, x, y, rows) {return}
+	editor_scroll_by(p, -f32(rows) * PAGE_WHEEL_LINE)
+}
+
+// Scrolls the page `dip` DIPs toward its end, or toward its start when negative, without moving the
+// selection.
+editor_scroll_by :: proc(p: ^Editor, dip: f32) {
 	p.jump_group = -1
-	editor_scroll_keep(
-		p,
-		editor_offset_position(p, editor_scroll_offset(p) - f32(rows) * PAGE_WHEEL_LINE / ROW_HEIGHT),
-	)
+	editor_scroll_keep(p, editor_offset_position(p, editor_scroll_offset(p) + dip / ROW_HEIGHT))
 }
 
 // The page lines of every group header, in page order; the outline lists them.

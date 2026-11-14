@@ -95,6 +95,8 @@ Window :: struct {
 	generation: u64,
 	// A terminal text selection drag; see terminal_selection.odin.
 	selection: Selection_Drag,
+	// Middle-click scrolling and its anchor; see autoscroll.odin.
+	autoscroll: Autoscroll,
 	// The terminal link under the pointer; see term_links.odin.
 	link_hover: Maybe(Link_Hover),
 	pointer: [2]f32,
@@ -739,6 +741,7 @@ build_frame :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 	if result := arrange_outline_draw(app, w); result != .Ok {return result}
 	if result := tab_drag_draw(app, w); result != .Ok {return result}
 	if result := window_leader_draw(app, w); result != .Ok {return result}
+	autoscroll_draw(app, w)
 	if result := workspace_overview_frame_end(app, w, content); result != .Ok {return result}
 	size := [2]f32{f32(w.width), f32(w.height)}
 	if ui.find_is_open(&w.find) {
