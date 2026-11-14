@@ -68,12 +68,24 @@ pane_io_reply :: proc(t: ^testing.T, state: ^app.App, args: ..string) -> cli_pro
 }
 
 @(private = "file")
-pane_io_wait_text :: proc(state: ^app.App, pane: u32, text: string) -> bool {
-	for deadline := time.tick_now(); time.tick_since(deadline) < 15 * time.Second; {
+pane_io_wait_text :: proc(state: ^app.App, pane: u32, text: string, within := 15 * time.Second) -> bool {
+	for deadline := time.tick_now(); time.tick_since(deadline) < within; {
 		app.tick(state)
 		read := pane_io_invoke(state, pane, "pane.read", "--scrollback")
 		if read.status == .Ok && strings.contains(string(read.payload.(app.Outcome_Text)), text) {return true}
 		time.sleep(25 * time.Millisecond)
+	}
+	return false
+}
+
+// The shell discards input typed while it recovers from Ctrl+C, so a line sent too early never runs.
+// Esc clears whatever part of an attempt arrived, and a marker's output proves the prompt reads input.
+@(private = "file")
+pane_io_wait_prompt :: proc(state: ^app.App, pane: u32) -> bool {
+	for deadline := time.tick_now(); time.tick_since(deadline) < 15 * time.Second; {
+		_ = pane_io_invoke(state, pane, "pane.send_keys", "--keys", "Esc")
+		_ = pane_io_invoke(state, pane, "pane.send", "--enter", "Write-Output ('aio-prompt-' + 'paneio')")
+		if pane_io_wait_text(state, pane, "aio-prompt-paneio", time.Second) {return true}
 	}
 	return false
 }
@@ -143,6 +155,8 @@ pane_io_keys_interrupt_and_edit_the_shell_using_its_keyboard_protocol :: proc(t:
 		cli_protocol.Status.Ok)
 	_, interrupted := pane_io_wait_process(state, pane, "pwsh.exe")
 	if !testing.expect(t, interrupted, "Ctrl+C interrupted the infinite ping") {return}
+	ready_again := pane_io_wait_prompt(state, pane)
+	if !testing.expect(t, ready_again, "the shell reads input again after Ctrl+C") {return}
 
 	// Move inside the final string literal, insert Y, then execute with a synthetic Enter.
 	testing.expect_value(t, pane_io_invoke(state, pane, "pane.send", "Write-Output ('aio-arrow-' + 'X')").status,
