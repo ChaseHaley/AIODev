@@ -1,0 +1,47 @@
+LuaJIT 2.1 rolling release 2.1.1794386141
+Source: https://github.com/LuaJIT/LuaJIT
+Branch: v2.1
+Commit: 63c8f1a9b479ba5518cf6a170ff7729178bc3cfd
+Commit date: 2026-11-11T09:35:41+01:00
+
+Vendored from a shallow clone of the v2.1 branch at the commit above.
+Includes src/, COPYRIGHT and dynasm/ (required by src/msvcbuild.bat).
+Omitted documentation, tests, Makefiles, ignore files and console build scripts.
+The original source files and msvcbuild.bat are otherwise unchanged.
+
+The root .relver contains the commit's Unix timestamp, 1794386141, instead
+of git's unexpanded $Format:%ct$ placeholder. Without a .git directory,
+msvcbuild.bat copies this into src/luajit_relver.txt and genversion.lua
+writes LuaJIT 2.1.1794386141 into the generated src/luajit.h.
+
+build.ps1 copies this directory to build/native/luajit-src before building.
+Only that copy is modified. In msvcbuild.bat:
+- Add /MT and /DLUAJIT_ENABLE_CHECKHOOK to LJCOMPILE.
+- Replace /MD with /MT (and consequently /MDd with /MTd).
+- Make the BAD and FAIL labels exit /b 1 instead of falling through END.
+In lj_err.c:
+- LJ_EXCODE 0xe24c4a00 becomes 0x624c4a00 (informational severity).
+It calls vcvars64.bat, then msvcbuild.bat static in the copied src directory,
+and copies src/lua51.lib to build/native/luajit.lib.
+The release static library uses the MSVC static multithreaded CRT (/MT),
+matching md4c and notifications. CHECKHOOK permits asynchronous hooks to
+interrupt JIT-compiled loops. No Lua 5.2 compatibility mode is enabled.
+
+Error unwinding stays external (Windows SEH, upstream's Windows default).
+Every lua_error, including one a pcall catches, is a RaiseException call.
+With upstream's error-severity code, Odin's test runner treats it as a
+fatal signal on a test thread and crash tooling may report it. The
+informational code avoids both; LuaJIT matches its own exceptions by the
+same LJ_EXCODE macro, so nothing else changes.
+LUAJIT_NO_UNWIND (internal unwinding) was rejected: on Windows x64 the
+interpreter frame saves only rbx, rsi, rdi and rbp (vm_x64.dasc X64WIN
+saveregs; the -D NO_UNWIND DynASM flag only changes the POSIX layout), so
+lj_vm_unwind_c returns from lua_pcall with r12-r15 and xmm6-xmm15 left as
+the raising C function set them. A probe built with /DLUAJIT_NO_UNWIND and
+-D NO_UNWIND returned from lua_pcall with all of r12-r15 corrupted; the
+default build preserved them.
+Neither unwinder runs Odin defers in the frames it unwinds, so CFunctions
+must release what they own before raising.
+
+The rebuild stamp is this VERSION file. Update it whenever changing the
+vendored revision, local source patches or native build options.

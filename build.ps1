@@ -78,16 +78,23 @@ function Write-VersionHeader([string] $BuildId, [string] $Version) {
 
 New-Item -ItemType Directory -Force build | Out-Null
 
+function Get-Vcvars64([string] $Name) {
+    $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio/Installer/vswhere.exe'
+    if (-not (Test-Path -LiteralPath $vswhere)) { throw "MSVC C++ tools are required to build $Name (vswhere.exe not found)." }
+    $visualStudio = & $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+    if (-not $visualStudio) { throw "MSVC C++ tools are required to build $Name." }
+    $vcvars = Join-Path $visualStudio 'VC/Auxiliary/Build/vcvars64.bat'
+    if (-not (Test-Path -LiteralPath $vcvars)) { throw "MSVC x64 environment script not found: $vcvars" }
+    return $vcvars
+}
+
 function Build-NativeLibrary([string] $Name, [string] $Source, [string] $CompilerFlags) {
     $nativeRoot = Join-Path $PSScriptRoot 'build/native'
     New-Item -ItemType Directory -Force $nativeRoot | Out-Null
     $library = Join-Path $nativeRoot "$Name.lib"
     $source = Join-Path $PSScriptRoot $Source
     if ((Test-Path $library) -and (Get-Item $library).LastWriteTimeUtc -gt (Get-Item $source).LastWriteTimeUtc) { return }
-    $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio/Installer/vswhere.exe'
-    $visualStudio = & $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
-    if (-not $visualStudio) { throw "MSVC C++ tools are required to build $Name." }
-    $vcvars = Join-Path $visualStudio 'VC/Auxiliary/Build/vcvars64.bat'
+    $vcvars = Get-Vcvars64 $Name
     $object = Join-Path $nativeRoot "$Name.obj"
     $batch = Join-Path $nativeRoot "compile-$Name.cmd"
     @("@echo off", "call `"$vcvars`" >nul 2>&1", 'if errorlevel 1 exit /b 1',
@@ -96,10 +103,55 @@ function Build-NativeLibrary([string] $Name, [string] $Source, [string] $Compile
     & cmd /d /c $batch
     if ($LASTEXITCODE -ne 0) { throw "$Name library build failed." }
 }
+function Build-LuaJIT {
+    $nativeRoot = Join-Path $PSScriptRoot 'build/native'
+    $vendorRoot = Join-Path $PSScriptRoot 'vendor/luajit'
+    $library = Join-Path $nativeRoot 'luajit.lib'
+    $version = Join-Path $vendorRoot 'VERSION'
+    if ((Test-Path -LiteralPath $library) -and (Get-Item $library).LastWriteTimeUtc -ge (Get-Item $version).LastWriteTimeUtc) { return }
+    $vcvars = Get-Vcvars64 'LuaJIT'
+    New-Item -ItemType Directory -Force $nativeRoot | Out-Null
+    $sourceRoot = Join-Path $nativeRoot 'luajit-src'
+    if (Test-Path -LiteralPath $sourceRoot) { Remove-Item -LiteralPath $sourceRoot -Recurse -Force }
+    Copy-Item -LiteralPath $vendorRoot -Destination $sourceRoot -Recurse -Force
+    $script = Join-Path $sourceRoot 'src/msvcbuild.bat'
+    $text = [IO.File]::ReadAllText($script).Replace("`r`n", "`n")
+    # Keep upstream sources pristine; the library and build tools use md4c's static CRT.
+    $text = $text.Replace('@set LJCOMPILE=cl ', '@set LJCOMPILE=cl /MT /DLUAJIT_ENABLE_CHECKHOOK ')
+    $text = $text.Replace('/MD', '/MT')
+    # Upstream's failure labels only print a message, so propagate their failure explicitly.
+    $text = $text.Replace("@goto :END`n:FAIL", "@exit /b 1`n:FAIL")
+    $text = $text.Replace("script`n:END", "script`n@exit /b 1`n:END")
+    [IO.File]::WriteAllText($script, $text.Replace("`n", "`r`n"), [Text.Encoding]::ASCII)
+    # LuaJIT raises every Lua error as an SEH exception, even one a pcall catches. Its
+    # error-severity code (0xE24C4A0x) is fatal to Odin's test runner and alarms crash
+    # tooling, so raise the same code with informational severity (0x624C4A0x) instead.
+    # The internal unwinder is not an option on Windows x64: its interpreter frame does
+    # not save r12-r15 or xmm6-xmm15, so an error returns from lua_pcall with clobbered
+    # callee-saved registers.
+    $errorSource = Join-Path $sourceRoot 'src/lj_err.c'
+    $errorText = [IO.File]::ReadAllText($errorSource)
+    $upstreamCode = "#define LJ_EXCODE`t`t((DWORD)0xe24c4a00)"
+    if (-not $errorText.Contains($upstreamCode)) { throw 'LuaJIT lj_err.c no longer defines LJ_EXCODE as expected.' }
+    [IO.File]::WriteAllText($errorSource, $errorText.Replace($upstreamCode, "#define LJ_EXCODE`t`t((DWORD)0x624c4a00)"), [Text.Encoding]::ASCII)
+    $batch = Join-Path $nativeRoot 'compile-luajit.cmd'
+    @("@echo off", "call `"$vcvars`" >nul 2>&1", 'if errorlevel 1 exit /b 1',
+      "pushd `"$sourceRoot/src`"", 'if errorlevel 1 exit /b 1',
+      'call msvcbuild.bat static', 'if errorlevel 1 exit /b 1', 'popd') |
+        Set-Content -LiteralPath $batch
+    & cmd /d /c $batch
+    $produced = Join-Path $sourceRoot 'src/lua51.lib'
+    if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $produced)) {
+        throw 'LuaJIT static library build failed; see the MSVC output above.'
+    }
+    Copy-Item -LiteralPath $produced -Destination $library -Force
+}
+
 function Build-NativeLibraries {
     # C++/WinRT keeps the notification ABI and COM event ownership out of the Odin UI code.
     Build-NativeLibrary 'notifications' 'native/windows_notifications.cpp' '/std:c++20 /EHsc /MT /O2 /W4 /WX'
     Build-NativeLibrary 'md4c' 'vendor/md4c/md4c.c' '/MT /O2 /W3'
+    Build-LuaJIT
 }
 if ($Task -ne 'test') { Build-NativeLibraries }
 
@@ -216,7 +268,7 @@ function Invoke-StyleCheck {
     Invoke-Odin build tools/stylecheck '-out:build/stylecheck.exe' -debug '-subsystem:console' @flags
     $files = Get-ChildItem src -Recurse -Filter *.odin -File |
         Where-Object {
-            $_.Name -ne 'win32_windows.odin' -and $_.FullName -notmatch '\\(ghostty|dwrite|shaders)\\'
+            $_.Name -ne 'win32_windows.odin' -and $_.FullName -notmatch '\\(ghostty|dwrite|shaders|lua)\\'
         } |
         ForEach-Object FullName
     & build/stylecheck.exe @files
