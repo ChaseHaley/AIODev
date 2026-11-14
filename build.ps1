@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Position = 0)]
-    [ValidateSet('debug', 'release', 'package', 'run', 'test', 'check', 'verify')]
+    [ValidateSet('debug', 'release', 'package', 'run', 'test', 'check', 'verify', 'types')]
     [string] $Task = 'debug',
 
     [Parameter(Position = 1)]
@@ -290,6 +290,15 @@ switch ($Task) {
         }
     }
     'debug' { Build-App @('-debug', '-subsystem:console') }
+    'types' {
+        # types/aio.lua is the aio API's built-in definitions for lua-language-server; a test compares it
+        # with what the app generates, so regenerate it whenever a command, event or reply changes.
+        Build-App @('-debug', '-subsystem:console')
+        New-Item -ItemType Directory -Force types | Out-Null
+        & build/aiodev.exe --lua-types types/aio.lua
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+        Write-Output 'Types: types/aio.lua'
+    }
     'release' {
         if ($OutputPath) { Build-Release $OutputPath }
         else { Build-Release }
@@ -310,6 +319,9 @@ switch ($Task) {
         Copy-Item -LiteralPath 'THIRD_PARTY_NOTICES.txt' -Destination "$stage/THIRD_PARTY_NOTICES.txt"
         Copy-Conpty $stage
         Copy-Item -LiteralPath 'themes' -Destination $stage -Recurse -Force
+        # The aio API's definitions for lua-language-server ship beside aio.exe as types\aio.lua.
+        New-Item -ItemType Directory -Force "$stage/types" | Out-Null
+        Copy-Item -LiteralPath 'types/aio.lua' -Destination "$stage/types/aio.lua"
         [IO.File]::WriteAllText((Join-Path $PWD "$stage/build.txt"), "$buildId`r`n")
         # install.ps1 installs exactly what this list names, so the stage above is the one file list.
         $stageRoot = (Resolve-Path -LiteralPath $stage).Path

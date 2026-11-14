@@ -83,6 +83,7 @@ Requirements:
 ./build.ps1 test     # all test packages (or ./build.ps1 test <package>)
 ./build.ps1 release  # optimized build: build/release/aiodev.exe
 ./build.ps1 package  # release zip and SHA256 in build/
+./build.ps1 types    # regenerate types/aio.lua, the aio Lua API for lua-language-server
 ```
 
 `vendor/ghostty` holds a prebuilt libghostty-vt release pinned by version and SHA256 in

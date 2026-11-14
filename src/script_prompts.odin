@@ -123,22 +123,21 @@ script_prompt_input :: proc(app: ^App, ctx: Command_Context, invocation: command
 
 script_prompt_cancel :: proc(app: ^App, w: ^Window) {
 	if w.script_prompt.id == 0 {return}
-	events.push(&app.events, .Prompt_Closed, struct {prompt: u64, cancelled: bool}{w.script_prompt.id, true})
+	fields := Event_Prompt_Closed{prompt = w.script_prompt.id, cancelled = true}
+	events.push(&app.events, .Prompt_Closed, fields)
 	w.script_prompt = {}
 }
 
 script_prompt_accept_index :: proc(app: ^App, w: ^Window, index: int) {
 	if w.script_prompt.id == 0 || !w.script_prompt.selection {return}
-	events.push(&app.events, .Prompt_Closed, struct {prompt: u64, cancelled: bool, index: int}{
-		w.script_prompt.id, false, index,
-	})
+	fields := Event_Prompt_Closed{prompt = w.script_prompt.id, index = index}
+	events.push(&app.events, .Prompt_Closed, fields)
 	w.script_prompt = {}
 }
 
 script_prompt_accept_text :: proc(app: ^App, w: ^Window, text: string) {
 	if w.script_prompt.id == 0 || w.script_prompt.selection {return}
-	events.push(&app.events, .Prompt_Closed, struct {prompt: u64, cancelled: bool, text: string}{
-		w.script_prompt.id, false, text,
-	})
+	fields := Event_Prompt_Closed{prompt = w.script_prompt.id, text = text}
+	events.push(&app.events, .Prompt_Closed, fields)
 	w.script_prompt = {}
 }

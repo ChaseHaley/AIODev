@@ -28,6 +28,13 @@ Event_Pane_Exit :: struct {
 	pane, exit_code: u32,
 }
 
+// pane.closed carries the exit code only when the pane's exit was observed.
+@(private)
+Event_Pane_Closed :: struct {
+	pane:      u32,
+	exit_code: Maybe(u32) `json:"exit_code,omitempty"`,
+}
+
 @(private)
 Event_Pane_Focus :: struct {
 	pane, previous: u32,
@@ -99,6 +106,47 @@ Event_Window :: struct {
 
 // The fields of settings.reloaded and app.quitting: an empty object.
 Event_Empty :: struct {}
+
+// prompt.closed: a dismissed prompt is cancelled, a list answers with index and a dialog with text.
+@(private)
+Event_Prompt_Closed :: struct {
+	prompt:    u64,
+	cancelled: bool,
+	index:     Maybe(int) `json:"index,omitempty"`,
+	text:      Maybe(string) `json:"text,omitempty"`,
+}
+
+// The struct each event's fields are marshalled from, which the aio type definitions describe.
+// Every push names its kind's struct here.
+EVENT_FIELDS :: [events.Kind]typeid {
+	.Pane_Created         = Event_Pane_Place,
+	.Pane_Closed          = Event_Pane_Closed,
+	.Pane_Exited          = Event_Pane_Exit,
+	.Pane_Focused         = Event_Pane_Focus,
+	.Pane_Title_Changed   = Event_Pane_Title,
+	.Pane_Cwd_Changed     = Event_Pane_Cwd,
+	.Pane_Bell            = Event_Pane,
+	.Pane_Status_Changed  = Event_Pane_Status,
+	.Pane_Notification    = Event_Pane_Notification,
+	.Pane_Resized         = Event_Pane_Size,
+	.Pane_Process_Changed = Event_Pane_Process,
+	.Tab_Created          = Event_Tab,
+	.Tab_Closed           = Event_Tab,
+	.Tab_Selected         = Event_Tab,
+	.Tab_Renamed          = Event_Tab_Name,
+	.Workspace_Created    = Event_Workspace,
+	.Workspace_Deleted    = Event_Workspace,
+	.Workspace_Selected   = Event_Workspace,
+	.Workspace_Renamed    = Event_Workspace_Name,
+	.Window_Created       = Event_Window,
+	.Window_Closed        = Event_Window,
+	.Window_Focused       = Event_Window,
+	.Layout_Changed       = events.Layout_Changed,
+	.Settings_Reloaded    = Event_Empty,
+	.Settings_Changed     = Setting_Value,
+	.Prompt_Closed        = Event_Prompt_Closed,
+	.App_Quitting         = Event_Empty,
+}
 
 // The words pane.status_changed reports for a stored program status.
 @(private)
@@ -257,11 +305,9 @@ app_events_panes_attached :: proc(app: ^App) {
 // Reports how a closing session ended: with its exit code only when its exit was observed.
 app_events_pane_closed :: proc(app: ^App, entry: ^Session_Entry, exit_code: u32) {
 	if !entry.event_created {return}
-	if entry.event_exited {
-		events.push(&app.events, .Pane_Closed, Event_Pane_Exit{entry.id, exit_code})
-	} else {
-		events.push(&app.events, .Pane_Closed, Event_Pane{entry.id})
-	}
+	fields := Event_Pane_Closed{pane = entry.id}
+	if entry.event_exited {fields.exit_code = exit_code}
+	events.push(&app.events, .Pane_Closed, fields)
 }
 
 // pane.process_changed names what pane.list reports: the program at `index`, or the shell at `root`
