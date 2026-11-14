@@ -589,6 +589,8 @@ when AIO_CONTROL {
 		state_valuef(r, "theme.hover_gloss", "%g", app.theme.hover_gloss)
 		state_value(r, "window.workspace_index", verify_workspace_index(app, w))
 		state_word(r, "overlay", overlay_kind(app, w))
+		state_value(r, "arrange", arrange_active(w))
+		state_value(r, "arrange.card", ui.presence_is_open(w.arrange.presence))
 		state_value(r, "leader.pending", leader_armed(w))
 		state_text(r, "leader.indicator", leader_armed(w) ? "pane-status-line" : "none")
 		state_valuef(r, "window.size", "%dx%d", w.width, w.height)

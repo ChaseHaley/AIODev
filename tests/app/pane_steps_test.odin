@@ -5,6 +5,7 @@ import app "../../src"
 import "aio:input"
 import "aio:layout"
 import "aio:platform"
+import "aio:ui"
 
 // Keyboard pane moves and Arrange mode (WORK-477): each command lands where the header drag would.
 
@@ -105,28 +106,38 @@ move_joins_a_neighbour_in_another_branch :: proc(t: ^testing.T) {
 	testing.expect_value(t, steps_focused(s, w), f.b)
 }
 
-// With nothing to its left, Move Left docks C along the whole left edge; Dock Down puts B along the bottom.
+// The owner's column (WORK-477), from the commands: A over the top half, B and C a quarter each below. Move
+// Right on C turns it beside B, A spanning the top; Move Right on B passes C; Move Right again docks B along
+// the right edge at full height. Dock Down then puts B along the whole bottom.
 @(test)
-move_docks_at_the_edge_with_nothing_beyond :: proc(t: ^testing.T) {
+move_from_a_column_turns_beside_then_passes_then_docks :: proc(t: ^testing.T) {
 	f: Steps_Fixture
 	defer palette_fixture_destroy(t, &f.palette)
-	if !steps_fixture_create(t, &f, "steps-dock") {return}
+	if !steps_fixture_create(t, &f, "steps-column") {return}
 	s, w := &f.palette.state, f.w
-	full := steps_rect(w, f.b)
-	app.run_action(s, w, .Focus_Left)
+	app.run_action(s, w, .Rotate_Split)
 	app.pane_split(s, w, .Down)
 	c := steps_focused(s, w)
-	app.run_action(s, w, .Move_Left)
-	docked := steps_rect(w, c)
-	testing.expect_value(t, docked.height, full.height)
-	testing.expect(t, docked.x < steps_rect(w, f.a).x)
-	app.run_action(s, w, .Focus_Right)
-	app.run_action(s, w, .Focus_Right)
+	top := steps_rect(w, f.a)
+	if !testing.expect(t, steps_rect(w, c).y > steps_rect(w, f.b).y) {return}
+	app.run_action(s, w, .Move_Right)
+	b, moved := steps_rect(w, f.b), steps_rect(w, c)
+	testing.expect_value(t, steps_rect(w, f.a), top)
+	testing.expect_value(t, moved.y, b.y)
+	testing.expect(t, moved.x > b.x && moved.y > top.y)
+	app.run_action(s, w, .Focus_Left)
 	if !testing.expect_value(t, steps_focused(s, w), f.b) {return}
+	app.run_action(s, w, .Move_Right)
+	testing.expect(t, steps_rect(w, f.b).x > steps_rect(w, c).x)
+	testing.expect_value(t, steps_rect(w, f.b).y, steps_rect(w, c).y)
+	app.run_action(s, w, .Move_Right)
+	docked := steps_rect(w, f.b)
+	testing.expect_value(t, docked.y, top.y)
+	testing.expect(t, docked.height > top.height && docked.x > steps_rect(w, f.a).x)
+	testing.expect_value(t, steps_rect(w, f.a).height, steps_rect(w, c).height)
 	app.run_action(s, w, .Dock_Down)
 	bottom := steps_rect(w, f.b)
-	testing.expect(t, bottom.y > steps_rect(w, c).y)
-	testing.expect(t, bottom.width > full.width)
+	testing.expect(t, bottom.y > steps_rect(w, c).y && bottom.width > docked.width)
 }
 
 // Swap Right trades A and B with focus following A; Rotate Split stacks them, and again sets them side by
@@ -293,19 +304,19 @@ arrange_card_flows_into_fewer_columns_in_a_narrow_window :: proc(t: ^testing.T) 
 		}
 		columns = card.columns
 	}
-	testing.expect_value(t, app.overlay_kind(s, w), app.Overlay_Kind.Arrange)
+	testing.expect(t, app.arrange_active(w))
 }
 
 // Arrange Panes takes the keys: arrows move, Shift swaps, Ctrl resizes, R rotates and = balances, while
-// typing reaches nothing. Esc and Enter leave, keeping every change.
+// typing reaches nothing. Enter does not leave; Esc does, keeping every change.
 @(test)
-arrange_mode_keys_arrange_and_esc_or_enter_keep_the_result :: proc(t: ^testing.T) {
+arrange_mode_keys_arrange_and_only_esc_leaves :: proc(t: ^testing.T) {
 	f: Steps_Fixture
 	defer palette_fixture_destroy(t, &f.palette)
 	if !steps_fixture_create(t, &f, "steps-arrange") {return}
 	s, w := &f.palette.state, f.w
 	app.run_action(s, w, .Arrange_Panes)
-	if !testing.expect_value(t, app.overlay_kind(s, w), app.Overlay_Kind.Arrange) {return}
+	if !testing.expect(t, app.arrange_active(w)) {return}
 	steps_press(s, w, .Arrow_Left)
 	testing.expect(t, steps_rect(w, f.b).x < steps_rect(w, f.a).x)
 	steps_press(s, w, .L)
@@ -323,52 +334,111 @@ arrange_mode_keys_arrange_and_esc_or_enter_keep_the_result :: proc(t: ^testing.T
 
 	steps_press(s, w, .X)
 	app.handle_event(s, input.Text_Event{window = w.id, text = "x"})
-	testing.expect_value(t, app.overlay_kind(s, w), app.Overlay_Kind.Arrange)
+	steps_press(s, w, .Enter)
+	testing.expect(t, app.arrange_active(w))
 	testing.expect_value(t, len(s.windows), 1)
 
 	stacked := steps_rect(w, f.b)
 	steps_press(s, w, .Escape)
-	testing.expect_value(t, app.overlay_kind(s, w), app.Overlay_Kind.None)
+	testing.expect(t, !app.arrange_active(w))
 	testing.expect_value(t, steps_rect(w, f.b), stacked)
 	steps_press(s, w, .Arrow_Left)
 	testing.expect_value(t, steps_rect(w, f.b), stacked)
-
-	app.run_action(s, w, .Arrange_Panes)
-	steps_press(s, w, .K, {.Alt, .Shift})
-	testing.expect_value(t, steps_rect(w, f.b), stacked)
-	steps_press(s, w, .Enter)
-	testing.expect_value(t, app.overlay_kind(s, w), app.Overlay_Kind.None)
 }
 
-// A press leaves the mode and still reaches the pane it landed on; opening the palette and the window losing
-// focus leave it too.
+// A click, the palette, a lost window focus and a closed pane all keep the mode. The click reaches the pane
+// it lands on and the mode moves to it; the palette pauses the mode and hides its card until it closes; a
+// closed pane hands the mode to the pane focus goes to.
 @(test)
-arrange_mode_leaves_on_a_click_the_palette_or_lost_focus :: proc(t: ^testing.T) {
+arrange_mode_stays_through_clicks_the_palette_focus_loss_and_closes :: proc(t: ^testing.T) {
 	f: Steps_Fixture
 	defer palette_fixture_destroy(t, &f.palette)
-	if !steps_fixture_create(t, &f, "steps-arrange-leave") {return}
+	if !steps_fixture_create(t, &f, "steps-arrange-stay") {return}
 	s, w := &f.palette.state, f.w
 	app.run_action(s, w, .Arrange_Panes)
+	app.update_motion(s)
+	testing.expect(t, ui.presence_is_open(w.arrange.presence))
+
 	a := steps_rect(w, f.a)
 	x, y := i32(a.x + a.width / 2), i32(a.y + a.height / 2)
 	app.handle_event(s, input.Mouse_Button_Event{window = w.id, button = .Left, pressed = true, x = x, y = y})
 	app.handle_event(s, input.Mouse_Button_Event{window = w.id, button = .Left, pressed = false, x = x, y = y})
-	testing.expect_value(t, app.overlay_kind(s, w), app.Overlay_Kind.None)
+	app.update_motion(s)
+	testing.expect(t, app.arrange_active(w))
 	testing.expect_value(t, steps_focused(s, w), f.a)
+	testing.expect_value(t, w.arrange.content.id, f.a)
 
-	app.run_action(s, w, .Arrange_Panes)
 	steps_press(s, w, .P, {.Control, .Shift})
+	app.update_motion(s)
 	testing.expect_value(t, app.overlay_kind(s, w), app.Overlay_Kind.Palette)
+	testing.expect(t, app.arrange_active(w) && app.arrange_paused(s, w))
+	testing.expect(t, !ui.presence_is_open(w.arrange.presence))
 	app.window_overlays_cancel(s, w)
+	app.update_motion(s)
+	testing.expect(t, ui.presence_is_open(w.arrange.presence))
 
-	app.run_action(s, w, .Arrange_Panes)
-	testing.expect_value(t, app.overlay_kind(s, w), app.Overlay_Kind.Arrange)
 	app.handle_event(s, platform.Focus_Event{w.id, false})
-	testing.expect_value(t, app.overlay_kind(s, w), app.Overlay_Kind.None)
+	testing.expect(t, app.arrange_active(w))
+	app.handle_event(s, platform.Focus_Event{w.id, true})
+	steps_press(s, w, .Arrow_Right)
+	testing.expect(t, steps_rect(w, f.a).x > steps_rect(w, f.b).x)
+
+	app.run_action(s, w, .Close_Pane)
+	app.update_motion(s)
+	testing.expect(t, app.arrange_active(w))
+	testing.expect_value(t, w.arrange.content.id, f.b)
+	steps_press(s, w, .Escape)
+	testing.expect(t, !app.arrange_active(w))
 }
 
-// The mode stays on the pane it arranges: through a move to another tab or a new tab, into a linked window
-// and, with Alt, onto the pane focus picks in the host. N ends it in the new window's name field.
+// Float, Linked window and Workspace… keep the mode on the pane: floated and docked again, out to a linked
+// window and back, and into a new workspace, the mode pausing while the picker and the name field have the
+// keys.
+@(test)
+arrange_mode_follows_its_pane_through_floats_links_and_workspaces :: proc(t: ^testing.T) {
+	f: Steps_Fixture
+	defer palette_fixture_destroy(t, &f.palette)
+	if !steps_fixture_create(t, &f, "steps-arrange-places") {return}
+	s, w := &f.palette.state, f.w
+	app.pane_split(s, w, .Right)
+	c := steps_focused(s, w)
+	app.run_action(s, w, .Arrange_Panes)
+	steps_press(s, w, .F)
+	testing.expect(t, app.arrange_active(w))
+	testing.expect(t, layout.is_floating(app.window_tree(w), app.window_tree(w).focus))
+	testing.expect_value(t, steps_focused(s, w), c)
+	steps_press(s, w, .F)
+	testing.expect(t, !layout.is_floating(app.window_tree(w), app.window_tree(w).focus))
+
+	steps_press(s, w, .O)
+	app.pane_links_sync(s)
+	if !testing.expect_value(t, len(s.windows), 2) {return}
+	linked := s.windows[1]
+	testing.expect(t, app.arrange_active(linked) && !app.arrange_active(w))
+	testing.expect_value(t, steps_focused(s, linked), c)
+	steps_press(s, linked, .O)
+	app.pane_links_sync(s)
+	app.update_motion(s)
+	testing.expect(t, app.arrange_active(w))
+	testing.expect_value(t, steps_focused(s, w), c)
+
+	original := w.workspace
+	steps_press(s, w, .W)
+	app.update_motion(s)
+	if !testing.expect_value(t, app.overlay_kind(s, w), app.Overlay_Kind.Workspace_Picker) {return}
+	testing.expect(t, app.arrange_active(w) && !ui.presence_is_open(w.arrange.presence))
+	w.workspace_picker.selected = len(w.workspace_picker.rows)
+	app.workspace_picker_choose(s, w)
+	app.update_motion(s)
+	testing.expect(t, w.workspace != original)
+	testing.expect_value(t, steps_focused(s, w), c)
+	testing.expect(t, app.arrange_active(w))
+	testing.expect_value(t, w.arrange.content.id, c)
+}
+
+// The mode stays on the pane it arranges: into a linked window, onto the pane Alt picks back in the host,
+// through a move to another tab or a new tab, and into a new window, where it waits while the window's name
+// field has the keys.
 @(test)
 arrange_mode_follows_its_pane_across_tabs_and_windows :: proc(t: ^testing.T) {
 	f: Linked_Fixture
@@ -405,7 +475,9 @@ arrange_mode_follows_its_pane_across_tabs_and_windows :: proc(t: ^testing.T) {
 
 	windows := len(s.windows)
 	steps_press(s, w, .N)
-	testing.expect(t, !app.arrange_active(w))
 	if !testing.expect_value(t, len(s.windows), windows + 1) {return}
-	testing.expect_value(t, app.overlay_kind(s, s.windows[windows]), app.Overlay_Kind.Chip_Name)
+	torn := s.windows[windows]
+	testing.expect(t, app.arrange_active(torn) && !app.arrange_active(w))
+	testing.expect_value(t, app.overlay_kind(s, torn), app.Overlay_Kind.Chip_Name)
+	testing.expect(t, app.arrange_paused(s, torn))
 }

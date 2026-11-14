@@ -7,8 +7,6 @@ import "aio:input"
 // a press reaches, and the surfaces beneath it see the pointer leave. Each surface's handlers live with
 // its feature; this file composes them and holds the policy that decides between surfaces.
 Pointer_Target :: enum u8 {
-	// Arrange mode takes the whole window: a press anywhere leaves it, then reaches what it landed on.
-	Arrange,
 	Notice,
 	Workspace_Picker,
 	Tab_Menu,
@@ -110,7 +108,6 @@ Pointer_Surface :: struct {
 
 @(rodata)
 pointer_surfaces := [Pointer_Target]Pointer_Surface {
-	.Arrange          = {claims = arrange_claims, hover = arrange_hover, press = arrange_press, modal = true},
 	.Notice           = {
 		claims = notice_claims, hover = notice_hover, press = notice_press, release = notice_release,
 		tooltip = notice_tooltip, cancel = notice_cancel, leave = notice_leave, holds = true,

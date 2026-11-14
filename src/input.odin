@@ -138,7 +138,6 @@ OVERLAY_FIRST :: bit_set[Overlay_Kind] {
 	.Profile_Menu,
 	.Document_Menu,
 	.Command_Menu,
-	.Arrange,
 }
 
 // Each surface's keys, text and wheel side by side. Keys a surface takes have their release
@@ -221,13 +220,6 @@ overlay_input :: proc(app: ^App, w: ^Window, kind: Overlay_Kind, event: Overlay_
 		case Overlay_Text: command_menu_text_input(app, w, e.text)
 		case Overlay_Wheel: command_menu_wheel(app, w, int(math.sign(e.delta)))
 		}
-	case .Arrange:
-		switch e in event {
-		case Overlay_Key:
-			key_suppress(w, e.event)
-			arrange_key(app, w, e.event, e.logical)
-		case Overlay_Text, Overlay_Wheel:
-		}
 	case .Confirmation:
 		switch e in event {
 		case Overlay_Key: _ = confirmation_key(app, w, e.event)
@@ -285,6 +277,12 @@ on_key :: proc(app: ^App, w: ^Window, e: input.Key_Event) {
 		overlay_input(app, w, kind, key)
 		return
 	}
+	// Arrange mode takes every key the surfaces above passed on, and pauses while one of them has the keys.
+	if arrange_active(w) {
+		key_suppress(w, e)
+		arrange_key(app, w, e, key.logical)
+		return
+	}
 	if settings_active(w) {
 		settings_key(app, w, e)
 		return
@@ -303,6 +301,7 @@ on_text :: proc(app: ^App, w: ^Window, text: string) {
 		overlay_input(app, w, kind, Overlay_Text{text})
 		return
 	}
+	if arrange_active(w) {return}
 	status_inbox_close(w)
 	if settings_active(w) {
 		ui.editor_text(&w.editor, text)

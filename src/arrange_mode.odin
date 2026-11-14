@@ -6,11 +6,21 @@ import "aio:render"
 import "aio:ui"
 
 // Arrange mode (WORK-477), a submap for panes as Hyprland has for windows: Arrange Panes takes the window's
-// keys until Enter or Esc, and plain keys move, swap and resize the focused pane while it wears the drag's
-// drop outline and a card lists the keys. Every key runs a registry command, so the mode does exactly what
-// those commands do; moving the pane to another tab or window keeps the mode on it. A press anywhere,
-// opening the palette or the window losing focus also leaves, and leaving keeps every change. Other keys
-// are swallowed, so nothing typed reaches a program. The mode's keys are fixed.
+// keys until Esc, and plain keys move, swap and resize the focused pane while it wears the drag's drop
+// outline and a card lists the keys. Every key runs a registry command, so the mode does exactly what those
+// commands do. Esc is its only way out: the mode follows its pane to another tab, a float, a linked or new
+// window or another workspace's window, and to whichever pane a click or a close leaves focused. While a
+// surface it cannot share has the keys, such as the palette or the workspace picker, it pauses and its card
+// and outline hide; it resumes when that surface closes. Other keys are swallowed, so nothing typed reaches
+// a program. The mode's keys are fixed.
+
+// Arrange mode in one window: whether it is on, and the pane it arranges, which it follows elsewhere.
+Arrange_Mode :: struct {
+	on:       bool,
+	content:  layout.Content,
+	// The outline and card fading in and out; they hide while the mode pauses.
+	presence: ui.Presence,
+}
 
 // What a direction key does, by the modifiers held with it.
 @(private = "file")
@@ -48,33 +58,31 @@ ARRANGE_STEP_ACTIONS := [Arrange_Step][layout.Direction]Action {
 	.Dock        = {.Left = .Dock_Left, .Right = .Dock_Right, .Up = .Dock_Up, .Down = .Dock_Down},
 }
 
-// A key that runs one command. One that `leaves` ends the mode first: its command takes the pane out of
-// the tiling it arranges or opens a surface of its own.
+// A key that runs one command.
 @(private = "file")
 Arrange_Key :: struct {
 	key:    input.Key,
 	action: Action,
-	leaves: bool,
 }
 
 @(private = "file", rodata)
 ARRANGE_KEYS := [?]Arrange_Key {
-	{.R, .Rotate_Split, false},
-	{.Equal, .Balance_Panes, false},
-	{.Digit_1, .Move_Pane_Tab_1, false},
-	{.Digit_2, .Move_Pane_Tab_2, false},
-	{.Digit_3, .Move_Pane_Tab_3, false},
-	{.Digit_4, .Move_Pane_Tab_4, false},
-	{.Digit_5, .Move_Pane_Tab_5, false},
-	{.Digit_6, .Move_Pane_Tab_6, false},
-	{.Digit_7, .Move_Pane_Tab_7, false},
-	{.Digit_8, .Move_Pane_Tab_8, false},
-	{.Digit_9, .Move_Pane_Tab_9, false},
-	{.T, .Move_Pane_New_Tab, false},
-	{.N, .Move_Pane_New_Window, true},
-	{.O, .Linked_Window, true},
-	{.F, .Float_Pane, true},
-	{.W, .Move_Pane_Workspace, true},
+	{.R, .Rotate_Split},
+	{.Equal, .Balance_Panes},
+	{.Digit_1, .Move_Pane_Tab_1},
+	{.Digit_2, .Move_Pane_Tab_2},
+	{.Digit_3, .Move_Pane_Tab_3},
+	{.Digit_4, .Move_Pane_Tab_4},
+	{.Digit_5, .Move_Pane_Tab_5},
+	{.Digit_6, .Move_Pane_Tab_6},
+	{.Digit_7, .Move_Pane_Tab_7},
+	{.Digit_8, .Move_Pane_Tab_8},
+	{.Digit_9, .Move_Pane_Tab_9},
+	{.T, .Move_Pane_New_Tab},
+	{.N, .Move_Pane_New_Window},
+	{.O, .Linked_Window},
+	{.F, .Float_Pane},
+	{.W, .Move_Pane_Workspace},
 }
 
 // The card's key hints in reading order, matching the keys above. On a wide window they stand in three
@@ -98,7 +106,7 @@ ARRANGE_HINTS := [?]ui.Key_Hint {
 	{{"O", ""}, "Linked window"},
 	{{"F", ""}, "Float or dock"},
 	{{"W", ""}, "Workspace…"},
-	{{"Enter", "Esc"}, "Done"},
+	{{"Esc", ""}, "Done"},
 }
 
 @(private = "file", rodata)
@@ -107,25 +115,36 @@ ARRANGE_CARD_ENDS := [ARRANGE_CARD_COLUMNS]int{6, 11, len(ARRANGE_HINTS)}
 @(private = "file")
 ARRANGE_TITLE :: "Arrange panes"
 
-// Enters Arrange mode on w's focused pane; whatever else took w's input closes first.
+// Enters Arrange mode on w's focused pane.
 arrange_open :: proc(app: ^App, w: ^Window) {
-	if arrange_active(w) {return}
-	if window_tree(w) == nil || !gesture_cancel(app, w) {return}
-	overlay_open(app, w, Overlay_Arrange{})
-	ui.presence_open(&w.arrange, ui.NOTICE_PRESENCE)
+	tree := window_tree(w)
+	if w.arrange.on || tree == nil {return}
+	content, focused := layout.focused_content(tree)
+	if !focused {return}
+	w.arrange.on, w.arrange.content = true, content
 	w.dirty = true
 }
 
-arrange_active :: proc(w: ^Window) -> bool {
-	_, open := w.overlay.(Overlay_Arrange)
-	return open
+arrange_active :: proc(w: ^Window) -> bool {return w.arrange.on}
+
+@(private = "file")
+arrange_leave :: proc(w: ^Window) {
+	w.arrange.on = false
+	w.dirty = true
 }
 
+// Another surface has w's keys, so the mode waits, its card and outline hidden.
+arrange_paused :: proc(app: ^App, w: ^Window) -> bool {
+	return overlay_kind(app, w) != .None
+}
+
+// The mode's keys, once every surface that takes keys ahead of it has passed on them.
 @(private)
 arrange_key :: proc(app: ^App, w: ^Window, e, logical: input.Key_Event) {
 	if !logical.pressed || input.is_modifier_key(logical.key) {return}
-	if window_tree(w) == nil {
-		overlay_close(app, w)
+	tree := window_tree(w)
+	if tree == nil {
+		arrange_leave(w)
 		return
 	}
 	held := logical.modifiers & {.Shift, .Control, .Alt}
@@ -133,37 +152,33 @@ arrange_key :: proc(app: ^App, w: ^Window, e, logical: input.Key_Event) {
 		for step in Arrange_Step {
 			if ARRANGE_STEP_MODIFIERS[step] != held {continue}
 			action := ARRANGE_STEP_ACTIONS[step][direction]
-			if step == .Pick {
-				// Focus may cross into a linked window, which the mode then follows.
-				destination, _ := pane_neighbour_toward(app, w, direction)
-				id := w.id
-				run_action(app, w, action)
-				arrange_keep(app, id, destination)
-			} else {
+			if step != .Pick {
 				arrange_run(app, w, action)
+				return
 			}
+			// Focus may cross into a linked window, which the mode then follows onto the pane it lands on.
+			destination, _ := pane_neighbour_toward(app, w, direction)
+			id := w.id
+			run_action(app, w, action)
+			picked, ok := layout.focused_content(window_tree(destination))
+			if ok {arrange_follow(app, id, picked, refocus = false)}
 			return
 		}
 		return
 	}
 	if held == {} {
-		#partial switch logical.key {
-		case .Enter, .Numpad_Enter, .Escape:
-			overlay_close(app, w)
+		if logical.key == .Escape {
+			arrange_leave(w)
 			return
 		}
 		for k in ARRANGE_KEYS {
-			if k.key != logical.key {continue}
-			if k.leaves {
-				overlay_close(app, w)
-				run_action(app, w, k.action)
-			} else {
+			if k.key == logical.key {
 				arrange_run(app, w, k.action)
+				return
 			}
-			return
 		}
 	}
-	// The palette still opens, which leaves the mode as it does from anywhere.
+	// The palette still opens; the mode waits while it is open.
 	if action, found := shortcut_action(app, e); found && action == .Command_Palette {run_action(app, w, action)}
 }
 
@@ -182,50 +197,72 @@ arrange_direction :: proc(key: input.Key) -> (layout.Direction, bool) {
 	return .Left, false
 }
 
-// Runs `action` on the arranged pane and keeps the mode on it, in whichever window then shows it focused.
+// Runs `action` on the arranged pane and keeps the mode on it, wherever the action took it.
 @(private = "file")
 arrange_run :: proc(app: ^App, w: ^Window, action: Action) {
-	tree := window_tree(w)
-	if tree == nil {return}
-	content, focused := layout.focused_content(tree)
+	content, focused := layout.focused_content(window_tree(w))
 	id := w.id
 	run_action(app, w, action)
-	if !focused {
-		arrange_keep(app, id, nil)
-		return
-	}
-	for other in app.windows {
-		shown_tree := window_tree(other)
-		if shown_tree == nil || !window_drawable(other) {continue}
-		if shown, ok := layout.focused_content(shown_tree); ok && shown == content {
-			arrange_keep(app, id, other)
+	if focused {arrange_follow(app, id, content, refocus = true)}
+}
+
+// Keeps the mode from window `from` on `content`: in the window that now shows it focused. After a mode key,
+// `refocus` also finds it shown unfocused, as a pane a linked window returns, and focuses it there. Otherwise
+// the mode stays in `from` on whichever pane it now has focused, and leaves a window left with no pane.
+@(private = "file")
+arrange_follow :: proc(app: ^App, from: input.Window_Id, content: layout.Content, refocus: bool) {
+	source := window_find(app, from)
+	for pass in 0 ..< (refocus ? 2 : 1) {
+		for other in app.windows {
+			tree := window_tree(other)
+			// A linked window just made for the pane shows at the next sync; a preview or closing one never.
+			if tree == nil || other.phase == .Preparing || other.phase == .Closing {continue}
+			if pass == 0 {
+				if shown, ok := layout.focused_content(tree); !ok || shown != content {continue}
+			} else {
+				node := layout.find_content(tree, content)
+				if node == layout.INVALID_NODE || layout.link_root(tree, node) != layout.INVALID_NODE {continue}
+				pane_focus(app, other, node)
+			}
+			if other == source {
+				source.arrange.content = content
+				return
+			}
+			if source != nil {arrange_leave(source)}
+			arrange_open(app, other)
 			return
 		}
 	}
-	arrange_keep(app, id, nil)
-}
-
-// Keeps the mode in `to`, leaving the window `from` when it is another one; nil keeps it in `from` when that
-// window is still open. A command may have closed the mode on its way, which this opens again.
-@(private = "file")
-arrange_keep :: proc(app: ^App, from: input.Window_Id, to: ^Window) {
-	source := window_find(app, from)
-	if to == nil || to == source {
-		if source != nil {arrange_open(app, source)}
-		return
+	if source == nil {return}
+	if tree := window_tree(source); tree != nil {
+		if shown, ok := layout.focused_content(tree); ok {
+			source.arrange.content = shown
+			return
+		}
 	}
-	if source != nil && arrange_active(source) {overlay_close(app, source)}
-	arrange_open(app, to)
+	arrange_leave(source)
 }
 
+// Follows the arranged pane after anything that moved focus without a mode key, such as a click, a close or
+// a choice in the workspace picker, then shows or hides the card as the mode runs or pauses.
 arrange_animate :: proc(app: ^App, w: ^Window, frame: ui.Frame_Time) -> bool {
-	changed, _ := ui.presence_advance(&w.arrange, app.animations, frame)
+	if w.arrange.on {
+		shown: layout.Content
+		ok := false
+		if tree := window_tree(w); tree != nil {shown, ok = layout.focused_content(tree)}
+		if !ok || shown != w.arrange.content {arrange_follow(app, w.id, w.arrange.content, refocus = false)}
+	}
+	presence := &w.arrange.presence
+	showing := w.arrange.on && !arrange_paused(app, w)
+	if showing && !ui.presence_is_open(presence^) {ui.presence_open(presence, ui.NOTICE_PRESENCE)}
+	if !showing && ui.presence_is_open(presence^) {ui.presence_close(presence)}
+	changed, _ := ui.presence_advance(presence, app.animations, frame)
 	return changed
 }
 
 // The drop outline around the arranged pane, following it as a move eases it to its new place.
 arrange_outline_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
-	if !ui.presence_visible(w.arrange) {return .Ok}
+	if !ui.presence_visible(w.arrange.presence) {return .Ok}
 	tree := window_tree(w)
 	if tree == nil {return .Ok}
 	for pane in w.panes {
@@ -233,7 +270,7 @@ arrange_outline_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 		if render.push_layer(&w.list, {0, 0, f32(w.width), f32(w.height)}) != .None {return .Ok}
 		r := pane_motion_rect(w, pane)
 		shown := render.Rect{r.x, r.y, r.width, r.height}
-		_ = pane_outline_draw(app, w, shown, shown, w.arrange.motion.value)
+		_ = pane_outline_draw(app, w, shown, shown, w.arrange.presence.motion.value)
 		break
 	}
 	return .Ok
@@ -296,7 +333,7 @@ arrange_card :: proc(app: ^App, w: ^Window) -> Arrange_Card {
 
 // The card of the mode's keys, fading and rising as a notice does.
 arrange_card_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
-	if !ui.presence_visible(w.arrange) {return .Ok}
+	if !ui.presence_visible(w.arrange.presence) {return .Ok}
 	s := w.scale
 	keycap := ui.text_styled(&w.ui_text, .Detail)
 	title := ui.text_styled(&w.ui_text, .Strong)
@@ -304,7 +341,7 @@ arrange_card_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 	r := card.rect
 	if render.push_layer(&w.list, {0, 0, f32(w.width), f32(w.height)}) != .None {return .Ok}
 	mark := render.draw_mark(&w.list)
-	defer ui.fade_draw(&w.list, mark, ui.presence_fade(w.arrange, ui.RISE_NOTICE * s))
+	defer ui.fade_draw(&w.list, mark, ui.presence_fade(w.arrange.presence, ui.RISE_NOTICE * s))
 	if ui.panel_draw(&w.list, ui.popover_panel(r, s), app.theme) != .None {return .Ok}
 	baseline := r.y + card.padding + title.ascent
 	if result := ui.draw_text(&title, &w.list, ARRANGE_TITLE, r.x + card.padding, baseline, app.theme.text);
@@ -323,22 +360,4 @@ arrange_card_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 		start = card.ends[c]
 	}
 	return .Ok
-}
-
-@(private)
-arrange_claims :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {return arrange_active(w)}
-
-@(private)
-arrange_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: input.Mouse_Move_Event) {
-	if owner == .Arrange {pointer_set(app, w, .Arrow)}
-}
-
-// A press anywhere leaves the mode, keeping its changes, and then reaches what it landed on.
-@(private)
-arrange_press :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) {
-	if !e.pressed {return}
-	overlay_close(app, w, .Leave)
-	target := pointer_target(app, w, f32(e.x), f32(e.y))
-	gesture_hand_off(w, e.button, target)
-	pointer_press(app, w, target, e)
 }

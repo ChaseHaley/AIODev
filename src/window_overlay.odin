@@ -62,7 +62,6 @@ Window_Overlay :: union {
 	Overlay_Profile_Menu,
 	Overlay_Document_Menu,
 	Overlay_Command_Menu,
-	Overlay_Arrange,
 }
 
 // A tab or pane renames in a dialog; the text is w.rename.
@@ -124,9 +123,6 @@ Overlay_Command_Menu :: struct {
 	mode:    Command_Menu_Mode,
 }
 
-// Arrange mode: the keys move, swap and resize the focused pane until Enter or Esc; see arrange_mode.odin.
-Overlay_Arrange :: struct {}
-
 // Which surface has the window's input. When more than one claims it, which only commands driven from
 // outside can arrange, the order here decides, as the order of on_key's checks did.
 Overlay_Kind :: enum u8 {
@@ -141,7 +137,6 @@ Overlay_Kind :: enum u8 {
 	Profile_Menu,
 	Document_Menu,
 	Command_Menu,
-	Arrange,
 	Confirmation,
 	Palette,
 }
@@ -158,7 +153,6 @@ overlay_kind :: proc(app: ^App, w: ^Window) -> Overlay_Kind {
 	case Overlay_Profile_Menu: return .Profile_Menu
 	case Overlay_Document_Menu: return .Document_Menu
 	case Overlay_Command_Menu: return .Command_Menu
-	case Overlay_Arrange: return .Arrange
 	}
 	if confirmation_current(w) != nil {return .Confirmation}
 	if palette_active(app, w) {return .Palette}
@@ -215,8 +209,6 @@ overlay_close :: proc(app: ^App, w: ^Window, exit := Overlay_Exit.Cancel) {
 		command_menu_close(&w.command_menu, current.mode)
 	case Overlay_Tab_Menu:
 		submenu_reset(&w.tab_menu.submenu)
-	case Overlay_Arrange:
-		ui.presence_close(&w.arrange)
 	case Overlay_Divider_Menu, Overlay_Activity_Menu, Overlay_Activity_Row_Menu, Overlay_Profile_Menu:
 	}
 	w.overlay, w.dirty = nil, true
@@ -248,7 +240,7 @@ overlay_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 		menu = document_menu_draw(app, w)
 	case Overlay_Command_Menu:
 		menu = command_menu_draw(app, w)
-	case nil, Overlay_Rename, Overlay_Chip_Name, Overlay_Group_Name, Overlay_Arrange:
+	case nil, Overlay_Rename, Overlay_Chip_Name, Overlay_Group_Name:
 	}
 	if menu != .Ok {return menu}
 	if !workspace_picker_active(&w.workspace_picker) {return .Ok}

@@ -105,7 +105,7 @@ window_motion_running :: proc(w: ^Window, part: Window_Motion) -> bool {
 	case .Pane_Drag:
 		return pane_drag_animating(w)
 	case .Arrange:
-		return ui.presence_active(w.arrange)
+		return ui.presence_active(w.arrange.presence)
 	case .Settings_Page:
 		return ui.editor_animating(&w.editor)
 	case .Pane_Headers:

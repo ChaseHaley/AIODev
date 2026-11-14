@@ -66,8 +66,8 @@ Window :: struct {
 	divider: Divider_Gesture,
 	// The pane or tab drag this window's pointer holds; see drag.odin.
 	drag: Drag,
-	// Arrange mode's outline and key card fading in and out; see arrange_mode.odin.
-	arrange: ui.Presence,
+	// Arrange mode in this window, and its outline and key card; see arrange_mode.odin.
+	arrange: Arrange_Mode,
 	using floats: Float_Window_State,
 	tab_incoming: Tab_Incoming,
 	// The pane under the pointer. Its header shows its buttons, as the focused pane's does.
