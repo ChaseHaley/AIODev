@@ -18,6 +18,7 @@ import "core:text/regex"
 USAGE_FORMAT :: `Usage: aio [--instance <name>] [--json] <command> [options] [-- <program> [arguments]]
        aio wait [--pane <pane>] [--text <text> | --regex <pattern>] [--idle <ms>] [--timeout <ms>]
        aio wait [--pane <pane>] --exit [--timeout <ms>]
+       aio events [--json] [<name>...]
        aio commands
        aio help [<command>]
        aio version
@@ -26,7 +27,7 @@ USAGE_FORMAT :: `Usage: aio [--instance <name>] [--json] <command> [options] [--
 Runs AIODev commands from scripts and coding agents. Every command in the everything palette
 runs by name, such as aio tab.next; aio commands lists AIODev's commands, and aio help
 <command> explains one's options, their defaults and an example of each, for aio's own wait,
-commands, help, version and agent-session too. aio version prints aio's build and the running
+events, commands, help, version and agent-session too. aio version prints aio's build and the running
 AIODev's, and aio warns on stderr when the two differ.
 
 Panes   --pane takes a pane id, a pane name, here or focused. Inside an AIODev pane the
@@ -63,6 +64,9 @@ Wait    aio wait polls until the pane shows the text, a line matches the pattern
         --idle or --exit; --idle does not combine with --exit. The default timeout is %d ms, and 0
         waits without limit. --exit prints the exit code, even after the pane closed with its program,
         or closed when it was closed while running.
+Events  aio events streams named application events, or all events without names. --json prints one
+        JSON object per line; plain output is the event name, a tab and its fields as JSON.
+        Ctrl+C exits 130; closing AIODev or the connection exits 4.
 Hooks   aio agent-session runs from a Claude Code or Codex SessionStart hook and records the
         session the hook names, so the pane can resume it; the "Install agent session hooks"
         command sets it up.
@@ -126,6 +130,28 @@ local_commands := [?]cli_protocol.Command_Report {
 		},
 	},
 	{
+		name = "events",
+		title = "Stream application events",
+		usage = "events [--json] [<name>...]",
+		summary = "Subscribes to the named events, or all events without names, until Ctrl+C (exit 130) " +
+		"or AIODev disconnects (exit 4). Plain output is the event name, a tab and its fields as JSON. " +
+		"An unknown name fails with the list of names.",
+		options = {
+			{
+				option = "--json",
+				description = "prints each event as the JSON object AIODev sends, its type first",
+				default = "off",
+				example = "--json",
+			},
+			{
+				option = "<name>...",
+				description = "the events to stream, such as pane.focused, tab.created or settings.changed",
+				default = "all events",
+				example = "pane.focused pane.exited",
+			},
+		},
+	},
+	{
 		name = "commands",
 		title = "List commands",
 		usage = "commands",
@@ -139,7 +165,7 @@ local_commands := [?]cli_protocol.Command_Report {
 		options = {
 			{
 				option = "<command>",
-				description = "the command to explain: any name aio commands lists, or wait, commands, help, " +
+				description = "the command to explain: any name aio commands lists, or wait, events, commands, help, " +
 				"version or agent-session",
 				default = "none (prints aio's usage)",
 				example = "pane.split",
@@ -204,15 +230,18 @@ Wait :: struct {
 
 Options :: struct {
 	// The AIODev instance name; empty for the default instance.
-	instance: string,
-	json:     bool,
+	instance:    string,
+	json:        bool,
 	// The command and its arguments, as AIODev parses them.
-	args:     []string,
+	args:        []string,
 	// Set when the command is wait.
-	waiting:  bool,
+	waiting:     bool,
 	// Set when the command is version or --version.
-	version:  bool,
-	wait:     Wait,
+	version:     bool,
+	wait:        Wait,
+	// Set when the command is events, with the event names it gave; none streams every event.
+	streaming:   bool,
+	event_names: []string,
 }
 
 // Reads aio's own options, which come before the command. `environment` is the AIODEV_INSTANCE
@@ -246,6 +275,23 @@ parse_options :: proc(args: []string, environment: string) -> (Options, string) 
 	o.version = o.args[0] == "version" || o.args[0] == "--version"
 	// Only an AIODev too old to know the version command fails it, which build_warning reports.
 	if o.version && len(o.args) > 1 {return {}, "version takes no arguments"}
+	if o.args[0] == "events" {
+		o.streaming = true
+		// --json may follow the command too, since aio and not AIODev formats the stream.
+		names := make([dynamic]string, 0, len(o.args) - 1, context.temp_allocator)
+		for word in o.args[1:] {
+			if word == "--json" {
+				if o.json {return {}, "use --json once"}
+				o.json = true
+			} else if strings.has_prefix(word, "-") {
+				return {}, "events takes --json and event names"
+			} else {
+				append(&names, word)
+			}
+		}
+		o.event_names = names[:]
+		return o, ""
+	}
 	if o.args[0] != "wait" {return o, ""}
 	o.waiting = true
 	o.wait.timeout_ms = WAIT_DEFAULT_TIMEOUT_MS
@@ -320,7 +366,8 @@ wait_found :: proc(w: Wait, pattern: Maybe(regex.Regular_Expression), text: stri
 
 // The pipe request for a command: the caller pane, the reply format, aio's working directory, then
 // the command line. `commands` and `help <command>` ask AIODev's catalogue; `version` asks its build
-// as text, since aio prints its own build beside it and composes any JSON itself.
+// as text, since aio prints its own build beside it and composes any JSON itself; `events` subscribes
+// to the names it gave.
 @(require_results)
 request :: proc(o: Options, caller, directory: string, allocator := context.allocator) -> []string {
 	format := o.json ? cli_protocol.Format.Json : cli_protocol.Format.Text
@@ -332,7 +379,11 @@ request :: proc(o: Options, caller, directory: string, allocator := context.allo
 		name, format = cli_protocol.VERSION_COMMAND, .Text
 	}
 	command := o.args
-	if name != o.args[0] {
+	if o.streaming {
+		command = make([]string, 1 + len(o.event_names), allocator)
+		command[0] = cli_protocol.EVENTS_COMMAND
+		copy(command[1:], o.event_names)
+	} else if name != o.args[0] {
 		command = make([]string, len(o.args), allocator)
 		command[0] = name
 		copy(command[1:], o.args[1:])
@@ -360,4 +411,20 @@ build_warning :: proc(own, app: string, allocator := context.allocator) -> strin
 	return fmt.aprintf(
 		"aio: warning: aio %s does not match the running %s; %s", own, app, advice, allocator = allocator,
 	)
+}
+
+// `aio events`' plain line for one stream line: the event's name, a tab and its fields object without
+// "type". The stream puts "type" first and event names hold no quotes, so the fields' JSON is kept
+// as AIODev wrote it rather than decoded and encoded again. False for a line in another shape.
+@(require_results)
+event_plain :: proc(line: string, allocator := context.allocator) -> (string, bool) {
+	prefix :: `{"type":"`
+	if !strings.has_prefix(line, prefix) {return "", false}
+	tail := line[len(prefix):]
+	end := strings.index_byte(tail, '"')
+	if end <= 0 {return "", false}
+	name, rest := tail[:end], tail[end + 1:]
+	if rest == "}" {return strings.concatenate({name, "\t{}"}, allocator), true}
+	if !strings.has_prefix(rest, ",") || !strings.has_suffix(rest, "}") {return "", false}
+	return strings.concatenate({name, "\t{", rest[1:]}, allocator), true
 }

@@ -44,6 +44,9 @@ PANE_READ_COMMAND :: "pane.read"
 // The command whose reply is AIODev's build line; aio's `version` asks it, and aio asks it before
 // each command to warn when the two builds differ.
 VERSION_COMMAND :: "app.version"
+// The command `aio events` sends: AIODev acknowledges it, then streams one JSON line per event on the
+// same connection until either side closes it.
+EVENTS_COMMAND :: "app.events"
 APP_NAME :: "AIODev"
 FIELDS_OPTION :: "--fields"
 ORIGIN_OPTION :: "--origin"

@@ -6,8 +6,9 @@ import "core:strconv"
 import "core:strings"
 import "core:unicode/utf8"
 
-// The pipe transport: current-user named pipes carrying one JSON string-array request line and one
-// JSON reply line. It delivers arguments unparsed; each protocol's owner interprets them.
+// The pipe transport: independent current-user named-pipe connections carrying JSON string-array
+// requests and JSON reply lines. A host may turn a connection into a bounded, ordered line stream
+// after acknowledging its subscription request. Arguments remain unparsed by the transport.
 
 MAX_MESSAGE :: 4 * 1024 * 1024
 // Real requests use fewer than ten arguments. Capping the decoded array keeps a
@@ -56,6 +57,7 @@ valid_pipe_name :: proc(name: string) -> bool {
 	)
 }
 Message :: struct {
+	// Unique across all connections to this server, including after a connection is reused.
 	id:        u64,
 	args:      []string,
 	allocator: runtime.Allocator,

@@ -20,6 +20,9 @@ CONNECT_TIMEOUT_MS :: 1000
 CALL_TIMEOUT_MS :: 15000
 @(private)
 WAIT_INTERVAL :: 100 * time.Millisecond
+// How long aio events waits for a line before it checks for Ctrl+C again.
+@(private)
+STREAM_POLL_MS :: 100
 // The app executable built beside this CLI. build.ps1 supplies the exact name for verify builds.
 @(private)
 SERVER_NAME :: #config(AIO_SERVER_NAME, "aiodev.exe")
@@ -73,6 +76,7 @@ start :: proc() -> cli_protocol.Status {
 	defer delete(pipe)
 	if o.waiting {return wait(o, pipe, caller)}
 	if o.version {return version(o, pipe, caller)}
+	if o.streaming {return stream_events(o, pipe, caller)}
 	// A directory that cannot be read leaves relative paths as given.
 	directory, _ := os.get_working_directory(context.temp_allocator)
 	response, status := send(pipe, request(o, caller, directory, context.temp_allocator), true)
@@ -139,7 +143,39 @@ version :: proc(o: Options, pipe, caller: string) -> cli_protocol.Status {
 // `check_build`, aio first asks AIODev's build on the same connection and warns when it differs.
 @(private, require_results)
 send :: proc(pipe: string, request: []string, check_build: bool) -> (control.Response, cli_protocol.Status) {
-	client, connect_error := control.connect(pipe, CONNECT_TIMEOUT_MS, context.temp_allocator)
+	client, status := connect_verified(pipe)
+	if status != .Ok {return {}, status}
+	defer control.close(&client)
+	if check_build {
+		version_command := [1]string{cli_protocol.VERSION_COMMAND}
+		query := cli_protocol.request_encode({command = version_command[:]}, context.temp_allocator)
+		reply, reply_error := control.call(&client, query, CALL_TIMEOUT_MS)
+		if reply_error != .None {
+			fmt.eprintfln("aio: lost the connection to AIODev (%v)", reply_error)
+			return {}, .Unreachable
+		}
+		if warning := build_warning(own_build(), reply.ok ? reply.text : "", context.temp_allocator);
+		   warning != "" {fmt.eprintln(warning)}
+	}
+	response, call_error := control.call(&client, request, CALL_TIMEOUT_MS)
+	if call_error != .None {
+		fmt.eprintfln("aio: lost the connection to AIODev (%v)", call_error)
+		return {}, .Unreachable
+	}
+	return response, cli_protocol.response_status(response)
+}
+
+// Connects to the pipe and checks that the expected AIODev serves it, reporting either failure; the
+// caller closes the client it returns with Ok.
+@(private, require_results)
+connect_verified :: proc(
+	pipe: string,
+	allocator := context.temp_allocator,
+) -> (
+	control.Client,
+	cli_protocol.Status,
+) {
+	client, connect_error := control.connect(pipe, CONNECT_TIMEOUT_MS, allocator)
 	if connect_error != .None {
 		fmt.eprintln(
 			"aio: AIODev is not reachable. Start it and turn on \"Command line control\" in Settings " +
@@ -147,7 +183,8 @@ send :: proc(pipe: string, request: []string, check_build: bool) -> (control.Res
 		)
 		return {}, .Unreachable
 	}
-	defer control.close(&client)
+	verified := false
+	defer if !verified {control.close(&client)}
 	identity, identity_ok := server_identity(SERVER_NAME, context.temp_allocator)
 	if !identity_ok {
 		fmt.eprintln("aio: could not locate the AIODev executable to verify the control pipe.")
@@ -174,23 +211,54 @@ send :: proc(pipe: string, request: []string, check_build: bool) -> (control.Res
 		)
 		return {}, .Impostor
 	}
-	if check_build {
-		version_command := [1]string{cli_protocol.VERSION_COMMAND}
-		query := cli_protocol.request_encode({command = version_command[:]}, context.temp_allocator)
-		reply, reply_error := control.call(&client, query, CALL_TIMEOUT_MS)
-		if reply_error != .None {
-			fmt.eprintfln("aio: lost the connection to AIODev (%v)", reply_error)
-			return {}, .Unreachable
+	verified = true
+	return client, .Ok
+}
+
+// Subscribes on one connection and prints each event line until Ctrl+C or until AIODev closes the
+// connection. Reads poll briefly so Ctrl+C ends the stream promptly; a partial line waits for the next.
+@(private, require_results)
+stream_events :: proc(o: Options, pipe, caller: string) -> cli_protocol.Status {
+	if !bool(w.SetConsoleCtrlHandler(on_interrupt, true)) {
+		fmt.eprintln("aio: could not watch for Ctrl+C")
+		return .Failed
+	}
+	client, status := connect_verified(pipe, context.allocator)
+	if status != .Ok {return status}
+	defer control.close(&client)
+	subscription := request(o, caller, "", context.temp_allocator)
+	response, err := control.subscribe(&client, subscription, CALL_TIMEOUT_MS)
+	if err != .None {
+		if sync.atomic_load(&interrupted) {return .Interrupted}
+		fmt.eprintfln("aio: lost the connection to AIODev (%v)", err)
+		return .Unreachable
+	}
+	defer control.response_destroy(&response)
+	if !response.ok {
+		if o.json {fmt.println(response.text)} else {fmt.eprintfln("aio: %s", response.text)}
+		return cli_protocol.response_status(response)
+	}
+	for {
+		free_all(context.temp_allocator)
+		if sync.atomic_load(&interrupted) {return .Interrupted}
+		line, read_error := control.next_line(&client, STREAM_POLL_MS, context.temp_allocator)
+		if sync.atomic_load(&interrupted) {return .Interrupted}
+		if read_error == .Timeout {continue}
+		if read_error != .None {
+			fmt.eprintln("aio: AIODev closed the event stream")
+			return .Unreachable
 		}
-		if warning := build_warning(own_build(), reply.ok ? reply.text : "", context.temp_allocator);
-		   warning != "" {fmt.eprintln(warning)}
+		if o.json {
+			fmt.println(line)
+			continue
+		}
+		text, valid := event_plain(line, context.temp_allocator)
+		if !valid {
+			fmt.eprintfln("aio: AIODev sent an unexpected event line: %s", line)
+			return .Failed
+		}
+		fmt.println(text)
 	}
-	response, call_error := control.call(&client, request, CALL_TIMEOUT_MS)
-	if call_error != .None {
-		fmt.eprintfln("aio: lost the connection to AIODev (%v)", call_error)
-		return {}, .Unreachable
-	}
-	return response, cli_protocol.response_status(response)
 }
 
 // Prints help aio answers itself, in the shape AIODev's help replies take.
