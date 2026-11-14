@@ -448,10 +448,20 @@ rail_row_draw :: proc(
 		if ui.tab_tray_draw(&w.list, slice, t.tray, t.tray_ends, t.tray_state, true, s) != .None {return .Ok}
 		if .End in t.tray_ends {row.height -= 2 * s}
 	}
-	if result := ui.navigation_row_draw(&w.list, &w.ui_text, app.theme, row,
-		{title = t.title, selected = t.selected, marked = t.marked, hovered = hover, pressed = pressed,
-		 mark_elsewhere = true, leading = leading, trailing = trailing}, s, w.pointer);
-	   result != .Ok {return result}
+	// The title draws as the strip's does, so a turning label slides it the same way.
+	nav := ui.Navigation_Row {
+		selected       = t.selected,
+		marked         = t.marked,
+		hovered        = hover,
+		pressed        = pressed,
+		mark_elsewhere = true,
+		leading        = leading,
+		trailing       = trailing,
+	}
+	if ui.navigation_row_surface_draw(&w.list, app.theme, row, nav, s, w.pointer) != .None {return .Ok}
+	ink := t.selected ? app.theme.tab_active_text : app.theme.tab_text
+	title := ui.navigation_row_title_box(row, nav, s)
+	if result := ui.tab_title_draw(&w.list, &w.ui_text, t, title, ink, s); result != .Ok {return result}
 	if t.status.glyph != .None {
 		band := render.Rect{row.x, row.y + s, row.width, row.height - 3 * s}
 		ui.tab_progress_draw(&w.list, app.theme, band, t.status, s)
