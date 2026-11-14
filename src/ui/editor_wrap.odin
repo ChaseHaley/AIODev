@@ -107,10 +107,13 @@ row_description_width :: proc(p: ^Editor, l: Editor_Layout, index: int) -> (widt
 
 // Wraps the shown rows' descriptions for this layout and type size, then measures the page again
 // when any row's height changed. Rows already wrapped at their width cost a comparison; the page
-// is walked only after a rebuild, a new width or a new type size.
+// is walked only after a rebuild, a new width or a new type size. Without fonts nothing can be
+// measured, so every row stays one line.
 @(private)
 editor_wrap_fit :: proc(p: ^Editor, l: Editor_Layout, text: ^Text) {
-	if text == nil || l.row_height <= 0 || editor_chained(p) || color_board_shown(p) {return}
+	if text == nil || text.fonts == nil || l.row_height <= 0 || editor_chained(p) || color_board_shown(p) {
+		return
+	}
 	small := text_styled(text, .Detail)
 	unit := small.line_height / l.row_height
 	key := [3]f32{l.list.width, small.size_px, unit}
