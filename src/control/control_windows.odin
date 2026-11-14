@@ -718,8 +718,19 @@ serve_stream :: proc(s: ^Connection) -> Error {
 	}
 }
 
+// Connects to the named pipe, waiting up to `timeout_ms` for a busy pipe and, with `wait_absent`, for
+// a server that has not created the pipe yet. A server keeps its pipe instances for its lifetime, so
+// without `wait_absent` a missing pipe means no server and fails at once with Closed.
 @(require_results)
-connect :: proc(name: string, timeout_ms: int, allocator := context.allocator) -> (Client, Error) {
+connect :: proc(
+	name: string,
+	timeout_ms: int,
+	allocator := context.allocator,
+	wait_absent := true,
+) -> (
+	Client,
+	Error,
+) {
 	if timeout_ms < 0 || timeout_ms > int(max(i32)) || !valid_pipe_name(name) {
 		return {}, .Invalid_Argument
 	}
@@ -749,6 +760,7 @@ connect :: proc(name: string, timeout_ms: int, allocator := context.allocator) -
 		code := w.GetLastError()
 		if code != w.ERROR_FILE_NOT_FOUND &&
 		   code != w.ERROR_PIPE_BUSY {return {}, os_error("CreateFileW")}
+		if code == w.ERROR_FILE_NOT_FOUND && !wait_absent {return {}, .Closed}
 		if remaining(start, timeout_ms) == 0 {return {}, .Timeout}
 		time.sleep(time.Duration(min(10, remaining(start, timeout_ms))) * time.Millisecond)
 	}

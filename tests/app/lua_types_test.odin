@@ -8,6 +8,7 @@ import "aio:events"
 import "aio:platform"
 import "core:fmt"
 import "core:os"
+import "core:path/filepath"
 import "core:reflect"
 import "core:strings"
 import "core:testing"
@@ -154,4 +155,48 @@ lua_types_app_command_adds_the_actions_init_lua_declared :: proc(t: ^testing.T) 
 	testing.expect(t, !strings.contains(text, "aio.args.shaped"), "a JSON Schema has no args class")
 	built_in := app.lua_types_text(&state, false, context.temp_allocator)
 	testing.expect(t, !strings.contains(built_in, "greet"), "the built-in text leaves the actions out")
+}
+
+// settings.lua_path names init.lua in the data folder an app started with, before the file exists.
+@(test)
+lua_path_names_init_lua_in_the_data_directory :: proc(t: ^testing.T) {
+	lua_types_log = context.logger
+	context.logger = {
+		procedure    = lua_types_logger,
+		lowest_level = lua_types_log.lowest_level,
+		options      = lua_types_log.options,
+	}
+	directory, directory_error := os.make_directory_temp("", "aio-lua-path-*", context.allocator)
+	if !testing.expect_value(t, directory_error, nil) {return}
+	defer delete(directory)
+	defer testing.expect_value(t, os.remove_all(directory), nil)
+	settings_text := fmt.tprintf(
+		"shell.command = \"%s/lua-no-such-shell.exe\"\ncursor.blink = false\n",
+		directory,
+	)
+	settings_path := fmt.tprintf("%s/settings.ini", directory)
+	if !testing.expect_value(t, os.write_entire_file(settings_path, settings_text), nil) {return}
+	state := app.App{options = {data_dir = directory, inactive = true}}
+	state.app_id = fmt.aprintf("AIODev.Test.LuaPath.%d", os.get_pid())
+	defer app.app_destroy(&state)
+	primary := platform.init(&state.platform, state.app_id)
+	if !testing.expect_value(t, primary, platform.Init_Result.Primary) {return}
+	state.platform_ready = true
+	if !testing.expect(t, app.app_init(&state)) {return}
+
+	// The request aio sends, so the reply is the text form aio reads.
+	command := [1]string{"settings.lua_path"}
+	request := cli_protocol.Request {
+		command = command[:],
+	}
+	reply := app.control_cli_answer(&state, cli_protocol.request_encode(request, context.temp_allocator))
+	testing.expect(t, reply.ok, reply.text)
+	parts := [2]string{directory, "init.lua"}
+	joined, join_error := filepath.join(parts[:], context.temp_allocator)
+	if !testing.expect_value(t, join_error, nil) {return}
+	expected, abs_error := filepath.abs(joined, context.temp_allocator)
+	if !testing.expect_value(t, abs_error, nil) {return}
+	testing.expect_value(t, reply.text, expected)
+	testing.expect(t, filepath.is_abs(reply.text), "the path is absolute")
+	testing.expect(t, !os.exists(expected), "the reply does not need the file")
 }

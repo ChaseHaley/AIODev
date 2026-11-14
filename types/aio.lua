@@ -154,6 +154,7 @@ aio = {}
 ---@overload fun(name: "settings.check_lua", fields?: aio.fields.settings.check_lua): aio.Reply?, string?, integer?
 ---@overload fun(name: "settings.customize_colors", fields?: aio.fields.settings.customize_colors): aio.Reply?, string?, integer?
 ---@overload fun(name: "settings.get", fields: aio.fields.settings.get): aio.Reply?, string?, integer?
+---@overload fun(name: "settings.lua_path", fields?: aio.fields.settings.lua_path): aio.Reply?, string?, integer?
 ---@overload fun(name: "settings.open", fields?: aio.fields.settings.open): aio.Reply?, string?, integer?
 ---@overload fun(name: "settings.open_file", fields?: aio.fields.settings.open_file): aio.Reply?, string?, integer?
 ---@overload fun(name: "settings.reload", fields?: aio.fields.settings.reload): aio.Reply?, string?, integer?
@@ -2513,6 +2514,18 @@ function aio.settings.customize_colors(fields) end
 ---The fields of settings.get.
 ---@class aio.fields.settings.get
 ---@field name string the schema setting's key; required
+
+---The fields of settings.lua_path.
+---@class aio.fields.settings.lua_path
+
+---Show init.lua path
+---
+---Prints the absolute path of the init.lua AIODev loads, beside settings.ini, whether or not the file exists; aio types and aio config check ask it for the folder.
+---@param fields? aio.fields.settings.lua_path
+---@return aio.Reply? reply
+---@return string? message
+---@return integer? status
+function aio.settings.lua_path(fields) end
 
 ---The fields of settings.open.
 ---@class aio.fields.settings.open

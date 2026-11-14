@@ -215,6 +215,11 @@ pipe_missing_timeout_and_client_limit :: proc(t: ^testing.T) {
 	testing.expect(t, time.tick_since(start) < time.Second)
 	_, invalid := control.connect(name, -1)
 	testing.expect_value(t, invalid, control.Error.Invalid_Argument)
+	// Without wait_absent a pipe nothing serves fails at once, well inside the timeout.
+	absent_start := time.tick_now()
+	_, absent := control.connect(name, 5000, wait_absent = false)
+	testing.expect_value(t, absent, control.Error.Closed)
+	testing.expect(t, time.tick_since(absent_start) < time.Second)
 	s, create_error := control.create(name, {})
 	if !testing.expect_value(t, create_error, control.Error.None) { return }
 	defer control.destroy(s)
@@ -360,6 +365,12 @@ pipe_unpolled_disconnect_and_busy_connect :: proc(t: ^testing.T) {
 	busy, busy_error := control.connect(name, 25)
 	control.close(&busy)
 	testing.expect_value(t, busy_error, control.Error.Timeout)
+	// A busy pipe exists, so even a connect that does not wait for an absent server waits for it.
+	busy_start := time.tick_now()
+	waited, waited_error := control.connect(name, 50, wait_absent = false)
+	control.close(&waited)
+	testing.expect_value(t, waited_error, control.Error.Timeout)
+	testing.expect(t, time.tick_since(busy_start) >= 50 * time.Millisecond)
 	response, timeout_error := control.call(&c, {"key", "Ctrl+P"}, 30)
 	control.response_destroy(&response)
 	control.close(&c)

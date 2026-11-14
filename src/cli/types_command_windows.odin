@@ -1,6 +1,7 @@
 package cli
 
 import "aio:cli_protocol"
+import "aio:control"
 import "core:encoding/json"
 import "core:fmt"
 import "core:os"
@@ -18,10 +19,15 @@ Types_Reply :: struct {
 }
 
 // Runs `aio types`: asks AIODev for the definitions, the user's actions included, or copies the
-// packaged built-ins beside aio.exe when AIODev is unreachable, and writes them beside init.lua.
+// packaged built-ins beside aio.exe when AIODev is unreachable, and writes them beside init.lua: the
+// init.lua of --data-dir's instance, else the one the running AIODev loads, else the instance's.
 @(private, require_results)
 types_run :: proc(o: Options, pipe, caller: string) -> cli_protocol.Status {
-	folder, problem := init_folder(o.instance, o.lua_types.data_dir, context.temp_allocator)
+	client, connected := connect_verified(pipe)
+	defer if connected == .Ok {control.close(&client)}
+	app_path := ""
+	if connected == .Ok && o.lua_types.data_dir == "" {app_path = lua_path_ask(&client)}
+	folder, problem := init_folder(o.instance, o.lua_types.data_dir, app_path, context.temp_allocator)
 	if problem != "" {return types_fail(o, .Failed, problem)}
 	if absolute, err := filepath.abs(folder, context.temp_allocator); err == nil {folder = absolute}
 	command := [1]string{LUA_TYPES_COMMAND}
@@ -31,7 +37,13 @@ types_run :: proc(o: Options, pipe, caller: string) -> cli_protocol.Status {
 		command = command[:],
 	}
 	encoded := cli_protocol.request_encode(request, context.temp_allocator)
-	response, status := send(pipe, encoded, true)
+	response: control.Response
+	status := connected
+	if connected == .Ok {
+		reply, reply_status := send_on(&client, encoded, true)
+		response = reply
+		status = reply_status
+	}
 	text := response.text
 	included := true
 	#partial switch status {
