@@ -176,8 +176,10 @@ layout_state_deadline :: proc(app: ^App) -> (time.Tick, bool) {
 	return scheduled.deadline, ok && !motion_active(app)
 }
 
-// Schedules a save check; repeated calls before it runs coalesce into one.
+// Schedules a save check; repeated calls before it runs coalesce into one. Panes a mutation attached
+// are announced here, so pane.created precedes what else the tick reports about them.
 layout_state_touch :: proc(app: ^App) {
+	app_events_panes_attached(app)
 	idle, ok := app.layout_save.(Layout_Save_Idle)
 	if !ok {return}
 	app.layout_save = Layout_Save_Scheduled{idle.path, time.tick_add(clock_now(&app.clock), LAYOUT_SAVE_DELAY)}

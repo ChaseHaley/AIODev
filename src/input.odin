@@ -1,6 +1,7 @@
 package main
 
 import "aio:commands"
+import "aio:events"
 import "aio:input"
 import "aio:platform"
 import "aio:render"
@@ -457,11 +458,14 @@ on_wheel :: proc(app: ^App, w: ^Window, e: input.Mouse_Wheel_Event) {
 
 @(private)
 on_focus :: proc(app: ^App, w: ^Window, focused: bool) {
+	// Windows can repeat an activation, so only a window that gains focus is reported.
+	changed := w.focused != focused
 	w.focused = focused
 	w.dirty = true
 	if focused {
 		app.focus_jumps.window = w.id
 		window_focus_note(app, w)
+		if changed {events.push(&app.events, .Window_Focused, Event_Window{w.id})}
 	}
 	window_notices_sync(app)
 	if !focused {

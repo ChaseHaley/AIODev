@@ -224,6 +224,9 @@ Session :: struct {
 	title_changed, bell:                                      bool,
 	status_changed:                                           bool,
 	program_status_changed:                                   bool,
+	// OSC 9 and 777 notifications kept while the app wants them, under `mutex`; see notifications.odin.
+	notifications_wanted, notifications_ready:                bool,
+	notifications:                                            [dynamic]Notification,
 	program_statuses:                                         [PROGRAM_STATUS_LIMIT]Stored_Status,
 	program_status_count:                                     int,
 	program_status_enabled:                                   bool,
@@ -321,6 +324,7 @@ session_new :: proc(geometry: Geometry, allocator: runtime.Allocator) -> ^Sessio
 	s.geometry = geometry
 	s.queue.pending.allocator = allocator
 	s.search_matches.allocator = allocator
+	s.notifications.allocator = allocator
 	pattern_init(&s.pattern, s)
 	return s
 }
@@ -343,6 +347,7 @@ destroy :: proc(s: ^Session) {
 	ghostty.key_encoder_free(s.key_encoder)
 	ghostty.terminal_free(s.terminal)
 	clear_program_status(s, .All)
+	destroy_notifications(s.notifications)
 	delete(s.queue.pending)
 	delete(s.search_matches)
 	pattern_destroy(&s.pattern, s)
@@ -386,6 +391,7 @@ ghostty_create :: proc(s: ^Session, g: Geometry, session_options: Options) -> Er
 		{.Title_Changed, rawptr(title_changed)},
 		{.Pwd_Changed, rawptr(title_changed)},
 		{.Reset, rawptr(title_changed)},
+		{.Desktop_Notification, rawptr(on_notification)},
 		{.Render_Hold, rawptr(render_hold)},
 		{.Semantic_Prompt, rawptr(semantic_prompt)},
 		// Unlimited: the engine's default byte cap, about one page, would prune before the line limit.

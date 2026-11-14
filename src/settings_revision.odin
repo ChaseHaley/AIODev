@@ -1,5 +1,6 @@
 package main
 
+import "aio:events"
 import "aio:settings"
 import "aio:term"
 import "aio:ui"
@@ -164,6 +165,7 @@ reload_settings :: proc(app: ^App, announce := true) {
 	if read.read_error == nil {publication = Publish_Reloaded{read.source}}
 	settings_revision_apply(app, read.loaded, &read.diagnostics, read.read_error, publication)
 	settings_read_report(app, &read)
+	events.push(&app.events, .Settings_Reloaded, Event_Empty{})
 	if announce {
 		base = settings.profile_base(&app.settings.profiles)
 		if previous_shell != base.command || previous_directory != base.directory {

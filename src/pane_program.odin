@@ -1,6 +1,7 @@
 package main
 
 import "aio:agent"
+import "aio:events"
 import "aio:program_art"
 import "aio:procinfo"
 import "aio:settings"
@@ -24,7 +25,7 @@ program_bridges := [?]string{"wsl", "ssh", "mosh", "mosh-client", "docker", "pod
 // Programs are polled only while program icons are shown; otherwise each lookup samples a
 // snapshot taken at that moment. Retained policy: polling costs a snapshot every interval.
 program_polling :: proc(app: ^App) -> bool {
-	return app.settings.tabs.program_icons
+	return app.settings.tabs.program_icons || events.wants(&app.events, .Pane_Process_Changed)
 }
 
 // The bundled artwork for an executable stem or reported app key.
@@ -101,11 +102,13 @@ program_update :: proc(
 	processes: []procinfo.Process_Info,
 	root: u32,
 ) -> bool {
+	previous := program_polled(entry)
 	apps := program_reporters(entry)
 	index := procinfo.process_program(
 		processes, root, apps, program_polled(entry), program_at_root(app, processes, root),
 	)
 	if index < 0 {
+		if previous != 0 {app_events_process(app, entry, processes, root, -1)}
 		// A program seen once never showed, so its end changes nothing drawn or saved.
 		if _, seen := entry.program.(Program_Seen); seen {entry.program = nil; return false}
 		if !program_forget(entry) {return false}
@@ -114,6 +117,7 @@ program_update :: proc(
 	}
 	id := processes[index].id
 	stem := procinfo.executable_stem(processes[index].executable)
+	if previous != id {app_events_process(app, entry, processes, root, index)}
 	adopted := false
 	switch &program in entry.program {
 	case nil:

@@ -1,5 +1,6 @@
 package main
 
+import "aio:events"
 import "aio:input"
 import "aio:layout"
 import "aio:platform"
@@ -95,10 +96,15 @@ tear_off_window_show :: proc(app: ^App, preview: ^Window, name: string) -> bool 
 	return false
 }
 
-// A committed tear-off's workspace becomes an ordinary listed one, owning its suggested `name`.
-window_preview_publish :: proc(preview: ^Window, name: string) {
+// A committed tear-off's workspace becomes an ordinary listed one, owning its suggested `name`. Its
+// workspace and tabs were kept quiet while it was provisional, so they are announced now.
+window_preview_publish :: proc(app: ^App, preview: ^Window, name: string) {
 	preview.workspace.provisional = false
 	preview.workspace.name = name
+	events.push(&app.events, .Workspace_Created, Event_Workspace{preview.workspace.id})
+	for tab in preview.workspace.tabs {
+		events.push(&app.events, .Tab_Created, Event_Tab{tab.id, preview.workspace.id})
+	}
 }
 
 // A small live picture of what a drag would carry into a new window.
