@@ -97,8 +97,10 @@ INSTANCE_VARIABLE :: "AIODEV_INSTANCE"
 CLI_VARIABLE :: "AIODEV_CLI"
 
 // `pane` is the session id the launch serves and `key` the pane's lasting key. The shell learns the id
-// from AIODEV_PANE, so the aio command line acts on "here" by default, and finds aio itself on PATH and
-// in AIODEV_CLI, which names the aio that matches this AIODev even when another aio comes first on PATH.
+// from AIODEV_PANE, so the aio command line acts on "here" by default. This AIODev's folder comes first
+// on the shell's PATH, so `aio` there is the aio beside this AIODev, the only one that trusts it, even
+// when another aio such as an installed release is on PATH too. AIODEV_CLI names the same aio for a
+// program that resets PATH or runs in another shell.
 @(private)
 session_config :: proc(
 	app: ^App,
@@ -131,7 +133,7 @@ session_config :: proc(
 		command_line = settings.shell_command_line(command, app.settings.shell.integration),
 		title = title,
 		environment = environment[:],
-		path_append = app.cli_directory,
+		path_prepend = app.cli_directory,
 		refresh_environment = app.settings.shell.refresh_environment,
 		working_directory = directory,
 		geometry = geometry,

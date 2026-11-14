@@ -26,8 +26,8 @@ Cli_Pipe_Failed :: struct {}
 CLI_EXECUTABLE :: "aio.exe"
 
 // The aio command line as App embeds it: the pipe it reaches the app through, the directory holding
-// aio.exe beside this executable, which each shell's PATH and AIODEV_CLI get (empty when aio.exe is
-// missing), and the connections `aio events` turned into event streams.
+// aio.exe beside this executable, which goes first on each shell's PATH and names AIODEV_CLI (empty when
+// aio.exe is missing), and the connections `aio events` turned into event streams.
 Cli_State :: struct {
 	cli:             Cli_Pipe,
 	cli_directory:   string,

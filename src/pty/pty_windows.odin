@@ -167,30 +167,61 @@ apply_environment_override :: proc(
 	return {}
 }
 
-// Adds `directory` as the last PATH entry, or sets PATH to it when the block has none.
+// Puts `directory` first on PATH, dropping any later entry naming the same directory (compared as
+// Windows does: case-insensitively, ignoring a trailing backslash), or sets PATH to it when the
+// block has none.
 @(private, require_results)
-append_path :: proc(
+prepend_path :: proc(
 	entries: ^[dynamic]Environment_Entry,
 	directory: string,
 	allocator: runtime.Allocator,
 ) -> Spawn_Error {
 	path_name := [4]u16{'P', 'A', 'T', 'H'}
 	for &existing in entries^ {
-		if compare_environment(environment_name(existing.text), path_name[:]) != CSTR_EQUAL {continue}
+		name := environment_name(existing.text)
+		if compare_environment(name, path_name[:]) != CSTR_EQUAL {continue}
 		addition := w.utf8_to_wstring(directory, allocator)
 		if addition == nil {return {.Out_Of_Memory, 0}}
 		defer delete(addition, allocator)
 		added := slice.from_ptr(cast(^u16)addition, len(addition))
-		combined, err := make([]u16, len(existing.text) + 1 + len(added) + 1, allocator)
+		value := existing.text[min(len(name) + 1, len(existing.text)):]
+		// Room for "PATH=", the directory, a separator before each kept entry and the terminator.
+		combined, err := make([]u16, len(name) + 1 + len(added) + len(value) + 2, allocator)
 		if err != nil {return {.Out_Of_Memory, 0}}
-		copy(combined, existing.text)
-		combined[len(existing.text)] = ';'
-		copy(combined[len(existing.text) + 1:], added)
+		length := copy(combined, name)
+		combined[length] = '='
+		length += 1
+		length += copy(combined[length:], added)
+		start := 0
+		for i in 0 ..= len(value) {
+			if i < len(value) && value[i] != ';' {continue}
+			segment := value[start:i]
+			start = i + 1
+			if len(segment) == 0 || same_path_entry(segment, added) {continue}
+			combined[length] = ';'
+			length += 1
+			length += copy(combined[length:], segment)
+		}
+		combined[length] = 0
 		delete(existing.owned, allocator)
-		existing = {text = combined[:len(combined) - 1], owned = cstring16(raw_data(combined))}
+		existing = {text = combined[:length], owned = cstring16(raw_data(combined))}
 		return {}
 	}
 	return apply_environment_override(entries, {"PATH", directory}, allocator)
+}
+
+// The UTF-16 form of same_directory for environment block text: case-insensitive, ignoring
+// trailing backslashes.
+@(private, require_results)
+same_path_entry :: proc(a, b: []u16) -> bool {
+	trim :: proc(text: []u16) -> []u16 {
+		end := len(text)
+		for end > 0 && text[end - 1] == '\\' {end -= 1}
+		return text[:end]
+	}
+	left, right := trim(a), trim(b)
+	if len(left) == 0 || len(right) == 0 {return len(left) == len(right)}
+	return compare_environment(left, right) == CSTR_EQUAL
 }
 
 @(private)
@@ -225,7 +256,7 @@ environment_block :: proc(
 	overrides: []Env_Var,
 	allocator: runtime.Allocator,
 	refresh: bool,
-	path_append: string = "",
+	path_prepend: string = "",
 ) -> (
 	[]u16,
 	Spawn_Error,
@@ -271,8 +302,8 @@ environment_block :: proc(
 			return nil, err
 		}
 	}
-	if path_append != "" {
-		if err := append_path(&entries, path_append, allocator); err.kind != .None {return nil, err}
+	if path_prepend != "" {
+		if err := prepend_path(&entries, path_prepend, allocator); err.kind != .None {return nil, err}
 	}
 	sort_environment(entries[:])
 	return serialize_environment(entries[:], allocator)
@@ -326,7 +357,7 @@ spawn :: proc(options: Spawn_Options, allocator := context.allocator) -> (Pty, S
 		options.environment,
 		allocator,
 		options.refresh_environment,
-		options.path_append,
+		options.path_prepend,
 	)
 	if env_err.kind != .None {
 		return {}, env_err
