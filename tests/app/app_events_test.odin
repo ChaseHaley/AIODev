@@ -71,7 +71,7 @@ seen_list :: proc(seen: []Seen, kind: events.Kind) -> string {
 invoke :: proc(state: ^app.App, caller: u32, args: ..string) -> app.Outcome {
 	invocation, err := commands.parse_invocation(&state.registry, args, context.temp_allocator)
 	if err.advice != "" {return {status = .Usage, message = err.advice}}
-	return app.command_execute(state, app.Control_Request{caller}, invocation)
+	return app.command_execute(state, app.Control_Request{caller = caller, origin = .Cli}, invocation)
 }
 
 // An app with real idle-shell panes, settled through its first ticks, listening for every kind.

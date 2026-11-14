@@ -646,7 +646,7 @@ settings_bindings_check :: proc(
 		// Validate against the runtime command's declared defaults, as a fresh registry holds them.
 		command := item
 		command.shortcuts = command.defaults
-		if _, err := commands.register_runtime(&registry, command); err != .None {
+		if _, err := commands.register_runtime(&registry, command, RUNTIME_COMMAND_FIRST); err != .None {
 			return "Could not validate shortcuts.", ""
 		}
 	}

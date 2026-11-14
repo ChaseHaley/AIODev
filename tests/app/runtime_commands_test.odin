@@ -39,7 +39,8 @@ runtime_commands_share_fields_origins_bindings_and_catalogue :: proc(t: ^testing
 	state := app.App{registry = commands.create(), runtime_runner = runtime_bridge_runner}
 	defer commands.destroy(&state.registry)
 	if !testing.expect_value(t, app.register_actions(&state.registry), commands.Error.None) {return}
-	id, register_error := commands.register_runtime(&state.registry, {name = "build", title = "Build project", category = "Project", keywords = "compile", source = "init.lua:12"})
+	id, register_error := commands.register_runtime(&state.registry, {name = "build", title = "Build project",
+		category = "Project", keywords = "compile", source = "init.lua:12"}, app.RUNTIME_COMMAND_FIRST)
 	if !testing.expect_value(t, register_error, commands.Error.None) {return}
 	runtime_bridge_seen = {}
 	fields :: `{"target":"all","options":{"clean":true}}`
@@ -124,7 +125,7 @@ runtime_binding_conflicts_report_runtime_source_lines :: proc(t: ^testing.T) {
 	defer commands.destroy(&registry)
 	if !testing.expect_value(t, app.register_actions(&registry), commands.Error.None) {return}
 	for name in ([?]string{"build", "deploy"}) {
-		_, err := commands.register_runtime(&registry, {name = name, title = name})
+		_, err := commands.register_runtime(&registry, {name = name, title = name}, app.RUNTIME_COMMAND_FIRST)
 		if !testing.expect_value(t, err, commands.Error.None) {return}
 	}
 	s, diagnostics, parse_error := settings.parse("keys.build = Ctrl+Alt+B\nkeys.deploy = Ctrl+Alt+B\n")

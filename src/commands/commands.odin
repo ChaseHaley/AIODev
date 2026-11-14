@@ -49,8 +49,7 @@ Error :: enum {
 	Invalid_Name,
 }
 Registry :: struct {
-	items:         [dynamic]Command,
-	builtin_count: int,
+	items: [dynamic]Command,
 }
 
 create :: proc(allocator := context.allocator) -> Registry {
@@ -273,14 +272,14 @@ register :: proc(registry: ^Registry, command: Command) -> Error {
 	return .None
 }
 
-// Runtime names are unqualified. IDs remain unchanged until the runtime catalogue is cleared.
+// Runtime names are unqualified. IDs start at `first`, the first id the caller never gives a built-in,
+// and remain unchanged until the runtime catalogue is cleared.
 @(require_results)
-register_runtime :: proc(registry: ^Registry, command: Command) -> (Command_Id, Error) {
+register_runtime :: proc(registry: ^Registry, command: Command, first: Command_Id) -> (Command_Id, Error) {
 	if len(command.name) == 0 || strings.index_byte(command.name, '.') >= 0 {
 		return 0, .Invalid_Name
 	}
-	assert(registry.builtin_count >= 0)
-	next := u64(registry.builtin_count)
+	next := u64(first)
 	for item in registry.items {
 		next = max(next, u64(item.id) + 1)
 	}

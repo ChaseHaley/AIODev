@@ -63,12 +63,13 @@ runtime_registration_ids_names_and_removal :: proc(t: ^testing.T) {
 		shortcuts = {{0 = {.Q, {.Control}}}, 1}}), commands.Error.None)
 	testing.expect_value(t, commands.register(&registry, {id = 4, name = "reserved", title = "Reserved"}),
 		commands.Error.None)
-	registry.builtin_count = 5
+	FIRST :: commands.Command_Id(5)
 	first, first_error := commands.register_runtime(&registry, {name = "first", title = "First",
-		shortcuts = {{0 = {.F1, {}}}, 1}})
+		shortcuts = {{0 = {.F1, {}}}, 1}}, FIRST)
 	testing.expect_value(t, first_error, commands.Error.None)
 	testing.expect_value(t, first, commands.Command_Id(5))
-	second, second_error := commands.register_runtime(&registry, {id = first, name = "second", title = "Second"})
+	second, second_error := commands.register_runtime(&registry,
+		{id = first, name = "second", title = "Second"}, FIRST)
 	testing.expect_value(t, second_error, commands.Error.None)
 	testing.expect_value(t, second, commands.Command_Id(6))
 	first_command := commands.find(&registry, first)
@@ -77,20 +78,19 @@ runtime_registration_ids_names_and_removal :: proc(t: ^testing.T) {
 	testing.expect_value(t, first_command.name, "first")
 	testing.expect_value(t, commands.find(&registry, "second").id, second)
 	for name in ([?]string{"", "app.custom", ".custom", "custom."}) {
-		_, err := commands.register_runtime(&registry, {name = name, title = "Invalid"})
+		_, err := commands.register_runtime(&registry, {name = name, title = "Invalid"}, FIRST)
 		testing.expect_value(t, err, commands.Error.Invalid_Name)
 	}
 	for name in ([?]string{"reserved", "first"}) {
-		_, err := commands.register_runtime(&registry, {name = name, title = "Duplicate"})
+		_, err := commands.register_runtime(&registry, {name = name, title = "Duplicate"}, FIRST)
 		testing.expect_value(t, err, commands.Error.Duplicate_Name)
 	}
-	_, invalid_utf8 := commands.register_runtime(&registry, {name = "\xff", title = "Invalid"})
+	_, invalid_utf8 := commands.register_runtime(&registry, {name = "\xff", title = "Invalid"}, FIRST)
 	testing.expect_value(t, invalid_utf8, commands.Error.Invalid_UTF8)
 	testing.expect_value(t, len(registry.items), 4)
 	testing.expect_value(t, commands.find(&registry, "first").id, first)
 	commands.unregister_runtime(&registry)
 	testing.expect_value(t, len(registry.items), 2)
-	testing.expect_value(t, registry.builtin_count, 5)
 	testing.expect(t, commands.find(&registry, first) == nil)
 	testing.expect(t, commands.find(&registry, second) == nil)
 	testing.expect(t, commands.find(&registry, "first") == nil)
@@ -101,7 +101,8 @@ runtime_registration_ids_names_and_removal :: proc(t: ^testing.T) {
 	testing.expect(t, commands.find(&registry, "reserved") != nil)
 	commands.unregister_runtime(&registry)
 	testing.expect_value(t, len(registry.items), 2)
-	reloaded, reload_error := commands.register_runtime(&registry, {name = "first", title = "Reloaded"})
+	reloaded, reload_error := commands.register_runtime(&registry,
+		{name = "first", title = "Reloaded"}, FIRST)
 	testing.expect_value(t, reload_error, commands.Error.None)
 	testing.expect_value(t, reloaded, commands.Command_Id(5))
 }
@@ -116,7 +117,7 @@ runtime_metadata_is_owned_and_categories_honor_overrides :: proc(t: ^testing.T) 
 	bindings := [?]commands.Shortcut{{.F2, {}}}
 	id, err := commands.register_runtime(&registry, {name = value, title = value,
 		category = value, keywords = value, source = value, summary = value,
-		notes = notes[:], shortcuts = {bindings[:], len(bindings)}})
+		notes = notes[:], shortcuts = {bindings[:], len(bindings)}}, 0)
 	testing.expect_value(t, err, commands.Error.None)
 	text[0] = 'X'
 	notes[0] = {}
@@ -149,11 +150,10 @@ runtime_registration_allocation_failures_leave_no_command :: proc(t: ^testing.T)
 	for successful_allocations in 0 ..< 32 {
 		failure := Failure{context.allocator, successful_allocations}
 		registry := commands.create(runtime.Allocator{failing_allocator, &failure})
-		registry.builtin_count = 3
 		notes := [?]commands.Argument_Note{{argument = .Text, help = {"Description", "Default", "Example"}}}
 		id, err := commands.register_runtime(&registry, {name = "custom", title = "Custom",
 			category = "Scripts", keywords = "search", source = "init.lua", summary = "Summary",
-			notes = notes[:], shortcuts = {{0 = {.F1, {}}}, 1}})
+			notes = notes[:], shortcuts = {{0 = {.F1, {}}}, 1}}, 3)
 		if err == .None {
 			testing.expect_value(t, id, commands.Command_Id(3))
 			commands.unregister_runtime(&registry)
@@ -164,7 +164,6 @@ runtime_registration_allocation_failures_leave_no_command :: proc(t: ^testing.T)
 		}
 		testing.expect_value(t, err, commands.Error.Out_Of_Memory)
 		testing.expect_value(t, len(registry.items), 0)
-		testing.expect_value(t, registry.builtin_count, 3)
 		commands.destroy(&registry)
 	}
 	testing.expect(t, completed)

@@ -966,7 +966,6 @@ register_actions :: proc(registry: ^commands.Registry) -> commands.Error {
 		}
 		if err := commands.register(registry, command); err != .None {return err}
 	}
-	registry.builtin_count = len(registry.items)
 	return .None
 }
 
@@ -997,10 +996,13 @@ shortcut_action :: proc(app: ^App, e: input.Key_Event) -> (Action, bool) {
 	return {}, false
 }
 
+// The first runtime command id; every id below it is the built-in Action of that index.
+RUNTIME_COMMAND_FIRST :: commands.Command_Id(len(Action))
+
 // Built-in ids are the descriptor indices; runtime ids must never index the Action tables.
 @(require_results)
 action_builtin :: proc(id: commands.Command_Id) -> (Action, bool) {
-	if u64(id) >= u64(len(ACTIONS)) {return {}, false}
+	if id >= RUNTIME_COMMAND_FIRST {return {}, false}
 	return Action(id), true
 }
 
@@ -1103,10 +1105,11 @@ command_execute :: proc(app: ^App, ctx: Command_Context, invocation: commands.In
 	@(static, rodata)
 	descriptors := ACTIONS
 	invocation := invocation
-	command := commands.find(&app.registry, invocation.id)
-	if command == nil {return outcome_failure(.Usage, "unknown command; use aio commands")}
+	// The Action enum decides what is built in; only runtime commands live solely in the registry.
 	action, builtin := action_builtin(invocation.id)
 	if !builtin {
+		command := commands.find(&app.registry, invocation.id)
+		if command == nil {return outcome_failure(.Usage, "unknown command; use aio commands")}
 		if app.runtime_runner == nil {
 			return outcome_failure(.Failed, fmt.tprintf("no script defines %s", command.name))
 		}

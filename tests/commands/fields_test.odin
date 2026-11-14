@@ -188,7 +188,7 @@ fields_runtime_preserves_object_json_unchanged :: proc(t: ^testing.T) {
 	defer commands.destroy(&registry)
 	id, register_error := commands.register_runtime(&registry, {
 		name = "custom", title = "Custom", required = {.Text},
-	})
+	}, 0)
 	if !testing.expect_value(t, register_error, commands.Error.None) {return}
 	fields := " \n{\"pane\":false,\"command\":17,\"custom_value\":[true,{\"x\":1}]}\t"
 	result := fields_parse(t, &registry, "custom", fields)
