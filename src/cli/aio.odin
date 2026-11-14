@@ -28,12 +28,13 @@ USAGE_FORMAT :: `Usage: aio [--instance <name>] [--json] <command> [options] [--
        aio help [<command>]
        aio version
        aio agent-session (claude | codex)
+       aio turn-hook (claude | codex) (prompt | stop | edit)
 
 Runs AIODev commands from scripts and coding agents. Every command in the everything palette
 runs by name, such as aio tab.next; aio commands lists AIODev's commands, and aio help
 <command> explains one's options, their defaults and an example of each, for aio's own wait,
-events, exec, config, types, commands, help, version and agent-session too. aio version prints aio's
-build and the running AIODev's, and aio warns on stderr when the two differ.
+events, exec, config, types, commands, help, version, agent-session and turn-hook too. aio version prints
+aio's build and the running AIODev's, and aio warns on stderr when the two differ.
 
 Panes   --pane takes a pane id, a pane name, here or focused. Inside an AIODev pane the
         default is here, the pane aio runs in; elsewhere it is the focused pane.
@@ -83,6 +84,9 @@ Lua     aio exec runs a Lua script with the aio API against AIODev, or one actio
 Hooks   aio agent-session runs from a Claude Code or Codex SessionStart hook and records the
         session the hook names, so the pane can resume it; the "Install agent session hooks"
         command sets it up.
+        aio turn-hook runs from a Claude Code or Codex UserPromptSubmit, Stop or PreToolUse hook
+        and tells AIODev when a turn starts or ends and which files it is about to edit, while
+        "Record agent turns" is on; the "Install agent turn hooks" command sets it up.
 Exit    %d ok, %d failed, %d bad command line, %d pane missing or ambiguous,
         %d AIODev unreachable, %d control pipe server unverified, %d interrupted.
 
@@ -294,7 +298,7 @@ local_commands := [?]cli_protocol.Command_Report {
 			{
 				option = "<command>",
 				description = "the command to explain: any name aio commands lists, or wait, events, exec, " +
-				"config, types, commands, help, version or agent-session",
+				"config, types, commands, help, version, agent-session or turn-hook",
 				default = "none (prints aio's usage)",
 				example = "pane.split",
 			},
@@ -321,6 +325,29 @@ local_commands := [?]cli_protocol.Command_Report {
 				description = "the harness whose hook runs it",
 				default = "none (required)",
 				example = "claude",
+			},
+		},
+	},
+	{
+		name = "turn-hook",
+		title = "Report an agent turn",
+		usage = "turn-hook (claude | codex) (prompt | stop | edit)",
+		summary = "Run by a Claude Code or Codex UserPromptSubmit, Stop or PreToolUse hook: tells AIODev " +
+		"when a turn starts or ends and which files it is about to edit, so Agent changes can show " +
+		"them exactly. Needs no control pipe, prints nothing and succeeds outside an AIODev pane or " +
+		"while turn recording is off; the \"Install agent turn hooks\" command sets it up.",
+		options = {
+			{
+				option = "claude | codex",
+				description = "the harness whose hook runs it",
+				default = "none (required)",
+				example = "claude",
+			},
+			{
+				option = "prompt | stop | edit",
+				description = "the hook's event: UserPromptSubmit, Stop or a file edit's PreToolUse",
+				default = "none (required)",
+				example = "prompt",
 			},
 		},
 	},

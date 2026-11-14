@@ -337,9 +337,9 @@ COMMAND :: `"C:/Program Files/AIODev/aio.exe" agent-session claude`
 @(test)
 hooks_install_into_a_missing_or_empty_file :: proc(t: ^testing.T) {
 	for text in ([?]string{"", "  \n", "{}"}) {
-		result, change := agent.hooks_install(text, COMMAND, 10, context.temp_allocator)
+		result, change := agent.hooks_install(text, "SessionStart", "", COMMAND, 10, context.temp_allocator)
 		testing.expect_value(t, change, agent.Hook_Install.Added)
-		_, present := agent.hooks_install(result, COMMAND, 10, context.temp_allocator)
+		_, present := agent.hooks_install(result, "SessionStart", "", COMMAND, 10, context.temp_allocator)
 		testing.expect_value(t, present, agent.Hook_Install.Present)
 	}
 }
@@ -347,7 +347,7 @@ hooks_install_into_a_missing_or_empty_file :: proc(t: ^testing.T) {
 @(test)
 hooks_install_keeps_the_rest_of_the_file_as_written :: proc(t: ^testing.T) {
 	original := "{\n  \"statusLine\": {\"type\": \"command\", \"command\": \"node x.js\"},\n  \"model\": \"opus\"\n}\n"
-	result, change := agent.hooks_install(original, COMMAND, 10, context.temp_allocator)
+	result, change := agent.hooks_install(original, "SessionStart", "", COMMAND, 10, context.temp_allocator)
 	testing.expect_value(t, change, agent.Hook_Install.Added)
 	testing.expect(t, strings.contains(result, "\"statusLine\": {\"type\": \"command\", \"command\": \"node x.js\"},\n"))
 	testing.expect(t, strings.has_suffix(result, "\"model\": \"opus\"\n}\n"))
@@ -363,18 +363,18 @@ hooks_install_keeps_the_rest_of_the_file_as_written :: proc(t: ^testing.T) {
 @(test)
 hooks_install_beside_existing_hooks :: proc(t: ^testing.T) {
 	other_event := `{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"say done"}]}]}}`
-	result, change := agent.hooks_install(other_event, COMMAND, 10, context.temp_allocator)
+	result, change := agent.hooks_install(other_event, "SessionStart", "", COMMAND, 10, context.temp_allocator)
 	testing.expect_value(t, change, agent.Hook_Install.Added)
 	testing.expect(t, strings.contains(result, `"Stop":[{"hooks":[{"type":"command","command":"say done"}]}]`))
 	other_start := `{"hooks":{"SessionStart":[{"matcher":"startup","hooks":[{"type":"command","command":"load"}]}]}}`
-	result, change = agent.hooks_install(other_start, COMMAND, 10, context.temp_allocator)
+	result, change = agent.hooks_install(other_start, "SessionStart", "", COMMAND, 10, context.temp_allocator)
 	testing.expect_value(t, change, agent.Hook_Install.Added)
 	value, _ := json.parse_string(result, allocator = context.temp_allocator)
 	groups := value.(json.Object)["hooks"].(json.Object)["SessionStart"].(json.Array)
 	testing.expect_value(t, len(groups), 2)
 	testing.expect(t, strings.contains(result, `{"matcher":"startup","hooks":[{"type":"command","command":"load"}]}`))
 	empty := `{"hooks":{"SessionStart":[ ]}}`
-	result, change = agent.hooks_install(empty, COMMAND, 10, context.temp_allocator)
+	result, change = agent.hooks_install(empty, "SessionStart", "", COMMAND, 10, context.temp_allocator)
 	testing.expect_value(t, change, agent.Hook_Install.Added)
 	_, err := json.parse_string(result, allocator = context.temp_allocator)
 	testing.expect_value(t, err, json.Error.None)
@@ -389,15 +389,88 @@ hooks_install_leaves_unexpected_files_alone :: proc(t: ^testing.T) {
 		"{ // comment\n}",
 		`{"a":`,
 	}) {
-		_, change := agent.hooks_install(text, COMMAND, 10, context.temp_allocator)
+		_, change := agent.hooks_install(text, "SessionStart", "", COMMAND, 10, context.temp_allocator)
 		testing.expectf(t, change == .Invalid, "%q gave %v", text, change)
 	}
 }
 
 @(test)
 hooks_install_keeps_a_byte_order_mark :: proc(t: ^testing.T) {
-	result, change := agent.hooks_install(agent.UTF8_BOM + `{"model":"opus"}`, COMMAND, 10, context.temp_allocator)
+	result, change := agent.hooks_install(agent.UTF8_BOM + `{"model":"opus"}`, "SessionStart", "", COMMAND, 10, context.temp_allocator)
 	testing.expect_value(t, change, agent.Hook_Install.Added)
 	testing.expect(t, strings.has_prefix(result, agent.UTF8_BOM + "{"))
 	testing.expect(t, strings.has_suffix(result, `"model":"opus"}`))
+}
+
+@(test)
+hooks_install_puts_each_event_in_the_same_file :: proc(t: ^testing.T) {
+	prompt, change := agent.hooks_install("", "UserPromptSubmit", "", COMMAND, 10, context.temp_allocator)
+	testing.expect_value(t, change, agent.Hook_Install.Added)
+	// The same command under another event is not the command already being run.
+	stop, stop_change := agent.hooks_install(prompt, "Stop", "", COMMAND, 10, context.temp_allocator)
+	testing.expect_value(t, stop_change, agent.Hook_Install.Added)
+	edit, edit_change := agent.hooks_install(
+		stop,
+		"PreToolUse",
+		"Edit|Write",
+		COMMAND,
+		10,
+		context.temp_allocator,
+	)
+	testing.expect_value(t, edit_change, agent.Hook_Install.Added)
+	value, parse_error := json.parse_string(edit, allocator = context.temp_allocator)
+	testing.expect_value(t, parse_error, json.Error.None)
+	hooks := value.(json.Object)["hooks"].(json.Object)
+	testing.expect_value(t, len(hooks), 3)
+	for event in ([]string{"UserPromptSubmit", "Stop", "PreToolUse"}) {
+		groups, is_array := hooks[event].(json.Array)
+		testing.expectf(t, is_array && len(groups) == 1, "%s should hold one group", event)
+		_, present := agent.hooks_install(edit, event, "", COMMAND, 10, context.temp_allocator)
+		testing.expect_value(t, present, agent.Hook_Install.Present)
+	}
+}
+
+@(test)
+hooks_install_writes_the_matcher_on_the_group :: proc(t: ^testing.T) {
+	matcher := "Edit|Write|MultiEdit|NotebookEdit"
+	result, change := agent.hooks_install("", "PreToolUse", matcher, COMMAND, 10, context.temp_allocator)
+	testing.expect_value(t, change, agent.Hook_Install.Added)
+	value, _ := json.parse_string(result, allocator = context.temp_allocator)
+	groups := value.(json.Object)["hooks"].(json.Object)["PreToolUse"].(json.Array)
+	group := groups[0].(json.Object)
+	testing.expect_value(t, string(group["matcher"].(json.String)), matcher)
+	handlers := group["hooks"].(json.Array)
+	testing.expect_value(t, string(handlers[0].(json.Object)["command"].(json.String)), COMMAND)
+	none, none_change := agent.hooks_install("", "Stop", "", COMMAND, 10, context.temp_allocator)
+	testing.expect_value(t, none_change, agent.Hook_Install.Added)
+	testing.expect(t, !strings.contains(none, `"matcher"`))
+	// A second group of an event that already has one keeps the first.
+	again, again_change := agent.hooks_install(
+		result,
+		"PreToolUse",
+		"apply_patch",
+		`& "C:/aio.exe" turn-hook codex edit`,
+		10,
+		context.temp_allocator,
+	)
+	testing.expect_value(t, again_change, agent.Hook_Install.Added)
+	value, _ = json.parse_string(again, allocator = context.temp_allocator)
+	groups = value.(json.Object)["hooks"].(json.Object)["PreToolUse"].(json.Array)
+	testing.expect_value(t, len(groups), 2)
+	matchers: [dynamic]string
+	matchers.allocator = context.temp_allocator
+	for group_value in groups {
+		append(&matchers, string(group_value.(json.Object)["matcher"].(json.String)))
+	}
+	testing.expect(t, slice.contains(matchers[:], "apply_patch"))
+	testing.expect(t, slice.contains(matchers[:], "Edit|Write|MultiEdit|NotebookEdit"))
+}
+
+@(test)
+hooks_install_event_of_the_wrong_shape_is_left_alone :: proc(t: ^testing.T) {
+	_, change := agent.hooks_install(`{"hooks":{"Stop":{}}}`, "Stop", "", COMMAND, 10, context.temp_allocator)
+	testing.expect_value(t, change, agent.Hook_Install.Invalid)
+	// Another event's wrong shape does not matter.
+	_, other := agent.hooks_install(`{"hooks":{"Stop":{}}}`, "PreToolUse", "", COMMAND, 10, context.temp_allocator)
+	testing.expect_value(t, other, agent.Hook_Install.Added)
 }
