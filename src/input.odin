@@ -277,6 +277,12 @@ on_key :: proc(app: ^App, w: ^Window, e: input.Key_Event) {
 		overlay_input(app, w, kind, key)
 		return
 	}
+	// Arrange mode takes every key the surfaces above passed on, and pauses while one of them has the keys.
+	if arrange_active(w) {
+		key_suppress(w, e)
+		arrange_key(app, w, e, key.logical)
+		return
+	}
 	if settings_active(w) {
 		settings_key(app, w, e)
 		return
@@ -295,6 +301,7 @@ on_text :: proc(app: ^App, w: ^Window, text: string) {
 		overlay_input(app, w, kind, Overlay_Text{text})
 		return
 	}
+	if arrange_active(w) {return}
 	status_inbox_close(w)
 	if settings_active(w) {
 		ui.editor_text(&w.editor, text)

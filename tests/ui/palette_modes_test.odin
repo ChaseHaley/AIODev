@@ -600,7 +600,7 @@ palette_scope_and_query_never_overlap :: proc(t: ^testing.T) {
 
 @(private)
 hint_labels :: proc(p: ^ui.Palette) -> []string {
-	hints: [6]ui.Palette_Key_Hint
+	hints: [6]ui.Key_Hint
 	count := ui.palette_key_hints(p, &hints)
 	labels := make([]string, count, context.temp_allocator)
 	for hint, i in hints[:count] {labels[i] = hint.label}

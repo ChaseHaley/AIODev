@@ -66,6 +66,8 @@ Window :: struct {
 	divider: Divider_Gesture,
 	// The pane or tab drag this window's pointer holds; see drag.odin.
 	drag: Drag,
+	// Arrange mode in this window, and its outline and key card; see arrange_mode.odin.
+	arrange: Arrange_Mode,
 	using floats: Float_Window_State,
 	tab_incoming: Tab_Incoming,
 	// The pane under the pointer. Its header shows its buttons, as the focused pane's does.
@@ -718,6 +720,7 @@ build_frame :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 	cursor_crossing_draw(app, w)
 	cursor_blink_observe(w, blinking, clock_now(&app.clock))
 	if result := pane_drag_draw(app, w); result != .Ok {return result}
+	if result := arrange_outline_draw(app, w); result != .Ok {return result}
 	if result := tab_drag_draw(app, w); result != .Ok {return result}
 	if result := window_leader_draw(app, w); result != .Ok {return result}
 	if result := workspace_overview_frame_end(app, w, content); result != .Ok {return result}
@@ -741,6 +744,7 @@ build_frame :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 		}
 	}
 	if result := hidden_panes_draw(app, w); result != .Ok {return result}
+	if result := arrange_card_draw(app, w); result != .Ok {return result}
 	if palette_visible(app, w) {
 		result := ui.palette_draw(
 			&app.palette, &w.list, &w.ui_text, app.theme, size.x, size.y, w.scale,

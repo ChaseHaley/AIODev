@@ -121,12 +121,6 @@ Palette_Mode_Info :: struct {
 	.Unassigned = .Commands,
 }
 
-// One footer entry: its keycaps, joined by a slash, and what they do.
-Palette_Key_Hint :: struct {
-	keys:  [2]string,
-	label: string,
-}
-
 // At most navigate, three selection actions, keyboard search, and close.
 @(private) PALETTE_HINT_CAP :: 6
 
@@ -1632,7 +1626,7 @@ draw_footer :: proc(
 		                 l.footer.y + (l.footer.height - hint_text.line_height) / 2 + hint_text.ascent,
 		                 error ? theme.error : theme.muted, max(1, l.footer.width - 24 * scale))
 	}
-	hints: [PALETTE_HINT_CAP]Palette_Key_Hint
+	hints: [PALETTE_HINT_CAP]Key_Hint
 	count := palette_key_hints(p, &hints)
 	if count == 0 {return .Ok}
 	keycap := text_styled(text, .Detail)
@@ -1642,13 +1636,13 @@ draw_footer :: proc(
 	// Close is pinned right; the other hints run left to right and stop before they would meet it.
 	last := hints[count - 1]
 	last_x := l.footer.x + l.footer.width - inset - key_hint_width(&keycap, &label, last, scale)
-	if result := draw_key_hint(list, &keycap, &label, theme, last, last_x, l.footer, baseline, scale);
+	if result := key_hint_draw(list, &keycap, &label, theme, last, last_x, l.footer, baseline, scale);
 	   result != .Ok {return result}
 	x := l.footer.x + inset
 	for hint in hints[:count - 1] {
 		width := key_hint_width(&keycap, &label, hint, scale)
 		if x + width > last_x - gap {break}
-		if result := draw_key_hint(list, &keycap, &label, theme, hint, x, l.footer, baseline, scale);
+		if result := key_hint_draw(list, &keycap, &label, theme, hint, x, l.footer, baseline, scale);
 		   result != .Ok {return result}
 		x += width + gap
 	}
@@ -1656,9 +1650,9 @@ draw_footer :: proc(
 }
 
 // The keys that apply to the current selection or open control, ending with the closing key.
-palette_key_hints :: proc(p: ^Palette, out: ^[PALETTE_HINT_CAP]Palette_Key_Hint) -> int {
+palette_key_hints :: proc(p: ^Palette, out: ^[PALETTE_HINT_CAP]Key_Hint) -> int {
 	count := 0
-	add :: proc(out: ^[PALETTE_HINT_CAP]Palette_Key_Hint, count: ^int, first, second, label: string) {
+	add :: proc(out: ^[PALETTE_HINT_CAP]Key_Hint, count: ^int, first, second, label: string) {
 		out[count^] = {keys = {first, second}, label = label}
 		count^ += 1
 	}
@@ -1710,42 +1704,6 @@ palette_key_hints :: proc(p: ^Palette, out: ^[PALETTE_HINT_CAP]Palette_Key_Hint)
 	add(out, &count, KEY_SEARCH_LABEL, "", "Search by keys")
 	add(out, &count, PALETTE_CANCEL_LABEL, "", "Close")
 	return count
-}
-
-@(private)
-key_hint_width :: proc(keycap, label: ^Text, hint: Palette_Key_Hint, scale: f32) -> f32 {
-	width := keycap_width(keycap, hint.keys[0], scale)
-	if hint.keys[1] != "" {
-		width += text_width(label, "/") + 2 * SPACE_1 * scale + keycap_width(keycap, hint.keys[1], scale)
-	}
-	return width + SPACE_1 * scale + text_width(label, hint.label)
-}
-
-@(private)
-draw_key_hint :: proc(
-	list: ^render.Draw_List,
-	keycap, label: ^Text,
-	theme: Theme,
-	hint: Palette_Key_Hint,
-	x: f32,
-	footer: render.Rect,
-	baseline: f32,
-	scale: f32,
-) -> render.Build_Status {
-	pen := x
-	for key, i in hint.keys {
-		if key == "" {continue}
-		if i > 0 {
-			pen += 4 * scale
-			if result := draw_text(label, list, "/", pen, baseline, theme.faint); result != .Ok {return result}
-			pen += text_width(label, "/") + 4 * scale
-		}
-		if result := keycap_draw(list, keycap, theme, key, pen, footer.y, footer.height, scale); result != .Ok {
-			return result
-		}
-		pen += keycap_width(keycap, key, scale)
-	}
-	return draw_text(label, list, hint.label, pen + SPACE_1 * scale, baseline, theme.muted)
 }
 
 @(private)

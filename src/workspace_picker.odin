@@ -80,8 +80,8 @@ Workspace_Picker :: struct {
 // What a picker position chooses. Each part of the picker lays its targets out in one order:
 //
 // - browsing, a row menu or a rename: each workspace row, then each of WORKSPACE_ACTIONS;
-// - a keyboard move: each workspace row, then a new workspace;
-// - a drag move: each workspace row, then a new workspace and a new window;
+// - a keyboard move of tabs: each workspace row, then a new workspace;
+// - a drag move, or a keyboard move of a pane: each workspace row, then a new workspace and a new window;
 // - icons: each preset icon, then the emoji field, its Apply button and the icon colour button;
 // - tint: each preset colour, then Back to icons.
 Workspace_Picker_Target :: union {
@@ -110,7 +110,8 @@ Picker_Action :: struct {
 // A move's destination row that creates a workspace for the content.
 Picker_New_Workspace :: struct {}
 
-// A drag's destination row that tears the content off into a new window.
+// A move's destination row that tears the content off into a new window, which a drag and a pane's keyboard
+// move offer.
 Picker_New_Window :: struct {}
 
 // A preset icon cell, by its index in WORKSPACE_ICONS.
@@ -201,6 +202,12 @@ workspace_picker_held :: proc(p: ^Workspace_Picker) -> bool {
 	return moving && move.drag
 }
 
+// Whether a move offers a new window: every drag does, and a pane's keyboard move.
+@(private)
+workspace_move_offers_window :: proc(move: Workspace_Move_Target) -> bool {
+	return move.drag || (!move.request.whole_tab && move.request.group == 0)
+}
+
 // The list shows workspaces to switch to: rows offer their menu and a press may reorder them.
 workspace_picker_browsing :: proc(p: ^Workspace_Picker) -> bool {
 	list, listing := p.state.(Workspace_Picker_List)
@@ -221,7 +228,7 @@ workspace_picker_count :: proc(w: ^Window) -> int {
 	case Workspace_Picker_Tint: return len(WORKSPACE_ICON_COLORS) + 1
 	}
 	if move, moving := workspace_picker_move(p); moving {
-		return len(p.rows) + (move.drag ? 2 : 1)
+		return len(p.rows) + (workspace_move_offers_window(move) ? 2 : 1)
 	}
 	return len(p.rows) + len(WORKSPACE_ACTIONS)
 }
@@ -270,7 +277,7 @@ workspace_picker_target_index :: proc(w: ^Window, target: Workspace_Picker_Targe
 	case Picker_New_Workspace:
 		if moving {return len(p.rows), true}
 	case Picker_New_Window:
-		if moving && move.drag {return len(p.rows) + 1, true}
+		if moving && workspace_move_offers_window(move) {return len(p.rows) + 1, true}
 	case Picker_Icon:
 		if icons && t.preset >= 0 && t.preset < len(WORKSPACE_ICONS) {return t.preset, true}
 	case Picker_Emoji_Field:

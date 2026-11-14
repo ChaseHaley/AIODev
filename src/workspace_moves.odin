@@ -83,6 +83,15 @@ workspace_move_new :: proc(app: ^App, w: ^Window, whole_tab: bool, index: int) {
 	workspace_move_choose(app, w, request, Workspace_Move_New{})
 }
 
+// Moves the pane a keyboard move names into a window of its own, the picker's New window row.
+workspace_move_new_window :: proc(app: ^App, w: ^Window, request: Workspace_Move_Request) {
+	workspace := workspace_find(app, request.workspace)
+	if workspace == nil {return}
+	index := tab_index_by_id(workspace, request.tab)
+	if index < 0 {return}
+	_ = pane_move_to_new_window(app, w, workspace.tabs[index], request.node)
+}
+
 workspace_move_choose :: proc(
 	app: ^App,
 	w: ^Window,
