@@ -182,7 +182,7 @@ help_for_client_commands_is_answered_locally :: proc(t: ^testing.T) {
 	testing.expect(t, local)
 	testing.expect_value(t, report.name, "wait")
 	testing.expect_value(t, len(report.options), 6)
-	for name in ([]string{"commands", "help", "version", "agent-session"}) {
+	for name in ([]string{"events", "commands", "help", "version", "agent-session"}) {
 		o, _ := cli.parse_options({"help", name}, "")
 		_, answered := cli.local_help(o)
 		testing.expectf(t, answered, "help %s should be answered by aio", name)
@@ -191,5 +191,39 @@ help_for_client_commands_is_answered_locally :: proc(t: ^testing.T) {
 		o, _ := cli.parse_options(args, "")
 		_, answered := cli.local_help(o)
 		testing.expectf(t, !answered, "%v should not be answered by aio", args)
+	}
+}
+
+@(test)
+events_subscribe_to_names_and_take_json_anywhere :: proc(t: ^testing.T) {
+	o, problem := cli.parse_options({"events", "pane.focused", "--json", "pane.exited"}, "")
+	testing.expect_value(t, problem, "")
+	testing.expect(t, o.streaming && o.json && !o.waiting && !o.version)
+	request := cli.request(o, "4", "", context.temp_allocator)
+	expected := [?]string{"4", "json", "", "app.events", "pane.focused", "pane.exited"}
+	if testing.expect_value(t, len(request), len(expected)) {
+		for item, i in expected {testing.expect_value(t, request[i], item)}
+	}
+	every, _ := cli.parse_options({"--json", "events"}, "")
+	all := cli.request(every, "", "", context.temp_allocator)
+	testing.expect_value(t, len(all), 4)
+	testing.expect_value(t, all[3], "app.events")
+	for args in ([][]string{{"--json", "events", "--json"}, {"events", "--pane", "3"}}) {
+		_, failure := cli.parse_options(args, "")
+		testing.expectf(t, failure != "", "%v should fail", args)
+	}
+}
+
+@(test)
+event_lines_print_name_then_fields :: proc(t: ^testing.T) {
+	fields, ok := cli.event_plain(`{"type":"pane.exited","pane":3,"exit_code":1}`, context.temp_allocator)
+	testing.expect(t, ok)
+	testing.expect_value(t, fields, "pane.exited\t{\"pane\":3,\"exit_code\":1}")
+	bare, bare_ok := cli.event_plain(`{"type":"app.quitting"}`, context.temp_allocator)
+	testing.expect(t, bare_ok)
+	testing.expect_value(t, bare, "app.quitting\t{}")
+	for line in ([]string{`{"pane":3,"type":"pane.bell"}`, `{"type":"pane.bell"`, `{"type":""}`, ``}) {
+		_, valid := cli.event_plain(line, context.temp_allocator)
+		testing.expectf(t, !valid, "%q should not parse", line)
 	}
 }

@@ -3,6 +3,7 @@ package main
 import "aio:cli_protocol"
 import "aio:commands"
 import "aio:control"
+import "aio:events"
 import "core:encoding/json"
 import "core:fmt"
 import "core:log"
@@ -24,12 +25,20 @@ Cli_Pipe_Failed :: struct {}
 @(private)
 CLI_EXECUTABLE :: "aio.exe"
 
-// The aio command line as App embeds it: the pipe it reaches the app through, and the directory holding
-// aio.exe beside this executable, which each shell's PATH and AIODEV_CLI get; empty when aio.exe is
-// missing.
+// The aio command line as App embeds it: the pipe it reaches the app through, the directory holding
+// aio.exe beside this executable, which each shell's PATH and AIODEV_CLI get (empty when aio.exe is
+// missing), and the connections `aio events` turned into event streams.
 Cli_State :: struct {
-	cli:           Cli_Pipe,
-	cli_directory: string,
+	cli:             Cli_Pipe,
+	cli_directory:   string,
+	cli_subscribers: [control.MAX_SERVER_CLIENTS]Cli_Subscriber,
+}
+
+// One event stream: its subscription request's id, which names the connection, and the events it
+// asked for. A zero id is a free entry.
+Cli_Subscriber :: struct {
+	id:    u64,
+	kinds: events.Kinds,
 }
 
 // Finds aio.exe beside this executable; the pipe starts with control_cli_sync once settings apply.
@@ -77,19 +86,140 @@ control_cli_sync :: proc(app: ^App) {
 control_cli_stop :: proc(app: ^App) {
 	if server, running := app.cli.(^control.Server); running {control.destroy(server)}
 	app.cli = nil
+	app.cli_subscribers = {}
+	events.set_interest(&app.events, .Cli, {})
 }
 
-// Answers the pending CLI request, if any. The pipe serves one client at a time and no command
-// waits, so one request per tick keeps every reply prompt.
+// Each connection holds at most one request and the server polls them in turn, so this many polls
+// answer every request queued when the tick began without waiting on any client.
 control_cli_tick :: proc(app: ^App) {
 	server, running := app.cli.(^control.Server)
 	if !running {return}
-	message := control.poll(server)
-	if message == nil {return}
-	defer control.message_destroy(message)
-	if err := control.respond(server, message.id, control_cli_answer(app, message.args)); err != .None {
-		log.errorf("answering the command line failed: %v", err)
+	for _ in 0 ..< control.MAX_SERVER_CLIENTS {
+		message := control.poll(server)
+		if message == nil {break}
+		request, well_formed := cli_protocol.request_decode(message.args)
+		response: control.Response
+		if well_formed && len(request.command) > 0 && request.command[0] == cli_protocol.EVENTS_COMMAND {
+			response = control_cli_subscribe(app, server, message.id, request)
+		} else {
+			response = control_cli_answer(app, message.args)
+		}
+		err := control.respond(server, message.id, response)
+		control.message_destroy(message)
+		// Closed: the client left before its answer, which nobody is waiting for.
+		if err != .None && err != .Closed {log.errorf("answering the command line failed: %v", err)}
 	}
+	// Streams that closed since the last delivery release their interest even on ticks without events.
+	control_cli_events(app, nil)
+}
+
+// Turns the request's connection into a stream of the named events, or of all events without names.
+// The acknowledgement reaches the client before any event line.
+@(private, require_results)
+control_cli_subscribe :: proc(
+	app: ^App,
+	server: ^control.Server,
+	id: u64,
+	request: cli_protocol.Request,
+) -> control.Response {
+	json_output := request.format == .Json
+	if request.caller != "" {
+		if _, valid := pane_id_parse(request.caller); !valid {
+			return control_cli_reply(outcome_failure(.Usage, "AIODEV_PANE is not a pane id"), json_output)
+		}
+	}
+	// aio sends each name as its own word, but the command's Text argument is one positional value.
+	words := request.command
+	joined: [2]string
+	if len(words) > 1 {
+		text := strings.join(words[1:], " ", context.temp_allocator)
+		joined = {words[0], text}
+		words = joined[:]
+	}
+	invocation, parse_error := commands.parse_invocation(&app.registry, words, context.temp_allocator)
+	if parse_error.advice != "" {
+		message := fmt.tprintf("%q: %s", parse_error.argument, parse_error.advice)
+		return control_cli_reply(outcome_failure(.Usage, message), json_output)
+	}
+	kinds: events.Kinds
+	names := strings.fields(invocation.text, context.temp_allocator)
+	if len(names) == 0 {
+		for kind in events.Kind {kinds += {kind}}
+	}
+	for name in names {
+		kind, known := events.kind_named(name)
+		if !known {
+			b := strings.builder_make(context.temp_allocator)
+			fmt.sbprintf(&b, "unknown event %q; events are", name)
+			for each in events.Kind {
+				strings.write_string(&b, each == min(events.Kind) ? " " : ", ")
+				strings.write_string(&b, control_cli_event_name(each))
+			}
+			return control_cli_reply(outcome_failure(.Usage, strings.to_string(b)), json_output)
+		}
+		kinds += {kind}
+	}
+	// Frees the entries of streams that have closed; there is one entry per pipe instance.
+	control_cli_events(app, nil)
+	for &subscriber in app.cli_subscribers {
+		if subscriber.id != 0 {continue}
+		if control.stream_start(server, id) != .None {
+			return control_cli_reply(outcome_failure(.Failed, "the subscribing client disconnected"), json_output)
+		}
+		subscriber = {id, kinds}
+		control_cli_events(app, nil)
+		return control_cli_reply(Outcome{}, json_output)
+	}
+	return control_cli_reply(outcome_failure(.Failed, "too many event subscribers"), json_output)
+}
+
+// Queues each pending event's stream line for the subscribers that want it, then keeps the queue's
+// Cli interest the union of what the remaining subscribers want, so unwanted events cost nothing.
+// app_events_deliver calls it at the end of each tick; it never waits on a client.
+control_cli_events :: proc(app: ^App, pending: []events.Event) {
+	server, running := app.cli.(^control.Server)
+	// control_cli_stop already released every stream and the Cli interest.
+	if !running {return}
+	wanted: events.Kinds
+	for &subscriber in app.cli_subscribers {
+		if subscriber.id != 0 && !control.stream_connected(server, subscriber.id) {subscriber = {}}
+		wanted |= subscriber.kinds
+	}
+	for event in pending {
+		if event.kind not_in wanted {continue}
+		line := control_cli_event_line(event)
+		for &subscriber in app.cli_subscribers {
+			if event.kind not_in subscriber.kinds {continue}
+			err := control.stream_push(server, subscriber.id, line)
+			if err == .None {continue}
+			// Closed is a client that left, or one stream_push disconnected because it fell behind.
+			if err != .Closed {log.errorf("queuing an application event failed: %v", err)}
+			if !control.stream_connected(server, subscriber.id) {subscriber = {}}
+		}
+	}
+	wanted = {}
+	for subscriber in app.cli_subscribers {wanted |= subscriber.kinds}
+	if app.events.interest[.Cli] != wanted {events.set_interest(&app.events, .Cli, wanted)}
+}
+
+// The event's stream line: its fields object with "type" first. Concatenated rather than formatted,
+// since fmt reads braces as argument placeholders.
+@(private, require_results)
+control_cli_event_line :: proc(event: events.Event) -> string {
+	name := control_cli_event_name(event.kind)
+	fields := strings.trim_space(event.fields)
+	members := len(fields) >= 2 ? strings.trim_space(fields[1:len(fields) - 1]) : ""
+	if members == "" {return strings.concatenate({`{"type":"`, name, `"}`}, context.temp_allocator)}
+	return strings.concatenate({`{"type":"`, name, `",`, members, "}"}, context.temp_allocator)
+}
+
+// The static copy lets a kind known only at run time index the constant names.
+@(private, require_results)
+control_cli_event_name :: proc(kind: events.Kind) -> string {
+	@(static, rodata)
+	names := events.NAMES
+	return names[kind]
 }
 
 @(require_results)

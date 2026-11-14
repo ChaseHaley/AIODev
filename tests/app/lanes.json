@@ -2,6 +2,7 @@
   "policy": "Explicit reviewed process-free checks; every other app test defaults to native.",
   "fast": [
     "build_info_registry_dispatch_refreshes_one_owned_notice_without_a_session",
+    "cli_event_subscriptions_filter_and_release_interest_without_processes",
     "ctrl_shift_digits_select_workspaces_instead_of_opening_profiles",
     "focus_jumps_new_focus_drops_forward_path",
     "focus_jumps_skip_closed_panes",

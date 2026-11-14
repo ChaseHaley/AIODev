@@ -177,6 +177,7 @@ Action :: enum u32 {
 	Mode_Enter,
 	Mode_Exit,
 	Mode_Exit_All,
+	App_Events,
 }
 
 // Everything one command is: its name and title, default shortcuts, what it does when a linked window
@@ -669,6 +670,10 @@ ACTIONS :: [Action]Command_Descriptor {
 	},
 	.Mode_Exit = {"mode.exit", "Leave key mode", nil, .Local, {}},
 	.Mode_Exit_All = {"mode.exit_all", "Leave all key modes", nil, .Local, {}},
+	.App_Events = {
+		cli_protocol.EVENTS_COMMAND, "Subscribe to application events", nil, .Host,
+		{accepted = {.Text}, hidden = true, control = .Unnamed},
+	},
 }
 
 // What help says about a command beyond its usage and title: a summary, and the command's own help for
@@ -784,6 +789,10 @@ COMMAND_HELP :: #partial [Action]Command_Help {
 		nil,
 	},
 	.App_Version = {"Prints AIODev's build; aio version shows it beside aio's own.", nil},
+	.App_Events = {
+		"Streams application events on this control connection until it closes; aio events subscribes.",
+		{{.Text, {"space-separated event names", "all events", "pane.focused pane.exited"}}},
+	},
 	.Pane_Focus = {"Focuses the pane and brings its window forward.", nil},
 	.Rename_Pane = {
 		"Names the pane; without text it opens the rename box on the pane.",
@@ -1049,6 +1058,8 @@ command_execute :: proc(app: ^App, ctx: Command_Context, invocation: commands.In
 		return command_catalogue(app, invocation.text)
 	case .App_Version:
 		return version_outcome()
+	case .App_Events:
+		return outcome_failure(.Usage, "app.events requires a streaming control connection; use aio events")
 	case .Pane_List:
 		return {payload = Outcome_Panes(pane_reports(app, nil))}
 	case .Tab_List:

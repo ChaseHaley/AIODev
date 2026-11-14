@@ -349,6 +349,14 @@ pipe_unpolled_disconnect_and_busy_connect :: proc(t: ^testing.T) {
 	defer control.destroy(s)
 	c, connect_error := control.connect(name, 1000)
 	if !testing.expect_value(t, connect_error, control.Error.None) { return }
+	// With every instance taken, one more client waits until connect gives up.
+	others: [control.MAX_SERVER_CLIENTS - 1]control.Client
+	defer { for &other in others { control.close(&other) } }
+	for &other in others {
+		other_error: control.Error
+		other, other_error = control.connect(name, 1000)
+		if !testing.expect_value(t, other_error, control.Error.None) { return }
+	}
 	busy, busy_error := control.connect(name, 25)
 	control.close(&busy)
 	testing.expect_value(t, busy_error, control.Error.Timeout)
@@ -429,8 +437,8 @@ pipe_delivery_blocked_then_disconnected :: proc(t: ^testing.T) {
 	testing.expect(t, !control.delivery_finished(s, m.id+1))
 }
 
-// A client that connects but never sends a line must not hold the single pipe
-// instance past the server I/O timeout.
+// Clients that connect but never send a line must not hold the pipe instances past the
+// server I/O timeout.
 @(test)
 pipe_silent_client_releases_instance :: proc(t: ^testing.T) {
 	name := test_pipe_name(t)
@@ -438,10 +446,14 @@ pipe_silent_client_releases_instance :: proc(t: ^testing.T) {
 	s, err := control.create(name, {})
 	if !testing.expect_value(t, err, control.Error.None) { return }
 	defer control.destroy(s)
-	first, first_error := control.connect(name, 1000)
-	if !testing.expect_value(t, first_error, control.Error.None) { return }
-	defer control.close(&first)
-	// Send nothing. The server must time out the request-line read, disconnect,
+	silent: [control.MAX_SERVER_CLIENTS]control.Client
+	defer { for &client in silent { control.close(&client) } }
+	for &client in silent {
+		silent_error: control.Error
+		client, silent_error = control.connect(name, 1000)
+		if !testing.expect_value(t, silent_error, control.Error.None) { return }
+	}
+	// Send nothing. The server must time out each request-line read, disconnect,
 	// and accept the next client instead of waiting forever.
 	start := time.tick_now()
 	second, second_error := control.connect(name, 10000)
@@ -482,13 +494,16 @@ pipe_unread_response_releases_instance :: proc(t: ^testing.T) {
 	defer delete(large)
 	testing.expect_value(t, control.respond(s, m.id, {ok = true, text = large}), control.Error.None)
 	testing.expect(t, !control.delivery_finished(s, m.id))
-	// Never read. The single instance must come back after the write stalls.
+	// Never read. The stalled write must end at the server I/O timeout, releasing the instance;
+	// other instances serve meanwhile, so wait for the delivery itself.
 	start := time.tick_now()
+	for !control.delivery_finished(s, m.id) && time.tick_since(start) < 10*time.Second {
+		time.sleep(10*time.Millisecond)
+	}
+	testing.expect(t, control.delivery_finished(s, m.id))
 	next, next_error := control.connect(name, 10000)
 	if !testing.expect_value(t, next_error, control.Error.None) { return }
 	defer control.close(&next)
-	testing.expect(t, time.tick_since(start) < 10*time.Second)
-	await_delivery(t, s, m.id)
 	r, call_error := answered_call(t, s, &next, {"unknown"})
 	defer control.response_destroy(&r)
 	testing.expect_value(t, call_error, control.Error.None)
