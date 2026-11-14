@@ -156,12 +156,16 @@ push :: proc(q: ^Queue, kind: Kind, fields: any) {
 	}
 }
 
+// The fields of layout.changed.
+Layout_Changed :: struct {
+	revision: u64,
+}
+
 // Every layout change bumps the revision, wanted or not, so a later reader can tell its view is old.
 layout_changed :: proc(q: ^Queue) {
 	q.revision += 1
-	push(q, .Layout_Changed, struct {
-		revision: u64,
-	}{q.revision})
+	fields := Layout_Changed{q.revision}
+	push(q, .Layout_Changed, fields)
 }
 
 // The events pushed since the last `clear`, oldest first. Valid until the next `clear`.

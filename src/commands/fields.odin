@@ -52,8 +52,11 @@ fields_trailing_comma :: proc(fields: string) -> bool {
 	}
 }
 
-@(private = "file")
-fields_name :: proc(argument: Argument, buffer: []u8) -> string {
+// The key a fields object names an argument by: the option without its dashes, with `_` for `-`
+// (`--tab-name` is `tab_name`), and `text`, `file` and `command` for the positional ones. buffer must
+// hold the longest option; the result may be written there.
+@(require_results)
+argument_field :: proc(argument: Argument, buffer: []u8) -> string {
 	#partial switch argument {
 	case .Text: return "text"
 	case .File: return "file"
@@ -76,7 +79,7 @@ fields_unknown :: proc(command: ^Command, key: string) -> Parse_Error {
 		// File and Text_File share the JSON spelling, with the positional file taking precedence.
 		if argument == .Text_File && .File in command.arguments {continue}
 		buffer: [128]u8
-		fmt.sbprintf(&builder, ", %s", fields_name(argument, buffer[:]))
+		fmt.sbprintf(&builder, ", %s", argument_field(argument, buffer[:]))
 	}
 	return {fmt.tprintf("%s", key), strings.to_string(builder)}
 }
@@ -182,7 +185,7 @@ fields_invocation :: proc(
 			for candidate in Argument {
 				if candidate not_in command.arguments {continue}
 				buffer: [128]u8
-				if fields_name(candidate, buffer[:]) != key {continue}
+				if argument_field(candidate, buffer[:]) != key {continue}
 				argument, found = candidate, true
 				break
 			}

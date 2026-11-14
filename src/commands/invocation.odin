@@ -262,10 +262,53 @@ argument_grammar := [Argument]struct {
 #assert(SPLIT_DEFAULT.direction == .Right && SPLIT_DEFAULT.ratio == 0.5)
 #assert(MAX_LINES == 10000)
 
+// Each argument's type as a Lua fields table gives it, for the aio type definitions. A string where a
+// value is JSON, a list or a pane is also accepted; these name what a script most likely writes.
+ARGUMENT_LUA_TYPES :: [Argument]string {
+	.Direction    = `"left"|"right"|"up"|"down"`,
+	.Ratio        = "number",
+	.Focus        = "boolean",
+	.Directory    = "string",
+	.Name         = "string",
+	.Profile      = "string",
+	.Text         = "string",
+	.File         = "string",
+	.Enter        = "boolean",
+	.Lines        = "integer",
+	.Program      = "string[]",
+	.Tab_Name     = "string",
+	.Workspace    = "string|integer",
+	.Command_File = "string",
+	.Text_File    = "string",
+	.Scrollback   = "boolean",
+	.Unwrap       = "boolean",
+	.Keys         = "string|string[]",
+	.Title        = "string",
+	.Once         = "boolean",
+	.Items        = "string[]|string",
+	.Details      = "string[]|string",
+	.Bounds       = "number[]",
+	.Unit         = `"share"|"cells"`,
+	.Beside       = "string|integer",
+	.Cells        = "integer",
+	.Layout       = "table|string",
+}
+
 // Each argument with the option that reads it from a file instead, so no shell's quoting touches it.
 // A command accepting both takes one or the other.
 @(private, rodata)
 file_alternatives := [?][2]Argument{{.Program, .Command_File}, {.Text, .Text_File}, {.File, .Layout}}
+
+// The argument the command also accepts in place of `argument`, which then stops being required:
+// the file form of a value, or the value a file form stands for.
+@(require_results)
+argument_alternative :: proc(command: ^Command, argument: Argument) -> (Argument, bool) {
+	for pair in file_alternatives {
+		if pair[0] == argument && pair[1] in command.arguments {return pair[1], true}
+		if pair[1] == argument && pair[0] in command.arguments {return pair[0], true}
+	}
+	return {}, false
+}
 
 // The defaults every interface starts from: a new pane splits right, taking half the space. `focus`
 // says whether a pane a command creates takes focus: interactive commands always focus it, a CLI

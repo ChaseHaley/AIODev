@@ -23,7 +23,8 @@ flags_and_borrowing :: proc(t: ^testing.T) {
 	}) {
 		options, err := instance.parse(args)
 		testing.expect_value(t, err, instance.Parse_Error.None)
-		testing.expect_value(t, options, instance.Options{"Verify_123-x", "C:\\test data\\漢字", true})
+		expected := instance.Options{name = "Verify_123-x", data_dir = "C:\\test data\\漢字", inactive = true}
+		testing.expect_value(t, options, expected)
 		for arg, i in args {
 			if arg == "--instance" {
 				testing.expect(t, raw_data(options.name) == raw_data(args[i+1]))
@@ -37,6 +38,11 @@ flags_and_borrowing :: proc(t: ^testing.T) {
 		_, err := instance.parse(args)
 		testing.expect_value(t, err, instance.Parse_Error.None)
 	}
+	lua_args := []string{"--lua-types", "types\\aio.lua"}
+	lua_options, lua_err := instance.parse(lua_args)
+	testing.expect_value(t, lua_err, instance.Parse_Error.None)
+	testing.expect_value(t, lua_options, instance.Options{lua_types = "types\\aio.lua"})
+	testing.expect(t, raw_data(lua_options.lua_types) == raw_data(lua_args[1]))
 }
 
 @(test)
@@ -59,6 +65,9 @@ parse_errors :: proc(t: ^testing.T) {
 		{{"--instance", "123456789012345678901234567890123"}, .Invalid_Name},
 		{{"--instance", "漢"}, .Invalid_Name},
 		{{"--data-dir", ""}, .Empty_Data_Dir},
+		{{"--lua-types"}, .Missing_Value},
+		{{"--lua-types", "a", "--lua-types", "b"}, .Repeated_Flag},
+		{{"--lua-types", ""}, .Empty_Lua_Types},
 	}) {
 		options, err := instance.parse(item.args)
 		testing.expect_value(t, err, item.error)

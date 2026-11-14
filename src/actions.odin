@@ -212,6 +212,7 @@ Action :: enum u32 {
 	Move_Pane_New_Tab,
 	Move_Pane_New_Window,
 	Arrange_Panes,
+	App_Lua_Types,
 }
 
 // Everything one command is: its name and title, default shortcuts, what it does when a linked window
@@ -819,6 +820,9 @@ ACTIONS :: [Action]Command_Descriptor {
 	.Move_Pane_New_Tab = {"pane.move_new_tab", "Move pane to new tab", nil, .Local, {}},
 	.Move_Pane_New_Window = {"pane.move_new_window", "Move pane to new window", nil, .Local, {}},
 	.Arrange_Panes = {"pane.arrange", "Arrange panes", nil, .Local, {}},
+	.App_Lua_Types = {
+		"app.lua_types", "Show Lua type definitions", nil, .Host, {hidden = true, control = .Unnamed},
+	},
 }
 
 // What help says about a command beyond its usage and title: a summary, and the command's own help for
@@ -1029,6 +1033,11 @@ COMMAND_HELP :: #partial [Action]Command_Help {
 	},
 	.Mode_Exit = {"Leaves the most recently entered key mode in this window.", nil},
 	.Mode_Exit_All = {"Leaves every key mode and cancels the pending key sequence in this window.", nil},
+	.App_Lua_Types = {
+		"Prints the aio API's LuaCATS definitions for lua-language-server: the built-in commands, events " +
+		"and replies, and the actions init.lua declares; aio types writes them beside init.lua.",
+		nil,
+	},
 }
 
 @(require_results)
@@ -1329,6 +1338,8 @@ command_execute :: proc(app: ^App, ctx: Command_Context, invocation: commands.In
 		return control_layout_apply(app, window_for_workspace(app, t.workspace), t.workspace, invocation)
 	case .App_View:
 		return control_view(app)
+	case .App_Lua_Types:
+		return {payload = Outcome_Text(lua_types_text(app, true, context.temp_allocator))}
 	case .Float_Set_Bounds, .Float_Raise, .Float_Lower, .Float_Dock, .Float_Minimize, .Float_Restore:
 		return control_float_change(app, target.?, invocation, action)
 	case .Pane_Move, .Pane_Resize, .Pane_Set_Ratio:
