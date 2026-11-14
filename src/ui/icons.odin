@@ -65,6 +65,8 @@ Icon :: enum {
 	Pencil,
 	// A program's window with an arrow leaving it: open in another program.
 	Launch,
+	// A page with a plus above a minus: what changed in a file.
+	Changes,
 }
 
 ICON_STROKE :: f32(1.25)
@@ -194,6 +196,11 @@ icon_draw :: proc(
 	}
 	switch icon {
 	case .None:
+	case .Changes:
+		pen_path(p, {3, 2}, {10, 2}, {13, 5}, {13, 14}, {3, 14}, {3, 2})
+		pen_path(p, {6.5, 6}, {9.5, 6})
+		pen_path(p, {8, 4.5}, {8, 7.5})
+		pen_path(p, {6.5, 11}, {9.5, 11})
 	case .Keyboard:
 		pen_box(p, 1, 3.5, 14, 9, 2)
 		for x in ([?]f32{4, 6.67, 9.33, 12}) {pen_dot(p, x, 6.5)}

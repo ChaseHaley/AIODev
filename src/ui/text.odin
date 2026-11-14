@@ -21,6 +21,8 @@ Theme :: struct {
 	scrollbar_track, scrollbar, scrollbar_hover, scrollbar_active: render.Color,
 	// Markdown code, inline code and frontmatter fills.
 	code_background: render.Color,
+	// The fills behind added and removed lines of a diff.
+	diff_added, diff_removed: render.Color,
 	// The shared raised-hover look. `rim` is the colour of the pointer-following edge light;
 	// `hover_edge` is the hairline that holds a light fill's shape. lift and gloss are the
 	// interface.hover_lift and interface.hover_gloss settings.
@@ -65,6 +67,8 @@ theme_from :: proc(t: settings.Theme, interface: settings.Interface_Settings) ->
 		scrollbar_hover = c(t, .Scrollbar_Hover),
 		scrollbar_active = c(t, .Scrollbar_Active),
 		code_background = c(t, .Code_Background),
+		diff_added = c(t, .Diff_Added),
+		diff_removed = c(t, .Diff_Removed),
 		// Light mode's hover is paper: the opaque raised-surface colour, so the seat drawn
 		// underneath cannot show through and darken the tile, and its shape comes from the
 		// hairline and the seat rather than from ink. Dark mode keeps the translucent lift.
@@ -313,6 +317,17 @@ text_styled :: proc(t: ^Text, style: Text_Style) -> Text {
 	}
 	if style == .Strong || style == .Title {copy.family = t.strong_family}
 	text_set_size(&copy, t.size_px * ratio)
+	return copy
+}
+
+// The terminal's font at 0.9 of `t`'s size, as Markdown sets its code; for source text and diffs.
+@(private = "file")
+MONO_RATIO :: f32(0.9)
+
+text_mono :: proc(t: ^Text, family: font.Family) -> Text {
+	copy := t^
+	copy.family, copy.strong_family = family, family
+	text_set_size(&copy, t.size_px * MONO_RATIO)
 	return copy
 }
 
