@@ -68,14 +68,14 @@ start :: proc() -> cli_protocol.Status {
 		return .Ok
 	}
 	if report, local := local_help(o); local {return help_print(report, o.json)}
-	// Config check reads init.lua locally; it needs no running AIODev.
-	if o.checking {return config_check_run(o)}
 	app_id, id_error := instance.app_id({name = o.instance}, context.allocator)
 	if id_error != nil {return .Failed}
 	defer delete(app_id)
 	pipe, pipe_error := control.cli_pipe_name(app_id)
 	if pipe_error != .None {return .Failed}
 	defer delete(pipe)
+	// Config check reads init.lua locally; it only asks a running AIODev where init.lua is.
+	if o.checking {return config_check_run(o, pipe)}
 	if o.waiting {return wait(o, pipe, caller)}
 	if o.version {return version(o, pipe, caller)}
 	if o.streaming {return stream_events(o, pipe, caller)}
@@ -150,10 +150,23 @@ send :: proc(pipe: string, request: []string, check_build: bool) -> (control.Res
 	client, status := connect_verified(pipe)
 	if status != .Ok {return {}, status}
 	defer control.close(&client)
+	return send_on(&client, request, check_build)
+}
+
+// One request on a verified connection; see send.
+@(private, require_results)
+send_on :: proc(
+	client: ^control.Client,
+	request: []string,
+	check_build: bool,
+) -> (
+	control.Response,
+	cli_protocol.Status,
+) {
 	if check_build {
 		version_command := [1]string{cli_protocol.VERSION_COMMAND}
 		query := cli_protocol.request_encode({command = version_command[:]}, context.temp_allocator)
-		reply, reply_error := control.call(&client, query, CALL_TIMEOUT_MS)
+		reply, reply_error := control.call(client, query, CALL_TIMEOUT_MS)
 		if reply_error != .None {
 			fmt.eprintfln("aio: lost the connection to AIODev (%v)", reply_error)
 			return {}, .Unreachable
@@ -161,7 +174,7 @@ send :: proc(pipe: string, request: []string, check_build: bool) -> (control.Res
 		if warning := build_warning(own_build(), reply.ok ? reply.text : "", context.temp_allocator);
 		   warning != "" {fmt.eprintln(warning)}
 	}
-	response, call_error := control.call(&client, request, CALL_TIMEOUT_MS)
+	response, call_error := control.call(client, request, CALL_TIMEOUT_MS)
 	if call_error != .None {
 		fmt.eprintfln("aio: lost the connection to AIODev (%v)", call_error)
 		return {}, .Unreachable
@@ -169,18 +182,35 @@ send :: proc(pipe: string, request: []string, check_build: bool) -> (control.Res
 	return response, cli_protocol.response_status(response)
 }
 
+// The init.lua the AIODev on a verified connection loads, so aio types and aio config check find the
+// folder of an instance started with --data-dir; "" when it does not say. The text is temporary.
+@(private, require_results)
+lua_path_ask :: proc(client: ^control.Client) -> string {
+	command := [1]string{LUA_PATH_COMMAND}
+	request := cli_protocol.Request {
+		command = command[:],
+	}
+	query := cli_protocol.request_encode(request, context.temp_allocator)
+	reply, err := control.call(client, query, CALL_TIMEOUT_MS)
+	if err != .None || !reply.ok {return ""}
+	return reply.text
+}
+
 // Connects to the pipe and checks that the expected AIODev serves it, reporting either failure; the
-// caller closes the client it returns with Ok.
+// caller closes the client it returns with Ok. A `probe` neither waits for an AIODev that is not
+// running, whose pipe does not exist, nor reports it unreachable; it still waits for a busy pipe.
 @(private, require_results)
 connect_verified :: proc(
 	pipe: string,
 	allocator := context.temp_allocator,
+	probe := false,
 ) -> (
 	control.Client,
 	cli_protocol.Status,
 ) {
-	client, connect_error := control.connect(pipe, CONNECT_TIMEOUT_MS, allocator)
+	client, connect_error := control.connect(pipe, CONNECT_TIMEOUT_MS, allocator, wait_absent = !probe)
 	if connect_error != .None {
+		if probe {return {}, .Unreachable}
 		fmt.eprintln(
 			"aio: AIODev is not reachable. Start it and turn on \"Command line control\" in Settings " +
 			"(control.enabled).",

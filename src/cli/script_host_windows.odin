@@ -420,10 +420,12 @@ exec_interrupt :: proc "system" (kind: w.DWORD) -> w.BOOL {
 	return true
 }
 
-// The folder init.lua lives in, beside the settings of the named instance or of the instance using
-// `data_dir`; "" and a problem when AIODev's settings folder cannot be found.
-@(private, require_results)
-init_folder :: proc(name, data_dir: string, allocator := context.allocator) -> (string, string) {
+// The folder init.lua lives in: beside the settings of the instance using an explicit `data_dir`;
+// else the folder of `app_path`, the init.lua the running AIODev reported loading; else beside the
+// settings of the named instance. "" and a problem when AIODev's settings folder cannot be found.
+@(require_results)
+init_folder :: proc(name, data_dir, app_path: string, allocator := context.allocator) -> (string, string) {
+	if data_dir == "" && app_path != "" {return filepath.dir(app_path), ""}
 	options := instance.Options {
 		name     = name,
 		data_dir = data_dir,
@@ -433,12 +435,15 @@ init_folder :: proc(name, data_dir: string, allocator := context.allocator) -> (
 	return filepath.dir(paths.settings), ""
 }
 
-// Runs `aio config check` on the named file, or on init.lua beside the instance's settings.
+// Runs `aio config check` on the named file, or on init.lua: --data-dir's instance's, else the one
+// the running AIODev loads, else the instance's beside its settings.
 @(private, require_results)
-config_check_run :: proc(o: Options) -> cli_protocol.Status {
+config_check_run :: proc(o: Options, pipe: string) -> cli_protocol.Status {
 	path := o.check.path
 	if path == "" {
-		folder, problem := init_folder(o.instance, o.check.data_dir, context.temp_allocator)
+		app_path := ""
+		if o.check.data_dir == "" {app_path = config_lua_path(pipe)}
+		folder, problem := init_folder(o.instance, o.check.data_dir, app_path, context.temp_allocator)
 		if problem != "" {
 			fmt.eprintfln("aio: %s", problem)
 			return .Failed
@@ -470,4 +475,13 @@ config_check_run :: proc(o: Options) -> cli_protocol.Status {
 	}
 	fmt.println(string(text))
 	return status
+}
+
+// The init.lua a running, verified AIODev loads, or "" when none answers; config check needs none.
+@(private, require_results)
+config_lua_path :: proc(pipe: string) -> string {
+	client, status := connect_verified(pipe, probe = true)
+	if status != .Ok {return ""}
+	defer control.close(&client)
+	return lua_path_ask(&client)
 }

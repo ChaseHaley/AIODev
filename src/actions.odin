@@ -213,6 +213,7 @@ Action :: enum u32 {
 	Move_Pane_New_Window,
 	Arrange_Panes,
 	App_Lua_Types,
+	Settings_Lua_Path,
 }
 
 // Everything one command is: its name and title, default shortcuts, what it does when a linked window
@@ -823,6 +824,9 @@ ACTIONS :: [Action]Command_Descriptor {
 	.App_Lua_Types = {
 		"app.lua_types", "Show Lua type definitions", nil, .Host, {hidden = true, control = .Unnamed},
 	},
+	.Settings_Lua_Path = {
+		"settings.lua_path", "Show init.lua path", nil, .Host, {hidden = true, control = .Unnamed},
+	},
 }
 
 // What help says about a command beyond its usage and title: a summary, and the command's own help for
@@ -1036,6 +1040,11 @@ COMMAND_HELP :: #partial [Action]Command_Help {
 	.App_Lua_Types = {
 		"Prints the aio API's LuaCATS definitions for lua-language-server: the built-in commands, events " +
 		"and replies, and the actions init.lua declares; aio types writes them beside init.lua.",
+		nil,
+	},
+	.Settings_Lua_Path = {
+		"Prints the absolute path of the init.lua AIODev loads, beside settings.ini, whether or not the " +
+		"file exists; aio types and aio config check ask it for the folder.",
 		nil,
 	},
 }
@@ -1340,6 +1349,8 @@ command_execute :: proc(app: ^App, ctx: Command_Context, invocation: commands.In
 		return control_view(app)
 	case .App_Lua_Types:
 		return {payload = Outcome_Text(lua_types_text(app, true, context.temp_allocator))}
+	case .Settings_Lua_Path:
+		return lua_path(app)
 	case .Float_Set_Bounds, .Float_Raise, .Float_Lower, .Float_Dock, .Float_Minimize, .Float_Restore:
 		return control_float_change(app, target.?, invocation, action)
 	case .Pane_Move, .Pane_Resize, .Pane_Set_Ratio:

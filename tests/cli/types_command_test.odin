@@ -1,6 +1,7 @@
 package cli_test
 
 import "aio:cli"
+import "aio:instance"
 import "core:os"
 import "core:path/filepath"
 import "core:testing"
@@ -31,6 +32,24 @@ types_takes_a_data_directory_and_force :: proc(t: ^testing.T) {
 		_, failure := cli.parse_options(args, "")
 		testing.expectf(t, failure != "", "%v should fail", args)
 	}
+}
+
+// An explicit --data-dir wins over the init.lua the running AIODev reported, which wins over the
+// instance's own settings folder.
+@(test)
+init_folder_prefers_the_data_directory_then_the_app_then_the_instance :: proc(t: ^testing.T) {
+	app_path := `C:\aio-app\data\init.lua`
+	explicit, explicit_problem := cli.init_folder("work", `D:\data`, app_path, context.temp_allocator)
+	testing.expect_value(t, explicit_problem, "")
+	testing.expect_value(t, explicit, `D:\data`)
+	reported, reported_problem := cli.init_folder("work", "", app_path, context.temp_allocator)
+	testing.expect_value(t, reported_problem, "")
+	testing.expect_value(t, reported, `C:\aio-app\data`)
+	paths, paths_error := instance.paths({name = "work"}, context.temp_allocator)
+	if !testing.expect_value(t, paths_error, nil) {return}
+	fallback, fallback_problem := cli.init_folder("work", "", "", context.temp_allocator)
+	testing.expect_value(t, fallback_problem, "")
+	testing.expect_value(t, fallback, filepath.dir(paths.settings))
 }
 
 @(private = "file")

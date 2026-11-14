@@ -92,6 +92,15 @@ lua_host_path :: proc(app: ^App) -> string {
 	return path
 }
 
+// settings.lua_path: the absolute path of the init.lua this app loads, whether or not it exists.
+@(private, require_results)
+lua_path :: proc(app: ^App) -> Outcome {
+	path := lua_host_path(app)
+	if path == "" {return outcome_failure(.Failed, "AIODev has no settings folder")}
+	if absolute, err := filepath.abs(path, context.temp_allocator); err == nil {path = absolute}
+	return {payload = Outcome_Text(path)}
+}
+
 @(private, require_results)
 lua_instance_create :: proc(app: ^App, path: string, checking: bool) -> (^Lua_Instance, string) {
 	instance := new(Lua_Instance)

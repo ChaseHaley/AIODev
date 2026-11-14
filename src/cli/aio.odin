@@ -74,10 +74,12 @@ Events  aio events streams named application events, or all events without names
         Ctrl+C exits 130; closing AIODev or the connection exits 4.
 Lua     aio exec runs a Lua script with the aio API against AIODev, or one action by name, and prints
         what it returns as JSON; Ctrl+C exits 130 and aio.stop(code) exits with that code.
-        aio config check loads init.lua without AIODev and reports its actions, keys, modes and
-        problems; it exits 1 when there are problems.
+        aio config check loads init.lua without running its commands and reports its actions, keys,
+        modes and problems; it exits 1 when there are problems.
         aio types writes types\aio.lua and .luarc.json beside init.lua for lua-language-server; it
         asks AIODev for your actions and copies the built-in definitions when AIODev is not running.
+        Both use the init.lua the running AIODev loads; --data-dir names an instance's data folder
+        only when AIODev is not running.
 Hooks   aio agent-session runs from a Claude Code or Codex SessionStart hook and records the
         session the hook names, so the pane can resume it; the "Install agent session hooks"
         command sets it up.
@@ -220,21 +222,23 @@ local_commands := [?]cli_protocol.Command_Report {
 		name = "config",
 		title = "Check init.lua",
 		usage = "config check [--data-dir <directory>] [<file>]",
-		summary = "Loads init.lua as AIODev would, without AIODev and without running commands, and " +
-		"prints the file, the number of actions, keys and modes it declares and each problem as " +
-		"file:line: message; exits 1 when there is a problem.",
+		summary = "Loads init.lua as AIODev would, without running commands, and prints the file, the " +
+		"number of actions, keys and modes it declares and each problem as file:line: message; exits 1 " +
+		"when there is a problem. Without --data-dir or a file it checks the init.lua the running AIODev " +
+		"loads; AIODev need not be running.",
 		options = {
 			{
 				option = "--data-dir <directory>",
 				description = "checks the init.lua beside the settings of the instance that uses " +
-				"this data folder",
-				default = "the settings folder of the default instance or --instance",
+				"this data folder; needed only when that AIODev is not running",
+				default = "the init.lua the running AIODev loads, else the settings folder of the " +
+				"default instance or --instance",
 				example = "--data-dir D:\\aiodev-test",
 			},
 			{
 				option = "<file>",
 				description = "the Lua file to check instead",
-				default = "init.lua beside settings.ini",
+				default = "the init.lua the running AIODev loads, beside its settings.ini",
 				example = "C:\\work\\init.lua",
 			},
 		},
@@ -245,14 +249,17 @@ local_commands := [?]cli_protocol.Command_Report {
 		usage = "types [--data-dir <directory>] [--force]",
 		summary = "Writes types\\aio.lua beside init.lua with the definitions of the aio API and your " +
 		"init.lua actions, as AIODev reports them, and creates .luarc.json there so lua-language-server " +
-		"reads them. When AIODev is not reachable, it copies the built-in definitions from types\\aio.lua " +
-		"beside aio.exe, without your actions. An existing .luarc.json is kept, and aio prints the two " +
-		"settings to add; exits 1 when no definitions are found or a file cannot be written.",
+		"reads them. The init.lua is the one the running AIODev loads. When AIODev is not reachable, it " +
+		"copies the built-in definitions from types\\aio.lua beside aio.exe, without your actions. An " +
+		"existing .luarc.json is kept, and aio prints the two settings to add; exits 1 when no " +
+		"definitions are found or a file cannot be written.",
 		options = {
 			{
 				option = "--data-dir <directory>",
-				description = "writes beside the init.lua of the instance that uses this data folder",
-				default = "the settings folder of the default instance or --instance",
+				description = "writes beside the init.lua of the instance that uses this data folder; " +
+				"needed only when that AIODev is not running",
+				default = "the init.lua the running AIODev loads, else the settings folder of the " +
+				"default instance or --instance",
 				example = "--data-dir D:\\aiodev-test",
 			},
 			{

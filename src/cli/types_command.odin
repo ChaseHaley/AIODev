@@ -9,6 +9,8 @@ import "core:path/filepath"
 
 // The hidden command that answers with the complete definition file, the user's actions included.
 LUA_TYPES_COMMAND :: "app.lua_types"
+// The hidden command that answers with the path of the init.lua AIODev loads.
+LUA_PATH_COMMAND :: "settings.lua_path"
 // Where the definitions go beside init.lua, and where the packaged built-ins sit beside aio.exe.
 TYPES_FOLDER :: "types"
 TYPES_FILE :: "aio.lua"
