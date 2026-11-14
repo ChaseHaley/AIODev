@@ -72,6 +72,7 @@ editor_chain_items :: proc(p: ^Editor) {
 		}
 	}
 	p.selected = p.chain.selected + 1
+	editor_tops_build(p)
 }
 
 // Lists the chain's rows and follows its selection, keeping it on the page; a row the chain just
@@ -87,7 +88,7 @@ editor_chain_sync :: proc(p: ^Editor) {
 	if appended := p.chain.appended + 1; appended > 0 && appended >= p.scroll + visible {
 		p.scroll = appended - visible + 1
 	}
-	p.scroll = clamp(p.scroll, 0, max_scroll(p))
+	p.scroll = clamp(p.scroll, 0, int(max_scroll(p)))
 }
 
 // Ends the conflict chain, dropping whatever it did not save, and returns the page to its search,
