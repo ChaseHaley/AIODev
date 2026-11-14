@@ -119,6 +119,7 @@ app_events_deliver :: proc(app: ^App) {
 	batch := events.take(&app.events)
 	// Consumers receive batch.list[:] here, before the release.
 	control_cli_events(app, batch.list[:])
+	lua_host_deliver(app, batch.list[:])
 	events.release(&app.events, &batch)
 }
 

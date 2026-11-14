@@ -12,8 +12,13 @@ Command_Target :: struct {
 	id: Command_Id,
 	fields: string,
 }
+// A Lua function bound by init.lua; ref is a registry reference the host's Lua state owns, so the keymap
+// stores the number only and never releases it.
+Script_Target :: struct {
+	ref: i32,
+}
 // Nil is never stored: keymap_bind refuses it, so a Run always carries a variant.
-Binding_Target :: union {Command_Target}
+Binding_Target :: union {Command_Target, Script_Target}
 Binding :: struct {
 	sequence: Key_Sequence,
 	target: Binding_Target,
@@ -97,6 +102,26 @@ sequence_equal :: proc(a, b: Key_Sequence) -> bool {
 	return true
 }
 
+// Room for a long mode name and four chord labels; only a mode name past it is cut short.
+SEQUENCE_TEXT_CAP :: 4 * SHORTCUT_TEXT_CAP + 64
+
+// The sequence as init.lua writes it ("resize/Ctrl+B>C"), in out, so a key press formats it without
+// allocating.
+@(require_results)
+sequence_text :: proc(sequence: Key_Sequence, out: []u8) -> string {
+	builder := strings.builder_from_bytes(out)
+	if sequence.mode != "" {
+		strings.write_string(&builder, sequence.mode)
+		strings.write_byte(&builder, '/')
+	}
+	for i in 0 ..< sequence.count {
+		if i > 0 {strings.write_byte(&builder, '>')}
+		label: [SHORTCUT_TEXT_CAP]u8
+		strings.write_string(&builder, shortcut_text(sequence.chords[i], label[:]))
+	}
+	return strings.to_string(builder)
+}
+
 keymap_init :: proc(keymap: ^Keymap, allocator := context.allocator) {
 	keymap.bindings.allocator = allocator
 	keymap.modes.allocator = allocator
@@ -109,7 +134,7 @@ binding_release :: proc(keymap: ^Keymap, binding: Binding) {
 	delete(binding.sequence.mode, allocator)
 	delete(binding.source, allocator)
 	switch target in binding.target {
-	case nil:
+	case nil, Script_Target:
 	case Command_Target:
 		delete(target.fields, allocator)
 	}
@@ -181,7 +206,7 @@ keymap_bind :: proc(keymap: ^Keymap, binding: Binding) -> Error {
 	if source_error != nil {delete(name, allocator); return .Out_Of_Memory}
 	owned.source = source
 	switch target in binding.target {
-	case nil:
+	case nil, Script_Target:
 	case Command_Target:
 		fields, err := strings.clone(target.fields, allocator)
 		if err != nil {delete(name, allocator); delete(source, allocator); return .Out_Of_Memory}
@@ -223,6 +248,9 @@ binding_target_equal :: proc(a, b: Binding_Target) -> bool {
 	case Command_Target:
 		other, ok := b.(Command_Target)
 		return ok && target.id == other.id && target.fields == other.fields
+	case Script_Target:
+		other, ok := b.(Script_Target)
+		return ok && target.ref == other.ref
 	}
 	return false
 }

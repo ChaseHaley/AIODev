@@ -104,14 +104,15 @@ load_settings :: proc(app: ^App) -> bool {
 	defer settings.diagnostics_destroy(&read.diagnostics)
 	defer delete(read.source)
 	settings_inputs_adopt(app, &read)
-	settings_apply_revision(app, read.loaded, &read.diagnostics, read.read_error)
+	settings_apply_revision(app, read.loaded, &read.diagnostics, read.read_error, lua_load = true)
 	settings_read_report(app, &read)
 	return true
 }
 
 // The one order every settings revision after startup takes, saved here or read from the file again:
 // interactions holding old settings end, the revision replaces the running settings, windows and
-// sessions apply it, and then the open settings pages show it.
+// sessions apply it, and then the open settings pages show it. A reload also runs init.lua again; a
+// save keeps the running state.
 @(private)
 settings_revision_apply :: proc(
 	app: ^App,
@@ -119,9 +120,10 @@ settings_revision_apply :: proc(
 	diagnostics: ^[dynamic]settings.Diagnostic,
 	read_error: os.Error,
 	publication: Settings_Publication,
+	lua_load := false,
 ) {
 	settings_prepare_reload(app)
-	settings_apply_revision(app, loaded, diagnostics, read_error)
+	settings_apply_revision(app, loaded, diagnostics, read_error, lua_load)
 	settings_apply_running(app)
 	settings_publish(app, publication)
 }
@@ -132,12 +134,17 @@ settings_apply_revision :: proc(
 	loaded: settings.Settings,
 	diagnostics: ^[dynamic]settings.Diagnostic,
 	read_error: os.Error = nil,
+	lua_load := false,
 ) {
 	settings.destroy(&app.settings)
 	app.settings = loaded
 	process_poll_restart(app)
 	for &entry in app.sessions {entry.process_padding = nil}
+	// init.lua's actions register before settings.ini binds keys to them, and its keys apply after,
+	// so their conflicts name the shortcuts this revision sets.
+	if lua_load {lua_host_load(app)}
 	apply_bindings(app, diagnostics)
+	lua_host_keys(app, diagnostics)
 	app.font_points = f32(loaded.font.size)
 	show_settings_diagnostics(app, diagnostics, read_error)
 }
@@ -163,7 +170,7 @@ reload_settings :: proc(app: ^App, announce := true) {
 	settings_inputs_adopt(app, &read)
 	publication: Settings_Publication = Publish_Unavailable{}
 	if read.read_error == nil {publication = Publish_Reloaded{read.source}}
-	settings_revision_apply(app, read.loaded, &read.diagnostics, read.read_error, publication)
+	settings_revision_apply(app, read.loaded, &read.diagnostics, read.read_error, publication, lua_load = true)
 	settings_read_report(app, &read)
 	events.push(&app.events, .Settings_Reloaded, Event_Empty{})
 	if announce {

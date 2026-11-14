@@ -234,3 +234,55 @@ keymap_matching_uses_logical_letters_and_physical_priority :: proc(t: ^testing.T
 	_ = commands.feed(&keymap, &state, &registry, .Shift_Left, {.Shift}, 0)
 	testing.expect_value(t, state.count, 1)
 }
+
+@(test)
+keymap_script_targets_bind_unbind_by_ref_and_format_their_sequence :: proc(t: ^testing.T) {
+	keymap: commands.Keymap
+	commands.keymap_init(&keymap)
+	defer commands.keymap_destroy(&keymap)
+	state: commands.Key_State
+	defer commands.key_state_destroy(&state)
+	registry := commands.create()
+	defer commands.destroy(&registry)
+	testing.expect_value(t, commands.mode_declare(&keymap, {"resize", false}), commands.Error.None)
+	sequence, ok := commands.parse_sequence("resize/Ctrl+B>C")
+	if !testing.expect(t, ok) {return}
+	script := commands.Binding{sequence, commands.Script_Target{ref = 7}, "init.lua:4"}
+	testing.expect_value(t, commands.keymap_bind(&keymap, script), commands.Error.None)
+	testing.expect(t, commands.mode_enter(&keymap, &state, "resize"))
+	_ = map_feed(&keymap, &state, &registry, "Ctrl+B")
+	result := map_feed(&keymap, &state, &registry, "C")
+	if run, is_run := result.(commands.Run); testing.expect(t, is_run) {
+		target, is_script := run.binding.target.(commands.Script_Target)
+		testing.expect(t, is_script)
+		testing.expect_value(t, target.ref, 7)
+		testing.expect_value(t, run.binding.source, "init.lua:4")
+	}
+	buffer: [commands.SEQUENCE_TEXT_CAP]u8
+	testing.expect_value(t, commands.sequence_text(sequence, buffer[:]), "resize/Ctrl+B>C")
+
+	// A different function, or a command, is not the binding; the same ref is.
+	other: commands.Binding_Target = commands.Script_Target{ref = 8}
+	testing.expect_value(t, commands.keymap_unbind(&keymap, sequence, other), commands.Error.None)
+	testing.expect_value(t, len(keymap.bindings), 1)
+	command: commands.Binding_Target = commands.Command_Target{id = 7}
+	testing.expect_value(t, commands.keymap_unbind(&keymap, sequence, command), commands.Error.None)
+	testing.expect_value(t, len(keymap.bindings), 1)
+	same: commands.Binding_Target = commands.Script_Target{ref = 7}
+	testing.expect_value(t, commands.keymap_unbind(&keymap, sequence, same), commands.Error.None)
+	testing.expect_value(t, len(keymap.bindings), 0)
+
+	// Rebinding a sequence from a function to a command replaces the target in place.
+	plain, _ := commands.parse_sequence("Ctrl+K")
+	first := commands.Binding{plain, commands.Script_Target{ref = 9}, "init.lua:5"}
+	testing.expect_value(t, commands.keymap_bind(&keymap, first), commands.Error.None)
+	map_binding(t, &keymap, "Ctrl+K", 2, `{"direction":"down"}`)
+	testing.expect_value(t, len(keymap.bindings), 1)
+	map_expect_run(t, map_feed(&keymap, &state, &registry, "Ctrl+K"), 2)
+	script_again := commands.Binding{plain, commands.Script_Target{ref = 9}, "init.lua:6"}
+	testing.expect_value(t, commands.keymap_bind(&keymap, script_again), commands.Error.None)
+	result = map_feed(&keymap, &state, &registry, "Ctrl+K")
+	if run, is_run := result.(commands.Run); testing.expect(t, is_run) {
+		testing.expect_value(t, run.binding.target.(commands.Script_Target).ref, 9)
+	}
+}

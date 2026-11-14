@@ -42,6 +42,7 @@ Notice_Key :: enum u32 {
 	Build_Info,
 	Shortcut_Undo,
 	Update,
+	Lua,
 }
 
 // What every window shares. Each feature's own state is a struct declared beside that feature's procs
@@ -128,6 +129,8 @@ App :: struct {
 	// Update AIODev's updater while it runs; see app_update.odin.
 	update:                App_Update,
 	next_prompt_id:         u64,
+	// init.lua's state, actions and timers; see lua_host.odin.
+	lua:                   Lua_Host,
 }
 
 // Creates the graphics device on a thread of its own. The driver takes longer to create one than
@@ -224,6 +227,8 @@ app_init :: proc(app: ^App) -> bool {
 	palette_usage_load(app)
 	palette_set_sources(app)
 	control_cli_init(app)
+	// Before settings load, which runs init.lua and registers its actions.
+	app.runtime_runner = lua_host_run
 	if !load_settings(app) {return false}
 	font_error: font.Error
 	when platform_api.AIO_HEADLESS {
@@ -288,6 +293,8 @@ app_init :: proc(app: ^App) -> bool {
 app_destroy :: proc(app: ^App) {
 	when AIO_CONTROL {verify_destroy(app)}
 	control_cli_destroy(app)
+	// Lua handlers may still hold windows and panes by id, but never past this point.
+	lua_host_destroy(app)
 	for len(app.windows) > 0 {
 		window_close(app, app.windows[len(app.windows) - 1])
 	}
@@ -470,6 +477,8 @@ App_Timer :: enum u8 {
 	File_Dialogs,
 	Markdown,
 	Update,
+	// init.lua's timers, process polls and the step after any Lua code ran.
+	Lua,
 }
 
 // Before the windows draw, a timer's change shows in this tick's frame; after, verify counts the
@@ -483,7 +492,7 @@ Timer_Phase :: enum u8 {
 @(private = "file")
 app_timer_phase :: proc(timer: App_Timer) -> Timer_Phase {
 	switch timer {
-	case .Processes, .Notices, .Drag_Hover:
+	case .Processes, .Notices, .Drag_Hover, .Lua:
 		return .Before_Draw
 	case .Verify, .Layout_Save, .Palette_Usage_Save, .File_Dialogs, .Markdown, .Update:
 		return .After_Draw
@@ -514,6 +523,8 @@ app_timers_advance :: proc(app: ^App, phase: Timer_Phase) {
 			markdown_tick(app)
 		case .Update:
 			app_update_tick(app)
+		case .Lua:
+			lua_host_tick(app)
 		}
 	}
 }
@@ -541,6 +552,8 @@ app_timer_deadline :: proc(app: ^App, timer: App_Timer) -> (next: time.Tick, pen
 		return markdown_poll_deadline(app)
 	case .Update:
 		// A finished updater wakes the loop itself.
+	case .Lua:
+		return lua_host_deadline(app)
 	}
 	return
 }

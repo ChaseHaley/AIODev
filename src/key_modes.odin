@@ -66,6 +66,15 @@ keymap_key :: proc(app: ^App, w: ^Window, e: input.Key_Event) -> bool {
 			keymap_take(w, e)
 			_ = command_execute(app, Window_Context{window = w, origin = .Key}, invocation)
 			return true
+		case commands.Script_Target:
+			// A function that returns false passes the key on untouched, so it is taken only once Lua
+			// has claimed it; the text lives on this frame because the hot path must not allocate.
+			buffer: [commands.SEQUENCE_TEXT_CAP]u8
+			if !lua_host_key(app, w, target.ref, commands.sequence_text(value.binding.sequence, buffer[:])) {
+				return false
+			}
+			keymap_take(w, e)
+			return true
 		}
 	}
 	return false

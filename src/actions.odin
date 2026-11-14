@@ -190,6 +190,7 @@ Action :: enum u32 {
 	Pane_Move,
 	Pane_Resize,
 	Pane_Set_Ratio,
+	Settings_Check_Lua,
 }
 
 // Everything one command is: its name and title, default shortcuts, what it does when a linked window
@@ -739,6 +740,10 @@ ACTIONS :: [Action]Command_Descriptor {
 		"pane.set_ratio", "Set pane share", nil, .Host,
 		{accepted = {.Ratio, .Focus}, required = {.Ratio}, hidden = true, control = .Pane},
 	},
+	.Settings_Check_Lua = {
+		"settings.check_lua", "Check init.lua", nil, .Host,
+		{accepted = {.File}, hidden = true, control = .Unnamed},
+	},
 }
 
 // What help says about a command beyond its usage and title: a summary, and the command's own help for
@@ -895,6 +900,11 @@ COMMAND_HELP :: #partial [Action]Command_Help {
 	.App_Events = {
 		"Streams application events on this control connection until it closes; aio events subscribes.",
 		{{.Text, {"space-separated event names", "all events", "pane.focused pane.exited"}}},
+	},
+	.Settings_Check_Lua = {
+		"Loads a Lua config file without running any command and prints its path, how many actions, keys " +
+		"and modes it declares, and each problem as file:line: message; fails when there is a problem.",
+		{{.File, {"the Lua file to check", "init.lua beside settings.ini", "init.lua"}}},
 	},
 	.Pane_Focus = {"Focuses the pane and brings its window forward.", nil},
 	.Rename_Pane = {
@@ -1170,6 +1180,8 @@ command_execute :: proc(app: ^App, ctx: Command_Context, invocation: commands.In
 		return script_prompt_select(app, ctx, invocation)
 	case .App_Input:
 		return script_prompt_input(app, ctx, invocation)
+	case .Settings_Check_Lua:
+		return lua_check(app, invocation.file)
 	case .Pane_List:
 		return {payload = Outcome_Panes(pane_reports(app, nil))}
 	case .Tab_List:
