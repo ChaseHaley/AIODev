@@ -236,7 +236,7 @@ function aio.on(name, fn) end
 ---seconds. Cannot run while init.lua loads. Config and Script.
 --{{wait}}
 ---@param name aio.EventName
----@param filter? table|fun(ev: aio.Event): boolean
+---@param filter? table|(fun(ev: aio.Event): boolean)
 ---@param timeout? number
 ---@return aio.Event? ev
 ---@return string? message
@@ -279,7 +279,7 @@ aio.ui = {}
 
 ---@class aio.SelectOptions
 ---@field prompt? string The list's title.
----@field format_item? fun(item: any): string Each item's label; tostring by default.
+---@field format_item? (fun(item: any): string) Each item's label; tostring by default.
 
 ---Opens a filtered list of items, in the shape of vim.ui.select. Without on_choice it suspends the
 ---entry point and returns the chosen item and its index, or nil when dismissed; with it, it returns
@@ -313,8 +313,8 @@ function aio.ui.input(opts, on_confirm) end
 ---@field clear_env? boolean Start from an empty environment.
 ---@field stdin? string|true Text to write, or true to keep stdin open for write.
 ---@field text? boolean false keeps CRLF line endings.
----@field stdout? false|fun(err: nil, data: string) false discards; a function streams each chunk.
----@field stderr? false|fun(err: nil, data: string) false discards; a function streams each chunk.
+---@field stdout? false|(fun(err: nil, data: string)) false discards; a function streams each chunk.
+---@field stderr? false|(fun(err: nil, data: string)) false discards; a function streams each chunk.
 ---@field timeout? number Seconds before the process tree is killed.
 ---@field detach? boolean Outlive the callback that started it.
 
@@ -362,7 +362,7 @@ function SystemHandle:is_closing() end
 ---@param on_exit? fun(result: aio.SystemResult)
 ---@return aio.SystemHandle? handle
 ---@return string? message
----@overload fun(argv: string[], on_exit: fun(result: aio.SystemResult)): aio.SystemHandle?, string?
+---@overload fun(argv: string[], on_exit: (fun(result: aio.SystemResult))): aio.SystemHandle?, string?
 function aio.system(argv, opts, on_exit) end
 
 -- Declarations --------------------------------------------------------------------------------
@@ -375,7 +375,7 @@ function aio.system(argv, opts, on_exit) end
 ---@class aio.ActionSpec
 ---@field name string Lowercase letters, digits and _; the command's name.
 ---@field title string What the palette and Settings show.
----@field run fun(ctx: aio.Ctx, args: table?): any Its return value is the reply's result.
+---@field run (fun(ctx: aio.Ctx, args: table?): any) Its return value is the reply's result.
 ---@field description? string
 ---@field category? string The palette category; Actions by default.
 ---@field keywords? string|string[] More words the palette matches.
@@ -393,7 +393,7 @@ function aio.action(spec) end
 ---name with args as its fields, or to a function called as fn(ctx); a function returning false passes
 ---the key on. Config only, while init.lua loads.
 ---@param key string
----@param target string|fun(ctx: aio.Ctx): boolean?
+---@param target string|(fun(ctx: aio.Ctx): boolean?)
 ---@param args? table Fields for a named target.
 ---@return true? ok
 ---@return string? message
@@ -401,7 +401,7 @@ function aio.bind(key, target, args) end
 
 ---Removes a key's binding, to target only when given. Config only, while init.lua loads.
 ---@param key string
----@param target? string|fun(ctx: aio.Ctx): boolean?
+---@param target? string|(fun(ctx: aio.Ctx): boolean?)
 ---@return true? ok
 ---@return string? message
 function aio.unbind(key, target) end

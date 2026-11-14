@@ -43,9 +43,9 @@ lua_types_built_in_text_matches_types_aio_lua_and_covers_the_catalogue :: proc(t
 	}
 
 	for name in events.NAMES {
-		on := fmt.tprintf("---@overload fun(name: %q, fn: fun(ctx: aio.Ctx, ev: aio.event.", name)
+		on := fmt.tprintf("---@overload fun(name: %q, fn: (fun(ctx: aio.Ctx, ev: aio.event.", name)
 		testing.expectf(t, strings.contains(text, on), "aio.on has an overload for %s", name)
-		wait := fmt.tprintf("---@overload fun(name: %q, filter?: table|fun(ev: aio.event.", name)
+		wait := fmt.tprintf("---@overload fun(name: %q, filter?: table|(fun(ev: aio.event.", name)
 		testing.expectf(t, strings.contains(text, wait), "aio.wait has an overload for %s", name)
 	}
 

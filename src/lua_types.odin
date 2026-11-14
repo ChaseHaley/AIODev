@@ -248,16 +248,18 @@ lua_types_events :: proc(g: ^Lua_Types) {
 		fmt.sbprintf(b, "\n---The fields of %s.\n---@class %s\n", names[kind], event)
 		fmt.sbprintf(b, "---@field type %q\n", names[kind])
 		lua_types_fields(g, fields[kind], nil)
+		// A function type inside a parameter list or a union is parenthesized: LuaLS otherwise reads
+		// what follows its return type as further return values.
 		fmt.sbprintf(
 			&g.splices[.On],
-			"---@overload fun(name: %q, fn: fun(ctx: aio.Ctx, ev: %s)): fun(ctx: aio.Ctx, ev: %s)\n",
+			"---@overload fun(name: %q, fn: (fun(ctx: aio.Ctx, ev: %s))): (fun(ctx: aio.Ctx, ev: %s))\n",
 			names[kind],
 			event,
 			event,
 		)
 		fmt.sbprintf(
 			&g.splices[.Wait],
-			"---@overload fun(name: %q, filter?: table|fun(ev: %s): boolean, timeout?: number): %s?, string?\n",
+			"---@overload fun(name: %q, filter?: table|(fun(ev: %s): boolean), timeout?: number): %s?, string?\n",
 			names[kind],
 			event,
 			event,

@@ -430,33 +430,33 @@ function aio.layout.apply(opts) end
 
 ---Calls fn(ctx, ev) for every event of that name, after the tick that caused it. Returns fn. An
 ---unknown name raises an error. Config and Script.
----@overload fun(name: "pane.created", fn: fun(ctx: aio.Ctx, ev: aio.event.PaneCreated)): fun(ctx: aio.Ctx, ev: aio.event.PaneCreated)
----@overload fun(name: "pane.closed", fn: fun(ctx: aio.Ctx, ev: aio.event.PaneClosed)): fun(ctx: aio.Ctx, ev: aio.event.PaneClosed)
----@overload fun(name: "pane.exited", fn: fun(ctx: aio.Ctx, ev: aio.event.PaneExited)): fun(ctx: aio.Ctx, ev: aio.event.PaneExited)
----@overload fun(name: "pane.focused", fn: fun(ctx: aio.Ctx, ev: aio.event.PaneFocused)): fun(ctx: aio.Ctx, ev: aio.event.PaneFocused)
----@overload fun(name: "pane.title_changed", fn: fun(ctx: aio.Ctx, ev: aio.event.PaneTitleChanged)): fun(ctx: aio.Ctx, ev: aio.event.PaneTitleChanged)
----@overload fun(name: "pane.cwd_changed", fn: fun(ctx: aio.Ctx, ev: aio.event.PaneCwdChanged)): fun(ctx: aio.Ctx, ev: aio.event.PaneCwdChanged)
----@overload fun(name: "pane.bell", fn: fun(ctx: aio.Ctx, ev: aio.event.PaneBell)): fun(ctx: aio.Ctx, ev: aio.event.PaneBell)
----@overload fun(name: "pane.status_changed", fn: fun(ctx: aio.Ctx, ev: aio.event.PaneStatusChanged)): fun(ctx: aio.Ctx, ev: aio.event.PaneStatusChanged)
----@overload fun(name: "pane.notification", fn: fun(ctx: aio.Ctx, ev: aio.event.PaneNotification)): fun(ctx: aio.Ctx, ev: aio.event.PaneNotification)
----@overload fun(name: "pane.resized", fn: fun(ctx: aio.Ctx, ev: aio.event.PaneResized)): fun(ctx: aio.Ctx, ev: aio.event.PaneResized)
----@overload fun(name: "pane.process_changed", fn: fun(ctx: aio.Ctx, ev: aio.event.PaneProcessChanged)): fun(ctx: aio.Ctx, ev: aio.event.PaneProcessChanged)
----@overload fun(name: "tab.created", fn: fun(ctx: aio.Ctx, ev: aio.event.TabCreated)): fun(ctx: aio.Ctx, ev: aio.event.TabCreated)
----@overload fun(name: "tab.closed", fn: fun(ctx: aio.Ctx, ev: aio.event.TabClosed)): fun(ctx: aio.Ctx, ev: aio.event.TabClosed)
----@overload fun(name: "tab.selected", fn: fun(ctx: aio.Ctx, ev: aio.event.TabSelected)): fun(ctx: aio.Ctx, ev: aio.event.TabSelected)
----@overload fun(name: "tab.renamed", fn: fun(ctx: aio.Ctx, ev: aio.event.TabRenamed)): fun(ctx: aio.Ctx, ev: aio.event.TabRenamed)
----@overload fun(name: "workspace.created", fn: fun(ctx: aio.Ctx, ev: aio.event.WorkspaceCreated)): fun(ctx: aio.Ctx, ev: aio.event.WorkspaceCreated)
----@overload fun(name: "workspace.deleted", fn: fun(ctx: aio.Ctx, ev: aio.event.WorkspaceDeleted)): fun(ctx: aio.Ctx, ev: aio.event.WorkspaceDeleted)
----@overload fun(name: "workspace.selected", fn: fun(ctx: aio.Ctx, ev: aio.event.WorkspaceSelected)): fun(ctx: aio.Ctx, ev: aio.event.WorkspaceSelected)
----@overload fun(name: "workspace.renamed", fn: fun(ctx: aio.Ctx, ev: aio.event.WorkspaceRenamed)): fun(ctx: aio.Ctx, ev: aio.event.WorkspaceRenamed)
----@overload fun(name: "window.created", fn: fun(ctx: aio.Ctx, ev: aio.event.WindowCreated)): fun(ctx: aio.Ctx, ev: aio.event.WindowCreated)
----@overload fun(name: "window.closed", fn: fun(ctx: aio.Ctx, ev: aio.event.WindowClosed)): fun(ctx: aio.Ctx, ev: aio.event.WindowClosed)
----@overload fun(name: "window.focused", fn: fun(ctx: aio.Ctx, ev: aio.event.WindowFocused)): fun(ctx: aio.Ctx, ev: aio.event.WindowFocused)
----@overload fun(name: "layout.changed", fn: fun(ctx: aio.Ctx, ev: aio.event.LayoutChanged)): fun(ctx: aio.Ctx, ev: aio.event.LayoutChanged)
----@overload fun(name: "settings.reloaded", fn: fun(ctx: aio.Ctx, ev: aio.event.SettingsReloaded)): fun(ctx: aio.Ctx, ev: aio.event.SettingsReloaded)
----@overload fun(name: "settings.changed", fn: fun(ctx: aio.Ctx, ev: aio.event.SettingsChanged)): fun(ctx: aio.Ctx, ev: aio.event.SettingsChanged)
----@overload fun(name: "prompt.closed", fn: fun(ctx: aio.Ctx, ev: aio.event.PromptClosed)): fun(ctx: aio.Ctx, ev: aio.event.PromptClosed)
----@overload fun(name: "app.quitting", fn: fun(ctx: aio.Ctx, ev: aio.event.AppQuitting)): fun(ctx: aio.Ctx, ev: aio.event.AppQuitting)
+---@overload fun(name: "pane.created", fn: (fun(ctx: aio.Ctx, ev: aio.event.PaneCreated))): (fun(ctx: aio.Ctx, ev: aio.event.PaneCreated))
+---@overload fun(name: "pane.closed", fn: (fun(ctx: aio.Ctx, ev: aio.event.PaneClosed))): (fun(ctx: aio.Ctx, ev: aio.event.PaneClosed))
+---@overload fun(name: "pane.exited", fn: (fun(ctx: aio.Ctx, ev: aio.event.PaneExited))): (fun(ctx: aio.Ctx, ev: aio.event.PaneExited))
+---@overload fun(name: "pane.focused", fn: (fun(ctx: aio.Ctx, ev: aio.event.PaneFocused))): (fun(ctx: aio.Ctx, ev: aio.event.PaneFocused))
+---@overload fun(name: "pane.title_changed", fn: (fun(ctx: aio.Ctx, ev: aio.event.PaneTitleChanged))): (fun(ctx: aio.Ctx, ev: aio.event.PaneTitleChanged))
+---@overload fun(name: "pane.cwd_changed", fn: (fun(ctx: aio.Ctx, ev: aio.event.PaneCwdChanged))): (fun(ctx: aio.Ctx, ev: aio.event.PaneCwdChanged))
+---@overload fun(name: "pane.bell", fn: (fun(ctx: aio.Ctx, ev: aio.event.PaneBell))): (fun(ctx: aio.Ctx, ev: aio.event.PaneBell))
+---@overload fun(name: "pane.status_changed", fn: (fun(ctx: aio.Ctx, ev: aio.event.PaneStatusChanged))): (fun(ctx: aio.Ctx, ev: aio.event.PaneStatusChanged))
+---@overload fun(name: "pane.notification", fn: (fun(ctx: aio.Ctx, ev: aio.event.PaneNotification))): (fun(ctx: aio.Ctx, ev: aio.event.PaneNotification))
+---@overload fun(name: "pane.resized", fn: (fun(ctx: aio.Ctx, ev: aio.event.PaneResized))): (fun(ctx: aio.Ctx, ev: aio.event.PaneResized))
+---@overload fun(name: "pane.process_changed", fn: (fun(ctx: aio.Ctx, ev: aio.event.PaneProcessChanged))): (fun(ctx: aio.Ctx, ev: aio.event.PaneProcessChanged))
+---@overload fun(name: "tab.created", fn: (fun(ctx: aio.Ctx, ev: aio.event.TabCreated))): (fun(ctx: aio.Ctx, ev: aio.event.TabCreated))
+---@overload fun(name: "tab.closed", fn: (fun(ctx: aio.Ctx, ev: aio.event.TabClosed))): (fun(ctx: aio.Ctx, ev: aio.event.TabClosed))
+---@overload fun(name: "tab.selected", fn: (fun(ctx: aio.Ctx, ev: aio.event.TabSelected))): (fun(ctx: aio.Ctx, ev: aio.event.TabSelected))
+---@overload fun(name: "tab.renamed", fn: (fun(ctx: aio.Ctx, ev: aio.event.TabRenamed))): (fun(ctx: aio.Ctx, ev: aio.event.TabRenamed))
+---@overload fun(name: "workspace.created", fn: (fun(ctx: aio.Ctx, ev: aio.event.WorkspaceCreated))): (fun(ctx: aio.Ctx, ev: aio.event.WorkspaceCreated))
+---@overload fun(name: "workspace.deleted", fn: (fun(ctx: aio.Ctx, ev: aio.event.WorkspaceDeleted))): (fun(ctx: aio.Ctx, ev: aio.event.WorkspaceDeleted))
+---@overload fun(name: "workspace.selected", fn: (fun(ctx: aio.Ctx, ev: aio.event.WorkspaceSelected))): (fun(ctx: aio.Ctx, ev: aio.event.WorkspaceSelected))
+---@overload fun(name: "workspace.renamed", fn: (fun(ctx: aio.Ctx, ev: aio.event.WorkspaceRenamed))): (fun(ctx: aio.Ctx, ev: aio.event.WorkspaceRenamed))
+---@overload fun(name: "window.created", fn: (fun(ctx: aio.Ctx, ev: aio.event.WindowCreated))): (fun(ctx: aio.Ctx, ev: aio.event.WindowCreated))
+---@overload fun(name: "window.closed", fn: (fun(ctx: aio.Ctx, ev: aio.event.WindowClosed))): (fun(ctx: aio.Ctx, ev: aio.event.WindowClosed))
+---@overload fun(name: "window.focused", fn: (fun(ctx: aio.Ctx, ev: aio.event.WindowFocused))): (fun(ctx: aio.Ctx, ev: aio.event.WindowFocused))
+---@overload fun(name: "layout.changed", fn: (fun(ctx: aio.Ctx, ev: aio.event.LayoutChanged))): (fun(ctx: aio.Ctx, ev: aio.event.LayoutChanged))
+---@overload fun(name: "settings.reloaded", fn: (fun(ctx: aio.Ctx, ev: aio.event.SettingsReloaded))): (fun(ctx: aio.Ctx, ev: aio.event.SettingsReloaded))
+---@overload fun(name: "settings.changed", fn: (fun(ctx: aio.Ctx, ev: aio.event.SettingsChanged))): (fun(ctx: aio.Ctx, ev: aio.event.SettingsChanged))
+---@overload fun(name: "prompt.closed", fn: (fun(ctx: aio.Ctx, ev: aio.event.PromptClosed))): (fun(ctx: aio.Ctx, ev: aio.event.PromptClosed))
+---@overload fun(name: "app.quitting", fn: (fun(ctx: aio.Ctx, ev: aio.event.AppQuitting))): (fun(ctx: aio.Ctx, ev: aio.event.AppQuitting))
 ---@param name aio.EventName
 ---@param fn fun(ctx: aio.Ctx, ev: aio.Event)
 ---@return fun(ctx: aio.Ctx, ev: aio.Event) fn
@@ -465,35 +465,35 @@ function aio.on(name, fn) end
 ---Suspends the calling entry point until an event of that name matches the filter: a table of field
 ---values, or a function returning true. Returns the event, or nil and 'timeout' after timeout
 ---seconds. Cannot run while init.lua loads. Config and Script.
----@overload fun(name: "pane.created", filter?: table|fun(ev: aio.event.PaneCreated): boolean, timeout?: number): aio.event.PaneCreated?, string?
----@overload fun(name: "pane.closed", filter?: table|fun(ev: aio.event.PaneClosed): boolean, timeout?: number): aio.event.PaneClosed?, string?
----@overload fun(name: "pane.exited", filter?: table|fun(ev: aio.event.PaneExited): boolean, timeout?: number): aio.event.PaneExited?, string?
----@overload fun(name: "pane.focused", filter?: table|fun(ev: aio.event.PaneFocused): boolean, timeout?: number): aio.event.PaneFocused?, string?
----@overload fun(name: "pane.title_changed", filter?: table|fun(ev: aio.event.PaneTitleChanged): boolean, timeout?: number): aio.event.PaneTitleChanged?, string?
----@overload fun(name: "pane.cwd_changed", filter?: table|fun(ev: aio.event.PaneCwdChanged): boolean, timeout?: number): aio.event.PaneCwdChanged?, string?
----@overload fun(name: "pane.bell", filter?: table|fun(ev: aio.event.PaneBell): boolean, timeout?: number): aio.event.PaneBell?, string?
----@overload fun(name: "pane.status_changed", filter?: table|fun(ev: aio.event.PaneStatusChanged): boolean, timeout?: number): aio.event.PaneStatusChanged?, string?
----@overload fun(name: "pane.notification", filter?: table|fun(ev: aio.event.PaneNotification): boolean, timeout?: number): aio.event.PaneNotification?, string?
----@overload fun(name: "pane.resized", filter?: table|fun(ev: aio.event.PaneResized): boolean, timeout?: number): aio.event.PaneResized?, string?
----@overload fun(name: "pane.process_changed", filter?: table|fun(ev: aio.event.PaneProcessChanged): boolean, timeout?: number): aio.event.PaneProcessChanged?, string?
----@overload fun(name: "tab.created", filter?: table|fun(ev: aio.event.TabCreated): boolean, timeout?: number): aio.event.TabCreated?, string?
----@overload fun(name: "tab.closed", filter?: table|fun(ev: aio.event.TabClosed): boolean, timeout?: number): aio.event.TabClosed?, string?
----@overload fun(name: "tab.selected", filter?: table|fun(ev: aio.event.TabSelected): boolean, timeout?: number): aio.event.TabSelected?, string?
----@overload fun(name: "tab.renamed", filter?: table|fun(ev: aio.event.TabRenamed): boolean, timeout?: number): aio.event.TabRenamed?, string?
----@overload fun(name: "workspace.created", filter?: table|fun(ev: aio.event.WorkspaceCreated): boolean, timeout?: number): aio.event.WorkspaceCreated?, string?
----@overload fun(name: "workspace.deleted", filter?: table|fun(ev: aio.event.WorkspaceDeleted): boolean, timeout?: number): aio.event.WorkspaceDeleted?, string?
----@overload fun(name: "workspace.selected", filter?: table|fun(ev: aio.event.WorkspaceSelected): boolean, timeout?: number): aio.event.WorkspaceSelected?, string?
----@overload fun(name: "workspace.renamed", filter?: table|fun(ev: aio.event.WorkspaceRenamed): boolean, timeout?: number): aio.event.WorkspaceRenamed?, string?
----@overload fun(name: "window.created", filter?: table|fun(ev: aio.event.WindowCreated): boolean, timeout?: number): aio.event.WindowCreated?, string?
----@overload fun(name: "window.closed", filter?: table|fun(ev: aio.event.WindowClosed): boolean, timeout?: number): aio.event.WindowClosed?, string?
----@overload fun(name: "window.focused", filter?: table|fun(ev: aio.event.WindowFocused): boolean, timeout?: number): aio.event.WindowFocused?, string?
----@overload fun(name: "layout.changed", filter?: table|fun(ev: aio.event.LayoutChanged): boolean, timeout?: number): aio.event.LayoutChanged?, string?
----@overload fun(name: "settings.reloaded", filter?: table|fun(ev: aio.event.SettingsReloaded): boolean, timeout?: number): aio.event.SettingsReloaded?, string?
----@overload fun(name: "settings.changed", filter?: table|fun(ev: aio.event.SettingsChanged): boolean, timeout?: number): aio.event.SettingsChanged?, string?
----@overload fun(name: "prompt.closed", filter?: table|fun(ev: aio.event.PromptClosed): boolean, timeout?: number): aio.event.PromptClosed?, string?
----@overload fun(name: "app.quitting", filter?: table|fun(ev: aio.event.AppQuitting): boolean, timeout?: number): aio.event.AppQuitting?, string?
+---@overload fun(name: "pane.created", filter?: table|(fun(ev: aio.event.PaneCreated): boolean), timeout?: number): aio.event.PaneCreated?, string?
+---@overload fun(name: "pane.closed", filter?: table|(fun(ev: aio.event.PaneClosed): boolean), timeout?: number): aio.event.PaneClosed?, string?
+---@overload fun(name: "pane.exited", filter?: table|(fun(ev: aio.event.PaneExited): boolean), timeout?: number): aio.event.PaneExited?, string?
+---@overload fun(name: "pane.focused", filter?: table|(fun(ev: aio.event.PaneFocused): boolean), timeout?: number): aio.event.PaneFocused?, string?
+---@overload fun(name: "pane.title_changed", filter?: table|(fun(ev: aio.event.PaneTitleChanged): boolean), timeout?: number): aio.event.PaneTitleChanged?, string?
+---@overload fun(name: "pane.cwd_changed", filter?: table|(fun(ev: aio.event.PaneCwdChanged): boolean), timeout?: number): aio.event.PaneCwdChanged?, string?
+---@overload fun(name: "pane.bell", filter?: table|(fun(ev: aio.event.PaneBell): boolean), timeout?: number): aio.event.PaneBell?, string?
+---@overload fun(name: "pane.status_changed", filter?: table|(fun(ev: aio.event.PaneStatusChanged): boolean), timeout?: number): aio.event.PaneStatusChanged?, string?
+---@overload fun(name: "pane.notification", filter?: table|(fun(ev: aio.event.PaneNotification): boolean), timeout?: number): aio.event.PaneNotification?, string?
+---@overload fun(name: "pane.resized", filter?: table|(fun(ev: aio.event.PaneResized): boolean), timeout?: number): aio.event.PaneResized?, string?
+---@overload fun(name: "pane.process_changed", filter?: table|(fun(ev: aio.event.PaneProcessChanged): boolean), timeout?: number): aio.event.PaneProcessChanged?, string?
+---@overload fun(name: "tab.created", filter?: table|(fun(ev: aio.event.TabCreated): boolean), timeout?: number): aio.event.TabCreated?, string?
+---@overload fun(name: "tab.closed", filter?: table|(fun(ev: aio.event.TabClosed): boolean), timeout?: number): aio.event.TabClosed?, string?
+---@overload fun(name: "tab.selected", filter?: table|(fun(ev: aio.event.TabSelected): boolean), timeout?: number): aio.event.TabSelected?, string?
+---@overload fun(name: "tab.renamed", filter?: table|(fun(ev: aio.event.TabRenamed): boolean), timeout?: number): aio.event.TabRenamed?, string?
+---@overload fun(name: "workspace.created", filter?: table|(fun(ev: aio.event.WorkspaceCreated): boolean), timeout?: number): aio.event.WorkspaceCreated?, string?
+---@overload fun(name: "workspace.deleted", filter?: table|(fun(ev: aio.event.WorkspaceDeleted): boolean), timeout?: number): aio.event.WorkspaceDeleted?, string?
+---@overload fun(name: "workspace.selected", filter?: table|(fun(ev: aio.event.WorkspaceSelected): boolean), timeout?: number): aio.event.WorkspaceSelected?, string?
+---@overload fun(name: "workspace.renamed", filter?: table|(fun(ev: aio.event.WorkspaceRenamed): boolean), timeout?: number): aio.event.WorkspaceRenamed?, string?
+---@overload fun(name: "window.created", filter?: table|(fun(ev: aio.event.WindowCreated): boolean), timeout?: number): aio.event.WindowCreated?, string?
+---@overload fun(name: "window.closed", filter?: table|(fun(ev: aio.event.WindowClosed): boolean), timeout?: number): aio.event.WindowClosed?, string?
+---@overload fun(name: "window.focused", filter?: table|(fun(ev: aio.event.WindowFocused): boolean), timeout?: number): aio.event.WindowFocused?, string?
+---@overload fun(name: "layout.changed", filter?: table|(fun(ev: aio.event.LayoutChanged): boolean), timeout?: number): aio.event.LayoutChanged?, string?
+---@overload fun(name: "settings.reloaded", filter?: table|(fun(ev: aio.event.SettingsReloaded): boolean), timeout?: number): aio.event.SettingsReloaded?, string?
+---@overload fun(name: "settings.changed", filter?: table|(fun(ev: aio.event.SettingsChanged): boolean), timeout?: number): aio.event.SettingsChanged?, string?
+---@overload fun(name: "prompt.closed", filter?: table|(fun(ev: aio.event.PromptClosed): boolean), timeout?: number): aio.event.PromptClosed?, string?
+---@overload fun(name: "app.quitting", filter?: table|(fun(ev: aio.event.AppQuitting): boolean), timeout?: number): aio.event.AppQuitting?, string?
 ---@param name aio.EventName
----@param filter? table|fun(ev: aio.Event): boolean
+---@param filter? table|(fun(ev: aio.Event): boolean)
 ---@param timeout? number
 ---@return aio.Event? ev
 ---@return string? message
@@ -536,7 +536,7 @@ aio.ui = {}
 
 ---@class aio.SelectOptions
 ---@field prompt? string The list's title.
----@field format_item? fun(item: any): string Each item's label; tostring by default.
+---@field format_item? (fun(item: any): string) Each item's label; tostring by default.
 
 ---Opens a filtered list of items, in the shape of vim.ui.select. Without on_choice it suspends the
 ---entry point and returns the chosen item and its index, or nil when dismissed; with it, it returns
@@ -570,8 +570,8 @@ function aio.ui.input(opts, on_confirm) end
 ---@field clear_env? boolean Start from an empty environment.
 ---@field stdin? string|true Text to write, or true to keep stdin open for write.
 ---@field text? boolean false keeps CRLF line endings.
----@field stdout? false|fun(err: nil, data: string) false discards; a function streams each chunk.
----@field stderr? false|fun(err: nil, data: string) false discards; a function streams each chunk.
+---@field stdout? false|(fun(err: nil, data: string)) false discards; a function streams each chunk.
+---@field stderr? false|(fun(err: nil, data: string)) false discards; a function streams each chunk.
 ---@field timeout? number Seconds before the process tree is killed.
 ---@field detach? boolean Outlive the callback that started it.
 
@@ -619,7 +619,7 @@ function SystemHandle:is_closing() end
 ---@param on_exit? fun(result: aio.SystemResult)
 ---@return aio.SystemHandle? handle
 ---@return string? message
----@overload fun(argv: string[], on_exit: fun(result: aio.SystemResult)): aio.SystemHandle?, string?
+---@overload fun(argv: string[], on_exit: (fun(result: aio.SystemResult))): aio.SystemHandle?, string?
 function aio.system(argv, opts, on_exit) end
 
 -- Declarations --------------------------------------------------------------------------------
@@ -632,7 +632,7 @@ function aio.system(argv, opts, on_exit) end
 ---@class aio.ActionSpec
 ---@field name string Lowercase letters, digits and _; the command's name.
 ---@field title string What the palette and Settings show.
----@field run fun(ctx: aio.Ctx, args: table?): any Its return value is the reply's result.
+---@field run (fun(ctx: aio.Ctx, args: table?): any) Its return value is the reply's result.
 ---@field description? string
 ---@field category? string The palette category; Actions by default.
 ---@field keywords? string|string[] More words the palette matches.
@@ -650,7 +650,7 @@ function aio.action(spec) end
 ---name with args as its fields, or to a function called as fn(ctx); a function returning false passes
 ---the key on. Config only, while init.lua loads.
 ---@param key string
----@param target string|fun(ctx: aio.Ctx): boolean?
+---@param target string|(fun(ctx: aio.Ctx): boolean?)
 ---@param args? table Fields for a named target.
 ---@return true? ok
 ---@return string? message
@@ -658,7 +658,7 @@ function aio.bind(key, target, args) end
 
 ---Removes a key's binding, to target only when given. Config only, while init.lua loads.
 ---@param key string
----@param target? string|fun(ctx: aio.Ctx): boolean?
+---@param target? string|(fun(ctx: aio.Ctx): boolean?)
 ---@return true? ok
 ---@return string? message
 function aio.unbind(key, target) end
