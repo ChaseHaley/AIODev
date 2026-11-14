@@ -32,6 +32,7 @@ Argument :: enum u8 {
 	Unwrap,
 	Keys,
 	Title,
+	Once,
 }
 Arguments :: bit_set[Argument;u32]
 
@@ -54,6 +55,7 @@ Invocation :: struct {
 	lines:                                   int,
 	scrollback, unwrap:                      bool,
 	keys, title:                            string,
+	once:                                    bool,
 }
 
 Parse_Error :: struct {
@@ -211,6 +213,7 @@ argument_grammar := [Argument]struct {
 		"--title", " <title>",
 		{"the notification's title", "AIODev", `--title "Build finished"`},
 	},
+	.Once      = {"--once", "", {"leaves the mode after one completed binding", "off", "--once"}},
 }
 #assert(layout.SPLIT_SHARE_MIN == 0.05 && layout.SPLIT_SHARE_MAX == 0.95)
 #assert(SPLIT_DEFAULT.direction == .Right && SPLIT_DEFAULT.ratio == 0.5)
@@ -374,6 +377,7 @@ parse_invocation :: proc(
 			if argument == .Scrollback {result.scrollback = true} else {result.unwrap = true}
 			continue
 		}
+		if argument == .Once {result.once = true; continue}
 		if i + 1 == len(args) {return {}, {option, "supply a value after this option"}}
 		i += 1
 		value := args[i]

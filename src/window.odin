@@ -1,5 +1,6 @@
 package main
 
+import "aio:commands"
 import "aio:input"
 import "aio:colour"
 import "aio:layout"
@@ -327,6 +328,7 @@ window_close :: proc(app: ^App, w: ^Window) {
 // through window_prepare is freed the same way.
 @(private)
 window_free :: proc(w: ^Window) {
+	commands.key_state_destroy(&w.bindings)
 	workspace_view_destroy(&w.resources)
 	drag_destroy(w)
 	ui.find_destroy(&w.find)

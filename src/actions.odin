@@ -174,6 +174,9 @@ Action :: enum u32 {
 	Clipboard_Write,
 	Settings_Get,
 	Settings_Set,
+	Mode_Enter,
+	Mode_Exit,
+	Mode_Exit_All,
 }
 
 // Everything one command is: its name and title, default shortcuts, what it does when a linked window
@@ -660,6 +663,12 @@ ACTIONS :: [Action]Command_Descriptor {
 		"settings.set", "Write setting", nil, .Host,
 		{accepted = {.Name, .Text}, required = {.Name, .Text}, hidden = true, control = .Unnamed},
 	},
+	.Mode_Enter = {
+		"mode.enter", "Enter key mode", nil, .Local,
+		{accepted = {.Name, .Once}, required = {.Name}},
+	},
+	.Mode_Exit = {"mode.exit", "Leave key mode", nil, .Local, {}},
+	.Mode_Exit_All = {"mode.exit_all", "Leave all key modes", nil, .Local, {}},
 }
 
 // What help says about a command beyond its usage and title: a summary, and the command's own help for
@@ -817,6 +826,12 @@ COMMAND_HELP :: #partial [Action]Command_Help {
 		"Lists every command, or describes one; aio commands and aio help ask it.",
 		{{.Text, {"a command to describe", "none (lists every command)", "pane.split"}}},
 	},
+	.Mode_Enter = {
+		"Enters a declared key mode in this window; the most recently entered mode handles keys first.",
+		{{.Name, {"the declared key mode", "required", "--name resize"}}},
+	},
+	.Mode_Exit = {"Leaves the most recently entered key mode in this window.", nil},
+	.Mode_Exit_All = {"Leaves every key mode and cancels the pending key sequence in this window.", nil},
 }
 
 @(require_results)
@@ -1028,6 +1043,8 @@ command_execute :: proc(app: ^App, ctx: Command_Context, invocation: commands.In
 		if w.workspace != nil {tab_index = tab.? or_else w.workspace.selected}
 	}
 	switch action {
+	case .Mode_Enter, .Mode_Exit, .Mode_Exit_All:
+		return key_mode_command(app, w, action, invocation)
 	case .App_Commands:
 		return command_catalogue(app, invocation.text)
 	case .App_Version:

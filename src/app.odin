@@ -82,6 +82,7 @@ App :: struct {
 	theme:                 ui.Theme,
 	registry:              commands.Registry,
 	runtime_runner:        Runtime_Runner,
+	keymap:                commands.Keymap,
 	leader:                Maybe(commands.Shortcut),
 	palette:               ui.Palette,
 	// Where the palette's usage is saved; see palette_usage.odin.
@@ -203,6 +204,7 @@ app_init :: proc(app: ^App) -> bool {
 		log.errorf("parsing the bundled program artwork failed: %v", err)
 	}
 	app.registry = commands.create()
+	commands.keymap_init(&app.keymap)
 	if err := register_actions(&app.registry); err != .None {
 		log.errorf("registering commands failed: %v", err)
 		return false
@@ -308,6 +310,7 @@ app_destroy :: proc(app: ^App) {
 	ui.notices_destroy(&app.notices)
 	shortcut_undo_destroy(&app.shortcut_undo)
 	commands.destroy(&app.registry)
+	commands.keymap_destroy(&app.keymap)
 	settings.destroy(&app.settings)
 	settings.inputs_destroy(&app.settings_inputs)
 	settings_notice_state_destroy(&app.settings_notices)
@@ -529,6 +532,7 @@ app_timer_deadline :: proc(app: ^App, timer: App_Timer) -> (next: time.Tick, pen
 @(private = "file")
 Window_Timer :: enum u8 {
 	Leader,
+	Key_Sequence,
 	Paste_Confirm,
 	Cursor_Blink,
 	Capture_Hold,
@@ -545,6 +549,8 @@ window_timer_advance :: proc(app: ^App, w: ^Window, timer: Window_Timer, now: ti
 	switch timer {
 	case .Leader:
 		leader_expire(w, now)
+	case .Key_Sequence:
+		key_sequence_expire(w, now)
 	case .Paste_Confirm:
 		paste_confirm_expire(w, now)
 	case .Cursor_Blink:
@@ -571,6 +577,8 @@ window_timer_deadline :: proc(w: ^Window, timer: Window_Timer) -> (time.Tick, bo
 	switch timer {
 	case .Leader:
 		return leader_deadline(w)
+	case .Key_Sequence:
+		return key_sequence_deadline(w)
 	case .Paste_Confirm:
 		return paste_confirm_deadline(w)
 	case .Cursor_Blink:

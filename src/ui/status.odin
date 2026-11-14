@@ -13,6 +13,9 @@ leader_status_layout :: proc(area: render.Rect, width, scale: f32) -> render.Rec
 	}
 }
 
+LEADER_STATUS_HINT :: "Leader · awaiting key"
+
+// An empty chord draws the hint alone, which is how a key mode or a pending key sequence shows.
 leader_status_draw :: proc(
 	list: ^render.Draw_List,
 	text: ^Text,
@@ -20,33 +23,35 @@ leader_status_draw :: proc(
 	area: render.Rect,
 	chord: string,
 	scale: f32,
+	hint := LEADER_STATUS_HINT,
 ) -> render.Build_Status {
 	small := text_styled(text, .Detail)
 	keycap := text_styled(text, .Detail)
-	hint := "Leader · awaiting key"
-	key_width := text_width(&keycap, chord)
-	r := leader_status_layout(area, key_width + 8 * scale + text_width(&small, hint), scale)
+	key_width := chord == "" ? 0 : text_width(&keycap, chord) + 8 * scale
+	r := leader_status_layout(area, key_width + text_width(&small, hint), scale)
 	if r.height < small.line_height || r.width <= 16 * scale {return .Ok}
 	if render.push_layer(list, r) != .None {return .Ok}
 	draw_rect(list, {rect = r, color = theme.pane, radius = RADIUS_CONTROL * scale})
 	baseline := r.y + (r.height - small.line_height) / 2 + small.ascent
-	if result := draw_text(
-		&keycap,
-		list,
-		chord,
-		r.x + 8 * scale,
-		baseline,
-		theme.accent,
-		max(0, r.width - 16 * scale),
-	); result != .Ok {return result}
+	if chord != "" {
+		if result := draw_text(
+			&keycap,
+			list,
+			chord,
+			r.x + 8 * scale,
+			baseline,
+			theme.accent,
+			max(0, r.width - 16 * scale),
+		); result != .Ok {return result}
+	}
 	return draw_text(
 		&small,
 		list,
 		hint,
-		r.x + 8 * scale + key_width + 8 * scale,
+		r.x + 8 * scale + key_width,
 		baseline,
 		theme.muted,
-		max(0, r.width - key_width - 24 * scale),
+		max(0, r.width - key_width - 16 * scale),
 	)
 }
 

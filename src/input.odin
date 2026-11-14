@@ -347,6 +347,7 @@ content_key_prelude :: proc(
 		find_close(app, w, find_target(app, w))
 		return {}, true
 	}
+	if keymap_key(app, w, e) {return {}, true}
 	switch leader_key(app, w, e) {
 	case .Consumed:
 		return {}, true
@@ -485,10 +486,16 @@ on_focus :: proc(app: ^App, w: ^Window, focused: bool) {
 	if focused {status_focus_enter(app, w)}
 }
 
-// What the keyboard holds between events: the leader chord and the keys whose release is suppressed.
+// What the keyboard holds between events: the leader chord, the keys whose release is suppressed, the
+// keymap's pending sequence and modes, and the keys whose press the keymap took.
 Key_State :: struct {
-	leader:     Leader,
-	suppressed: Suppressed_Keys,
+	leader:      Leader,
+	suppressed:  Suppressed_Keys,
+	bindings:    commands.Key_State,
+	key_until:   time.Tick,
+	// Kept apart from `suppressed`, which other surfaces also set, so only the keymap's own keys have
+	// their repeats swallowed and ordinary shortcuts still repeat.
+	keymap_held: Suppressed_Keys,
 }
 
 // Leader chord mode: nil is Idle; Armed waits until `until` for the key that completes the chord.
@@ -565,13 +572,20 @@ leader_key :: proc(app: ^App, w: ^Window, e: input.Key_Event) -> Leader_Result {
 	return .None
 }
 
-// While the chord is armed, the leader's name shows over the focused pane.
+// While the chord is armed, the leader's name shows over the focused pane; otherwise the active key
+// mode's name or the pending key sequence does.
 window_leader_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
-	if !leader_armed(w) {return .Ok}
-	leader, enabled := app.leader.?
-	if !enabled {return .Ok}
-	buffer: [commands.SHORTCUT_TEXT_CAP]u8
-	label := commands.shortcut_text(leader, buffer[:])
+	chord_buffer: [commands.SHORTCUT_TEXT_CAP]u8
+	hint_buffer: [4 * commands.SHORTCUT_TEXT_CAP + 256]u8
+	chord, hint := "", ui.LEADER_STATUS_HINT
+	if leader_armed(w) {
+		leader, enabled := app.leader.?
+		if !enabled {return .Ok}
+		chord = commands.shortcut_text(leader, chord_buffer[:])
+	} else {
+		hint = key_mode_text(w, hint_buffer[:])
+		if hint == "" {return .Ok}
+	}
 	tree := window_tree(w)
 	if tree == nil {return .Ok}
 	for pane in w.panes {
@@ -582,8 +596,9 @@ window_leader_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 			&w.ui_text,
 			app.theme,
 			{r.x, r.y, r.width, r.height},
-			label,
+			chord,
 			w.scale,
+			hint,
 		)
 	}
 	return .Ok
