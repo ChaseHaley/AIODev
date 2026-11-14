@@ -80,6 +80,7 @@ start :: proc() -> cli_protocol.Status {
 	if o.version {return version(o, pipe, caller)}
 	if o.streaming {return stream_events(o, pipe, caller)}
 	if o.executing {return exec_run(o, pipe, caller)}
+	if o.typing {return types_run(o, pipe, caller)}
 	// A directory that cannot be read leaves relative paths as given.
 	directory, _ := os.get_working_directory(context.temp_allocator)
 	response, status := send(pipe, request(o, caller, directory, context.temp_allocator), true)

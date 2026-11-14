@@ -23,6 +23,7 @@ USAGE_FORMAT :: `Usage: aio [--instance <name>] [--json] <command> [options] [--
        aio exec (<file.lua> | -e <code> | - | <action>) [<key>=<value>...] [--args <json> | @<file>]
                 [--json] [--for <duration>] [--fail-fast]
        aio config check [--data-dir <directory>] [<file>]
+       aio types [--data-dir <directory>] [--force]
        aio commands
        aio help [<command>]
        aio version
@@ -31,8 +32,8 @@ USAGE_FORMAT :: `Usage: aio [--instance <name>] [--json] <command> [options] [--
 Runs AIODev commands from scripts and coding agents. Every command in the everything palette
 runs by name, such as aio tab.next; aio commands lists AIODev's commands, and aio help
 <command> explains one's options, their defaults and an example of each, for aio's own wait,
-events, exec, config, commands, help, version and agent-session too. aio version prints aio's build
-and the running AIODev's, and aio warns on stderr when the two differ.
+events, exec, config, types, commands, help, version and agent-session too. aio version prints aio's
+build and the running AIODev's, and aio warns on stderr when the two differ.
 
 Panes   --pane takes a pane id, a pane name, here or focused. Inside an AIODev pane the
         default is here, the pane aio runs in; elsewhere it is the focused pane.
@@ -75,6 +76,8 @@ Lua     aio exec runs a Lua script with the aio API against AIODev, or one actio
         what it returns as JSON; Ctrl+C exits 130 and aio.stop(code) exits with that code.
         aio config check loads init.lua without AIODev and reports its actions, keys, modes and
         problems; it exits 1 when there are problems.
+        aio types writes types\aio.lua and .luarc.json beside init.lua for lua-language-server; it
+        asks AIODev for your actions and copies the built-in definitions when AIODev is not running.
 Hooks   aio agent-session runs from a Claude Code or Codex SessionStart hook and records the
         session the hook names, so the pane can resume it; the "Install agent session hooks"
         command sets it up.
@@ -237,6 +240,37 @@ local_commands := [?]cli_protocol.Command_Report {
 		},
 	},
 	{
+		name = "types",
+		title = "Write Lua type definitions",
+		usage = "types [--data-dir <directory>] [--force]",
+		summary = "Writes types\\aio.lua beside init.lua with the definitions of the aio API and your " +
+		"init.lua actions, as AIODev reports them, and creates .luarc.json there so lua-language-server " +
+		"reads them. When AIODev is not reachable, it copies the built-in definitions from types\\aio.lua " +
+		"beside aio.exe, without your actions. An existing .luarc.json is kept, and aio prints the two " +
+		"settings to add; exits 1 when no definitions are found or a file cannot be written.",
+		options = {
+			{
+				option = "--data-dir <directory>",
+				description = "writes beside the init.lua of the instance that uses this data folder",
+				default = "the settings folder of the default instance or --instance",
+				example = "--data-dir D:\\aiodev-test",
+			},
+			{
+				option = "--force",
+				description = "replaces an existing .luarc.json too",
+				default = "off",
+				example = "--force",
+			},
+			{
+				option = "--json",
+				description = "prints {ok, status, path, luarc, actions_included}; luarc is created, " +
+				"replaced or kept",
+				default = "off",
+				example = "--json",
+			},
+		},
+	},
+	{
 		name = "commands",
 		title = "List commands",
 		usage = "commands",
@@ -251,7 +285,7 @@ local_commands := [?]cli_protocol.Command_Report {
 			{
 				option = "<command>",
 				description = "the command to explain: any name aio commands lists, or wait, events, exec, " +
-				"config, commands, help, version or agent-session",
+				"config, types, commands, help, version or agent-session",
 				default = "none (prints aio's usage)",
 				example = "pane.split",
 			},
@@ -333,6 +367,9 @@ Options :: struct {
 	// Set when the command is config check.
 	checking:    bool,
 	check:       Config_Check,
+	// Set when the command is types.
+	typing:      bool,
+	lua_types:   Lua_Types,
 }
 
 // Reads aio's own options, which come before the command. `environment` is the AIODEV_INSTANCE
@@ -368,6 +405,8 @@ parse_options :: proc(args: []string, environment: string) -> (Options, string) 
 		return exec_options(o)
 	case "config":
 		return config_options(o)
+	case "types":
+		return types_options(o)
 	}
 	o.version = o.args[0] == "version" || o.args[0] == "--version"
 	// Only an AIODev too old to know the version command fails it, which build_warning reports.

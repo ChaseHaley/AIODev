@@ -420,21 +420,30 @@ exec_interrupt :: proc "system" (kind: w.DWORD) -> w.BOOL {
 	return true
 }
 
+// The folder init.lua lives in, beside the settings of the named instance or of the instance using
+// `data_dir`; "" and a problem when AIODev's settings folder cannot be found.
+@(private, require_results)
+init_folder :: proc(name, data_dir: string, allocator := context.allocator) -> (string, string) {
+	options := instance.Options {
+		name     = name,
+		data_dir = data_dir,
+	}
+	paths, err := instance.paths(options, allocator)
+	if err != nil || paths.settings == "" {return "", "could not find AIODev's settings folder"}
+	return filepath.dir(paths.settings), ""
+}
+
 // Runs `aio config check` on the named file, or on init.lua beside the instance's settings.
 @(private, require_results)
 config_check_run :: proc(o: Options) -> cli_protocol.Status {
 	path := o.check.path
 	if path == "" {
-		options := instance.Options {
-			name     = o.instance,
-			data_dir = o.check.data_dir,
-		}
-		paths, err := instance.paths(options, context.temp_allocator)
-		if err != nil || paths.settings == "" {
-			fmt.eprintln("aio: could not find AIODev's settings folder")
+		folder, problem := init_folder(o.instance, o.check.data_dir, context.temp_allocator)
+		if problem != "" {
+			fmt.eprintfln("aio: %s", problem)
 			return .Failed
 		}
-		parts := [2]string{filepath.dir(paths.settings), INIT_FILE}
+		parts := [2]string{folder, INIT_FILE}
 		joined, join_error := filepath.join(parts[:], context.temp_allocator)
 		if join_error != nil {
 			fmt.eprintln("aio: not enough memory for the init.lua path")
