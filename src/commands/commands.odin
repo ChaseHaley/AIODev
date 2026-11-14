@@ -363,6 +363,7 @@ category :: proc(command: ^Command) -> Category {
 		{"status", {"Activity", "Activity shortcuts"}},
 		{"profile", {"Profiles", "Profile shortcuts"}},
 		{"mode", {"Modes", "Mode shortcuts"}},
+		{"float", {"Floats", "Float shortcuts"}},
 	}
 	dot := strings.index_byte(command.name, '.')
 	namespace := dot < 0 ? command.name : command.name[:dot]

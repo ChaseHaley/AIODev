@@ -353,6 +353,6 @@ Reply_Json :: struct {
 	tabs:       []Tab_Report `json:"tabs,omitempty"`,
 	workspaces: []Workspace_Report `json:"workspaces,omitempty"`,
 	process:    Maybe(Process_Report) `json:"process,omitempty"`,
-	prompt:     u64 `json:"prompt,omitempty"`,
+	prompt:     Maybe(u64) `json:"prompt,omitempty"`,
 	view:       Maybe(View_Report) `json:"view,omitempty"`,
 }

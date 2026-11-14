@@ -180,13 +180,14 @@ script_prompt_replies_and_invalid_lists_preserve_the_open_question :: proc(t: ^t
 	reply: cli_protocol.Reply_Json
 	if !testing.expect_value(t, json.unmarshal_string(response.text, &reply,
 		allocator = context.temp_allocator), nil) {return}
-	testing.expect(t, reply.prompt != 0)
-	testing.expect_value(t, reply.prompt, w.script_prompt.id)
+	prompt, has_prompt := reply.prompt.?
+	testing.expect(t, has_prompt && prompt != 0)
+	testing.expect_value(t, prompt, w.script_prompt.id)
 	bad_lists := []string{`null`, `[1]`, `["one"] trailing`, `{}`}
 	for bad in bad_lists {
 		failure := invoke(&state, 0, "app.select", "--title", "Bad", "--items", bad)
 		testing.expect_value(t, failure.status, cli_protocol.Status.Usage)
-		testing.expect_value(t, w.script_prompt.id, reply.prompt)
+		testing.expect_value(t, w.script_prompt.id, prompt)
 	}
 	failure := invoke(&state, 0, "app.select", "--title", "Bad details", "--items", `["one"]`, "--details", `[]`)
 	testing.expect_value(t, failure.status, cli_protocol.Status.Usage)
@@ -195,9 +196,9 @@ script_prompt_replies_and_invalid_lists_preserve_the_open_question :: proc(t: ^t
 	plain := app.control_cli_answer(&state, input_args)
 	testing.expect(t, plain.ok)
 	id, parsed := strconv.parse_u64(plain.text)
-	testing.expect(t, parsed && id > reply.prompt)
+	testing.expect(t, parsed && id > prompt)
 	testing.expect_value(t, id, w.script_prompt.id)
 	answer := prompt_test_answer(t, &state)
-	testing.expect_value(t, answer.prompt, reply.prompt)
+	testing.expect_value(t, answer.prompt, prompt)
 	testing.expect(t, answer.cancelled)
 }
