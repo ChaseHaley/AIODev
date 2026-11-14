@@ -4,8 +4,8 @@ import "aio:input"
 import "aio:render"
 import "aio:ui"
 
-// The title bar's own controls, left to right after the tab orientation toggle. None is no control,
-// for hover and press state.
+// The title bar's own controls, left to right after the tab orientation toggle and the Activity panel
+// toggle. None is no control, for hover and press state.
 Title_Action :: enum {None, Settings, Palette}
 
 // What a control draws, says, and runs.
@@ -23,8 +23,8 @@ TITLE_CONTROLS := #partial [Title_Action]Title_Control {
 }
 
 // The right edge of the last title button. Controls after them start here with no gap.
-title_actions_end :: proc(w: ^Window) -> f32 {
-	palette := title_action_rect(w, .Palette)
+title_actions_end :: proc(app: ^App, w: ^Window) -> f32 {
+	palette := title_action_rect(app, w, .Palette)
 	return palette.x + palette.width
 }
 
@@ -38,17 +38,20 @@ window_caption_reserve :: proc(w: ^Window) -> f32 {
 	return (ui.CAPTION_WIDTH + CAPTION_CLEAR_MARGIN) * w.scale
 }
 
-title_action_rect :: proc(w: ^Window, action: Title_Action) -> render.Rect {
+// Settings and the palette follow the tab orientation toggle, one slot further right while the Activity
+// panel toggle sits between them.
+title_action_rect :: proc(app: ^App, w: ^Window, action: Title_Action) -> render.Rect {
 	if action == .None {return {}}
 	r := tab_orientation_button_rect(w)
 	slot := 1 + int(action) - int(Title_Action.Settings)
+	if status_panel_toggle_rect(app, w).width > 0 {slot += 1}
 	r.x += f32(slot) * ui.TITLE_BUTTON_WIDTH * w.scale
 	return r
 }
 
-title_action_hit :: proc(w: ^Window, x, y: f32) -> Title_Action {
+title_action_hit :: proc(app: ^App, w: ^Window, x, y: f32) -> Title_Action {
 	for action in Title_Action {
-		if action != .None && render.rect_contains(title_action_rect(w, action), x, y) {return action}
+		if action != .None && render.rect_contains(title_action_rect(app, w, action), x, y) {return action}
 	}
 	return .None
 }
@@ -58,7 +61,7 @@ title_actions_draw :: proc(app: ^App, w: ^Window) {
 	for action in Title_Action {
 		if action == .None {continue}
 		_ = ui.icon_button_draw(
-			&w.list, app.theme, title_action_rect(w, action), TITLE_CONTROLS[action].icon,
+			&w.list, app.theme, title_action_rect(app, w, action), TITLE_CONTROLS[action].icon,
 			f32(int(w.title_action_hover == action)),
 			f32(int(ui.armed_is(w.title_action_armed, action))), w.scale, w.pointer,
 		)
@@ -67,8 +70,8 @@ title_actions_draw :: proc(app: ^App, w: ^Window) {
 
 when AIO_CONTROL {
 	title_state_report :: proc(r: ^State_Report, app: ^App, w: ^Window) {
-		state_rect(r, "title.settings", title_action_rect(w, .Settings))
-		state_rect(r, "title.palette", title_action_rect(w, .Palette))
+		state_rect(r, "title.settings", title_action_rect(app, w, .Settings))
+		state_rect(r, "title.palette", title_action_rect(app, w, .Palette))
 		state_valuef(r, "title.height", "%g", ui.TITLE_BAR_HEIGHT * w.scale)
 		state_value(r, "title.controls_end", i32(window_title_controls_end(app, w)))
 		state_valuef(r, "title.caption_start", "%g", f32(w.width) - ui.CAPTION_WIDTH * w.scale)
@@ -79,39 +82,39 @@ when AIO_CONTROL {
 
 @(private)
 title_action_claims :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {
-	return title_action_hit(w, x, y) != .None
+	return title_action_hit(app, w, x, y) != .None
 }
 
 @(private)
 title_action_pointer_hover :: proc(
 	app: ^App, w: ^Window, owner: Pointer_Target, e: input.Mouse_Move_Event,
 ) {
-	hover := owner == .Title_Action ? title_action_hit(w, f32(e.x), f32(e.y)) : Title_Action.None
+	hover := owner == .Title_Action ? title_action_hit(app, w, f32(e.x), f32(e.y)) : Title_Action.None
 	if hover != w.title_action_hover {w.title_action_hover, w.dirty = hover, true}
 	if hover != .None {pointer_set(app, w, .Hand)}
 }
 
 @(private)
-title_action_tooltip :: proc(_: ^App, w: ^Window, x, y: f32) -> string {
-	return TITLE_CONTROLS[title_action_hit(w, x, y)].tooltip
+title_action_tooltip :: proc(app: ^App, w: ^Window, x, y: f32) -> string {
+	return TITLE_CONTROLS[title_action_hit(app, w, x, y)].tooltip
 }
 
 @(private)
-title_action_shortcut :: proc(_: ^App, w: ^Window, x, y: f32) -> Tooltip_Shortcut {
-	hit := title_action_hit(w, x, y)
+title_action_shortcut :: proc(app: ^App, w: ^Window, x, y: f32) -> Tooltip_Shortcut {
+	hit := title_action_hit(app, w, x, y)
 	if hit == .None {return nil}
 	return TITLE_CONTROLS[hit].action
 }
 
 @(private)
 title_action_press :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) {
-	if e.button == .Left {ui.armed_press(&w.title_action_armed, title_action_hit(w, f32(e.x), f32(e.y)))}
+	if e.button == .Left {ui.armed_press(&w.title_action_armed, title_action_hit(app, w, f32(e.x), f32(e.y)))}
 }
 
 @(private)
 title_action_release :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) -> bool {
 	if e.button != .Left || !ui.armed_down(w.title_action_armed) {return false}
-	fired, ok := ui.armed_release(&w.title_action_armed, title_action_hit(w, f32(e.x), f32(e.y)))
+	fired, ok := ui.armed_release(&w.title_action_armed, title_action_hit(app, w, f32(e.x), f32(e.y)))
 	w.dirty = true
 	if ok && fired != .None {run_action(app, w, TITLE_CONTROLS[fired].action, .Button)}
 	return true

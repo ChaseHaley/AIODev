@@ -67,16 +67,31 @@ tab_selected_after_remove :: proc(selected, index, count: int) -> int {
 
 // What the strip, rail and status crumbs call a tab: its title, else `Tab N` for its 1-based ordinal.
 tab_display_title :: proc(tab: ^Tab, ordinal: int) -> string {
-	return tab.title != "" ? tab.title : fmt.tprintf("Tab %d", ordinal)
+	return tab_title_or_ordinal(tab.title, ordinal)
+}
+
+// What tab_display_title calls the tab while `content` is its focused pane, as a label turning away from that
+// pane shows (WORK-483).
+tab_display_title_with :: proc(app: ^App, tab: ^Tab, content: layout.Content, ordinal: int) -> string {
+	return tab_title_or_ordinal(tab_title_of(app, tab, content), ordinal)
+}
+
+@(private = "file")
+tab_title_or_ordinal :: proc(title: string, ordinal: int) -> string {
+	return title != "" ? title : fmt.tprintf("Tab %d", ordinal)
 }
 
 // One rule for construction and later refreshes: the tab's own name, else its content's title.
+@(private = "file")
+tab_title_of :: proc(app: ^App, tab: ^Tab, content: layout.Content) -> string {
+	if tab.name != "" {return tab.name}
+	return content_pane_title(app, workspace_session_for_content(app, content), content)
+}
+
 @(private)
 tab_update_title :: proc(app: ^App, tab: ^Tab) {
 	content, _ := layout.focused_content(&tab.tree)
-	title := content_pane_title(app, workspace_session_for_content(app, content), content)
-	if tab.name != "" {title = tab.name}
-	owned, err := strings.clone(title)
+	owned, err := strings.clone(tab_title_of(app, tab, content))
 	if err != nil {log.error("copying the tab title failed"); return}
 	delete(tab.title)
 	tab.title = owned

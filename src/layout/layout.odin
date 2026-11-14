@@ -873,19 +873,47 @@ move_pane :: proc(l: ^Layout, node, target: Node_Id, direction: Direction) -> (N
 	return added, true
 }
 
-// Docks a pane along an edge of the whole tiling, which takes a floating pane out of its group.
+// Docks a pane along an edge of the whole tiling, which takes a floating pane out of its group; or, given a
+// `region`, a split holding the pane, along that edge of the region alone (a keyboard move's step outward,
+// see step_plan).
 @(require_results)
-dock_pane :: proc(l: ^Layout, node: Node_Id, direction: Direction) -> (Node_Id, bool) {
+dock_pane :: proc(
+	l: ^Layout,
+	node: Node_Id,
+	direction: Direction,
+	region := INVALID_NODE,
+) -> (
+	Node_Id,
+	bool,
+) {
 	if node == l.root || int(node) >= len(l.nodes) {return INVALID_NODE, false}
 	pane, ok := l.nodes[node].(Pane)
 	// Removing the only shown pane would bring linked panes back; docking has nothing to dock beside.
 	if !ok || (pane_tiled(l, node) && shown_count(l, l.root) <= 1) {return INVALID_NODE, false}
+	anchor := region
+	if region != INVALID_NODE {
+		if int(region) >= len(l.nodes) || !node_holds(l, region, node) {return INVALID_NODE, false}
+		if _, split := l.nodes[region].(Split); !split {return INVALID_NODE, false}
+		// The pane's own split collapses into its sibling as the pane leaves.
+		if sibling, _, _, _, placed := placement(l, node); placed && parent_of(l, node) == region {
+			anchor = sibling
+		}
+	}
 	pane_settle(&pane)
 	focused := l.focus == node
 	if !remove(l, node) {return INVALID_NODE, false}
-	added := place_pane(l, l.root, pane, direction)
+	added := place_pane(l, anchor == INVALID_NODE ? l.root : anchor, pane, direction)
 	if focused {l.focus = added}
 	return added, true
+}
+
+// Whether `node` lies under `region`.
+@(private, require_results)
+node_holds :: proc(l: ^Layout, region, node: Node_Id) -> bool {
+	for x := node; x != INVALID_NODE; x = parent_of(l, x) {
+		if x == region {return true}
+	}
+	return false
 }
 
 // Reserve before detaching, so allocation failure leaves both trees untouched.

@@ -25,15 +25,22 @@ navigation_row_draw :: proc(
 	pointer: [2]f32,
 ) -> render.Build_Status {
 	if navigation_row_surface_draw(list, theme, rect, row, scale, pointer) != .None {return .Ok}
+	box := navigation_row_title_box(rect, row, scale)
 	return draw_fading_text(
 		text,
 		list,
 		row.title,
-		rect.x + CONTROL_INSET * scale + row.leading,
-		rect.y + (rect.height - text.line_height) / 2 + text.ascent,
+		box.x,
+		box.y + (box.height - text.line_height) / 2 + text.ascent,
 		row.selected ? theme.tab_active_text : theme.tab_text,
-		max(0, rect.width - 2 * CONTROL_INSET * scale - row.leading - row.trailing),
+		box.width,
 	)
+}
+
+// Where a row's title draws: between its leading and trailing room, the row's full height.
+navigation_row_title_box :: proc(rect: render.Rect, row: Navigation_Row, scale: f32) -> render.Rect {
+	x := rect.x + CONTROL_INSET * scale + row.leading
+	return {x, rect.y, max(0, rect.width - 2 * CONTROL_INSET * scale - row.leading - row.trailing), rect.height}
 }
 
 // Shared by tab rows and Activity reports, whose content has its own layout.

@@ -25,3 +25,45 @@ keycap_draw :: proc(
 	baseline := box.y + (box.height - keycap.line_height) / 2 + keycap.ascent
 	return draw_text(keycap, list, label, box.x + KEYCAP_PADDING * scale, baseline, theme.muted, max_width)
 }
+
+// One key hint: its keycaps, joined by a slash, and what they do. The palette footer and the Arrange mode
+// card list keys this way.
+Key_Hint :: struct {
+	keys:  [2]string,
+	label: string,
+}
+
+key_hint_width :: proc(keycap, label: ^Text, hint: Key_Hint, scale: f32) -> f32 {
+	width := keycap_width(keycap, hint.keys[0], scale)
+	if hint.keys[1] != "" {
+		width += text_width(label, "/") + 2 * SPACE_1 * scale + keycap_width(keycap, hint.keys[1], scale)
+	}
+	return width + SPACE_1 * scale + text_width(label, hint.label)
+}
+
+// Draws `hint` from `x`, its keycaps centred in `band`'s height and its label on `baseline`.
+key_hint_draw :: proc(
+	list: ^render.Draw_List,
+	keycap, label: ^Text,
+	theme: Theme,
+	hint: Key_Hint,
+	x: f32,
+	band: render.Rect,
+	baseline: f32,
+	scale: f32,
+) -> render.Build_Status {
+	pen := x
+	for key, i in hint.keys {
+		if key == "" {continue}
+		if i > 0 {
+			pen += 4 * scale
+			if result := draw_text(label, list, "/", pen, baseline, theme.faint); result != .Ok {return result}
+			pen += text_width(label, "/") + 4 * scale
+		}
+		if result := keycap_draw(list, keycap, theme, key, pen, band.y, band.height, scale); result != .Ok {
+			return result
+		}
+		pen += keycap_width(keycap, key, scale)
+	}
+	return draw_text(label, list, hint.label, pen + SPACE_1 * scale, baseline, theme.muted)
+}

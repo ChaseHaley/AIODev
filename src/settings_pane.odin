@@ -60,9 +60,10 @@ settings_pane_rect :: proc(w: ^Window) -> layout.Pane_Rect {
 
 @(require_results)
 // Composition fits the editor before input/drawing; ui.editor_layout remains a pure geometry query.
+// Fitting with the interface text re-wraps descriptions for a new width, DPI or font size.
 settings_layout_for :: proc(w: ^Window, pane: layout.Pane_Rect) -> ui.Editor_Layout {
 	l := ui.editor_layout(pane_body_rect(w, pane), w.scale, len(w.editor.sections) > 0)
-	ui.editor_fit(&w.editor, l)
+	ui.editor_fit(&w.editor, l, &w.ui_text)
 	return l
 }
 
@@ -241,7 +242,9 @@ settings_tooltip :: proc(_: ^App, w: ^Window, _, _: f32) -> string {
 	if w.editor.hover_reset >= 0 {return "Reset setting"}
 	if w.editor.hover_browse {return "Choose icon…"}
 	if w.editor.keys_hover {return ui.key_search_tooltip(&w.editor.keys)}
-	return ui.editor_profile_tooltip(&w.editor)
+	if label := ui.editor_profile_tooltip(&w.editor); label != "" {return label}
+	// A description cut short by its row's width shows whole; the tooltip wraps it.
+	return ui.editor_description_tooltip(&w.editor)
 }
 
 @(private)

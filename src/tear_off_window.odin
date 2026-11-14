@@ -86,6 +86,14 @@ window_place_at_pointer :: proc(app: ^App, preview, source_window: ^Window, poin
 	return window_sync_placement(app, preview)
 }
 
+// Moves a prepared window so its corner rests at `corner` in source_window, where a pane it takes from
+// there began, as a tear-off dropped with the pointer at that place on its title bar would.
+@(require_results)
+window_place_at_corner :: proc(app: ^App, preview, source_window: ^Window, corner: [2]f32) -> bool {
+	grab := [2]f32{TEAR_OFF_GRAB_X, TEAR_OFF_GRAB_Y} * preview.scale
+	return window_place_at_pointer(app, preview, source_window, corner + grab)
+}
+
 // The step every tear-off commit takes before anything moves: the preview shows, so its window owns what
 // arrives next. `name`, the one its workspace will take, is the caller's to keep on success; a failure
 // frees it and leaves the preview prepared.

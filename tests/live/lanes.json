@@ -10,6 +10,9 @@
     "arrange": {
       "lane": "headless"
     },
+    "arrange_mode": {
+      "lane": "headless"
+    },
     "build_info": {
       "lane": "headless",
       "args": [
