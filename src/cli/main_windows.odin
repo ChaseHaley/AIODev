@@ -68,6 +68,8 @@ start :: proc() -> cli_protocol.Status {
 		return .Ok
 	}
 	if report, local := local_help(o); local {return help_print(report, o.json)}
+	// Config check reads init.lua locally; it needs no running AIODev.
+	if o.checking {return config_check_run(o)}
 	app_id, id_error := instance.app_id({name = o.instance}, context.allocator)
 	if id_error != nil {return .Failed}
 	defer delete(app_id)
@@ -77,6 +79,7 @@ start :: proc() -> cli_protocol.Status {
 	if o.waiting {return wait(o, pipe, caller)}
 	if o.version {return version(o, pipe, caller)}
 	if o.streaming {return stream_events(o, pipe, caller)}
+	if o.executing {return exec_run(o, pipe, caller)}
 	// A directory that cannot be read leaves relative paths as given.
 	directory, _ := os.get_working_directory(context.temp_allocator)
 	response, status := send(pipe, request(o, caller, directory, context.temp_allocator), true)
