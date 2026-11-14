@@ -178,6 +178,8 @@ Action :: enum u32 {
 	Mode_Exit,
 	Mode_Exit_All,
 	App_Events,
+	App_Select,
+	App_Input,
 }
 
 // Everything one command is: its name and title, default shortcuts, what it does when a linked window
@@ -674,6 +676,14 @@ ACTIONS :: [Action]Command_Descriptor {
 		cli_protocol.EVENTS_COMMAND, "Subscribe to application events", nil, .Host,
 		{accepted = {.Text}, hidden = true, control = .Unnamed},
 	},
+	.App_Select = {
+		"app.select", "Ask for a selection", nil, .Local,
+		{accepted = {.Title, .Items, .Details}, required = {.Title, .Items}, hidden = true, control = .Unnamed},
+	},
+	.App_Input = {
+		"app.input", "Ask for text", nil, .Local,
+		{accepted = {.Title, .Text}, required = {.Title}, hidden = true, control = .Unnamed},
+	},
 }
 
 // What help says about a command beyond its usage and title: a summary, and the command's own help for
@@ -686,6 +696,16 @@ Command_Help :: struct {
 
 @(private)
 COMMAND_HELP :: #partial [Action]Command_Help {
+	.App_Select = {
+		"Opens a filtered list and returns a prompt id immediately. The prompt.closed event reports the " +
+		"original 1-based index, or cancelled when dismissed. Details must have one string per item.",
+		nil,
+	},
+	.App_Input = {
+		"Opens a single-line text dialog with the optional default selected and returns a prompt id " +
+		"immediately. The prompt.closed event reports text (including empty text), or cancelled.",
+		nil,
+	},
 	.New_Tab = {
 		"Opens a tab in the pane's workspace running the profile's shell or a program and prints the new " +
 		"pane's id; focus stays where it is unless --focus.",
@@ -1060,6 +1080,10 @@ command_execute :: proc(app: ^App, ctx: Command_Context, invocation: commands.In
 		return version_outcome()
 	case .App_Events:
 		return outcome_failure(.Usage, "app.events requires a streaming control connection; use aio events")
+	case .App_Select:
+		return script_prompt_select(app, ctx, invocation)
+	case .App_Input:
+		return script_prompt_input(app, ctx, invocation)
 	case .Pane_List:
 		return {payload = Outcome_Panes(pane_reports(app, nil))}
 	case .Tab_List:

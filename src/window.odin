@@ -133,6 +133,7 @@ Window :: struct {
 	status_rail_reserve: f32,
 	// The dock edges shown beside the layout's dividers, refreshed with them by window_dividers.
 	dock_edges: Dock_Edges_Shown,
+	script_prompt: Script_Prompt,
 }
 
 // What the last frame drew that asks for another frame. build_frame clears it and drawing fills it in,
@@ -309,6 +310,7 @@ window_close :: proc(app: ^App, w: ^Window) {
 		w.phase = .Closing
 		_ = gesture_cancel(app, w)
 	}
+	script_prompt_cancel(app, w)
 	if announced {events.push(&app.events, .Window_Closed, Event_Window{w.id})}
 	window_overlays_cancel(app, w)
 	// A file dialog belongs to its native window, so it closes before the window does.

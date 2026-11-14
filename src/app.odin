@@ -125,6 +125,7 @@ App :: struct {
 	closed:                [dynamic]Closed_Item,
 	// Update AIODev's updater while it runs; see app_update.odin.
 	update:                App_Update,
+	next_prompt_id:         u64,
 }
 
 // Creates the graphics device on a thread of its own. The driver takes longer to create one than

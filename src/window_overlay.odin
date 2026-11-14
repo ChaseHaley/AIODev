@@ -62,11 +62,17 @@ Window_Overlay :: union {
 	Overlay_Profile_Menu,
 	Overlay_Document_Menu,
 	Overlay_Command_Menu,
+	Overlay_Input,
 }
 
 // A tab or pane renames in a dialog; the text is w.rename.
 Overlay_Rename :: struct {
 	target: Rename_Target,
+}
+
+// A script input reuses the rename field but never commits a name.
+Overlay_Input :: struct {
+	title: string,
 }
 
 // The window's workspace names in place, in its chip; the text is w.rename.
@@ -144,7 +150,7 @@ Overlay_Kind :: enum u8 {
 overlay_kind :: proc(app: ^App, w: ^Window) -> Overlay_Kind {
 	if workspace_picker_active(&w.workspace_picker) {return .Workspace_Picker}
 	switch _ in w.overlay {
-	case Overlay_Rename: return .Rename
+	case Overlay_Rename, Overlay_Input: return .Rename
 	case Overlay_Chip_Name, Overlay_Group_Name: return .Chip_Name
 	case Overlay_Tab_Menu: return .Tab_Menu
 	case Overlay_Divider_Menu: return .Divider_Menu
@@ -198,6 +204,10 @@ overlay_close :: proc(app: ^App, w: ^Window, exit := Overlay_Exit.Cancel) {
 		ui.field_release(&w.rename)
 	case Overlay_Rename:
 		ui.field_release(&w.rename)
+	case Overlay_Input:
+		script_prompt_cancel(app, w)
+		delete(current.title)
+		ui.field_release(&w.rename)
 	case Overlay_Group_Name:
 		if exit == .Leave && !group_name_save(app, w, current.group) {
 			notify(app, .Warning, "Another group of this colour has that name, so the name was not changed.")
@@ -218,7 +228,7 @@ overlay_close :: proc(app: ^App, w: ^Window, exit := Overlay_Exit.Cancel) {
 // a menu, then the workspace picker.
 overlay_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 	#partial switch _ in w.overlay {
-	case Overlay_Rename, Overlay_Chip_Name:
+	case Overlay_Rename, Overlay_Input, Overlay_Chip_Name:
 		if result := rename_draw(app, w); result != .Ok {return result}
 	case Overlay_Group_Name:
 		if result := group_name_draw(app, w); result != .Ok {return result}
@@ -240,7 +250,7 @@ overlay_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 		menu = document_menu_draw(app, w)
 	case Overlay_Command_Menu:
 		menu = command_menu_draw(app, w)
-	case nil, Overlay_Rename, Overlay_Chip_Name, Overlay_Group_Name:
+	case nil, Overlay_Rename, Overlay_Input, Overlay_Chip_Name, Overlay_Group_Name:
 	}
 	if menu != .Ok {return menu}
 	if !workspace_picker_active(&w.workspace_picker) {return .Ok}
