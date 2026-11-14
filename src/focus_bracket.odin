@@ -54,7 +54,7 @@ focus_leave :: proc(app: ^App, w: ^Window) {
 // Gives focus to the pane the window now shows, leaving first a different pane that still holds it.
 // The pane that holds it already hears nothing again; the window is refreshed either way.
 focus_enter :: proc(app: ^App, w: ^Window) {
-	app_events_focus(app, w)
+	app.events_focus = true
 	content, shown := window_focused_content(w)
 	if entered, ok := w.focus_bracket.(Focus_Entered); ok && (!shown || entered.content != content) {
 		focus_leave(app, w)

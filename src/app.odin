@@ -117,6 +117,8 @@ App :: struct {
 	events:                app_events.Queue,
 	// Some session has not been announced by pane.created because no tree held it yet.
 	events_unattached:     bool,
+	// A window's focus may have moved; app_events_settle reports where it came to rest.
+	events_focus:          bool,
 	// A digest of every listed workspace's arrangement, compared each tick for layout.changed.
 	events_layout:         u64,
 	// Panes and tabs closed explicitly, newest last, for Reopen Closed.

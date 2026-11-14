@@ -1,6 +1,10 @@
 {
   "policy": "Explicit reviewed process-free checks; every other app test defaults to native.",
   "fast": [
+    "app_events_layout_revision_advances_once_per_tick_after_a_mutation",
+    "app_events_settings_change_reports_the_key_and_new_value",
+    "app_events_settings_commit_reports_changed_and_removed_keys",
+    "app_events_tab_rename_without_a_process_reports_tab_renamed",
     "build_info_registry_dispatch_refreshes_one_owned_notice_without_a_session",
     "ctrl_shift_digits_select_workspaces_instead_of_opening_profiles",
     "focus_jumps_new_focus_drops_forward_path",
