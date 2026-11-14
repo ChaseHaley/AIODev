@@ -285,7 +285,7 @@ settings_change :: proc(app: ^App, edit: Settings_Edit, base: Settings_Base) -> 
 	if parse_error != nil {return {status = .Failed}}
 	result := built.result
 	if settings_edit_affects_bindings(edit) {
-		problem, warning := settings_bindings_check(&loaded, app.settings_path)
+		problem, warning := settings_bindings_check(app, &loaded, app.settings_path)
 		if problem != "" {return {status = .Refused, message = problem}}
 		result.message = warning
 	}
@@ -619,10 +619,25 @@ settings_change_memory :: proc(app: ^App, edit: Settings_Edit) -> Settings_Resul
 // A refusal for the first shortcut problem a revision would have, or the first warning it keeps.
 // Both are temporary.
 @(private, require_results)
-settings_bindings_check :: proc(s: ^settings.Settings, path: string) -> (problem, warning: string) {
+settings_bindings_check :: proc(
+	app: ^App,
+	s: ^settings.Settings,
+	path: string,
+) -> (
+	problem, warning: string,
+) {
 	registry := commands.create()
 	defer commands.destroy(&registry)
 	if register_actions(&registry) != .None {return "Could not validate shortcuts.", ""}
+	for item in app.registry.items {
+		if !item.runtime {continue}
+		// Validate against the runtime command's declared defaults, as a fresh registry holds them.
+		command := item
+		command.shortcuts = command.defaults
+		if _, err := commands.register_runtime(&registry, command); err != .None {
+			return "Could not validate shortcuts.", ""
+		}
+	}
 	report, report_error := binding_report(&registry, s)
 	for issue in report.issues {
 		if issue.severity == .Shortcut_Warning {

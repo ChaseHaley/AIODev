@@ -396,7 +396,7 @@ workspace_picker_choose :: proc(app: ^App, w: ^Window) {
 		if !workspace_select(app, w, workspace_find(app, t.id)) {
 			notify(app, .Error, "Could not select the workspace.")
 		}
-	case Picker_Action: run_action(app, w, t.action)
+	case Picker_Action: run_action(app, w, t.action, .Menu)
 	}
 }
 

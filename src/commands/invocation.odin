@@ -38,6 +38,7 @@ Arguments :: bit_set[Argument;u32]
 // One request to run a command. Text fields borrow from the arguments they were parsed from.
 Invocation :: struct {
 	id:                                      Command_Id,
+	fields:                                  string,
 	// Empty means the caller's own pane, else the focused pane; also `here`, `focused`, an id or a
 	// pane name.
 	pane:                                    string,

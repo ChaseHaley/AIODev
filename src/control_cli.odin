@@ -108,19 +108,69 @@ control_cli_answer :: proc(app: ^App, args: []string) -> control.Response {
 		if !valid {return control_cli_reply(outcome_failure(.Usage, "AIODEV_PANE is not a pane id"), json_output)}
 		caller = id
 	}
+	ctx := Control_Request{caller = caller, origin = .Cli}
+	if len(request.command) >= 2 && request.command[1] == cli_protocol.FIELDS_OPTION {
+		if len(request.command) != 3 && len(request.command) != 5 {
+			usage := outcome_failure(.Usage, "use <command> --fields <object> [--origin <origin>]")
+			return control_cli_reply(usage, json_output)
+		}
+		if len(request.command) == 5 {
+			if request.command[3] != cli_protocol.ORIGIN_OPTION {
+				return control_cli_reply(outcome_failure(.Usage, "expected --origin after --fields"), json_output)
+			}
+			found := false
+			for word, origin in COMMAND_ORIGIN_WORDS {
+				if word == request.command[4] {ctx.origin, found = origin, true; break}
+			}
+			if !found {return control_cli_reply(outcome_failure(.Usage, "unknown command origin"), json_output)}
+		}
+		if json_output {
+			return command_run_fields(app, ctx, request.command[0], request.command[2], request.directory)
+		}
+		outcome := command_fields_execute(app, ctx, request.command[0], request.command[2], request.directory)
+		return control_cli_reply(outcome, false)
+	}
 	invocation, parse_error := commands.parse_invocation(&app.registry, request.command, context.temp_allocator)
 	if parse_error.advice != "" {
 		message := fmt.tprintf("%q: %s", parse_error.argument, parse_error.advice)
 		return control_cli_reply(outcome_failure(.Usage, message), json_output)
 	}
-	// AIODev has its own working directory, so a relative path means one in aio's, and a pane the
-	// request opens starts in aio's unless --cwd names another, as a terminal's split starts where
-	// its user is (WORK-367). An empty directory leaves each command's own default.
-	if commands.invocation_paths_resolve(&invocation, request.directory, context.temp_allocator) != nil {
-		return control_cli_reply(outcome_failure(.Failed, "not enough memory for the paths"), json_output)
+	return control_cli_reply(command_run_resolved(app, ctx, invocation, request.directory), json_output)
+}
+
+// Config and pipe callers share parsing, path resolution and the exact JSON reply shape.
+@(require_results)
+command_run_fields :: proc(
+	app: ^App,
+	ctx: Command_Context,
+	name, fields, directory: string,
+) -> control.Response {
+	return control_cli_reply(command_fields_execute(app, ctx, name, fields, directory), true)
+}
+
+@(private, require_results)
+command_fields_execute :: proc(app: ^App, ctx: Command_Context, name, fields, directory: string) -> Outcome {
+	invocation, parse_error := commands.parse_fields(&app.registry, name, fields, context.temp_allocator)
+	if parse_error.advice != "" {
+		return outcome_failure(.Usage, fmt.tprintf("%q: %s", parse_error.argument, parse_error.advice))
 	}
-	if .Directory not_in invocation.given {invocation.directory = request.directory}
-	return control_cli_reply(command_execute(app, Control_Request{caller}, invocation), json_output)
+	return command_run_resolved(app, ctx, invocation, directory)
+}
+
+@(private, require_results)
+command_run_resolved :: proc(
+	app: ^App,
+	ctx: Command_Context,
+	invocation: commands.Invocation,
+	directory: string,
+) -> Outcome {
+	invocation := invocation
+	// Paths belong to the requester, and a newly opened pane inherits its directory unless --cwd overrides it.
+	if commands.invocation_paths_resolve(&invocation, directory, context.temp_allocator) != nil {
+		return outcome_failure(.Failed, "not enough memory for the paths")
+	}
+	if .Directory not_in invocation.given {invocation.directory = directory}
+	return command_execute(app, ctx, invocation)
 }
 
 // The payload kind selects the reply shape; status and message report failures independently. Plain
@@ -137,6 +187,7 @@ control_cli_reply :: proc(outcome: Outcome, json_output: bool) -> control.Respon
 			error    = outcome.message,
 		}
 		status_pane: [1]cli_protocol.Pane_Report
+		raw_result: string
 		switch payload in outcome.payload {
 		case Outcome_Created:
 			document.pane = payload.pane
@@ -144,6 +195,8 @@ control_cli_reply :: proc(outcome: Outcome, json_output: bool) -> control.Respon
 			document.text = string(payload)
 		case Outcome_Process:
 			document.process = cli_protocol.Process_Report(payload)
+		case Outcome_Json:
+			raw_result = string(payload)
 		case Outcome_Panes:
 			document.panes = ([]cli_protocol.Pane_Report)(payload)
 		case Outcome_Layout:
@@ -160,11 +213,19 @@ control_cli_reply :: proc(outcome: Outcome, json_output: bool) -> control.Respon
 		case Outcome_Usage:
 			document.commands = []cli_protocol.Command_Report{cli_protocol.Command_Report(payload)}
 		}
-		data, err := json.marshal(document, {}, context.temp_allocator)
-		if err != nil {
+		builder := strings.builder_make(context.temp_allocator)
+		options: json.Marshal_Options
+		if json.marshal_to_builder(&builder, document, &options) != nil {
 			return cli_protocol.response(.Failed, "not enough memory for the reply")
 		}
-		response.text = string(data)
+		if raw_result != "" {
+			// Preserve raw script JSON verbatim, including numbers beyond the decoder's precision.
+			resize(&builder.buf, len(builder.buf) - 1)
+			strings.write_string(&builder, ",\"result\":")
+			strings.write_string(&builder, raw_result)
+			strings.write_byte(&builder, '}')
+		}
+		response.text = strings.to_string(builder)
 		return response
 	}
 	b := strings.builder_make(context.temp_allocator)
@@ -216,6 +277,8 @@ control_cli_reply :: proc(outcome: Outcome, json_output: bool) -> control.Respon
 			data, err := json.marshal(cli_protocol.Process_Report(payload), {}, context.temp_allocator)
 			if err != nil {return cli_protocol.response(.Failed, "not enough memory for the reply")}
 			strings.write_string(&b, string(data))
+		case Outcome_Json:
+			strings.write_string(&b, string(payload))
 		}
 	}
 	response.text = strings.to_string(b)

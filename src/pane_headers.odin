@@ -473,7 +473,7 @@ pane_header_release :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) 
 	}
 	button, chose := chosen.(Pane_Header_Button)
 	if !chose {return}
-	if action, runs := pane_header_command(button); runs {run_action(app, w, action)}
+	if action, runs := pane_header_command(button); runs {run_action(app, w, action, .Button)}
 }
 
 // Follows the hovered header button; a refused button takes no hover, so it stays flat under the arrow.

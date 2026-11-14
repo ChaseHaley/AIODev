@@ -26,6 +26,7 @@ Outcome :: struct {
 	payload: union {
 		Outcome_Created,
 		Outcome_Text,
+		Outcome_Json,
 		Outcome_Panes,
 		Outcome_Pane_Status,
 		Outcome_Tabs,
@@ -38,6 +39,7 @@ Outcome :: struct {
 }
 Outcome_Created :: struct {pane: u32}
 Outcome_Text :: distinct string
+Outcome_Json :: distinct string
 Outcome_Panes :: distinct []cli_protocol.Pane_Report
 Outcome_Pane_Status :: distinct cli_protocol.Pane_Report
 Outcome_Tabs :: distinct []cli_protocol.Tab_Report
@@ -47,6 +49,8 @@ Outcome_Usage :: distinct cli_protocol.Command_Report
 // The panes a layout opened, in the file's order.
 Outcome_Layout :: distinct []cli_protocol.Pane_Report
 Outcome_Process :: distinct cli_protocol.Process_Report
+
+Runtime_Runner :: #type proc(app: ^App, ctx: Command_Context, invocation: commands.Invocation) -> Outcome
 
 // A pane a control invocation acts on, with the identity mutation needs.
 Pane_Target :: struct {

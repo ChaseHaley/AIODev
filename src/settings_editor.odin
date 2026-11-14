@@ -404,7 +404,7 @@ settings_page_opener_rows :: proc(p: ^ui.Editor, openers: ^settings.Openers) -> 
 // One row per command a key can run, showing the file's shortcuts or the defaults.
 @(private, require_results)
 settings_page_shortcut_rows :: proc(app: ^App, p: ^ui.Editor, s: ^settings.Settings) -> bool {
-	for command in app.registry.items {
+	for &command in app.registry.items {
 		if command.hidden {continue}
 		value := commands.shortcut_set_text(command.shortcuts, context.temp_allocator)
 		for binding in s.keys {if binding.name == command.name {value = binding.value; break}}
@@ -415,7 +415,7 @@ settings_page_shortcut_rows :: proc(app: ^App, p: ^ui.Editor, s: ^settings.Setti
 			default_value = commands.shortcut_set_text(command.defaults, context.temp_allocator),
 			kind          = .Shortcut,
 		}
-		if ui.editor_add(p, row, commands.category(command.name).group) != nil {return false}
+		if ui.editor_add(p, row, commands.category(&command).group) != nil {return false}
 	}
 	return true
 }
@@ -1113,8 +1113,9 @@ settings_key :: proc(app: ^App, w: ^Window, e: input.Key_Event) {
 	case .None:
 	}
 	search_owns := ui.editor_focus(p) == .Search && ui.key_search_toggles(e)
-	if key.found && !editor_owns(key.logical) && !search_owns && action_available(app, w, key.action) {
-		run_action(app, w, key.action)
+	if key.found && !editor_owns(key.logical) && !search_owns &&
+	   (key.runtime || action_available(app, w, key.action)) {
+		run_window_command(app, w, key.command, .Key)
 		return
 	}
 	status_inbox_typed(w, e)

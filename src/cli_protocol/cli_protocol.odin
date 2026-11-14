@@ -1,6 +1,7 @@
 package cli_protocol
 
 import "aio:control"
+import "core:encoding/json"
 import "core:fmt"
 import "core:strings"
 
@@ -44,6 +45,8 @@ PANE_READ_COMMAND :: "pane.read"
 // each command to warn when the two builds differ.
 VERSION_COMMAND :: "app.version"
 APP_NAME :: "AIODev"
+FIELDS_OPTION :: "--fields"
+ORIGIN_OPTION :: "--origin"
 
 // The build every executable embeds. build.ps1 passes the same values to the app and to aio in one
 // build run, so the two report the same build exactly when they came from it. A direct odin build,
@@ -278,6 +281,7 @@ Reply_Json :: struct {
 	error:      string `json:"error,omitempty"`,
 	pane:       Maybe(u32) `json:"pane,omitempty"`,
 	text:       string `json:"text,omitempty"`,
+	result:     json.Value `json:"result,omitempty"`,
 	panes:      []Pane_Report `json:"panes,omitempty"`,
 	commands:   []Command_Report `json:"commands,omitempty"`,
 	tabs:       []Tab_Report `json:"tabs,omitempty"`,

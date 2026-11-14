@@ -285,7 +285,7 @@ on_palette_outcome :: proc(app: ^App, w: ^Window, outcome: ui.Outcome, id: comma
 		w.dirty = true
 	case .Run:
 		w.dirty = true
-		run_action(app, w, Action(id))
+		run_window_command(app, w, id, .Palette)
 	case .Open_Setting:
 		w.dirty = true
 		if setting, ok := chosen.(ui.Chosen_Setting); ok {

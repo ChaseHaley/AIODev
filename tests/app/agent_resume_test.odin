@@ -22,7 +22,7 @@ SESSION :: "81b3816b-4fce-4b04-b3bf-9f40b8d2172e"
 invoke :: proc(state: ^app.App, args: ..string) -> app.Outcome {
 	invocation, err := commands.parse_invocation(&state.registry, args, context.temp_allocator)
 	if err.advice != "" {return {status = .Usage, message = err.advice}}
-	return app.command_execute(state, app.Control_Request{0}, invocation)
+	return app.command_execute(state, app.Control_Request{caller = 0, origin = .Cli}, invocation)
 }
 
 // Waits until the pane's screen shows `text`, ticking the app meanwhile. Rows are joined, so text the
