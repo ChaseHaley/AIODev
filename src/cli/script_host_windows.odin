@@ -202,9 +202,9 @@ exec_loop :: proc(
 				if text != "" {fmt.println(text)}
 			}
 		}
-		// A suspended top level keeps the state busy, so not busy means it has finished and reported
-		// above. --for keeps a script that listens for events running until it runs out.
-		if !scripting.busy(s) && (e.for_ms == 0 || host.wanted == {}) {return .Ok}
+		// A suspended top level keeps the state busy, and so do its handlers, so not busy means it
+		// has finished, reported above and listens for nothing.
+		if !scripting.busy(s) {return .Ok}
 		now := seconds(clock_start)
 		if e.for_ms > 0 && now >= deadline {return .Ok}
 		timeout := u32(w.INFINITE)

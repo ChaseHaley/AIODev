@@ -74,7 +74,8 @@ commands_share_conversion_and_lazy_namespaces :: proc(t: ^testing.T) {
 	state := new_state(t, &fake, .Config)
 	if state == nil {return}
 	defer scripting.destroy(state)
-	check(t, state, `
+	// init.lua's commands are refused while it loads, so they run from a timer afterwards.
+	check(t, state, `aio.after(0, function()
 		local split = assert(aio.pane.split{direction='right'})
 		assert(split.pane == 7 and split.ok == nil and split.status == nil)
 		assert(aio.pane.split == aio.pane.split)
@@ -90,7 +91,9 @@ commands_share_conversion_and_lazy_namespaces :: proc(t: ^testing.T) {
 		assert(aio.notify{title='Title', body='Body'})
 		assert(aio.stop == nil or type(aio.stop) == 'table')
 		print('hello', 42)
-	`)
+	end)`)
+	_, _ = scripting.step(state, 1)
+	testing.expect_value(t, len(scripting.take_errors(state)), 0)
 	if !testing.expect_value(t, len(fake.calls), 10) {return}
 	testing.expect_value(t, fake.calls[0].pane, u32(5))
 	testing.expect_value(t, fake.calls[0].name, "pane.split")
@@ -105,6 +108,53 @@ commands_share_conversion_and_lazy_namespaces :: proc(t: ^testing.T) {
 	testing.expect_value(t, fake.logs, 1)
 }
 
+@(test)
+config_load_refuses_commands_with_a_located_warning :: proc(t: ^testing.T) {
+	fake: Fake
+	defer fake_destroy(&fake)
+	state := new_state(t, &fake, .Config)
+	if state == nil {return}
+	defer scripting.destroy(state)
+	result := scripting.run_source(state, "init.lua", `local ok = true
+local value, message, status = aio.tab.rename{name='Work'}
+assert(value == nil and message == 'commands cannot run while init.lua loads' and status == 1)
+assert(aio.settings.set('font.size', 12) == nil)
+loaded = true`)
+	testing.expect(t, result.ok && result.finished, result.message)
+	testing.expect_value(t, len(fake.calls), 0)
+	errors := scripting.take_errors(state)
+	if testing.expect_value(t, len(errors), 2) {
+		refused := "init.lua:2: aio.tab.rename: commands cannot run while init.lua loads"
+		testing.expect_value(t, errors[0].message, refused)
+		testing.expect_value(t, errors[0].file, "init.lua")
+		testing.expect_value(t, errors[0].line, 2)
+		refused = "init.lua:4: aio.settings.set: commands cannot run while init.lua loads"
+		testing.expect_value(t, errors[1].message, refused)
+	}
+}
+
+@(test)
+script_handlers_keep_the_state_busy_until_stop :: proc(t: ^testing.T) {
+	fake: Fake
+	defer fake_destroy(&fake)
+	state := new_state(t, &fake, .Script)
+	if state == nil {return}
+	defer scripting.destroy(state)
+	testing.expect(t, !scripting.busy(state))
+	check(t, state, `aio.on('pane.bell', function() bells = (bells or 0) + 1 end)`)
+	testing.expect(t, scripting.busy(state))
+	_, has_next := scripting.step(state, 1)
+	testing.expect(t, !has_next)
+	testing.expect(t, scripting.busy(state))
+	scripting.deliver(state, []events.Event{{kind = .Pane_Bell, fields = `{"pane":5}`}})
+	testing.expect(t, scripting.busy(state))
+	check(t, state, `assert(bells == 1); aio.stop()`)
+	testing.expect(t, !scripting.busy(state))
+	code, stopped := scripting.stopped(state)
+	testing.expect(t, stopped)
+	testing.expect_value(t, code, 0)
+}
+
 // One tab with a right split of panes 7 and 8, and pane 9 floating, in app.view's flat form.
 VIEW_REPLY ::
 	`{"ok":true,"status":0,"view":{"revision":1,"windows":[],"panes":[],"workspaces":[{"id":1,` +
@@ -117,7 +167,7 @@ VIEW_REPLY ::
 view_nests_the_flat_node_list :: proc(t: ^testing.T) {
 	fake: Fake
 	defer fake_destroy(&fake)
-	state := new_state(t, &fake, .Config)
+	state := new_state(t, &fake, .Script)
 	if state == nil {return}
 	defer scripting.destroy(state)
 	check(t, state, `
@@ -438,7 +488,7 @@ prompts_resume_with_original_items_and_one_based_index :: proc(t: ^testing.T) {
 layout_builders_produce_the_layout_document :: proc(t: ^testing.T) {
 	fake: Fake
 	defer fake_destroy(&fake)
-	state := new_state(t, &fake, .Config)
+	state := new_state(t, &fake, .Script)
 	if state == nil {return}
 	defer scripting.destroy(state)
 	check(t, state, `
@@ -487,7 +537,8 @@ system_wait_collects_text_and_callback_scope_terminates_children :: proc(t: ^tes
 		end)
 	`)
 	scripting.deliver(state, []events.Event{{kind = .Pane_Bell, fields = `{"pane":5}`}})
-	drain(state, 10)
+	// The handler keeps the state busy, so drain would only time out; the waits below block.
+	_, _ = scripting.step(state, 10)
 	check(t, state, `
 		assert(child:is_closing() and child:wait().code ~= 0)
 		assert(survivor:wait().code == 0)

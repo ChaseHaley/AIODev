@@ -397,7 +397,8 @@ step :: proc(s: ^State, now: f64) -> (next: f64, has_next: bool) {
 	return
 }
 
-// True while a coroutine is suspended, a timer is live or a process runs.
+// True until aio.stop while a coroutine is suspended, a timer is live, a process runs or an event
+// handler is registered.
 @(require_results)
 busy :: proc(s: ^State) -> bool {
 	get_runtime(s, "busy")

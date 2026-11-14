@@ -22,6 +22,22 @@ local function pane() return current and current.ctx.pane or config.pane end
 local function report(message) errors[#errors + 1] = tostring(message) end
 local function pack(...) return {n = select('#', ...), ...} end
 
+local getinfo = debug.getinfo
+-- True while a Config host's top level loads: it may declare, and commands are refused.
+local declaring = false
+
+-- The first frame outside this file is the script's call, even through pcall or a tail call.
+local function caller()
+	for level = 2, 64 do
+		local info = getinfo(level, 'Sl')
+		if not info then break end
+		if info.what ~= 'C' and info.currentline > 0 and info.source ~= '@aio/runtime.lua' then
+			return info.source:sub(1, 1) == '@' and info.source:sub(2) or info.short_src, info.currentline
+		end
+	end
+	return '?', 0
+end
+
 local function interest()
 	local wanted = {}
 	for name, list in pairs(handlers) do if #list > 0 then wanted[name] = true end end
@@ -110,6 +126,13 @@ end
 
 function aio.run(name, fields)
 	if type(name) ~= 'string' then return nil, 'command name must be a string' end
+	-- The host would refuse it too; reporting it here names the line, as a bad declaration does.
+	if declaring then
+		local message = 'commands cannot run while init.lua loads'
+		local file, line = caller()
+		report(file .. ':' .. line .. ': aio.' .. name .. ': ' .. message)
+		return nil, message, 1
+	end
 	if fields ~= nil and type(fields) ~= 'table' then return nil, 'command fields must be a table' end
 	local encoded, message = json.encode(fields or {})
 	if not encoded then return nil, message end
@@ -450,25 +473,11 @@ end
 -- init.lua's top level, and the files it requires, declare actions, key operations and modes.
 -- state.odin reads them through runtime.declarations once the load returns. A bad call is
 -- skipped and reported rather than raised, so one typo does not cost the rest of the file.
-local getinfo = debug.getinfo
-local declaring = false
 local declared = {serial = 0, actions = {}, keys = {}, modes = {}}
 -- One function keeps one registry reference, so the host can match an unbind to its bind.
 local function_refs = {}
 local ARG_TYPES = {string = true, number = true, integer = true, boolean = true, object = true, array = true,
 	any = true}
-
--- The first frame outside this file is the script's call, even through pcall or a tail call.
-local function caller()
-	for level = 2, 64 do
-		local info = getinfo(level, 'Sl')
-		if not info then break end
-		if info.what ~= 'C' and info.currentline > 0 and info.source ~= '@aio/runtime.lua' then
-			return info.source:sub(1, 1) == '@' and info.source:sub(2) or info.short_src, info.currentline
-		end
-	end
-	return '?', 0
-end
 
 local function declaration(fn)
 	if config.script or not declaring then error('aio.' .. fn .. ' works only while init.lua loads', 3) end
@@ -793,9 +802,14 @@ function runtime.step(host_now)
 	return next_time
 end
 
+-- Registered handlers count: a script that listens runs until aio.stop, as C6 describes busy.
 function runtime.busy()
 	if stop_code then return false end
-	return next(tasks) ~= nil or next(timers) ~= nil or next(processes) ~= nil
+	if next(tasks) ~= nil or next(timers) ~= nil or next(processes) ~= nil then return true end
+	for _, list in pairs(handlers) do
+		if #list > 0 then return true end
+	end
+	return false
 end
 
 function runtime.stopped() return stop_code end
