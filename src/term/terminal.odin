@@ -149,7 +149,8 @@ Process_Failed :: struct {
 }
 
 // stop_process is taking the process down. A process that had already exited drains its final
-// output; one still running has its pending reads cancelled so closing a pane is fast (WORK-306).
+// output; one still running has its pending reads cancelled (WORK-306), and the stop does not wait
+// for its exit (WORK-486), so closing a pane is fast.
 @(private)
 Process_Stopping :: struct {
 	drain: bool,
@@ -608,8 +609,9 @@ stop_started :: proc(s: ^Session) {
 	if err := pty.terminate(&s.pty); err != .None {
 		log.errorf("term: terminating the process tree failed: %v", err)
 	}
+	pty.stop_waiting(&s.pty)
 	join_thread(&s.waiter)
-	// The waiter normally closes the console; closing again is harmless and covers a missing waiter.
+	// A waiter that saw the process exit has closed the console; otherwise this closes it.
 	pty.close_console(&s.pty)
 	if !stopping.drain {
 		if err := pty.cancel_reads(s.reader); err != .None {
@@ -735,6 +737,8 @@ reader_main :: proc(s: ^Session) {
 @(private)
 waiter_main :: proc(s: ^Session) {
 	code, err := pty.wait_exit(&s.pty)
+	// stop_started stopped the wait and finishes the stop itself.
+	if err == .Closed {return}
 	if err != .None {
 		log.errorf("term: waiting for process exit failed: %v", err)
 	}
