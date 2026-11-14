@@ -12,6 +12,8 @@ import "core:unicode/utf8"
 
 Pty :: struct {
 	output, input, process, job: w.HANDLE,
+	// A manual-reset event stop_waiting sets, releasing wait_exit without the process's exit.
+	waiting_stopped:             w.HANDLE,
 	id:                          u32,
 	console_mutex:               sync.Mutex, // Guards console.
 	console_changed:             sync.Cond,
@@ -397,6 +399,10 @@ spawn :: proc(options: Spawn_Options, allocator := context.allocator) -> (Pty, S
 	if p.job == nil {
 		return {}, spawn_failure("CreateJobObjectW", .Job, u32(w.GetLastError()))
 	}
+	p.waiting_stopped = w.CreateEventW(nil, true, false, nil)
+	if p.waiting_stopped == nil {
+		return {}, spawn_failure("CreateEventW", .Job, u32(w.GetLastError()))
+	}
 	limits := JOBOBJECT_EXTENDED_LIMIT_INFORMATION {
 		BasicLimitInformation = {LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE},
 	}
@@ -572,18 +578,34 @@ resize :: proc(p: ^Pty, cols, rows: u16) -> Error {
 	return .None
 }
 
+// The process's exit code once it has exited. Closed: there is no process, or stop_waiting was called
+// first, so the process may still be exiting.
 @(require_results)
 wait_exit :: proc(p: ^Pty) -> (code: u32, err: Error) {
 	if p.process == nil {
 		return 0, .Closed
 	}
-	if w.WaitForSingleObject(p.process, w.INFINITE) != w.WAIT_OBJECT_0 {
-		return 0, io_failure("WaitForSingleObject", .Wait, u32(w.GetLastError()))
+	handles := [2]w.HANDLE{p.process, p.waiting_stopped}
+	switch w.WaitForMultipleObjects(len(handles), &handles[0], false, w.INFINITE) {
+	case w.WAIT_OBJECT_0:
+	case w.WAIT_OBJECT_0 + 1:
+		return 0, .Closed
+	case:
+		return 0, io_failure("WaitForMultipleObjects", .Wait, u32(w.GetLastError()))
 	}
 	if !bool(w.GetExitCodeProcess(p.process, &code)) {
 		return 0, io_failure("GetExitCodeProcess", .Wait, u32(w.GetLastError()))
 	}
 	return code, .None
+}
+
+// Makes wait_exit, current or later, return Closed without waiting for the process. A stop calls it
+// after terminate: a terminated tree can take the kernel hundreds of milliseconds to finish exiting
+// while a program is loading, and nothing a stop does needs that exit (WORK-486).
+stop_waiting :: proc(p: ^Pty) {
+	if p.waiting_stopped != nil && !bool(w.SetEvent(p.waiting_stopped)) {
+		log.errorf("pty: SetEvent failed: %v", w.GetLastError())
+	}
 }
 
 close_console :: proc(p: ^Pty) {
@@ -635,6 +657,7 @@ destroy :: proc(p: ^Pty) {
 	close_handle(&p.output)
 	close_handle(&p.process)
 	close_handle(&p.job)
+	close_handle(&p.waiting_stopped)
 	p.id = 0
 }
 

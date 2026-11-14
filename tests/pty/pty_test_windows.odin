@@ -358,6 +358,46 @@ closed_operations :: proc(t: ^testing.T) {
 }
 
 @(private = "file")
+Exit_Wait :: struct {
+	p:   ^pty.Pty,
+	err: pty.Error,
+}
+
+@(private = "file")
+wait_for_exit :: proc(wait: ^Exit_Wait) {
+	_, wait.err = pty.wait_exit(wait.p)
+}
+
+// A stop does not wait for a terminated tree to finish exiting (WORK-486): stop_waiting releases
+// wait_exit, current or later, while the process still runs.
+@(test)
+stop_waiting_releases_wait_exit_before_the_exit :: proc(t: ^testing.T) {
+	testing.set_fail_timeout(t, 40 * time.Second)
+	p, err := pty.spawn({
+		command_line = "cmd.exe /d /k echo STOP_WAITING",
+		working_directory = "C:\\Windows\\System32",
+		cols = 80,
+		rows = 25,
+	})
+	if !testing.expect_value(t, err.kind, pty.Spawn_Error_Kind.None) {return}
+	defer pty.destroy(&p)
+	wait := Exit_Wait{p = &p}
+	waiter := thread.create_and_start_with_poly_data(&wait, wait_for_exit)
+	if !testing.expect(t, waiter != nil) {return}
+	pty.stop_waiting(&p)
+	if !testing.expect_value(t, w.WaitForSingleObject(waiter.win32_thread, 5000), w.WAIT_OBJECT_0) {
+		testing.expect_value(t, pty.terminate(&p), pty.Error.None)
+	}
+	thread.join(waiter)
+	thread.destroy(waiter)
+	testing.expect_value(t, wait.err, pty.Error.Closed)
+	// cmd /k waits for input it never gets, so only the stopped wait can have returned.
+	testing.expect_value(t, w.WaitForSingleObject(p.process, 0), w.WAIT_TIMEOUT)
+	_, again := pty.wait_exit(&p)
+	testing.expect_value(t, again, pty.Error.Closed)
+}
+
+@(private = "file")
 Console_Race :: struct {
 	p:          ^pty.Pty,
 	unexpected: pty.Error,
