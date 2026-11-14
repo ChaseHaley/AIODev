@@ -481,3 +481,54 @@ arrange_mode_follows_its_pane_across_tabs_and_windows :: proc(t: ^testing.T) {
 	testing.expect_value(t, app.overlay_kind(s, torn), app.Overlay_Kind.Chip_Name)
 	testing.expect(t, app.arrange_paused(s, torn))
 }
+
+// The owner's row (WORK-477) in Arrange mode: A and X a quarter each, B the right half. Each Right takes A
+// one place, focus staying on it: past X; into B's half beside B, still the middle pane; past B; then the
+// right half of the tab, X and B sharing the left half; then nothing. Alt+Shift+Up and Down then make A the
+// full-width top and bottom half.
+@(test)
+arrange_mode_moves_one_place_per_press_across_a_row :: proc(t: ^testing.T) {
+	f: Steps_Fixture
+	defer palette_fixture_destroy(t, &f.palette)
+	if !steps_fixture_create(t, &f, "steps-row") {return}
+	s, w := &f.palette.state, f.w
+	app.run_action(s, w, .Focus_Left)
+	app.pane_split(s, w, .Right)
+	x := steps_focused(s, w)
+	app.run_action(s, w, .Focus_Left)
+	if !testing.expect_value(t, steps_focused(s, w), f.a) {return}
+	half := steps_rect(w, f.b).width
+	app.run_action(s, w, .Arrange_Panes)
+
+	steps_press(s, w, .Arrow_Right)
+	a := steps_rect(w, f.a)
+	testing.expect(t, steps_rect(w, x).x < a.x && a.x < steps_rect(w, f.b).x)
+	testing.expect_value(t, steps_focused(s, w), f.a)
+	steps_press(s, w, .Arrow_Right)
+	a = steps_rect(w, f.a)
+	testing.expect(t, steps_rect(w, x).x < a.x && a.x < steps_rect(w, f.b).x)
+	testing.expect_value(t, steps_rect(w, x).width, half)
+	testing.expect_value(t, a.width, steps_rect(w, f.b).width)
+	testing.expect_value(t, steps_focused(s, w), f.a)
+	steps_press(s, w, .Arrow_Right)
+	a = steps_rect(w, f.a)
+	testing.expect(t, a.x > steps_rect(w, f.b).x)
+	testing.expect_value(t, steps_focused(s, w), f.a)
+	steps_press(s, w, .Arrow_Right)
+	a = steps_rect(w, f.a)
+	testing.expect_value(t, a.width, half)
+	testing.expect(t, a.x > steps_rect(w, f.b).x && a.x > steps_rect(w, x).x)
+	testing.expect_value(t, steps_rect(w, x).width, steps_rect(w, f.b).width)
+	testing.expect_value(t, steps_focused(s, w), f.a)
+	steps_press(s, w, .Arrow_Right)
+	testing.expect_value(t, steps_rect(w, f.a), a)
+
+	steps_press(s, w, .Arrow_Up, {.Alt, .Shift})
+	top := steps_rect(w, f.a)
+	testing.expect(t, top.y < steps_rect(w, x).y && top.width > half)
+	steps_press(s, w, .Arrow_Down, {.Alt, .Shift})
+	bottom := steps_rect(w, f.a)
+	testing.expect(t, bottom.y > steps_rect(w, x).y && bottom.width == top.width)
+	testing.expect_value(t, steps_focused(s, w), f.a)
+	testing.expect(t, app.arrange_active(w))
+}

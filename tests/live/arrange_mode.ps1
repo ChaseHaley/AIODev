@@ -196,6 +196,56 @@ try {
     Aio key Esc | Out-Null
     Aio expect state arrange=false | Out-Null
 
+    # The owner's row: A and B a quarter each, C the right half, each pane named so the captures show
+    # which is which. Each Right takes A one place: past B; into C's half beside C, still the middle pane;
+    # past C; then the right half of the tab with B and C sharing the left half; then nothing.
+    Aio command tab.new | Out-Null
+    Aio wait text 'PS ' | Out-Null
+    Aio run '$Host.UI.RawUI.WindowTitle = "A"; Clear-Host' | Out-Null
+    $ra = (State)['session.id']
+    Aio command pane.split_right | Out-Null
+    Aio wait text 'PS ' | Out-Null
+    Aio run '$Host.UI.RawUI.WindowTitle = "C"; Clear-Host' | Out-Null
+    $rc = (State)['session.id']
+    Aio command pane.focus_left | Out-Null
+    Aio command pane.split_right | Out-Null
+    Aio wait text 'PS ' | Out-Null
+    Aio run '$Host.UI.RawUI.WindowTitle = "B"; Clear-Host' | Out-Null
+    $rb = (State)['session.id']
+    Aio command pane.focus_left | Out-Null
+    Aio expect state "session.id=$ra" | Out-Null
+    Aio command pane.arrange | Out-Null
+    Aio wait idle | Out-Null
+    Aio capture --out "$captures/row-0-start.png" | Out-Null
+    $labels = @('', 'passed-b', 'entered-c-half', 'passed-c', 'right-half')
+    foreach ($press in 1..4) {
+        Aio key Right | Out-Null
+        Aio wait idle | Out-Null
+        Aio expect state "session.id=$ra" | Out-Null
+        $s = State
+        $pa, $pb, $pc = (Rect $s (Pane-Of $s $ra)), (Rect $s (Pane-Of $s $rb)), (Rect $s (Pane-Of $s $rc))
+        $ok = switch ($press) {
+            1 { $pb[0] -lt $pa[0] -and $pa[0] -lt $pc[0] -and $pc[2] -gt $pa[2] }
+            2 { $pb[0] -lt $pa[0] -and $pa[0] -lt $pc[0] -and $pb[2] -gt $pa[2] -and $pa[2] -eq $pc[2] }
+            3 { $pa[0] -gt $pc[0] -and $pc[0] -gt $pb[0] -and $pb[2] -gt $pa[2] }
+            4 { $pa[0] -gt $pc[0] -and $pc[0] -gt $pb[0] -and $pa[2] -gt $pb[2] -and $pb[2] -eq $pc[2] }
+        }
+        Check $ok "row press $press $($labels[$press])"
+        Aio capture --out "$captures/row-$press-$($labels[$press]).png" | Out-Null
+    }
+    $before = (State)["pane.$(Pane-Of (State) $ra).rect"]
+    Aio key Right | Out-Null
+    Aio wait idle | Out-Null
+    $s = State
+    Check ($s["pane.$(Pane-Of $s $ra).rect"] -eq $before) 'row press 5 changes nothing'
+    Aio key Alt+Shift+Up | Out-Null
+    Aio wait idle | Out-Null
+    $s = State
+    $pa, $pb = (Rect $s (Pane-Of $s $ra)), (Rect $s (Pane-Of $s $rb))
+    Check ($pa[1] -lt $pb[1] -and $pa[2] -gt 2 * $pb[2]) 'Alt+Shift+Up makes A the top half'
+    Aio capture --out "$captures/row-6-top-half.png" | Out-Null
+    Aio key Esc | Out-Null
+
     # About 700 px wide the card flows into fewer columns and stays inside the panes. Resize sizes the
     # focused terminal, so a tab of one pane gives it a known width per column.
     Aio command tab.new | Out-Null
