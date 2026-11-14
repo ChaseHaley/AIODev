@@ -1,6 +1,7 @@
 package main
 
 import "aio:commands"
+import "aio:events"
 import "aio:layout"
 import "aio:localpath"
 import "aio:platform"
@@ -20,6 +21,9 @@ Session_Entry :: struct {
 	id:                  u32,
 	session:             ^term.Session,
 	status:              term.Status_Kind,
+	// pane.created was reported, so pane.closed will be; and pane.exited was, for this process.
+	event_created:       bool,
+	event_exited:        bool,
 	keep_open:           bool,
 	process_padding:     Maybe(int),
 	// The leaf process padding_update last matched, kept only while padding groups are set; the
@@ -93,8 +97,10 @@ INSTANCE_VARIABLE :: "AIODEV_INSTANCE"
 CLI_VARIABLE :: "AIODEV_CLI"
 
 // `pane` is the session id the launch serves and `key` the pane's lasting key. The shell learns the id
-// from AIODEV_PANE, so the aio command line acts on "here" by default, and finds aio itself on PATH and
-// in AIODEV_CLI, which names the aio that matches this AIODev even when another aio comes first on PATH.
+// from AIODEV_PANE, so the aio command line acts on "here" by default. This AIODev's folder comes first
+// on the shell's PATH, so `aio` there is the aio beside this AIODev, the only one that trusts it, even
+// when another aio such as an installed release is on PATH too. AIODEV_CLI names the same aio for a
+// program that resets PATH or runs in another shell.
 @(private)
 session_config :: proc(
 	app: ^App,
@@ -127,7 +133,7 @@ session_config :: proc(
 		command_line = settings.shell_command_line(command, app.settings.shell.integration),
 		title = title,
 		environment = environment[:],
-		path_append = app.cli_directory,
+		path_prepend = app.cli_directory,
 		refresh_environment = app.settings.shell.refresh_environment,
 		working_directory = directory,
 		geometry = geometry,
@@ -206,6 +212,10 @@ session_open :: proc(
 		term.destroy(session)
 		return 0, false
 	}
+	// pane.created waits until a tree holds the pane; see app_events_panes_attached.
+	app.events_unattached = true
+	// A notification the program sends before the next tick is kept only if someone listens.
+	term.notifications_interest(session, events.wants(&app.events, .Pane_Notification))
 	pane_header_launch(&app.sessions[len(app.sessions) - 1].header, config, session)
 	session_status_sync(&app.sessions[len(app.sessions) - 1])
 	return id, true
@@ -282,31 +292,44 @@ session_restart :: proc(app: ^App, entry: ^Session_Entry) {
 // launch and the status what the new process reports.
 session_relaunch :: proc(app: ^App, entry: ^Session_Entry, config: term.Config) {
 	term.restart(entry.session, config)
+	entry.event_exited = false
 	pane_header_launch(&entry.header, config, entry.session)
-	pane_header_refresh(entry)
+	pane_header_refresh(app, entry)
 	session_status_sync(entry)
 	mark_all_dirty(app)
 }
 
 // The per-tick poll of every session: status, title, program status and bell, then the windows whose
 // shown screens changed.
-@(private)
 update_sessions :: proc(app: ^App) {
 	workspace_status_changed := false
 	// Exit cleanup removes only the current entry; earlier entries remain valid.
 	for i := len(app.sessions) - 1; i >= 0; i -= 1 {
 		entry := &app.sessions[i]
 		s := entry.session
+		// Notifications are copied out of the terminal only while a consumer wants them.
+		term.notifications_interest(s, events.wants(&app.events, .Pane_Notification))
+		notices := term.take_notifications(s)
+		for notice in notices {
+			notification := Event_Pane_Notification{entry.id, notice.title, notice.body}
+			events.push(&app.events, .Pane_Notification, notification)
+		}
+		term.destroy_notifications(notices)
 		if term.take_status_change(s) {
 			workspace_status_changed = true
 			layout_state_touch(app)
 			status, changed := session_status_sync(entry)
 			if changed {mark_all_dirty(app)}
+			// Exited is reported once per process, before an auto-close can remove the pane.
+			if !entry.event_exited && status.kind == .Exited {
+				entry.event_exited = true
+				events.push(&app.events, .Pane_Exited, Event_Pane_Exit{entry.id, status.exit_code})
+			}
 			if status.kind == .Exited && close_exited_session(app, entry.id) {continue}
 		}
 		if term.take_title_change(s) {
 			layout_state_touch(app)
-			pane_header_refresh(entry)
+			pane_header_refresh(app, entry)
 			session_titles_changed(app, entry.id)
 		}
 		if term.take_program_status_change(s) {
@@ -316,6 +339,7 @@ update_sessions :: proc(app: ^App) {
 			mark_all_dirty(app)
 		}
 		if term.take_bell(s) {
+			events.push(&app.events, .Pane_Bell, Event_Pane{entry.id})
 			for window in app.windows {
 				if !window.focused && window.phase == .Shown &&
 				   platform.window_flash(&app.platform, window.id) != .None {
@@ -355,6 +379,7 @@ session_close :: proc(app: ^App, id: u32) {
 		if entry.id == id {
 			status := term.status(entry.session)
 			closed_sessions_record(&app.closed_sessions, {id, status.kind, status.exit_code})
+			app_events_pane_closed(app, &entry, status.exit_code)
 			session_entry_destroy(&entry)
 			ordered_remove(&app.sessions, i)
 			return

@@ -1094,13 +1094,15 @@ when AIO_CONTROL {
 		case verify_protocol.Command:
 			command := commands.find(&app.registry, r.name)
 			if command == nil {return .Invalid_Argument}
-			if !action_available(app, w, Action(command.id)) {return .Invalid_Argument}
+			if action, builtin := action_builtin(command.id); builtin && !action_available(app, w, action) {
+				return .Invalid_Argument
+			}
 			palette_close(app, w)
 			// Verification stands in for a person at the keyboard, acting on this window's focus, which
 			// reports failures as notices rather than an outcome.
 			invocation := commands.invocation(command.id, focus = r.focus)
 			invocation.direction, invocation.ratio = r.direction, r.ratio
-			_ = command_execute(app, Window_Context{window = w}, invocation)
+			_ = command_execute(app, Window_Context{window = w, origin = .Key}, invocation)
 		case:
 			return .Invalid_Argument
 		}

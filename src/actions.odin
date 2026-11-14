@@ -167,6 +167,30 @@ Action :: enum u32 {
 	App_Version,
 	Install_Agent_Hooks,
 	Update,
+	Pane_Send_Keys,
+	Pane_Process,
+	App_Notify,
+	Clipboard_Read,
+	Clipboard_Write,
+	Settings_Get,
+	Settings_Set,
+	Mode_Enter,
+	Mode_Exit,
+	Mode_Exit_All,
+	App_Events,
+	App_Select,
+	App_Input,
+	App_View,
+	Float_Set_Bounds,
+	Float_Raise,
+	Float_Lower,
+	Float_Dock,
+	Float_Minimize,
+	Float_Restore,
+	Pane_Move,
+	Pane_Resize,
+	Pane_Set_Ratio,
+	Settings_Check_Lua,
 	Move_Left,
 	Move_Right,
 	Move_Up,
@@ -188,6 +212,8 @@ Action :: enum u32 {
 	Move_Pane_New_Tab,
 	Move_Pane_New_Window,
 	Arrange_Panes,
+	App_Lua_Types,
+	Settings_Lua_Path,
 }
 
 // Everything one command is: its name and title, default shortcuts, what it does when a linked window
@@ -205,8 +231,8 @@ Command_Descriptor :: struct {
 Command_Spec :: struct {
 	// The arguments a control request may give, and those it must.
 	accepted, required: commands.Arguments,
-	// Serves the CLI and scripts only: it stays out of the palette and shortcut lists, and a key bound
-	// to it does nothing.
+	// Serves the CLI and scripts: it stays out of the palette and shortcut lists, and a key bound to it
+	// runs it only when it acts on a pane (command_hidden_from_window).
 	hidden:             bool,
 	control:            Control_Form,
 	param:              Action_Param,
@@ -621,7 +647,10 @@ ACTIONS :: [Action]Command_Descriptor {
 	.Show_Commands = {"pane.commands", "Show saved commands", nil, .Local, {}},
 	.New_Floating = {
 		"pane.new_floating", "New shell float", {{.Backquote, {.Control, .Shift}}}, .Host,
-		{accepted = {.Focus, .Directory, .Name, .Profile, .Program, .Command_File}, control = .Pane},
+		{
+			accepted = {.Focus, .Directory, .Name, .Profile, .Program, .Command_File, .Bounds, .Unit},
+			control = .Pane,
+		},
 	},
 	.Float_Pane = {"pane.float", "Float or dock pane", {{.Enter, {.Control, .Alt}}}, .Refuse, {}},
 	.Minimize_Floating = {
@@ -639,7 +668,7 @@ ACTIONS :: [Action]Command_Descriptor {
 	},
 	.Layout_Apply = {
 		"layout.apply", "Apply layout file", nil, .Host,
-		{accepted = {.File, .Focus}, required = {.File}, hidden = true, control = .Pane},
+		{accepted = {.File, .Layout, .Focus}, required = {.File}, hidden = true, control = .Pane},
 	},
 	.Tab_List = {"tab.list", "List tabs", nil, .Host, {hidden = true, control = .Unnamed}},
 	.Workspace_List = {"workspace.list", "List workspaces", nil, .Host, {hidden = true, control = .Unnamed}},
@@ -648,6 +677,96 @@ ACTIONS :: [Action]Command_Descriptor {
 	},
 	.Install_Agent_Hooks = {"app.install_agent_hooks", "Install agent session hooks", nil, .Local, {}},
 	.Update = {"app.update", "Update AIODev", nil, .Local, {}},
+	.Pane_Send_Keys = {
+		"pane.send_keys", "Send keys to pane", nil, .Host,
+		{accepted = {.Keys}, required = {.Keys}, hidden = true, control = .Pane},
+	},
+	.Pane_Process = {
+		"pane.process", "Show pane process", nil, .Host, {hidden = true, control = .Pane},
+	},
+	.App_Notify = {
+		"app.notify", "Show notification", nil, .Host,
+		{accepted = {.Title, .Text}, required = {.Text}, hidden = true, control = .Unnamed},
+	},
+	.Clipboard_Read = {
+		"edit.clipboard_read", "Read clipboard", nil, .Host, {hidden = true, control = .Unnamed},
+	},
+	.Clipboard_Write = {
+		"edit.clipboard_write", "Write clipboard", nil, .Host,
+		{accepted = {.Text}, required = {.Text}, hidden = true, control = .Unnamed},
+	},
+	.Settings_Get = {
+		"settings.get", "Read setting", nil, .Host,
+		{accepted = {.Name}, required = {.Name}, hidden = true, control = .Unnamed},
+	},
+	.Settings_Set = {
+		"settings.set", "Write setting", nil, .Host,
+		{accepted = {.Name, .Text}, required = {.Name, .Text}, hidden = true, control = .Unnamed},
+	},
+	.Mode_Enter = {
+		"mode.enter", "Enter key mode", nil, .Local,
+		{accepted = {.Name, .Once}, required = {.Name}},
+	},
+	.Mode_Exit = {"mode.exit", "Leave key mode", nil, .Local, {}},
+	.Mode_Exit_All = {"mode.exit_all", "Leave all key modes", nil, .Local, {}},
+	.App_Events = {
+		cli_protocol.EVENTS_COMMAND, "Subscribe to application events", nil, .Host,
+		{accepted = {.Text}, hidden = true, control = .Unnamed},
+	},
+	.App_Select = {
+		"app.select", "Ask for a selection", nil, .Local,
+		{accepted = {.Title, .Items, .Details}, required = {.Title, .Items}, hidden = true, control = .Unnamed},
+	},
+	.App_Input = {
+		"app.input", "Ask for text", nil, .Local,
+		{accepted = {.Title, .Text}, required = {.Title}, hidden = true, control = .Unnamed},
+	},
+	.App_View = {"app.view", "Show layout view", nil, .Host, {hidden = true, control = .Unnamed}},
+	.Float_Set_Bounds = {
+		"float.set_bounds", "Set float bounds", nil, .Host,
+		{accepted = {.Bounds, .Unit, .Focus}, required = {.Bounds}, hidden = true, control = .Pane},
+	},
+	.Float_Raise = {
+		"float.raise", "Raise float", nil, .Host, {accepted = {.Focus}, hidden = true, control = .Pane},
+	},
+	.Float_Lower = {
+		"float.lower", "Lower float", nil, .Host, {accepted = {.Focus}, hidden = true, control = .Pane},
+	},
+	.Float_Dock = {
+		"float.dock", "Dock float", nil, .Host, {accepted = {.Focus}, hidden = true, control = .Pane},
+	},
+	.Float_Minimize = {
+		"float.minimize", "Minimize float", nil, .Host, {accepted = {.Focus}, hidden = true, control = .Pane},
+	},
+	.Float_Restore = {
+		"float.restore", "Restore float", nil, .Host, {accepted = {.Focus}, hidden = true, control = .Pane},
+	},
+	.Pane_Move = {
+		"pane.move", "Move pane beside another", nil, .Host,
+		{
+			accepted = {.Beside, .Direction, .Focus},
+			required = {.Beside, .Direction},
+			hidden = true,
+			control = .Pane,
+		},
+	},
+	.Pane_Resize = {
+		"pane.resize", "Resize pane by cells", nil, .Host,
+		{
+			accepted = {.Direction, .Cells, .Focus},
+			required = {.Direction, .Cells},
+			hidden = true,
+			control = .Pane,
+		},
+	},
+	.Pane_Set_Ratio = {
+		"pane.set_ratio", "Set pane share", nil, .Host,
+		{accepted = {.Ratio, .Focus}, required = {.Ratio}, hidden = true, control = .Pane},
+	},
+	.Settings_Check_Lua = {
+		"settings.check_lua", "Check init.lua", nil, .Host,
+		{accepted = {.File}, hidden = true, control = .Unnamed},
+	},
 	.Move_Left = {
 		"pane.move_left", "Move pane left", nil, .Local, {param = {family = .Toward, direction = .Left}},
 	},
@@ -702,6 +821,12 @@ ACTIONS :: [Action]Command_Descriptor {
 	.Move_Pane_New_Tab = {"pane.move_new_tab", "Move pane to new tab", nil, .Local, {}},
 	.Move_Pane_New_Window = {"pane.move_new_window", "Move pane to new window", nil, .Local, {}},
 	.Arrange_Panes = {"pane.arrange", "Arrange panes", nil, .Local, {}},
+	.App_Lua_Types = {
+		"app.lua_types", "Show Lua type definitions", nil, .Host, {hidden = true, control = .Unnamed},
+	},
+	.Settings_Lua_Path = {
+		"settings.lua_path", "Show init.lua path", nil, .Host, {hidden = true, control = .Unnamed},
+	},
 }
 
 // What help says about a command beyond its usage and title: a summary, and the command's own help for
@@ -714,6 +839,44 @@ Command_Help :: struct {
 
 @(private)
 COMMAND_HELP :: #partial [Action]Command_Help {
+	.App_Select = {
+		"Opens a filtered list and returns a prompt id immediately. The prompt.closed event reports the " +
+		"original 1-based index, or cancelled when dismissed. Details must have one string per item.",
+		nil,
+	},
+	.App_Input = {
+		"Opens a single-line text dialog with the optional default selected and returns a prompt id " +
+		"immediately. The prompt.closed event reports text (including empty text), or cancelled.",
+		nil,
+	},
+	.App_View = {
+		"Prints one JSON document describing all windows, workspaces, tab trees, floats and panes.",
+		nil,
+	},
+	.Float_Set_Bounds = {"Sets the named float's clamped bounds without changing focus unless --focus.", nil},
+	.Float_Raise = {
+		"Raises the named float above every other float without changing focus unless --focus.",
+		nil,
+	},
+	.Float_Lower = {
+		"Lowers the named float beneath every other float without changing focus unless --focus.",
+		nil,
+	},
+	.Float_Dock = {"Returns the named float to its tiled slot without changing focus unless --focus.", nil},
+	.Float_Minimize = {"Minimizes the named float; its program keeps running.", nil},
+	.Float_Restore = {"Restores the named float without changing focus unless --focus.", nil},
+	.Pane_Move = {
+		"Moves the named pane beside another pane in the same tab without changing focus unless --focus.",
+		{{.Direction, {description = "the side of --beside on which the pane is placed"}}},
+	},
+	.Pane_Resize = {
+		"Moves the pane's nearest border along the given direction by terminal cells.",
+		{{.Direction, {description = "the direction in which the border moves"}}},
+	},
+	.Pane_Set_Ratio = {
+		"Sets the pane's share of its parent split.",
+		{{.Ratio, {description = "the named pane's share of its parent split"}}},
+	},
 	.New_Tab = {
 		"Opens a tab in the pane's workspace running the profile's shell or a program and prints the new " +
 		"pane's id; focus stays where it is unless --focus.",
@@ -738,16 +901,16 @@ COMMAND_HELP :: #partial [Action]Command_Help {
 		},
 	},
 	.Layout_Apply = {
-		"Opens a tab of named panes from a JSON layout file in the pane's workspace and prints their ids " +
-		"column by column, top to bottom; nothing opens when the file is wrong.",
+		"Opens a tab of named panes from a JSON layout file or --layout document and prints their ids " +
+		"in tree order, then floats; nothing opens when the layout is wrong.",
 		{
 			{
 				.File,
 				{
-					"the JSON layout: tab, cwd and columns of panes with name, command (an argument " +
-					"array), cwd and profile; at most 1 MiB and 16 panes; a relative path is from aio's " +
-					"working directory",
-					"none (required)",
+					"the JSON layout: tab, cwd and either columns or a root split tree, plus optional floats; " +
+					"panes take name, command (an argument array), cwd and profile; at most 1 MiB and 16 panes; " +
+					"a relative path is from aio's working directory",
+					"none (give a file or --layout)",
 					"review.json",
 				},
 			},
@@ -771,6 +934,30 @@ COMMAND_HELP :: #partial [Action]Command_Help {
 		"Types text into the pane's program as a person at the keyboard would.",
 		{{.Text, {description = "the text to type", example = `"git status"`}}},
 	},
+	.Pane_Send_Keys = {
+		"Sends each chord through the pane's negotiated keyboard protocol. Invalid chords send nothing.",
+		nil,
+	},
+	.Pane_Process = {
+		"Reports the pane's current program, its executable path and directory when available, and its " +
+		"ancestors from nearest parent back to the pane's shell.",
+		nil,
+	},
+	.App_Notify = {
+		"Shows an Info notice; with no visible window, also uses the notification preferences for done programs.",
+		nil,
+	},
+	.Clipboard_Read = {"Returns the clipboard's text.", nil},
+	.Clipboard_Write = {"Replaces the clipboard's text; empty text clears it.", nil},
+	.Settings_Get = {
+		"Returns a current schema setting in its settings.ini form, including quotes around strings.",
+		{{.Name, {"the schema setting's key", "none (required)", "--name font.size"}}},
+	},
+	.Settings_Set = {
+		"Validates, saves and applies a setting exactly as the Settings page does. String values are " +
+		"given without settings.ini's surrounding quotes.",
+		{{.Name, {"the schema setting's key", "none (required)", "--name font.size"}}},
+	},
 	.Pane_Read = {
 		"Prints the pane's visible text; --scrollback adds the history above it and --unwrap joins rows the " +
 		"terminal wrapped.",
@@ -793,6 +980,15 @@ COMMAND_HELP :: #partial [Action]Command_Help {
 		nil,
 	},
 	.App_Version = {"Prints AIODev's build; aio version shows it beside aio's own.", nil},
+	.App_Events = {
+		"Streams application events on this control connection until it closes; aio events subscribes.",
+		{{.Text, {"space-separated event names", "all events", "pane.focused pane.exited"}}},
+	},
+	.Settings_Check_Lua = {
+		"Loads a Lua config file without running any command and prints its path, how many actions, keys " +
+		"and modes it declares, and each problem as file:line: message; fails when there is a problem.",
+		{{.File, {"the Lua file to check", "init.lua beside settings.ini", "init.lua"}}},
+	},
 	.Pane_Focus = {"Focuses the pane and brings its window forward.", nil},
 	.Rename_Pane = {
 		"Names the pane; without text it opens the rename box on the pane.",
@@ -834,6 +1030,22 @@ COMMAND_HELP :: #partial [Action]Command_Help {
 	.App_Commands = {
 		"Lists every command, or describes one; aio commands and aio help ask it.",
 		{{.Text, {"a command to describe", "none (lists every command)", "pane.split"}}},
+	},
+	.Mode_Enter = {
+		"Enters a declared key mode in this window; the most recently entered mode handles keys first.",
+		{{.Name, {"the declared key mode", "required", "--name resize"}}},
+	},
+	.Mode_Exit = {"Leaves the most recently entered key mode in this window.", nil},
+	.Mode_Exit_All = {"Leaves every key mode and cancels the pending key sequence in this window.", nil},
+	.App_Lua_Types = {
+		"Prints the aio API's LuaCATS definitions for lua-language-server: the built-in commands, events " +
+		"and replies, and the actions init.lua declares; aio types writes them beside init.lua.",
+		nil,
+	},
+	.Settings_Lua_Path = {
+		"Prints the absolute path of the init.lua AIODev loads, beside settings.ini, whether or not the " +
+		"file exists; aio types and aio config check ask it for the folder.",
+		nil,
 	},
 }
 
@@ -882,9 +1094,34 @@ action_shortcut_text :: proc(app: ^App, action: Action, out: []u8) -> string {
 shortcut_action :: proc(app: ^App, e: input.Key_Event) -> (Action, bool) {
 	if command := commands.find_by_key(&app.registry, e.key, e.modifiers, e.unshifted);
 	   command != nil {
-		return Action(command.id), true
+		return action_builtin(command.id)
 	}
 	return {}, false
+}
+
+// The first runtime command id; every id below it is the built-in Action of that index.
+RUNTIME_COMMAND_FIRST :: commands.Command_Id(len(Action))
+
+// Built-in ids are the descriptor indices; runtime ids must never index the Action tables.
+@(require_results)
+action_builtin :: proc(id: commands.Command_Id) -> (Action, bool) {
+	if id >= RUNTIME_COMMAND_FIRST {return {}, false}
+	return Action(id), true
+}
+
+Command_Origin :: enum u8 {
+	Key, Palette, Menu, Button, Cli, Script, Config,
+}
+
+// The wire spelling of each origin, as `--origin` takes it.
+COMMAND_ORIGIN_WORDS :: [Command_Origin]string {
+	.Key     = "key",
+	.Palette = "palette",
+	.Menu    = "menu",
+	.Button  = "button",
+	.Cli     = "cli",
+	.Script  = "script",
+	.Config  = "config",
 }
 
 // A window's own keys, palette, menus and buttons act on its focus. Tab commands act on `tab`, or the
@@ -892,12 +1129,14 @@ shortcut_action :: proc(app: ^App, e: input.Key_Event) -> (Action, bool) {
 Window_Context :: struct {
 	window: ^Window,
 	tab:    Maybe(int),
+	origin: Command_Origin,
 }
 
 // A control request names its pane in the invocation; empty means `caller`, the pane the request came
-// from (D-046).
+// from (D-046). Pipe requests carry origin .Cli unless they name another.
 Control_Request :: struct {
 	caller: u32,
+	origin: Command_Origin,
 }
 
 // Who runs a command, which decides what it acts on.
@@ -907,9 +1146,14 @@ Command_Context :: union #no_nil {
 }
 
 // Runs `action` as a person at w would, on its focus and selected tab. Failures show as notices.
-run_action :: proc(app: ^App, w: ^Window, action: Action) {
-	invocation := commands.invocation(commands.Command_Id(action), focus = true)
-	_ = command_execute(app, Window_Context{window = w}, invocation)
+run_action :: proc(app: ^App, w: ^Window, action: Action, origin := Command_Origin.Key) {
+	run_window_command(app, w, commands.Command_Id(action), origin)
+}
+
+@(private)
+run_window_command :: proc(app: ^App, w: ^Window, id: commands.Command_Id, origin: Command_Origin) {
+	invocation := commands.invocation(id, focus = true)
+	_ = command_execute(app, Window_Context{window = w, origin = origin}, invocation)
 }
 
 // The window that runs a command w was asked to run, or nil when it must not run: a held drag that
@@ -964,7 +1208,16 @@ command_execute :: proc(app: ^App, ctx: Command_Context, invocation: commands.In
 	@(static, rodata)
 	descriptors := ACTIONS
 	invocation := invocation
-	action := Action(invocation.id)
+	// The Action enum decides what is built in; only runtime commands live solely in the registry.
+	action, builtin := action_builtin(invocation.id)
+	if !builtin {
+		command := commands.find(&app.registry, invocation.id)
+		if command == nil {return outcome_failure(.Usage, "unknown command; use aio commands")}
+		if app.runtime_runner == nil {
+			return outcome_failure(.Failed, fmt.tprintf("no script defines %s", command.name))
+		}
+		return app.runtime_runner(app, ctx, invocation)
+	}
 	w: ^Window
 	tab: Maybe(int)
 	// The pane a control request names, for commands that act on it where it is.
@@ -974,7 +1227,8 @@ command_execute :: proc(app: ^App, ctx: Command_Context, invocation: commands.In
 	switch c in ctx {
 	case Window_Context:
 		w = command_window(app, c.window, action)
-		if w == nil || descriptors[action].spec.hidden {return {}}
+		if w == nil {return {}}
+		if descriptors[action].spec.hidden {return command_hidden_from_window(app, w, c.origin, invocation, action)}
 		if w == c.window {tab = c.tab}
 	case Control_Request:
 		if commands.find(&app.registry, invocation.id) == nil {
@@ -1008,10 +1262,20 @@ command_execute :: proc(app: ^App, ctx: Command_Context, invocation: commands.In
 		if w.workspace != nil {tab_index = tab.? or_else w.workspace.selected}
 	}
 	switch action {
+	case .Mode_Enter, .Mode_Exit, .Mode_Exit_All:
+		return key_mode_command(app, w, action, invocation)
 	case .App_Commands:
 		return command_catalogue(app, invocation.text)
 	case .App_Version:
 		return version_outcome()
+	case .App_Events:
+		return outcome_failure(.Usage, "app.events requires a streaming control connection; use aio events")
+	case .App_Select:
+		return script_prompt_select(app, ctx, invocation)
+	case .App_Input:
+		return script_prompt_input(app, ctx, invocation)
+	case .Settings_Check_Lua:
+		return lua_check(app, invocation.file)
 	case .Pane_List:
 		return {payload = Outcome_Panes(pane_reports(app, nil))}
 	case .Tab_List:
@@ -1026,6 +1290,26 @@ command_execute :: proc(app: ^App, ctx: Command_Context, invocation: commands.In
 	case .Pane_Send:
 		named := target.?
 		return pane_send(named.pane.session, invocation.text, invocation.enter)
+	case .Pane_Send_Keys:
+		named := target.?
+		return control_pane_send_keys(named.pane.session, invocation.keys)
+	case .Pane_Process:
+		named := target.?
+		return control_pane_process(app, named.pane.session)
+	case .App_Notify:
+		control_app_notify(app, invocation.title, invocation.text)
+		return {}
+	case .Clipboard_Read:
+		text, ok := platform.clipboard_get_text(&app.platform, context.temp_allocator)
+		if !ok {return outcome_failure(.Failed, "could not read the clipboard")}
+		return {payload = Outcome_Text(text)}
+	case .Clipboard_Write:
+		if !clipboard_write(app, invocation.text) {
+			return outcome_failure(.Failed, "could not write the clipboard")
+		}
+		return {}
+	case .Settings_Get, .Settings_Set:
+		return control_settings_value(app, invocation, action == .Settings_Set)
 	case .Pane_Focus:
 		return control_pane_focus(app, target.?)
 	case .Close_Pane:
@@ -1061,6 +1345,16 @@ command_execute :: proc(app: ^App, ctx: Command_Context, invocation: commands.In
 	case .Layout_Apply:
 		t := target.?
 		return control_layout_apply(app, window_for_workspace(app, t.workspace), t.workspace, invocation)
+	case .App_View:
+		return control_view(app)
+	case .App_Lua_Types:
+		return {payload = Outcome_Text(lua_types_text(app, true, context.temp_allocator))}
+	case .Settings_Lua_Path:
+		return lua_path(app)
+	case .Float_Set_Bounds, .Float_Raise, .Float_Lower, .Float_Dock, .Float_Minimize, .Float_Restore:
+		return control_float_change(app, target.?, invocation, action)
+	case .Pane_Move, .Pane_Resize, .Pane_Set_Ratio:
+		return control_pane_layout_change(app, target.?, invocation, action)
 	case .Rename_Pane:
 		if t, named := target.?; named {
 			if .Text in invocation.given {return control_rename(app, t, invocation.text)}
@@ -1360,6 +1654,28 @@ command_execute :: proc(app: ^App, ctx: Command_Context, invocation: commands.In
 	case .Status_Panel_Previous:
 		status_panel_step(app, w, -1)
 	}
+	return {}
+}
+
+// A key or an init.lua binding reaches a hidden command with its fields. One that acts on a pane runs on
+// w's focused pane, as a control request from that pane would, and a failure shows as a notice; the
+// rest serve the CLI and scripts only, so the key does nothing.
+@(private, require_results)
+command_hidden_from_window :: proc(
+	app: ^App,
+	w: ^Window,
+	origin: Command_Origin,
+	invocation: commands.Invocation,
+	action: Action,
+) -> Outcome {
+	@(static, rodata)
+	descriptors := ACTIONS
+	control := descriptors[action].spec.control
+	if control != .Pane && control != .Focus {return {}}
+	entry := focused_session(app, w)
+	if entry == nil {return {}}
+	outcome := command_execute(app, Control_Request{caller = entry.id, origin = origin}, invocation)
+	if outcome.status != .Ok {notify(app, .Info, outcome.message)}
 	return {}
 }
 

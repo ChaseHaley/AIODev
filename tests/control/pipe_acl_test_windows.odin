@@ -25,7 +25,8 @@ pipe_creation_aligns_token_information_for_byte_aligned_allocators :: proc(t: ^t
 	name := test_pipe_name(t)
 	if name == "" {return}
 	defer delete(name)
-	storage: [16384]u8
+	// The server holds every pipe instance's connection state, about 20 KiB for 16 instances.
+	storage: [65536]u8
 	arena: mem.Arena
 	mem.arena_init(&arena, storage[:])
 	server, err := control.create(name, {}, {byte_aligned_allocator, &arena})
@@ -91,7 +92,7 @@ pipe_dacl_allows_only_its_current_user :: proc(t: ^testing.T) {
 	acl: w.PACL
 	descriptor: w.PSECURITY_DESCRIPTOR
 	// SE_KERNEL_OBJECT is a Windows C enum, whose argument width is DWORD.
-	result := GetSecurityInfo(server.pipe, 6, w.DACL_SECURITY_INFORMATION, nil, nil, &acl, nil, &descriptor)
+	result := GetSecurityInfo(server.clients[0].pipe, 6, w.DACL_SECURITY_INFORMATION, nil, nil, &acl, nil, &descriptor)
 	if !testing.expect(t, result == 0, fmt.tprintf("GetSecurityInfo: %v", result)) {return}
 	defer testing.expect(t, w.LocalFree(descriptor) == nil, "LocalFree descriptor")
 	present, defaulted: w.BOOL

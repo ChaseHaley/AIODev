@@ -1,7 +1,9 @@
 package main
 
-import "aio:input"
 import "aio:colour"
+import "aio:commands"
+import "aio:events"
+import "aio:input"
 import "aio:layout"
 import "aio:perf"
 import "aio:platform"
@@ -51,6 +53,8 @@ Pane_View :: struct {
 
 Window :: struct {
 	id: input.Window_Id,
+	// The workspace, tab and pane this window last reported as selected and focused.
+	event_focus: App_Event_Focus,
 	surface: Window_Surface,
 	ui_text: ui.Text,
 	// Every text field caret this window draws; ui_text points here.
@@ -131,6 +135,7 @@ Window :: struct {
 	status_rail_reserve: f32,
 	// The dock edges shown beside the layout's dividers, refreshed with them by window_dividers.
 	dock_edges: Dock_Edges_Shown,
+	script_prompt: Script_Prompt,
 }
 
 // What the last frame drew that asks for another frame. build_frame clears it and drawing fills it in,
@@ -258,6 +263,9 @@ window_commit :: proc(app: ^App, w: ^Window) -> bool {
 		return false
 	}
 	w.phase, w.dirty = .Shown, true
+	// A preview a drop discards is never announced, so only a window that shows is created.
+	events.push(&app.events, .Window_Created, Event_Window{w.id})
+	app.events_focus = true
 	return true
 }
 
@@ -288,6 +296,7 @@ window_tree :: proc(w: ^Window) -> ^layout.Layout {
 }
 
 window_close :: proc(app: ^App, w: ^Window) {
+	announced := w.phase == .Shown || w.phase == .Hidden
 	switch w.phase {
 	case .Closing:
 		return
@@ -303,6 +312,8 @@ window_close :: proc(app: ^App, w: ^Window) {
 		w.phase = .Closing
 		_ = gesture_cancel(app, w)
 	}
+	script_prompt_cancel(app, w)
+	if announced {events.push(&app.events, .Window_Closed, Event_Window{w.id})}
 	window_overlays_cancel(app, w)
 	// A file dialog belongs to its native window, so it closes before the window does.
 	file_dialogs_window_closed(app, w.id)
@@ -329,6 +340,7 @@ window_close :: proc(app: ^App, w: ^Window) {
 // through window_prepare is freed the same way.
 @(private)
 window_free :: proc(w: ^Window) {
+	commands.key_state_destroy(&w.bindings)
 	workspace_view_destroy(&w.resources)
 	drag_destroy(w)
 	ui.find_destroy(&w.find)
@@ -543,9 +555,13 @@ pane_fit :: proc(app: ^App, w: ^Window, pane: layout.Pane_Rect) {
 		pane_insets(app, w, entry),
 	)
 	g := pane_box_geometry(box, w.metrics, w.width, w.height)
+	previous := term.geometry(entry.session)
 	// A floating pane that only moved keeps its grid, so its program sees no resize.
-	if g != term.geometry(entry.session) && !(pane.floating && term.reposition(entry.session, g)) {
+	if g != previous && !(pane.floating && term.reposition(entry.session, g)) {
 		term.resize(entry.session, g)
+		if previous.columns != g.columns || previous.rows != g.rows {
+			events.push(&app.events, .Pane_Resized, Event_Pane_Size{entry.id, g.columns, g.rows})
+		}
 	}
 	if pane_view(w, pane.content) == nil {
 		cached, created := pane_view_create(pane.content, true)

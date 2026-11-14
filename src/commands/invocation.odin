@@ -30,12 +30,23 @@ Argument :: enum u8 {
 	Text_File,
 	Scrollback,
 	Unwrap,
+	Keys,
+	Title,
+	Once,
+	Items,
+	Details,
+	Bounds,
+	Unit,
+	Beside,
+	Cells,
+	Layout,
 }
 Arguments :: bit_set[Argument;u32]
 
 // One request to run a command. Text fields borrow from the arguments they were parsed from.
 Invocation :: struct {
 	id:                                      Command_Id,
+	fields:                                  string,
 	// Empty means the caller's own pane, else the focused pane; also `here`, `focused`, an id or a
 	// pane name.
 	pane:                                    string,
@@ -50,6 +61,12 @@ Invocation :: struct {
 	tab_name, workspace:                     string,
 	lines:                                   int,
 	scrollback, unwrap:                      bool,
+	keys, title:                            string,
+	once:                                    bool,
+	items, details:                          string,
+	bounds:                                  layout.Rect,
+	unit, beside, layout:                    string,
+	cells:                                   int,
 }
 
 Parse_Error :: struct {
@@ -195,15 +212,103 @@ argument_grammar := [Argument]struct {
 		"--unwrap", "",
 		{"joins rows the terminal soft-wrapped into one line", "off (one line per row)", "--unwrap"},
 	},
+	.Keys = {
+		"--keys", " <chords>",
+		{
+			"space-separated shortcut chords, or a JSON array of chord strings",
+			"none (required)",
+			`--keys "Ctrl+C Escape Up"`,
+		},
+	},
+	.Title = {
+		"--title", " <title>",
+		{"the notification's title", "AIODev", `--title "Build finished"`},
+	},
+	.Once      = {"--once", "", {"leaves the mode after one completed binding", "off", "--once"}},
+	.Items = {
+		"--items", " <json>",
+		{"the selectable strings as a JSON array", "none (required)", `--items '["Build","Test"]'`},
+	},
+	.Details = {
+		"--details", " <json>",
+		{"secondary text for each item as a JSON array of strings", "none", `--details '["Compile","Run tests"]'`},
+	},
+	.Bounds = {
+		"--bounds", " x,y,w,h",
+		{"the float's position and size in the chosen unit", "a centered float", "--bounds 0.1,0.1,0.6,0.6"},
+	},
+	.Unit = {
+		"--unit", " share|cells",
+		{"the bounds' unit, fractions of the float area or terminal cells", "share", "--unit cells"},
+	},
+	.Beside = {
+		"--beside", " <pane>",
+		{"the pane beside which to move, in the same tab", "none (required)", "--beside 3"},
+	},
+	.Cells = {
+		"--cells", " <n>",
+		{"the number of terminal cells to move the border", "none (required)", "--cells 2"},
+	},
+	.Layout = {
+		"--layout", " <json>",
+		{
+			"the inline JSON layout instead of a file, at most 1 MiB and 16 panes",
+			"none (give a file or --layout)",
+			`--layout '{"root":{}}'`,
+		},
+	},
 }
 #assert(layout.SPLIT_SHARE_MIN == 0.05 && layout.SPLIT_SHARE_MAX == 0.95)
 #assert(SPLIT_DEFAULT.direction == .Right && SPLIT_DEFAULT.ratio == 0.5)
 #assert(MAX_LINES == 10000)
 
+// Each argument's type as a Lua fields table gives it, for the aio type definitions. A string where a
+// value is JSON, a list or a pane is also accepted; these name what a script most likely writes.
+ARGUMENT_LUA_TYPES :: [Argument]string {
+	.Direction    = `"left"|"right"|"up"|"down"`,
+	.Ratio        = "number",
+	.Focus        = "boolean",
+	.Directory    = "string",
+	.Name         = "string",
+	.Profile      = "string",
+	.Text         = "string",
+	.File         = "string",
+	.Enter        = "boolean",
+	.Lines        = "integer",
+	.Program      = "string[]",
+	.Tab_Name     = "string",
+	.Workspace    = "string|integer",
+	.Command_File = "string",
+	.Text_File    = "string",
+	.Scrollback   = "boolean",
+	.Unwrap       = "boolean",
+	.Keys         = "string|string[]",
+	.Title        = "string",
+	.Once         = "boolean",
+	.Items        = "string[]|string",
+	.Details      = "string[]|string",
+	.Bounds       = "number[]",
+	.Unit         = `"share"|"cells"`,
+	.Beside       = "string|integer",
+	.Cells        = "integer",
+	.Layout       = "table|string",
+}
+
 // Each argument with the option that reads it from a file instead, so no shell's quoting touches it.
 // A command accepting both takes one or the other.
 @(private, rodata)
-file_alternatives := [?][2]Argument{{.Program, .Command_File}, {.Text, .Text_File}}
+file_alternatives := [?][2]Argument{{.Program, .Command_File}, {.Text, .Text_File}, {.File, .Layout}}
+
+// The argument the command also accepts in place of `argument`, which then stops being required:
+// the file form of a value, or the value a file form stands for.
+@(require_results)
+argument_alternative :: proc(command: ^Command, argument: Argument) -> (Argument, bool) {
+	for pair in file_alternatives {
+		if pair[0] == argument && pair[1] in command.arguments {return pair[1], true}
+		if pair[1] == argument && pair[0] in command.arguments {return pair[0], true}
+	}
+	return {}, false
+}
 
 // The defaults every interface starts from: a new pane splits right, taking half the space. `focus`
 // says whether a pane a command creates takes focus: interactive commands always focus it, a CLI
@@ -358,6 +463,7 @@ parse_invocation :: proc(
 			if argument == .Scrollback {result.scrollback = true} else {result.unwrap = true}
 			continue
 		}
+		if argument == .Once {result.once = true; continue}
 		if i + 1 == len(args) {return {}, {option, "supply a value after this option"}}
 		i += 1
 		value := args[i]
@@ -370,12 +476,47 @@ parse_invocation :: proc(
 			ratio, valid := parse_ratio(value)
 			if !valid {return {}, {value, "use a ratio from 0.05 to 0.95"}}
 			result.ratio = ratio
+		case .Bounds:
+			parts, _ := strings.split(value, ",", allocator)
+			defer delete(parts, allocator)
+			if len(parts) != 4 {return {}, {value, "use four finite numbers: x,y,w,h"}}
+			numbers: [4]f32
+			for part, n in parts {
+				number, valid := strconv.parse_f32(part)
+				if !valid || !(number >= -max(f32) && number <= max(f32)) {
+					return {}, {value, "use four finite numbers: x,y,w,h"}
+				}
+				numbers[n] = number
+			}
+			if numbers[2] <= 0 || numbers[3] <= 0 {return {}, {value, "give positive width and height"}}
+			result.bounds = {numbers[0], numbers[1], numbers[2], numbers[3]}
+		case .Unit:
+			if value != "share" && value != "cells" {return {}, {value, "choose share or cells"}}
+			result.unit = value
+		case .Beside:
+			if value == "" {return {}, {option, "name a pane"}}
+			result.beside = value
+		case .Cells:
+			cells, valid := strconv.parse_int(value, 10)
+			if !valid || cells < 1 || cells > MAX_LINES {return {}, {value, "use a cell count from 1 to 10000"}}
+			result.cells = cells
+		case .Layout:
+			if value == "" {return {}, {option, "supply a JSON layout"}}
+			result.layout = value
 		case .Lines:
 			lines, ok := strconv.parse_int(value, 10)
 			if !ok || lines < 1 || lines > MAX_LINES {
 				return {}, {value, fmt.tprintf("use a row count from 1 to %d", MAX_LINES)}
 			}
 			result.lines = lines
+		case .Keys:
+			result.keys = value
+		case .Title:
+			result.title = value
+		case .Items:
+			result.items = value
+		case .Details:
+			result.details = value
 		case .Directory, .Name, .Profile, .Tab_Name, .Workspace, .Command_File, .Text_File:
 			if value == "" {return {}, {option, "supply a nonempty value"}}
 			#partial switch argument {

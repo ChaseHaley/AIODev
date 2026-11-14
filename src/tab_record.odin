@@ -1,5 +1,6 @@
 package main
 
+import "aio:events"
 import "aio:layout"
 import "core:fmt"
 import "core:log"
@@ -27,6 +28,12 @@ tab_record_commit :: proc(app: ^App, workspace: ^Workspace, tab: ^Tab, at := -1)
 		append(&workspace.tabs, tab)
 	} else {
 		inject_at(&workspace.tabs, at, tab)
+	}
+	// Only listed workspaces announce tabs: a tear-off preview announces its tabs once published, and
+	// a linked window's private view (id 0) shows a pane whose tab was announced where it lives.
+	if !workspace.provisional && workspace.id != 0 {
+		events.push(&app.events, .Tab_Created, Event_Tab{tab.id, workspace.id})
+		app_events_panes_attached(app)
 	}
 }
 

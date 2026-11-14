@@ -186,7 +186,7 @@ tabs_to_window :: proc(app: ^App, source_window, preview: ^Window) -> bool {
 	workspace_tab_choose(workspace, workspace.selected)
 	window_relayout(app, source_window)
 	rail_reveal_active(source_window)
-	window_preview_publish(preview, name)
+	window_preview_publish(app, preview, name)
 	window_relayout(app, preview)
 	focus_enter(app, preview)
 	workspace_mutation_finish(app, workspace, {.Structure})

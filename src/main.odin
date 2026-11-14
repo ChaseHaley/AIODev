@@ -51,6 +51,7 @@ start :: proc() -> int {
 		fmt.fprintln(os.stderr, "Invalid command line:", parse_error)
 		return 2
 	}
+	if options.lua_types != "" {return lua_types_write(options.lua_types)}
 	level: log.Level = ODIN_DEBUG ? .Debug : .Info
 	logger := App_Logger {
 		console = log.create_console_logger(level),

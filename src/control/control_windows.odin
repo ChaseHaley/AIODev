@@ -15,20 +15,48 @@ import "core:time"
 // await_response, which stays unbounded.
 SERVER_IO_TIMEOUT_MS :: 5000
 
+// Pipe instances, each serving one client at a time; a client beyond them waits in connect. Requests
+// from every connection queue for the app, which polls them in turn.
+MAX_SERVER_CLIENTS :: 16
+// Bounds one stream's unsent lines, by count and bytes. A subscriber that falls this far behind is
+// disconnected, so a slow reader costs the pusher one copy per line and never a wait.
+MAX_STREAM_LINES :: 64
+MAX_STREAM_BYTES :: MAX_MESSAGE
+
 Server :: struct {
-	allocator:          runtime.Allocator,
-	wake:               Wake,
-	pipe, stop, ready:  w.HANDLE,
-	worker:             ^thread.Thread,
-	mutex:              sync.Mutex, // Guards slot and serial.
-	slot:               Slot,
-	// The last request id handed out. Every earlier id, and this one once the slot empties, has
-	// been delivered or abandoned.
-	serial:             u64,
+	allocator:    runtime.Allocator,
+	wake:         Wake,
+	// Guards serial, the last request id handed out across every connection.
+	serial_mutex: sync.Mutex,
+	serial:       u64,
+	stopping:     bool,
+	clients:      [MAX_SERVER_CLIENTS]Connection,
+	// Where the next poll starts, so one busy client cannot starve the others.
+	next_client:  int,
 }
 
-// The one request in flight between the server thread and the app; nil is empty. The procs that
-// name a state in their comment are its only writers, each under the mutex.
+// One pipe instance and its worker thread. A request's reply, then for a stream its queued lines, go
+// back on the connection the request came in on.
+@(private)
+Connection :: struct {
+	server:            ^Server,
+	allocator:         runtime.Allocator,
+	wake:              Wake,
+	pipe, stop, ready: w.HANDLE,
+	worker:            ^thread.Thread,
+	// Guards slot, stream and the line queue.
+	mutex:             sync.Mutex,
+	slot:              Slot,
+	// The id of the request that made this connection a stream; 0 while it is not one.
+	stream:            u64,
+	// A ring of unsent stream lines starting at first.
+	lines:             [MAX_STREAM_LINES][]u8,
+	first, count:      int,
+	bytes:             int,
+}
+
+// The one request in flight between a connection's worker and the app; nil is empty. The procs that
+// name a state in their comment are its only writers, each under the connection's mutex.
 @(private)
 Slot :: union {
 	// Read from the client, waiting for the app to poll it.
@@ -68,6 +96,7 @@ Client :: struct {
 Line_Reader :: struct {
 	buffer:      [8192]u8,
 	first, last: int,
+	partial: [dynamic]u8,
 }
 
 @(private, require_results)
@@ -168,54 +197,74 @@ create :: proc(name: string, wake: Wake, allocator := context.allocator) -> (^Se
 		nLength              = size_of(w.SECURITY_ATTRIBUTES),
 		lpSecurityDescriptor = descriptor,
 	}
-	s.pipe = w.CreateNamedPipeW(
-		wide,
-		w.PIPE_ACCESS_DUPLEX | w.FILE_FLAG_OVERLAPPED | w.FILE_FLAG_FIRST_PIPE_INSTANCE,
-		w.PIPE_TYPE_BYTE | w.PIPE_READMODE_BYTE | w.PIPE_WAIT | w.PIPE_REJECT_REMOTE_CLIENTS,
-		1,
-		65536,
-		65536,
-		0,
-		&sa,
-	)
-	if s.pipe == w.INVALID_HANDLE_VALUE {return nil, os_error("CreateNamedPipeW")}
-	s.stop = w.CreateEventW(nil, true, false, nil)
-	if s.stop == nil {return nil, os_error("CreateEventW")}
-	s.ready = w.CreateEventW(nil, false, false, nil)
-	if s.ready == nil {return nil, os_error("CreateEventW")}
-	s.worker = thread.create(server_thread)
-	if s.worker == nil {return nil, .System}
-	s.worker.data = s
-	thread.start(s.worker)
+	for &client, index in s.clients {
+		client.server, client.allocator, client.wake = s, allocator, wake
+		flags := w.PIPE_ACCESS_DUPLEX | w.FILE_FLAG_OVERLAPPED
+		if index == 0 {flags |= w.FILE_FLAG_FIRST_PIPE_INSTANCE}
+		client.pipe = w.CreateNamedPipeW(
+			wide,
+			flags,
+			w.PIPE_TYPE_BYTE | w.PIPE_READMODE_BYTE | w.PIPE_WAIT | w.PIPE_REJECT_REMOTE_CLIENTS,
+			MAX_SERVER_CLIENTS,
+			65536,
+			65536,
+			0,
+			&sa,
+		)
+		if client.pipe == w.INVALID_HANDLE_VALUE {return nil, os_error("CreateNamedPipeW")}
+		client.stop = w.CreateEventW(nil, true, false, nil)
+		if client.stop == nil {return nil, os_error("CreateEventW")}
+		client.ready = w.CreateEventW(nil, false, false, nil)
+		if client.ready == nil {return nil, os_error("CreateEventW")}
+	}
+	for &client in s.clients {
+		client.worker = thread.create(server_thread)
+		if client.worker == nil {return nil, .System}
+		client.worker.data = &client
+		thread.start(client.worker)
+	}
 	ok = true
 	return s, .None
 }
 
 destroy :: proc(s: ^Server) {
 	if s == nil {return}
-	if s.stop != nil && !bool(w.SetEvent(s.stop)) {
-		log.errorf("control: SetEvent failed: %v", w.GetLastError())
+	sync.atomic_store(&s.stopping, true)
+	for &client in s.clients {
+		if client.stop != nil && !bool(w.SetEvent(client.stop)) {
+			log.errorf("control: SetEvent failed: %v", w.GetLastError())
+		}
 	}
-	if s.worker != nil {
-		thread.join(s.worker)
-		thread.destroy(s.worker)
+	for &client in s.clients {
+		if client.worker != nil {
+			thread.join(client.worker)
+			thread.destroy(client.worker)
+		}
+		slot_release(&client)
+		stream_release(&client)
+		close_handle(&client.pipe)
+		close_handle(&client.stop)
+		close_handle(&client.ready)
 	}
-	slot_release(s)
-	close_handle(&s.pipe)
-	close_handle(&s.stop)
-	close_handle(&s.ready)
 	free(s, s.allocator)
 }
 
 // Queued becomes Taken. Poll transfers ownership; the caller destroys the message even if its client
 // disconnects.
 poll :: proc(s: ^Server) -> ^Message {
-	sync.mutex_lock(&s.mutex)
-	defer sync.mutex_unlock(&s.mutex)
-	queued, ok := s.slot.(Slot_Queued)
-	if !ok {return nil}
-	s.slot = Slot_Taken{queued.message.id}
-	return queued.message
+	for offset in 0 ..< MAX_SERVER_CLIENTS {
+		index := (s.next_client + offset) % MAX_SERVER_CLIENTS
+		client := &s.clients[index]
+		sync.mutex_lock(&client.mutex)
+		queued, ok := client.slot.(Slot_Queued)
+		if ok {client.slot = Slot_Taken{queued.message.id}}
+		sync.mutex_unlock(&client.mutex)
+		if ok {
+			s.next_client = (index + 1) % MAX_SERVER_CLIENTS
+			return queued.message
+		}
+	}
+	return nil
 }
 
 // Taken becomes Responded. Any other state means the request is gone: its client disconnected, or
@@ -224,24 +273,107 @@ poll :: proc(s: ^Server) -> ^Message {
 respond :: proc(s: ^Server, id: u64, response: Response) -> Error {
 	data, err := encode_response(response, s.allocator)
 	if err != .None {return err}
-	sync.mutex_lock(&s.mutex)
-	if taken, ok := s.slot.(Slot_Taken); !ok || taken.id != id {
-		sync.mutex_unlock(&s.mutex)
-		delete(data, s.allocator)
-		return .Closed
+	for &client in s.clients {
+		sync.mutex_lock(&client.mutex)
+		taken, ok := client.slot.(Slot_Taken)
+		if ok && taken.id == id {
+			client.slot = Slot_Responded{id, data}
+			sync.mutex_unlock(&client.mutex)
+			if !bool(w.SetEvent(client.ready)) {return os_error("SetEvent")}
+			return .None
+		}
+		sync.mutex_unlock(&client.mutex)
 	}
-	s.slot = Slot_Responded{id, data}
-	sync.mutex_unlock(&s.mutex)
-	if !bool(w.SetEvent(s.ready)) {return os_error("SetEvent")}
-	return .None
+	delete(data, s.allocator)
+	return .Closed
 }
 
 @(require_results)
 delivery_finished :: proc(s: ^Server, id: u64) -> bool {
 	if s == nil || id == 0 {return false}
-	sync.mutex_lock(&s.mutex)
-	defer sync.mutex_unlock(&s.mutex)
-	return id < s.serial || id == s.serial && s.slot == nil
+	sync.mutex_lock(&s.serial_mutex)
+	issued := id <= s.serial
+	sync.mutex_unlock(&s.serial_mutex)
+	if !issued {return false}
+	for &client in s.clients {
+		sync.mutex_lock(&client.mutex)
+		pending := slot_id(client.slot) == id
+		sync.mutex_unlock(&client.mutex)
+		if pending {return false}
+	}
+	return true
+}
+
+@(private)
+slot_id :: proc(slot: Slot) -> u64 {
+	switch held in slot {
+	case Slot_Queued: return held.message.id
+	case Slot_Taken: return held.id
+	case Slot_Responded: return held.id
+	case Slot_Writing: return held.id
+	}
+	return 0
+}
+
+// Marks a taken request as a stream. The acknowledgement is written before any queued lines.
+@(require_results)
+stream_start :: proc(s: ^Server, id: u64) -> Error {
+	for &client in s.clients {
+		sync.mutex_lock(&client.mutex)
+		taken, ok := client.slot.(Slot_Taken)
+		if ok && taken.id == id {
+			client.stream = id
+			sync.mutex_unlock(&client.mutex)
+			return .None
+		}
+		sync.mutex_unlock(&client.mutex)
+	}
+	return .Closed
+}
+
+@(require_results)
+stream_connected :: proc(s: ^Server, id: u64) -> bool {
+	if id == 0 {return false}
+	for &client in s.clients {
+		sync.mutex_lock(&client.mutex)
+		found := client.stream == id
+		sync.mutex_unlock(&client.mutex)
+		if found {return true}
+	}
+	return false
+}
+
+// Only copies to a bounded queue; no pipe I/O or worker wait runs on the pusher's thread.
+@(require_results)
+stream_push :: proc(s: ^Server, id: u64, line: string) -> Error {
+	if id == 0 || len(line) > MAX_MESSAGE || strings.contains(line, "\n") {return .Invalid_Argument}
+	for &client in s.clients {
+		sync.mutex_lock(&client.mutex)
+		if client.stream != id {
+			sync.mutex_unlock(&client.mutex)
+			continue
+		}
+		if client.count == MAX_STREAM_LINES || client.bytes + len(line) > MAX_STREAM_BYTES {
+			client.stream = 0
+			_ = w.SetEvent(client.stop)
+			sync.mutex_unlock(&client.mutex)
+			log.warn("control: disconnecting event subscriber: output queue is full")
+			return .Closed
+		}
+		data, allocation_error := make([]u8, len(line), s.allocator)
+		if allocation_error != nil {
+			sync.mutex_unlock(&client.mutex)
+			return .Out_Of_Memory
+		}
+		copy(data, line)
+		client.lines[(client.first + client.count) % MAX_STREAM_LINES] = data
+		client.count += 1
+		client.bytes += len(data)
+		_ = w.SetEvent(client.ready)
+		sync.mutex_unlock(&client.mutex)
+		return .None
+	}
+	return .Closed
 }
 
 @(private, require_results)
@@ -265,11 +397,15 @@ wait_io :: proc(
 			log.errorf("control: CancelIoEx failed: %v", w.GetLastError())
 		}
 		transferred: u32
-		if !bool(w.GetOverlappedResult(pipe, overlapped, &transferred, true)) &&
-		   w.GetLastError() != w.ERROR_OPERATION_ABORTED {
+		completed := bool(w.GetOverlappedResult(pipe, overlapped, &transferred, true))
+		if !completed && w.GetLastError() != w.ERROR_OPERATION_ABORTED {
 			log.errorf("control: GetOverlappedResult after cancel failed: %v", w.GetLastError())
 		}
-		if result == w.WAIT_TIMEOUT {return 0, .Timeout}
+		// Completion may win the cancellation race. Do not discard bytes at a polling boundary.
+		if result == w.WAIT_TIMEOUT {
+			if completed {return transferred, .None}
+			return 0, .Timeout
+		}
 		if result == w.WAIT_OBJECT_0 + 1 {return 0, .Closed}
 		return 0, .System
 	}
@@ -334,8 +470,7 @@ read_line :: proc(
 	[]u8,
 	Error,
 ) {
-	data := make([dynamic]u8, allocator)
-	defer delete(data)
+	r.partial.allocator = allocator
 	for {
 		if r.first == r.last {
 			n, err := transfer(pipe, r.buffer[:], false, stop, remaining(start, timeout))
@@ -346,15 +481,16 @@ read_line :: proc(
 		for end < r.last && r.buffer[end] != '\n' {
 			end += 1
 		}
-		if len(data) + end - r.first > MAX_MESSAGE {return nil, .Protocol}
-		if _, err := append(&data, ..r.buffer[r.first:end]);
+		if len(r.partial) + end - r.first > MAX_MESSAGE {return nil, .Protocol}
+		if _, err := append(&r.partial, ..r.buffer[r.first:end]);
 		   err != nil {return nil, .Out_Of_Memory}
 		r.first = end
 		if end < r.last {
 			r.first += 1
-			line, err := make([]u8, len(data), allocator)
+			line, err := make([]u8, len(r.partial), allocator)
 			if err != nil {return nil, .Out_Of_Memory}
-			copy(line, data[:])
+			copy(line, r.partial[:])
+			clear(&r.partial)
 			return line, .None
 		}
 	}
@@ -379,7 +515,7 @@ write_line :: proc(
 }
 
 @(private, require_results)
-accept_client :: proc(s: ^Server) -> Error {
+accept_client :: proc(s: ^Connection) -> Error {
 	event := w.CreateEventW(nil, true, false, nil)
 	if event == nil {return os_error("CreateEventW")}
 	defer close_handle(&event)
@@ -396,17 +532,19 @@ accept_client :: proc(s: ^Server) -> Error {
 
 // Empty becomes Queued.
 @(private)
-slot_queue :: proc(s: ^Server, m: ^Message) {
+slot_queue :: proc(s: ^Connection, m: ^Message) {
 	sync.mutex_lock(&s.mutex)
 	defer sync.mutex_unlock(&s.mutex)
-	s.serial += 1
-	m.id = s.serial
+	sync.mutex_lock(&s.server.serial_mutex)
+	s.server.serial += 1
+	m.id = s.server.serial
+	sync.mutex_unlock(&s.server.serial_mutex)
 	s.slot = Slot_Queued{m}
 }
 
 // Any state becomes empty, freeing what the slot still owns; the request is delivered or abandoned.
 @(private)
-slot_release :: proc(s: ^Server) {
+slot_release :: proc(s: ^Connection) {
 	sync.mutex_lock(&s.mutex)
 	slot := s.slot
 	s.slot = nil
@@ -422,7 +560,7 @@ slot_release :: proc(s: ^Server) {
 
 // Waits for Responded and makes it Writing, handing the reply to the caller.
 @(private, require_results)
-await_response :: proc(s: ^Server) -> ([]u8, Error) {
+await_response :: proc(s: ^Connection) -> ([]u8, Error) {
 	handles := [?]w.HANDLE{s.stop, s.ready}
 	for {
 		sync.mutex_lock(&s.mutex)
@@ -440,8 +578,9 @@ await_response :: proc(s: ^Server) -> ([]u8, Error) {
 }
 
 @(private, require_results)
-serve_client :: proc(s: ^Server) -> Error {
+serve_client :: proc(s: ^Connection) -> Error {
 	r: Line_Reader
+	defer delete(r.partial)
 	for {
 		data, read_error := read_line(
 			&r,
@@ -474,14 +613,20 @@ serve_client :: proc(s: ^Server) -> Error {
 		delete(response, s.allocator)
 		slot_release(s)
 		if write_error != .None {return write_error}
+		sync.mutex_lock(&s.mutex)
+		streaming := s.stream != 0
+		sync.mutex_unlock(&s.mutex)
+		if streaming {return serve_stream(s)}
 	}
 }
 
 @(private)
 server_thread :: proc(t: ^thread.Thread) {
-	s := (^Server)(t.data)
+	s := (^Connection)(t.data)
 	context.allocator = s.allocator
 	for {
+		_ = w.ResetEvent(s.stop)
+		if sync.atomic_load(&s.server.stopping) {break}
 		if err := accept_client(s); err != .None {
 			break
 		}
@@ -518,22 +663,74 @@ server_thread :: proc(t: ^thread.Thread) {
 				log.errorf("control: encoding protocol error failed: %v", encode_error)
 			}
 		}
+		slot_release(s)
+		sync.mutex_lock(&s.mutex)
+		was_streaming := s.stream != 0
+		sync.mutex_unlock(&s.mutex)
+		stream_release(s)
+		if was_streaming && s.wake.procedure != nil {s.wake.procedure(s.wake.user)}
 		if !bool(w.DisconnectNamedPipe(s.pipe)) && w.GetLastError() != ERROR_PIPE_NOT_CONNECTED {
 			log.errorf("control: DisconnectNamedPipe failed: %v", w.GetLastError())
 		}
-		result := w.WaitForSingleObject(s.stop, 0)
-		if result == w.WAIT_OBJECT_0 {
-			break
-		}
-		if result == w.WAIT_FAILED {
-			log.errorf("control: stop wait failed: %v", w.GetLastError())
-			break
-		}
+		if sync.atomic_load(&s.server.stopping) {break}
 	}
 }
 
+@(private)
+stream_release :: proc(s: ^Connection) {
+	sync.mutex_lock(&s.mutex)
+	defer sync.mutex_unlock(&s.mutex)
+	s.stream = 0
+	for s.count > 0 {
+		delete(s.lines[s.first], s.allocator)
+		s.lines[s.first] = nil
+		s.first = (s.first + 1) % MAX_STREAM_LINES
+		s.count -= 1
+	}
+	s.first, s.bytes = 0, 0
+}
+
+@(private, require_results)
+serve_stream :: proc(s: ^Connection) -> Error {
+	handles := [?]w.HANDLE{s.stop, s.ready}
+	for {
+		if w.WaitForSingleObject(s.stop, 0) == w.WAIT_OBJECT_0 {return .Closed}
+		sync.mutex_lock(&s.mutex)
+		data: []u8
+		if s.count > 0 {
+			data = s.lines[s.first]
+			s.lines[s.first] = nil
+			s.first = (s.first + 1) % MAX_STREAM_LINES
+			s.count -= 1
+			s.bytes -= len(data)
+		}
+		sync.mutex_unlock(&s.mutex)
+		if data != nil {
+			err := write_line(s.pipe, data, s.stop, time.tick_now(), SERVER_IO_TIMEOUT_MS)
+			delete(data, s.allocator)
+			if err != .None {return err}
+			continue
+		}
+		result := w.WaitForMultipleObjects(2, &handles[0], false, 10)
+		if result == w.WAIT_OBJECT_0 {return .Closed}
+		if result == w.WAIT_FAILED {return os_error("WaitForMultipleObjects")}
+		if !bool(w.PeekNamedPipe(s.pipe, nil, 0, nil, nil, nil)) {return .Closed}
+	}
+}
+
+// Connects to the named pipe, waiting up to `timeout_ms` for a busy pipe and, with `wait_absent`, for
+// a server that has not created the pipe yet. A server keeps its pipe instances for its lifetime, so
+// without `wait_absent` a missing pipe means no server and fails at once with Closed.
 @(require_results)
-connect :: proc(name: string, timeout_ms: int, allocator := context.allocator) -> (Client, Error) {
+connect :: proc(
+	name: string,
+	timeout_ms: int,
+	allocator := context.allocator,
+	wait_absent := true,
+) -> (
+	Client,
+	Error,
+) {
 	if timeout_ms < 0 || timeout_ms > int(max(i32)) || !valid_pipe_name(name) {
 		return {}, .Invalid_Argument
 	}
@@ -563,6 +760,7 @@ connect :: proc(name: string, timeout_ms: int, allocator := context.allocator) -
 		code := w.GetLastError()
 		if code != w.ERROR_FILE_NOT_FOUND &&
 		   code != w.ERROR_PIPE_BUSY {return {}, os_error("CreateFileW")}
+		if code == w.ERROR_FILE_NOT_FOUND && !wait_absent {return {}, .Closed}
 		if remaining(start, timeout_ms) == 0 {return {}, .Timeout}
 		time.sleep(time.Duration(min(10, remaining(start, timeout_ms))) * time.Millisecond)
 	}
@@ -607,25 +805,53 @@ verify_server :: proc(client: ^Client, expected: Server_Identity) -> Error {
 	return .None
 }
 
+// Checks that the connected pipe's server runs an executable that is a file directly in `folder`,
+// whatever its name, so a client can trust the AIODev beside another aio. A server elsewhere is Impostor.
+@(require_results)
+verify_server_folder :: proc(client: ^Client, folder: string) -> Error {
+	if client.pipe == nil {return .Closed}
+	if folder == "" {return .Invalid_Argument}
+	handle := w.OpenProcess(w.PROCESS_QUERY_LIMITED_INFORMATION, false, client.process_id)
+	if handle == nil {
+		log.errorf("control: OpenProcess(%d) failed: %v", client.process_id, w.GetLastError())
+		return .System
+	}
+	defer close_handle(&handle)
+	actual, actual_ok := process_image(handle)
+	if !actual_ok {return .System}
+	want, want_ok := normalized_image_path(folder)
+	if !want_ok {return .System}
+	want = strings.trim_right(want, `\`)
+	separator := strings.last_index_byte(actual, '\\')
+	if separator < 0 || !strings.equal_fold(actual[:separator], want) {return .Impostor}
+	return .None
+}
+
 @(private, require_results)
 process_image_matches :: proc(handle: w.HANDLE, expected: string) -> bool {
+	actual, actual_ok := process_image(handle)
+	if !actual_ok {return false}
+	want, want_ok := normalized_image_path(expected)
+	if !want_ok {return false}
+	return strings.equal_fold(actual, want)
+}
+
+// The process's executable as normalized_image_path gives it; temporary.
+@(private, require_results)
+process_image :: proc(handle: w.HANDLE) -> (string, bool) {
 	buffer: [32768]u16
 	size := u32(len(buffer))
 	if !bool(QueryFullProcessImageNameW(handle, 0, raw_data(buffer[:]), &size)) {
 		log.errorf("control: QueryFullProcessImageNameW failed: %v", w.GetLastError())
-		return false
+		return "", false
 	}
 	text: [131072]u8
 	image := w.utf16_to_utf8(text[:], buffer[:size])
 	if image == "" {
 		log.errorf("control: WideCharToMultiByte failed: %v", w.GetLastError())
-		return false
+		return "", false
 	}
-	actual, actual_ok := normalized_image_path(image)
-	if !actual_ok {return false}
-	want, want_ok := normalized_image_path(expected)
-	if !want_ok {return false}
-	return strings.equal_fold(actual, want)
+	return normalized_image_path(image)
 }
 
 @(private, require_results)
@@ -655,6 +881,7 @@ normalized_image_path :: proc(path: string) -> (string, bool) {
 
 close :: proc(c: ^Client) {
 	close_handle(&c.pipe)
+	delete(c.reader.partial)
 	c^ = {}
 }
 
@@ -683,4 +910,26 @@ call :: proc(c: ^Client, args: []string, timeout_ms: int = 15000) -> (Response, 
 		close(c)
 	}
 	return response, decode_error
+}
+
+// The arguments are the host protocol's complete subscription request, just as for call.
+@(require_results)
+subscribe :: proc(c: ^Client, args: []string, timeout_ms: int) -> (Response, Error) {
+	return call(c, args, timeout_ms)
+}
+
+// A timeout preserves both the connection and any incomplete line for the next poll.
+@(require_results)
+next_line :: proc(c: ^Client, timeout_ms: int, allocator := context.allocator) -> (string, Error) {
+	if c.pipe == nil {return "", .Closed}
+	if timeout_ms < 0 || timeout_ms > int(max(i32)) {return "", .Invalid_Argument}
+	line, err := read_line(&c.reader, c.pipe, nil, time.tick_now(), timeout_ms, c.allocator)
+	if err != .None {
+		if err != .Timeout {close(c)}
+		return "", err
+	}
+	defer delete(line, c.allocator)
+	result, allocation_error := strings.clone(string(line), allocator)
+	if allocation_error != nil {return "", .Out_Of_Memory}
+	return result, .None
 }

@@ -60,8 +60,8 @@ binding_report :: proc(
 	alloc_error: runtime.Allocator_Error,
 ) {
 	issues := make([dynamic]Binding_Issue, context.temp_allocator)
-	overrides: [len(Action)]commands.Override
-	lines: [len(Action)]int
+	overrides := make([]commands.Override, len(s.keys), context.temp_allocator)
+	lines := make([]int, len(s.keys), context.temp_allocator)
 	count := 0
 	for binding, i in s.keys {
 		command := commands.find(registry, binding.name)
@@ -120,16 +120,16 @@ binding_report :: proc(
 		lines[count] = i
 		count += 1
 	}
-	errors: [len(Action)]commands.Error
+	errors := make([]commands.Error, count, context.temp_allocator)
 	if commands.rebind(registry, overrides[:count], errors[:count]) != .None {
 		report.issues = issues[:]
 		return report, .Out_Of_Memory
 	}
-	// The registry holds this app's commands, whose ids are their Actions.
-	applied_lines: [Action]int
+	// Runtime ids are not Actions, so source lines are keyed by catalogue identity.
+	applied_lines := make(map[commands.Command_Id]int, context.temp_allocator)
 	for error, i in errors[:count] {
 		if error == .None {
-			applied_lines[Action(overrides[i].id)] = s.keys[lines[i]].line
+			applied_lines[overrides[i].id] = s.keys[lines[i]].line
 		}
 	}
 	for error, i in errors[:count] {
@@ -158,7 +158,7 @@ binding_report :: proc(
 						winner   = {
 							name  = other.name,
 							title = other.title,
-							line  = applied_lines[Action(other.id)],
+							line  = applied_lines[other.id],
 						},
 					}
 					break
@@ -189,9 +189,9 @@ binding_report :: proc(
 			for &other in registry.items {
 				for shortcut in commands.active_shortcuts(&other) {
 					if commands.prefix_conflicts(leader, shortcut) &&
-					   applied_lines[Action(other.id)] >= leader_line &&
+					   applied_lines[other.id] >= leader_line &&
 					   (winner == nil ||
-							   applied_lines[Action(other.id)] > applied_lines[Action(winner.id)]) {
+							   applied_lines[other.id] > applied_lines[winner.id]) {
 						winner = &other
 					}
 				}
@@ -202,7 +202,7 @@ binding_report :: proc(
 				winner_source = {settings.LEADER_KEY, "", leader_line}
 				report.leader = leader
 			} else {
-				winner_source = {winner.name, winner.title, applied_lines[Action(winner.id)]}
+				winner_source = {winner.name, winner.title, applied_lines[winner.id]}
 			}
 			for &other in registry.items {
 				// Copy because unbind compacts the active shortcut array.
@@ -218,7 +218,7 @@ binding_report :: proc(
 						conflict = {
 							shortcut    = shortcut,
 							leader_text = s.input.leader,
-							loser       = {other.name, other.title, applied_lines[Action(other.id)]},
+							loser       = {other.name, other.title, applied_lines[other.id]},
 							winner      = winner_source,
 						},
 					}

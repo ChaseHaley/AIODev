@@ -267,6 +267,17 @@ placement :: proc(
 	return sibling, s.axis, before, share, true
 }
 
+// Sets the pane's share, rather than the split's first side's share.
+@(require_results)
+set_ratio :: proc(l: ^Layout, node: Node_Id, share: f32) -> bool {
+	parent := parent_of(l, node)
+	if parent == INVALID_NODE {return false}
+	s := l.nodes[parent].(Split)
+	s.ratio = s.first == node ? split_share_clamp(share) : 1 - split_share_clamp(share)
+	l.nodes[parent] = s
+	return true
+}
+
 // The content shown by the pane at `node`; false when `node` is out of range or not a pane.
 pane_content :: proc(l: ^Layout, node: Node_Id) -> (Content, bool) {
 	if int(node) >= len(l.nodes) {return {}, false}

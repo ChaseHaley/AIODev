@@ -1,6 +1,7 @@
 package cli
 
 import "aio:cli_protocol"
+import "aio:events"
 import "aio:instance"
 import "aio:layout"
 import "core:fmt"
@@ -18,6 +19,11 @@ import "core:text/regex"
 USAGE_FORMAT :: `Usage: aio [--instance <name>] [--json] <command> [options] [-- <program> [arguments]]
        aio wait [--pane <pane>] [--text <text> | --regex <pattern>] [--idle <ms>] [--timeout <ms>]
        aio wait [--pane <pane>] --exit [--timeout <ms>]
+       aio events [--json] [<name>...]
+       aio exec (<file.lua> | -e <code> | - | <action>) [<key>=<value>...] [--args <json> | @<file>]
+                [--json] [--for <duration>] [--fail-fast]
+       aio config check [--data-dir <directory>] [<file>]
+       aio types [--data-dir <directory>] [--force]
        aio commands
        aio help [<command>]
        aio version
@@ -26,8 +32,8 @@ USAGE_FORMAT :: `Usage: aio [--instance <name>] [--json] <command> [options] [--
 Runs AIODev commands from scripts and coding agents. Every command in the everything palette
 runs by name, such as aio tab.next; aio commands lists AIODev's commands, and aio help
 <command> explains one's options, their defaults and an example of each, for aio's own wait,
-commands, help, version and agent-session too. aio version prints aio's build and the running
-AIODev's, and aio warns on stderr when the two differ.
+events, exec, config, types, commands, help, version and agent-session too. aio version prints aio's
+build and the running AIODev's, and aio warns on stderr when the two differ.
 
 Panes   --pane takes a pane id, a pane name, here or focused. Inside an AIODev pane the
         default is here, the pane aio runs in; elsewhere it is the focused pane.
@@ -63,6 +69,17 @@ Wait    aio wait polls until the pane shows the text, a line matches the pattern
         --idle or --exit; --idle does not combine with --exit. The default timeout is %d ms, and 0
         waits without limit. --exit prints the exit code, even after the pane closed with its program,
         or closed when it was closed while running.
+Events  aio events streams named application events, or all events without names. --json prints one
+        JSON object per line; plain output is the event name, a tab and its fields as JSON.
+        Ctrl+C exits 130; closing AIODev or the connection exits 4.
+Lua     aio exec runs a Lua script with the aio API against AIODev, or one action by name, and prints
+        what it returns as JSON; Ctrl+C exits 130 and aio.stop(code) exits with that code.
+        aio config check loads init.lua without running its commands and reports its actions, keys,
+        modes and problems; it exits 1 when there are problems.
+        aio types writes types\aio.lua and .luarc.json beside init.lua for lua-language-server; it
+        asks AIODev for your actions and copies the built-in definitions when AIODev is not running.
+        Both use the init.lua the running AIODev loads; --data-dir names an instance's data folder
+        only when AIODev is not running.
 Hooks   aio agent-session runs from a Claude Code or Codex SessionStart hook and records the
         session the hook names, so the pane can resume it; the "Install agent session hooks"
         command sets it up.
@@ -70,6 +87,8 @@ Exit    %d ok, %d failed, %d bad command line, %d pane missing or ambiguous,
         %d AIODev unreachable, %d control pipe server unverified, %d interrupted.
 
 Turn on "Command line control" in AIODev's Settings (control.enabled) first.
+aio talks only to the AIODev beside it. In a pane of an AIODev elsewhere, it hands the call to the aio
+that pane names in AIODEV_CLI; outside its panes, use the aio beside that AIODev.
 `
 
 WAIT_DEFAULT_TIMEOUT_MS :: 30000
@@ -126,6 +145,141 @@ local_commands := [?]cli_protocol.Command_Report {
 		},
 	},
 	{
+		name = "events",
+		title = "Stream application events",
+		usage = "events [--json] [<name>...]",
+		summary = "Subscribes to the named events, or all events without names, until Ctrl+C (exit 130) " +
+		"or AIODev disconnects (exit 4). Plain output is the event name, a tab and its fields as JSON. " +
+		"An unknown name fails with the list of names.",
+		options = {
+			{
+				option = "--json",
+				description = "prints each event as the JSON object AIODev sends, its type first",
+				default = "off",
+				example = "--json",
+			},
+			{
+				option = "<name>...",
+				description = "the events to stream, such as pane.focused, tab.created or settings.changed",
+				default = "all events",
+				example = "pane.focused pane.exited",
+			},
+		},
+	},
+	{
+		name = "exec",
+		title = "Run a Lua script or an action",
+		usage = "exec (<file.lua> | -e <code> | - | <action>) [<key>=<value>...] [--args <json> | @<file>] " +
+		"[--json] [--for <duration>] [--fail-fast]",
+		summary = "Runs a Lua script with the aio API, its commands going to AIODev with origin script, " +
+		"and prints the value its top level returns as JSON (nothing for nil). The script runs until its " +
+		"top level, timers, waits and processes finish, aio.stop(code) ends it with that exit code, or " +
+		"Ctrl+C (exit 130). Handler errors print Error: file:line: message and the script goes on; a " +
+		"top-level error exits 1 and an unreachable AIODev exits 4. A name that does not end in .lua and " +
+		"holds no slash or backslash runs that action once and prints its result as JSON.",
+		options = {
+			{
+				option = "<file.lua> | -e <code> | - | <action>",
+				description = "the script file, Lua code given inline, a script read from standard input, " +
+				"or an action or command name",
+				default = "none (required)",
+				example = "-e \"return aio.view()\"",
+			},
+			{
+				option = "<key>=<value>",
+				description = "an argument, seen as aio.args.<key> or as the action's field; a number " +
+				"or true or false keeps its type, anything else is a string",
+				default = "none",
+				example = "count=2 force=true name=build",
+			},
+			{
+				option = "--args <json> | @<file>",
+				description = "the arguments as JSON text, or a file holding it, instead of key=value " +
+				"arguments",
+				default = "none",
+				example = "--args @args.json",
+			},
+			{
+				option = "--json",
+				description = "indents the printed result",
+				default = "off",
+				example = "--json",
+			},
+			{
+				option = "--for <duration>",
+				description = "keeps a script with event handlers running this long, then exits 0; " +
+				"a number with ms, s, m or h, seconds without a unit",
+				default = "until the script has nothing left to do",
+				example = "--for 10m",
+			},
+			{
+				option = "--fail-fast",
+				description = "exits 1 at the first handler, timer or process callback error",
+				default = "off",
+				example = "--fail-fast",
+			},
+		},
+	},
+	{
+		name = "config",
+		title = "Check init.lua",
+		usage = "config check [--data-dir <directory>] [<file>]",
+		summary = "Loads init.lua as AIODev would, without running commands, and prints the file, the " +
+		"number of actions, keys and modes it declares and each problem as file:line: message; exits 1 " +
+		"when there is a problem. Without --data-dir or a file it checks the init.lua the running AIODev " +
+		"loads; AIODev need not be running.",
+		options = {
+			{
+				option = "--data-dir <directory>",
+				description = "checks the init.lua beside the settings of the instance that uses " +
+				"this data folder; needed only when that AIODev is not running",
+				default = "the init.lua the running AIODev loads, else the settings folder of the " +
+				"default instance or --instance",
+				example = "--data-dir D:\\aiodev-test",
+			},
+			{
+				option = "<file>",
+				description = "the Lua file to check instead",
+				default = "the init.lua the running AIODev loads, beside its settings.ini",
+				example = "C:\\work\\init.lua",
+			},
+		},
+	},
+	{
+		name = "types",
+		title = "Write Lua type definitions",
+		usage = "types [--data-dir <directory>] [--force]",
+		summary = "Writes types\\aio.lua beside init.lua with the definitions of the aio API and your " +
+		"init.lua actions, as AIODev reports them, and creates .luarc.json there so lua-language-server " +
+		"reads them. The init.lua is the one the running AIODev loads. When AIODev is not reachable, it " +
+		"copies the built-in definitions from types\\aio.lua beside aio.exe, without your actions. An " +
+		"existing .luarc.json is kept, and aio prints the two settings to add; exits 1 when no " +
+		"definitions are found or a file cannot be written.",
+		options = {
+			{
+				option = "--data-dir <directory>",
+				description = "writes beside the init.lua of the instance that uses this data folder; " +
+				"needed only when that AIODev is not running",
+				default = "the init.lua the running AIODev loads, else the settings folder of the " +
+				"default instance or --instance",
+				example = "--data-dir D:\\aiodev-test",
+			},
+			{
+				option = "--force",
+				description = "replaces an existing .luarc.json too",
+				default = "off",
+				example = "--force",
+			},
+			{
+				option = "--json",
+				description = "prints {ok, status, path, luarc, actions_included}; luarc is created, " +
+				"replaced or kept",
+				default = "off",
+				example = "--json",
+			},
+		},
+	},
+	{
 		name = "commands",
 		title = "List commands",
 		usage = "commands",
@@ -139,8 +293,8 @@ local_commands := [?]cli_protocol.Command_Report {
 		options = {
 			{
 				option = "<command>",
-				description = "the command to explain: any name aio commands lists, or wait, commands, help, " +
-				"version or agent-session",
+				description = "the command to explain: any name aio commands lists, or wait, events, exec, " +
+				"config, types, commands, help, version or agent-session",
 				default = "none (prints aio's usage)",
 				example = "pane.split",
 			},
@@ -204,15 +358,27 @@ Wait :: struct {
 
 Options :: struct {
 	// The AIODev instance name; empty for the default instance.
-	instance: string,
-	json:     bool,
+	instance:    string,
+	json:        bool,
 	// The command and its arguments, as AIODev parses them.
-	args:     []string,
+	args:        []string,
 	// Set when the command is wait.
-	waiting:  bool,
+	waiting:     bool,
 	// Set when the command is version or --version.
-	version:  bool,
-	wait:     Wait,
+	version:     bool,
+	wait:        Wait,
+	// Set when the command is events, with the event names it gave; none streams every event.
+	streaming:   bool,
+	event_names: []string,
+	// Set when the command is exec.
+	executing:   bool,
+	exec:        Exec,
+	// Set when the command is config check.
+	checking:    bool,
+	check:       Config_Check,
+	// Set when the command is types.
+	typing:      bool,
+	lua_types:   Lua_Types,
 }
 
 // Reads aio's own options, which come before the command. `environment` is the AIODEV_INSTANCE
@@ -243,9 +409,34 @@ parse_options :: proc(args: []string, environment: string) -> (Options, string) 
 	}
 	if i == len(args) {return {}, "name a command"}
 	o.args = args[i:]
+	switch o.args[0] {
+	case "exec":
+		return exec_options(o)
+	case "config":
+		return config_options(o)
+	case "types":
+		return types_options(o)
+	}
 	o.version = o.args[0] == "version" || o.args[0] == "--version"
 	// Only an AIODev too old to know the version command fails it, which build_warning reports.
 	if o.version && len(o.args) > 1 {return {}, "version takes no arguments"}
+	if o.args[0] == "events" {
+		o.streaming = true
+		// --json may follow the command too, since aio and not AIODev formats the stream.
+		names := make([dynamic]string, 0, len(o.args) - 1, context.temp_allocator)
+		for word in o.args[1:] {
+			if word == "--json" {
+				if o.json {return {}, "use --json once"}
+				o.json = true
+			} else if strings.has_prefix(word, "-") {
+				return {}, "events takes --json and event names"
+			} else {
+				append(&names, word)
+			}
+		}
+		o.event_names = names[:]
+		return o, ""
+	}
 	if o.args[0] != "wait" {return o, ""}
 	o.waiting = true
 	o.wait.timeout_ms = WAIT_DEFAULT_TIMEOUT_MS
@@ -320,7 +511,8 @@ wait_found :: proc(w: Wait, pattern: Maybe(regex.Regular_Expression), text: stri
 
 // The pipe request for a command: the caller pane, the reply format, aio's working directory, then
 // the command line. `commands` and `help <command>` ask AIODev's catalogue; `version` asks its build
-// as text, since aio prints its own build beside it and composes any JSON itself.
+// as text, since aio prints its own build beside it and composes any JSON itself; `events` subscribes
+// to the names it gave.
 @(require_results)
 request :: proc(o: Options, caller, directory: string, allocator := context.allocator) -> []string {
 	format := o.json ? cli_protocol.Format.Json : cli_protocol.Format.Text
@@ -332,7 +524,11 @@ request :: proc(o: Options, caller, directory: string, allocator := context.allo
 		name, format = cli_protocol.VERSION_COMMAND, .Text
 	}
 	command := o.args
-	if name != o.args[0] {
+	if o.streaming {
+		command = make([]string, 1 + len(o.event_names), allocator)
+		command[0] = cli_protocol.EVENTS_COMMAND
+		copy(command[1:], o.event_names)
+	} else if name != o.args[0] {
 		command = make([]string, len(o.args), allocator)
 		command[0] = name
 		copy(command[1:], o.args[1:])
@@ -360,4 +556,38 @@ build_warning :: proc(own, app: string, allocator := context.allocator) -> strin
 	return fmt.aprintf(
 		"aio: warning: aio %s does not match the running %s; %s", own, app, advice, allocator = allocator,
 	)
+}
+
+// `aio events`' plain line for one stream line: the event's name, a tab and its fields object without
+// "type". The stream puts "type" first and event names hold no quotes, so the fields' JSON is kept
+// as AIODev wrote it rather than decoded and encoded again. False for a line in another shape.
+@(require_results)
+event_plain :: proc(line: string, allocator := context.allocator) -> (string, bool) {
+	name, rest, valid := event_line_split(line)
+	if !valid {return "", false}
+	if rest == "}" {return strings.concatenate({name, "\t{}"}, allocator), true}
+	return strings.concatenate({name, "\t{", rest[1:]}, allocator), true
+}
+
+// The kind a stream line names, for the script host, which hands the whole line to the script as the
+// event's fields: the script sets "type" itself. False for a line in another shape or an unknown name.
+@(require_results)
+event_line_kind :: proc(line: string) -> (events.Kind, bool) {
+	name, _, valid := event_line_split(line)
+	if !valid {return {}, false}
+	return events.kind_named(name)
+}
+
+// A stream line's event name and what follows its closing quote: "}" or "," and the other fields.
+@(private, require_results)
+event_line_split :: proc(line: string) -> (name, rest: string, valid: bool) {
+	prefix :: `{"type":"`
+	if !strings.has_prefix(line, prefix) {return}
+	tail := line[len(prefix):]
+	end := strings.index_byte(tail, '"')
+	if end <= 0 {return}
+	name, rest = tail[:end], tail[end + 1:]
+	if rest == "}" {return name, rest, true}
+	if !strings.has_prefix(rest, ",") || !strings.has_suffix(rest, "}") {return "", "", false}
+	return name, rest, true
 }

@@ -1,6 +1,7 @@
 package main
 
 import "aio:commands"
+import "aio:events"
 import "aio:input"
 import "aio:platform"
 import "aio:render"
@@ -97,7 +98,7 @@ handle_event :: proc(app: ^App, event: platform.Event) {
 
 // A key, typed text or the wheel, on its way to the surface that takes the window's input.
 @(private = "file")
-Overlay_Input :: union {
+Overlay_Input_Event :: union {
 	Overlay_Key,
 	Overlay_Text,
 	Overlay_Wheel,
@@ -143,7 +144,7 @@ OVERLAY_FIRST :: bit_set[Overlay_Kind] {
 // Each surface's keys, text and wheel side by side. Keys a surface takes have their release
 // suppressed, except a confirmation's, which suppresses its own.
 @(private = "file")
-overlay_input :: proc(app: ^App, w: ^Window, kind: Overlay_Kind, event: Overlay_Input) {
+overlay_input :: proc(app: ^App, w: ^Window, kind: Overlay_Kind, event: Overlay_Input_Event) {
 	switch kind {
 	case .None:
 	case .Workspace_Picker:
@@ -331,6 +332,8 @@ Content_Key :: struct {
 	clipboard: Clipboard_Chord,
 	// The shortcut a fresh press that is not literal runs; found is false otherwise.
 	action:    Action,
+	command:   commands.Command_Id,
+	runtime:   bool,
 	found:     bool,
 }
 
@@ -352,6 +355,7 @@ content_key_prelude :: proc(
 		find_close(app, w, find_target(app, w))
 		return {}, true
 	}
+	if keymap_key(app, w, e) {return {}, true}
 	switch leader_key(app, w, e) {
 	case .Consumed:
 		return {}, true
@@ -362,7 +366,14 @@ content_key_prelude :: proc(
 	key.logical = e
 	key.logical.key = commands.logical_key(e.key, e.unshifted)
 	key.clipboard = clipboard_chord(key.logical)
-	if e.pressed && !key.literal {key.action, key.found = shortcut_action(app, e)}
+	if e.pressed && !key.literal {
+		if command := commands.find_by_key(&app.registry, e.key, e.modifiers, e.unshifted); command != nil {
+			key.command, key.found = command.id, true
+			builtin: bool
+			key.action, builtin = action_builtin(command.id)
+			key.runtime = !builtin
+		}
+	}
 	return key, false
 }
 
@@ -378,10 +389,10 @@ terminal_key :: proc(app: ^App, w: ^Window, e: input.Key_Event) {
 	if consumed {return}
 	if key.found {
 		// A held Copy key stays with the app once its first press copied and ended the selection.
-		held_copy := key.action == .Copy && e.repeat && key_suppressed(w, e.key)
-		if held_copy || action_available(app, w, key.action) {
+		held_copy := !key.runtime && key.action == .Copy && e.repeat && key_suppressed(w, e.key)
+		if held_copy || key.runtime || action_available(app, w, key.action) {
 			key_suppress(w, e)
-			if !held_copy {run_action(app, w, key.action)}
+			if !held_copy {run_window_command(app, w, key.command, .Key)}
 			return
 		}
 	}
@@ -464,11 +475,14 @@ on_wheel :: proc(app: ^App, w: ^Window, e: input.Mouse_Wheel_Event) {
 
 @(private)
 on_focus :: proc(app: ^App, w: ^Window, focused: bool) {
+	// Windows can repeat an activation, so only a window that gains focus is reported.
+	changed := w.focused != focused
 	w.focused = focused
 	w.dirty = true
 	if focused {
 		app.focus_jumps.window = w.id
 		window_focus_note(app, w)
+		if changed {events.push(&app.events, .Window_Focused, Event_Window{w.id})}
 	}
 	window_notices_sync(app)
 	if !focused {
@@ -483,10 +497,16 @@ on_focus :: proc(app: ^App, w: ^Window, focused: bool) {
 	if focused {status_focus_enter(app, w)}
 }
 
-// What the keyboard holds between events: the leader chord and the keys whose release is suppressed.
+// What the keyboard holds between events: the leader chord, the keys whose release is suppressed, the
+// keymap's pending sequence and modes, and the keys whose press the keymap took.
 Key_State :: struct {
-	leader:     Leader,
-	suppressed: Suppressed_Keys,
+	leader:      Leader,
+	suppressed:  Suppressed_Keys,
+	bindings:    commands.Key_State,
+	key_until:   time.Tick,
+	// Kept apart from `suppressed`, which other surfaces also set, so only the keymap's own keys have
+	// their repeats swallowed and ordinary shortcuts still repeat.
+	keymap_held: Suppressed_Keys,
 }
 
 // Leader chord mode: nil is Idle; Armed waits until `until` for the key that completes the chord.
@@ -551,7 +571,8 @@ leader_key :: proc(app: ^App, w: ^Window, e: input.Key_Event) -> Leader_Result {
 		if e.key == .Escape {return .Consumed}
 		chord := e
 		chord.modifiers += {.Leader}
-		if action, found := shortcut_action(app, chord); found {run_action(app, w, action)}
+		command := commands.find_by_key(&app.registry, chord.key, chord.modifiers, chord.unshifted)
+		if command != nil {run_window_command(app, w, command.id, .Key)}
 		return .Consumed
 	}
 	if is_leader {
@@ -562,13 +583,20 @@ leader_key :: proc(app: ^App, w: ^Window, e: input.Key_Event) -> Leader_Result {
 	return .None
 }
 
-// While the chord is armed, the leader's name shows over the focused pane.
+// While the chord is armed, the leader's name shows over the focused pane; otherwise the active key
+// mode's name or the pending key sequence does.
 window_leader_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
-	if !leader_armed(w) {return .Ok}
-	leader, enabled := app.leader.?
-	if !enabled {return .Ok}
-	buffer: [commands.SHORTCUT_TEXT_CAP]u8
-	label := commands.shortcut_text(leader, buffer[:])
+	chord_buffer: [commands.SHORTCUT_TEXT_CAP]u8
+	hint_buffer: [4 * commands.SHORTCUT_TEXT_CAP + 256]u8
+	chord, hint := "", ui.LEADER_STATUS_HINT
+	if leader_armed(w) {
+		leader, enabled := app.leader.?
+		if !enabled {return .Ok}
+		chord = commands.shortcut_text(leader, chord_buffer[:])
+	} else {
+		hint = key_mode_text(w, hint_buffer[:])
+		if hint == "" {return .Ok}
+	}
 	tree := window_tree(w)
 	if tree == nil {return .Ok}
 	for pane in w.panes {
@@ -579,8 +607,9 @@ window_leader_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 			&w.ui_text,
 			app.theme,
 			{r.x, r.y, r.width, r.height},
-			label,
+			chord,
 			w.scale,
+			hint,
 		)
 	}
 	return .Ok

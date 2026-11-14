@@ -1,6 +1,7 @@
 package cli
 
 import "aio:cli_protocol"
+import "aio:commands"
 import "aio:control"
 import "aio:instance"
 import "core:encoding/json"
@@ -20,6 +21,9 @@ CONNECT_TIMEOUT_MS :: 1000
 CALL_TIMEOUT_MS :: 15000
 @(private)
 WAIT_INTERVAL :: 100 * time.Millisecond
+// How long aio events waits for a line before it checks for Ctrl+C again.
+@(private)
+STREAM_POLL_MS :: 100
 // The app executable built beside this CLI. build.ps1 supplies the exact name for verify builds.
 @(private)
 SERVER_NAME :: #config(AIO_SERVER_NAME, "aiodev.exe")
@@ -28,8 +32,18 @@ SERVER_NAME :: #config(AIO_SERVER_NAME, "aiodev.exe")
 @(private)
 SERVER_ALTERNATE :: #config(AIO_SERVER_ALTERNATE, "")
 
+// The aio a pane's environment names, and the variable marking an aio another one handed its call to.
+@(private)
+CLI_VARIABLE :: "AIODEV_CLI"
+@(private)
+DELEGATED_VARIABLE :: "AIODEV_CLI_DELEGATED"
+
 @(private)
 interrupted: bool
+// Set once aio may have acted on its own, by printing, reading standard input or running Lua, so a
+// later connection cannot hand the call to another aio, which would repeat that.
+@(private)
+delegation_closed: bool
 
 main :: proc() {
 	code := start()
@@ -71,8 +85,13 @@ start :: proc() -> cli_protocol.Status {
 	pipe, pipe_error := control.cli_pipe_name(app_id)
 	if pipe_error != .None {return .Failed}
 	defer delete(pipe)
+	// Config check reads init.lua locally; it only asks a running AIODev where init.lua is.
+	if o.checking {return config_check_run(o, pipe)}
 	if o.waiting {return wait(o, pipe, caller)}
 	if o.version {return version(o, pipe, caller)}
+	if o.streaming {return stream_events(o, pipe, caller)}
+	if o.executing {return exec_run(o, pipe, caller)}
+	if o.typing {return types_run(o, pipe, caller)}
 	// A directory that cannot be read leaves relative paths as given.
 	directory, _ := os.get_working_directory(context.temp_allocator)
 	response, status := send(pipe, request(o, caller, directory, context.temp_allocator), true)
@@ -83,15 +102,108 @@ start :: proc() -> cli_protocol.Status {
 	return status
 }
 
-// The process image this build expects behind the control pipe, `name` beside this executable.
+// The process image `name` in `folder`, as verify_server checks it.
 @(private, require_results)
-server_identity :: proc(name: string, allocator := context.allocator) -> (control.Server_Identity, bool) {
-	executable, err := os.get_executable_path(allocator)
-	if err != nil {return {}, false}
-	defer delete(executable, allocator)
-	image, join_error := filepath.join({filepath.dir(executable), name}, allocator)
+server_identity :: proc(
+	folder, name: string,
+	allocator := context.allocator,
+) -> (
+	control.Server_Identity,
+	bool,
+) {
+	parts := [2]string{folder, name}
+	image, join_error := filepath.join(parts[:], allocator)
 	if join_error != nil {return {}, false}
 	return {image = image}, true
+}
+
+// Checks the connected server against SERVER_NAME, then SERVER_ALTERNATE, in `folder`.
+@(private, require_results)
+verify_beside :: proc(client: ^control.Client, folder: string) -> control.Error {
+	identity, identity_ok := server_identity(folder, SERVER_NAME, context.temp_allocator)
+	if !identity_ok {return .Out_Of_Memory}
+	verify_error := control.verify_server(client, identity)
+	if verify_error != .Impostor || SERVER_ALTERNATE == "" {return verify_error}
+	alternate, alternate_ok := server_identity(folder, SERVER_ALTERNATE, context.temp_allocator)
+	if !alternate_ok {return .Out_Of_Memory}
+	return control.verify_server(client, alternate)
+}
+
+// The aio to hand an unverified pipe server's call to: `cli`, the AIODEV_CLI value, made absolute,
+// when it names another aio than `own`, this one's path, compared absolute, in any case and with
+// either separator, and this aio is not itself a hand-over. "" otherwise. The caller still checks
+// that the file exists and that the pipe's server runs from its folder.
+@(require_results)
+delegation_target :: proc(own, cli: string, delegated: bool, allocator := context.allocator) -> string {
+	if delegated || cli == "" {return ""}
+	target, target_error := filepath.abs(cli, allocator)
+	if target_error != nil {return ""}
+	self, self_error := filepath.abs(own, context.temp_allocator)
+	if self_error != nil || strings.equal_fold(target, self) {return ""}
+	return target
+}
+
+// Hands the call to the aio a pane names in AIODEV_CLI when the pipe's server runs from that aio's
+// folder: runs it with this aio's arguments, inheriting the console and environment, and exits with
+// its code. AIODEV_CLI comes from the pane's environment, never from the server. Returns "" without
+// acting when the hand-over does not apply, or the problem when that aio cannot start. Nothing was
+// sent on `client`, which it closes first.
+@(private, require_results)
+delegate :: proc(client: ^control.Client, own: string) -> string {
+	if delegation_closed {return ""}
+	cli, _ := os.lookup_env(CLI_VARIABLE, context.temp_allocator)
+	_, delegated := os.lookup_env(DELEGATED_VARIABLE, context.temp_allocator)
+	target := delegation_target(own, cli, delegated, context.temp_allocator)
+	if target == "" || !os.exists(target) {return ""}
+	if control.verify_server_folder(client, filepath.dir(target)) != .None {return ""}
+	control.close(client)
+	argv := make([]string, len(os.args), context.temp_allocator)
+	argv[0] = target
+	copy(argv[1:], os.args[1:])
+	line, line_error := commands.command_line_join(argv, context.temp_allocator)
+	application := w.utf8_to_wstring(target, context.temp_allocator)
+	command := w.utf8_to_wstring(line, context.temp_allocator)
+	if line_error != nil || application == nil || command == nil || os.set_env(DELEGATED_VARIABLE, "1") != nil {
+		return fmt.tprintf("aio: handing the call over to %s failed: out of memory.", target)
+	}
+	startup := w.STARTUPINFOW {
+		cb         = size_of(w.STARTUPINFOW),
+		dwFlags    = w.STARTF_USESTDHANDLES,
+		hStdInput  = w.GetStdHandle(w.STD_INPUT_HANDLE),
+		hStdOutput = w.GetStdHandle(w.STD_OUTPUT_HANDLE),
+		hStdError  = w.GetStdHandle(w.STD_ERROR_HANDLE),
+	}
+	// The child inherits only these: the control pipe is closed and aio opens no other handles.
+	standard := [3]w.HANDLE{startup.hStdInput, startup.hStdOutput, startup.hStdError}
+	for handle in standard {
+		if handle == nil || handle == w.INVALID_HANDLE_VALUE {continue}
+		w.SetHandleInformation(handle, w.HANDLE_FLAG_INHERIT, w.HANDLE_FLAG_INHERIT)
+	}
+	info: w.PROCESS_INFORMATION
+	if !bool(w.CreateProcessW(application, command, nil, nil, true, 0, nil, nil, &startup, &info)) {
+		return fmt.tprintf("aio: handing the call over to %s failed (Win32 %d).", target, w.GetLastError())
+	}
+	w.CloseHandle(info.hThread)
+	// Only the child handles Ctrl+C now, so its exit code, 130 included, becomes aio's.
+	w.SetConsoleCtrlHandler(nil, true)
+	w.WaitForSingleObject(info.hProcess, w.INFINITE)
+	code: w.DWORD
+	if !bool(w.GetExitCodeProcess(info.hProcess, &code)) {code = w.DWORD(cli_protocol.Status.Failed)}
+	os.exit(int(code))
+}
+
+// For a command that acts before it reaches AIODev, such as a script: hands the call over now, before
+// it acts, if a connection would, and never afterwards. An unreachable or verified AIODev changes nothing.
+@(private)
+delegate_before_acting :: proc(pipe: string) {
+	defer delegation_closed = true
+	allocator := context.temp_allocator
+	client, connect_error := control.connect(pipe, CONNECT_TIMEOUT_MS, allocator, wait_absent = false)
+	if connect_error != .None {return}
+	defer control.close(&client)
+	executable, executable_error := os.get_executable_path(context.temp_allocator)
+	if executable_error != nil || verify_beside(&client, filepath.dir(executable)) != .Impostor {return}
+	if problem := delegate(&client, executable); problem != "" {fmt.eprintln(problem)}
 }
 
 // This aio's build, as build_warning compares it. The text is temporary.
@@ -106,6 +218,8 @@ own_build :: proc() -> string {
 // AIODev is unreachable; under --json the reply's text holds both lines.
 @(private, require_results)
 version :: proc(o: Options, pipe, caller: string) -> cli_protocol.Status {
+	// aio prints its own build before it asks AIODev's.
+	delegate_before_acting(pipe)
 	own := own_build()
 	line := fmt.tprintf("aio %s", own)
 	if !o.json {fmt.println(line)}
@@ -139,33 +253,95 @@ version :: proc(o: Options, pipe, caller: string) -> cli_protocol.Status {
 // `check_build`, aio first asks AIODev's build on the same connection and warns when it differs.
 @(private, require_results)
 send :: proc(pipe: string, request: []string, check_build: bool) -> (control.Response, cli_protocol.Status) {
-	client, connect_error := control.connect(pipe, CONNECT_TIMEOUT_MS, context.temp_allocator)
+	client, status := connect_verified(pipe)
+	if status != .Ok {return {}, status}
+	defer control.close(&client)
+	return send_on(&client, request, check_build)
+}
+
+// One request on a verified connection; see send.
+@(private, require_results)
+send_on :: proc(
+	client: ^control.Client,
+	request: []string,
+	check_build: bool,
+) -> (
+	control.Response,
+	cli_protocol.Status,
+) {
+	if check_build {
+		version_command := [1]string{cli_protocol.VERSION_COMMAND}
+		query := cli_protocol.request_encode({command = version_command[:]}, context.temp_allocator)
+		reply, reply_error := control.call(client, query, CALL_TIMEOUT_MS)
+		if reply_error != .None {
+			fmt.eprintfln("aio: lost the connection to AIODev (%v)", reply_error)
+			return {}, .Unreachable
+		}
+		if warning := build_warning(own_build(), reply.ok ? reply.text : "", context.temp_allocator);
+		   warning != "" {fmt.eprintln(warning)}
+	}
+	response, call_error := control.call(client, request, CALL_TIMEOUT_MS)
+	if call_error != .None {
+		fmt.eprintfln("aio: lost the connection to AIODev (%v)", call_error)
+		return {}, .Unreachable
+	}
+	return response, cli_protocol.response_status(response)
+}
+
+// The init.lua the AIODev on a verified connection loads, so aio types and aio config check find the
+// folder of an instance started with --data-dir; "" when it does not say. The text is temporary.
+@(private, require_results)
+lua_path_ask :: proc(client: ^control.Client) -> string {
+	command := [1]string{LUA_PATH_COMMAND}
+	request := cli_protocol.Request {
+		command = command[:],
+	}
+	query := cli_protocol.request_encode(request, context.temp_allocator)
+	reply, err := control.call(client, query, CALL_TIMEOUT_MS)
+	if err != .None || !reply.ok {return ""}
+	return reply.text
+}
+
+// Connects to the pipe and checks that the expected AIODev serves it, reporting either failure; the
+// caller closes the client it returns with Ok. A `probe` neither waits for an AIODev that is not
+// running, whose pipe does not exist, nor reports it unreachable; it still waits for a busy pipe.
+@(private, require_results)
+connect_verified :: proc(
+	pipe: string,
+	allocator := context.temp_allocator,
+	probe := false,
+) -> (
+	control.Client,
+	cli_protocol.Status,
+) {
+	client, connect_error := control.connect(pipe, CONNECT_TIMEOUT_MS, allocator, wait_absent = !probe)
 	if connect_error != .None {
+		if probe {return {}, .Unreachable}
 		fmt.eprintln(
 			"aio: AIODev is not reachable. Start it and turn on \"Command line control\" in Settings " +
 			"(control.enabled).",
 		)
 		return {}, .Unreachable
 	}
-	defer control.close(&client)
-	identity, identity_ok := server_identity(SERVER_NAME, context.temp_allocator)
-	if !identity_ok {
+	verified := false
+	defer if !verified {control.close(&client)}
+	executable, executable_error := os.get_executable_path(context.temp_allocator)
+	if executable_error != nil {
 		fmt.eprintln("aio: could not locate the AIODev executable to verify the control pipe.")
 		return {}, .Impostor
 	}
-	verify_error := control.verify_server(&client, identity)
-	if verify_error == .Impostor && SERVER_ALTERNATE != "" {
-		if alternate, ok := server_identity(SERVER_ALTERNATE, context.temp_allocator); ok {
-			verify_error = control.verify_server(&client, alternate)
-		}
-	}
+	server := client.process_id
+	verify_error := verify_beside(&client, filepath.dir(executable))
+	handover := ""
+	if verify_error == .Impostor {handover = delegate(&client, executable)}
 	if verify_error != .None {
 		if verify_error == .Impostor {
 			fmt.eprintfln(
 				"aio: the control pipe is served by an unverified process (PID %d); refusing to send. " +
 				"If AIODev runs from another folder, use the aio beside it ($env:AIODEV_CLI in its panes).",
-				client.process_id,
+				server,
 			)
+			if handover != "" {fmt.eprintln(handover)}
 			return {}, .Impostor
 		}
 		fmt.eprintfln(
@@ -174,23 +350,54 @@ send :: proc(pipe: string, request: []string, check_build: bool) -> (control.Res
 		)
 		return {}, .Impostor
 	}
-	if check_build {
-		version_command := [1]string{cli_protocol.VERSION_COMMAND}
-		query := cli_protocol.request_encode({command = version_command[:]}, context.temp_allocator)
-		reply, reply_error := control.call(&client, query, CALL_TIMEOUT_MS)
-		if reply_error != .None {
-			fmt.eprintfln("aio: lost the connection to AIODev (%v)", reply_error)
-			return {}, .Unreachable
+	verified = true
+	return client, .Ok
+}
+
+// Subscribes on one connection and prints each event line until Ctrl+C or until AIODev closes the
+// connection. Reads poll briefly so Ctrl+C ends the stream promptly; a partial line waits for the next.
+@(private, require_results)
+stream_events :: proc(o: Options, pipe, caller: string) -> cli_protocol.Status {
+	if !bool(w.SetConsoleCtrlHandler(on_interrupt, true)) {
+		fmt.eprintln("aio: could not watch for Ctrl+C")
+		return .Failed
+	}
+	client, status := connect_verified(pipe, context.allocator)
+	if status != .Ok {return status}
+	defer control.close(&client)
+	subscription := request(o, caller, "", context.temp_allocator)
+	response, err := control.subscribe(&client, subscription, CALL_TIMEOUT_MS)
+	if err != .None {
+		if sync.atomic_load(&interrupted) {return .Interrupted}
+		fmt.eprintfln("aio: lost the connection to AIODev (%v)", err)
+		return .Unreachable
+	}
+	defer control.response_destroy(&response)
+	if !response.ok {
+		if o.json {fmt.println(response.text)} else {fmt.eprintfln("aio: %s", response.text)}
+		return cli_protocol.response_status(response)
+	}
+	for {
+		free_all(context.temp_allocator)
+		if sync.atomic_load(&interrupted) {return .Interrupted}
+		line, read_error := control.next_line(&client, STREAM_POLL_MS, context.temp_allocator)
+		if sync.atomic_load(&interrupted) {return .Interrupted}
+		if read_error == .Timeout {continue}
+		if read_error != .None {
+			fmt.eprintln("aio: AIODev closed the event stream")
+			return .Unreachable
 		}
-		if warning := build_warning(own_build(), reply.ok ? reply.text : "", context.temp_allocator);
-		   warning != "" {fmt.eprintln(warning)}
+		if o.json {
+			fmt.println(line)
+			continue
+		}
+		text, valid := event_plain(line, context.temp_allocator)
+		if !valid {
+			fmt.eprintfln("aio: AIODev sent an unexpected event line: %s", line)
+			return .Failed
+		}
+		fmt.println(text)
 	}
-	response, call_error := control.call(&client, request, CALL_TIMEOUT_MS)
-	if call_error != .None {
-		fmt.eprintfln("aio: lost the connection to AIODev (%v)", call_error)
-		return {}, .Unreachable
-	}
-	return response, cli_protocol.response_status(response)
 }
 
 // Prints help aio answers itself, in the shape AIODev's help replies take.

@@ -182,7 +182,7 @@ help_for_client_commands_is_answered_locally :: proc(t: ^testing.T) {
 	testing.expect(t, local)
 	testing.expect_value(t, report.name, "wait")
 	testing.expect_value(t, len(report.options), 6)
-	for name in ([]string{"commands", "help", "version", "agent-session"}) {
+	for name in ([]string{"events", "commands", "help", "version", "agent-session"}) {
 		o, _ := cli.parse_options({"help", name}, "")
 		_, answered := cli.local_help(o)
 		testing.expectf(t, answered, "help %s should be answered by aio", name)
@@ -192,4 +192,58 @@ help_for_client_commands_is_answered_locally :: proc(t: ^testing.T) {
 		_, answered := cli.local_help(o)
 		testing.expectf(t, !answered, "%v should not be answered by aio", args)
 	}
+}
+
+@(test)
+events_subscribe_to_names_and_take_json_anywhere :: proc(t: ^testing.T) {
+	o, problem := cli.parse_options({"events", "pane.focused", "--json", "pane.exited"}, "")
+	testing.expect_value(t, problem, "")
+	testing.expect(t, o.streaming && o.json && !o.waiting && !o.version)
+	request := cli.request(o, "4", "", context.temp_allocator)
+	expected := [?]string{"4", "json", "", "app.events", "pane.focused", "pane.exited"}
+	if testing.expect_value(t, len(request), len(expected)) {
+		for item, i in expected {testing.expect_value(t, request[i], item)}
+	}
+	every, _ := cli.parse_options({"--json", "events"}, "")
+	all := cli.request(every, "", "", context.temp_allocator)
+	testing.expect_value(t, len(all), 4)
+	testing.expect_value(t, all[3], "app.events")
+	for args in ([][]string{{"--json", "events", "--json"}, {"events", "--pane", "3"}}) {
+		_, failure := cli.parse_options(args, "")
+		testing.expectf(t, failure != "", "%v should fail", args)
+	}
+}
+
+@(test)
+event_lines_print_name_then_fields :: proc(t: ^testing.T) {
+	fields, ok := cli.event_plain(`{"type":"pane.exited","pane":3,"exit_code":1}`, context.temp_allocator)
+	testing.expect(t, ok)
+	testing.expect_value(t, fields, "pane.exited\t{\"pane\":3,\"exit_code\":1}")
+	bare, bare_ok := cli.event_plain(`{"type":"app.quitting"}`, context.temp_allocator)
+	testing.expect(t, bare_ok)
+	testing.expect_value(t, bare, "app.quitting\t{}")
+	for line in ([]string{`{"pane":3,"type":"pane.bell"}`, `{"type":"pane.bell"`, `{"type":""}`, ``}) {
+		_, valid := cli.event_plain(line, context.temp_allocator)
+		testing.expectf(t, !valid, "%q should not parse", line)
+	}
+}
+
+// aio hands an unverified pipe server's call to AIODEV_CLI only when that names another aio, and never
+// from an aio that was itself handed a call.
+@(test)
+delegation_targets_only_another_aio :: proc(t: ^testing.T) {
+	own := `C:\Tools\AIODev\aio.exe`
+	other := `D:\Dev\AIODev\build\aio.exe`
+	testing.expect_value(t, cli.delegation_target(own, other, false, context.temp_allocator), other)
+	forward := cli.delegation_target(own, "D:/Dev/AIODev/build/aio.exe", false, context.temp_allocator)
+	testing.expect_value(t, forward, other)
+	testing.expect_value(t, cli.delegation_target(own, other, true, context.temp_allocator), "")
+	testing.expect_value(t, cli.delegation_target(own, "", false, context.temp_allocator), "")
+	testing.expect_value(t, cli.delegation_target(own, own, false, context.temp_allocator), "")
+	upper := cli.delegation_target(own, `c:\TOOLS\aiodev\AIO.EXE`, false, context.temp_allocator)
+	testing.expect_value(t, upper, "")
+	slashes := cli.delegation_target(own, "C:/Tools/AIODev/aio.exe", false, context.temp_allocator)
+	testing.expect_value(t, slashes, "")
+	dotted := cli.delegation_target(own, `C:\Tools\AIODev\..\AIODev\aio.exe`, false, context.temp_allocator)
+	testing.expect_value(t, dotted, "")
 }

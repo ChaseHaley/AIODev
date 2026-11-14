@@ -114,7 +114,7 @@ pane_to_window :: proc(
 	assert(removed)
 	// A pane that leaves its slot joins an ordinary window, where it must be shown.
 	layout.pane_adopt(&destination.tree, layout_pane)
-	window_preview_publish(preview, name)
+	window_preview_publish(app, preview, name)
 	workspace_mutation_finish(app, preview.workspace, {.Names})
 	pane_move_finish(app, move, destination)
 	_ = window_activate(app, preview)

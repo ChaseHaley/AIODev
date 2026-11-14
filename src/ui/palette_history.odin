@@ -57,7 +57,7 @@ palette_frecency :: proc(p: ^Palette, r: Palette_Result) -> f64 {
 		score = frecency.lookup(&p.usage.tabs, use.id, now)
 	case .Workspace:
 		score = frecency.lookup(&p.usage.workspaces, use.id, now)
-	case .Unassigned:
+	case .Unassigned, .Item:
 	}
 	for counted in p.counted {
 		if counted == use {return max(0, score - 1)}
@@ -77,7 +77,7 @@ palette_result_use :: proc(p: ^Palette, r: Palette_Result) -> (Palette_Use, bool
 		}
 	case .Tab, .Workspace:
 		return {kind = r.kind, id = r.id}, true
-	case .Unassigned:
+	case .Unassigned, .Item:
 	}
 	return {}, false
 }
@@ -106,7 +106,7 @@ palette_use :: proc(p: ^Palette, use: Palette_Use) {
 		recorded = frecency.record(&p.usage.tabs, use.id, now)
 	case .Workspace:
 		recorded = frecency.record(&p.usage.workspaces, use.id, now)
-	case .Unassigned:
+	case .Unassigned, .Item:
 	}
 	if !recorded {
 		log.warn("palette: no room to record a use")

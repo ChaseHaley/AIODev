@@ -9,9 +9,11 @@ APP_NAME :: "AIODev"
 FLAG_INSTANCE :: "--instance"
 FLAG_DATA_DIR :: "--data-dir"
 FLAG_NO_ACTIVATE :: "--no-activate"
+// Writes the aio type definitions to a file and exits without opening a window; build.ps1 types runs it.
+FLAG_LUA_TYPES :: "--lua-types"
 USAGE ::
 	"Usage: " + APP_NAME + " [" + FLAG_INSTANCE + " <name>] [" + FLAG_DATA_DIR + " <dir>] [" +
-	FLAG_NO_ACTIVATE + "]"
+	FLAG_NO_ACTIVATE + "] [" + FLAG_LUA_TYPES + " <file>]"
 // A name has 1..MAX_NAME_LENGTH ASCII letters, digits, hyphens or underscores.
 MAX_NAME_LENGTH :: 32
 // Compose the two-digit bound without runtime formatting or allocation.
@@ -30,9 +32,11 @@ CAPTURES_DIRECTORY :: "captures"
 AGENTS_DIRECTORY :: "agent-sessions"
 
 Options :: struct {
-	name:     string,
-	data_dir: string,
-	inactive: bool,
+	name:      string,
+	data_dir:  string,
+	inactive:  bool,
+	// Where --lua-types writes the type definitions; empty to run the app.
+	lua_types: string,
 }
 
 Error :: enum {
@@ -48,6 +52,7 @@ Parse_Error :: enum {
 	Repeated_Flag,
 	Invalid_Name,
 	Empty_Data_Dir,
+	Empty_Lua_Types,
 }
 
 @(require_results)
@@ -82,6 +87,12 @@ parse :: proc(args: []string) -> (Options, Parse_Error) {
 		case FLAG_NO_ACTIVATE:
 			if options.inactive {return {}, .Repeated_Flag}
 			options.inactive = true
+		case FLAG_LUA_TYPES:
+			if options.lua_types != "" {return {}, .Repeated_Flag}
+			value, err := flag_value(args, &i)
+			if err != .None {return {}, err}
+			if value == "" {return {}, .Empty_Lua_Types}
+			options.lua_types = value
 		case:
 			return {}, .Unknown_Argument
 		}

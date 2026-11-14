@@ -85,6 +85,9 @@
     "linked_window": {
       "lane": "headless"
     },
+    "lua_scripting": {
+      "lane": "headless"
+    },
     "markdown": {
       "lane": "headless"
     },

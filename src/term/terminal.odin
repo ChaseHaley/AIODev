@@ -60,10 +60,10 @@ Config :: struct {
 	command_line, working_directory: string,
 	title:                           string,
 	refresh_environment:             bool,
-	// Up to MAX_HOST_ENVIRONMENT variables the host adds for this session, and a directory added
-	// to the end of its PATH.
+	// Up to MAX_HOST_ENVIRONMENT variables the host adds for this session, and a directory put
+	// first on its PATH.
 	environment:                     []pty.Env_Var,
-	path_append:                     string,
+	path_prepend:                    string,
 	geometry:                        Geometry,
 	options:                         Options,
 	colors:                          Colors,
@@ -225,6 +225,9 @@ Session :: struct {
 	title_changed, bell:                                      bool,
 	status_changed:                                           bool,
 	program_status_changed:                                   bool,
+	// OSC 9 and 777 notifications kept while the app wants them, under `mutex`; see notifications.odin.
+	notifications_wanted, notifications_ready:                bool,
+	notifications:                                            [dynamic]Notification,
 	program_statuses:                                         [PROGRAM_STATUS_LIMIT]Stored_Status,
 	program_status_count:                                     int,
 	program_status_enabled:                                   bool,
@@ -322,6 +325,7 @@ session_new :: proc(geometry: Geometry, allocator: runtime.Allocator) -> ^Sessio
 	s.geometry = geometry
 	s.queue.pending.allocator = allocator
 	s.search_matches.allocator = allocator
+	s.notifications.allocator = allocator
 	pattern_init(&s.pattern, s)
 	return s
 }
@@ -344,6 +348,7 @@ destroy :: proc(s: ^Session) {
 	ghostty.key_encoder_free(s.key_encoder)
 	ghostty.terminal_free(s.terminal)
 	clear_program_status(s, .All)
+	destroy_notifications(s.notifications)
 	delete(s.queue.pending)
 	delete(s.search_matches)
 	pattern_destroy(&s.pattern, s)
@@ -387,6 +392,7 @@ ghostty_create :: proc(s: ^Session, g: Geometry, session_options: Options) -> Er
 		{.Title_Changed, rawptr(title_changed)},
 		{.Pwd_Changed, rawptr(title_changed)},
 		{.Reset, rawptr(title_changed)},
+		{.Desktop_Notification, rawptr(on_notification)},
 		{.Render_Hold, rawptr(render_hold)},
 		{.Semantic_Prompt, rawptr(semantic_prompt)},
 		// Unlimited: the engine's default byte cap, about one page, would prune before the line limit.
@@ -473,7 +479,7 @@ spawn :: proc(s: ^Session, config: Config) {
 		working_directory   = config.working_directory,
 		title               = config.title,
 		environment         = environment[:count],
-		path_append         = config.path_append,
+		path_prepend        = config.path_prepend,
 		cols                = config.geometry.columns,
 		rows                = config.geometry.rows,
 		refresh_environment = config.refresh_environment,
@@ -558,7 +564,7 @@ start_request_copy :: proc(
 	r.options.command_line = copy_text(options.command_line, allocator, &ok)
 	r.options.working_directory = copy_text(options.working_directory, allocator, &ok)
 	r.options.title = copy_text(options.title, allocator, &ok)
-	r.options.path_append = copy_text(options.path_append, allocator, &ok)
+	r.options.path_prepend = copy_text(options.path_prepend, allocator, &ok)
 	environment, err := make([]pty.Env_Var, len(options.environment), allocator)
 	ok &&= err == nil
 	r.environment = environment
@@ -576,7 +582,7 @@ start_request_free :: proc(r: ^Start_Request, allocator: runtime.Allocator) {
 	delete(r.options.command_line, allocator)
 	delete(r.options.working_directory, allocator)
 	delete(r.options.title, allocator)
-	delete(r.options.path_append, allocator)
+	delete(r.options.path_prepend, allocator)
 	for variable in r.environment {
 		delete(variable.name, allocator)
 		delete(variable.value, allocator)

@@ -1,6 +1,7 @@
 package main
 
 import "aio:commands"
+import app_events "aio:events"
 import "aio:font"
 import "aio:glyphs"
 import "aio:input"
@@ -41,6 +42,7 @@ Notice_Key :: enum u32 {
 	Build_Info,
 	Shortcut_Undo,
 	Update,
+	Lua,
 }
 
 // What every window shares. Each feature's own state is a struct declared beside that feature's procs
@@ -81,6 +83,8 @@ App :: struct {
 	animations:            bool,
 	theme:                 ui.Theme,
 	registry:              commands.Registry,
+	runtime_runner:        Runtime_Runner,
+	keymap:                commands.Keymap,
 	leader:                Maybe(commands.Shortcut),
 	palette:               ui.Palette,
 	// Where the palette's usage is saved; see palette_usage.odin.
@@ -112,10 +116,21 @@ App :: struct {
 	using cli_state:       Cli_State,
 	// How the most recently closed sessions ended; see session.odin.
 	closed_sessions:       Closed_Sessions,
+	// What happened this tick, for scripts and `aio events`; see app_events.odin.
+	events:                app_events.Queue,
+	// Some session has not been announced by pane.created because no tree held it yet.
+	events_unattached:     bool,
+	// A window's focus may have moved; app_events_settle reports where it came to rest.
+	events_focus:          bool,
+	// A digest of every listed workspace's arrangement, compared each tick for layout.changed.
+	events_layout:         u64,
 	// Panes and tabs closed explicitly, newest last, for Reopen Closed.
 	closed:                [dynamic]Closed_Item,
 	// Update AIODev's updater while it runs; see app_update.odin.
 	update:                App_Update,
+	next_prompt_id:         u64,
+	// init.lua's state, actions and timers; see lua_host.odin.
+	lua:                   Lua_Host,
 }
 
 // Creates the graphics device on a thread of its own. The driver takes longer to create one than
@@ -166,6 +181,7 @@ device_abandon :: proc(s: ^Device_Start) {
 
 @(require_results)
 app_init :: proc(app: ^App) -> bool {
+	app_events.init(&app.events)
 	when FRAME_STATS {perf.start(&app.perf)}
 	when platform_api.AIO_HEADLESS {
 		// The same pixels on every machine: WARP (WORK-350).
@@ -202,6 +218,7 @@ app_init :: proc(app: ^App) -> bool {
 		log.errorf("parsing the bundled program artwork failed: %v", err)
 	}
 	app.registry = commands.create()
+	commands.keymap_init(&app.keymap)
 	if err := register_actions(&app.registry); err != .None {
 		log.errorf("registering commands failed: %v", err)
 		return false
@@ -210,6 +227,8 @@ app_init :: proc(app: ^App) -> bool {
 	palette_usage_load(app)
 	palette_set_sources(app)
 	control_cli_init(app)
+	// Before settings load, which runs init.lua and registers its actions.
+	app.runtime_runner = lua_host_run
 	if !load_settings(app) {return false}
 	font_error: font.Error
 	when platform_api.AIO_HEADLESS {
@@ -274,6 +293,8 @@ app_init :: proc(app: ^App) -> bool {
 app_destroy :: proc(app: ^App) {
 	when AIO_CONTROL {verify_destroy(app)}
 	control_cli_destroy(app)
+	// Lua handlers may still hold windows and panes by id, but never past this point.
+	lua_host_destroy(app)
 	for len(app.windows) > 0 {
 		window_close(app, app.windows[len(app.windows) - 1])
 	}
@@ -307,6 +328,7 @@ app_destroy :: proc(app: ^App) {
 	ui.notices_destroy(&app.notices)
 	shortcut_undo_destroy(&app.shortcut_undo)
 	commands.destroy(&app.registry)
+	commands.keymap_destroy(&app.keymap)
 	settings.destroy(&app.settings)
 	settings.inputs_destroy(&app.settings_inputs)
 	settings_notice_state_destroy(&app.settings_notices)
@@ -317,6 +339,7 @@ app_destroy :: proc(app: ^App) {
 	palette_usage_store_destroy(&app.palette_store)
 	closed_destroy(app)
 	app_update_destroy(app)
+	app_events.destroy(&app.events)
 	delete(app.app_id)
 	if app.platform_ready {
 		if platform_api.destroy(&app.platform) != .None {
@@ -339,6 +362,9 @@ run :: proc(app: ^App) {
 		if signaled >= 0 {render.frame_signaled(window_surface(waits.windows[signaled]))}
 		tick(app, wait_frames = false)
 	}
+	// Consumers hear of the quit while everything they may ask about still exists.
+	app_events.push(&app.events, .App_Quitting, Event_Empty{})
+	app_events_deliver(app)
 }
 
 // The windows that want a frame and how the loop learns it may draw them: a window with a swap chain
@@ -429,6 +455,8 @@ tick :: proc(app: ^App, wait_frames := true) {
 	app_timers_advance(app, .After_Draw)
 	control_cli_tick(app)
 	focus_jumps_track(app)
+	// Lua and pipe consumers are added in app_events_deliver.
+	app_events_deliver(app)
 	free_all(context.temp_allocator)
 }
 
@@ -449,6 +477,8 @@ App_Timer :: enum u8 {
 	File_Dialogs,
 	Markdown,
 	Update,
+	// init.lua's timers, process polls and the step after any Lua code ran.
+	Lua,
 }
 
 // Before the windows draw, a timer's change shows in this tick's frame; after, verify counts the
@@ -462,7 +492,7 @@ Timer_Phase :: enum u8 {
 @(private = "file")
 app_timer_phase :: proc(timer: App_Timer) -> Timer_Phase {
 	switch timer {
-	case .Processes, .Notices, .Drag_Hover:
+	case .Processes, .Notices, .Drag_Hover, .Lua:
 		return .Before_Draw
 	case .Verify, .Layout_Save, .Palette_Usage_Save, .File_Dialogs, .Markdown, .Update:
 		return .After_Draw
@@ -493,6 +523,8 @@ app_timers_advance :: proc(app: ^App, phase: Timer_Phase) {
 			markdown_tick(app)
 		case .Update:
 			app_update_tick(app)
+		case .Lua:
+			lua_host_tick(app)
 		}
 	}
 }
@@ -520,6 +552,8 @@ app_timer_deadline :: proc(app: ^App, timer: App_Timer) -> (next: time.Tick, pen
 		return markdown_poll_deadline(app)
 	case .Update:
 		// A finished updater wakes the loop itself.
+	case .Lua:
+		return lua_host_deadline(app)
 	}
 	return
 }
@@ -528,6 +562,7 @@ app_timer_deadline :: proc(app: ^App, timer: App_Timer) -> (next: time.Tick, pen
 @(private = "file")
 Window_Timer :: enum u8 {
 	Leader,
+	Key_Sequence,
 	Paste_Confirm,
 	Cursor_Blink,
 	Capture_Hold,
@@ -544,6 +579,8 @@ window_timer_advance :: proc(app: ^App, w: ^Window, timer: Window_Timer, now: ti
 	switch timer {
 	case .Leader:
 		leader_expire(w, now)
+	case .Key_Sequence:
+		key_sequence_expire(w, now)
 	case .Paste_Confirm:
 		paste_confirm_expire(w, now)
 	case .Cursor_Blink:
@@ -570,6 +607,8 @@ window_timer_deadline :: proc(w: ^Window, timer: Window_Timer) -> (time.Tick, bo
 	switch timer {
 	case .Leader:
 		return leader_deadline(w)
+	case .Key_Sequence:
+		return key_sequence_deadline(w)
 	case .Paste_Confirm:
 		return paste_confirm_deadline(w)
 	case .Cursor_Blink:

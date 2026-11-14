@@ -1,5 +1,6 @@
 package main
 
+import "aio:events"
 import "core:strings"
 
 // What a rename names. A tab is found within its workspace and a pane by its terminal session, so the
@@ -75,6 +76,7 @@ rename_target_commit :: proc(
 		case .Workspace_Row: return .Empty
 		}
 	}
+	changed := destination^ != clean
 	name, err := strings.clone(clean)
 	if err != nil {return .Failed}
 	delete(destination^)
@@ -82,6 +84,7 @@ rename_target_commit :: proc(
 	switch t in target {
 	case Rename_Tab_Target:
 		workspace := workspace_find(app, t.workspace)
+		if changed {events.push(&app.events, .Tab_Renamed, Event_Tab_Name{t.tab, t.workspace, clean})}
 		for tab in workspace.tabs {tab_update_title(app, tab)}
 		if owner := window_for_workspace(app, workspace); owner != nil {
 			window_update_title(app, owner)
@@ -90,6 +93,7 @@ rename_target_commit :: proc(
 	case Rename_Pane_Target:
 		session_titles_changed(app, t.session)
 	case Rename_Workspace_Target:
+		if changed {events.push(&app.events, .Workspace_Renamed, Event_Workspace_Name{t.workspace, clean})}
 		for window in app.windows {window_relayout(app, window)}
 		workspace_mutation_finish(app, workspace_find(app, t.workspace), {.Names})
 	case Rename_Group_Target:

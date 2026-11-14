@@ -799,8 +799,8 @@ markdown_key :: proc(app: ^App, w: ^Window, e: input.Key_Event) {
 	// An editor's keys come before shortcuts, as a terminal's program would want them, except the chords
 	// it has no use for.
 	if !has_find && editing != nil && markdown_edit_key(app, w, editing, key) {return}
-	if key.found && action_available(app, w, key.action) {
-		run_action(app, w, key.action)
+	if key.found && (key.runtime || action_available(app, w, key.action)) {
+		run_window_command(app, w, key.command, .Key)
 		return
 	}
 	status_inbox_typed(w, e)

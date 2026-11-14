@@ -1,6 +1,7 @@
 package main
 
 import "aio:commands"
+import "aio:events"
 import "aio:settings"
 import "aio:ui"
 import "core:fmt"
@@ -285,7 +286,7 @@ settings_change :: proc(app: ^App, edit: Settings_Edit, base: Settings_Base) -> 
 	if parse_error != nil {return {status = .Failed}}
 	result := built.result
 	if settings_edit_affects_bindings(edit) {
-		problem, warning := settings_bindings_check(&loaded, app.settings_path)
+		problem, warning := settings_bindings_check(app, &loaded, app.settings_path)
 		if problem != "" {return {status = .Refused, message = problem}}
 		result.message = warning
 	}
@@ -302,6 +303,7 @@ settings_change :: proc(app: ^App, edit: Settings_Edit, base: Settings_Base) -> 
 	}
 	publication: Settings_Publication = Publish_Saved{previous, revision, origin}
 	if _, reset := edit.(Factory_Reset); reset {publication = Publish_Reset{revision}}
+	app_events_settings_commit(app, &loaded, previous, revision)
 	settings_revision_apply(app, loaded, &diagnostics, nil, publication)
 	loaded = {}
 	result.previous, result.revision = previous, revision
@@ -604,9 +606,19 @@ settings_change_memory :: proc(app: ^App, edit: Settings_Edit) -> Settings_Resul
 	value, is_value := edit.(Setting_Value)
 	entry := is_value ? settings.schema_find(value.key) : nil
 	if entry == nil {return {status = .Failed}}
+	// The value as text before and after, so an assignment that changes nothing reports nothing. A
+	// string setting's text is the stored value itself, which the assignment frees.
+	wanted := events.wants(&app.events, .Settings_Changed)
+	previous: string
+	if wanted {previous = strings.clone(settings.value_text(&app.settings, entry^), context.temp_allocator)}
 	message, err := settings.setting_assign(&app.settings, entry^, value.value)
 	if err != nil {return {status = .Unprepared}}
 	if message != "" {return {status = .Refused, message = message}}
+	if wanted {
+		if current := settings.value_text(&app.settings, entry^); current != previous {
+			events.push(&app.events, .Settings_Changed, Setting_Value{entry.key, current})
+		}
+	}
 	for window in app.windows {
 		window_apply_settings(app, window)
 		rail_reveal_active(window)
@@ -619,10 +631,25 @@ settings_change_memory :: proc(app: ^App, edit: Settings_Edit) -> Settings_Resul
 // A refusal for the first shortcut problem a revision would have, or the first warning it keeps.
 // Both are temporary.
 @(private, require_results)
-settings_bindings_check :: proc(s: ^settings.Settings, path: string) -> (problem, warning: string) {
+settings_bindings_check :: proc(
+	app: ^App,
+	s: ^settings.Settings,
+	path: string,
+) -> (
+	problem, warning: string,
+) {
 	registry := commands.create()
 	defer commands.destroy(&registry)
 	if register_actions(&registry) != .None {return "Could not validate shortcuts.", ""}
+	for item in app.registry.items {
+		if !item.runtime {continue}
+		// Validate against the runtime command's declared defaults, as a fresh registry holds them.
+		command := item
+		command.shortcuts = command.defaults
+		if _, err := commands.register_runtime(&registry, command, RUNTIME_COMMAND_FIRST); err != .None {
+			return "Could not validate shortcuts.", ""
+		}
+	}
 	report, report_error := binding_report(&registry, s)
 	for issue in report.issues {
 		if issue.severity == .Shortcut_Warning {

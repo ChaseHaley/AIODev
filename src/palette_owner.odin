@@ -71,6 +71,7 @@ palette_visible :: proc(app: ^App, w: ^Window) -> bool {
 // Open to Closing: the palette fades out in w, which keeps it until the fade settles.
 palette_close :: proc(app: ^App, w: ^Window) {
 	if !palette_owned_by(app, w) {return}
+	if w.script_prompt.selection {script_prompt_cancel(app, w)}
 	ui.palette_close(&app.palette)
 	w.dirty = true
 }
@@ -89,18 +90,35 @@ palette_open :: proc(app: ^App, w: ^Window) {
 
 // Opens the palette in w, taking it from any other window. Cancelling w's gesture can remove w, so the
 // palette leaves its previous window only once w is known to remain.
-palette_open_mode :: proc(app: ^App, w: ^Window, mode: ui.Palette_Mode) {
-	if w == nil || w.id == 0 {return}
-	if !gesture_cancel(app, w) {return}
+@(private, require_results)
+palette_claim :: proc(app: ^App, w: ^Window) -> bool {
+	if w == nil || w.id == 0 {return false}
+	if !gesture_cancel(app, w) {return false}
+	if palette_owned_by(app, w) {palette_close(app, w)}
 	if previous := palette_owner_window(app); previous != nil && previous != w {
 		palette_release(app, previous)
 	}
 	window_overlays_cancel(app, w)
 	app.palette_owner = w.id
 	app.palette.leader = app.leader
+	return true
+}
+
+palette_open_mode :: proc(app: ^App, w: ^Window, mode: ui.Palette_Mode) {
+	if !palette_claim(app, w) {return}
 	ui.palette_open_mode(&app.palette, &app.registry, mode, time.time_to_unix(clock_wall(&app.clock)))
 	ui.palette_fit(&app.palette, f32(w.width), f32(w.height), w.scale)
 	w.dirty = true
+}
+
+// Transfers the list's owned strings only after the destination window is known to remain.
+@(require_results)
+palette_open_list :: proc(app: ^App, w: ^Window, title: string, items: []ui.Palette_Item) -> bool {
+	if !palette_claim(app, w) {return false}
+	ui.palette_open_list(&app.palette, &app.registry, title, items)
+	ui.palette_fit(&app.palette, f32(w.width), f32(w.height), w.scale)
+	w.dirty = true
+	return true
 }
 
 // The palette's settings: every schema setting with a row of its own, then the page sections the
@@ -281,11 +299,17 @@ on_palette_outcome :: proc(app: ^App, w: ^Window, outcome: ui.Outcome, id: comma
 	if ui.palette_used_take(&app.palette) {palette_usage_touch(app)}
 	switch outcome {
 	case .None:
-	case .Changed, .Closed:
+	case .Changed:
+		w.dirty = true
+	case .Closed:
+		if w.script_prompt.selection {script_prompt_cancel(app, w)}
+		w.dirty = true
+	case .Select_Item:
+		if item, ok := chosen.(ui.Chosen_Item); ok {script_prompt_accept_index(app, w, item.index)}
 		w.dirty = true
 	case .Run:
 		w.dirty = true
-		run_action(app, w, Action(id))
+		run_window_command(app, w, id, .Palette)
 	case .Open_Setting:
 		w.dirty = true
 		if setting, ok := chosen.(ui.Chosen_Setting); ok {

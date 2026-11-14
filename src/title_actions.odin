@@ -116,7 +116,7 @@ title_action_release :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event)
 	if e.button != .Left || !ui.armed_down(w.title_action_armed) {return false}
 	fired, ok := ui.armed_release(&w.title_action_armed, title_action_hit(app, w, f32(e.x), f32(e.y)))
 	w.dirty = true
-	if ok && fired != .None {run_action(app, w, TITLE_CONTROLS[fired].action)}
+	if ok && fired != .None {run_action(app, w, TITLE_CONTROLS[fired].action, .Button)}
 	return true
 }
 

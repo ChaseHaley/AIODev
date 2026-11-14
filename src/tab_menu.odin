@@ -229,7 +229,7 @@ tab_menu_choose :: proc(app: ^App, w: ^Window) {
 	target := tab_menu_target(w)
 	overlay_close(app, w)
 	invocation := commands.invocation(commands.Command_Id(action), focus = true)
-	_ = command_execute(app, Window_Context{w, target}, invocation)
+	_ = command_execute(app, Window_Context{window = w, tab = target, origin = .Menu}, invocation)
 }
 
 // Fills the submenu of row `row`: the groups to add the tabs to, after New Group, or a group's colours.

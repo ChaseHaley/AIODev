@@ -50,6 +50,7 @@ Outcome :: enum {
 	Open_Workspace,
 	// A conflict chain resolved: the owner saves palette_chain_changes, then palette_chain_close.
 	Save_Chain,
+	Select_Item,
 }
 
 // The kind a result belongs to. A row names it only when another result shares its title. Unassigned
@@ -60,6 +61,7 @@ Palette_Kind :: enum {
 	Tab,
 	Workspace,
 	Unassigned,
+	Item,
 }
 
 Palette_Mode :: enum {
@@ -109,6 +111,7 @@ Palette_Mode_Info :: struct {
 	.Tab = "Tab",
 	.Workspace = "Workspace",
 	.Unassigned = "Shortcut",
+	.Item = "Item",
 }
 
 // The mode listing only one kind; its icon marks that kind's rows. Identity never relies on colour:
@@ -119,6 +122,7 @@ Palette_Mode_Info :: struct {
 	.Tab = .Tabs,
 	.Workspace = .Workspaces,
 	.Unassigned = .Commands,
+	.Item = .All,
 }
 
 // At most navigate, three selection actions, keyboard search, and close.
@@ -254,6 +258,10 @@ Palette :: struct {
 	used:         bool,
 	// The query texts this opening has recorded in history, owned; see palette_note_query.
 	noted:        [dynamic]string,
+	// A caller-supplied list owns its strings until the next opening or destruction, including fades.
+	list_mode: bool,
+	list_title: string,
+	list_items: []Palette_Item,
 }
 
 // What the last outcome names for the owner: the setting to reveal (Open_Setting), the value to save
@@ -265,6 +273,7 @@ Palette_Chosen :: union {
 	Chosen_Value,
 	Chosen_Tab,
 	Chosen_Workspace,
+	Chosen_Item,
 }
 
 Chosen_Setting :: struct {
@@ -282,6 +291,10 @@ Chosen_Tab :: struct {
 
 Chosen_Workspace :: struct {
 	id: u64,
+}
+
+Chosen_Item :: struct {
+	index: int,
 }
 
 // `lead` is the band above the rows that a conflict chain's line takes, empty otherwise.
@@ -350,6 +363,7 @@ palette_init :: proc(
 
 palette_destroy :: proc(p: ^Palette) {
 	edit_set(p, nil)
+	palette_list_clear(p)
 	palette_browse_end(p)
 	query_history_destroy(&p.history)
 	palette_usage_destroy(&p.usage)
@@ -383,6 +397,13 @@ palette_open :: proc(p: ^Palette, registry: ^commands.Registry, now: i64 = 0) {
 
 // `now`, in Unix seconds, dates the uses this opening records and ages the ones before it.
 palette_open_mode :: proc(p: ^Palette, registry: ^commands.Registry, mode: Palette_Mode, now: i64 = 0) {
+	palette_begin(p, mode, now)
+	refresh(p, registry)
+}
+
+@(private)
+palette_begin :: proc(p: ^Palette, mode: Palette_Mode, now: i64) {
+	palette_list_clear(p)
 	presence_open(&p.presence, DIALOG_PRESENCE)
 	palette_browse_end(p)
 	field_set(&p.query, "")
@@ -397,7 +418,25 @@ palette_open_mode :: proc(p: ^Palette, registry: ^commands.Registry, mode: Palet
 	p.keys, p.keys_hover, p.assign = {}, false, nil
 	drag_set(p, nil)
 	palette_choose(p, nil)
+}
+
+// Takes ownership of title, items and each item's label/detail, all from the palette's allocator.
+palette_open_list :: proc(p: ^Palette, registry: ^commands.Registry, title: string, items: []Palette_Item) {
+	palette_begin(p, .All, 0)
+	p.list_mode, p.list_title, p.list_items = true, title, items
 	refresh(p, registry)
+}
+
+@(private)
+palette_list_clear :: proc(p: ^Palette) {
+	allocator := p.results.allocator
+	for item in p.list_items {
+		delete(item.label, allocator)
+		delete(item.detail, allocator)
+	}
+	delete(p.list_items, allocator)
+	delete(p.list_title, allocator)
+	p.list_mode, p.list_title, p.list_items = false, "", nil
 }
 
 palette_close :: proc(p: ^Palette) {
@@ -471,6 +510,7 @@ palette_next_mode :: proc(mode: Palette_Mode, reverse: bool = false) -> Palette_
 // become typed text, which every mode can search, and a pending assignment ends.
 palette_set_mode :: proc(p: ^Palette, registry: ^commands.Registry, mode: Palette_Mode) {
 	if p.mode == mode {return}
+	if p.list_mode {return}
 	palette_browse_end(p)
 	if p.keys.state != .Off {key_search_leave(&p.keys, &p.query)}
 	p.assign = nil
@@ -488,6 +528,7 @@ palette_recording :: proc(p: ^Palette) -> bool {return p.keys.state == .Recordin
 
 // Turns the query's record mode on or off; on, it searches commands, so other scopes show Commands.
 palette_key_search_toggle :: proc(p: ^Palette, registry: ^commands.Registry) -> Outcome {
+	if p.list_mode {return .None}
 	edit_set(p, nil)
 	drag_set(p, nil)
 	palette_browse_end(p)
@@ -557,6 +598,8 @@ palette_result_name :: proc(p: ^Palette, r: Palette_Result) -> string {
 		return source_item(p.workspaces, r.source).label
 	case .Unassigned:
 		return "unassigned"
+	case .Item:
+		return p.list_items[r.source].label
 	}
 	return ""
 }
@@ -573,12 +616,15 @@ palette_result_title :: proc(p: ^Palette, r: Palette_Result) -> string {
 		return source_item(p.workspaces, r.source).label
 	case .Unassigned:
 		return "Unassigned"
+	case .Item:
+		return p.list_items[r.source].label
 	}
 	return ""
 }
 
 // The muted right-side field of a tab row: its workspace, which tells same-named tabs apart.
 palette_result_context :: proc(p: ^Palette, r: Palette_Result) -> string {
+	if r.kind == .Item {return p.list_items[r.source].detail}
 	return r.kind == .Tab ? source_item(p.tabs, r.source).owner : ""
 }
 
@@ -608,6 +654,8 @@ palette_target :: proc(p: ^Palette, r: Palette_Result) -> Palette_Target {
 		return {kind = .Workspace, id = r.id}
 	case .Unassigned:
 		return {kind = .Unassigned}
+	case .Item:
+		return {kind = .Item, id = r.id}
 	}
 	return {}
 }
@@ -864,6 +912,28 @@ refresh :: proc(p: ^Palette, registry: ^commands.Registry) {
 	edit_set(p, nil)
 	clear(&p.results)
 	clear(&p.ordered)
+	if p.list_mode {
+		empty := strings.trim_space(query) == ""
+		width := empty ? 0 : utf8.rune_count(query)
+		count := len(p.list_items)
+		if reserve(&p.results, count) != nil || reserve(&p.ordered, count) != nil ||
+		   (width > 0 && resize(&p.positions, count * width) != nil) {
+			p.selected, p.scroll = 0, 0
+			return
+		}
+		for item, index in p.list_items {
+			if empty {
+				append(&p.ordered, Palette_Result{kind = .Item, source = index, id = u64(index + 1)})
+			} else {
+				consider_item(p, .Item, nil, -1, index, u64(index + 1), item.label, query, width,
+					[]string{item.detail}, .Scattered)
+			}
+		}
+		append(&p.results, ..p.ordered[:])
+		if !empty {slice.stable_sort_by(p.results[:], less_result)}
+		keep_selection_visible(p)
+		return
+	}
 	if p.keys.state != .Off {
 		refresh_keys(p, registry)
 		return
@@ -976,7 +1046,7 @@ refresh :: proc(p: ^Palette, registry: ^commands.Registry) {
 				command.title,
 				query,
 				width,
-				[]string{commands.category(command.name).title},
+				[]string{commands.category(&command).title, command.keywords},
 				.Scattered,
 				match,
 			)
@@ -1067,6 +1137,11 @@ run :: proc(p: ^Palette, registry: ^commands.Registry, index: int) -> (Outcome, 
 		return .None, 0
 	}
 	result := p.results[index]
+	if result.kind == .Item {
+		palette_close(p)
+		palette_choose(p, Chosen_Item{result.source + 1})
+		return .Select_Item, 0
+	}
 	if result.kind == .Unassigned {return palette_assign(p, registry, result.chord), 0}
 	if _, assigning := p.assign.?; assigning && result.kind == .Command {
 		return palette_binding_assign(p, registry, index), 0
@@ -1086,7 +1161,7 @@ run :: proc(p: ^Palette, registry: ^commands.Registry, index: int) -> (Outcome, 
 	case .Workspace:
 		palette_choose(p, Chosen_Workspace{result.id})
 		return .Open_Workspace, 0
-	case .Unassigned:
+	case .Unassigned, .Item:
 	}
 	return .None, 0
 }
@@ -1111,7 +1186,7 @@ edited :: proc(p: ^Palette, registry: ^commands.Registry, change: Field_Change) 
 	case .Edited:
 	}
 	palette_browse_end(p)
-	if mode, length := palette_parse_prefix(field_string(&p.query)); length > 0 {
+	if mode, length := palette_parse_prefix(field_string(&p.query)); !p.list_mode && length > 0 {
 		strip_prefix(&p.query, length)
 		p.mode = mode
 	}
@@ -1145,7 +1220,7 @@ palette_key :: proc(
 	if p.keys.state == .Recording {
 		return palette_key_search_step(p, registry, key_search_record(&p.keys, e, p.leader)), 0
 	}
-	if key_search_toggles(e) {return palette_key_search_toggle(p, registry), 0}
+	if !p.list_mode && key_search_toggles(e) {return palette_key_search_toggle(p, registry), 0}
 	if p.keys.state == .Recorded {
 		if step, handled := key_search_recorded_key(&p.keys, e); handled {
 			return palette_key_search_step(p, registry, step), 0
@@ -1156,7 +1231,7 @@ palette_key :: proc(
 		palette_cycle_mode(p, registry, .Shift in e.modifiers)
 		return .Changed, 0
 	case .Backspace:
-		if p.mode != .All && p.query.cursor == 0 && p.query.anchor == 0 {
+		if !p.list_mode && p.mode != .All && p.query.cursor == 0 && p.query.anchor == 0 {
 			palette_set_mode(p, registry, .All)
 			return .Changed, 0
 		}
@@ -1184,7 +1259,9 @@ palette_key :: proc(
 			if PALETTE_OPERATE in e.modifiers {return control_activate(p, setting), 0}
 		}
 	}
-	if outcome, recalled := palette_recall_key(p, registry, e); recalled {return outcome, 0}
+	if !p.list_mode {
+		if outcome, recalled := palette_recall_key(p, registry, e); recalled {return outcome, 0}
+	}
 	if step := list_key_step(e, p.visible_rows, len(p.results)); step != 0 {
 		palette_browse_end(p)
 		return move(p, step), 0
@@ -1305,6 +1382,7 @@ palette_layout :: proc(p: ^Palette, viewport_width, viewport_height, viewport_sc
 	panel_width, row_height, padding := f.panel_width, f.row_height, f.padding
 	footer_height, input_height := f.footer_height, f.input_height
 	mode_height, separator := f.mode_height, f.separator
+	if p.list_mode {mode_height = 0}
 	lead := palette_lead_rows(p)
 	rows := clamp(len(p.results) - p.scroll, 0, max(0, f.rows - lead))
 	if len(p.results) == 0 && f.rows > 0 {rows = 1}
@@ -1348,11 +1426,12 @@ palette_layout :: proc(p: ^Palette, viewport_width, viewport_height, viewport_sc
 		l.modes[mode] = {mode_x, panel.y, mode_width, mode_height}
 		mode_x += mode_width
 	}
+	if p.list_mode {l.modes = {}}
 	if footer_height > 0 {l.footer = {panel.x, top + used + padding, panel.width, footer_height}}
 	// The keyboard button closes the query row; a row too narrow for it and some text has none.
 	button := min(HEIGHT_TOOLBAR * scale, input.height)
 	needed := (2 * PALETTE_TEXT_INSET + ICON_BUTTON + SPACE_3 + HEIGHT_TOOLBAR + 3 * SPACE_6) * scale
-	if input.width >= needed {
+	if !p.list_mode && input.width >= needed {
 		right := input.x + input.width - (PALETTE_TEXT_INSET - SPACE_2) * scale
 		l.keys = {right - button, input.y + (input.height - button) / 2, button, button}
 	}
@@ -1694,6 +1773,8 @@ palette_key_hints :: proc(p: ^Palette, out: ^[PALETTE_HINT_CAP]Key_Hint) -> int 
 			add(out, &count, PALETTE_ACCEPT_LABEL, "", "Switch workspace")
 		case .Unassigned:
 			add(out, &count, PALETTE_ACCEPT_LABEL, "", "Assign to a command")
+		case .Item:
+			add(out, &count, PALETTE_ACCEPT_LABEL, "", "Choose")
 		}
 	}
 	if p.keys.state == .Recorded {
@@ -1701,7 +1782,7 @@ palette_key_hints :: proc(p: ^Palette, out: ^[PALETTE_HINT_CAP]Key_Hint) -> int 
 		add(out, &count, PALETTE_CANCEL_LABEL, "", "Search by text")
 		return count
 	}
-	add(out, &count, KEY_SEARCH_LABEL, "", "Search by keys")
+	if !p.list_mode {add(out, &count, KEY_SEARCH_LABEL, "", "Search by keys")}
 	add(out, &count, PALETTE_CANCEL_LABEL, "", "Close")
 	return count
 }
@@ -1781,7 +1862,9 @@ palette_draw :: proc(
 		rect  = {panel.x, l.input.y + l.input.height, panel.width, scale},
 		color = theme.border,
 	})
-	if result := draw_modes(p, list, text, theme, l, scale); result != .Ok {return result}
+	if !p.list_mode {
+		if result := draw_modes(p, list, text, theme, l, scale); result != .Ok {return result}
+	}
 	if render.push_layer(list, l.input) != .None { return .Ok }
 	padding := PALETTE_TEXT_INSET * scale
 	search := render.Rect{l.input.x + padding, l.input.y, ICON_BUTTON * scale, l.input.height}
@@ -1795,6 +1878,7 @@ palette_draw :: proc(
 		}
 	} else if box.rect.width > 1 {
 		placeholder := PALETTE_MODES[p.mode].placeholder
+		if p.list_mode {placeholder = p.list_title}
 		buffer: [128]u8
 		if chord, assigning := p.assign.?; assigning {
 			label: [commands.SHORTCUT_TEXT_CAP]u8

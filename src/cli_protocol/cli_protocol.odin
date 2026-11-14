@@ -1,6 +1,7 @@
 package cli_protocol
 
 import "aio:control"
+import "core:encoding/json"
 import "core:fmt"
 import "core:strings"
 
@@ -43,7 +44,12 @@ PANE_READ_COMMAND :: "pane.read"
 // The command whose reply is AIODev's build line; aio's `version` asks it, and aio asks it before
 // each command to warn when the two builds differ.
 VERSION_COMMAND :: "app.version"
+// The command `aio events` sends: AIODev acknowledges it, then streams one JSON line per event on the
+// same connection until either side closes it.
+EVENTS_COMMAND :: "app.events"
 APP_NAME :: "AIODev"
+FIELDS_OPTION :: "--fields"
+ORIGIN_OPTION :: "--origin"
 
 // The build every executable embeds. build.ps1 passes the same values to the app and to aio in one
 // build run, so the two report the same build exactly when they came from it. A direct odin build,
@@ -166,6 +172,20 @@ Pane_Report :: struct {
 	grid:           Maybe(Grid) `json:"grid,omitempty"`,
 }
 
+// The foreground program selected by pane.list, and its parent chain within the pane's process tree.
+Process_Report :: struct {
+	name:      string,
+	pid:       u32,
+	path:      string `json:"path,omitempty"`,
+	directory: string `json:"directory,omitempty"`,
+	ancestors: []Process_Ancestor,
+}
+
+Process_Ancestor :: struct {
+	name: string,
+	pid:  u32,
+}
+
 // A pane's place in DIPs from the top left of its window's pane area, as the split view lays out its
 // tab; zoom and fill do not change it, and a floating pane keeps its own place.
 Rect :: struct {
@@ -202,6 +222,69 @@ Workspace_Report :: struct {
 	tabs:    int,
 	// Whether its window has keyboard focus.
 	focused: bool,
+}
+
+// A temporary snapshot of the application's windows, tab trees and terminal pane reports.
+View_Report :: struct {
+	revision:   u64,
+	windows:    []View_Window_Report,
+	workspaces: []View_Workspace_Report,
+	panes:      []Pane_Report,
+}
+
+View_Window_Report :: struct {
+	id:        u64,
+	focused:   bool,
+	workspace: u32,
+	linked:    bool,
+}
+
+View_Workspace_Report :: struct {
+	id:       u32,
+	name:     string,
+	// Whether the focused-or-primary window shows this workspace.
+	selected: bool,
+	tabs:     []View_Tab_Report,
+}
+
+// JSON cannot hold pointers, so the tab's tiled tree and its float trees share `nodes`, and every
+// reference to a node is its 1-based position there (Lua's indexing); 0 means none.
+View_Tab_Report :: struct {
+	id:           u32,
+	index:        int,
+	name:         string,
+	title:        string,
+	group:        u32,
+	selected:     bool,
+	focused_pane: u32,
+	// split, zoom, fill or fullscreen.
+	view:         string,
+	nodes:        []View_Node_Report,
+	// The tiled tree; 0 when every terminal pane floats or the tab shows none.
+	root:         int,
+	floats:       []View_Float_Report,
+}
+
+// Exactly one of pane or split is set. Omitted branches collapse into their surviving child.
+View_Node_Report :: struct {
+	pane:   u32 `json:"pane,omitempty"`,
+	// right or down; ratio is the first child's share.
+	split:  string `json:"split,omitempty"`,
+	ratio:  f32 `json:"ratio,omitempty"`,
+	// Positions in the tab's nodes, set for a split.
+	first:  int `json:"first,omitempty"`,
+	second: int `json:"second,omitempty"`,
+}
+
+View_Float_Report :: struct {
+	// x, y, width and height, as shares of the window's floating work area.
+	bounds:    [4]f32,
+	// The same rectangle in terminal cells when a window shows the tab.
+	cells:     Maybe([4]int) `json:"cells,omitempty"`,
+	stack:     u64,
+	minimized: bool,
+	// The float's tree, a position in the tab's nodes.
+	root:      int,
 }
 
 // One option of a command as help reports it.
@@ -264,8 +347,12 @@ Reply_Json :: struct {
 	error:      string `json:"error,omitempty"`,
 	pane:       Maybe(u32) `json:"pane,omitempty"`,
 	text:       string `json:"text,omitempty"`,
+	result:     json.Value `json:"result,omitempty"`,
 	panes:      []Pane_Report `json:"panes,omitempty"`,
 	commands:   []Command_Report `json:"commands,omitempty"`,
 	tabs:       []Tab_Report `json:"tabs,omitempty"`,
 	workspaces: []Workspace_Report `json:"workspaces,omitempty"`,
+	process:    Maybe(Process_Report) `json:"process,omitempty"`,
+	prompt:     Maybe(u64) `json:"prompt,omitempty"`,
+	view:       Maybe(View_Report) `json:"view,omitempty"`,
 }
