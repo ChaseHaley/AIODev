@@ -21,7 +21,7 @@ fake_command :: proc(data: rawptr, pane: u32, name, fields, origin: string) -> s
 	switch name {
 	case "pane.split": return `{"ok":true,"status":0,"pane":7}`
 	case "pane.read": return `{"ok":true,"status":0,"text":"hello\n"}`
-	case "app.view": return `{"ok":true,"status":0,"view":{"root":{"pane":7}}}`
+	case "app.view": return VIEW_REPLY
 	case "edit.clipboard_read", "settings.get": return `{"ok":true,"status":0,"text":"value"}`
 	case "my_action": return `{"ok":true,"status":0,"result":{"answer":42}}`
 	case "app.select", "app.input": return `{"ok":true,"status":0,"prompt":21}`
@@ -82,7 +82,7 @@ commands_share_conversion_and_lazy_namespaces :: proc(t: ^testing.T) {
 		local value, message, status = aio.run('bad')
 		assert(value == nil and message == 'no such pane' and status == 3)
 		assert(aio.invoke('my_action', {x=1}).answer == 42)
-		assert(aio.view().root.pane == 7)
+		assert(aio.view().workspaces[1].tabs[1].root.first.pane == 7)
 		assert(aio.clipboard.get() == 'value')
 		assert(aio.clipboard.set('copied'))
 		assert(aio.settings.get('font.size') == 'value')
@@ -103,6 +103,36 @@ commands_share_conversion_and_lazy_namespaces :: proc(t: ^testing.T) {
 	testing.expect_value(t, fake.calls[9].name, "app.notify")
 	testing.expect_value(t, fake.calls[9].fields, `{"text":"Body","title":"Title"}`)
 	testing.expect_value(t, fake.logs, 1)
+}
+
+// One tab with a right split of panes 7 and 8, and pane 9 floating, in app.view's flat form.
+VIEW_REPLY ::
+	`{"ok":true,"status":0,"view":{"revision":1,"windows":[],"panes":[],"workspaces":[{"id":1,` +
+	`"name":"Main","selected":true,"tabs":[{"id":1,"index":0,"name":"T","nodes":[` +
+	`{"split":"right","ratio":0.25,"first":2,"second":3},{"pane":7},{"pane":8},{"pane":9}],"root":1,` +
+	`"floats":[{"bounds":[0,0,0.5,0.5],"stack":1,"minimized":false,"root":4}]},` +
+	`{"id":2,"index":1,"name":"Empty","nodes":[],"root":0,"floats":[]}]}]}}`
+
+@(test)
+view_nests_the_flat_node_list :: proc(t: ^testing.T) {
+	fake: Fake
+	defer fake_destroy(&fake)
+	state := new_state(t, &fake, .Config)
+	if state == nil {return}
+	defer scripting.destroy(state)
+	check(t, state, `
+		local view = assert(aio.view())
+		local tab = view.workspaces[1].tabs[1]
+		assert(tab.nodes == nil)
+		local root = tab.root
+		assert(root.split == 'right' and root.ratio == 0.25 and root.pane == nil)
+		assert(root.first.pane == 7 and root.first.split == nil and root.first.first == nil)
+		assert(root.second.pane == 8)
+		assert(#tab.floats == 1 and tab.floats[1].root.pane == 9 and tab.floats[1].stack == 1)
+		local empty = view.workspaces[1].tabs[2]
+		assert(empty.root == nil and empty.nodes == nil and #empty.floats == 0)
+		assert(view.revision == 1)
+	`)
 }
 
 @(test)

@@ -120,7 +120,38 @@ local function field(name, fields, key)
 end
 
 function aio.invoke(name, args) return field(name, args, 'result') end
-function aio.view() return field('app.view', nil, 'view') end
+
+-- app.view lists each tab's nodes flat, because its JSON cannot hold pointers: roots and split
+-- children are 1-based positions in the tab's nodes, 0 for none. Lua gets the trees nested, a leaf
+-- as {pane} and a split as {split, ratio, first, second}, and no nodes list.
+local function nest_view(view)
+	if type(view) ~= 'table' or type(view.workspaces) ~= 'table' then return view end
+	for _, workspace in ipairs(view.workspaces) do
+		for _, tab in ipairs(type(workspace.tabs) == 'table' and workspace.tabs or {}) do
+			local nodes = type(tab.nodes) == 'table' and tab.nodes or {}
+			-- depth bounds a malformed list whose positions loop back.
+			local function node(index, depth)
+				local raw = type(index) == 'number' and depth <= #nodes and nodes[index]
+				if type(raw) ~= 'table' then return nil end
+				if raw.split == nil then return {pane = raw.pane} end
+				return {split = raw.split, ratio = raw.ratio or 0, first = node(raw.first, depth + 1),
+					second = node(raw.second, depth + 1)}
+			end
+			tab.root = node(tab.root, 1)
+			for _, float in ipairs(type(tab.floats) == 'table' and tab.floats or {}) do
+				float.root = node(float.root, 1)
+			end
+			tab.nodes = nil
+		end
+	end
+	return view
+end
+
+function aio.view()
+	local view, message, status = field('app.view', nil, 'view')
+	if view == nil then return nil, message, status end
+	return nest_view(view)
+end
 
 function aio.notify(opts)
 	if type(opts) ~= 'table' then return nil, 'notify expects a table' end
@@ -407,6 +438,216 @@ function aio.system(argv, opts, on_exit)
 	return p
 end
 
+-- Declarations ----------------------------------------------------------------------------
+
+-- init.lua's top level, and the files it requires, declare actions, key operations and modes.
+-- state.odin reads them through runtime.declarations once the load returns. A bad call is
+-- skipped and reported rather than raised, so one typo does not cost the rest of the file.
+local getinfo = debug.getinfo
+local declaring = false
+local declared = {serial = 0, actions = {}, keys = {}, modes = {}}
+-- One function keeps one registry reference, so the host can match an unbind to its bind.
+local function_refs = {}
+local ARG_TYPES = {string = true, number = true, integer = true, boolean = true, object = true, array = true,
+	any = true}
+
+-- The first frame outside this file is the script's call, even through pcall or a tail call.
+local function caller()
+	for level = 2, 64 do
+		local info = getinfo(level, 'Sl')
+		if not info then break end
+		if info.what ~= 'C' and info.currentline > 0 and info.source ~= '@aio/runtime.lua' then
+			return info.source:sub(1, 1) == '@' and info.source:sub(2) or info.short_src, info.currentline
+		end
+	end
+	return '?', 0
+end
+
+local function declaration(fn)
+	if config.script or not declaring then error('aio.' .. fn .. ' works only while init.lua loads', 3) end
+	local file, line = caller()
+	return {file = file, line = line}
+end
+
+local function skip(fn, at, message)
+	message = 'aio.' .. fn .. ': ' .. message
+	report(at.file .. ':' .. at.line .. ': ' .. message)
+	return nil, message
+end
+
+local function ref(fn)
+	local id = function_refs[fn]
+	if not id then
+		id = native.ref(fn)
+		function_refs[fn] = id
+	end
+	return id
+end
+
+local function record(list, entry)
+	list[#list + 1] = entry
+	declared.serial = declared.serial + 1
+	return true
+end
+
+-- Fields travel as a JSON object, so an array or a value JSON cannot hold is refused here.
+local function fields_text(args)
+	if type(args) ~= 'table' then return nil, 'args must be a table' end
+	local text, message = json.encode(args)
+	if not text then return nil, 'args: ' .. message end
+	if text:sub(1, 1) ~= '{' then return nil, 'args must be a table of named values' end
+	return text
+end
+
+-- A table with a type key is a JSON Schema kept verbatim. Anything else maps names to type words,
+-- or to a per-argument schema (a table with a type key), which is kept verbatim too.
+local function action_args(args)
+	if args == nil then return '' end
+	if type(args) ~= 'table' then return nil, 'args must be a table' end
+	if args.type == nil then
+		for name, word in pairs(args) do
+			if type(name) ~= 'string' then return nil, 'args names must be strings' end
+			local schema = type(word) == 'table' and word.type ~= nil
+			if not schema and (type(word) ~= 'string' or not ARG_TYPES[(word:gsub('%?$', ''))]) then
+				return nil, 'args.' .. name .. ' must be string, number, integer, boolean, object, array or any, '
+					.. 'with a trailing ? when optional, or a schema table with a type key'
+			end
+		end
+	end
+	return fields_text(args)
+end
+
+local function keywords_text(value)
+	if value == nil then return '' end
+	if type(value) == 'string' then return value end
+	if type(value) ~= 'table' then return nil end
+	local words = {}
+	for i, word in ipairs(value) do
+		if type(word) ~= 'string' then return nil end
+		words[i] = word
+	end
+	return table.concat(words, ' ')
+end
+
+function aio.action(spec)
+	local at = declaration('action')
+	if type(spec) ~= 'table' then return skip('action', at, 'expects a table') end
+	local name = spec.name
+	if type(name) ~= 'string' or not name:find('^[a-z0-9_]+$') then
+		return skip('action', at, 'name ' .. tostring(name) .. ' must use lowercase letters, digits and _')
+	end
+	if type(spec.title) ~= 'string' or spec.title == '' then
+		return skip('action', at, name .. ': title must be a nonempty string')
+	end
+	if type(spec.run) ~= 'function' then return skip('action', at, name .. ': run must be a function') end
+	if spec.description ~= nil and type(spec.description) ~= 'string' then
+		return skip('action', at, name .. ': description must be a string')
+	end
+	if spec.category ~= nil and type(spec.category) ~= 'string' then
+		return skip('action', at, name .. ': category must be a string')
+	end
+	if spec.repeats ~= nil and type(spec.repeats) ~= 'boolean' then
+		return skip('action', at, name .. ': repeats must be a boolean')
+	end
+	local keywords = keywords_text(spec.keywords)
+	if not keywords then
+		return skip('action', at, name .. ': keywords must be a string or a list of strings')
+	end
+	local args, message = action_args(spec.args)
+	if not args then return skip('action', at, name .. ': ' .. message) end
+	local actions = declared.actions
+	for i, earlier in ipairs(actions) do
+		if earlier.name == name then
+			report(at.file .. ':' .. at.line .. ': aio.action: ' .. name .. ' was already declared at ' .. earlier.file
+				.. ':' .. earlier.line .. '; this later declaration replaces it')
+			table.remove(actions, i)
+			break
+		end
+	end
+	return record(actions, {
+		name = name, title = spec.title, description = spec.description or '', category = spec.category or '',
+		keywords = keywords, args = args, repeats = spec.repeats == true, ref = ref(spec.run),
+		file = at.file, line = at.line,
+	})
+end
+
+-- Returns the key entry, or nil and the message. args are allowed only with a name target.
+local function key_entry(fn, at, op, key, target, args)
+	if type(key) ~= 'string' or key == '' then return skip(fn, at, 'key must be a nonempty string') end
+	local entry = {op = op, key = key, command = '', fields = '', ref = 0, file = at.file, line = at.line}
+	if type(target) == 'function' then
+		if args ~= nil then return skip(fn, at, key .. ': args need a command or action name, not a function') end
+		entry.fn, entry.ref = target, ref(target)
+	elseif type(target) == 'string' and target ~= '' then
+		entry.command = target
+		if args ~= nil then
+			local text, message = fields_text(args)
+			if not text then return skip(fn, at, key .. ': ' .. message) end
+			entry.fields = text
+		end
+	elseif target ~= nil or op == 'bind' then
+		return skip(fn, at, key .. ': target must be a command or action name, or a function')
+	end
+	return entry
+end
+
+function aio.bind(key, target, args)
+	local at = declaration('bind')
+	local entry, message = key_entry('bind', at, 'bind', key, target, args)
+	if not entry then return nil, message end
+	return record(declared.keys, entry)
+end
+
+function aio.unbind(key, target)
+	local at = declaration('unbind')
+	local entry, message = key_entry('unbind', at, 'unbind', key, target, nil)
+	if not entry then return nil, message end
+	return record(declared.keys, entry)
+end
+
+function aio.mode(name, opts)
+	local at = declaration('mode')
+	if type(name) ~= 'string' or not name:find('^[a-z0-9_%-]+$') then
+		return skip('mode', at, 'name ' .. tostring(name) .. ' must use lowercase letters, digits, _ and -')
+	end
+	if opts ~= nil and type(opts) ~= 'table' then
+		return skip('mode', at, name .. ': options must be a table')
+	end
+	local exclusive = opts and opts.exclusive
+	if exclusive ~= nil and type(exclusive) ~= 'boolean' then
+		return skip('mode', at, name .. ': exclusive must be a boolean')
+	end
+	return record(declared.modes, {name = name, exclusive = exclusive == true, file = at.file, line = at.line})
+end
+
+-- Splits `mode/key` the way commands.parse_sequence does: only a valid mode name before the first
+-- slash names a mode, since a slash is also a key.
+local function split_mode(text)
+	local trimmed = text:match('^%s*(.-)%s*$')
+	local mode, key = trimmed:match('^([a-z0-9_%-]+)/(.*)$')
+	if mode then return mode, key end
+	return nil, trimmed
+end
+
+function aio.bindings(filter)
+	local at = declaration('bindings')
+	if filter ~= nil and type(filter) ~= 'table' then return skip('bindings', at, 'filter must be a table') end
+	filter = filter or {}
+	local result = {}
+	for _, entry in ipairs(declared.keys) do
+		local mode, key = split_mode(entry.key)
+		local action = entry.command ~= '' and entry.command or nil
+		if (filter.key == nil or filter.key == key) and (filter.mode == nil or filter.mode == mode)
+			and (filter.action == nil or filter.action == action) then
+			result[#result + 1] = {
+				op = entry.op, key = key, mode = mode, action = action, fn = entry.fn,
+				args = entry.fields ~= '' and json.decode(entry.fields) or nil, source = entry.file .. ':' .. entry.line,
+			}
+		end
+	end
+	return result
+end
+
 -- Host entry points -----------------------------------------------------------------------
 
 local runtime = {}
@@ -422,12 +663,18 @@ local function finish(ok, finished, value)
 	return true, finished, finished and value == false, encoded, ''
 end
 
--- A chunk's top level: Config refuses to yield there, and processes it starts outlive it.
+-- A chunk's top level: Config refuses to yield there, and processes it starts outlive it. Only a
+-- loading Config top level may declare; the load cannot yield, so it is over when start returns.
 function runtime.run(fn, ctx, args, loading, scoped)
 	local refuse = loading and 'while init.lua loads' or nil
+	declaring = loading and not config.script
 	local _, ok, finished, value = start(fn, ctx or context(), refuse, scoped ~= false, ctx, args)
+	declaring = false
 	return finish(ok, finished, value)
 end
+
+-- serial changes whenever a declaration is recorded, so the host knows when to read again.
+function runtime.declarations() return declared.serial, declared.actions, declared.keys, declared.modes end
 
 function runtime.call(fn, ctx, args)
 	local decoded_ctx, ctx_error = json.decode(ctx)

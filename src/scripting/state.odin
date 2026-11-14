@@ -52,6 +52,9 @@ State :: struct {
 	result_message, result_file, result_value: string,
 	errors: [dynamic]Run_Error,
 	pending_errors: [dynamic]Run_Error,
+	// The host's copy of runtime.lua's declarations, rebuilt when its serial moves.
+	declared: Declarations,
+	declared_serial: int,
 }
 
 // value is the chunk's first result as JSON, or "" when it returned nothing or is still suspended.
@@ -155,6 +158,7 @@ create :: proc(config: Config, backend: Backend, allocator := context.allocator)
 	install_native(L, "process", native_process)
 	install_native(L, "clock", native_clock)
 	install_native(L, "pause", native_pause)
+	install_native(L, "ref", native_ref)
 	if !load_module(L, #load("json.lua", string), "@aio/json.lua", 0) {return create_failed(s)}
 	lua.newtable(L)
 	lua.pushboolean(L, config.kind == .Script)
@@ -200,6 +204,7 @@ destroy :: proc(s: ^State) {
 	delete(s.errors)
 	clear_errors(s, &s.pending_errors)
 	delete(s.pending_errors)
+	declarations_free(s)
 	delete(s.result_message, s.allocator)
 	delete(s.result_file, s.allocator)
 	delete(s.result_value, s.allocator)
