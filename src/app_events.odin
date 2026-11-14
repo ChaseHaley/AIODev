@@ -115,12 +115,23 @@ EVENT_STATUS_WORDS :: [term.Program_Status_State]string {
 // are taken out of the queue first, so a consumer whose work re-enters tick delivers only what was
 // pushed after the take, and cannot free or move the list being delivered here.
 app_events_deliver :: proc(app: ^App) {
-	app_events_panes_attached(app)
-	app_events_layout_track(app)
+	app_events_settle(app)
 	batch := events.take(&app.events)
 	// Consumers receive batch.list[:] here, before the release.
 	control_cli_events(app, batch.list[:])
 	events.release(&app.events, &batch)
+}
+
+// Reports what the tick's end decides rather than the moment it happens: panes their trees now hold,
+// the arrangement, and where each window's focus came to rest. A command that switches tabs and then
+// focuses a pane there moves focus once, so no pane the window only passed through is reported.
+app_events_settle :: proc(app: ^App) {
+	app_events_panes_attached(app)
+	if app.events_focus {
+		app.events_focus = false
+		for w in app.windows {app_events_focus(app, w)}
+	}
+	app_events_layout_track(app)
 }
 
 // Reports layout.changed when a listed workspace's arrangement differs from the last tick's: the
@@ -200,12 +211,11 @@ app_events_mix :: proc(digest, value: u64) -> u64 {
 
 // Focus brackets also run when relayout re-enters the same pane. Remember identities independently
 // of the bracket's temporary Left state, so these transitions do not invent focus changes. A window
-// still Preparing is nobody's yet; window_commit reports it once it shows. A linked window shows a
-// private view of a pane, so only its pane focus is reported.
+// still Preparing is nobody's yet; window_commit marks it once it shows. A linked window shows a
+// private view of a pane, so only its pane focus is reported. Runs from app_events_settle, after the
+// panes a window may focus as they open are announced as created.
 app_events_focus :: proc(app: ^App, w: ^Window) {
 	if w.phase == .Preparing || w.workspace == nil {return}
-	// A pane focused as it opens is announced as created before it is announced as focused.
-	app_events_panes_attached(app)
 	next: App_Event_Focus
 	if !window_linked(w) {
 		next.workspace = w.workspace.id

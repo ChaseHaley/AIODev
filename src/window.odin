@@ -263,7 +263,7 @@ window_commit :: proc(app: ^App, w: ^Window) -> bool {
 	w.phase, w.dirty = .Shown, true
 	// A preview a drop discards is never announced, so only a window that shows is created.
 	events.push(&app.events, .Window_Created, Event_Window{w.id})
-	app_events_focus(app, w)
+	app.events_focus = true
 	return true
 }
 
