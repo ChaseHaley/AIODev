@@ -212,6 +212,8 @@ control_cli_reply :: proc(outcome: Outcome, json_output: bool) -> control.Respon
 			document.commands = ([]cli_protocol.Command_Report)(payload)
 		case Outcome_Usage:
 			document.commands = []cli_protocol.Command_Report{cli_protocol.Command_Report(payload)}
+		case Outcome_Prompt:
+			document.prompt = payload.prompt
 		}
 		builder := strings.builder_make(context.temp_allocator)
 		options: json.Marshal_Options
@@ -238,6 +240,8 @@ control_cli_reply :: proc(outcome: Outcome, json_output: bool) -> control.Respon
 		switch payload in outcome.payload {
 		case Outcome_Created:
 			fmt.sbprintf(&b, "%d", payload.pane)
+		case Outcome_Prompt:
+			fmt.sbprintf(&b, "%d", payload.prompt)
 		case Outcome_Usage:
 			cli_protocol.command_report_write(&b, cli_protocol.Command_Report(payload))
 		case Outcome_Catalogue:

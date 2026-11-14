@@ -7,7 +7,7 @@ import "aio:ui"
 // The dialog or the chip's name field shows.
 rename_shown :: proc(w: ^Window) -> bool {
 	#partial switch _ in w.overlay {
-	case Overlay_Rename, Overlay_Chip_Name, Overlay_Group_Name: return true
+	case Overlay_Rename, Overlay_Input, Overlay_Chip_Name, Overlay_Group_Name: return true
 	}
 	return false
 }
@@ -56,6 +56,8 @@ rename_finish :: proc(app: ^App, w: ^Window, save: bool) {
 	#partial switch &current in w.overlay {
 	case Overlay_Rename:
 		if save {_ = rename_target_commit(app, current.target, ui.field_string(&w.rename), .Automatic_Title)}
+	case Overlay_Input:
+		if save {script_prompt_accept_text(app, w, ui.field_string(&w.rename))}
 	case Overlay_Chip_Name:
 		if save && !chip_name_save(app, w, current.workspace) {
 			current.error, w.dirty = true, true
@@ -168,7 +170,8 @@ workspace_name_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 
 rename_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 	dialog, shown := w.overlay.(Overlay_Rename)
-	if !shown {return workspace_name_draw(app, w)}
+	_, asking := w.overlay.(Overlay_Input)
+	if !shown && !asking {return workspace_name_draw(app, w)}
 	s := w.scale
 	r := rename_rect(app, w)
 	pad := ui.DIALOG_PADDING * s
@@ -181,6 +184,9 @@ rename_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 	_, tab := dialog.target.(Rename_Tab_Target)
 	title := tab ? "Rename tab" : "Rename pane"
 	empty, advice := "Automatic title", "Enter saves · Esc cancels · Empty restores automatic titles"
+	if prompt, ok := w.overlay.(Overlay_Input); ok {
+		title, empty, advice = prompt.title, "", "Enter accepts · Esc cancels"
+	}
 	if result := ui.draw_text(
 		&heading,
 		&w.list,

@@ -98,7 +98,7 @@ handle_event :: proc(app: ^App, event: platform.Event) {
 
 // A key, typed text or the wheel, on its way to the surface that takes the window's input.
 @(private = "file")
-Overlay_Input :: union {
+Overlay_Input_Event :: union {
 	Overlay_Key,
 	Overlay_Text,
 	Overlay_Wheel,
@@ -144,7 +144,7 @@ OVERLAY_FIRST :: bit_set[Overlay_Kind] {
 // Each surface's keys, text and wheel side by side. Keys a surface takes have their release
 // suppressed, except a confirmation's, which suppresses its own.
 @(private = "file")
-overlay_input :: proc(app: ^App, w: ^Window, kind: Overlay_Kind, event: Overlay_Input) {
+overlay_input :: proc(app: ^App, w: ^Window, kind: Overlay_Kind, event: Overlay_Input_Event) {
 	switch kind {
 	case .None:
 	case .Workspace_Picker:

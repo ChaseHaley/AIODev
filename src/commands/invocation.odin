@@ -33,6 +33,8 @@ Argument :: enum u8 {
 	Keys,
 	Title,
 	Once,
+	Items,
+	Details,
 }
 Arguments :: bit_set[Argument;u32]
 
@@ -56,6 +58,7 @@ Invocation :: struct {
 	scrollback, unwrap:                      bool,
 	keys, title:                            string,
 	once:                                    bool,
+	items, details:                          string,
 }
 
 Parse_Error :: struct {
@@ -214,6 +217,14 @@ argument_grammar := [Argument]struct {
 		{"the notification's title", "AIODev", `--title "Build finished"`},
 	},
 	.Once      = {"--once", "", {"leaves the mode after one completed binding", "off", "--once"}},
+	.Items = {
+		"--items", " <json>",
+		{"the selectable strings as a JSON array", "none (required)", `--items '["Build","Test"]'`},
+	},
+	.Details = {
+		"--details", " <json>",
+		{"secondary text for each item as a JSON array of strings", "none", `--details '["Compile","Run tests"]'`},
+	},
 }
 #assert(layout.SPLIT_SHARE_MIN == 0.05 && layout.SPLIT_SHARE_MAX == 0.95)
 #assert(SPLIT_DEFAULT.direction == .Right && SPLIT_DEFAULT.ratio == 0.5)
@@ -400,6 +411,10 @@ parse_invocation :: proc(
 			result.keys = value
 		case .Title:
 			result.title = value
+		case .Items:
+			result.items = value
+		case .Details:
+			result.details = value
 		case .Directory, .Name, .Profile, .Tab_Name, .Workspace, .Command_File, .Text_File:
 			if value == "" {return {}, {option, "supply a nonempty value"}}
 			#partial switch argument {

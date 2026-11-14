@@ -35,6 +35,7 @@ Outcome :: struct {
 		Outcome_Usage,
 		Outcome_Layout,
 		Outcome_Process,
+		Outcome_Prompt,
 	},
 }
 Outcome_Created :: struct {pane: u32}
@@ -51,6 +52,7 @@ Outcome_Layout :: distinct []cli_protocol.Pane_Report
 Outcome_Process :: distinct cli_protocol.Process_Report
 
 Runtime_Runner :: #type proc(app: ^App, ctx: Command_Context, invocation: commands.Invocation) -> Outcome
+Outcome_Prompt :: struct {prompt: u64}
 
 // A pane a control invocation acts on, with the identity mutation needs.
 Pane_Target :: struct {
