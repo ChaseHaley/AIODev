@@ -364,7 +364,10 @@ stream_open :: proc(host: ^Script_Host) {
 		return
 	}
 	stream := new(Event_Stream)
-	stream.client, stream.wake = client, exec_wake
+	// Separate stores: a multi-assignment loads the 8 KiB Client as one LLVM value, which -o:speed
+	// splits into thousands of byte-sized values and spends minutes on.
+	stream.client = client
+	stream.wake = exec_wake
 	stream.lines = make([dynamic]string, context.allocator)
 	stream.reader = thread.create_and_start_with_poly_data(stream, stream_read)
 	host.stream = stream
