@@ -3,6 +3,8 @@ package control_test
 import "aio:control"
 import "core:fmt"
 import "core:os"
+import "core:path/filepath"
+import "core:strings"
 import "core:testing"
 import "core:thread"
 import w "core:sys/windows"
@@ -104,6 +106,17 @@ server_identity_accepts_the_expected_process_and_rejects_a_decoy :: proc(t: ^tes
 		"wrong creation time",
 	)
 	expect_identity(t, &client, {}, .Invalid_Argument, "empty identity")
+	// The folder check accepts the server's own folder, however it is spelled, and nothing else.
+	folder := filepath.dir(image)
+	testing.expect_value(t, control.verify_server_folder(&client, folder), control.Error.None)
+	slashed, _ := strings.replace_all(folder, `\`, "/", context.temp_allocator)
+	trailing := fmt.tprintf("%s/", strings.to_upper(slashed, context.temp_allocator))
+	testing.expect_value(t, control.verify_server_folder(&client, trailing), control.Error.None)
+	parent := filepath.dir(folder)
+	testing.expect_value(t, control.verify_server_folder(&client, parent), control.Error.Impostor)
+	windows := control.verify_server_folder(&client, `C:\Windows\System32`)
+	testing.expect_value(t, windows, control.Error.Impostor)
+	testing.expect_value(t, control.verify_server_folder(&client, ""), control.Error.Invalid_Argument)
 	thread.join(worker)
 	joined = true
 	testing.expect(

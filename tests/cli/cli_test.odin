@@ -227,3 +227,23 @@ event_lines_print_name_then_fields :: proc(t: ^testing.T) {
 		testing.expectf(t, !valid, "%q should not parse", line)
 	}
 }
+
+// aio hands an unverified pipe server's call to AIODEV_CLI only when that names another aio, and never
+// from an aio that was itself handed a call.
+@(test)
+delegation_targets_only_another_aio :: proc(t: ^testing.T) {
+	own := `C:\Tools\AIODev\aio.exe`
+	other := `D:\Dev\AIODev\build\aio.exe`
+	testing.expect_value(t, cli.delegation_target(own, other, false, context.temp_allocator), other)
+	forward := cli.delegation_target(own, "D:/Dev/AIODev/build/aio.exe", false, context.temp_allocator)
+	testing.expect_value(t, forward, other)
+	testing.expect_value(t, cli.delegation_target(own, other, true, context.temp_allocator), "")
+	testing.expect_value(t, cli.delegation_target(own, "", false, context.temp_allocator), "")
+	testing.expect_value(t, cli.delegation_target(own, own, false, context.temp_allocator), "")
+	upper := cli.delegation_target(own, `c:\TOOLS\aiodev\AIO.EXE`, false, context.temp_allocator)
+	testing.expect_value(t, upper, "")
+	slashes := cli.delegation_target(own, "C:/Tools/AIODev/aio.exe", false, context.temp_allocator)
+	testing.expect_value(t, slashes, "")
+	dotted := cli.delegation_target(own, `C:\Tools\AIODev\..\AIODev\aio.exe`, false, context.temp_allocator)
+	testing.expect_value(t, dotted, "")
+}

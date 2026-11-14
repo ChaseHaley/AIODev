@@ -87,6 +87,8 @@ Exit    %d ok, %d failed, %d bad command line, %d pane missing or ambiguous,
         %d AIODev unreachable, %d control pipe server unverified, %d interrupted.
 
 Turn on "Command line control" in AIODev's Settings (control.enabled) first.
+aio talks only to the AIODev beside it. In a pane of an AIODev elsewhere, it hands the call to the aio
+that pane names in AIODEV_CLI; outside its panes, use the aio beside that AIODev.
 `
 
 WAIT_DEFAULT_TIMEOUT_MS :: 30000

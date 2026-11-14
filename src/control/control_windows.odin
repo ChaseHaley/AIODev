@@ -805,25 +805,53 @@ verify_server :: proc(client: ^Client, expected: Server_Identity) -> Error {
 	return .None
 }
 
+// Checks that the connected pipe's server runs an executable that is a file directly in `folder`,
+// whatever its name, so a client can trust the AIODev beside another aio. A server elsewhere is Impostor.
+@(require_results)
+verify_server_folder :: proc(client: ^Client, folder: string) -> Error {
+	if client.pipe == nil {return .Closed}
+	if folder == "" {return .Invalid_Argument}
+	handle := w.OpenProcess(w.PROCESS_QUERY_LIMITED_INFORMATION, false, client.process_id)
+	if handle == nil {
+		log.errorf("control: OpenProcess(%d) failed: %v", client.process_id, w.GetLastError())
+		return .System
+	}
+	defer close_handle(&handle)
+	actual, actual_ok := process_image(handle)
+	if !actual_ok {return .System}
+	want, want_ok := normalized_image_path(folder)
+	if !want_ok {return .System}
+	want = strings.trim_right(want, `\`)
+	separator := strings.last_index_byte(actual, '\\')
+	if separator < 0 || !strings.equal_fold(actual[:separator], want) {return .Impostor}
+	return .None
+}
+
 @(private, require_results)
 process_image_matches :: proc(handle: w.HANDLE, expected: string) -> bool {
+	actual, actual_ok := process_image(handle)
+	if !actual_ok {return false}
+	want, want_ok := normalized_image_path(expected)
+	if !want_ok {return false}
+	return strings.equal_fold(actual, want)
+}
+
+// The process's executable as normalized_image_path gives it; temporary.
+@(private, require_results)
+process_image :: proc(handle: w.HANDLE) -> (string, bool) {
 	buffer: [32768]u16
 	size := u32(len(buffer))
 	if !bool(QueryFullProcessImageNameW(handle, 0, raw_data(buffer[:]), &size)) {
 		log.errorf("control: QueryFullProcessImageNameW failed: %v", w.GetLastError())
-		return false
+		return "", false
 	}
 	text: [131072]u8
 	image := w.utf16_to_utf8(text[:], buffer[:size])
 	if image == "" {
 		log.errorf("control: WideCharToMultiByte failed: %v", w.GetLastError())
-		return false
+		return "", false
 	}
-	actual, actual_ok := normalized_image_path(image)
-	if !actual_ok {return false}
-	want, want_ok := normalized_image_path(expected)
-	if !want_ok {return false}
-	return strings.equal_fold(actual, want)
+	return normalized_image_path(image)
 }
 
 @(private, require_results)

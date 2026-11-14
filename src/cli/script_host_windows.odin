@@ -65,6 +65,8 @@ exec_run :: proc(o: Options, pipe, caller: string) -> cli_protocol.Status {
 		fmt.eprintfln("aio: %s; use aio help exec", problem)
 		return .Usage
 	}
+	// The script reads stdin and runs Lua before its first command reaches AIODev.
+	delegate_before_acting(pipe)
 	// The loop frees the temporary allocator; the state reads args only while it is created, but
 	// owning it keeps that independent of where create happens.
 	args := strings.clone(args_text)
