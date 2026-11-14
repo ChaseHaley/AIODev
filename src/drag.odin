@@ -148,6 +148,9 @@ Pane_Place :: enum u8 {
 	Swap,
 	// In a new tab of the window. The pane's own tab, when it is that tab's only pane, only moves to the end.
 	New_Tab,
+	// Along the `direction` edge of `target`, a split holding the pane in its own tree: a keyboard move's
+	// step outward (layout.step_plan), which no drag makes.
+	Region,
 }
 
 // A pane landing in `window`, which shows `tab`: the plan the outline measures and the release carries out.

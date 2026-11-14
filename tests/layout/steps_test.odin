@@ -155,3 +155,137 @@ rotate_split_turns_the_nearest_split_a_quarter :: proc(t: ^testing.T) {
 	testing.expect(t, !layout.rotate_split(&l, f))
 	testing.expect(t, !layout.rotate_split(&l, layout.Node_Id(99)))
 }
+
+// One keyboard move of the pane showing `id` toward `direction`, as pane_move_toward makes it within one
+// window: the plan's step, or for a neighbour in the row, passing it or joining it as step_passes says.
+// Returns whether anything moved.
+@(private = "file")
+step :: proc(l: ^layout.Layout, id: u32, direction: layout.Direction) -> bool {
+	node := layout.find_content(l, terminal(id))
+	switch plan in layout.step_plan(l, node, direction) {
+	case layout.Step_Beside:
+		_, moved := layout.move_pane(l, node, plan.target, direction)
+		return moved
+	case layout.Step_Region:
+		_, moved := layout.dock_pane(l, node, direction, plan.region)
+		return moved
+	case layout.Step_Neighbour:
+		rects := make([dynamic]layout.Pane_Rect, context.temp_allocator)
+		layout.compute(l, AREA, 0, &rects)
+		target := layout.focus_direction(rects[:], node, direction)
+		if target == node {return false}
+		side := layout.step_passes(l, node, target, direction) ? direction : layout.opposite(direction)
+		_, moved := layout.move_pane(l, node, target, side)
+		return moved
+	case nil:
+	}
+	return false
+}
+
+// A column of three: A over the top half, B and C a quarter each below.
+@(private = "file")
+column_of_three :: proc(t: ^testing.T, l: ^layout.Layout, axis: layout.Axis) {
+	testing.expect_value(t, layout.init(l, terminal(1)), nil)
+	b, _ := layout.split(l, l.root, axis, 0.5, terminal(2))
+	_, _ = layout.split(l, b, axis, 0.5, terminal(3))
+}
+
+// The owner's column (WORK-477): C moving right first turns beside B, so A spans the top and B and C share
+// the bottom; B moving right then passes C; moving right again, at the end of its row, docks along the
+// tab's right edge at full height; and a fourth press has nowhere left to go.
+@(test)
+a_move_from_a_column_turns_beside_then_passes_then_docks :: proc(t: ^testing.T) {
+	l: layout.Layout
+	defer layout.destroy(&l)
+	column_of_three(t, &l, .Vertical)
+	testing.expect_value(t, placed(&l, 3), layout.Rect{0, 300, 400, 100})
+	testing.expect(t, step(&l, 3, .Right))
+	testing.expect_value(t, placed(&l, 1), layout.Rect{0, 0, 400, 200})
+	testing.expect_value(t, placed(&l, 2), layout.Rect{0, 200, 200, 200})
+	testing.expect_value(t, placed(&l, 3), layout.Rect{200, 200, 200, 200})
+	testing.expect(t, step(&l, 2, .Right))
+	testing.expect_value(t, placed(&l, 3), layout.Rect{0, 200, 200, 200})
+	testing.expect_value(t, placed(&l, 2), layout.Rect{200, 200, 200, 200})
+	testing.expect(t, step(&l, 2, .Right))
+	testing.expect_value(t, placed(&l, 2), layout.Rect{200, 0, 200, 400})
+	testing.expect_value(t, placed(&l, 1), layout.Rect{0, 0, 200, 200})
+	testing.expect_value(t, placed(&l, 3), layout.Rect{0, 200, 200, 200})
+	testing.expect(t, !step(&l, 2, .Right))
+	testing.expect(t, layout.step_plan(&l, layout.find_content(&l, terminal(2)), .Right) == nil)
+}
+
+// The mirror: C moving left turns beside B on its left, and from there docks along the left edge.
+@(test)
+a_move_left_from_a_column_turns_beside_on_the_left :: proc(t: ^testing.T) {
+	l: layout.Layout
+	defer layout.destroy(&l)
+	column_of_three(t, &l, .Vertical)
+	testing.expect(t, step(&l, 3, .Left))
+	testing.expect_value(t, placed(&l, 3), layout.Rect{0, 200, 200, 200})
+	testing.expect_value(t, placed(&l, 2), layout.Rect{200, 200, 200, 200})
+	testing.expect(t, step(&l, 3, .Left))
+	testing.expect_value(t, placed(&l, 3), layout.Rect{0, 0, 200, 400})
+}
+
+// The same across a row of three, A on the left half and B and C a quarter each to the right: C moving down
+// turns beside B below it, B moving down passes C, and moving down again docks along the bottom edge; up
+// from the original row puts C above B.
+@(test)
+a_move_from_a_row_turns_beside_then_passes_then_docks :: proc(t: ^testing.T) {
+	l: layout.Layout
+	defer layout.destroy(&l)
+	column_of_three(t, &l, .Horizontal)
+	testing.expect(t, step(&l, 3, .Down))
+	testing.expect_value(t, placed(&l, 1), layout.Rect{0, 0, 200, 400})
+	testing.expect_value(t, placed(&l, 2), layout.Rect{200, 0, 200, 200})
+	testing.expect_value(t, placed(&l, 3), layout.Rect{200, 200, 200, 200})
+	testing.expect(t, step(&l, 2, .Down))
+	testing.expect_value(t, placed(&l, 2), layout.Rect{200, 200, 200, 200})
+	testing.expect(t, step(&l, 2, .Down))
+	testing.expect_value(t, placed(&l, 2), layout.Rect{0, 200, 400, 200})
+	testing.expect(t, !step(&l, 2, .Down))
+
+	up: layout.Layout
+	defer layout.destroy(&up)
+	column_of_three(t, &up, .Horizontal)
+	testing.expect(t, step(&up, 3, .Up))
+	testing.expect_value(t, placed(&up, 3), layout.Rect{200, 0, 200, 200})
+	testing.expect_value(t, placed(&up, 2), layout.Rect{200, 200, 200, 200})
+}
+
+// Across a split, the pane turns beside the neighbour that touches it at the far end of the move: under a
+// row of two, C moving right joins the right one of the pair, not the left.
+@(test)
+a_move_turns_beside_the_neighbour_at_the_far_end :: proc(t: ^testing.T) {
+	l: layout.Layout
+	defer layout.destroy(&l)
+	testing.expect_value(t, layout.init(&l, terminal(1)), nil)
+	c, _ := layout.split(&l, l.root, .Vertical, 0.5, terminal(3))
+	_, _ = layout.split(&l, layout.find_content(&l, terminal(1)), .Horizontal, 0.5, terminal(2))
+	plan, beside := layout.step_plan(&l, c, .Right).(layout.Step_Beside)
+	testing.expect(t, beside)
+	testing.expect_value(t, plan.target, layout.find_content(&l, terminal(2)))
+	plan, beside = layout.step_plan(&l, c, .Left).(layout.Step_Beside)
+	testing.expect(t, beside)
+	testing.expect_value(t, plan.target, layout.find_content(&l, terminal(1)))
+}
+
+// Docking into a region keeps the rest of the tree, and refuses a region that does not hold the pane.
+@(test)
+dock_pane_docks_along_a_region :: proc(t: ^testing.T) {
+	l: layout.Layout
+	defer layout.destroy(&l)
+	column_of_three(t, &l, .Vertical)
+	b := layout.find_content(&l, terminal(2))
+	c := layout.find_content(&l, terminal(3))
+	_, refused := layout.dock_pane(&l, b, .Right, c)
+	testing.expect(t, !refused)
+	_, outside := layout.dock_pane(&l, b, .Right, layout.Node_Id(99))
+	testing.expect(t, !outside)
+	region := layout.find_content(&l, terminal(1))
+	_, pane := layout.dock_pane(&l, b, .Right, region)
+	testing.expect(t, !pane)
+	_, docked := layout.dock_pane(&l, b, .Right, l.root)
+	testing.expect(t, docked)
+	testing.expect_value(t, placed(&l, 2), layout.Rect{200, 0, 200, 400})
+}

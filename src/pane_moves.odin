@@ -39,6 +39,9 @@ pane_operation_apply :: proc(
 		return layout.INVALID_NODE, false
 	case op.place == .Swap:
 		return op.target, layout.swap(destination, op.node, op.target)
+	case op.place == .Region:
+		if !within || linked {return layout.INVALID_NODE, false}
+		return layout.dock_pane(source, op.node, op.direction, op.target)
 	case linked && within:
 		return layout.slot_take_pane(source, op.node, op.slot, op.target, op.direction, edge)
 	case linked:
@@ -99,7 +102,7 @@ pane_drop_operation :: proc(
 		}
 		return pane_transfer_operation(app, w, source, drop.tab, op)
 	}
-	if drop.place == .Swap {return {}, false}
+	if drop.place == .Swap || drop.place == .Region {return {}, false}
 	home, source_linked, allowed := pane_source_leaves(app, source, node)
 	if !allowed {return {}, false}
 	destination_linked := window_linked(w)

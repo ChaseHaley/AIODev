@@ -121,7 +121,7 @@ pane_drop_preview :: proc(
 	case .Swap:
 		for pane in w.panes {if pane.node == drop.target {return pane.rect, .Fits}}
 		return {}, .Refused
-	case .Beside, .Edge:
+	case .Beside, .Edge, .Region:
 	}
 	op, resolved := pane_drop_operation(app, source_window, grab.source, grab.node, w, drop^)
 	if !resolved {return {}, pane_drop_refusal(source_window, grab.source, w, drop^)}
@@ -474,7 +474,7 @@ pane_drag_label :: proc(drop: Pane_Drop) -> string {
 		return "Swap panes"
 	case .Edge:
 		return "Dock to workspace edge"
-	case .Beside:
+	case .Beside, .Region:
 	}
 	return "Move pane here"
 }

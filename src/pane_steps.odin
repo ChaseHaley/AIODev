@@ -7,35 +7,44 @@ import "aio:layout"
 // drag reach the same layouts and give the same refusals. A direction finds its neighbour as focus does
 // (pane_neighbour_toward), across the linked windows showing the tab.
 
-// Moves w's focused pane one step toward `direction`. It passes its neighbour that way when the two share a
-// row along it, and otherwise joins the neighbour on the side facing it, in w or in a linked window showing
-// the same tab; with no pane that way it docks along that edge of the tab. A floating pane steps only
-// within its group. Returns the window then holding the pane, or nil when nothing moved.
+// Moves w's focused pane one step toward `direction`, smallest change first (layout.step_plan). With a pane
+// that way in its row it passes that neighbour when the two share the row, and otherwise joins the
+// neighbour on the side facing it. In a split across the move it turns to sit beside its neighbour across
+// that split; at the end of its row it docks along that edge of the next region out, the whole tab last.
+// Only a pane already along the tab's edge goes on, into a linked window showing the same tab. A floating
+// pane steps only within its float. Returns the window then holding the pane, or nil when nothing moved.
 pane_move_toward :: proc(app: ^App, w: ^Window, direction: layout.Direction) -> ^Window {
 	tree := window_tree(w)
 	if tree == nil {return nil}
 	node := tree.focus
+	drop := Pane_Drop {
+		window    = w.id,
+		tab       = selected_tab(w.workspace),
+		direction = direction,
+	}
+	switch step in layout.step_plan(tree, node, direction) {
+	case layout.Step_Beside:
+		drop.place, drop.target = .Beside, step.target
+		return pane_step_drop(app, w, w, drop) ? w : nil
+	case layout.Step_Region:
+		drop.place, drop.target = .Region, step.region
+		return pane_step_drop(app, w, w, drop) ? w : nil
+	case layout.Step_Neighbour:
+	case nil:
+	}
 	floating := layout.is_floating(tree, node)
 	destination, target := pane_neighbour_toward(app, w, direction)
-	side := layout.opposite(direction)
 	switch {
-	case destination != w:
-		if floating {return nil}
-	case target == node:
-		if floating {return nil}
-		return pane_dock(app, w, direction) ? w : nil
+	case destination == w && target == node, floating && destination != w:
+		return nil
 	case floating && layout.float_root(tree, target) != layout.float_root(tree, node):
 		return nil
-	case layout.step_passes(tree, node, target, direction):
-		side = direction
+	case destination == w && layout.step_passes(tree, node, target, direction):
+	case:
+		drop.direction = layout.opposite(direction)
 	}
-	drop := Pane_Drop {
-		window    = destination.id,
-		tab       = selected_tab(destination.workspace),
-		place     = .Beside,
-		target    = target,
-		direction = side,
-	}
+	drop.window, drop.tab = destination.id, selected_tab(destination.workspace)
+	drop.place, drop.target = .Beside, target
 	return pane_step_drop(app, w, destination, drop) ? destination : nil
 }
 
