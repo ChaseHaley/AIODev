@@ -442,3 +442,21 @@ float_stack_restore :: proc(l: ^Layout) {
 		}
 	}
 }
+
+// Reorders a floating group without focusing or restoring it.
+@(require_results)
+float_restack :: proc(l: ^Layout, node: Node_Id, raise: bool) -> bool {
+	root := float_root(l, node)
+	if root == INVALID_NODE {return false}
+	floating, _ := node_float(l, root)
+	l.next_float_stack += 1
+	if raise {
+		floating.stack = l.next_float_stack
+	} else {
+		for _, i in l.nodes {
+			if other, ok := node_float(l, Node_Id(i)); ok {other.stack += 1}
+		}
+		floating.stack = 1
+	}
+	return true
+}

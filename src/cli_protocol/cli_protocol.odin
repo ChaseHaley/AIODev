@@ -221,6 +221,69 @@ Workspace_Report :: struct {
 	focused: bool,
 }
 
+// A temporary snapshot of the application's windows, tab trees and terminal pane reports.
+View_Report :: struct {
+	revision:   u64,
+	windows:    []View_Window_Report,
+	workspaces: []View_Workspace_Report,
+	panes:      []Pane_Report,
+}
+
+View_Window_Report :: struct {
+	id:        u64,
+	focused:   bool,
+	workspace: u32,
+	linked:    bool,
+}
+
+View_Workspace_Report :: struct {
+	id:       u32,
+	name:     string,
+	// Whether the focused-or-primary window shows this workspace.
+	selected: bool,
+	tabs:     []View_Tab_Report,
+}
+
+// JSON cannot hold pointers, so the tab's tiled tree and its float trees share `nodes`, and every
+// reference to a node is its 1-based position there (Lua's indexing); 0 means none.
+View_Tab_Report :: struct {
+	id:           u32,
+	index:        int,
+	name:         string,
+	title:        string,
+	group:        u32,
+	selected:     bool,
+	focused_pane: u32,
+	// split, zoom, fill or fullscreen.
+	view:         string,
+	nodes:        []View_Node_Report,
+	// The tiled tree; 0 when every terminal pane floats or the tab shows none.
+	root:         int,
+	floats:       []View_Float_Report,
+}
+
+// Exactly one of pane or split is set. Omitted branches collapse into their surviving child.
+View_Node_Report :: struct {
+	pane:   u32 `json:"pane,omitempty"`,
+	// right or down; ratio is the first child's share.
+	split:  string `json:"split,omitempty"`,
+	ratio:  f32 `json:"ratio,omitempty"`,
+	// Positions in the tab's nodes, set for a split.
+	first:  int `json:"first,omitempty"`,
+	second: int `json:"second,omitempty"`,
+}
+
+View_Float_Report :: struct {
+	// x, y, width and height, as shares of the window's floating work area.
+	bounds:    [4]f32,
+	// The same rectangle in terminal cells when a window shows the tab.
+	cells:     Maybe([4]int) `json:"cells,omitempty"`,
+	stack:     u64,
+	minimized: bool,
+	// The float's tree, a position in the tab's nodes.
+	root:      int,
+}
+
 // One option of a command as help reports it.
 Option_Report :: struct {
 	// How usage writes the option, such as `--ratio 0.05-0.95` or `<text>`.
@@ -287,4 +350,5 @@ Reply_Json :: struct {
 	tabs:       []Tab_Report `json:"tabs,omitempty"`,
 	workspaces: []Workspace_Report `json:"workspaces,omitempty"`,
 	process:    Maybe(Process_Report) `json:"process,omitempty"`,
+	view:       Maybe(View_Report) `json:"view,omitempty"`,
 }

@@ -177,6 +177,16 @@ Action :: enum u32 {
 	Mode_Enter,
 	Mode_Exit,
 	Mode_Exit_All,
+	App_View,
+	Float_Set_Bounds,
+	Float_Raise,
+	Float_Lower,
+	Float_Dock,
+	Float_Minimize,
+	Float_Restore,
+	Pane_Move,
+	Pane_Resize,
+	Pane_Set_Ratio,
 }
 
 // Everything one command is: its name and title, default shortcuts, what it does when a linked window
@@ -610,7 +620,10 @@ ACTIONS :: [Action]Command_Descriptor {
 	.Show_Commands = {"pane.commands", "Show saved commands", nil, .Local, {}},
 	.New_Floating = {
 		"pane.new_floating", "New shell float", {{.Backquote, {.Control, .Shift}}}, .Host,
-		{accepted = {.Focus, .Directory, .Name, .Profile, .Program, .Command_File}, control = .Pane},
+		{
+			accepted = {.Focus, .Directory, .Name, .Profile, .Program, .Command_File, .Bounds, .Unit},
+			control = .Pane,
+		},
 	},
 	.Float_Pane = {"pane.float", "Float or dock pane", {{.Enter, {.Control, .Alt}}}, .Refuse, {}},
 	.Minimize_Floating = {
@@ -628,7 +641,7 @@ ACTIONS :: [Action]Command_Descriptor {
 	},
 	.Layout_Apply = {
 		"layout.apply", "Apply layout file", nil, .Host,
-		{accepted = {.File, .Focus}, required = {.File}, hidden = true, control = .Pane},
+		{accepted = {.File, .Layout, .Focus}, required = {.File}, hidden = true, control = .Pane},
 	},
 	.Tab_List = {"tab.list", "List tabs", nil, .Host, {hidden = true, control = .Unnamed}},
 	.Workspace_List = {"workspace.list", "List workspaces", nil, .Host, {hidden = true, control = .Unnamed}},
@@ -669,6 +682,48 @@ ACTIONS :: [Action]Command_Descriptor {
 	},
 	.Mode_Exit = {"mode.exit", "Leave key mode", nil, .Local, {}},
 	.Mode_Exit_All = {"mode.exit_all", "Leave all key modes", nil, .Local, {}},
+	.App_View = {"app.view", "Show layout view", nil, .Host, {hidden = true, control = .Unnamed}},
+	.Float_Set_Bounds = {
+		"float.set_bounds", "Set float bounds", nil, .Host,
+		{accepted = {.Bounds, .Unit, .Focus}, required = {.Bounds}, hidden = true, control = .Pane},
+	},
+	.Float_Raise = {
+		"float.raise", "Raise float", nil, .Host, {accepted = {.Focus}, hidden = true, control = .Pane},
+	},
+	.Float_Lower = {
+		"float.lower", "Lower float", nil, .Host, {accepted = {.Focus}, hidden = true, control = .Pane},
+	},
+	.Float_Dock = {
+		"float.dock", "Dock float", nil, .Host, {accepted = {.Focus}, hidden = true, control = .Pane},
+	},
+	.Float_Minimize = {
+		"float.minimize", "Minimize float", nil, .Host, {accepted = {.Focus}, hidden = true, control = .Pane},
+	},
+	.Float_Restore = {
+		"float.restore", "Restore float", nil, .Host, {accepted = {.Focus}, hidden = true, control = .Pane},
+	},
+	.Pane_Move = {
+		"pane.move", "Move pane beside another", nil, .Host,
+		{
+			accepted = {.Beside, .Direction, .Focus},
+			required = {.Beside, .Direction},
+			hidden = true,
+			control = .Pane,
+		},
+	},
+	.Pane_Resize = {
+		"pane.resize", "Resize pane by cells", nil, .Host,
+		{
+			accepted = {.Direction, .Cells, .Focus},
+			required = {.Direction, .Cells},
+			hidden = true,
+			control = .Pane,
+		},
+	},
+	.Pane_Set_Ratio = {
+		"pane.set_ratio", "Set pane share", nil, .Host,
+		{accepted = {.Ratio, .Focus}, required = {.Ratio}, hidden = true, control = .Pane},
+	},
 }
 
 // What help says about a command beyond its usage and title: a summary, and the command's own help for
@@ -681,6 +736,34 @@ Command_Help :: struct {
 
 @(private)
 COMMAND_HELP :: #partial [Action]Command_Help {
+	.App_View = {
+		"Prints one JSON document describing all windows, workspaces, tab trees, floats and panes.",
+		nil,
+	},
+	.Float_Set_Bounds = {"Sets the named float's clamped bounds without changing focus unless --focus.", nil},
+	.Float_Raise = {
+		"Raises the named float above every other float without changing focus unless --focus.",
+		nil,
+	},
+	.Float_Lower = {
+		"Lowers the named float beneath every other float without changing focus unless --focus.",
+		nil,
+	},
+	.Float_Dock = {"Returns the named float to its tiled slot without changing focus unless --focus.", nil},
+	.Float_Minimize = {"Minimizes the named float; its program keeps running.", nil},
+	.Float_Restore = {"Restores the named float without changing focus unless --focus.", nil},
+	.Pane_Move = {
+		"Moves the named pane beside another pane in the same tab without changing focus unless --focus.",
+		{{.Direction, {description = "the side of --beside on which the pane is placed"}}},
+	},
+	.Pane_Resize = {
+		"Moves the pane's nearest border along the given direction by terminal cells.",
+		{{.Direction, {description = "the direction in which the border moves"}}},
+	},
+	.Pane_Set_Ratio = {
+		"Sets the pane's share of its parent split.",
+		{{.Ratio, {description = "the named pane's share of its parent split"}}},
+	},
 	.New_Tab = {
 		"Opens a tab in the pane's workspace running the profile's shell or a program and prints the new " +
 		"pane's id; focus stays where it is unless --focus.",
@@ -705,16 +788,16 @@ COMMAND_HELP :: #partial [Action]Command_Help {
 		},
 	},
 	.Layout_Apply = {
-		"Opens a tab of named panes from a JSON layout file in the pane's workspace and prints their ids " +
-		"column by column, top to bottom; nothing opens when the file is wrong.",
+		"Opens a tab of named panes from a JSON layout file or --layout document and prints their ids " +
+		"in tree order, then floats; nothing opens when the layout is wrong.",
 		{
 			{
 				.File,
 				{
-					"the JSON layout: tab, cwd and columns of panes with name, command (an argument " +
-					"array), cwd and profile; at most 1 MiB and 16 panes; a relative path is from aio's " +
-					"working directory",
-					"none (required)",
+					"the JSON layout: tab, cwd and either columns or a root split tree, plus optional floats; " +
+					"panes take name, command (an argument array), cwd and profile; at most 1 MiB and 16 panes; " +
+					"a relative path is from aio's working directory",
+					"none (give a file or --layout)",
 					"review.json",
 				},
 			},
@@ -1118,6 +1201,12 @@ command_execute :: proc(app: ^App, ctx: Command_Context, invocation: commands.In
 	case .Layout_Apply:
 		t := target.?
 		return control_layout_apply(app, window_for_workspace(app, t.workspace), t.workspace, invocation)
+	case .App_View:
+		return control_view(app)
+	case .Float_Set_Bounds, .Float_Raise, .Float_Lower, .Float_Dock, .Float_Minimize, .Float_Restore:
+		return control_float_change(app, target.?, invocation, action)
+	case .Pane_Move, .Pane_Resize, .Pane_Set_Ratio:
+		return control_pane_layout_change(app, target.?, invocation, action)
 	case .Rename_Pane:
 		if t, named := target.?; named {
 			if .Text in invocation.given {return control_rename(app, t, invocation.text)}

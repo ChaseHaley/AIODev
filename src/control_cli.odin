@@ -201,6 +201,8 @@ control_cli_reply :: proc(outcome: Outcome, json_output: bool) -> control.Respon
 			document.panes = ([]cli_protocol.Pane_Report)(payload)
 		case Outcome_Layout:
 			document.panes = ([]cli_protocol.Pane_Report)(payload)
+		case Outcome_View:
+			document.view = cli_protocol.View_Report(payload)
 		case Outcome_Pane_Status:
 			status_pane[0] = cli_protocol.Pane_Report(payload)
 			document.panes = status_pane[:]
@@ -271,6 +273,10 @@ control_cli_reply :: proc(outcome: Outcome, json_output: bool) -> control.Respon
 				if i > 0 {strings.write_byte(&b, '\n')}
 				fmt.sbprintf(&b, "%d", pane.id)
 			}
+		case Outcome_View:
+			data, err := json.marshal(cli_protocol.View_Report(payload), {}, context.temp_allocator)
+			if err != nil {return cli_protocol.response(.Failed, "not enough memory for the reply")}
+			strings.write_string(&b, string(data))
 		case Outcome_Text:
 			strings.write_string(&b, string(payload))
 		case Outcome_Process:

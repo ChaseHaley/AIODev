@@ -35,6 +35,7 @@ Outcome :: struct {
 		Outcome_Usage,
 		Outcome_Layout,
 		Outcome_Process,
+		Outcome_View,
 	},
 }
 Outcome_Created :: struct {pane: u32}
@@ -51,6 +52,7 @@ Outcome_Layout :: distinct []cli_protocol.Pane_Report
 Outcome_Process :: distinct cli_protocol.Process_Report
 
 Runtime_Runner :: #type proc(app: ^App, ctx: Command_Context, invocation: commands.Invocation) -> Outcome
+Outcome_View :: distinct cli_protocol.View_Report
 
 // A pane a control invocation acts on, with the identity mutation needs.
 Pane_Target :: struct {
@@ -622,11 +624,23 @@ control_floating_new :: proc(
 ) -> Outcome {
 	if failure, ok := control_profile_check(app, invocation.profile); !ok {return failure}
 	launch := Pane_Launch{invocation.program, invocation.directory, invocation.profile}
+	bounds: layout.Rect
+	if .Bounds in invocation.given {
+		failure: Outcome
+		bounds, failure = control_float_bounds(w, invocation.bounds, invocation.unit == "cells")
+		if failure.status != .Ok {return failure}
+	}
 	if launch.directory == "" && target.pane.session != nil {
 		launch.directory, _ = pane_directory(app, target.pane.session)
 	}
 	id, ok := floating_open(app, w, target.workspace, target.pane.tab, launch, invocation.focus)
 	if !ok {return outcome_failure(.Failed, "could not open a float")}
+	if .Bounds in invocation.given {
+		tree := &target.workspace.tabs[target.pane.tab].tree
+		node := layout.find_content(tree, {.Terminal, id})
+		_ = layout.float_set_bounds(tree, node, bounds)
+		control_layout_changed(app, w, target.workspace, target.pane.tab, false)
+	}
 	return control_created(app, w, id, invocation.name)
 }
 
