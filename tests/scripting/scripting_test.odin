@@ -246,6 +246,54 @@ wait_filters_sleep_and_timeout_resume_through_host_steps :: proc(t: ^testing.T) 
 }
 
 @(test)
+suspended_top_level_reports_its_outcome_once :: proc(t: ^testing.T) {
+	fake: Fake
+	defer fake_destroy(&fake)
+	state := new_state(t, &fake, .Script)
+	if state == nil {return}
+	defer scripting.destroy(state)
+	immediate := scripting.run_source(state, "now.lua", "return 7")
+	testing.expect(t, immediate.ok && immediate.finished, immediate.message)
+	testing.expect_value(t, immediate.value, "7")
+	_, done := scripting.top_result(state)
+	testing.expect(t, !done)
+
+	result := scripting.run_source(state, "top.lua", "aio.sleep(0.2)\nreturn {answer = 5}")
+	testing.expect(t, result.ok && !result.finished, result.message)
+	testing.expect_value(t, result.value, "")
+	_, done = scripting.top_result(state)
+	testing.expect(t, !done)
+	_, _ = scripting.step(state, 0.5)
+	top: scripting.Run_Result
+	top, done = scripting.top_result(state)
+	testing.expect(t, done)
+	testing.expect(t, top.ok && top.finished, top.message)
+	testing.expect_value(t, top.value, `{"answer":5}`)
+	_, done = scripting.top_result(state)
+	testing.expect(t, !done)
+
+	result = scripting.run_source(state, "fail.lua", "aio.sleep(0.2)\nlocal x = 1\nerror('boom ' .. x)")
+	testing.expect(t, result.ok && !result.finished, result.message)
+	_, _ = scripting.step(state, 1)
+	top, done = scripting.top_result(state)
+	testing.expect(t, done)
+	testing.expect(t, !top.ok && top.finished)
+	testing.expect_value(t, top.message, "fail.lua:3: boom 1")
+	testing.expect_value(t, top.file, "fail.lua")
+	testing.expect_value(t, top.line, 3)
+	testing.expect_value(t, len(scripting.take_errors(state)), 0)
+	_, done = scripting.top_result(state)
+	testing.expect(t, !done)
+
+	// The Config host's top level still refuses to suspend, and finishes at once.
+	config := new_state(t, &fake, .Config)
+	if config == nil {return}
+	defer scripting.destroy(config)
+	refused := scripting.run_source(config, "init.lua", `aio.sleep(1)`)
+	testing.expect(t, !refused.ok && refused.finished)
+}
+
+@(test)
 timers_cancel_coalesce_and_enforce_live_limit :: proc(t: ^testing.T) {
 	fake: Fake
 	defer fake_destroy(&fake)

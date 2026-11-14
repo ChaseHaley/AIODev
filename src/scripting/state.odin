@@ -58,8 +58,9 @@ State :: struct {
 }
 
 // value is the chunk's first result as JSON, or "" when it returned nothing or is still suspended.
+// finished is false when a Script host's top level suspended; top_result reports how it ends.
 Run_Result :: struct {
-	ok: bool,
+	ok, finished: bool,
 	message, file: string,
 	line: int,
 	value: string,
@@ -256,6 +257,13 @@ finish_call :: proc(s: ^State, nargs: c.int) -> Call_Result {
 		result.finished = true
 		return result
 	}
+	return read_call_result(s)
+}
+
+// Pops the five results runtime.run, runtime.call and runtime.top leave on the stack.
+@(private, require_results)
+read_call_result :: proc(s: ^State) -> Call_Result {
+	L := s.L
 	result := remember_result(s, text_at(L, -2), text_at(L, -1))
 	result.ok = bool(lua.toboolean(L, -5))
 	result.finished = bool(lua.toboolean(L, -4))
@@ -265,10 +273,18 @@ finish_call :: proc(s: ^State, nargs: c.int) -> Call_Result {
 }
 
 @(private, require_results)
+run_result :: proc(result: Call_Result) -> Run_Result {
+	return {
+		ok = result.ok, finished = result.finished, message = result.message, file = result.file,
+		line = result.line, value = result.value,
+	}
+}
+
+@(private, require_results)
 load_failed :: proc(s: ^State) -> Run_Result {
 	result := remember_result(s, "", text_at(s.L, -1))
 	lua.pop(s.L, 1)
-	return {message = result.message, file = result.file, line = result.line}
+	return {finished = true, message = result.message, file = result.file, line = result.line}
 }
 
 // name is the chunk's path; errors read `name:line: message`.
@@ -285,7 +301,7 @@ run_file :: proc(s: ^State, path: string) -> Run_Result {
 	data, err := os.read_entire_file(path, context.temp_allocator)
 	if err != nil {
 		result := remember_result(s, "", fmt.tprintf("cannot open %s: %s", path, os.error_string(err)))
-		return {message = result.message, file = path}
+		return {finished = true, message = result.message, file = path}
 	}
 	return run_source(s, path, string(data))
 }
@@ -298,11 +314,28 @@ run_loaded :: proc(s: ^State) -> Run_Result {
 	lua.pushnil(s.L)
 	lua.pushboolean(s.L, s.config.kind == .Config)
 	lua.pushboolean(s.L, false)
-	result := finish_call(s, 5)
-	return {
-		ok = result.ok, message = result.message, file = result.file, line = result.line,
-		value = result.value,
+	return run_result(finish_call(s, 5))
+}
+
+// A Script host's top level that suspended (finished false from run_file or run_source) ends
+// later, during step or deliver. done is true exactly once, when it has finished: result holds its
+// value JSON or its `file:line: message` error, never reported through take_errors. Its strings
+// live like run_source's.
+@(require_results)
+top_result :: proc(s: ^State) -> (result: Run_Result, done: bool) {
+	L := s.L
+	get_runtime(s, "top")
+	if lua.pcall(L, 0, 6, 0) != 0 {
+		record_runtime_error(s)
+		return
 	}
+	done = bool(lua.toboolean(L, -6))
+	lua.remove(L, -6)
+	if !done {
+		lua.pop(L, 5)
+		return
+	}
+	return run_result(read_call_result(s)), true
 }
 
 // ref is a registry reference (lua.L_ref on REGISTRYINDEX) to a function called as fn(ctx, args).
