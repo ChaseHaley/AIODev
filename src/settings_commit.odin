@@ -1,6 +1,7 @@
 package main
 
 import "aio:commands"
+import "aio:events"
 import "aio:settings"
 import "aio:ui"
 import "core:fmt"
@@ -302,6 +303,7 @@ settings_change :: proc(app: ^App, edit: Settings_Edit, base: Settings_Base) -> 
 	}
 	publication: Settings_Publication = Publish_Saved{previous, revision, origin}
 	if _, reset := edit.(Factory_Reset); reset {publication = Publish_Reset{revision}}
+	app_events_settings_commit(app, &loaded, previous, revision)
 	settings_revision_apply(app, loaded, &diagnostics, nil, publication)
 	loaded = {}
 	result.previous, result.revision = previous, revision
@@ -604,9 +606,19 @@ settings_change_memory :: proc(app: ^App, edit: Settings_Edit) -> Settings_Resul
 	value, is_value := edit.(Setting_Value)
 	entry := is_value ? settings.schema_find(value.key) : nil
 	if entry == nil {return {status = .Failed}}
+	// The value as text before and after, so an assignment that changes nothing reports nothing. A
+	// string setting's text is the stored value itself, which the assignment frees.
+	wanted := events.wants(&app.events, .Settings_Changed)
+	previous: string
+	if wanted {previous = strings.clone(settings.value_text(&app.settings, entry^), context.temp_allocator)}
 	message, err := settings.setting_assign(&app.settings, entry^, value.value)
 	if err != nil {return {status = .Unprepared}}
 	if message != "" {return {status = .Refused, message = message}}
+	if wanted {
+		if current := settings.value_text(&app.settings, entry^); current != previous {
+			events.push(&app.events, .Settings_Changed, Setting_Value{entry.key, current})
+		}
+	}
 	for window in app.windows {
 		window_apply_settings(app, window)
 		rail_reveal_active(window)

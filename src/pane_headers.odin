@@ -1,5 +1,6 @@
 package main
 
+import "aio:events"
 import "aio:input"
 import "aio:layout"
 import "aio:localpath"
@@ -14,6 +15,10 @@ import "core:strings"
 Pane_Header_Metadata :: struct {
 	executable, title, directory: string,
 	command, launch_directory:    string,
+	// The raw title and directory the terminal last reported, which pane.title_changed and
+	// pane.cwd_changed compare against, so each fires only for its own change.
+	reported_title:               string,
+	reported_directory:           string,
 	// The started process's image path, whose own icon stands for the shell; empty when nothing
 	// started.
 	executable_path:              string,
@@ -24,6 +29,8 @@ pane_header_destroy :: proc(header: ^Pane_Header_Metadata) {
 	delete(header.executable)
 	delete(header.title)
 	delete(header.directory)
+	delete(header.reported_title)
+	delete(header.reported_directory)
 	delete(header.command)
 	delete(header.launch_directory)
 	delete(header.executable_path)
@@ -38,7 +45,11 @@ header_clone :: proc(text: string) -> string {
 }
 
 pane_header_launch :: proc(header: ^Pane_Header_Metadata, config: term.Config, session: ^term.Session) {
+	// A relaunch keeps what was last reported, so an unchanged title or directory is not announced again.
+	reported_title, reported_directory := header.reported_title, header.reported_directory
+	header.reported_title, header.reported_directory = "", ""
 	pane_header_destroy(header)
+	header.reported_title, header.reported_directory = reported_title, reported_directory
 	header.executable = header_clone(settings.shell_executable(config.command_line))
 	header.command, header.launch_directory =
 		header_clone(config.command_line), header_clone(config.working_directory)
@@ -46,17 +57,24 @@ pane_header_launch :: proc(header: ^Pane_Header_Metadata, config: term.Config, s
 	header.executable_path = term.process_image(session)
 }
 
-pane_header_refresh :: proc(entry: ^Session_Entry) {
+pane_header_refresh :: proc(app: ^App, entry: ^Session_Entry) {
 	header := &entry.header
 	title := term.title(entry.session)
-	defer delete(title)
 	directory := term.working_directory(entry.session)
-	defer delete(directory)
 	label, err := localpath.directory_label(directory)
 	if err != nil {log.error("caching the reported pane directory failed")}
+	if title != header.reported_title {
+		events.push(&app.events, .Pane_Title_Changed, Event_Pane_Title{entry.id, title})
+	}
+	if directory != header.reported_directory {
+		events.push(&app.events, .Pane_Cwd_Changed, Event_Pane_Cwd{entry.id, directory})
+	}
 	delete(header.title)
 	delete(header.directory)
 	header.title, header.directory = display_title(title), label
+	delete(header.reported_title)
+	delete(header.reported_directory)
+	header.reported_title, header.reported_directory = title, directory
 }
 
 // A program-supplied or user-typed title as shown: control characters dropped, capped at 1024

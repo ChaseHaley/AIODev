@@ -1,5 +1,6 @@
 package main
 
+import "aio:events"
 import "aio:term"
 
 workspace_delete_request :: proc(app: ^App, w: ^Window, workspace: ^Workspace) {
@@ -19,6 +20,10 @@ workspace_delete_release :: proc(app: ^App, workspace: ^Workspace, actor: ^Windo
 	for current, i in app.workspaces {
 		if current == workspace {ordered_remove(&app.workspaces, i); break}
 	}
+	for tab in workspace.tabs {
+		events.push(&app.events, .Tab_Closed, Event_Tab{tab.id, workspace.id})
+	}
+	events.push(&app.events, .Workspace_Deleted, Event_Workspace{workspace.id})
 	workspace_destroy(workspace)
 }
 

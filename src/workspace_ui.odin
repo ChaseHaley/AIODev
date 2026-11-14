@@ -1,5 +1,6 @@
 package main
 
+import "aio:events"
 import "aio:input"
 import "aio:render"
 import "aio:ui"
@@ -62,6 +63,7 @@ workspace_create_empty :: proc(app: ^App, provisional := false) -> ^Workspace {
 		return nil
 	}
 	app.next_workspace_id = workspace.id
+	if !provisional {events.push(&app.events, .Workspace_Created, Event_Workspace{workspace.id})}
 	// An empty workspace is not saved state yet: the tab that fills it saves the layout. Startup
 	// creates one after setting aside a damaged layout file and must not schedule a save.
 	workspace_pickers_refresh(app)
@@ -80,6 +82,7 @@ workspace_discard_empty :: proc(app: ^App, workspace: ^Workspace) -> bool {
 	for current, i in app.workspaces {
 		if current != workspace {continue}
 		ordered_remove(&app.workspaces, i)
+		if !workspace.provisional {events.push(&app.events, .Workspace_Deleted, Event_Workspace{workspace.id})}
 		workspace_destroy(workspace)
 		workspace_pickers_refresh(app)
 		return true

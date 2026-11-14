@@ -1,5 +1,6 @@
 package main
 
+import "aio:events"
 import "aio:layout"
 import "aio:platform"
 import "aio:settings"
@@ -392,6 +393,7 @@ workspace_close_tab :: proc(app: ^App, workspace: ^Workspace, original_index: in
 		if next := tab_nearest_shown(workspace, workspace.selected); next >= 0 {workspace.selected = next}
 	}
 	tab_groups_tidy(workspace)
+	events.push(&app.events, .Tab_Closed, Event_Tab{tab.id, workspace.id})
 	tab_record_free(tab)
 	workspace_mutation_finish(app, workspace, {.Structure})
 	for i := len(app.windows) - 1; i >= 0; i -= 1 {

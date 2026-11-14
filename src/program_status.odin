@@ -1,6 +1,7 @@
 package main
 
 import platform_api "aio:platform"
+import "aio:events"
 import "aio:render"
 import "aio:settings"
 import "aio:term"
@@ -46,6 +47,20 @@ status_refresh :: proc(app: ^App, entry: ^Session_Entry) {
 	if err != nil {return}
 	previous := entry.statuses
 	entry.statuses = next
+	if events.wants(&app.events, .Pane_Status_Changed) {
+		words := EVENT_STATUS_WORDS
+		for record in next {
+			changed := true
+			for old in previous {
+				if old.id != record.id {continue}
+				changed = old.state != record.state || old.app != record.app
+				break
+			}
+			if !changed {continue}
+			status := Event_Pane_Status{entry.id, words[record.state], record.app}
+			events.push(&app.events, .Pane_Status_Changed, status)
+		}
+	}
 	status_notify_changes(app, entry, previous)
 	term.destroy_program_status(previous)
 }

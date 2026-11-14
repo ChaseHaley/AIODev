@@ -1,6 +1,7 @@
 package main
 
 import "aio:commands"
+import app_events "aio:events"
 import "aio:font"
 import "aio:glyphs"
 import "aio:input"
@@ -114,6 +115,12 @@ App :: struct {
 	using cli_state:       Cli_State,
 	// How the most recently closed sessions ended; see session.odin.
 	closed_sessions:       Closed_Sessions,
+	// What happened this tick, for scripts and `aio events`; see app_events.odin.
+	events:                app_events.Queue,
+	// Some session has not been announced by pane.created because no tree held it yet.
+	events_unattached:     bool,
+	// A digest of every listed workspace's arrangement, compared each tick for layout.changed.
+	events_layout:         u64,
 	// Panes and tabs closed explicitly, newest last, for Reopen Closed.
 	closed:                [dynamic]Closed_Item,
 	// Update AIODev's updater while it runs; see app_update.odin.
@@ -168,6 +175,7 @@ device_abandon :: proc(s: ^Device_Start) {
 
 @(require_results)
 app_init :: proc(app: ^App) -> bool {
+	app_events.init(&app.events)
 	when FRAME_STATS {perf.start(&app.perf)}
 	when platform_api.AIO_HEADLESS {
 		// The same pixels on every machine: WARP (WORK-350).
@@ -321,6 +329,7 @@ app_destroy :: proc(app: ^App) {
 	palette_usage_store_destroy(&app.palette_store)
 	closed_destroy(app)
 	app_update_destroy(app)
+	app_events.destroy(&app.events)
 	delete(app.app_id)
 	if app.platform_ready {
 		if platform_api.destroy(&app.platform) != .None {
@@ -343,6 +352,9 @@ run :: proc(app: ^App) {
 		if signaled >= 0 {render.frame_signaled(window_surface(waits.windows[signaled]))}
 		tick(app, wait_frames = false)
 	}
+	// Consumers hear of the quit while everything they may ask about still exists.
+	app_events.push(&app.events, .App_Quitting, Event_Empty{})
+	app_events_deliver(app)
 }
 
 // The windows that want a frame and how the loop learns it may draw them: a window with a swap chain
@@ -433,6 +445,8 @@ tick :: proc(app: ^App, wait_frames := true) {
 	app_timers_advance(app, .After_Draw)
 	control_cli_tick(app)
 	focus_jumps_track(app)
+	// Lua and pipe consumers are added in app_events_deliver.
+	app_events_deliver(app)
 	free_all(context.temp_allocator)
 }
 
