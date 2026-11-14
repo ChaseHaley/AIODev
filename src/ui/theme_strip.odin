@@ -785,6 +785,17 @@ strip_wide_draw :: proc(
 	return text_button_draw(list, text, theme, button, "Customize", customize_focused, s, pointer)
 }
 
+// The strip's header line over the cards: its title and description start one step in and run up
+// to the keys hint a keyboard-focused strip shows on the right.
+@(private)
+strip_header :: proc(
+	block: render.Rect, small: ^Text, keyboard: bool, s: f32,
+) -> (header: render.Rect, hint_width, width: f32) {
+	header = {block.x, block.y, block.width, STRIP_HEADER * s}
+	if keyboard {hint_width = text_width(small, STRIP_KEYS_HINT) + SPACE_3 * s}
+	return header, hint_width, max(1, header.width - 2 * ITEM_INSET * s - hint_width)
+}
+
 // The strip row: its title and description over the band of cards. Every card is drawn at its
 // current width; a card between spine and wide card fades its spine out and its wide content in, the
 // wide content clipped to the card so it is uncovered as the card opens, never squeezed.
@@ -807,11 +818,8 @@ editor_strip_draw :: proc(
 	keyboard := focused && selected && editor_focus(p) == .Control
 	if selected {draw_rect(list, {rect = block, color = theme.selection, radius = RADIUS_CONTROL * s})}
 	small := text_styled(text, .Detail)
-	header := render.Rect{block.x, block.y, block.width, STRIP_HEADER * s}
+	header, hint_width, title_width := strip_header(block, &small, keyboard, s)
 	inset := ITEM_INSET * s
-	hint_width: f32
-	if keyboard {hint_width = text_width(&small, STRIP_KEYS_HINT) + SPACE_3 * s}
-	title_width := max(1, header.width - 2 * inset - hint_width)
 	baseline, detail_baseline := stacked_baselines(header, text, &small, s)
 	if result := draw_text(text, list, row.title, header.x + inset, baseline, theme.text, title_width);
 	   result != .Ok {return result}
