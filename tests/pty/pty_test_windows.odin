@@ -51,7 +51,7 @@ start :: proc(
 	r: ^Run,
 	command: string,
 	environment: []pty.Env_Var = nil,
-	path_append := "",
+	path_prepend := "",
 	title := "",
 ) -> bool {
 	testing.set_fail_timeout(t, 40 * time.Second)
@@ -59,7 +59,7 @@ start :: proc(
 		command_line = command,
 		working_directory = "C:\\Windows\\System32",
 		environment = environment,
-		path_append = path_append,
+		path_prepend = path_prepend,
 		title = title,
 		cols = 80,
 		rows = 25,
@@ -311,14 +311,26 @@ environment :: proc(t: ^testing.T) {
 }
 
 @(test)
-path_append_ends_path :: proc(t: ^testing.T) {
+path_prepend_starts_path :: proc(t: ^testing.T) {
 	r: Run
-	// The last 17 characters of PATH: the separator and the appended directory.
-	if !start(t, &r, "cmd.exe /d /c \"echo TAIL[%PATH:~-17%]\"", nil, `C:\aio-path-test`) {
+	// The first 17 characters of PATH: the prepended directory and the separator.
+	if !start(t, &r, "cmd.exe /d /c \"echo HEAD[%PATH:~0,17%]\"", nil, `C:\aio-path-test`) {
 		return
 	}
 	finish(t, &r)
-	testing.expect(t, contains(&r, `TAIL[;C:\aio-path-test]`))
+	testing.expect(t, contains(&r, `HEAD[C:\aio-path-test;]`))
+}
+
+@(test)
+path_prepend_moves_existing_entry :: proc(t: ^testing.T) {
+	r: Run
+	// The same directory in another case and with a trailing backslash moves to the front once.
+	path := [?]pty.Env_Var{{"PATH", `C:\Windows\System32;;c:\AIO-PATH-TEST\;C:\Windows`}}
+	if !start(t, &r, "cmd.exe /d /c \"echo PATH[%PATH%]\"", path[:], `C:\aio-path-test`) {
+		return
+	}
+	finish(t, &r)
+	testing.expect(t, contains(&r, `PATH[C:\aio-path-test;C:\Windows\System32;C:\Windows]`))
 }
 
 @(test)

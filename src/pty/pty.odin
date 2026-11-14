@@ -9,8 +9,9 @@ Spawn_Options :: struct {
 	// The console title the child starts with; empty leaves the executable path.
 	title:                           string,
 	environment:                     []Env_Var,
-	// A directory added at the end of the child's PATH, after the overrides apply.
-	path_append:                     string,
+	// A directory put first on the child's PATH after the overrides apply; a later entry naming the
+	// same directory is dropped.
+	path_prepend:                    string,
 	cols, rows:                      u16,
 	refresh_environment:             bool,
 	// Keeps what the terminal already shows above the cursor instead of clearing the screen.

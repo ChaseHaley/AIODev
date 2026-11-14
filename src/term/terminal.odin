@@ -60,10 +60,10 @@ Config :: struct {
 	command_line, working_directory: string,
 	title:                           string,
 	refresh_environment:             bool,
-	// Up to MAX_HOST_ENVIRONMENT variables the host adds for this session, and a directory added
-	// to the end of its PATH.
+	// Up to MAX_HOST_ENVIRONMENT variables the host adds for this session, and a directory put
+	// first on its PATH.
 	environment:                     []pty.Env_Var,
-	path_append:                     string,
+	path_prepend:                    string,
 	geometry:                        Geometry,
 	options:                         Options,
 	colors:                          Colors,
@@ -479,7 +479,7 @@ spawn :: proc(s: ^Session, config: Config) {
 		working_directory   = config.working_directory,
 		title               = config.title,
 		environment         = environment[:count],
-		path_append         = config.path_append,
+		path_prepend        = config.path_prepend,
 		cols                = config.geometry.columns,
 		rows                = config.geometry.rows,
 		refresh_environment = config.refresh_environment,
@@ -564,7 +564,7 @@ start_request_copy :: proc(
 	r.options.command_line = copy_text(options.command_line, allocator, &ok)
 	r.options.working_directory = copy_text(options.working_directory, allocator, &ok)
 	r.options.title = copy_text(options.title, allocator, &ok)
-	r.options.path_append = copy_text(options.path_append, allocator, &ok)
+	r.options.path_prepend = copy_text(options.path_prepend, allocator, &ok)
 	environment, err := make([]pty.Env_Var, len(options.environment), allocator)
 	ok &&= err == nil
 	r.environment = environment
@@ -582,7 +582,7 @@ start_request_free :: proc(r: ^Start_Request, allocator: runtime.Allocator) {
 	delete(r.options.command_line, allocator)
 	delete(r.options.working_directory, allocator)
 	delete(r.options.title, allocator)
-	delete(r.options.path_append, allocator)
+	delete(r.options.path_prepend, allocator)
 	for variable in r.environment {
 		delete(variable.name, allocator)
 		delete(variable.value, allocator)
