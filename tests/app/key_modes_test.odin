@@ -120,6 +120,18 @@ key_modes_window_sequences_fields_modes_and_timeout_without_processes :: proc(t:
 	testing.expect_value(t, len(w.bindings.modes), 0)
 	testing.expect(t, len(state.notices.items) > 0)
 
+	// A hidden command that acts on a pane runs from a key on the focused pane, here the lower half of
+	// the split above, with its fields; the control pipe was its only way in before.
+	mode_test_bind(t, &state, "resize/Up", "pane.resize", `{"direction":"up","cells":2}`)
+	before := tree.nodes[tree.root].(layout.Split).ratio
+	entered = mode_test_command(&state, w, "mode.enter", "--name", "resize")
+	testing.expect_value(t, entered.status, app.Outcome{}.status)
+	mode_test_event(&state, w, .Arrow_Up)
+	mode_test_event(&state, w, .Arrow_Up, pressed = false)
+	after := tree.nodes[tree.root].(layout.Split).ratio
+	testing.expectf(t, after < before, "resize/Up moves the border up: ratio %v -> %v", before, after)
+	_ = mode_test_command(&state, w, "mode.exit_all")
+
 	mode_test_event(&state, w, .B, {.Control})
 	deadline, pending := app.key_sequence_deadline(w)
 	testing.expect(t, pending)

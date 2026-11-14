@@ -208,8 +208,8 @@ Command_Descriptor :: struct {
 Command_Spec :: struct {
 	// The arguments a control request may give, and those it must.
 	accepted, required: commands.Arguments,
-	// Serves the CLI and scripts only: it stays out of the palette and shortcut lists, and a key bound
-	// to it does nothing.
+	// Serves the CLI and scripts: it stays out of the palette and shortcut lists, and a key bound to it
+	// runs it only when it acts on a pane (command_hidden_from_window).
 	hidden:             bool,
 	control:            Control_Form,
 	param:              Action_Param,
@@ -1134,7 +1134,8 @@ command_execute :: proc(app: ^App, ctx: Command_Context, invocation: commands.In
 	switch c in ctx {
 	case Window_Context:
 		w = command_window(app, c.window, action)
-		if w == nil || descriptors[action].spec.hidden {return {}}
+		if w == nil {return {}}
+		if descriptors[action].spec.hidden {return command_hidden_from_window(app, w, c.origin, invocation, action)}
 		if w == c.window {tab = c.tab}
 	case Control_Request:
 		if commands.find(&app.registry, invocation.id) == nil {
@@ -1550,6 +1551,28 @@ command_execute :: proc(app: ^App, ctx: Command_Context, invocation: commands.In
 	case .Status_Panel_Previous:
 		status_panel_step(app, w, -1)
 	}
+	return {}
+}
+
+// A key or an init.lua binding reaches a hidden command with its fields. One that acts on a pane runs on
+// w's focused pane, as a control request from that pane would, and a failure shows as a notice; the
+// rest serve the CLI and scripts only, so the key does nothing.
+@(private, require_results)
+command_hidden_from_window :: proc(
+	app: ^App,
+	w: ^Window,
+	origin: Command_Origin,
+	invocation: commands.Invocation,
+	action: Action,
+) -> Outcome {
+	@(static, rodata)
+	descriptors := ACTIONS
+	control := descriptors[action].spec.control
+	if control != .Pane && control != .Focus {return {}}
+	entry := focused_session(app, w)
+	if entry == nil {return {}}
+	outcome := command_execute(app, Control_Request{caller = entry.id, origin = origin}, invocation)
+	if outcome.status != .Ok {notify(app, .Info, outcome.message)}
 	return {}
 }
 
