@@ -7,6 +7,8 @@ _G.aio = aio
 -- tasks: suspended or running entry points. processes: unfinished aio.system handles by id.
 local tasks, handlers, timers, processes, errors = {}, {}, {}, {}, {}
 local current, timer_count, stop_code = nil, 0, nil
+-- A top level that suspended and has since finished, until runtime.top hands it over.
+local top_outcome = nil
 -- Deadlines use the host's step clock. Between steps it is estimated from the monotonic native
 -- clock, so a timer set long after the last step still counts from when it was set.
 local offset, anchored = 0, false
@@ -75,9 +77,14 @@ local function callback(fn, ctx, ...)
 	return task
 end
 
+-- A suspended top level's outcome belongs to the host (runtime.top), not to the handler errors.
 local function resume_async(task, ...)
-	local ok, _, message = resume(task, ...)
-	if not ok then report(message) end
+	local ok, finished, value = resume(task, ...)
+	if task.top then
+		if finished then top_outcome = {ok = ok, value = value} end
+	elseif not ok then
+		report(value)
+	end
 end
 
 -- True when the running code may suspend its entry point.
@@ -665,12 +672,22 @@ end
 
 -- A chunk's top level: Config refuses to yield there, and processes it starts outlive it. Only a
 -- loading Config top level may declare; the load cannot yield, so it is over when start returns.
+-- A top level that suspends reports its later outcome through runtime.top.
 function runtime.run(fn, ctx, args, loading, scoped)
 	local refuse = loading and 'while init.lua loads' or nil
 	declaring = loading and not config.script
-	local _, ok, finished, value = start(fn, ctx or context(), refuse, scoped ~= false, ctx, args)
+	local task, ok, finished, value = start(fn, ctx or context(), refuse, scoped ~= false, ctx, args)
 	declaring = false
+	task.top = true
 	return finish(ok, finished, value)
+end
+
+-- done, then finish's results, once a suspended top level has finished; nothing before that.
+function runtime.top()
+	local outcome = top_outcome
+	if not outcome then return false end
+	top_outcome = nil
+	return true, finish(outcome.ok, true, outcome.value)
 end
 
 -- serial changes whenever a declaration is recorded, so the host knows when to read again.
