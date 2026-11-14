@@ -82,6 +82,7 @@ Action :: enum u32 {
 	Open_Markdown,
 	Edit_Markdown,
 	Open_Markdown_Default_App,
+	Agent_Changes,
 	Duplicate_Tab,
 	Move_Tab_Left,
 	Move_Tab_Right,
@@ -166,6 +167,7 @@ Action :: enum u32 {
 	Workspace_List,
 	App_Version,
 	Install_Agent_Hooks,
+	Install_Turn_Hooks,
 	Update,
 	Pane_Send_Keys,
 	Pane_Process,
@@ -462,6 +464,7 @@ ACTIONS :: [Action]Command_Descriptor {
 	.Open_Markdown_Default_App = {
 		"pane.open_markdown_default_app", "Open Markdown in default app", nil, .Local, {},
 	},
+	.Agent_Changes = {"pane.agent_changes", "Show or hide agent changes", nil, .Local, {}},
 	.Duplicate_Tab = {"tab.duplicate", "Duplicate tab", nil, .Host, {}},
 	.Move_Tab_Left = {"tab.move_left", "Move tab left", nil, .Host, {}},
 	.Move_Tab_Right = {"tab.move_right", "Move tab right", nil, .Host, {}},
@@ -676,6 +679,7 @@ ACTIONS :: [Action]Command_Descriptor {
 		cli_protocol.VERSION_COMMAND, "Show AIODev's build", nil, .Host, {hidden = true, control = .Unnamed},
 	},
 	.Install_Agent_Hooks = {"app.install_agent_hooks", "Install agent session hooks", nil, .Local, {}},
+	.Install_Turn_Hooks = {"app.install_turn_hooks", "Install agent turn hooks", nil, .Local, {}},
 	.Update = {"app.update", "Update AIODev", nil, .Local, {}},
 	.Pane_Send_Keys = {
 		"pane.send_keys", "Send keys to pane", nil, .Host,
@@ -928,6 +932,15 @@ COMMAND_HELP :: #partial [Action]Command_Help {
 	},
 	.Open_Markdown_Default_App = {
 		"Opens the focused Markdown pane's file in the program Windows opens Markdown files with.",
+		nil,
+	},
+	.Agent_Changes = {
+		"Opens Agent changes beside the focused pane, or closes it.",
+		nil,
+	},
+	.Install_Turn_Hooks = {
+		"Adds AIODev's turn hooks to Claude Code and Codex so Agent changes knows exactly when turns start " +
+			"and which files agent tools edit.",
 		nil,
 	},
 	.Pane_Send = {
@@ -1337,6 +1350,8 @@ command_execute :: proc(app: ^App, ctx: Command_Context, invocation: commands.In
 		markdown_edit_toggle(app, w)
 	case .Open_Markdown_Default_App:
 		markdown_open_external(app, w)
+	case .Agent_Changes:
+		changes_toggle(app, w)
 	case .New_Floating:
 		if t, named := target.?; named {
 			return control_floating_new(app, window_for_workspace(app, t.workspace), t, invocation)
@@ -1395,6 +1410,9 @@ command_execute :: proc(app: ^App, ctx: Command_Context, invocation: commands.In
 		show_build_info(app)
 	case .Install_Agent_Hooks:
 		agent_hooks_install(app)
+	case .Install_Turn_Hooks:
+		agent_turn_hooks_install(app)
+		changes_hooks_refresh(app)
 	case .Update:
 		app_update_start(app)
 	case .Command_Palette:

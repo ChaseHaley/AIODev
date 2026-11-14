@@ -1,0 +1,644 @@
+package main
+
+import "aio:input"
+import "aio:layout"
+import "aio:platform"
+import "aio:render"
+import "aio:ui"
+import "core:reflect"
+import "core:strings"
+import "core:time"
+
+// Agent changes panes: what agents changed per turn, and plain git diffs. A pane is bound to the pane
+// that ran the agent (its key, which may be empty) and to a directory inside the repository.
+
+@(private)
+CHANGES_POLL :: 500 * time.Millisecond
+
+// What the pane shows. changes_model.odin fills the view from the worker's results and owns what is
+// listed here; the pane's input only reads it and changes the selection and the folds.
+Changes_Model :: struct {
+	view:           ui.Changes_View,
+	// The id of the newest read asked for; an older result is stale.
+	request:        u64,
+	// The result the view borrows its diff and titles from.
+	content:        Turn_Result,
+	// Parallel to view.turns, whose details are the strings in `details`.
+	row_ids:        []u64,
+	details:        []string,
+	// The repository the last turn query found, "" until one answered.
+	repository_key: string,
+	// Paths the user folded; they stay folded whenever a diff shows them again.
+	folded:         map[string]struct{},
+	// Whether the view holds a result for `shown`.
+	loaded:         bool,
+	shown:          ui.Changes_Scope,
+	// The worker is watching the pane's worktree for a git scope.
+	watching:       bool,
+	// turns.record when the pane last asked, so a change is noticed.
+	recording:      bool,
+	// The wall-clock minute the row ages were written for.
+	aged:           i64,
+}
+
+// Owned by App.changes_panes; windows refer to it by id and the poll frees it once none does.
+Changes_Pane :: struct {
+	id:         u32,
+	source:     string,
+	directory:  string,
+	scope:      ui.Changes_Scope,
+	state:      ui.Changes_State,
+	model:      Changes_Model,
+	dropdown:   ui.Dropdown,
+	scope_open: bool,
+	// The scope labels the dropdown lists, kept here because the dropdown borrows its choices.
+	labels:     [len(ui.Changes_Scope)]string,
+	// The turn a selection extends from, and the turn the keys move; -1 for none.
+	anchor:     int,
+	cursor:     int,
+	moving:     bool,
+}
+
+// App embeds it; this file owns it, and changes_app_destroy releases it.
+Changes_App :: struct {
+	changes_panes:    [dynamic]^Changes_Pane,
+	next_changes_id:  u32,
+	// Zero while no pane is registered, so nothing polls.
+	changes_deadline: time.Tick,
+	// Whether the turn hooks are installed; read from the settings files once, not per pane.
+	turn_hooks:       Changes_Hooks,
+}
+
+@(require_results)
+changes_find :: proc(app: ^App, id: u32) -> ^Changes_Pane {
+	for pane in app.changes_panes {if pane.id == id {return pane}}
+	return nil
+}
+
+// Frees the pane and its model. The worker is not told: app destroy has stopped it.
+@(private)
+changes_pane_free :: proc(pane: ^Changes_Pane) {
+	changes_model_destroy(pane)
+	ui.dropdown_destroy(&pane.dropdown)
+	ui.changes_state_destroy(&pane.state)
+	delete(pane.source)
+	delete(pane.directory)
+	free(pane)
+}
+
+// Stops the pane's git watch on the worker, then frees it.
+@(private)
+changes_pane_destroy :: proc(app: ^App, pane: ^Changes_Pane) {
+	changes_model_unwatch(app, pane)
+	changes_pane_free(pane)
+}
+
+changes_app_destroy :: proc(state: ^Changes_App) {
+	for pane in state.changes_panes {changes_pane_free(pane)}
+	delete(state.changes_panes)
+	state^ = {}
+}
+
+// The scope as the layout file names it.
+@(require_results)
+changes_scope_name :: proc(scope: ui.Changes_Scope) -> string {
+	return reflect.enum_string(scope)
+}
+
+// The scope a layout file names; an unknown name is Uncommitted, which always works.
+@(require_results)
+changes_scope_parse :: proc(name: string) -> ui.Changes_Scope {
+	scope, ok := reflect.enum_from_name(ui.Changes_Scope, name)
+	return ok ? scope : .Uncommitted
+}
+
+// Registers a pane. `source` and `directory` are copied.
+@(require_results)
+changes_pane_create :: proc(app: ^App, source, directory: string, scope: ui.Changes_Scope) -> ^Changes_Pane {
+	pane, err := new(Changes_Pane)
+	if err != nil {return nil}
+	cloned_source, source_error := strings.clone(source)
+	cloned_directory, directory_error := strings.clone(directory)
+	if source_error != nil || directory_error != nil {
+		delete(cloned_source)
+		delete(cloned_directory)
+		free(pane)
+		return nil
+	}
+	pane.source, pane.directory, pane.scope = cloned_source, cloned_directory, scope
+	for label, which in ui.CHANGES_SCOPE_LABELS {pane.labels[int(which)] = label}
+	pane.anchor, pane.cursor = -1, -1
+	pane.model.view.first, pane.model.view.last = -1, -1
+	ui.dropdown_init(&pane.dropdown)
+	if _, append_error := append(&app.changes_panes, pane); append_error != nil {
+		changes_pane_free(pane)
+		return nil
+	}
+	app.next_changes_id += 1
+	pane.id = app.next_changes_id
+	app.turn_hooks = .Unknown
+	changes_model_changed(app, pane)
+	if app.changes_deadline == {} {app.changes_deadline = time.tick_add(clock_now(&app.clock), CHANGES_POLL)}
+	return pane
+}
+
+@(private, require_results)
+changes_referenced :: proc(app: ^App, id: u32) -> bool {
+	content := layout.Content{.Changes, id}
+	for workspace in app.workspaces {if workspace_has_content(workspace, content) {return true}}
+	return false
+}
+
+// Frees panes nothing shows any more and follows the recording setting.
+changes_tick :: proc(app: ^App) {
+	if app.changes_deadline == {} {return}
+	now := clock_now(&app.clock)
+	if time.tick_diff(now, app.changes_deadline) > 0 {return}
+	changed := false
+	for i := len(app.changes_panes) - 1; i >= 0; i -= 1 {
+		pane := app.changes_panes[i]
+		if !changes_referenced(app, pane.id) {
+			changes_pane_destroy(app, pane)
+			ordered_remove(&app.changes_panes, i)
+			continue
+		}
+		changed = changes_model_poll(app, pane) || changed
+	}
+	app.changes_deadline = len(app.changes_panes) > 0 ? time.tick_add(now, CHANGES_POLL) : {}
+	if changed {mark_all_dirty(app)}
+}
+
+changes_poll_deadline :: proc(app: ^App) -> (next: time.Tick, pending: bool) {
+	if app.changes_deadline == {} {return}
+	return app.changes_deadline, true
+}
+
+// Opens Agent changes beside the focused pane, or closes the one the focused tab has.
+changes_toggle :: proc(app: ^App, w: ^Window) {
+	acting := pane_link_acting_window(app, w)
+	workspace := acting.workspace
+	if workspace == nil || workspace.selected < 0 || workspace.selected >= len(workspace.tabs) {return}
+	tab := workspace.selected
+	walk := tab_other_panes(app, &workspace.tabs[tab].tree, tab)
+	for shown, ok := workspace_pane_next(&walk); ok; shown, ok = workspace_pane_next(&walk) {
+		if shown.content.kind == .Changes {
+			pane_close_at(app, workspace, tab, shown.node)
+			return
+		}
+	}
+	source, directory := "", ""
+	scope := ui.Changes_Scope.Uncommitted
+	if entry := focused_session(app, acting); entry != nil {
+		source = entry.key
+		directory, _ = pane_directory(app, entry)
+		if pane_agent(app, entry, nil).launch.harness != .None || len(entry.statuses) > 0 {scope = .Agent}
+	} else if page := markdown_focused(app, acting); page != nil {
+		directory = page.directory
+	}
+	if directory == "" {directory = home_directory()}
+	pane := changes_pane_create(app, source, directory, scope)
+	if pane == nil {
+		notify(app, .Error, "Could not open Agent changes.")
+		return
+	}
+	content := layout.Content{.Changes, pane.id}
+	if !pane_place(app, acting, workspace, tab, window_tree(acting).focus, content, .Split_Right, true) {
+		notify(app, .Error, "Could not open Agent changes.")
+	}
+}
+
+@(require_results)
+changes_focused :: proc(app: ^App, w: ^Window) -> ^Changes_Pane {
+	content, ok := window_focused_content(w)
+	if !ok || content.kind != .Changes {return nil}
+	return changes_find(app, content.id)
+}
+
+changes_active :: proc(w: ^Window) -> bool {
+	content, ok := window_focused_content(w)
+	return ok && content.kind == .Changes
+}
+
+@(private, require_results)
+changes_pane_rect :: proc(w: ^Window, id: u32) -> (layout.Pane_Rect, bool) {
+	for pane in w.panes {if pane.content == {.Changes, id} {return pane, true}}
+	return {}, false
+}
+
+@(private, require_results)
+changes_under_pointer :: proc(app: ^App, w: ^Window, x, y: f32) -> (^Changes_Pane, layout.Pane_Rect) {
+	shown, found := layout.hit_test(w.panes[:], x, y)
+	if !found || shown.content.kind != .Changes {return nil, {}}
+	return changes_find(app, shown.content.id), shown
+}
+
+@(require_results)
+changes_geometry_of :: proc(
+	app: ^App,
+	w: ^Window,
+	pane: ^Changes_Pane,
+	shown: layout.Pane_Rect,
+) -> ui.Changes_Geometry {
+	mono := ui.text_mono(&w.ui_text, app.family)
+	g := ui.changes_geometry(pane_body_rect(w, shown), w.scale, &pane.model.view, &w.ui_text)
+	ui.changes_layout(&pane.state, &pane.model.view, &mono, w.scale)
+	return g
+}
+
+@(private = "file")
+changes_dropdown_choices :: proc(pane: ^Changes_Pane) -> ui.Dropdown_Choices {
+	return {choices = pane.labels[:], value = pane.labels[int(pane.scope)]}
+}
+
+@(private = "file")
+changes_dropdown_anchor :: proc(g: ui.Changes_Geometry) -> ui.Dropdown_Anchor {
+	return {field = g.scope, row = g.scope, bounds = g.area}
+}
+
+@(private = "file")
+changes_scope_close :: proc(w: ^Window, pane: ^Changes_Pane) {
+	if !pane.scope_open {return}
+	pane.scope_open, pane.state.scope_open = false, false
+	ui.dropdown_close(&pane.dropdown)
+	w.dirty = true
+}
+
+@(private = "file")
+changes_scope_set :: proc(app: ^App, pane: ^Changes_Pane, scope: ui.Changes_Scope) {
+	if scope == pane.scope {return}
+	pane.scope = scope
+	pane.anchor, pane.cursor = -1, -1
+	pane.model.view.first, pane.model.view.last = -1, -1
+	changes_model_changed(app, pane)
+}
+
+// Selects turn `index`, or with `extend` the run from the anchor to it.
+@(private = "file")
+changes_select :: proc(app: ^App, pane: ^Changes_Pane, index: int, extend: bool) {
+	view := &pane.model.view
+	if index < 0 || index >= len(view.turns) {return}
+	if !extend {
+		pane.anchor = index
+	} else if pane.anchor < 0 || pane.anchor >= len(view.turns) {
+		// The selection the worker chose on its own, such as the newest turn, has no anchor yet.
+		pane.anchor = view.first >= 0 && view.first < len(view.turns) ? view.first : index
+	}
+	view.first, view.last = min(pane.anchor, index), max(pane.anchor, index)
+	pane.cursor = index
+	changes_model_changed(app, pane)
+}
+
+@(private = "file")
+changes_move :: proc(app: ^App, pane: ^Changes_Pane, step: int, extend: bool) {
+	view := &pane.model.view
+	if len(view.turns) == 0 {return}
+	from := pane.cursor
+	if from < 0 || from >= len(view.turns) {from = view.first >= 0 ? view.first : (step > 0 ? -1 : 0)}
+	changes_select(app, pane, clamp(from + step, 0, len(view.turns) - 1), extend)
+}
+
+@(private = "file")
+changes_diff_scroll :: proc(app: ^App, w: ^Window, pane: ^Changes_Pane, shown: layout.Pane_Rect, delta: int) {
+	g := changes_geometry_of(app, w, pane, shown)
+	if ui.changes_scroll_diff(&pane.state, g, delta) {w.dirty = true}
+}
+
+// Drives the hover and press fades of every Changes pane in the window.
+@(private)
+changes_animate :: proc(app: ^App, w: ^Window, frame: ui.Frame_Time) -> bool {
+	changed := false
+	for shown in w.panes {
+		if shown.content.kind != .Changes {continue}
+		pane := changes_find(app, shown.content.id)
+		if pane == nil {continue}
+		pane.moving = ui.changes_animate(&pane.state, app.animations, frame)
+		changed = changed || pane.moving
+	}
+	return changed
+}
+
+@(private)
+changes_animating :: proc(app: ^App, w: ^Window) -> bool {
+	for shown in w.panes {
+		if shown.content.kind != .Changes {continue}
+		if pane := changes_find(app, shown.content.id); pane != nil && pane.moving {return true}
+	}
+	return false
+}
+
+// The pane's toolbar, turns and diff, or its notice, inside the card; `scrollable` when its diff
+// scrolls and a scrollbar belongs beside it.
+@(require_results)
+changes_pane_draw :: proc(
+	app: ^App,
+	w: ^Window,
+	shown: layout.Pane_Rect,
+) -> (
+	scrollable: bool,
+	result: render.Build_Status,
+) {
+	pane := changes_find(app, shown.content.id)
+	if pane == nil {return false, .Ok}
+	g := changes_geometry_of(app, w, pane, shown)
+	mono := ui.text_mono(&w.ui_text, app.family)
+	result = ui.changes_draw(
+		&w.list, &w.ui_text, &mono, &app.theme, g, &pane.model.view, &pane.state, w.scale, w.pointer,
+	)
+	if result != .Ok {return true, result}
+	if pane.scope_open {
+		result = ui.dropdown_draw(
+			&pane.dropdown, changes_dropdown_choices(pane), changes_dropdown_anchor(g), &w.list, &w.ui_text,
+			app.theme, w.pointer, w.scale,
+		)
+	}
+	return pane.model.view.notice == .None, result
+}
+
+changes_key :: proc(app: ^App, w: ^Window, e: input.Key_Event) {
+	pane_header_cancel(w)
+	key_suppress(w, e)
+	key, consumed := content_key_prelude(app, w, e, true)
+	if consumed {return}
+	if !e.pressed {return}
+	pane := changes_focused(app, w)
+	shown: layout.Pane_Rect
+	found := false
+	if pane != nil {shown, found = changes_pane_rect(w, pane.id)}
+	if pane != nil && pane.scope_open && found {
+		g := changes_geometry_of(app, w, pane, shown)
+		outcome, taken := ui.dropdown_key(
+			&pane.dropdown, changes_dropdown_choices(pane), changes_dropdown_anchor(g), e, w.scale,
+		)
+		#partial switch outcome {
+		case .Chosen:
+			index := ui.dropdown_highlighted(&pane.dropdown, changes_dropdown_choices(pane))
+			if index >= 0 {changes_scope_set(app, pane, ui.Changes_Scope(index))}
+			changes_scope_close(w, pane)
+		case .Closed:
+			changes_scope_close(w, pane)
+		case:
+			w.dirty = true
+		}
+		if taken {return}
+	}
+	if key.found && (key.runtime || action_available(app, w, key.action)) {
+		run_window_command(app, w, key.command, .Key)
+		return
+	}
+	status_inbox_typed(w, e)
+	if pane == nil || !found {return}
+	modifiers := e.modifiers & {.Control, .Shift, .Alt, .Super}
+	extend := modifiers == {.Shift}
+	if modifiers != {} && !extend {return}
+	g := changes_geometry_of(app, w, pane, shown)
+	page := max(1, int(g.diff.height))
+	#partial switch key.logical.key {
+	case .Arrow_Up:
+		changes_move(app, pane, -1, extend)
+		_ = ui.changes_turn_reveal(&pane.state, g, &pane.model.view, pane.cursor)
+	case .Arrow_Down:
+		changes_move(app, pane, 1, extend)
+		_ = ui.changes_turn_reveal(&pane.state, g, &pane.model.view, pane.cursor)
+	case .Page_Up:
+		if !extend {changes_diff_scroll(app, w, pane, shown, -page)}
+	case .Page_Down:
+		if !extend {changes_diff_scroll(app, w, pane, shown, page)}
+	case .Home:
+		if !extend {changes_diff_scroll(app, w, pane, shown, -max(int))}
+	case .End:
+		if !extend {changes_diff_scroll(app, w, pane, shown, max(int))}
+	}
+}
+
+// Rows are the scrolled lines, positive toward the top, as the mouse wheel reports them.
+@(require_results)
+changes_wheel :: proc(app: ^App, w: ^Window, x, y: f32, rows: int) -> bool {
+	pane, shown := changes_under_pointer(app, w, x, y)
+	if shown.content.kind != .Changes {return false}
+	if pane == nil {return true}
+	g := changes_geometry_of(app, w, pane, shown)
+	if pane.scope_open {
+		_ = ui.dropdown_wheel(
+			&pane.dropdown, changes_dropdown_choices(pane), changes_dropdown_anchor(g), rows, w.scale,
+		)
+		w.dirty = true
+		return true
+	}
+	mono := ui.text_mono(&w.ui_text, app.family)
+	delta := -rows * int(mono.line_height)
+	if render.rect_contains(g.turns, x, y) {
+		if ui.changes_scroll_turns(&pane.state, g, &pane.model.view, delta) {w.dirty = true}
+	} else {
+		changes_diff_scroll(app, w, pane, shown, delta)
+	}
+	return true
+}
+
+// Pointer surface
+
+changes_claims :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {
+	shown, found := layout.hit_test(w.panes[:], x, y)
+	return found && shown.content.kind == .Changes
+}
+
+@(private = "file")
+changes_hover_clear :: proc(app: ^App, w: ^Window) {
+	for shown in w.panes {
+		if shown.content.kind != .Changes {continue}
+		pane := changes_find(app, shown.content.id)
+		if pane != nil && pane.state.hover != {} {pane.state.hover, w.dirty = {}, true}
+	}
+}
+
+// The pointer is off every Agent changes pane.
+changes_leave :: proc(app: ^App, w: ^Window) {
+	changes_hover_clear(app, w)
+	pane_scrollbar_hover_leave(w, .Changes)
+}
+
+changes_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: input.Mouse_Move_Event) {
+	x, y := f32(e.x), f32(e.y)
+	if owner != .Changes_Page {
+		changes_leave(app, w)
+		return
+	}
+	pane, shown := changes_under_pointer(app, w, x, y)
+	if pane == nil {
+		changes_leave(app, w)
+		pointer_set(app, w, .Arrow)
+		return
+	}
+	g := changes_geometry_of(app, w, pane, shown)
+	if pane.state.turn_bar.active {
+		if bar, visible := ui.changes_turn_scrollbar(&pane.state, g, &pane.model.view); visible {
+			if .Left in e.buttons {
+				pane.state.turn_scroll = ui.scrollbar_drag(pane.state.turn_bar, bar, y)
+			} else {
+				pane.state.turn_bar = {}
+			}
+			w.dirty = true
+			return
+		}
+	}
+	if pane.scope_open {
+		if ui.dropdown_hover(
+			&pane.dropdown, changes_dropdown_choices(pane), changes_dropdown_anchor(g), x, y, w.scale,
+		) {w.dirty = true}
+		shape := ui.dropdown_pointer(
+			&pane.dropdown, changes_dropdown_choices(pane), changes_dropdown_anchor(g), x, y, w.scale,
+		)
+		pointer_set(app, w, shape)
+		return
+	}
+	shape := platform.Cursor_Shape.Arrow
+	hit: ui.Changes_Hit
+	bar, visible := pane_scrollbar_geometry(app, w, shown)
+	if visible && ui.scrollbar_contains(bar, x, y) {
+		pane_scrollbar_hover_set(w, shown.content)
+	} else {
+		pane_scrollbar_hover_leave(w, .Changes)
+		hit = ui.changes_hit(g, &pane.model.view, &pane.state, x, y)
+		#partial switch hit.part {
+		case .Scope, .Hooks, .Notice_Button, .Turn, .File_Header:
+			shape = .Hand
+		}
+	}
+	if pane.state.hover != hit {pane.state.hover, w.dirty = hit, true}
+	pointer_set(app, w, shape)
+}
+
+changes_press :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) {
+	x, y := f32(e.x), f32(e.y)
+	pane, shown := changes_under_pointer(app, w, x, y)
+	if shown.content.kind != .Changes {return}
+	pane_focus(app, w, shown.node)
+	if pane == nil || e.button != .Left {return}
+	w.dirty = true
+	g := changes_geometry_of(app, w, pane, shown)
+	if pane.scope_open {
+		choices, anchor := changes_dropdown_choices(pane), changes_dropdown_anchor(g)
+		switch ui.dropdown_press(&pane.dropdown, choices, anchor, &w.ui_text, x, y, false, w.scale) {
+		case .Chosen:
+			changes_scope_set(app, pane, ui.Changes_Scope(ui.dropdown_highlighted(&pane.dropdown, choices)))
+			changes_scope_close(w, pane)
+		case .None:
+			changes_scope_close(w, pane)
+		case .Changed, .Closed, .Font_Filter:
+		}
+		return
+	}
+	if bar, visible := ui.changes_turn_scrollbar(&pane.state, g, &pane.model.view);
+	   visible && ui.scrollbar_contains(bar, x, y) {
+		pane.state.turn_scroll = ui.scrollbar_press(&pane.state.turn_bar, bar, y)
+		return
+	}
+	if pane_scrollbar_press(app, w, shown, x, y) {return}
+	view := &pane.model.view
+	hit := ui.changes_hit(g, view, &pane.state, x, y)
+	pane.state.press = hit
+	#partial switch hit.part {
+	case .Scope:
+		pane.scope_open, pane.state.scope_open = true, true
+		ui.dropdown_open(&pane.dropdown, changes_dropdown_choices(pane))
+	case .Hooks:
+		run_action(app, w, .Install_Turn_Hooks, .Button)
+	case .Notice_Button:
+		_ = settings_save_value(app, "turns.record", "true", "Could not turn on turn recording.")
+		changes_model_changed(app, pane)
+	case .Turn:
+		changes_select(app, pane, hit.index, .Shift in e.modifiers)
+	case .File_Header:
+		changes_model_fold(&pane.model, hit.index)
+	}
+}
+
+changes_release :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) -> bool {
+	if e.button != .Left {return false}
+	if pane_scrollbar_end(w, .Changes) {
+		w.dirty = true
+		return true
+	}
+	cleared := false
+	for shown in w.panes {
+		if shown.content.kind != .Changes {continue}
+		pane := changes_find(app, shown.content.id)
+		if pane == nil {continue}
+		if pane.state.turn_bar.active {pane.state.turn_bar, cleared = {}, true}
+		if pane.state.press != {} {pane.state.press, cleared = {}, true}
+	}
+	if cleared {w.dirty = true}
+	return cleared
+}
+
+// Ends whatever the pointer holds on an Agent changes pane: a press or a scrollbar thumb.
+changes_cancel :: proc(app: ^App, w: ^Window) {
+	_ = changes_release(app, w, {button = .Left})
+}
+
+when AIO_CONTROL {
+	// "changes.<kind>.<index>.<field>"
+	@(private = "file")
+	changes_report_key :: proc(kind: string, index: int, field: string) -> string {
+		b := strings.builder_make(context.temp_allocator)
+		strings.write_string(&b, "changes.")
+		strings.write_string(&b, kind)
+		strings.write_byte(&b, '.')
+		strings.write_int(&b, index)
+		strings.write_byte(&b, '.')
+		strings.write_string(&b, field)
+		return strings.to_string(b)
+	}
+
+	// The focused Agent changes pane's verification keys; the rectangles are where the draw puts the
+	// controls, zero when a control is not shown.
+	changes_state_report :: proc(r: ^State_Report, app: ^App, w: ^Window) {
+		pane := changes_focused(app, w)
+		scope, notice := "none", "none"
+		turn_count, first, last, files := 0, -1, -1, 0
+		scope_rect, notice_rect, hooks_rect: render.Rect
+		if pane != nil {
+			view := &pane.model.view
+			scope = strings.to_lower(changes_scope_name(pane.scope), context.temp_allocator)
+			notice = strings.to_lower(reflect.enum_string(view.notice), context.temp_allocator)
+			turn_count, first, last, files = len(view.turns), view.first, view.last, len(view.files)
+			if shown, found := changes_pane_rect(w, pane.id); found {
+				g := changes_geometry_of(app, w, pane, shown)
+				scope_rect = g.scope
+				if view.notice == .Recording_Off {notice_rect = g.notice_button}
+				if view.hooks_offer {hooks_rect = g.hooks}
+				for i in 0 ..< len(view.turns) {
+					rect := ui.changes_turn_rect(g, &pane.state, i)
+					if rect.width <= 0 || rect.height <= 0 {continue}
+					state_rect(r, changes_report_key("turn", i, "rect"), rect)
+				}
+			}
+			for file, i in view.files {
+				state_text(r, changes_report_key("file", i, "path"), file.new_path)
+				state_value(r, changes_report_key("file", i, "added"), file.added)
+				state_value(r, changes_report_key("file", i, "removed"), file.removed)
+				marked := i < len(view.marked) && view.marked[i]
+				state_value(r, changes_report_key("file", i, "marked"), marked)
+				folded := i < len(view.collapsed) && view.collapsed[i]
+				state_value(r, changes_report_key("file", i, "collapsed"), folded)
+			}
+		}
+		state_value(r, "changes.count", len(app.changes_panes))
+		state_value(r, "changes.active", changes_active(w))
+		state_text(r, "changes.scope", scope)
+		state_text(r, "changes.notice", notice)
+		state_value(r, "changes.turns", turn_count)
+		state_value(r, "changes.first", first)
+		state_value(r, "changes.last", last)
+		state_value(r, "changes.files", files)
+		state_value(r, "changes.recording", app.settings.turns.record)
+		state_value(r, "changes.loaded", pane != nil && pane.model.loaded)
+		state_value(r, "changes.hooks_offer", pane != nil && pane.model.view.hooks_offer)
+		state_text(r, "changes.repository", pane != nil ? pane.model.view.repository : "")
+		state_text(r, "changes.detail", pane != nil ? pane.model.view.detail : "")
+		state_value(r, "changes.omitted", pane != nil ? pane.model.view.omitted : 0)
+		state_value(r, "changes.dropdown_open", pane != nil && pane.scope_open)
+		state_rect(r, "changes.scope_rect", scope_rect)
+		state_rect(r, "changes.notice_button_rect", notice_rect)
+		state_rect(r, "changes.hooks_rect", hooks_rect)
+	}
+}

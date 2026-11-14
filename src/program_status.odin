@@ -62,6 +62,7 @@ status_refresh :: proc(app: ^App, entry: ^Session_Entry) {
 		}
 	}
 	status_notify_changes(app, entry, previous)
+	turn_recorder_status(app, entry, previous, next)
 	term.destroy_program_status(previous)
 }
 

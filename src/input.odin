@@ -292,6 +292,10 @@ on_key :: proc(app: ^App, w: ^Window, e: input.Key_Event) {
 		markdown_key(app, w, e)
 		return
 	}
+	if changes_active(w) {
+		changes_key(app, w, e)
+		return
+	}
 	terminal_key(app, w, e)
 }
 
@@ -467,6 +471,7 @@ on_wheel :: proc(app: ^App, w: ^Window, e: input.Mouse_Wheel_Event) {
 	}
 	if _, _, header := pane_header_hit(w, f32(e.x), f32(e.y)); header {return}
 	if markdown_wheel(app, w, f32(e.x), f32(e.y), rows) {return}
+	if changes_wheel(app, w, f32(e.x), f32(e.y), rows) {return}
 	if entry := pane_at(app, w, e.x, e.y); entry != nil {
 		term.scroll(entry.session, rows, e.modifiers, f32(e.x), f32(e.y))
 		w.dirty = true

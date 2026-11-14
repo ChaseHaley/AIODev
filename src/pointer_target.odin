@@ -49,6 +49,8 @@ Pointer_Target :: enum u8 {
 	Settings_Page,
 	// A Markdown document shown in a pane.
 	Markdown_Page,
+	// An Agent changes pane.
+	Changes_Page,
 	// Terminal content, including its links, and anything uncovered.
 	Content,
 }
@@ -236,6 +238,10 @@ pointer_surfaces := [Pointer_Target]Pointer_Surface {
 	.Markdown_Page    = {
 		claims = markdown_claims, hover = markdown_hover, press = markdown_press, release = markdown_release,
 		cancel = markdown_gesture_clear, leave = markdown_leave, holds = true, blurs_find = true,
+	},
+	.Changes_Page     = {
+		claims = changes_claims, hover = changes_hover, press = changes_press, release = changes_release,
+		cancel = changes_cancel, leave = changes_leave, holds = true, blurs_find = true,
 	},
 	.Content          = {
 		claims = content_claims, hover = content_hover, press = content_press, release = content_release,

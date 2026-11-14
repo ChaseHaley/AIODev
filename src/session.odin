@@ -380,6 +380,7 @@ session_close :: proc(app: ^App, id: u32) {
 			status := term.status(entry.session)
 			closed_sessions_record(&app.closed_sessions, {id, status.kind, status.exit_code})
 			app_events_pane_closed(app, &entry, status.exit_code)
+			turn_recorder_closed(app, &entry)
 			session_entry_destroy(&entry)
 			ordered_remove(&app.sessions, i)
 			return

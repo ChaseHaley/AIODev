@@ -440,12 +440,14 @@ when AIO_CONTROL {
 		}
 		w := verify_window(app)
 		verify_app_report(&r, app)
+		turns_state_report(&r, app)
 		palette_state_report(&r, app, w)
 		entry: ^Session_Entry
 		if w != nil {
 			entry = focused_session(app, w)
 			verify_window_report(&r, app, w, entry)
 			markdown_state_report(&r, app, w)
+			changes_state_report(&r, app, w)
 			settings_page_state_report(&r, app, w)
 			rename_state_report(&r, w)
 			tab_menu_state_report(&r, w)

@@ -535,6 +535,12 @@ Status_Settings :: struct {
 	keep_finished:                         Status_Keep,
 	ignore_apps:                           string,
 }
+// Agent changes: whether to keep a private copy of the files agents change in each turn, and for how
+// many days.
+Turns_Settings :: struct {
+	record:         bool,
+	retention_days: int,
+}
 Window_Settings :: struct {
 	columns, rows, padding: int,
 	tray_notification:      bool,
@@ -619,6 +625,7 @@ Settings :: struct {
 	motion:          Motion_Settings,
 	tabs:            Tabs_Settings,
 	status:          Status_Settings,
+	turns:           Turns_Settings,
 	control:         Control_Settings,
 	profiles:        Profiles,
 	openers:         Openers,
@@ -743,6 +750,8 @@ group_title :: proc(key: string) -> string {
 		return "Tabs"
 	case "status":
 		return "Activity"
+	case "turns":
+		return "Agent changes"
 	case "shell":
 		return "Shell"
 	case "input":
@@ -1438,6 +1447,25 @@ SCHEMA :: [?]Schema_Entry {
 		valid = {0, 256},
 		description = "Comma-separated program names, the OSC 7501 app key such as vite or cargo, whose status " +
 			"is never shown.",
+	},
+	{
+		key = "turns.record",
+		title = "Record agent turns",
+		kind = .Bool,
+		offset = offset_of(Settings, turns) + offset_of(Turns_Settings, record),
+		default_value = "false",
+		description = "Keep a private copy of the files agents change in each turn, so Agent changes can show " +
+			"what a turn changed. Only git repositories are recorded. Off stops recording and offers to " +
+			"delete the copies.",
+	},
+	{
+		key = "turns.retention_days",
+		title = "Keep recorded turns (days)",
+		kind = .Int,
+		offset = offset_of(Settings, turns) + offset_of(Turns_Settings, retention_days),
+		default_value = "14",
+		valid = {1, 365},
+		description = "Recorded turns older than this are deleted.",
 	},
 	{
 		key = "shell.default_profile",

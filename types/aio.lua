@@ -35,6 +35,7 @@ aio = {}
 ---@overload fun(name: "app.hide_to_tray", fields?: aio.fields.app.hide_to_tray): aio.Reply?, string?, integer?
 ---@overload fun(name: "app.input", fields: aio.fields.app.input): aio.Reply?, string?, integer?
 ---@overload fun(name: "app.install_agent_hooks", fields?: aio.fields.app.install_agent_hooks): aio.Reply?, string?, integer?
+---@overload fun(name: "app.install_turn_hooks", fields?: aio.fields.app.install_turn_hooks): aio.Reply?, string?, integer?
 ---@overload fun(name: "app.lua_types", fields?: aio.fields.app.lua_types): aio.Reply?, string?, integer?
 ---@overload fun(name: "app.notify", fields: aio.fields.app.notify): aio.Reply?, string?, integer?
 ---@overload fun(name: "app.palette_commands", fields?: aio.fields.app.palette_commands): aio.Reply?, string?, integer?
@@ -61,6 +62,7 @@ aio = {}
 ---@overload fun(name: "mode.enter", fields: aio.fields.mode.enter): aio.Reply?, string?, integer?
 ---@overload fun(name: "mode.exit", fields?: aio.fields.mode.exit): aio.Reply?, string?, integer?
 ---@overload fun(name: "mode.exit_all", fields?: aio.fields.mode.exit_all): aio.Reply?, string?, integer?
+---@overload fun(name: "pane.agent_changes", fields?: aio.fields.pane.agent_changes): aio.Reply?, string?, integer?
 ---@overload fun(name: "pane.arrange", fields?: aio.fields.pane.arrange): aio.Reply?, string?, integer?
 ---@overload fun(name: "pane.balance", fields?: aio.fields.pane.balance): aio.Reply?, string?, integer?
 ---@overload fun(name: "pane.change_shell", fields?: aio.fields.pane.change_shell): aio.Reply?, string?, integer?
@@ -1120,6 +1122,19 @@ function aio.app.input(fields) end
 ---@return integer? status
 function aio.app.install_agent_hooks(fields) end
 
+---The fields of app.install_turn_hooks.
+---@class aio.fields.app.install_turn_hooks
+---@field pane? string|integer the pane to act on: a pane id, a pane name, here or focused; default: here (the pane aio runs in), or the focused pane outside AIODev
+
+---Install agent turn hooks
+---
+---Adds AIODev's turn hooks to Claude Code and Codex so Agent changes knows exactly when turns start and which files agent tools edit.
+---@param fields? aio.fields.app.install_turn_hooks
+---@return aio.Reply? reply
+---@return string? message
+---@return integer? status
+function aio.app.install_turn_hooks(fields) end
+
 ---The fields of app.lua_types.
 ---@class aio.fields.app.lua_types
 
@@ -1424,6 +1439,19 @@ function aio.float.set_bounds(fields) end
 
 ---The pane.* commands.
 aio.pane = {}
+
+---The fields of pane.agent_changes.
+---@class aio.fields.pane.agent_changes
+---@field pane? string|integer the pane to act on: a pane id, a pane name, here or focused; default: here (the pane aio runs in), or the focused pane outside AIODev
+
+---Show or hide agent changes
+---
+---Opens Agent changes beside the focused pane, or closes it.
+---@param fields? aio.fields.pane.agent_changes
+---@return aio.Reply? reply
+---@return string? message
+---@return integer? status
+function aio.pane.agent_changes(fields) end
 
 ---The fields of pane.arrange.
 ---@class aio.fields.pane.arrange

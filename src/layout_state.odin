@@ -66,6 +66,9 @@ Saved_Node :: struct {
 	name:      string `json:"name,omitempty"`,
 	// The file a Markdown pane shows.
 	path:      string `json:"path,omitempty"`,
+	// A Changes pane's bound pane key and scope name; its directory is `directory`.
+	changes_source: string `json:"changes_source,omitempty"`,
+	changes_scope:  string `json:"changes_scope,omitempty"`,
 	keep_open: bool,
 	// What the pane was running, shown above the fresh shell's prompt when it comes back.
 	command:   string `json:"command,omitempty"`,
@@ -321,6 +324,12 @@ layout_pane_encode :: proc(
 			saved.path, saved.documents = pane.path, pane.documents[:]
 		}
 	}
+	if content.kind == .Changes {
+		if pane := changes_find(app, content.id); pane != nil {
+			saved.directory, saved.changes_source = pane.directory, pane.source
+			saved.changes_scope = changes_scope_name(pane.scope)
+		}
+	}
 	if !pane_owns_session(content.kind) {return saved}
 	entry := session_find(app, content.id)
 	if entry == nil {return saved}
@@ -565,6 +574,15 @@ layout_tab_restore :: proc(
 			if restored {
 				pane.content.id = document.id
 				documents_restore(&document.documents, saved.nodes[i].documents)
+			}
+		case .Changes:
+			// A repository that is gone only empties the pane; the tab still comes back.
+			node := &saved.nodes[i]
+			source := utf8.valid_string(node.changes_source) ? node.changes_source : ""
+			directory := utf8.valid_string(node.directory) ? node.directory : ""
+			scope := changes_scope_parse(node.changes_scope)
+			if created := changes_pane_create(app, source, directory, scope); created != nil {
+				pane.content.id, restored = created.id, true
 			}
 		}
 		if restored && CONTENT_POLICY[kind].one_per_workspace {
