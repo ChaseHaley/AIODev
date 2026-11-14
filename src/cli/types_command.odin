@@ -1,8 +1,10 @@
 package cli
 
 import "core:fmt"
+import "core:io"
 import "core:os"
 import "core:path/filepath"
+import "core:time"
 
 // `aio types`: the parts that need no running AIODev, so tests reach them. types_command_windows.odin
 // asks AIODev for the definitions over the pipe.
@@ -26,6 +28,13 @@ LUARC_SETTINGS :: `"runtime.version": "LuaJIT", "workspace.library": ["types"]`
 // The suffix of the file a write goes through before it replaces its target.
 @(private)
 TEMP_SUFFIX :: ".tmp"
+// How long a replace waits for another process, such as a virus scanner, an indexer or an editor
+// that opened the file a moment ago, to let go of it. Windows reports that as Permission_Denied,
+// which a truly unwritable file also reports, so the wait is short and bounded, as in settings.save.
+@(private)
+REPLACE_LOCK_ATTEMPTS :: 20
+@(private)
+REPLACE_LOCK_WAIT :: 10 * time.Millisecond
 
 Lua_Types :: struct {
 	// The data folder of the instance whose init.lua folder receives the definitions; "" for the
@@ -135,13 +144,21 @@ types_write :: proc(
 	return
 }
 
-// Writes `text` to path + TEMP_SUFFIX, then renames it over `path`; the temporary file is gone either way.
+// Writes `text` to path + TEMP_SUFFIX, then renames it over `path`, waiting briefly while another
+// process holds `path` open; the temporary file is gone either way.
 @(private, require_results)
 file_replace :: proc(path, text: string) -> bool {
 	temp := fmt.tprintf("%s%s", path, TEMP_SUFFIX)
-	if os.write_entire_file(temp, text) != nil || os.rename(temp, path) != nil {
+	if os.write_entire_file(temp, text) != nil {
 		os.remove(temp)
 		return false
 	}
-	return true
+	for attempt in 1 ..= REPLACE_LOCK_ATTEMPTS {
+		rename_error := os.rename(temp, path)
+		if rename_error == nil {return true}
+		if rename_error != io.Error.Permission_Denied || attempt == REPLACE_LOCK_ATTEMPTS {break}
+		time.sleep(REPLACE_LOCK_WAIT)
+	}
+	os.remove(temp)
+	return false
 }
