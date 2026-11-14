@@ -35,6 +35,11 @@ Argument :: enum u8 {
 	Once,
 	Items,
 	Details,
+	Bounds,
+	Unit,
+	Beside,
+	Cells,
+	Layout,
 }
 Arguments :: bit_set[Argument;u32]
 
@@ -59,6 +64,9 @@ Invocation :: struct {
 	keys, title:                            string,
 	once:                                    bool,
 	items, details:                          string,
+	bounds:                                  layout.Rect,
+	unit, beside, layout:                    string,
+	cells:                                   int,
 }
 
 Parse_Error :: struct {
@@ -225,6 +233,30 @@ argument_grammar := [Argument]struct {
 		"--details", " <json>",
 		{"secondary text for each item as a JSON array of strings", "none", `--details '["Compile","Run tests"]'`},
 	},
+	.Bounds = {
+		"--bounds", " x,y,w,h",
+		{"the float's position and size in the chosen unit", "a centered float", "--bounds 0.1,0.1,0.6,0.6"},
+	},
+	.Unit = {
+		"--unit", " share|cells",
+		{"the bounds' unit, fractions of the float area or terminal cells", "share", "--unit cells"},
+	},
+	.Beside = {
+		"--beside", " <pane>",
+		{"the pane beside which to move, in the same tab", "none (required)", "--beside 3"},
+	},
+	.Cells = {
+		"--cells", " <n>",
+		{"the number of terminal cells to move the border", "none (required)", "--cells 2"},
+	},
+	.Layout = {
+		"--layout", " <json>",
+		{
+			"the inline JSON layout instead of a file, at most 1 MiB and 16 panes",
+			"none (give a file or --layout)",
+			`--layout '{"root":{}}'`,
+		},
+	},
 }
 #assert(layout.SPLIT_SHARE_MIN == 0.05 && layout.SPLIT_SHARE_MAX == 0.95)
 #assert(SPLIT_DEFAULT.direction == .Right && SPLIT_DEFAULT.ratio == 0.5)
@@ -233,7 +265,7 @@ argument_grammar := [Argument]struct {
 // Each argument with the option that reads it from a file instead, so no shell's quoting touches it.
 // A command accepting both takes one or the other.
 @(private, rodata)
-file_alternatives := [?][2]Argument{{.Program, .Command_File}, {.Text, .Text_File}}
+file_alternatives := [?][2]Argument{{.Program, .Command_File}, {.Text, .Text_File}, {.File, .Layout}}
 
 // The defaults every interface starts from: a new pane splits right, taking half the space. `focus`
 // says whether a pane a command creates takes focus: interactive commands always focus it, a CLI
@@ -401,6 +433,33 @@ parse_invocation :: proc(
 			ratio, valid := parse_ratio(value)
 			if !valid {return {}, {value, "use a ratio from 0.05 to 0.95"}}
 			result.ratio = ratio
+		case .Bounds:
+			parts, _ := strings.split(value, ",", allocator)
+			defer delete(parts, allocator)
+			if len(parts) != 4 {return {}, {value, "use four finite numbers: x,y,w,h"}}
+			numbers: [4]f32
+			for part, n in parts {
+				number, valid := strconv.parse_f32(part)
+				if !valid || !(number >= -max(f32) && number <= max(f32)) {
+					return {}, {value, "use four finite numbers: x,y,w,h"}
+				}
+				numbers[n] = number
+			}
+			if numbers[2] <= 0 || numbers[3] <= 0 {return {}, {value, "give positive width and height"}}
+			result.bounds = {numbers[0], numbers[1], numbers[2], numbers[3]}
+		case .Unit:
+			if value != "share" && value != "cells" {return {}, {value, "choose share or cells"}}
+			result.unit = value
+		case .Beside:
+			if value == "" {return {}, {option, "name a pane"}}
+			result.beside = value
+		case .Cells:
+			cells, valid := strconv.parse_int(value, 10)
+			if !valid || cells < 1 || cells > MAX_LINES {return {}, {value, "use a cell count from 1 to 10000"}}
+			result.cells = cells
+		case .Layout:
+			if value == "" {return {}, {option, "supply a JSON layout"}}
+			result.layout = value
 		case .Lines:
 			lines, ok := strconv.parse_int(value, 10)
 			if !ok || lines < 1 || lines > MAX_LINES {
