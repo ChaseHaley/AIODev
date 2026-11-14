@@ -81,6 +81,7 @@ App :: struct {
 	animations:            bool,
 	theme:                 ui.Theme,
 	registry:              commands.Registry,
+	runtime_runner:        Runtime_Runner,
 	leader:                Maybe(commands.Shortcut),
 	palette:               ui.Palette,
 	// Where the palette's usage is saved; see palette_usage.odin.

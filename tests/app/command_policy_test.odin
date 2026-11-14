@@ -17,8 +17,8 @@ command_categories_cover_every_action_namespace :: proc(t: ^testing.T) {
 	registry := commands.create()
 	defer commands.destroy(&registry)
 	if !testing.expect_value(t, app.register_actions(&registry), commands.Error.None) {return}
-	for command in registry.items {
-		category := commands.category(command.name)
+	for &command in registry.items {
+		category := commands.category(&command)
 		testing.expectf(t, category.title != "Commands", "uncategorized action: %s", command.name)
 		if strings.has_prefix(command.name, "status.") {
 			testing.expect_value(t, category.title, "Activity")

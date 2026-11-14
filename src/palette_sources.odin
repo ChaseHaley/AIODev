@@ -119,7 +119,8 @@ palette_setting_choices :: proc(user: rawptr, key: string) -> (choices, labels: 
 palette_command_available :: proc(user: rawptr, id: commands.Command_Id) -> bool {
 	app := cast(^App)user
 	w := palette_owner_window(app)
-	return w == nil || action_available(app, w, Action(id))
+	action, builtin := action_builtin(id)
+	return !builtin || w == nil || action_available(app, w, action)
 }
 
 palette_set_sources :: proc(app: ^App) {

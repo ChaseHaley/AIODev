@@ -324,6 +324,8 @@ Content_Key :: struct {
 	clipboard: Clipboard_Chord,
 	// The shortcut a fresh press that is not literal runs; found is false otherwise.
 	action:    Action,
+	command:   commands.Command_Id,
+	runtime:   bool,
 	found:     bool,
 }
 
@@ -355,7 +357,14 @@ content_key_prelude :: proc(
 	key.logical = e
 	key.logical.key = commands.logical_key(e.key, e.unshifted)
 	key.clipboard = clipboard_chord(key.logical)
-	if e.pressed && !key.literal {key.action, key.found = shortcut_action(app, e)}
+	if e.pressed && !key.literal {
+		if command := commands.find_by_key(&app.registry, e.key, e.modifiers, e.unshifted); command != nil {
+			key.command, key.found = command.id, true
+			builtin: bool
+			key.action, builtin = action_builtin(command.id)
+			key.runtime = !builtin
+		}
+	}
 	return key, false
 }
 
@@ -371,10 +380,10 @@ terminal_key :: proc(app: ^App, w: ^Window, e: input.Key_Event) {
 	if consumed {return}
 	if key.found {
 		// A held Copy key stays with the app once its first press copied and ended the selection.
-		held_copy := key.action == .Copy && e.repeat && key_suppressed(w, e.key)
-		if held_copy || action_available(app, w, key.action) {
+		held_copy := !key.runtime && key.action == .Copy && e.repeat && key_suppressed(w, e.key)
+		if held_copy || key.runtime || action_available(app, w, key.action) {
 			key_suppress(w, e)
-			if !held_copy {run_action(app, w, key.action)}
+			if !held_copy {run_window_command(app, w, key.command, .Key)}
 			return
 		}
 	}
@@ -544,7 +553,8 @@ leader_key :: proc(app: ^App, w: ^Window, e: input.Key_Event) -> Leader_Result {
 		if e.key == .Escape {return .Consumed}
 		chord := e
 		chord.modifiers += {.Leader}
-		if action, found := shortcut_action(app, chord); found {run_action(app, w, action)}
+		command := commands.find_by_key(&app.registry, chord.key, chord.modifiers, chord.unshifted)
+		if command != nil {run_window_command(app, w, command.id, .Key)}
 		return .Consumed
 	}
 	if is_leader {

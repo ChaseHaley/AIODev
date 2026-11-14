@@ -782,6 +782,7 @@ register_actions :: proc(registry: ^commands.Registry) -> commands.Error {
 		}
 		if err := commands.register(registry, command); err != .None {return err}
 	}
+	registry.builtin_count = len(registry.items)
 	return .None
 }
 
@@ -807,9 +808,31 @@ action_shortcut_text :: proc(app: ^App, action: Action, out: []u8) -> string {
 shortcut_action :: proc(app: ^App, e: input.Key_Event) -> (Action, bool) {
 	if command := commands.find_by_key(&app.registry, e.key, e.modifiers, e.unshifted);
 	   command != nil {
-		return Action(command.id), true
+		return action_builtin(command.id)
 	}
 	return {}, false
+}
+
+// Built-in ids are the descriptor indices; runtime ids must never index the Action tables.
+@(require_results)
+action_builtin :: proc(id: commands.Command_Id) -> (Action, bool) {
+	if u64(id) >= u64(len(ACTIONS)) {return {}, false}
+	return Action(id), true
+}
+
+Command_Origin :: enum u8 {
+	Key, Palette, Menu, Button, Cli, Script, Config,
+}
+
+// The wire spelling of each origin, as `--origin` takes it.
+COMMAND_ORIGIN_WORDS :: [Command_Origin]string {
+	.Key     = "key",
+	.Palette = "palette",
+	.Menu    = "menu",
+	.Button  = "button",
+	.Cli     = "cli",
+	.Script  = "script",
+	.Config  = "config",
 }
 
 // A window's own keys, palette, menus and buttons act on its focus. Tab commands act on `tab`, or the
@@ -817,12 +840,14 @@ shortcut_action :: proc(app: ^App, e: input.Key_Event) -> (Action, bool) {
 Window_Context :: struct {
 	window: ^Window,
 	tab:    Maybe(int),
+	origin: Command_Origin,
 }
 
 // A control request names its pane in the invocation; empty means `caller`, the pane the request came
-// from (D-046).
+// from (D-046). Pipe requests carry origin .Cli unless they name another.
 Control_Request :: struct {
 	caller: u32,
+	origin: Command_Origin,
 }
 
 // Who runs a command, which decides what it acts on.
@@ -832,9 +857,14 @@ Command_Context :: union #no_nil {
 }
 
 // Runs `action` as a person at w would, on its focus and selected tab. Failures show as notices.
-run_action :: proc(app: ^App, w: ^Window, action: Action) {
-	invocation := commands.invocation(commands.Command_Id(action), focus = true)
-	_ = command_execute(app, Window_Context{window = w}, invocation)
+run_action :: proc(app: ^App, w: ^Window, action: Action, origin := Command_Origin.Key) {
+	run_window_command(app, w, commands.Command_Id(action), origin)
+}
+
+@(private)
+run_window_command :: proc(app: ^App, w: ^Window, id: commands.Command_Id, origin: Command_Origin) {
+	invocation := commands.invocation(id, focus = true)
+	_ = command_execute(app, Window_Context{window = w, origin = origin}, invocation)
 }
 
 // The window that runs a command w was asked to run, or nil when it must not run: a held drag that
@@ -889,7 +919,15 @@ command_execute :: proc(app: ^App, ctx: Command_Context, invocation: commands.In
 	@(static, rodata)
 	descriptors := ACTIONS
 	invocation := invocation
-	action := Action(invocation.id)
+	command := commands.find(&app.registry, invocation.id)
+	if command == nil {return outcome_failure(.Usage, "unknown command; use aio commands")}
+	action, builtin := action_builtin(invocation.id)
+	if !builtin {
+		if app.runtime_runner == nil {
+			return outcome_failure(.Failed, fmt.tprintf("no script defines %s", command.name))
+		}
+		return app.runtime_runner(app, ctx, invocation)
+	}
 	w: ^Window
 	tab: Maybe(int)
 	// The pane a control request names, for commands that act on it where it is.

@@ -982,7 +982,7 @@ refresh :: proc(p: ^Palette, registry: ^commands.Registry) {
 				command.title,
 				query,
 				width,
-				[]string{commands.category(command.name).title},
+				[]string{commands.category(&command).title, command.keywords},
 				.Scattered,
 				match,
 			)

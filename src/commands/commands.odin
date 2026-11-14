@@ -22,13 +22,17 @@ Override :: struct {
 Command :: struct {
 	id:                  Command_Id,
 	name, title:         string,
+	// Registry-owned palette metadata and the script that defines a runtime command.
+	category, keywords:  string,
+	runtime:             bool,
+	source:              string,
 	shortcuts, defaults: Shortcut_Set,
 	// The arguments the command accepts, and those it cannot run without.
 	arguments, required: Arguments,
 	// Hidden commands serve the CLI and scripts: they stay out of the palette and shortcut lists.
 	hidden:              bool,
 	// What help says beyond the title, empty when the title says it all; and the command's own help
-	// for arguments whose shared wording does not fit it. Both borrow from the registering caller.
+	// for arguments whose shared wording does not fit it. Registration owns copies of all text.
 	summary:             string,
 	notes:               []Argument_Note,
 }
@@ -42,9 +46,11 @@ Error :: enum {
 	Output_Too_Small,
 	Unknown_Command,
 	Invalid_Shortcut,
+	Invalid_Name,
 }
 Registry :: struct {
-	items: [dynamic]Command,
+	items:         [dynamic]Command,
+	builtin_count: int,
 }
 
 create :: proc(allocator := context.allocator) -> Registry {
@@ -54,14 +60,28 @@ create :: proc(allocator := context.allocator) -> Registry {
 }
 
 destroy :: proc(registry: ^Registry) {
-	for item in registry.items {
-		delete(item.name, registry.items.allocator)
-		delete(item.title, registry.items.allocator)
-		delete(item.shortcuts.items, registry.items.allocator)
-		delete(item.defaults.items, registry.items.allocator)
+	for &item in registry.items {
+		command_destroy(&item, registry.items.allocator)
 	}
 	delete(registry.items)
 	registry^ = {}
+}
+
+@(private)
+command_destroy :: proc(command: ^Command, allocator: runtime.Allocator) {
+	for text in ([?]string{command.name, command.title, command.category, command.keywords,
+		command.source, command.summary}) {
+		delete(text, allocator)
+	}
+	for note in command.notes {
+		delete(note.help.description, allocator)
+		delete(note.help.default, allocator)
+		delete(note.help.example, allocator)
+	}
+	delete(command.notes, allocator)
+	delete(command.shortcuts.items, allocator)
+	delete(command.defaults.items, allocator)
+	command^ = {}
 }
 
 @(private)
@@ -212,36 +232,79 @@ register :: proc(registry: ^Registry, command: Command) -> Error {
 		if find_by_shortcut(registry, binding) != nil {return .Duplicate_Shortcut}
 	}
 	owned := command
+	owned.name, owned.title, owned.category, owned.keywords, owned.source, owned.summary = "", "", "", "", "", ""
+	owned.notes = nil
+	owned.shortcuts, owned.defaults = {}, {}
 	allocator := registry.items.allocator
-	name, name_error := strings.clone(command.name, allocator)
-	if name_error != nil {return .Out_Of_Memory}
-	title, title_error := strings.clone(command.title, allocator)
-	if title_error != nil {
-		delete(name, allocator)
-		return .Out_Of_Memory
+	committed := false
+	defer if !committed {command_destroy(&owned, allocator)}
+	targets := [?]^string{&owned.name, &owned.title, &owned.category, &owned.keywords,
+		&owned.source, &owned.summary}
+	for source, i in ([?]string{command.name, command.title, command.category, command.keywords,
+		command.source, command.summary}) {
+		text, err := strings.clone(source, allocator)
+		if err != nil {return .Out_Of_Memory}
+		targets[i]^ = text
 	}
-	owned.name, owned.title = name, title
+	notes, notes_error := make([]Argument_Note, len(command.notes), allocator)
+	if notes_error != nil {return .Out_Of_Memory}
+	owned.notes = notes
+	for source, i in command.notes {
+		note := &owned.notes[i]
+		note.argument = source.argument
+		note_targets := [?]^string{&note.help.description, &note.help.default, &note.help.example}
+		for text, j in ([?]string{source.help.description, source.help.default, source.help.example}) {
+			cloned, err := strings.clone(text, allocator)
+			if err != nil {return .Out_Of_Memory}
+			note_targets[j]^ = cloned
+		}
+	}
 	active, active_error := make([]Shortcut, command.shortcuts.count, allocator)
+	if active_error != nil {return .Out_Of_Memory}
+	owned.shortcuts = {active, len(active)}
 	defaults, defaults_error := make([]Shortcut, command.shortcuts.count, allocator)
-	if active_error != nil || defaults_error != nil {
-		delete(active, allocator)
-		delete(defaults, allocator)
-		delete(name, allocator)
-		delete(title, allocator)
-		return .Out_Of_Memory
-	}
+	if defaults_error != nil {return .Out_Of_Memory}
+	owned.defaults = {defaults, len(defaults)}
 	copy(active, command.shortcuts.items[:command.shortcuts.count])
 	copy(defaults, active)
-	owned.shortcuts, owned.defaults = {active, len(active)}, {defaults, len(defaults)}
 	_, err := append(&registry.items, owned)
-	if err != nil {
-		delete(active, allocator)
-		delete(defaults, allocator)
-		delete(name, allocator)
-		delete(title, allocator)
-		return .Out_Of_Memory
-	}
+	if err != nil {return .Out_Of_Memory}
+	committed = true
 	return .None
+}
+
+// Runtime names are unqualified. IDs remain unchanged until the runtime catalogue is cleared.
+@(require_results)
+register_runtime :: proc(registry: ^Registry, command: Command) -> (Command_Id, Error) {
+	if len(command.name) == 0 || strings.index_byte(command.name, '.') >= 0 {
+		return 0, .Invalid_Name
+	}
+	assert(registry.builtin_count >= 0)
+	next := u64(registry.builtin_count)
+	for item in registry.items {
+		next = max(next, u64(item.id) + 1)
+	}
+	if next > u64(max(u32)) {return 0, .Out_Of_Memory}
+	owned := command
+	owned.id = Command_Id(next)
+	owned.runtime = true
+	err := register(registry, owned)
+	if err != .None {return 0, err}
+	return owned.id, .None
+}
+
+// Clearing scripts preserves built-in commands, their IDs, and their current bindings.
+unregister_runtime :: proc(registry: ^Registry) {
+	kept := 0
+	for &item in registry.items {
+		if item.runtime {
+			command_destroy(&item, registry.items.allocator)
+		} else {
+			registry.items[kept] = item
+			kept += 1
+		}
+	}
+	resize(&registry.items, kept)
 }
 
 find :: proc {
@@ -280,8 +343,9 @@ Category :: struct {
 	title, group: string,
 }
 
-// The category of a command name's namespace, such as Panes for pane.split_right.
-category :: proc(name: string) -> Category {
+// An explicit category wins; otherwise use the command name's namespace.
+category :: proc(command: ^Command) -> Category {
+	if len(command.category) > 0 {return {command.category, command.category}}
 	@(static, rodata)
 	categories := [?]struct {
 		namespace: string,
@@ -300,8 +364,8 @@ category :: proc(name: string) -> Category {
 		{"status", {"Activity", "Activity shortcuts"}},
 		{"profile", {"Profiles", "Profile shortcuts"}},
 	}
-	dot := strings.index_byte(name, '.')
-	namespace := dot < 0 ? name : name[:dot]
+	dot := strings.index_byte(command.name, '.')
+	namespace := dot < 0 ? command.name : command.name[:dot]
 	for entry in categories {
 		if entry.namespace == namespace {return entry.category}
 	}

@@ -21,7 +21,7 @@ import "aio:term"
 invoke :: proc(state: ^app.App, caller: u32, args: ..string) -> app.Outcome {
 	invocation, err := commands.parse_invocation(&state.registry, args, context.temp_allocator)
 	if err.advice != "" {return {status = .Usage, message = err.advice}}
-	return app.command_execute(state, app.Control_Request{caller}, invocation)
+	return app.command_execute(state, app.Control_Request{caller = caller, origin = .Cli}, invocation)
 }
 
 @(test)
