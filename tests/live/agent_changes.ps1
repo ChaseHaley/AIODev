@@ -549,6 +549,8 @@ try {
         # Long enough to scroll, so the file list can put the header of a later file at the top.
         'Set-Content -LiteralPath (Join-Path $work ''long.txt'') -Value (1..200 | ForEach-Object { "line $_" })'
         'Set-Content -LiteralPath (Join-Path $work ''notes.txt'') -Value @(''alpha'', ''BETA'', ''gamma'', ''delta'')'
+        # Sorts last, with no t in its path, and keeps enough below long.txt to scroll it to the top.
+        'Set-Content -LiteralPath (Join-Path $work ''zz.md'') -Value (1..150 | ForEach-Object { "- entry $_" })'
         'while (-not (Test-Path -LiteralPath $end)) { Start-Sleep -Milliseconds 100 }'
         "Report 'done' 'Live'"
         '[Console]::Write([char]27 + ''[?2004h'')'
@@ -583,16 +585,17 @@ try {
     Like $s['changes.agent'] '*Reviewer agent*' 'the source field names the reviewer'
     Await-Like 'changes.range_label' 'Working*' 'the range label says the live turn is working' | Out-Null
     Set-Content -LiteralPath $reviewGo -Value 'x'
-    # Paths sort, so live.py comes first, then long.txt, then notes.txt.
+    # Paths sort, so live.py comes first, then long.txt, notes.txt and zz.md.
     $s = Await-State @{
-        'changes.turn.0.live' = 'true'; 'changes.files' = 3; 'changes.file.0.path' = 'live.py'
-        'changes.file.1.path' = 'long.txt'; 'changes.file.2.path' = 'notes.txt'; 'changes.settled' = 'true'
+        'changes.turn.0.live' = 'true'; 'changes.files' = 4; 'changes.file.0.path' = 'live.py'
+        'changes.file.1.path' = 'long.txt'; 'changes.file.2.path' = 'notes.txt'; 'changes.file.3.path' = 'zz.md'
+        'changes.settled' = 'true'
     } 'the live turn lists the files the agent wrote within 3 s' 3
     Set-Content -LiteralPath $reviewEnd -Value 'x'
     Await-AtLeast 'turns.saved' ($saved + 1) 'the live turn is saved at its end' | Out-Null
     $s = Await-State @{
         'changes.turns' = 1; 'changes.turn.0.live' = 'false'; 'changes.first' = 0; 'changes.last' = 0
-        'changes.files' = 3; 'changes.file.0.path' = 'live.py'; 'changes.file.0.highlighted' = 'true'
+        'changes.files' = 4; 'changes.file.0.path' = 'live.py'; 'changes.file.0.highlighted' = 'true'
         'changes.settled' = 'true'
     } 'the saved turn keeps its selection and highlights live.py'
     Equal $s['changes.file.0.added'] 4 'live.py adds its four lines'
@@ -660,55 +663,90 @@ try {
     Click-Rect $s 'changes.filter_button_rect'
     Await-State @{ 'changes.filter_open' = 'true' } 'the filter button opens the filter' | Out-Null
     Aio type '!long' | Out-Null
+    # Lines: live.py +4, long.txt +200, notes.txt +1 -1, zz.md +150.
     $s = Await-State @{
         'changes.filter' = '!long'; 'changes.filter_active' = 'true'; 'changes.hidden_files' = 1
-        'changes.total_files' = 3; 'changes.files' = 2; 'changes.file.0.path' = 'live.py'
-        'changes.file.1.path' = 'notes.txt'
-    } '!long hides long.txt'
+        'changes.total_files' = 4; 'changes.files' = 3; 'changes.file.0.path' = 'live.py'
+        'changes.file.1.path' = 'notes.txt'; 'changes.file.2.path' = 'zz.md'
+        'changes.shown_added' = 155; 'changes.shown_removed' = 1; 'changes.total_added' = 355
+        'changes.total_removed' = 1
+    } '!long hides long.txt and its lines from the shown totals'
     Aio capture --out "$data/agent-filter.png" | Out-Null
     Aio key Enter | Out-Null
-    $s = Await-State @{ 'changes.filter_open' = 'false'; 'changes.filter' = '!long'; 'changes.files' = 2 } `
+    $s = Await-State @{ 'changes.filter_open' = 'false'; 'changes.filter' = '!long'; 'changes.files' = 3 } `
         'Enter closes the filter and keeps it'
     Click-Rect $s 'changes.files_button_rect'
     $s = Await-State @{
         'changes.files_open' = 'true'; 'changes.file_list.0.faded' = 'false'; 'changes.file_list.1.faded' = 'true'
-        'changes.file_list.2.faded' = 'false'
+        'changes.file_list.2.faded' = 'false'; 'changes.file_list.3.faded' = 'false'
     } 'the file list keeps the hidden file, faded'
     Like $s['changes.file_list.1.label'] '*long.txt*' 'the faded file is long.txt'
     Aio type 'long' | Out-Null
     Await-Like 'changes.file_list.0.label' '*long.txt*' 'the search finds the hidden long.txt' | Out-Null
     Aio key Enter | Out-Null
     $s = Await-State @{
-        'changes.files_open' = 'false'; 'changes.filter' = '!long'; 'changes.files' = 3
+        'changes.files_open' = 'false'; 'changes.filter' = '!long'; 'changes.files' = 4
         'changes.file.1.path' = 'long.txt'; 'changes.top_file' = 1
-    } 'picking the hidden long.txt shows it despite the filter'
+        'changes.shown_added' = 355; 'changes.shown_removed' = 1; 'changes.total_added' = 355
+        'changes.total_removed' = 1
+    } 'picking the hidden long.txt shows it and its lines despite the filter'
     # live.py has no t; notes.txt has one but !notes hides it.
     Click-Rect $s 'changes.filter_button_rect'
     Await-State @{ 'changes.filter_open' = 'true' } 'the filter opens again' | Out-Null
     Aio key Ctrl+A Backspace | Out-Null
     Aio type 't !notes' | Out-Null
     Await-State @{
-        'changes.filter' = 't !notes'; 'changes.filter_active' = 'true'; 'changes.hidden_files' = 2
+        'changes.filter' = 't !notes'; 'changes.filter_active' = 'true'; 'changes.hidden_files' = 3
         'changes.files' = 1; 'changes.file.0.path' = 'long.txt'
     } 'a plain term and a !term together show only long.txt' | Out-Null
     Aio key Ctrl+A Backspace | Out-Null
     Aio type '[' | Out-Null
     $s = Await-State @{
         'changes.filter' = '['; 'changes.filter_invalid' = 'true'; 'changes.filter_active' = 'false'
-        'changes.hidden_files' = 0; 'changes.files' = 3
+        'changes.hidden_files' = 0; 'changes.files' = 4
     } 'an invalid filter hides nothing'
     Like $s['changes.filter_error'] 'Invalid regular expression*' 'the filter says the term is invalid'
     Aio key Ctrl+A Backspace | Out-Null
     Aio type '!long' | Out-Null
-    Await-State @{ 'changes.filter' = '!long'; 'changes.hidden_files' = 1; 'changes.files' = 2 } `
+    Await-State @{ 'changes.filter' = '!long'; 'changes.hidden_files' = 1; 'changes.files' = 3 } `
         'editing the filter hides long.txt again' | Out-Null
     Aio key Esc | Out-Null
     $s = Await-State @{ 'changes.filter_open' = 'false'; 'changes.filter' = '!long' } 'Esc closes the filter and keeps it'
     Click-Rect $s 'changes.filter_bar_clear_rect'
     $s = Await-State @{
-        'changes.filter' = ''; 'changes.filter_active' = 'false'; 'changes.hidden_files' = 0; 'changes.files' = 3
+        'changes.filter' = ''; 'changes.filter_active' = 'false'; 'changes.hidden_files' = 0; 'changes.files' = 4
         'changes.file.0.path' = 'live.py'; 'changes.file.1.path' = 'long.txt'; 'changes.file.2.path' = 'notes.txt'
-    } 'Clear on the filter bar shows every file'
+        'changes.file.3.path' = 'zz.md'
+        'changes.shown_added' = 355; 'changes.shown_removed' = 1; 'changes.total_added' = 355
+        'changes.total_removed' = 1
+    } 'Clear on the filter bar shows every file and every line'
+
+    # Sticky header: inside long.txt its header stays pinned at the top of the diff.
+    Click-Rect $s 'changes.files_button_rect'
+    Await-State @{ 'changes.files_open' = 'true' } 'the file list opens for long.txt' | Out-Null
+    Aio type 'long' | Out-Null
+    Await-Like 'changes.file_list.0.label' '*long.txt*' 'the search finds long.txt' | Out-Null
+    Aio key Enter | Out-Null
+    $s = Await-State @{ 'changes.files_open' = 'false'; 'changes.top_file' = 1 } 'picking long.txt puts it at the top'
+    # Wheel rows are positive toward the top, so a negative count scrolls down into the file.
+    Aio mouse wheel (Middle (Rect $s "pane.$reviewChanges.rect")) -5 --px | Out-Null
+    $s = Await-State @{ 'changes.top_file' = 1; 'changes.sticky_file' = 1 } 'the long.txt header sticks inside its body'
+    Aio capture --out "$data/agent-sticky.png" | Out-Null
+    # Collapsing from the sticky header puts that file's header at the top.
+    Click-Rect $s 'changes.sticky_rect'
+    $s = Await-State @{ 'changes.file.1.collapsed' = 'true'; 'changes.top_file' = 1; 'changes.sticky_file' = -1 } `
+        'pressing the sticky header collapses long.txt and keeps it at the top'
+    # Fold all collapses every file while one is expanded, then expands them all.
+    Click-Rect $s 'changes.fold_button_rect'
+    $s = Await-State @{
+        'changes.any_expanded' = 'false'; 'changes.file.0.collapsed' = 'true'; 'changes.file.1.collapsed' = 'true'
+        'changes.file.2.collapsed' = 'true'; 'changes.file.3.collapsed' = 'true'
+    } 'the fold button collapses every file'
+    Click-Rect $s 'changes.fold_button_rect'
+    $s = Await-State @{
+        'changes.any_expanded' = 'true'; 'changes.file.0.collapsed' = 'false'; 'changes.file.1.collapsed' = 'false'
+        'changes.file.2.collapsed' = 'false'; 'changes.file.3.collapsed' = 'false'
+    } 'the fold button expands every file again'
     # live.py at the top again for the comments below.
     Click-Rect $s 'changes.files_button_rect'
     Await-State @{ 'changes.files_open' = 'true' } 'the file list opens for live.py' | Out-Null
@@ -751,8 +789,9 @@ try {
     Aio command pane.agent_changes | Out-Null
     Await-State @{
         'changes.active' = 'true'; 'changes.scope' = 'agent'; 'changes.side_by_side' = 'true'
-        'changes.filter' = '!long'; 'changes.hidden_files' = 1; 'changes.files' = 2
-        'changes.file.0.path' = 'live.py'; 'changes.file.1.path' = 'notes.txt'; 'changes.settled' = 'true'
+        'changes.filter' = '!long'; 'changes.hidden_files' = 1; 'changes.files' = 3
+        'changes.file.0.path' = 'live.py'; 'changes.file.1.path' = 'notes.txt'; 'changes.file.2.path' = 'zz.md'
+        'changes.settled' = 'true'
     } 'a new pane opens side by side and filtered when the settings say so' | Out-Null
     Close-Changes 2
     Set-Content -LiteralPath "$data/settings.ini" -Value $ini -NoNewline
