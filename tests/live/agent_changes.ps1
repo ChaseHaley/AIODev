@@ -186,6 +186,8 @@ New-Item -ItemType Directory -Path $work | Out-Null
 Git init -q
 Set-Content -LiteralPath (Join-Path $work 'a.txt') -Value @('one', 'two', 'three')
 Set-Content -LiteralPath (Join-Path $work 'b.txt') -Value @('keep', 'drop')
+# Only the reviewer of section (d) edits it, for a modified file whose two sides show side by side.
+Set-Content -LiteralPath (Join-Path $work 'notes.txt') -Value @('alpha', 'beta', 'gamma', 'delta')
 Git add -A
 Git commit -q -m initial
 
@@ -544,6 +546,9 @@ try {
         '    ''    return "hello " + name'''
         '    ''VALUE = 42'''
         ')'
+        # Long enough to scroll, so the file list can put the header of a later file at the top.
+        'Set-Content -LiteralPath (Join-Path $work ''long.txt'') -Value (1..200 | ForEach-Object { "line $_" })'
+        'Set-Content -LiteralPath (Join-Path $work ''notes.txt'') -Value @(''alpha'', ''BETA'', ''gamma'', ''delta'')'
         'while (-not (Test-Path -LiteralPath $end)) { Start-Sleep -Milliseconds 100 }'
         "Report 'done' 'Live'"
         '[Console]::Write([char]27 + ''[?2004h'')'
@@ -578,19 +583,59 @@ try {
     Like $s['changes.agent'] '*Reviewer agent*' 'the source field names the reviewer'
     Await-Like 'changes.range_label' 'Working*' 'the range label says the live turn is working' | Out-Null
     Set-Content -LiteralPath $reviewGo -Value 'x'
+    # Paths sort, so live.py comes first, then long.txt, then notes.txt.
     $s = Await-State @{
-        'changes.turn.0.live' = 'true'; 'changes.files' = 1; 'changes.file.0.path' = 'live.py'
-        'changes.settled' = 'true'
-    } 'the live turn lists the file the agent wrote within 3 s' 3
+        'changes.turn.0.live' = 'true'; 'changes.files' = 3; 'changes.file.0.path' = 'live.py'
+        'changes.file.1.path' = 'long.txt'; 'changes.file.2.path' = 'notes.txt'; 'changes.settled' = 'true'
+    } 'the live turn lists the files the agent wrote within 3 s' 3
     Set-Content -LiteralPath $reviewEnd -Value 'x'
     Await-AtLeast 'turns.saved' ($saved + 1) 'the live turn is saved at its end' | Out-Null
     $s = Await-State @{
         'changes.turns' = 1; 'changes.turn.0.live' = 'false'; 'changes.first' = 0; 'changes.last' = 0
-        'changes.files' = 1; 'changes.file.0.path' = 'live.py'; 'changes.file.0.highlighted' = 'true'
+        'changes.files' = 3; 'changes.file.0.path' = 'live.py'; 'changes.file.0.highlighted' = 'true'
         'changes.settled' = 'true'
     } 'the saved turn keeps its selection and highlights live.py'
     Equal $s['changes.file.0.added'] 4 'live.py adds its four lines'
     Aio capture --out "$data/agent-live-highlight.png" | Out-Null
+
+    # The file list: typing part of a later file's path and Enter puts that file's header at the top.
+    Click-Rect $s 'changes.files_button_rect'
+    Await-State @{ 'changes.files_open' = 'true' } 'the files button opens the file list' | Out-Null
+    Aio type 'long' | Out-Null
+    Await-Like 'changes.file_list.0.label' '*long.txt*' 'the search keeps long.txt' | Out-Null
+    Aio key Enter | Out-Null
+    $s = Await-State @{ 'changes.files_open' = 'false'; 'changes.top_file' = 1 } `
+        'picking long.txt scrolls its header to the top'
+    # Side by side keeps the top file in view; a modified file shows its old line left of its new one.
+    Click-Rect $s 'changes.layout_button_rect'
+    $s = Await-State @{ 'changes.side_by_side' = 'true'; 'changes.top_file' = 1 } `
+        'the layout toggle shows the diff side by side'
+    Click-Rect $s 'changes.files_button_rect'
+    Await-State @{ 'changes.files_open' = 'true' } 'the file list opens again' | Out-Null
+    Aio type 'notes' | Out-Null
+    Await-Like 'changes.file_list.0.label' '*notes.txt*' 'the search keeps notes.txt' | Out-Null
+    Aio key Enter | Out-Null
+    $s = Await-State @{ 'changes.files_open' = 'false'; 'changes.side_by_side' = 'true' } 'picking notes.txt closes the list'
+    Aio capture --out "$data/agent-side-by-side.png" | Out-Null
+    # notes.txt: alpha, -beta, +BETA, gamma, delta; the removed and the added line share a row.
+    $old = Rect $s 'changes.line.2.1.rect'
+    $new = Rect $s 'changes.line.2.2.rect'
+    if (-not ($old[2] -gt 0 -and $new[2] -gt 0 -and $new[0] -gt $old[0] -and $new[1] -eq $old[1])) {
+        throw "side by side expected beta left of BETA on one row, observed $($old -join ',') and $($new -join ',')"
+    }
+    Write-Output 'PASS the removed and added lines share a row, old on the left'
+    Click-Rect $s 'changes.line.2.2.rect'
+    Await-State @{ 'changes.selection' = '2:2-2' } 'a click on a right-half line selects the new line' | Out-Null
+    # Back to unified, with live.py at the top again for the comments below.
+    $s = State
+    Click-Rect $s 'changes.files_button_rect'
+    Await-State @{ 'changes.files_open' = 'true' } 'the file list opens a third time' | Out-Null
+    Aio type 'live' | Out-Null
+    Await-Like 'changes.file_list.0.label' '*live.py*' 'the search keeps live.py' | Out-Null
+    Aio key Enter | Out-Null
+    $s = Await-State @{ 'changes.files_open' = 'false'; 'changes.top_file' = 0 } 'picking live.py scrolls to the top'
+    Click-Rect $s 'changes.layout_button_rect'
+    $s = Await-State @{ 'changes.side_by_side' = 'false'; 'changes.top_file' = 0 } 'the layout toggle goes back to unified'
 
     # Comments: select two lines, write a comment, copy it, then send it to the reviewer's pane.
     Await-File $reviewReady 'the reviewer accepts pasted text' | Out-Null
@@ -618,6 +663,20 @@ try {
     Focus-Pane $reviewPane
     Aio wait text "ECHO:$comment" | Out-Null
     Write-Output "PASS the comment reaches the reviewer's prompt"
+
+    # The default view setting: a pane opened from an agent pane takes it.
+    $ini = Get-Content -LiteralPath "$data/settings.ini" -Raw
+    Add-Content -LiteralPath "$data/settings.ini" -Value "`nturns.diff_view = side_by_side"
+    Aio command settings.reload | Out-Null
+    Aio command pane.agent_changes | Out-Null
+    Await-State @{
+        'changes.active' = 'true'; 'changes.scope' = 'agent'; 'changes.side_by_side' = 'true'
+        'changes.settled' = 'true'
+    } 'a new pane opens side by side when the setting says so' | Out-Null
+    Close-Changes 2
+    Set-Content -LiteralPath "$data/settings.ini" -Value $ini -NoNewline
+    Aio command settings.reload | Out-Null
+    Focus-Pane $reviewPane
 
     # Back at its shell the reviewer takes no comments: Send is refused with a reason, and Discard clears.
     Aio run 'EXIT' | Out-Null
