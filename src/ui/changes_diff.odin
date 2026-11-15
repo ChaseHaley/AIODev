@@ -1,5 +1,6 @@
 package ui
 
+import "aio:colour"
 import "aio:font"
 import "aio:render"
 import "aio:syntax"
@@ -810,15 +811,114 @@ number_draw :: proc(p: ^Diff_Paint, n: i32, x, baseline: f32) -> render.Build_St
 	return draw_text(p.mono, p.list, label, x + p.column - f32(len(label)) * p.digit, baseline, p.theme.faint)
 }
 
+// What a diff row's code text sits on, which its inks are raised against.
+Changes_Background :: enum u8 {
+	Context,
+	Added,
+	Removed,
+	Context_Selected,
+	Added_Selected,
+	Removed_Selected,
+}
+
+// A row's inks: the 16 palette colours, then the text, the muted context text and the two signs.
+CHANGES_INK_TEXT :: 16
+CHANGES_INK_MUTED :: 17
+CHANGES_INK_ADDED_SIGN :: 18
+CHANGES_INK_REMOVED_SIGN :: 19
+CHANGES_INKS :: 20
+
+// The colours the ink table is built from: the ratio, the row fills and the inks.
+Changes_Ink_Key :: struct {
+	ratio:                                   f32,
+	pane, added, removed, selection:         render.Color,
+	text, muted, success, error:             render.Color,
+	palette:                                 [16]render.Color,
+}
+
+// Code text colours raised to the view's minimum contrast against each row background. Built when the key
+// changes, so drawing only looks colours up; `builds` counts the builds.
+Changes_Inks :: struct {
+	key:    Changes_Ink_Key,
+	builds: int,
+	table:  [Changes_Background][CHANGES_INKS]render.Color,
+}
+
+// `top` composited over `bottom` by its alpha, opaque.
+@(private = "file")
+colour_over :: proc(top, bottom: render.Color) -> render.Color {
+	a := top.a
+	return {top.r * a + bottom.r * (1 - a), top.g * a + bottom.g * (1 - a), top.b * a + bottom.b * (1 - a), 1}
+}
+
+// Rebuilds the table when the theme's colours or the ratio changed since the last build.
+@(private)
+changes_inks_refresh :: proc(inks: ^Changes_Inks, theme: Theme, ratio: f32) {
+	key := Changes_Ink_Key {
+		ratio     = ratio,
+		pane      = theme.pane,
+		added     = theme.diff_added,
+		removed   = theme.diff_removed,
+		selection = theme.selection,
+		text      = theme.text,
+		muted     = theme.muted,
+		success   = theme.success,
+		error     = theme.error,
+		palette   = theme.palette,
+	}
+	if inks.builds > 0 && inks.key == key {return}
+	inks.key = key
+	inks.builds += 1
+	sources: [CHANGES_INKS]render.Color
+	palette := theme.palette
+	copy(sources[:16], palette[:])
+	sources[CHANGES_INK_TEXT], sources[CHANGES_INK_MUTED] = theme.text, theme.muted
+	sources[CHANGES_INK_ADDED_SIGN], sources[CHANGES_INK_REMOVED_SIGN] = theme.success, theme.error
+	pane := theme.pane
+	pane.a = 1
+	added, removed := colour_over(theme.diff_added, pane), colour_over(theme.diff_removed, pane)
+	backgrounds := [Changes_Background]render.Color {
+		.Context          = pane,
+		.Added            = added,
+		.Removed          = removed,
+		.Context_Selected = colour_over(theme.selection, pane),
+		.Added_Selected   = colour_over(theme.selection, added),
+		.Removed_Selected = colour_over(theme.selection, removed),
+	}
+	for back, kind in backgrounds {
+		for source, i in sources {inks.table[kind][i] = colour.minimum_contrast(source, back, ratio)}
+	}
+}
+
+// The inks of a row of `kind`, selected or not.
+@(private = "file")
+row_inks :: proc(p: ^Diff_Paint, kind: tr.Line_Kind, selected: bool) -> ^[CHANGES_INKS]render.Color {
+	background: Changes_Background
+	#partial switch kind {
+	case .Added:
+		background = selected ? .Added_Selected : .Added
+	case .Removed:
+		background = selected ? .Removed_Selected : .Removed
+	case:
+		background = selected ? .Context_Selected : .Context
+	}
+	return &p.state.inks.table[background]
+}
+
 // Draws the start of a diff line from `x`, fading out over the last fifth of `width` when it runs past
 // it. A tab advances CHANGES_TAB_COLUMNS spaces. `spans` are byte offsets into `s`, which starts where
-// the line does, so the walk colours each rune by the span it is in; text outside them takes `ink`. Spans
-// come from the whole file, which a clean or smudge filter can make differ from the diff text, so they are
-// only read at offsets inside `s`: one reaching past the end colours what is inside, and an empty or
-// out-of-order one is skipped.
+// the line does, so the walk colours each rune by the span it is in; text outside them takes ink `plain`
+// of the row's `inks`. Spans come from the whole file, which a clean or smudge filter can make differ from
+// the diff text, so they are only read at offsets inside `s`: one reaching past the end colours what is
+// inside, and an empty or out-of-order one is skipped.
 @(private = "file")
 paint_text :: proc(
-	p: ^Diff_Paint, s: string, spans: []syntax.Span, x, baseline, width: f32, ink: render.Color,
+	p: ^Diff_Paint,
+	s: string,
+	spans: []syntax.Span,
+	x, baseline, width: f32,
+	inks: ^[CHANGES_INKS]render.Color,
+	plain: int,
 ) -> render.Build_Status {
 	if width <= 0 {return .Ok}
 	t := p.mono
@@ -837,10 +937,10 @@ paint_text :: proc(
 			break
 		}
 		for next < len(spans) && int(spans[next].end) <= offset {next += 1}
-		c := ink
+		c := inks[plain]
 		if next < len(spans) && int(spans[next].start) <= offset {
 			index := palette[spans[next].kind]
-			c = index >= 0 ? p.theme.palette[index] : p.theme.text
+			c = inks[index >= 0 ? index : CHANGES_INK_TEXT]
 		}
 		if r == '\t' {
 			pen += CHANGES_TAB_COLUMNS * space
@@ -890,7 +990,8 @@ paint_line :: proc(
 		draw_rect(p.list, {rect = row, color = t.diff_removed})
 	case .Context, .No_Newline:
 	}
-	if line_selected(p.view, file, flat) {
+	selected := line_selected(p.view, file, flat)
+	if selected {
 		draw_rect(p.list, {rect = row, color = t.selection})
 		draw_rect(p.list, {rect = {row.x, y, max(1, math.round(2 * p.scale)), height}, color = t.accent})
 	}
@@ -907,18 +1008,24 @@ paint_line :: proc(
 		if r := number_draw(p, line.new_line, p.new_x, baseline); r != .Ok {return r}
 	}
 	spans, highlighted := line_spans(p.view, file, flat)
-	ink := highlighted ? t.text : t.muted
+	inks := row_inks(p, line.kind, selected)
+	plain := highlighted ? CHANGES_INK_TEXT : CHANGES_INK_MUTED
 	switch line.kind {
 	case .Added:
-		if r := draw_text(p.mono, p.list, "+", p.sign_x, baseline, t.success); r != .Ok {return r}
-		ink = t.text
+		if r := draw_text(p.mono, p.list, "+", p.sign_x, baseline, inks[CHANGES_INK_ADDED_SIGN]); r != .Ok {
+			return r
+		}
+		plain = CHANGES_INK_TEXT
 	case .Removed:
-		if r := draw_text(p.mono, p.list, "-", p.sign_x, baseline, t.error); r != .Ok {return r}
-		ink = t.text
+		if r := draw_text(p.mono, p.list, "-", p.sign_x, baseline, inks[CHANGES_INK_REMOVED_SIGN]); r != .Ok {
+			return r
+		}
+		plain = CHANGES_INK_TEXT
 	case .Context, .No_Newline:
 	}
 	width := p.card_x + p.card_width - p.text_x
-	return paint_text(p, mono_prefix(line.text, width, p.digit), spans, p.text_x, baseline, width, ink)
+	text := mono_prefix(line.text, width, p.digit)
+	return paint_text(p, text, spans, p.text_x, baseline, width, inks, plain)
 }
 
 // One cell of a side-by-side row: flat line `line` of the hunk whose first line is flat line `flat`, with
@@ -940,7 +1047,8 @@ paint_cell :: proc(
 	case .Removed:
 		draw_rect(p.list, {rect = cell, color = t.diff_removed})
 	}
-	if line_selected(p.view, file, line) {
+	selected := line_selected(p.view, file, line)
+	if selected {
 		draw_rect(p.list, {rect = cell, color = t.selection})
 		bar := render.Rect{cell.x, cell.y, max(1, math.round(2 * s)), cell.height}
 		draw_rect(p.list, {rect = bar, color = t.accent})
@@ -955,16 +1063,21 @@ paint_cell :: proc(
 	}
 	if r := number_draw(p, old ? d.old_line : d.new_line, number_x, baseline); r != .Ok {return r}
 	spans, highlighted := line_spans(p.view, file, line)
-	ink := highlighted ? t.text : t.muted
+	inks := row_inks(p, d.kind, selected)
+	plain := highlighted ? CHANGES_INK_TEXT : CHANGES_INK_MUTED
 	#partial switch d.kind {
 	case .Added:
-		if r := draw_text(p.mono, p.list, "+", sign_x, baseline, t.success); r != .Ok {return r}
-		ink = t.text
+		if r := draw_text(p.mono, p.list, "+", sign_x, baseline, inks[CHANGES_INK_ADDED_SIGN]); r != .Ok {
+			return r
+		}
+		plain = CHANGES_INK_TEXT
 	case .Removed:
-		if r := draw_text(p.mono, p.list, "-", sign_x, baseline, t.error); r != .Ok {return r}
-		ink = t.text
+		if r := draw_text(p.mono, p.list, "-", sign_x, baseline, inks[CHANGES_INK_REMOVED_SIGN]); r != .Ok {
+			return r
+		}
+		plain = CHANGES_INK_TEXT
 	}
-	return paint_text(p, mono_prefix(d.text, width, p.digit), spans, text_x, baseline, width, ink)
+	return paint_text(p, mono_prefix(d.text, width, p.digit), spans, text_x, baseline, width, inks, plain)
 }
 
 // Hunk `index` of `file`, whose first line is flat line `flat`: its header row, then its rows.
@@ -1200,6 +1313,7 @@ diff_draw :: proc(
 	notice := view.notice != .None
 	if !rows.valid || g.diff.width <= 0 || (notice && rows.detached <= 0) {return .Ok}
 	if !notice && len(rows.tops) != len(view.files) + 1 {return .Ok}
+	changes_inks_refresh(&state.inks, theme, view.minimum_contrast)
 	scope, opened := clip_scope_open(list, g.diff)
 	if !opened {return .Ok}
 	defer clip_scope_close(list, scope)

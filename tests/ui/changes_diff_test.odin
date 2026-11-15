@@ -1,5 +1,6 @@
 package ui_test
 
+import "aio:colour"
 import "aio:font"
 import "aio:glyphs"
 import "aio:render"
@@ -647,4 +648,97 @@ changes_sticky_header_draws_in_a_layer_above_the_stream :: proc(t: ^testing.T) {
 	for l in list.layers[:layer] {stream += l.glyph_count}
 	testing.expect(t, stream > 0)
 	testing.expect(t, pinned.glyph_count > 0)
+}
+
+@(private = "file")
+hex :: proc(value: u32, alpha: u32 = 0xff) -> render.Color {
+	channel :: proc(value: u32, shift: u32) -> f32 {return f32(value >> shift & 0xff) / 255}
+	return {channel(value, 16), channel(value, 8), channel(value, 0), f32(alpha) / 255}
+}
+
+@(private = "file")
+count_colour :: proc(list: ^render.Draw_List, row: render.Rect, ink: render.Color) -> int {
+	count := 0
+	for glyph in list.glyphs {
+		inside := glyph.rect.y >= row.y && glyph.rect.y < row.y + row.height
+		if inside && glyph.color == ink {count += 1}
+	}
+	return count
+}
+
+// Tokyo Night Moon's comment colour on an added row measures 1.25:1; the diff raises it to the minimum.
+@(test)
+changes_code_text_keeps_the_minimum_contrast :: proc(t: ^testing.T) {
+	device, device_error := render.device_create(.Warp)
+	if !testing.expect_value(t, device_error, render.Error.None) {return}
+	defer render.device_destroy(device)
+	f: Diff_Fixture
+	view: ui.Changes_View
+	if !diff_fixture_make(t, &f, &view) {return}
+	defer diff_fixture_destroy(&f)
+	cache: glyphs.Cache
+	glyphs.init(&cache, f.fonts, device)
+	defer glyphs.destroy(&cache)
+	if !testing.expect(t, ui.text_init(&f.text, f.fonts, &cache, 13)) {return}
+	f.mono = ui.text_mono(&f.text, f.text.family)
+
+	// The context line "ab" is a string; the added line's "ab" after its tab is a comment.
+	context_spans := [?]syntax.Span{{0, 2, .String}}
+	added_spans := [?]syntax.Span{{1, 3, .Comment}}
+	file_lines := [?][]syntax.Span{context_spans[:], nil, added_spans[:]}
+	highlights := [?]syntax.File_Lines{{lines = file_lines[:]}}
+	view.highlights = highlights[:]
+	theme: ui.Theme
+	theme.pane = hex(0x222436)
+	theme.diff_added = hex(0xc3e88d, 0x24)
+	theme.text = hex(0xc8d3f5)
+	theme.palette[8] = hex(0x444a73)
+	theme.palette[2] = hex(0xc3e88d)
+	a := theme.diff_added.a
+	added := theme.diff_added * a + theme.pane * (1 - a)
+	added.a = 1
+	testing.expect(t, colour.contrast_ratio(theme.palette[8], added) < 1.5)
+
+	state: ui.Changes_State
+	defer ui.changes_state_destroy(&state)
+	g := lay_out(&f, &view, &state)
+	list := render.draw_list_init()
+	defer render.draw_list_destroy(&list)
+	draw :: proc(
+		t: ^testing.T,
+		list: ^render.Draw_List,
+		f: ^Diff_Fixture,
+		theme: ^ui.Theme,
+		g: ui.Changes_Geometry,
+		view: ^ui.Changes_View,
+		state: ^ui.Changes_State,
+	) {
+		render.draw_list_reset(list)
+		testing.expect_value(t, render.push_layer(list, g.area), render.Error.None)
+		status, _ := ui.changes_draw(list, &f.text, &f.mono, theme, g, view, state, 1, {-1, -1}, 0)
+		testing.expect_value(t, status, render.Build_Status.Ok)
+	}
+	added_row := ui.changes_line_rect(g, &view, &state, 0, 2)
+	context_row := ui.changes_line_rect(g, &view, &state, 0, 0)
+
+	view.minimum_contrast = 4.5
+	draw(t, &list, &f, &theme, g, &view, &state)
+	comment := state.inks.table[.Added][8]
+	testing.expect(t, colour.contrast_ratio(comment, added) >= 4.45)
+	testing.expect_value(t, count_colour(&list, added_row, comment), 2)
+	testing.expect_value(t, count_colour(&list, added_row, theme.palette[8]), 0)
+	// A colour already past the ratio keeps the theme's value.
+	testing.expect_value(t, state.inks.table[.Context][2], theme.palette[2])
+	testing.expect_value(t, count_colour(&list, context_row, theme.palette[2]), 2)
+
+	// The same theme and ratio draw again without rebuilding the table.
+	builds := state.inks.builds
+	draw(t, &list, &f, &theme, g, &view, &state)
+	testing.expect_value(t, state.inks.builds, builds)
+
+	// A ratio of one keeps the theme's exact colours.
+	view.minimum_contrast = 1
+	draw(t, &list, &f, &theme, g, &view, &state)
+	testing.expect_value(t, state.inks.builds, builds + 1)
+	testing.expect_value(t, count_colour(&list, added_row, theme.palette[8]), 2)
 }

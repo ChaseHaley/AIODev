@@ -552,12 +552,13 @@ DIFF_VIEW_LABEL :: [Diff_View]string {
 DIFF_VIEW_NAMES :: []string{DIFF_VIEW_NAME[Diff_View(0)], DIFF_VIEW_NAME[Diff_View(1)]}
 DIFF_VIEW_LABELS :: []string{DIFF_VIEW_LABEL[Diff_View(0)], DIFF_VIEW_LABEL[Diff_View(1)]}
 // Agent changes: whether to keep a private copy of the files agents change in each turn, for how many
-// days, and how new panes show diffs and which files they show.
+// days, and how new panes show diffs, which files they show and how legible their code text stays.
 Turns_Settings :: struct {
-	record:         bool,
-	retention_days: int,
-	diff_view:      Diff_View,
-	diff_filter:    string,
+	record:                bool,
+	retention_days:        int,
+	diff_view:             Diff_View,
+	diff_filter:           string,
+	diff_minimum_contrast: f64,
 }
 Window_Settings :: struct {
 	columns, rows, padding: int,
@@ -1504,6 +1505,16 @@ SCHEMA :: [?]Schema_Entry {
 		valid = {0, 256},
 		description = "The filter a new Agent changes pane starts with: space-separated regular expressions on " +
 			"file paths; a term starting with ! hides matching files. Empty shows every file.",
+	},
+	{
+		key = "turns.diff_minimum_contrast",
+		title = "Minimum diff text contrast",
+		kind = .Float,
+		offset = offset_of(Settings, turns) + offset_of(Turns_Settings, diff_minimum_contrast),
+		default_value = "4.5",
+		valid = {1, 21},
+		description = "Minimum contrast for code text in Agent changes diffs, in every theme. One keeps the " +
+			"theme's exact colours.",
 	},
 	{
 		key = "shell.default_profile",

@@ -106,6 +106,9 @@ Changes_View :: struct {
 	editing:     int,
 	editor:      ^Text_Field,
 	send:        Changes_Send_View,
+	// The least WCAG contrast code text and signs keep against the row they sit on; 1 or less keeps the
+	// theme's colours.
+	minimum_contrast: f32,
 	// Show the "Install turn hooks" toolbar button.
 	hooks_offer: bool,
 	// Old and new side by side rather than one unified stream; the pane's own choice.
@@ -215,6 +218,8 @@ Changes_State :: struct {
 	filter_open:              bool,
 	motion:                   Control_Motion,
 	rows:                     Changes_Rows,
+	// Code text colours raised to `minimum_contrast` per row background, kept while the theme and ratio hold.
+	inks:                     Changes_Inks,
 	turn_list_bar, diff_bar:  Scroll_Drag,
 }
 

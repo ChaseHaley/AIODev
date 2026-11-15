@@ -576,7 +576,7 @@ the_filter_popover_edits_the_filter_and_the_bar_clears_it :: proc(t: ^testing.T)
 }
 
 @(test)
-turn_settings_default_to_off_two_weeks_unified_and_no_filter :: proc(t: ^testing.T) {
+turn_settings_default_to_off_two_weeks_unified_no_filter_and_4_5_contrast :: proc(t: ^testing.T) {
 	s, d, err := settings.parse("")
 	testing.expect_value(t, err, nil)
 	defer settings.destroy(&s)
@@ -585,11 +585,47 @@ turn_settings_default_to_off_two_weeks_unified_and_no_filter :: proc(t: ^testing
 	testing.expect_value(t, s.turns.retention_days, 14)
 	testing.expect_value(t, s.turns.diff_view, settings.Diff_View.Unified)
 	testing.expect_value(t, s.turns.diff_filter, "")
+	testing.expect_value(t, s.turns.diff_minimum_contrast, 4.5)
 	side, side_diagnostics, side_error := settings.parse("turns.diff_view = side_by_side\n")
 	testing.expect_value(t, side_error, nil)
 	defer settings.destroy(&side)
 	defer settings.diagnostics_destroy(&side_diagnostics)
 	testing.expect_value(t, side.turns.diff_view, settings.Diff_View.Side_By_Side)
+	// A contrast past 21 is refused and the default stays.
+	high, high_diagnostics, high_error := settings.parse("turns.diff_minimum_contrast = 30\n")
+	testing.expect_value(t, high_error, nil)
+	defer settings.destroy(&high)
+	defer settings.diagnostics_destroy(&high_diagnostics)
+	testing.expect_value(t, high.turns.diff_minimum_contrast, 4.5)
+	testing.expect(t, len(high_diagnostics) > 0, "the refused value is reported")
+	one, one_diagnostics, one_error := settings.parse("turns.diff_minimum_contrast = 1\n")
+	testing.expect_value(t, one_error, nil)
+	defer settings.destroy(&one)
+	defer settings.diagnostics_destroy(&one_diagnostics)
+	testing.expect_value(t, one.turns.diff_minimum_contrast, 1)
+}
+
+@(test)
+the_diff_carries_the_minimum_contrast_setting_into_the_next_frame :: proc(t: ^testing.T) {
+	f: Fixture
+	defer {
+		app.app_destroy(&f.state)
+		testing.expect_value(t, os.remove_all(f.directory), nil)
+		delete(f.directory)
+	}
+	if !fixture_start(t, &f, "Contrast") {return}
+	w := f.state.windows[0]
+	app.run_action(&f.state, w, .Agent_Changes)
+	if !testing.expect_value(t, len(f.state.changes_panes), 1) {return}
+	pane := f.state.changes_panes[0]
+	shown, found := changes_pane_of(&f.state, w)
+	if !testing.expect(t, found) {return}
+	_ = app.changes_geometry_of(&f.state, w, pane, shown)
+	testing.expect_value(t, pane.model.view.minimum_contrast, 4.5)
+	saved := app.settings_save_value(&f.state, "turns.diff_minimum_contrast", "7", "Could not save.")
+	testing.expect(t, saved)
+	_ = app.changes_geometry_of(&f.state, w, pane, shown)
+	testing.expect_value(t, pane.model.view.minimum_contrast, 7)
 }
 
 @(test)

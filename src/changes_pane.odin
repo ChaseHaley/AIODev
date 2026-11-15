@@ -305,7 +305,8 @@ changes_under_pointer :: proc(app: ^App, w: ^Window, x, y: f32) -> (^Changes_Pan
 }
 
 // The pane's geometry with its diff rows laid out. The comments' part of the view is filled first: it is
-// temporary memory, and the rows, the draw and every hit test read it.
+// temporary memory, and the rows, the draw and every hit test read it. The code text contrast follows the
+// setting here, so a settings reload shows on the next frame.
 @(require_results)
 changes_geometry_of :: proc(
 	app: ^App,
@@ -314,6 +315,7 @@ changes_geometry_of :: proc(
 	shown: layout.Pane_Rect,
 ) -> ui.Changes_Geometry {
 	changes_comments_view(app, pane)
+	pane.model.view.minimum_contrast = f32(app.settings.turns.diff_minimum_contrast)
 	mono := ui.text_mono(&w.ui_text, app.family)
 	g := ui.changes_geometry(pane_body_rect(w, shown), w.scale, &pane.model.view, &w.ui_text)
 	ui.changes_layout(&pane.state, &pane.model.view, &w.ui_text, &mono, g.diff.width, w.scale)
@@ -1270,6 +1272,7 @@ when AIO_CONTROL {
 		state_value(r, "changes.shown_removed", pane != nil ? pane.model.view.shown_removed : 0)
 		state_value(r, "changes.total_added", pane != nil ? pane.model.view.total_added : 0)
 		state_value(r, "changes.total_removed", pane != nil ? pane.model.view.total_removed : 0)
+		state_value(r, "changes.minimum_contrast", pane != nil ? pane.model.view.minimum_contrast : 0)
 		state_value(r, "changes.file_list_regex", pane != nil && pane.dropdown.regex)
 		state_text(r, "changes.file_list_empty", list_empty)
 		state_text(r, "changes.range_label", range_label)
