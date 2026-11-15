@@ -773,6 +773,108 @@ diff_plain_shows_staged_unstaged_and_uncommitted_changes_and_leaves_the_index_al
 }
 
 @(test)
+plain_and_recorded_diffs_name_the_full_blob_ids :: proc(t: ^testing.T) {
+	setup, ok := store_setup(t)
+	if !ok {return}
+	defer store_teardown(&setup)
+	repo := setup.repo
+	store_write(t, repo, "base.txt", "base two\n")
+	store_git(t, repo, "add", "base.txt")
+	old_oid, old_ok := store_git(t, repo, "rev-parse", "HEAD:base.txt")
+	new_oid, new_ok := store_git(t, repo, "rev-parse", ":base.txt")
+	if !old_ok || !new_ok {return}
+
+	staged, _, staged_error := turns.diff_plain(repo, .Staged)
+	if !testing.expect_value(t, staged_error, turns.Error.None) {return}
+	defer delete(staged)
+	plain, plain_ok := turns.diff_parse(staged)
+	if testing.expect(t, plain_ok, "diff_parse rejected the patch") {
+		defer turns.diff_destroy(&plain)
+		if testing.expect_value(t, len(plain.files), 1) {
+			testing.expect_value(t, plain.files[0].old_oid, old_oid)
+			testing.expect_value(t, plain.files[0].new_oid, new_oid)
+		}
+	}
+
+	entries := [?]turns.Diff_Entry{{path = "x.txt", before = old_oid, after = new_oid}}
+	patch, patch_error := turns.diff_entries(setup.store, entries[:])
+	if !testing.expect_value(t, patch_error, turns.Error.None) {return}
+	defer delete(patch)
+	recorded, recorded_ok := turns.diff_parse(patch)
+	if testing.expect(t, recorded_ok, "diff_parse rejected the patch") {
+		defer turns.diff_destroy(&recorded)
+		if testing.expect_value(t, len(recorded.files), 1) {
+			testing.expect_value(t, recorded.files[0].old_oid, old_oid)
+			testing.expect_value(t, recorded.files[0].new_oid, new_oid)
+		}
+	}
+}
+
+@(test)
+blobs_read_returns_each_blob_in_order_and_empty_for_none :: proc(t: ^testing.T) {
+	setup, ok := store_setup(t)
+	if !ok {return}
+	defer store_teardown(&setup)
+	repo := setup.repo
+	// Bytes come back untouched: CR, NUL and no final newline.
+	stored_text := "one\r\ntwo\x00three"
+	stored := store_blob(t, setup, stored_text)
+	base, base_ok := store_git(t, repo, "rev-parse", "HEAD:base.txt")
+	if stored == "" || !base_ok {return}
+	missing := strings.repeat("1", len(base), context.temp_allocator)
+	empty := store_blob(t, setup, "")
+	before, snapshot_ok := store_snapshot(t, repo)
+	if !snapshot_ok {return}
+
+	oids := [?]turns.Oid{stored, "", base, missing, empty, stored, "not an id"}
+	contents, err := turns.blobs_read(setup.store, oids[:])
+	if !testing.expect_value(t, err, turns.Error.None) {return}
+	defer turns.oids_destroy(contents)
+	if testing.expect_value(t, len(contents), len(oids)) {
+		testing.expect_value(t, contents[0], stored_text)
+		testing.expect_value(t, contents[1], "")
+		// The store reaches the user's objects through its alternates.
+		testing.expect_value(t, contents[2], "base\n")
+		testing.expect_value(t, contents[3], "")
+		testing.expect_value(t, contents[4], "")
+		testing.expect_value(t, contents[5], stored_text)
+		testing.expect_value(t, contents[6], "")
+	}
+
+	// The user's repository has its own blobs, not the store's.
+	theirs, theirs_error := turns.repository_blobs_read(repo, oids[:])
+	if !testing.expect_value(t, theirs_error, turns.Error.None) {return}
+	defer turns.oids_destroy(theirs)
+	if testing.expect_value(t, len(theirs), len(oids)) {
+		testing.expect_value(t, theirs[0], "")
+		testing.expect_value(t, theirs[2], "base\n")
+	}
+
+	// A blob over the limit is left out, never read; one at the limit is read.
+	limited, limited_error := turns.blobs_read(setup.store, oids[:], limit = len("base\n"))
+	if !testing.expect_value(t, limited_error, turns.Error.None) {return}
+	defer turns.oids_destroy(limited)
+	if testing.expect_value(t, len(limited), len(oids)) {
+		testing.expect_value(t, limited[0], "")
+		testing.expect_value(t, limited[2], "base\n")
+		testing.expect_value(t, limited[3], "")
+		testing.expect_value(t, limited[5], "")
+	}
+	small, small_error := turns.repository_blobs_read(repo, oids[2:4], limit = 1)
+	if !testing.expect_value(t, small_error, turns.Error.None) {return}
+	defer turns.oids_destroy(small)
+	if testing.expect_value(t, len(small), 2) {testing.expect_value(t, small[0], "")}
+
+	nothing, nothing_error := turns.blobs_read(setup.store, nil)
+	testing.expect_value(t, nothing_error, turns.Error.None)
+	testing.expect_value(t, len(nothing), 0)
+	delete(nothing)
+
+	after, after_ok := store_snapshot(t, repo)
+	if after_ok {store_expect_same(t, before, after)}
+}
+
+@(test)
 an_uncommitted_diff_stops_at_fifty_untracked_files_and_counts_the_rest :: proc(t: ^testing.T) {
 	setup, ok := store_setup(t)
 	if !ok {return}
@@ -959,6 +1061,11 @@ a_raised_cancel_flag_makes_every_store_proc_fail_at_once :: proc(t: ^testing.T) 
 	testing.expect_value(t, entries_error, turns.Error.Failed)
 	_, _, plain_error := turns.diff_plain(setup.repo, .Uncommitted, context.allocator, &cancel)
 	testing.expect_value(t, plain_error, turns.Error.Failed)
+	wanted := [?]turns.Oid{strings.repeat("1", 40, context.temp_allocator)}
+	_, blobs_error := turns.blobs_read(setup.store, wanted[:], context.allocator, &cancel)
+	testing.expect_value(t, blobs_error, turns.Error.Failed)
+	_, theirs_error := turns.repository_blobs_read(setup.repo, wanted[:], context.allocator, &cancel)
+	testing.expect_value(t, theirs_error, turns.Error.Failed)
 	// Nothing was started, so nothing had to be waited for.
 	testing.expect(t, time.tick_since(started) < time.Second, "cancelled calls were slow")
 }

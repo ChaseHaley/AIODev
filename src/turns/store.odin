@@ -4,6 +4,7 @@ import "base:runtime"
 import "core:fmt"
 import "core:log"
 import "core:os"
+import "core:strconv"
 import "core:strings"
 
 // The user's repository is only ever read: git runs there with optional locks off, and nothing below
@@ -597,6 +598,7 @@ diff_entries :: proc(
 		"-p",
 		"-r",
 		"-M",
+		"--full-index",
 		"--no-color",
 		"--no-ext-diff",
 		"-U3",
@@ -662,6 +664,136 @@ diff_side_tree :: proc(
 	written := strings.trim_space(string(output.stdout))
 	if written == "" || !oid_valid(written) {return "", .Failed}
 	return git_clone(written, context.allocator)
+}
+
+// The content of each blob, in order, read from the store, whose alternates reach the user's objects
+// too. "" for a "" id, for an id that names no blob, and, when `limit` > 0, for a blob larger than
+// `limit` bytes, which is never read: the content is only shown, so one blob a prune took must not cost
+// the others, and a huge one must not cost its size. Each content is a separate allocation;
+// oids_destroy frees them.
+@(require_results)
+blobs_read :: proc(
+	s: Store,
+	oids: []Oid,
+	allocator := context.allocator,
+	cancel: ^Git_Cancel = nil,
+	limit := 0,
+) -> (
+	contents: []string,
+	err: Error,
+) {
+	run := Git_Run {
+		cwd     = s.directory,
+		git_dir = s.git_dir,
+		cancel  = cancel,
+	}
+	return blobs_batch(oids, run, limit, allocator)
+}
+
+// blobs_read from the user's repository at `worktree`, which is only read.
+@(require_results)
+repository_blobs_read :: proc(
+	worktree: string,
+	oids: []Oid,
+	allocator := context.allocator,
+	cancel: ^Git_Cancel = nil,
+	limit := 0,
+) -> (
+	contents: []string,
+	err: Error,
+) {
+	return blobs_batch(oids, {cwd = worktree, cancel = cancel}, limit, allocator)
+}
+
+// With a limit, one `cat-file --batch-check` gives every size first; then one `cat-file --batch` reads
+// the blobs that are wanted.
+@(private = "file", require_results)
+blobs_batch :: proc(
+	oids: []Oid,
+	run: Git_Run,
+	limit: int,
+	allocator: runtime.Allocator,
+) -> (
+	contents: []string,
+	err: Error,
+) {
+	contents = git_make(string, len(oids), allocator) or_return
+	defer if err != .None {oids_destroy(contents, allocator)}
+	wanted := git_make(bool, len(oids), context.allocator) or_return
+	defer delete(wanted)
+	for oid, i in oids {wanted[i] = oid != "" && oid_valid(oid)}
+	if limit > 0 {
+		sizes := blobs_cat(oids, wanted, run, "--batch-check", context.allocator) or_return
+		defer git_output_destroy(&sizes, context.allocator)
+		rest := string(sizes.stdout)
+		for _, i in oids {
+			if !wanted[i] {continue}
+			kind, size := blob_header(&rest) or_return
+			wanted[i] = kind == "blob" && size <= limit
+		}
+	}
+	output := blobs_cat(oids, wanted, run, "--batch", context.allocator) or_return
+	defer git_output_destroy(&output, context.allocator)
+	rest := string(output.stdout)
+	for _, i in oids {
+		if !wanted[i] {continue}
+		kind, size := blob_header(&rest) or_return
+		if kind == "" {continue}
+		if size >= len(rest) || rest[size] != '\n' {return contents, .Failed}
+		if kind == "blob" {contents[i] = git_clone(rest[:size], allocator) or_return}
+		rest = rest[size + 1:]
+	}
+	return contents, .None
+}
+
+// One cat-file run over the wanted ids, one per line. Nothing is run when none is wanted.
+@(private = "file", require_results)
+blobs_cat :: proc(
+	oids: []Oid,
+	wanted: []bool,
+	run: Git_Run,
+	mode: string,
+	allocator: runtime.Allocator,
+) -> (
+	output: Git_Output,
+	err: Error,
+) {
+	input := make([dynamic]u8, 0, 4096, context.allocator)
+	defer delete(input)
+	for oid, i in oids {
+		if wanted[i] && !git_text_add(&input, oid, "\n") {return {}, .Out_Of_Memory}
+	}
+	if len(input) == 0 {return {}, .None}
+	args := [?]string{"cat-file", mode}
+	// A partial clone would otherwise fetch a missing blob from its remote just to colour it.
+	edits := [?]string{"GIT_NO_LAZY_FETCH=1"}
+	batch := run
+	batch.env = edits[:]
+	batch.stdin = string(input[:])
+	output = git_run(args[:], batch, allocator) or_return
+	if output.code != 0 {
+		failure := git_failure(args[:], output)
+		git_output_destroy(&output, allocator)
+		return {}, failure
+	}
+	return output, .None
+}
+
+// Takes the next answer line of cat-file: "<oid> <type> <size>", or "<oid> missing", which has no kind.
+@(private = "file", require_results)
+blob_header :: proc(rest: ^string) -> (kind: string, size: int, err: Error) {
+	newline := strings.index_byte(rest^, '\n')
+	if newline < 0 {return "", 0, .Failed}
+	header := rest^[:newline]
+	rest^ = rest^[newline + 1:]
+	first := strings.index_byte(header, ' ')
+	if first < 0 {return "", 0, .Failed}
+	kind_size := header[first + 1:]
+	second := strings.index_byte(kind_size, ' ')
+	if second < 0 {return "", 0, .None}
+	parsed, parsed_ok := strconv.parse_int(kind_size[second + 1:], 10)
+	if !parsed_ok || parsed < 0 {return "", 0, .Failed}
+	return kind_size[:second], parsed, .None
 }
 
 // Which changes of a repository a plain diff shows.
@@ -746,7 +878,8 @@ plain_diff :: proc(
 	defer delete(args)
 	append(&args, "-c", "diff.autoRefreshIndex=false", "-c", "core.quotePath=false", "diff")
 	append(&args, ..revisions)
-	append(&args, "--no-color", "--no-ext-diff", "-U3", "--src-prefix=a/", "--dst-prefix=b/")
+	append(&args, "--no-color", "--no-ext-diff", "--full-index", "-U3")
+	append(&args, "--src-prefix=a/", "--dst-prefix=b/")
 	append(&args, ..tail)
 	// Without a path list a file named like the revision would make the argument ambiguous.
 	if len(tail) == 0 {append(&args, "--")}

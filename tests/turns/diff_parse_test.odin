@@ -657,3 +657,49 @@ a_combined_diff_section_ends_the_file_before_it_and_is_skipped :: proc(t: ^testi
 	testing.expect_value(t, d.files[1].new_path, "after.txt")
 	testing.expect_value(t, d.files[1].added, 1)
 }
+
+@(test)
+the_index_line_gives_each_side_s_blob_and_an_all_zero_id_is_no_side :: proc(t: ^testing.T) {
+	defer free_all(context.temp_allocator)
+	old_full := "83db48f1c2a4b5d6e7f8091a2b3c4d5e6f708192"
+	new_full := "bf2a1c3d4e5f60718293a4b5c6d7e8f901234567"
+	d := parse(
+		t,
+		unified(
+			"diff --git a/mod.txt b/mod.txt",
+			strings.concatenate({"index ", old_full, "..", new_full, " 100644"}, context.temp_allocator),
+			"--- a/mod.txt",
+			"+++ b/mod.txt",
+			"@@ -1 +1 @@",
+			"-x",
+			"+y",
+			"diff --git a/new.txt b/new.txt",
+			"new file mode 100644",
+			"index 0000000000000000000000000000000000000000..e69de29bb2d1d6434b8b29ae775ad8c2e48c5391",
+			"diff --git a/old.txt b/old.txt",
+			"deleted file mode 100644",
+			"index 5716ca5..0000000",
+			"--- a/old.txt",
+			"+++ /dev/null",
+			"@@ -1 +0,0 @@",
+			"-bye",
+			"diff --git a/a.txt b/b.txt",
+			"similarity index 100%",
+			"rename from a.txt",
+			"rename to b.txt",
+		),
+	)
+	defer turns.diff_destroy(&d)
+	testing.expect_value(t, len(d.files), 4)
+	if len(d.files) != 4 {return}
+	testing.expect_value(t, d.files[0].old_oid, old_full)
+	testing.expect_value(t, d.files[0].new_oid, new_full)
+	testing.expect_value(t, d.files[1].old_oid, "")
+	testing.expect_value(t, d.files[1].new_oid, "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391")
+	testing.expect_value(t, d.files[2].old_oid, "5716ca5")
+	testing.expect_value(t, d.files[2].new_oid, "")
+	// A pure rename has no index line.
+	testing.expect_value(t, d.files[3].old_oid, "")
+	testing.expect_value(t, d.files[3].new_oid, "")
+	testing.expect_value(t, d.files[3].status, turns.File_Status.Renamed)
+}

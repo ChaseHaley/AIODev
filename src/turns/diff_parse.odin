@@ -39,10 +39,15 @@ File_Status :: enum u8 {
 }
 
 // One file of a diff. Both paths are always set: they are the same unless the file was renamed or
-// copied, so an added or deleted file names itself and `status` says which side exists.
+// copied, so an added or deleted file names itself and `status` says which side exists. The oids come
+// from the "index" line, borrowing from the parsed text; a side that does not exist, or a diff without
+// that line (a pure rename or mode change), has "". They are full ids only when git ran with
+// --full-index.
 Diff_File :: struct {
 	old_path: string,
 	new_path: string,
+	old_oid:  Oid,
+	new_oid:  Oid,
 	status:   File_Status,
 	binary:   bool,
 	added:    int,
@@ -340,8 +345,28 @@ header_line :: proc(p: ^Parser, file: ^Diff_File, line: string) -> bool {
 		h.to, h.to_null = side_path(p, line[len("+++ "):], "b/") or_return
 	case strings.has_prefix(line, "Binary files ") || strings.has_prefix(line, "GIT binary patch"):
 		file.binary = true
+	case strings.has_prefix(line, "index "):
+		file.old_oid, file.new_oid = index_oids(line[len("index "):])
 	}
 	return true
+}
+
+// "<old>..<new>[ <mode>]"; an all-zero id is git's name for the side that does not exist.
+@(private)
+index_oids :: proc(rest: string) -> (old_oid, new_oid: Oid) {
+	ids := rest
+	if space := strings.index_byte(ids, ' '); space >= 0 {ids = ids[:space]}
+	dots := strings.index(ids, "..")
+	if dots < 0 {return "", ""}
+	return real_oid(ids[:dots]), real_oid(ids[dots + 2:])
+}
+
+@(private)
+real_oid :: proc(id: string) -> Oid {
+	for c in transmute([]u8)id {
+		if c != '0' {return id}
+	}
+	return ""
 }
 
 // The file a "---" or "+++" line names, without git's a/ or b/, or null for /dev/null.
