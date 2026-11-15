@@ -785,11 +785,14 @@ when AIO_CONTROL {
 
 	verify_notices_report :: proc(r: ^State_Report, app: ^App) {
 		state_value(r, "notices.window", app.notice_window)
+		// The pointer is over the deck: it is open and every countdown stands still.
+		state_value(r, "notices.paused", app.notices.over)
 		holder := window_find(app, app.notice_window)
+		clock := ui.notices_clock(&app.notices, clock_now(&app.clock))
 		for n in ui.notices_live(&app.notices) {
 			left := "sticky"
 			if expires, timed := ui.notice_expiry(n).?; timed {
-				remaining := max(i64(0), i64(time.tick_diff(clock_now(&app.clock), expires) / time.Millisecond))
+				remaining := max(i64(0), i64(time.tick_diff(clock, expires) / time.Millisecond))
 				left = fmt.tprintf("%dms", remaining)
 			}
 			key, identity := verify_notice_entry(n)

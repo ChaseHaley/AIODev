@@ -146,14 +146,33 @@ text_button_draw :: proc(
 }
 
 // The one call to action of a surface: an accent button with a Strong label. `hover` and `press` are
-// the animated 0..1 values from Control_Motion. The hover lightens with the ink colour, because the
-// theme's hover fill is paper in light mode and would hide the accent.
+// the animated 0..1 values from Control_Motion.
 primary_button_draw :: proc(
 	list: ^render.Draw_List,
 	text: ^Text,
 	theme: Theme,
 	rect: render.Rect,
 	label: string,
+	hover, press: f32,
+	focused: bool,
+	scale: f32,
+	pointer: [2]f32,
+) -> render.Build_Status {
+	return filled_button_draw(
+		list, text, theme, rect, label, theme.accent, theme.accent_text, hover, press, focused, scale, pointer,
+	)
+}
+
+// A button filled with `fill` and labelled in `ink`, as the primary button is in the accent; a notice's
+// action takes its severity colour. The hover lightens with the ink colour, because the theme's hover
+// fill is paper in light mode and would hide the fill.
+filled_button_draw :: proc(
+	list: ^render.Draw_List,
+	text: ^Text,
+	theme: Theme,
+	rect: render.Rect,
+	label: string,
+	fill, ink: render.Color,
 	hover, press: f32,
 	focused: bool,
 	scale: f32,
@@ -167,8 +186,8 @@ primary_button_draw :: proc(
 	if h > 0 {
 		if hover_shadow_draw(list, theme, face, radius, h, scale) != .None {return .Ok}
 	}
-	draw_rect(list, {rect = face, color = theme.accent, radius = radius})
-	lighten := theme.accent_text
+	draw_rect(list, {rect = face, color = fill, radius = radius})
+	lighten := ink
 	lighten.a *= PRIMARY_HOVER_ALPHA * h
 	draw_rect(list, {rect = face, color = lighten, radius = radius})
 	dim := theme.pressed
@@ -187,7 +206,7 @@ primary_button_draw :: proc(
 		label,
 		face.x + (face.width - width) / 2,
 		face.y + (face.height - strong.line_height) / 2 + strong.ascent,
-		theme.accent_text,
+		ink,
 		max(1, face.width - 2 * inset),
 	)
 }

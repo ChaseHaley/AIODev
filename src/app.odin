@@ -516,7 +516,13 @@ app_timers_advance :: proc(app: ^App, phase: Timer_Phase) {
 		case .Processes:
 			update_processes(app)
 		case .Notices:
-			if ui.notices_expire(&app.notices, app.animations, clock_now(&app.clock)) {mark_all_dirty(app)}
+			now := clock_now(&app.clock)
+			if ui.notices_expire(&app.notices, app.animations, now) {mark_all_dirty(app)}
+			// The front card's countdown line redraws only once it has lost a whole pixel: about every
+			// frame for a short notice, about 37 times a second for a 12 s one at 100%, and never paused.
+			if ui.notices_line_due(&app.notices, now) {
+				if w := window_find(app, app.notice_window); w != nil {w.dirty = true}
+			}
 		case .Drag_Hover:
 			for i := 0; i < len(app.windows); i += 1 {pane_drag_tick(app, app.windows[i], clock_now(&app.clock))}
 		case .Verify:
@@ -579,7 +585,6 @@ app_timer_deadline :: proc(app: ^App, timer: App_Timer) -> (next: time.Tick, pen
 Window_Timer :: enum u8 {
 	Leader,
 	Key_Sequence,
-	Paste_Confirm,
 	Cursor_Blink,
 	Capture_Hold,
 	Selection_Autoscroll,
@@ -597,8 +602,6 @@ window_timer_advance :: proc(app: ^App, w: ^Window, timer: Window_Timer, now: ti
 		leader_expire(w, now)
 	case .Key_Sequence:
 		key_sequence_expire(w, now)
-	case .Paste_Confirm:
-		paste_confirm_expire(w, now)
 	case .Cursor_Blink:
 		cursor_blink_tick(w, now)
 	case .Capture_Hold:
@@ -625,8 +628,6 @@ window_timer_deadline :: proc(w: ^Window, timer: Window_Timer) -> (time.Tick, bo
 		return leader_deadline(w)
 	case .Key_Sequence:
 		return key_sequence_deadline(w)
-	case .Paste_Confirm:
-		return paste_confirm_deadline(w)
 	case .Cursor_Blink:
 		return cursor_blink_deadline(w)
 	case .Capture_Hold:

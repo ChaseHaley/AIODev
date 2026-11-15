@@ -28,7 +28,7 @@ function Close-Point([double]$Scale) {
     $points = foreach ($line in $rects) {
         if ($line -match '^rect \d+ ([\d.]+),([\d.]+) ([\d.]+)x([\d.]+) .* radius=([\d.]+)$') {
             $x, $y, $w, $h, $radius = 1..5 | ForEach-Object { [double]$Matches[$_] }
-            if ([Math]::Abs($x - ([double]$size[0] - 52*$Scale)) -lt 0.1 -and
+            if ([Math]::Abs($x - ([double]$size[0] - 48*$Scale)) -lt 0.1 -and
                 $w -eq 24*$Scale -and $h -eq $w -and $radius -eq 4*$Scale) {
                 [pscustomobject]@{x=$x+$w/2; y=$y+$h/2}
             }
