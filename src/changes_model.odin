@@ -1,8 +1,10 @@
 package main
 
+import "aio:syntax"
 import "aio:turns"
 import "aio:ui"
 import "core:fmt"
+import "core:mem"
 import "core:os"
 import "core:path/filepath"
 import "core:slice"
@@ -358,7 +360,32 @@ changes_agent_learn :: proc(app: ^App, pane: ^Changes_Pane) {
 	_ = changes_sources_refresh(app, pane)
 }
 
-// Frees what the view owns beside the result: the row arrays and the per-file flags.
+// The files a result lists and what runs parallel to them, borrowed from the result.
+Changes_Diff :: struct {
+	files:             []turns.Diff_File,
+	// Parallel to files, or empty.
+	highlights:        []syntax.File_Lines,
+	marked, ambiguous: []bool,
+}
+
+// Frees the shown files' arrays; the result's files stay.
+@(private = "file")
+changes_shown_release :: proc(model: ^Changes_Model) {
+	view := &model.view
+	delete(view.marked)
+	delete(view.ambiguous)
+	delete(view.collapsed)
+	delete(model.faded)
+	delete(model.file_index)
+	delete(model.shown_files)
+	delete(model.shown_highlights)
+	view.marked, view.ambiguous, view.collapsed = nil, nil, nil
+	model.faded, model.file_index, model.shown_files, model.shown_highlights = nil, nil, nil, nil
+	view.files, view.highlights = nil, nil
+	view.total_files, view.hidden_count = 0, 0
+}
+
+// Frees what the view owns beside the result: the row arrays, the file list's labels and the shown files.
 @(private = "file")
 changes_view_release :: proc(model: ^Changes_Model) {
 	view := &model.view
@@ -366,14 +393,14 @@ changes_view_release :: proc(model: ^Changes_Model) {
 	delete(model.row_ids)
 	for detail in model.details {delete(detail)}
 	delete(model.details)
-	delete(view.marked)
-	delete(view.ambiguous)
-	delete(view.collapsed)
 	for label in model.file_labels {delete(label)}
 	delete(model.file_labels)
-	view.turns, model.row_ids, model.details, view.marked, view.ambiguous, view.collapsed =
-		nil, nil, nil, nil, nil, nil
-	view.files, view.highlights, model.file_labels = nil, nil, nil
+	for path in model.file_paths {delete(path)}
+	delete(model.file_paths)
+	view.turns, model.row_ids, model.details = nil, nil, nil
+	model.file_labels, model.file_paths = nil, nil
+	changes_shown_release(model)
+	model.diff = {}
 }
 
 @(private = "file", require_results)
@@ -382,24 +409,19 @@ changes_view_alloc :: proc(model: ^Changes_Model, rows, files: int) -> bool {
 	turn_rows, turn_error := make([]ui.Changes_Turn, rows)
 	ids, ids_error := make([]u64, rows)
 	details, details_error := make([]string, rows)
-	marked, marked_error := make([]bool, files)
-	ambiguous, ambiguous_error := make([]bool, files)
-	collapsed, collapsed_error := make([]bool, files)
 	labels, labels_error := make([]string, files)
-	if turn_error != nil || ids_error != nil || details_error != nil || marked_error != nil ||
-	   ambiguous_error != nil || collapsed_error != nil || labels_error != nil {
+	paths, paths_error := make([]string, files)
+	if turn_error != nil || ids_error != nil || details_error != nil || labels_error != nil ||
+	   paths_error != nil {
 		delete(turn_rows)
 		delete(ids)
 		delete(details)
-		delete(marked)
-		delete(ambiguous)
-		delete(collapsed)
 		delete(labels)
+		delete(paths)
 		return false
 	}
-	view.turns, model.row_ids, model.details, view.marked, view.ambiguous, view.collapsed =
-		turn_rows, ids, details, marked, ambiguous, collapsed
-	model.file_labels = labels
+	view.turns, model.row_ids, model.details = turn_rows, ids, details
+	model.file_labels, model.file_paths = labels, paths
 	return true
 }
 
@@ -409,22 +431,92 @@ changes_file_path :: proc(file: turns.Diff_File) -> string {
 	return file.status == .Deleted || file.new_path == "" ? file.old_path : file.new_path
 }
 
-// The diff's files with their marks, folds and file list labels; folds come back by path.
-@(private = "file")
-changes_files_fill :: proc(model: ^Changes_Model, files: []turns.Diff_File, marked, ambiguous: []bool) {
-	view := &model.view
-	view.files = files
-	for file, i in files {
-		view.marked[i] = i < len(marked) && marked[i]
-		view.ambiguous[i] = i < len(ambiguous) && ambiguous[i]
-		_, folded := model.folded[file.new_path]
-		view.collapsed[i] = folded
-	}
-	for file, i in files {
+// The path a renamed or copied file had, which its header shows before the new one; "" for other files.
+@(require_results)
+changes_file_old_path :: proc(file: turns.Diff_File) -> string {
+	moved := file.status == .Renamed || file.status == .Copied
+	return moved && file.old_path != "" && file.old_path != file.new_path ? file.old_path : ""
+}
+
+// Takes a result's files: the file list's labels name every one, its search matches the paths as the
+// headers show them, and the view shows the files the filter lets through. False when memory ran out.
+@(private = "file", require_results)
+changes_files_fill :: proc(pane: ^Changes_Pane, diff: Changes_Diff) -> bool {
+	model := &pane.model
+	model.diff = diff
+	for file, i in diff.files {
+		path := changes_file_path(file)
 		mark := changes_status_mark(file.status)
-		label := fmt.tprintf("%s %s  +%d \u2212%d", mark, changes_file_path(file), file.added, file.removed)
+		label := fmt.tprintf("%s %s  +%d \u2212%d", mark, path, file.added, file.removed)
 		model.file_labels[i] = changes_clone_text(label)
+		old := changes_file_old_path(file)
+		model.file_paths[i] = changes_clone_text(old != "" ? fmt.tprintf("%s \u2192 %s", old, path) : path)
 	}
+	return changes_view_filter(pane)
+}
+
+// Puts in view.files the result's files the pane's filter shows or that were picked from the file list,
+// with their marks, folds and highlights, and counts the rest. The result is in memory, so the worker is
+// not asked. False when memory ran out, which leaves no file shown.
+@(require_results)
+changes_view_filter :: proc(pane: ^Changes_Pane) -> bool {
+	model, view := &pane.model, &pane.model.view
+	changes_shown_release(model)
+	view.revision += 1
+	files := model.diff.files
+	faded, faded_error := make([]bool, len(files))
+	if faded_error != nil {return false}
+	model.faded = faded
+	hidden := 0
+	for file, i in files {
+		path := changes_file_path(file)
+		shows := changes_filter_shows(&pane.filter, path, changes_file_old_path(file))
+		faded[i] = path not_in pane.revealed && !shows
+		if faded[i] {hidden += 1}
+	}
+	shown := len(files) - hidden
+	highlighted := len(model.diff.highlights) == len(files)
+	index, index_error := make([]int, shown)
+	entries, entries_error := make([]turns.Diff_File, shown)
+	marked, marked_error := make([]bool, shown)
+	ambiguous, ambiguous_error := make([]bool, shown)
+	collapsed, collapsed_error := make([]bool, shown)
+	highlights: []syntax.File_Lines
+	highlights_error: mem.Allocator_Error
+	if highlighted {highlights, highlights_error = make([]syntax.File_Lines, shown)}
+	if index_error != nil || entries_error != nil || marked_error != nil || ambiguous_error != nil ||
+	   collapsed_error != nil || highlights_error != nil {
+		delete(index)
+		delete(entries)
+		delete(marked)
+		delete(ambiguous)
+		delete(collapsed)
+		delete(highlights)
+		return false
+	}
+	at := 0
+	for file, i in files {
+		if faded[i] {continue}
+		index[at], entries[at] = i, file
+		marked[at] = i < len(model.diff.marked) && model.diff.marked[i]
+		ambiguous[at] = i < len(model.diff.ambiguous) && model.diff.ambiguous[i]
+		_, folded := model.folded[file.new_path]
+		collapsed[at] = folded
+		if highlighted {highlights[at] = model.diff.highlights[i]}
+		at += 1
+	}
+	model.file_index, model.shown_files, model.shown_highlights = index, entries, highlights
+	view.marked, view.ambiguous, view.collapsed = marked, ambiguous, collapsed
+	view.files, view.highlights = entries, highlights
+	view.total_files, view.hidden_count = len(files), hidden
+	return true
+}
+
+// The filter or the files picked past it changed: the view shows what they let through now, and the
+// comments find their lines again.
+changes_model_refilter :: proc(pane: ^Changes_Pane) {
+	if !changes_view_filter(pane) {changes_notice_set(&pane.model, .Failed, "Out of memory.")}
+	changes_comments_reanchor(pane)
 }
 
 // The letter a file header shows for a file's status.
@@ -506,8 +598,11 @@ changes_fill_query :: proc(
 			agent   = all_agents ? row.agent : -1,
 		}
 	}
-	changes_files_fill(model, q.diff.files, q.marked, q.ambiguous)
-	view.highlights = q.highlights
+	diff := Changes_Diff{q.diff.files, q.highlights, q.marked, q.ambiguous}
+	if !changes_files_fill(pane, diff) {
+		changes_notice_set(model, .Failed, "Out of memory.")
+		return
+	}
 	view.first, view.last = changes_ids_range(model.row_ids, q.selected)
 	// An end of the selection the result no longer holds is forgotten, so the keys start over.
 	if anchored {pane.anchor = changes_index_of(model.row_ids, anchor_id)}
@@ -539,8 +634,11 @@ changes_fill_plain :: proc(app: ^App, pane: ^Changes_Pane, r: ^Result_Plain) {
 		changes_notice_set(model, .Failed, "Out of memory.")
 		return
 	}
-	changes_files_fill(model, r.diff.files, nil, nil)
-	view.highlights = r.highlights
+	if !changes_files_fill(pane, {files = r.diff.files, highlights = r.highlights}) {
+		view.omitted = 0
+		changes_notice_set(model, .Failed, "Out of memory.")
+		return
+	}
 	notice, detail := changes_notice_of(r.error, false, false, 0, len(r.diff.files))
 	changes_notice_set(model, notice, detail)
 }

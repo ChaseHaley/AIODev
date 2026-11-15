@@ -398,6 +398,110 @@ a_turn_query_result_marks_ambiguous_files :: proc(t: ^testing.T) {
 	testing.expect_value(t, view.worktree, "")
 }
 
+@(private = "file")
+filter_to :: proc(pane: ^app.Changes_Pane, text: string) {
+	_ = ui.field_set(&pane.filter_editor, text)
+	app.changes_filter_changed(pane)
+}
+
+@(test)
+the_diff_filter_hides_files_the_file_list_fades_and_a_pick_reveals :: proc(t: ^testing.T) {
+	state: app.App
+	defer app.changes_app_destroy(&state.changes_state)
+	pane := pane_start(&state, .Repository)
+	if !testing.expect(t, pane != nil) {return}
+	view := &pane.model.view
+	filter_to(pane, "!.json")
+	testing.expect(t, view.filter_active)
+	files := []turns.Diff_File{file_of("a.odin"), file_of("b.json"), file_of("c.odin")}
+	q := app.Result_Query {
+		pane   = pane.id,
+		diff   = {files = files},
+		marked = {false, true, true},
+	}
+	app.changes_fill_query(&state, pane, &q, now_time(), true)
+	if !testing.expect_value(t, len(view.files), 2) {return}
+	testing.expect_value(t, view.files[0].new_path, "a.odin")
+	testing.expect_value(t, view.files[1].new_path, "c.odin")
+	testing.expect_value(t, view.marked[1], true)
+	testing.expect_value(t, view.hidden_count, 1)
+	testing.expect_value(t, view.total_files, 3)
+	testing.expect_value(t, len(pane.model.file_labels), 3)
+	testing.expect_value(t, pane.model.faded[0], false)
+	testing.expect_value(t, pane.model.faded[1], true)
+	testing.expect_value(t, pane.model.file_index[1], 2)
+
+	// A file picked from the list shows despite the filter and is no longer faded.
+	app.changes_filter_reveal(pane, "b.json")
+	testing.expect_value(t, len(view.files), 3)
+	testing.expect_value(t, view.hidden_count, 0)
+	testing.expect_value(t, pane.model.faded[1], false)
+	// A refresh keeps it shown.
+	app.changes_fill_query(&state, pane, &q, now_time(), true)
+	testing.expect_value(t, len(view.files), 3)
+
+	// Editing the filter hides it again with the rest.
+	filter_to(pane, "!.odin")
+	if !testing.expect_value(t, len(view.files), 1) {return}
+	testing.expect_value(t, view.files[0].new_path, "b.json")
+	testing.expect_value(t, view.marked[0], true)
+	testing.expect_value(t, view.hidden_count, 2)
+	testing.expect_value(t, len(pane.revealed), 0)
+}
+
+@(test)
+an_invalid_diff_filter_shows_every_file_and_says_why :: proc(t: ^testing.T) {
+	state: app.App
+	defer app.changes_app_destroy(&state.changes_state)
+	pane := pane_start(&state, .Repository)
+	if !testing.expect(t, pane != nil) {return}
+	view := &pane.model.view
+	files := []turns.Diff_File{file_of("a.odin"), file_of("b.json")}
+	q := app.Result_Query {
+		pane = pane.id,
+		diff = {files = files},
+	}
+	app.changes_fill_query(&state, pane, &q, now_time(), true)
+	filter_to(pane, "odin [")
+	testing.expect(t, view.filter_invalid)
+	testing.expect(t, !view.filter_active)
+	testing.expect_value(t, view.filter_error, "Invalid regular expression: [")
+	testing.expect_value(t, len(view.files), 2)
+	testing.expect_value(t, view.hidden_count, 0)
+	filter_to(pane, "odin")
+	testing.expect(t, !view.filter_invalid)
+	testing.expect_value(t, view.filter_error, "")
+	testing.expect_value(t, len(view.files), 1)
+	filter_to(pane, "")
+	testing.expect(t, !view.filter_active)
+	testing.expect_value(t, len(view.files), 2)
+}
+
+@(test)
+the_diff_filter_hides_a_rename_by_its_old_name :: proc(t: ^testing.T) {
+	state: app.App
+	defer app.changes_app_destroy(&state.changes_state)
+	pane := pane_start(&state, .Repository)
+	if !testing.expect(t, pane != nil) {return}
+	view := &pane.model.view
+	files := []turns.Diff_File {
+		file_of("a.odin"),
+		{old_path = "old_name.odin", new_path = "new_name.odin", status = .Renamed},
+	}
+	q := app.Result_Query {
+		pane = pane.id,
+		diff = {files = files},
+	}
+	app.changes_fill_query(&state, pane, &q, now_time(), true)
+	testing.expect_value(t, pane.model.file_paths[1], "old_name.odin \u2192 new_name.odin")
+	filter_to(pane, "!old_name")
+	if !testing.expect_value(t, len(view.files), 1) {return}
+	testing.expect_value(t, view.files[0].new_path, "a.odin")
+	filter_to(pane, "old_name")
+	if !testing.expect_value(t, len(view.files), 1) {return}
+	testing.expect_value(t, view.files[0].new_path, "new_name.odin")
+}
+
 @(test)
 the_file_list_names_each_file_with_its_mark_and_counts :: proc(t: ^testing.T) {
 	state: app.App

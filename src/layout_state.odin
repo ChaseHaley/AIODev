@@ -75,6 +75,8 @@ Saved_Node :: struct {
 	changes_agent_session: string `json:"changes_agent_session,omitempty"`,
 	changes_scope:         string `json:"changes_scope,omitempty"`,
 	changes_view:          string `json:"changes_view,omitempty"`,
+	// A Changes pane's diff filter, written even when empty because missing is the setting's default.
+	changes_filter:        Maybe(string) `json:"changes_filter,omitempty"`,
 	keep_open: bool,
 	// What the pane was running, shown above the fresh shell's prompt when it comes back.
 	command:   string `json:"command,omitempty"`,
@@ -338,6 +340,7 @@ layout_pane_encode :: proc(
 			view := pane.side_by_side ? settings.Diff_View.Side_By_Side : settings.Diff_View.Unified
 			views := settings.DIFF_VIEW_NAME
 			saved.changes_view = views[view]
+			saved.changes_filter = changes_filter_text(pane)
 		}
 	}
 	if !pane_owns_session(content.kind) {return saved}
@@ -598,7 +601,9 @@ layout_tab_restore :: proc(
 			views := settings.DIFF_VIEW_NAME
 			if node.changes_view == views[.Unified] {side_by_side = false}
 			if node.changes_view == views[.Side_By_Side] {side_by_side = true}
-			if created := changes_pane_create(app, agent, directory, scope, side_by_side); created != nil {
+			filter := app.settings.turns.diff_filter
+			if text, kept := node.changes_filter.?; kept && utf8.valid_string(text) {filter = text}
+			if created := changes_pane_create(app, agent, directory, scope, side_by_side, filter); created != nil {
 				pane.content.id, restored = created.id, true
 			}
 		}

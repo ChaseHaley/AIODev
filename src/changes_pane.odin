@@ -4,6 +4,7 @@ import "aio:input"
 import "aio:layout"
 import "aio:platform"
 import "aio:render"
+import "aio:syntax"
 import "aio:turns"
 import "aio:ui"
 import "core:reflect"
@@ -51,8 +52,21 @@ Changes_Model :: struct {
 	sources:        []string,
 	// The label of the pane's own agent, which the source field shows in the Agent scope.
 	agent_label:    string,
-	// The file list's choices, parallel to view.files and owned: "<status mark> <path>  +A −R".
+	// The result's files and what runs parallel to them, borrowed from the result, so the diff filter can
+	// refill the view without asking the worker again.
+	diff:           Changes_Diff,
+	// The file list's choices, parallel to diff.files and owned: "<status mark> <path>  +A −R".
 	file_labels:    []string,
+	// What the file list's search matches, parallel to file_labels: each path as the diff header shows it,
+	// borrowed from the result like `diff`.
+	file_paths:     []string,
+	// Parallel to diff.files: the filter hides the file and it was not picked; the file list fades it.
+	faded:          []bool,
+	// Parallel to view.files: each shown file's index in diff.files.
+	file_index:     []int,
+	// What view.files and view.highlights point at: the shown files' entries, owned.
+	shown_files:    []turns.Diff_File,
+	shown_highlights: []syntax.File_Lines,
 	// turns.record when the pane last asked, so a change is noticed.
 	recording:      bool,
 	// The wall-clock minute the row ages were written for.
@@ -88,6 +102,13 @@ Changes_Pane :: struct {
 	files_open: bool,
 	// The diff shows old and new side by side. Persisted, and copied by a pane opened from this one.
 	side_by_side: bool,
+	// The diff filter: its text is what `filter_editor` holds (persisted, and copied by a pane opened from
+	// this one), `filter` its parsed terms and `filter_error` why they do not compile, owned.
+	filter_editor: ui.Text_Field,
+	filter:     Changes_Filter,
+	filter_error: string,
+	// Paths picked from the file list that show despite the filter, until its text changes; owned keys.
+	revealed:   map[string]struct{},
 	// The turn a selection extends from, and the turn the keys move; -1 for none.
 	anchor:     int,
 	cursor:     int,
@@ -121,6 +142,7 @@ changes_pane_free :: proc(pane: ^Changes_Pane) {
 	changes_session_delete(&pane.agent)
 	delete(pane.directory)
 	delete(pane.worktree_pick)
+	changes_filter_release(pane)
 	free(pane)
 }
 
@@ -151,7 +173,7 @@ changes_scope_parse :: proc(name: string) -> ui.Changes_Scope {
 	return ok ? scope : .Uncommitted
 }
 
-// Registers a pane. `agent` and `directory` are copied.
+// Registers a pane. `agent`, `directory` and `filter` are copied.
 @(require_results)
 changes_pane_create :: proc(
 	app: ^App,
@@ -159,6 +181,7 @@ changes_pane_create :: proc(
 	directory: string,
 	scope: ui.Changes_Scope,
 	side_by_side := false,
+	filter := "",
 ) -> ^Changes_Pane {
 	pane, err := new(Changes_Pane)
 	if err != nil {return nil}
@@ -176,6 +199,8 @@ changes_pane_create :: proc(
 	pane.model.view.first, pane.model.view.last = -1, -1
 	pane.comments.editing, pane.model.view.editing = -1, -1
 	ui.dropdown_init(&pane.dropdown)
+	_ = ui.field_set(&pane.filter_editor, filter)
+	changes_filter_parse(pane)
 	if _, append_error := append(&app.changes_panes, pane); append_error != nil {
 		changes_pane_free(pane)
 		return nil
@@ -231,8 +256,10 @@ changes_open :: proc(app: ^App, w: ^Window) {
 	directory := ""
 	scope := ui.Changes_Scope.Uncommitted
 	side_by_side := app.settings.turns.diff_view == .Side_By_Side
+	filter := app.settings.turns.diff_filter
 	if from := changes_focused(app, acting); from != nil {
 		agent, directory, scope, side_by_side = from.agent, from.directory, from.scope, from.side_by_side
+		filter = changes_filter_text(from)
 	} else if entry := focused_session(app, acting); entry != nil {
 		agent = turn_recorder_session(app, entry.key)
 		directory, _ = pane_directory(app, entry)
@@ -241,7 +268,7 @@ changes_open :: proc(app: ^App, w: ^Window) {
 		directory = page.directory
 	}
 	if directory == "" {directory = home_directory()}
-	pane := changes_pane_create(app, agent, directory, scope, side_by_side)
+	pane := changes_pane_create(app, agent, directory, scope, side_by_side, filter)
 	if pane == nil {
 		notify(app, .Error, "Could not open Agent changes.")
 		return
@@ -321,13 +348,18 @@ changes_dropdown_choices :: proc(pane: ^Changes_Pane) -> ui.Dropdown_Choices {
 			value = changes_worktree_value(pane),
 			searchable = true,
 			placeholder = "Search worktrees",
+			empty_text = "No matching worktrees",
 		}
 	}
 	if pane.files_open {
 		return {
 			choices = pane.model.file_labels,
+			search_text = pane.model.file_paths,
+			faded = pane.model.faded,
 			searchable = true,
+			regex_toggle = true,
 			placeholder = "Search files",
+			empty_text = "No matching files",
 			min_width = CHANGES_FILE_LIST_WIDTH,
 		}
 	}
@@ -367,7 +399,7 @@ changes_list_highlight :: proc(pane: ^Changes_Pane) -> (identity: string, highli
 changes_list_identity :: proc(pane: ^Changes_Pane, choice: int) -> string {
 	model := &pane.model
 	if pane.files_open {
-		return choice < len(model.view.files) ? changes_file_path(model.view.files[choice]) : ""
+		return choice < len(model.diff.files) ? changes_file_path(model.diff.files[choice]) : ""
 	}
 	if pane.worktree_open {
 		return choice > 0 && choice <= len(model.worktree_paths) ? model.worktree_paths[choice - 1] : ""
@@ -423,11 +455,23 @@ changes_list_choose :: proc(app: ^App, w: ^Window, pane: ^Changes_Pane, index: i
 	}
 }
 
-// Unfolds file `index` and scrolls the diff so its header is at the top.
-changes_file_pick :: proc(app: ^App, w: ^Window, pane: ^Changes_Pane, index: int) {
-	view := &pane.model.view
-	if index < 0 || index >= len(view.files) {return}
-	if index < len(view.collapsed) && view.collapsed[index] {changes_model_fold(&pane.model, index)}
+// Shows file `choice` of the result at the top of the diff: picked past the filter when it hides the
+// file, unfolded, and scrolled to its header.
+changes_file_pick :: proc(app: ^App, w: ^Window, pane: ^Changes_Pane, choice: int) {
+	model, view := &pane.model, &pane.model.view
+	if choice < 0 || choice >= len(model.diff.files) {return}
+	if choice < len(model.faded) && model.faded[choice] {
+		changes_filter_reveal(pane, changes_file_path(model.diff.files[choice]))
+	}
+	index := -1
+	for at, i in model.file_index {
+		if at == choice {
+			index = i
+			break
+		}
+	}
+	if index < 0 {return}
+	if index < len(view.collapsed) && view.collapsed[index] {changes_model_fold(model, index)}
 	shown, found := changes_pane_rect(w, pane.id)
 	if !found {return}
 	// Laid out first, so the file's top counts the unfolded body; then kept within what can scroll.
@@ -458,10 +502,111 @@ changes_layout_toggle :: proc(app: ^App, w: ^Window, pane: ^Changes_Pane) {
 	w.dirty = true
 }
 
-// Typed or pasted text goes to the open list's search, else to the comment being written.
+// Opens or closes the diff filter's popover. Opening closes the open list and the turn list and keeps the
+// comment being written, as a list opening does; closing keeps the text.
+@(private = "file")
+changes_filter_popover :: proc(app: ^App, w: ^Window, pane: ^Changes_Pane, open: bool) {
+	if pane.state.filter_open == open {return}
+	if open {
+		changes_list_close(w, pane)
+		pane.state.turn_list_open, pane.state.turn_list_bar = false, {}
+		changes_list_begin(app, pane)
+	} else {
+		_ = ui.field_release(&pane.filter_editor)
+	}
+	pane.state.filter_open = open
+	w.dirty = true
+}
+
+// The filter text changed in window `w`: the view shows what the new filter lets through, and the file
+// that was at the top stays there while it still shows.
+changes_filter_edited :: proc(app: ^App, w: ^Window, pane: ^Changes_Pane) {
+	view := &pane.model.view
+	shown, found := changes_pane_rect(w, pane.id)
+	top_path := ""
+	if found {
+		_ = changes_geometry_of(app, w, pane, shown)
+		if top := ui.changes_top_file(&pane.state, view); top >= 0 && top < len(view.files) {
+			top_path = strings.clone(changes_file_path(view.files[top]), context.temp_allocator)
+		}
+	}
+	changes_filter_changed(pane)
+	if found {
+		g := changes_geometry_of(app, w, pane, shown)
+		for file, i in view.files {
+			if top_path == "" || changes_file_path(file) != top_path {continue}
+			pane.state.diff_scroll = ui.changes_diff_file_top(&pane.state, view, i)
+			break
+		}
+		_ = ui.changes_scroll_diff(&pane.state, g, 0)
+	}
+	layout_state_touch(app)
+	w.dirty = true
+}
+
+// Empties the filter, so every file shows.
+changes_filter_clear :: proc(app: ^App, w: ^Window, pane: ^Changes_Pane) {
+	if changes_filter_text(pane) == "" {return}
+	_ = ui.field_set(&pane.filter_editor, "")
+	changes_filter_edited(app, w, pane)
+}
+
+// Keys while the filter popover is open: Enter and Escape close it and keep the text, and the field takes
+// its editing keys. Chords the field has no use for go on to the shortcuts.
+@(private = "file")
+changes_filter_key :: proc(
+	app: ^App,
+	w: ^Window,
+	pane: ^Changes_Pane,
+	logical, e: input.Key_Event,
+) -> bool {
+	modifiers := e.modifiers & {.Control, .Shift, .Alt, .Super}
+	#partial switch logical.key {
+	case .Enter, .Numpad_Enter, .Escape:
+		if modifiers == {} {
+			changes_filter_popover(app, w, pane, false)
+			return true
+		}
+	}
+	edit := field_edit_key(app, &pane.filter_editor, logical)
+	switch edit.change {
+	case .Edited:
+		changes_filter_edited(app, w, pane)
+	case .Moved:
+		w.dirty = true
+	case .None:
+		chord := clipboard_chord(logical) != .None
+		if !chord && modifiers - {.Shift} != {} && e.text == "" {return false}
+	}
+	return true
+}
+
+// A press in the filter field puts the caret under the pointer, or extends the selection to it; a drag
+// that press started extends it.
+@(private = "file")
+changes_filter_point :: proc(
+	w: ^Window,
+	pane: ^Changes_Pane,
+	g: ui.Changes_Geometry,
+	x: f32,
+	pressed, extend: bool,
+) {
+	box, visible := ui.changes_filter_box(g, &pane.model.view, &w.ui_text)
+	if !visible {return}
+	at := ui.field_box_offset(box, x)
+	if ui.field_pointer(&pane.filter_editor, at, pressed, extend) != .None {w.dirty = true}
+}
+
+// Typed or pasted text goes to the filter field or the open list's search, else to the comment being
+// written.
 changes_text :: proc(app: ^App, w: ^Window, text: string) -> bool {
 	pane := changes_focused(app, w)
 	if pane == nil {return false}
+	if pane.state.filter_open {
+		if ui.field_text(&pane.filter_editor, text) == .Edited {changes_filter_edited(app, w, pane)}
+		w.dirty = true
+		return true
+	}
 	if changes_list_open(pane) {
 		if ui.dropdown_text(&pane.dropdown, changes_dropdown_choices(pane), text) {w.dirty = true}
 		return true
@@ -605,6 +750,9 @@ changes_key :: proc(app: ^App, w: ^Window, e: input.Key_Event) {
 		}
 		if taken {return}
 	}
+	if pane != nil && found && pane.state.filter_open && changes_filter_key(app, w, pane, key.logical, e) {
+		return
+	}
 	if pane != nil && found && pane.state.turn_list_open && key.logical.key == .Escape {
 		changes_turn_list_set(w, pane, changes_geometry_of(app, w, pane, shown), false)
 		return
@@ -704,10 +852,12 @@ changes_cursor :: proc(hit: ui.Changes_Hit) -> platform.Cursor_Shape {
 	#partial switch hit.part {
 	case .Scope, .Worktree, .Hooks, .Notice_Button, .File_Header, .Strip_Bar, .Step_Back, .Step_Forward,
 	     .Range_Label, .Hunk_Comment, .Comment_Button, .Comment_Card, .Comment_Delete, .Send, .Copy, .Discard,
-	     .Files_Button, .Layout_Button:
+	     .Files_Button, .Layout_Button, .Filter_Button, .Filter_Clear, .Filter_Bar_Clear:
 		return .Hand
 	case .Turn_List_Row:
 		if hit.index >= 0 {return .Hand}
+	case .Filter_Field:
+		if hit.index >= 0 {return .Text}
 	case .Comment_Editor:
 		return .Text
 	}
@@ -754,6 +904,15 @@ changes_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: input.Mou
 			&pane.dropdown, changes_dropdown_choices(pane), changes_dropdown_anchor(pane, g), x, y, w.scale,
 		)
 		pointer_set(app, w, shape)
+		return
+	}
+	if pane.filter_editor.dragging {
+		if .Left in e.buttons {
+			changes_filter_point(w, pane, g, x, false, false)
+		} else {
+			_ = ui.field_release(&pane.filter_editor)
+		}
+		pointer_set(app, w, .Text)
 		return
 	}
 	if .Left not_in e.buttons {pane.dragging = .None}
@@ -808,6 +967,18 @@ changes_press :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) {
 	hit := ui.changes_hit(g, view, &pane.state, x, y)
 	pane.state.press = hit
 	extend := .Shift in e.modifiers
+	// While the filter popover is open, a press outside it, its button's own included, only closes it.
+	if pane.state.filter_open {
+		#partial switch hit.part {
+		case .Filter_Field:
+			if hit.index >= 0 {changes_filter_point(w, pane, g, x, true, extend)}
+		case .Filter_Clear:
+			changes_filter_clear(app, w, pane)
+		case:
+			changes_filter_popover(app, w, pane, false)
+		}
+		return
+	}
 	// A press outside the open turn list only closes it, as a press outside a dropdown does.
 	if pane.state.turn_list_open && hit.part != .Turn_List_Row && hit.part != .Range_Label {
 		changes_turn_list_set(w, pane, g, false)
@@ -854,6 +1025,10 @@ changes_press :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) {
 		}
 	case .Layout_Button:
 		changes_layout_toggle(app, w, pane)
+	case .Filter_Button:
+		changes_filter_popover(app, w, pane, true)
+	case .Filter_Bar_Clear:
+		changes_filter_clear(app, w, pane)
 	case .Line, .Hunk_Comment, .Comment_Button, .Comment_Card, .Comment_Delete, .Comment_Editor, .Send, .Copy,
 	     .Discard:
 		_ = changes_comments_press(app, w, pane, hit, e)
@@ -874,6 +1049,7 @@ changes_release :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) -> b
 		if pane.state.turn_list_bar.active {pane.state.turn_list_bar, cleared = {}, true}
 		if pane.state.press != {} {pane.state.press, cleared = {}, true}
 		if pane.dragging != .None {pane.dragging, cleared = .None, true}
+		if ui.field_release(&pane.filter_editor) {cleared = true}
 		if pane.comments.dragging {cleared = true}
 		changes_comments_release(app, w, pane)
 	}
@@ -886,12 +1062,20 @@ changes_cancel :: proc(app: ^App, w: ^Window) {
 	_ = changes_release(app, w, {button = .Left})
 }
 
-// The strip bar's turn, why Send is off, and what the toolbar and hunk buttons do.
+// The strip bar's turn, why Send is off, what the toolbar and hunk buttons do, and the file list's regular
+// expression toggle.
 @(private)
 changes_tooltip :: proc(app: ^App, w: ^Window, x, y: f32) -> string {
 	pane, shown := changes_under_pointer(app, w, x, y)
-	if pane == nil || changes_list_open(pane) {return ""}
+	if pane == nil {return ""}
 	g := changes_geometry_of(app, w, pane, shown)
+	if changes_list_open(pane) {
+		if !pane.files_open {return ""}
+		toggle := ui.dropdown_regex_rect(
+			&pane.dropdown, changes_dropdown_choices(pane), changes_dropdown_anchor(pane, g), w.scale,
+		)
+		return render.rect_contains(toggle, x, y) ? "Use regular expression" : ""
+	}
 	view := &pane.model.view
 	hit := ui.changes_hit(g, view, &pane.state, x, y)
 	#partial switch hit.part {
@@ -905,6 +1089,8 @@ changes_tooltip :: proc(app: ^App, w: ^Window, x, y: f32) -> string {
 		return pane.side_by_side ? "Unified view" : "Side-by-side view"
 	case .Files_Button:
 		return "Files in this diff"
+	case .Filter_Button:
+		return "Filter files"
 	}
 	return ""
 }
@@ -939,7 +1125,10 @@ when AIO_CONTROL {
 		scope_rect, worktree_rect, notice_rect, hooks_rect: render.Rect
 		step_back_rect, step_forward_rect, range_label_rect: render.Rect
 		files_button_rect, layout_button_rect: render.Rect
+		filter_button_rect, filter_field_rect, filter_clear_rect, filter_bar_clear_rect: render.Rect
+		regex_rect: render.Rect
 		top_file := -1
+		list_empty := ""
 		label_buffer: [64]u8
 		if pane != nil {
 			view := &pane.model.view
@@ -953,6 +1142,15 @@ when AIO_CONTROL {
 				if view.notice == .Recording_Off {notice_rect = g.notice_button}
 				if view.hooks_offer {hooks_rect = g.hooks}
 				files_button_rect, layout_button_rect = g.files_button, g.layout_button
+				filter_button_rect, filter_bar_clear_rect = g.filter_button, g.filter_bar_clear
+				if pane.state.filter_open {
+					filter_field_rect = g.filter_field
+					if changes_filter_text(pane) != "" {filter_clear_rect = g.filter_clear}
+				}
+				if pane.files_open {
+					choices, anchor := changes_dropdown_choices(pane), changes_dropdown_anchor(pane, g)
+					regex_rect = ui.dropdown_regex_rect(&pane.dropdown, choices, anchor, w.scale)
+				}
 				top_file = ui.changes_top_file(&pane.state, view)
 				for i in 0 ..< len(view.turns) {
 					rect := ui.changes_strip_bar_rect(g, &pane.state, view, i)
@@ -982,11 +1180,13 @@ when AIO_CONTROL {
 			}
 			if pane.files_open {
 				choices := changes_dropdown_choices(pane)
+				list_empty = ui.dropdown_empty_text(&pane.dropdown, choices)
 				for match, i in pane.dropdown.matches {
 					if i >= 20 {break}
-					if match < len(choices.choices) {
-						state_text(r, changes_report_key("file_list", i, "label"), choices.choices[match])
-					}
+					if match >= len(choices.choices) {continue}
+					state_text(r, changes_report_key("file_list", i, "label"), choices.choices[match])
+					faded := match < len(pane.model.faded) && pane.model.faded[match]
+					state_value(r, changes_report_key("file_list", i, "faded"), faded)
 				}
 			}
 		}
@@ -1020,6 +1220,15 @@ when AIO_CONTROL {
 		state_value(r, "changes.side_by_side", pane != nil && pane.side_by_side)
 		state_value(r, "changes.diff_scroll", pane != nil ? pane.state.diff_scroll : 0)
 		state_value(r, "changes.top_file", top_file)
+		state_text(r, "changes.filter", pane != nil ? changes_filter_text(pane) : "")
+		state_value(r, "changes.filter_open", pane != nil && pane.state.filter_open)
+		state_value(r, "changes.filter_active", pane != nil && pane.model.view.filter_active)
+		state_value(r, "changes.filter_invalid", pane != nil && pane.model.view.filter_invalid)
+		state_text(r, "changes.filter_error", pane != nil ? pane.filter_error : "")
+		state_value(r, "changes.hidden_files", pane != nil ? pane.model.view.hidden_count : 0)
+		state_value(r, "changes.total_files", pane != nil ? pane.model.view.total_files : 0)
+		state_value(r, "changes.file_list_regex", pane != nil && pane.dropdown.regex)
+		state_text(r, "changes.file_list_empty", list_empty)
 		state_text(r, "changes.range_label", range_label)
 		state_rect(r, "changes.scope_rect", scope_rect)
 		state_rect(r, "changes.worktree_rect", worktree_rect)
@@ -1030,6 +1239,11 @@ when AIO_CONTROL {
 		state_rect(r, "changes.range_label_rect", range_label_rect)
 		state_rect(r, "changes.files_button_rect", files_button_rect)
 		state_rect(r, "changes.layout_button_rect", layout_button_rect)
+		state_rect(r, "changes.filter_button_rect", filter_button_rect)
+		state_rect(r, "changes.filter_field_rect", filter_field_rect)
+		state_rect(r, "changes.filter_clear_rect", filter_clear_rect)
+		state_rect(r, "changes.filter_bar_clear_rect", filter_bar_clear_rect)
+		state_rect(r, "changes.file_list_regex_rect", regex_rect)
 		changes_comments_state_report(r, app, w, pane)
 	}
 }

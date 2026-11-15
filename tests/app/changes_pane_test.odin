@@ -339,7 +339,163 @@ the_file_list_keeps_its_highlight_when_a_new_result_arrives :: proc(t: ^testing.
 }
 
 @(test)
-turn_settings_default_to_off_two_weeks_and_unified :: proc(t: ^testing.T) {
+the_file_list_regex_search_matches_paths_not_labels :: proc(t: ^testing.T) {
+	f: Fixture
+	defer {
+		app.app_destroy(&f.state)
+		testing.expect_value(t, os.remove_all(f.directory), nil)
+		delete(f.directory)
+	}
+	if !fixture_start(t, &f, "ListRegex") {return}
+	w := f.state.windows[0]
+	app.run_action(&f.state, w, .Agent_Changes)
+	if !testing.expect_value(t, len(f.state.changes_panes), 1) {return}
+	pane := f.state.changes_panes[0]
+	shown, found := changes_pane_of(&f.state, w)
+	if !testing.expect(t, found) {return}
+	lines := make([]turns.Diff_Line, 4)
+	defer delete(lines)
+	for &line, i in lines {line = {kind = .Context, old_line = i32(i + 1), new_line = i32(i + 1), text = "line"}}
+	hunks := []turns.Hunk{{old_start = 1, old_count = 4, new_start = 1, new_count = 4, lines = lines}}
+	files := files_named({"long.txt", "live.py", "notes.txt", "src/new.py"}, hunks)
+	defer delete(files)
+	files[3].old_path, files[3].status = "src/old.py", .Renamed
+	plain := app.Result_Plain {
+		pane = pane.id,
+		diff = {files = files},
+	}
+	app.changes_fill_plain(&f.state, pane, &plain)
+	testing.expect_value(t, pane.model.file_paths[1], "live.py")
+	testing.expect_value(t, pane.model.file_paths[3], "src/old.py \u2192 src/new.py")
+
+	g := app.changes_geometry_of(&f.state, w, pane, shown)
+	click(&f.state, w, g.files_button)
+	if !testing.expect(t, pane.files_open) {return}
+	app.handle_event(&f.state, input.Key_Event{window = w.id, key = .R, modifiers = {.Alt}, pressed = true})
+	app.handle_event(&f.state, input.Key_Event{window = w.id, key = .R, modifiers = {.Alt}})
+	if !testing.expect(t, pane.dropdown.regex, "Alt+R turns the regular expression on") {return}
+	// Anchored on the path: the labels' status mark and counts would hide every match.
+	app.handle_event(&f.state, input.Text_Event{window = w.id, text = `^l.*\.py$`})
+	if !testing.expect_value(t, len(pane.dropdown.matches), 1) {return}
+	testing.expect_value(t, pane.dropdown.matches[0], 1)
+
+	// A renamed file is found by its old path, as its header shows it.
+	for _ in 0 ..< len(`^l.*\.py$`) {tap(&f.state, w, .Backspace)}
+	app.handle_event(&f.state, input.Text_Event{window = w.id, text = "^src/old"})
+	if !testing.expect_value(t, len(pane.dropdown.matches), 1) {return}
+	testing.expect_value(t, pane.dropdown.matches[0], 3)
+}
+
+@(test)
+a_new_pane_takes_the_default_filter_or_the_one_it_opens_from_and_keeps_it :: proc(t: ^testing.T) {
+	first: Fixture
+	if !fixture_start(t, &first, "FilterA") {return}
+	defer delete(first.directory)
+	defer testing.expect_value(t, os.remove_all(first.directory), nil)
+	w := first.state.windows[0]
+	saved := app.settings_save_value(&first.state, "turns.diff_filter", "!long", "Could not save.")
+	testing.expect(t, saved)
+	app.run_action(&first.state, w, .Agent_Changes)
+	if !testing.expect_value(t, len(first.state.changes_panes), 1) {
+		app.app_destroy(&first.state)
+		return
+	}
+	from := first.state.changes_panes[0]
+	testing.expect_value(t, app.changes_filter_text(from), "!long")
+	testing.expect(t, from.model.view.filter_active)
+
+	// A pane opened from an Agent changes pane copies its filter, not the setting.
+	_ = ui.field_set(&from.filter_editor, "notes")
+	app.changes_filter_changed(from)
+	app.run_action(&first.state, w, .Agent_Changes)
+	if !testing.expect_value(t, len(first.state.changes_panes), 2) {
+		app.app_destroy(&first.state)
+		return
+	}
+	opened := first.state.changes_panes[1]
+	testing.expect_value(t, app.changes_filter_text(opened), "notes")
+	// An empty filter comes back empty, not as the setting.
+	_ = ui.field_set(&opened.filter_editor, "")
+	app.changes_filter_changed(opened)
+	app.layout_state_save(&first.state)
+	app.app_destroy(&first.state)
+
+	second := Fixture{directory = first.directory}
+	if !fixture_start(t, &second, "FilterB", true) {return}
+	defer app.app_destroy(&second.state)
+	testing.expect_value(t, second.state.settings.turns.diff_filter, "!long")
+	if !testing.expect_value(t, len(second.state.changes_panes), 2) {return}
+	texts: [2]string
+	for pane, i in second.state.changes_panes {texts[i] = app.changes_filter_text(pane)}
+	both := texts == [2]string{"notes", ""} || texts == [2]string{"", "notes"}
+	testing.expect(t, both, "both filters come back")
+}
+
+@(test)
+the_filter_popover_edits_the_filter_and_the_bar_clears_it :: proc(t: ^testing.T) {
+	f: Fixture
+	defer {
+		app.app_destroy(&f.state)
+		testing.expect_value(t, os.remove_all(f.directory), nil)
+		delete(f.directory)
+	}
+	if !fixture_start(t, &f, "FilterEdit") {return}
+	w := f.state.windows[0]
+	app.run_action(&f.state, w, .Agent_Changes)
+	if !testing.expect_value(t, len(f.state.changes_panes), 1) {return}
+	pane := f.state.changes_panes[0]
+	shown, found := changes_pane_of(&f.state, w)
+	if !testing.expect(t, found) {return}
+	view := &pane.model.view
+	lines := make([]turns.Diff_Line, 60)
+	defer delete(lines)
+	for &line, i in lines {line = {kind = .Context, old_line = i32(i + 1), new_line = i32(i + 1), text = "line"}}
+	hunks := []turns.Hunk{{old_start = 1, old_count = 60, new_start = 1, new_count = 60, lines = lines}}
+	files := files_named({"a.odin", "b.odin", "c.odin", "d.odin"}, hunks)
+	defer delete(files)
+	plain := app.Result_Plain {
+		pane = pane.id,
+		diff = {files = files},
+	}
+	app.changes_fill_plain(&f.state, pane, &plain)
+
+	g := app.changes_geometry_of(&f.state, w, pane, shown)
+	click(&f.state, w, g.filter_button)
+	if !testing.expect(t, pane.state.filter_open, "the filter button opens the popover") {return}
+	app.handle_event(&f.state, input.Text_Event{window = w.id, text = "!b.od"})
+	testing.expect_value(t, app.changes_filter_text(pane), "!b.od")
+	testing.expect_value(t, view.hidden_count, 1)
+	testing.expect_value(t, len(view.files), 3)
+	tap(&f.state, w, .Escape)
+	testing.expect(t, !pane.state.filter_open)
+	testing.expect_value(t, app.changes_filter_text(pane), "!b.od")
+
+	// Picking the hidden file from the list shows it at the top.
+	app.changes_file_pick(&f.state, w, pane, 1)
+	testing.expect_value(t, len(view.files), 4)
+	testing.expect_value(t, view.hidden_count, 0)
+	_ = app.changes_geometry_of(&f.state, w, pane, shown)
+	testing.expect_value(t, ui.changes_top_file(&pane.state, view), 1)
+
+	// Editing the filter hides it again.
+	g = app.changes_geometry_of(&f.state, w, pane, shown)
+	click(&f.state, w, g.filter_button)
+	if !testing.expect(t, pane.state.filter_open) {return}
+	tap(&f.state, w, .Backspace)
+	testing.expect_value(t, app.changes_filter_text(pane), "!b.o")
+	testing.expect_value(t, len(view.files), 3)
+	tap(&f.state, w, .Enter)
+	testing.expect(t, !pane.state.filter_open)
+
+	g = app.changes_geometry_of(&f.state, w, pane, shown)
+	click(&f.state, w, g.filter_bar_clear)
+	testing.expect_value(t, app.changes_filter_text(pane), "")
+	testing.expect_value(t, view.hidden_count, 0)
+	testing.expect_value(t, len(view.files), 4)
+}
+
+@(test)
+turn_settings_default_to_off_two_weeks_unified_and_no_filter :: proc(t: ^testing.T) {
 	s, d, err := settings.parse("")
 	testing.expect_value(t, err, nil)
 	defer settings.destroy(&s)
@@ -347,6 +503,7 @@ turn_settings_default_to_off_two_weeks_and_unified :: proc(t: ^testing.T) {
 	testing.expect_value(t, s.turns.record, false)
 	testing.expect_value(t, s.turns.retention_days, 14)
 	testing.expect_value(t, s.turns.diff_view, settings.Diff_View.Unified)
+	testing.expect_value(t, s.turns.diff_filter, "")
 	side, side_diagnostics, side_error := settings.parse("turns.diff_view = side_by_side\n")
 	testing.expect_value(t, side_error, nil)
 	defer settings.destroy(&side)

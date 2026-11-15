@@ -552,11 +552,12 @@ DIFF_VIEW_LABEL :: [Diff_View]string {
 DIFF_VIEW_NAMES :: []string{DIFF_VIEW_NAME[Diff_View(0)], DIFF_VIEW_NAME[Diff_View(1)]}
 DIFF_VIEW_LABELS :: []string{DIFF_VIEW_LABEL[Diff_View(0)], DIFF_VIEW_LABEL[Diff_View(1)]}
 // Agent changes: whether to keep a private copy of the files agents change in each turn, for how many
-// days, and how new panes show diffs.
+// days, and how new panes show diffs and which files they show.
 Turns_Settings :: struct {
 	record:         bool,
 	retention_days: int,
 	diff_view:      Diff_View,
+	diff_filter:    string,
 }
 Window_Settings :: struct {
 	columns, rows, padding: int,
@@ -1493,6 +1494,16 @@ SCHEMA :: [?]Schema_Entry {
 		names = DIFF_VIEW_NAMES,
 		labels = DIFF_VIEW_LABELS,
 		description = "How a new Agent changes pane shows diffs. Each pane can switch with its toolbar toggle.",
+	},
+	{
+		key = "turns.diff_filter",
+		title = "Default diff filter",
+		kind = .String,
+		offset = offset_of(Settings, turns) + offset_of(Turns_Settings, diff_filter),
+		default_value = "",
+		valid = {0, 256},
+		description = "The filter a new Agent changes pane starts with: space-separated regular expressions on " +
+			"file paths; a term starting with ! hides matching files. Empty shows every file.",
 	},
 	{
 		key = "shell.default_profile",
