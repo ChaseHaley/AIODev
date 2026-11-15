@@ -578,7 +578,14 @@ try {
         # The other agent's copy of the same shared change is not an outside change.
         Equal $s['changes.file.0.marked'] false "ca.txt is not also marked as changed outside ($node)"
         Equal $s['changes.file.1.marked'] false "cb.txt is not also marked as changed outside ($node)"
-        if ($node -eq $panes[0]) { Aio capture --out "$data/agent-shared-worktrees.png" | Out-Null }
+        if ($node -eq $panes[0]) {
+            Aio capture --out "$data/agent-shared-worktrees.png" | Out-Null
+            # The file list shows the worktree folder of each path, shortened from its start, and the marks.
+            Open-Files | Out-Null
+            Aio capture --out "$data/agent-row-files-worktree.png" | Out-Null
+            Aio key Esc | Out-Null
+            Await-State @{ 'changes.files_open' = 'false' } 'Esc closes the file list' | Out-Null
+        }
         Close-Changes 2
     }
 
@@ -676,6 +683,13 @@ try {
     Equal $s['changes.tools_open'] false 'the tools menu is closed'
     Assert-Hidden $s 'changes.source_chip.0.rect'
     Aio capture --out "$data/agent-row.png" | Out-Null
+    # At 150% the row's icons and the files button's still share one centre line; the capture is checked by eye.
+    Aio dpi 144 | Out-Null
+    Start-Sleep -Milliseconds 800
+    Aio capture --out "$data/agent-row-144.png" | Out-Null
+    Aio dpi 96 | Out-Null
+    Await-State @{ 'changes.row_steps' = '0' } 'the row goes back to 100%' | Out-Null
+    $s = State
     # The summary opens the panel, with no file list; a second click, outside the panel, closes it.
     Click-Rect $s 'changes.summary_rect'
     $s = Await-State @{ 'changes.panel_open' = 'true'; 'changes.dropdown_open' = 'false' } 'the summary opens the panel without a file list'

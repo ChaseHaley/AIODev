@@ -818,21 +818,38 @@ file_label :: proc(buf: []u8, f: ^tr.Diff_File) -> string {
 	return clip_bytes(f.new_path, len(buf))
 }
 
-@(private = "file")
-status_mark :: proc(status: tr.File_Status, theme: Theme) -> (mark: string, color: render.Color) {
+// The colour role of a file's status: modified warns, added is a success, deleted an error, and renamed
+// or copied files are informational. The file headers and the file list's badges both read it.
+changes_status_tint :: proc(status: tr.File_Status) -> Dropdown_Tint {
 	switch status {
 	case .Modified:
-		return "M", theme.warning
+		return .Warning
 	case .Added:
-		return "A", theme.success
+		return .Success
 	case .Deleted:
-		return "D", theme.error
-	case .Renamed:
-		return "R", theme.info
-	case .Copied:
-		return "C", theme.info
+		return .Error
+	case .Renamed, .Copied:
+		return .Info
 	}
-	return "M", theme.warning
+	return .Warning
+}
+
+@(private = "file")
+status_mark :: proc(status: tr.File_Status, theme: Theme) -> (mark: string, color: render.Color) {
+	color = dropdown_tint_color(theme, changes_status_tint(status))
+	switch status {
+	case .Modified:
+		return "M", color
+	case .Added:
+		return "A", color
+	case .Deleted:
+		return "D", color
+	case .Renamed:
+		return "R", color
+	case .Copied:
+		return "C", color
+	}
+	return "M", color
 }
 
 @(private = "file")

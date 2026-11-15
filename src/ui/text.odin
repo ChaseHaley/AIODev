@@ -142,6 +142,14 @@ text_set_size :: proc(t: ^Text, size_px: f32) {
 	t.line_height = math.round(m.ascent + m.descent + m.line_gap)
 }
 
+// The baseline that centres `t`'s capitals, and so digits and most lowercase, on the middle of the band
+// from `y` that is `height` tall. A line box centred on its ascent and descent sits capitals low, so a
+// label beside an icon uses this to share the icon's centre line.
+baseline_caps :: proc(y, height: f32, t: ^Text) -> f32 {
+	m := font.face_metrics(t.fonts, t.family.faces[.Regular], t.size_px)
+	return math.round(y + height / 2 + m.cap_height / 2)
+}
+
 text_width :: proc(t: ^Text, s: string) -> f32 {
 	width: f32
 	for r in s {

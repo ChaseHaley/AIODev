@@ -39,6 +39,8 @@ Dropdown :: struct {
 	regex:        bool,
 	// The regular expression does not compile, so nothing matches.
 	invalid:      bool,
+	// What the rows of a list with `rows` measured.
+	metrics:      Dropdown_Metrics,
 }
 
 // The pointer drags a selection in the search field, or holds the scrollbar thumb.
@@ -70,6 +72,14 @@ Dropdown_Choices :: struct {
 	empty_text:                               string,
 	faded:                                    []bool,
 	search_text:                              []string,
+	// Structured rows, parallel to `choices` when present: each option is drawn as its row instead of its
+	// label (see dropdown_row.odin). `rows_serial` changes whenever the rows do, so their measurements are
+	// kept between frames; `fit_content` widens the list to the widest row, up to the room `bounds` has.
+	rows:                                     []Dropdown_Row,
+	rows_serial:                              int,
+	fit_content:                              bool,
+	// How many options show at most; zero is CHOICE_LIST_ROWS.
+	max_rows:                                 int,
 }
 
 // Where a dropdown opens: under `field`, flipped above `row` when `bounds` has no room below, and
@@ -203,9 +213,11 @@ dropdown_header :: proc(c: Dropdown_Choices, scale: f32) -> f32 {
 	return (DROPDOWN_SEARCH_HEIGHT + (c.font_filter ? CHOICE_HEIGHT : 0)) * scale
 }
 
-// How many options fit: at most CHOICE_LIST_ROWS, fewer when the bounds are short.
+// How many options fit: at most CHOICE_LIST_ROWS (or the choices' `max_rows`), fewer when the bounds are
+// short.
 dropdown_rows :: proc(d: ^Dropdown, c: Dropdown_Choices, a: Dropdown_Anchor, scale: f32) -> int {
-	return choice_list_rows(dropdown_count(d, c), a.bounds.height, scale, dropdown_header(c, scale))
+	limit := c.max_rows > 0 ? c.max_rows : CHOICE_LIST_ROWS
+	return choice_list_rows(dropdown_count(d, c), a.bounds.height, scale, dropdown_header(c, scale), limit)
 }
 
 // Keeps the highlight on a shown row, as when the bounds change.
@@ -220,6 +232,7 @@ dropdown_rect :: proc(d: ^Dropdown, c: Dropdown_Choices, a: Dropdown_Anchor, sca
 	// The highlight stays on a shown row however the bounds changed since the list moved.
 	choice_list_keep_visible(&d.list, dropdown_count(d, c), rows)
 	width := max(a.field.width, c.min_width * s)
+	if c.fit_content {width = max(width, d.metrics.content)}
 	r := render.Rect {
 		a.align_end ? a.field.x + a.field.width - width : a.field.x,
 		a.field.y + a.field.height + SPACE_1 * s,
@@ -549,6 +562,7 @@ dropdown_draw :: proc(
 	pointer: [2]f32,
 	scale: f32,
 ) -> render.Build_Status {
+	dropdown_measure(d, c, text, scale)
 	r := dropdown_rect(d, c, a, scale)
 	if r.width == 0 {return .Ok}
 	s := scale
@@ -632,8 +646,18 @@ dropdown_draw :: proc(
 			mark := render.Rect{option.x, option.y + SPACE_2 * s, 3 * s, option.height - 2 * SPACE_2 * s}
 			draw_rect(list, {rect = mark, color = theme.accent, radius = pill_radius(mark)})
 		}
+		faded := source < len(c.faded) && c.faded[source]
+		if source < len(c.rows) {
+			body := text_styled(text, .Body)
+			detail := text_styled(text, .Detail)
+			cut_buf: [CHANGES_CLIP_BYTES + 8]u8
+			l := dropdown_row_layout(c.rows[source], option, d.metrics, &body, &detail, s, cut_buf[:])
+			if result := dropdown_row_draw(list, text, theme, c.rows[source], l, d.metrics, option, faded, s);
+			   result != .Ok {return result}
+			continue
+		}
 		ink := theme.text
-		if source < len(c.faded) && c.faded[source] {
+		if faded {
 			ink = theme.muted
 			ink.a *= DISABLED_ALPHA
 		}

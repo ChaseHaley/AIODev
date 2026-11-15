@@ -397,8 +397,9 @@ changes_view_release :: proc(model: ^Changes_Model) {
 	delete(model.file_labels)
 	for path in model.file_paths {delete(path)}
 	delete(model.file_paths)
+	delete(model.file_rows)
 	view.turns, model.row_ids, model.details = nil, nil, nil
-	model.file_labels, model.file_paths = nil, nil
+	model.file_labels, model.file_paths, model.file_rows = nil, nil, nil
 	changes_shown_release(model)
 	model.diff = {}
 }
@@ -411,17 +412,19 @@ changes_view_alloc :: proc(model: ^Changes_Model, rows, files: int) -> bool {
 	details, details_error := make([]string, rows)
 	labels, labels_error := make([]string, files)
 	paths, paths_error := make([]string, files)
+	rows_list, rows_error := make([]ui.Dropdown_Row, files)
 	if turn_error != nil || ids_error != nil || details_error != nil || labels_error != nil ||
-	   paths_error != nil {
+	   paths_error != nil || rows_error != nil {
 		delete(turn_rows)
 		delete(ids)
 		delete(details)
 		delete(labels)
 		delete(paths)
+		delete(rows_list)
 		return false
 	}
 	view.turns, model.row_ids, model.details = turn_rows, ids, details
-	model.file_labels, model.file_paths = labels, paths
+	model.file_labels, model.file_paths, model.file_rows = labels, paths, rows_list
 	return true
 }
 
@@ -438,6 +441,32 @@ changes_file_old_path :: proc(file: turns.Diff_File) -> string {
 	return moved && file.old_path != "" && file.old_path != file.new_path ? file.old_path : ""
 }
 
+// The file list's row for a file: its status badge, its name and folder, its marks and its counts. `listed`
+// is the file's entry in file_paths, which ends with the path, so the name and the folder borrow from it.
+@(private = "file", require_results)
+changes_file_row :: proc(file: turns.Diff_File, listed: string, marked, ambiguous: bool) -> ui.Dropdown_Row {
+	path := changes_file_path(file)
+	path = listed[len(listed) - len(path):]
+	folder, name := "", path
+	if at := strings.last_index_byte(path, '/'); at >= 0 {
+		folder, name = path[:at], path[at + 1:]
+	}
+	row := ui.Dropdown_Row {
+		badge      = changes_status_mark(file.status),
+		badge_tint = ui.changes_status_tint(file.status),
+		primary    = name,
+		secondary  = folder,
+	}
+	if !file.binary {row.added, row.removed = file.added, file.removed}
+	count := 0
+	if marked {
+		row.marks[count] = {.Warning, .Warning}
+		count += 1
+	}
+	if ambiguous {row.marks[count] = {.Info, .Info}}
+	return row
+}
+
 // Takes a result's files: the file list's labels name every one, its search matches the paths as the
 // headers show them, and the view shows the files the filter lets through. False when memory ran out.
 @(private = "file", require_results)
@@ -451,7 +480,10 @@ changes_files_fill :: proc(pane: ^Changes_Pane, diff: Changes_Diff) -> bool {
 		model.file_labels[i] = changes_clone_text(label)
 		old := changes_file_old_path(file)
 		model.file_paths[i] = changes_clone_text(old != "" ? fmt.tprintf("%s \u2192 %s", old, path) : path)
+		model.file_rows[i] = changes_file_row(file, model.file_paths[i], i < len(diff.marked) && diff.marked[i],
+			i < len(diff.ambiguous) && diff.ambiguous[i])
 	}
+	model.file_serial += 1
 	return changes_view_filter(pane)
 }
 

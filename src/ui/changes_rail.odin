@@ -28,7 +28,7 @@ ROW_FILES_MARGIN :: f32(8)
 @(private = "file")
 ROW_FILES_PAD :: f32(8)
 @(private = "file")
-ROW_FILES_GAP :: f32(4)
+ROW_FILES_GAP :: f32(6)
 @(private = "file")
 ROW_SUMMARY_PAD_LEFT :: f32(7)
 @(private = "file")
@@ -346,6 +346,15 @@ summary_draw :: proc(
 	return
 }
 
+// The 16 DIP box every icon of the row is drawn in: centred vertically on the row and snapped to whole
+// pixels, so the icons of the 22 DIP buttons and of the files button line up at every scale. The caller
+// sets `x`.
+@(private = "file")
+row_icon_box :: proc(row: render.Rect, scale: f32) -> render.Rect {
+	extent := ICON_BUTTON * scale
+	return {0, math.round(row.y + (row.height - extent) / 2), extent, extent}
+}
+
 // One 22 DIP header-style icon button: the shared button surface with the muted icon and the raised hover.
 // `lit` is the "on" look, the pressed fill under the surface and the full-strength ink, never an accent;
 // `dot` marks a set filter at the top right.
@@ -353,7 +362,7 @@ summary_draw :: proc(
 row_button_draw :: proc(
 	list: ^render.Draw_List,
 	theme: Theme,
-	rect: render.Rect,
+	row, rect: render.Rect,
 	icon: Icon,
 	part: Changes_Part,
 	lit, disabled, dot: bool,
@@ -375,7 +384,11 @@ row_button_draw :: proc(
 	if err != .None {return err}
 	if lit && !disabled {ink = theme.text}
 	if colour, set := ink_override.?; set && !disabled {ink = colour}
-	icon_draw(list, icon, face, ink, ICON_BUTTON, scale)
+	// The icon sits on the row's centre line, as the files button's does, however the rects round.
+	box := row_icon_box(row, scale)
+	box.x = face.x + (face.width - box.width) / 2
+	box.y += face.y - rect.y
+	icon_draw(list, icon, box, ink, ICON_BUTTON, scale)
 	if dot {
 		size := ROW_FILTER_DOT * scale
 		mark := render.Rect{face.x + face.width - 2 * scale - size, face.y + 2 * scale, size, size}
@@ -417,11 +430,14 @@ files_button_draw :: proc(
 	plan := row_plan(g.row_steps, !changes_scope_turns(view.scope))
 	t := row_texts(view, text, plan, scale, range_buf[:], count_buf[:])
 	body := text_styled(text, .Body)
-	x := face.x + ROW_FILES_PAD * scale
-	icon_draw(list, .Files, {x, face.y, ICON_BUTTON * scale, face.height}, ink, ICON_BUTTON, scale)
-	x += (ICON_BUTTON + ROW_FILES_GAP) * scale
+	// The icon is in the same box as the icons of the buttons beside it; the label's capitals are centred on
+	// that box's centre line.
+	box := row_icon_box(g.row, scale)
+	box.x = face.x + ROW_FILES_PAD * scale
+	icon_draw(list, .Files, box, ink, ICON_BUTTON, scale)
+	x := box.x + box.width + ROW_FILES_GAP * scale
 	return draw_fading_text(
-		&body, list, t.files, x, baseline_in(face.y, face.height, &body), ink,
+		&body, list, t.files, x, baseline_caps(box.y, box.height, &body), ink,
 		face.x + face.width - ROW_FILES_PAD * scale - x,
 	)
 }
@@ -467,25 +483,26 @@ row_draw :: proc(
 	filter_ink: Maybe(render.Color)
 	if view.filter_invalid {filter_ink = theme.warning}
 	enabled := len(view.files) > 0
+	fold_icon: Icon = view.any_expanded ? .Collapse_All : .Expand_All
 	err := row_button_draw(
-		list, theme, g.layout_button, .Side_By_Side, .Layout_Button, view.side_by_side, false, false, nil, state, s,
-		pointer,
+		list, theme, g.row, g.layout_button, .Side_By_Side, .Layout_Button, view.side_by_side, false, false, nil,
+		state, s, pointer,
 	)
 	if err == .None {
 		err = row_button_draw(
-			list, theme, g.fold_button, view.any_expanded ? .Collapse_All : .Expand_All, .Fold_Button, false, !enabled,
-			false, nil, state, s, pointer,
+			list, theme, g.row, g.fold_button, fold_icon, .Fold_Button, false, !enabled, false, nil, state, s,
+			pointer,
 		)
 	}
 	if err == .None {
 		err = row_button_draw(
-			list, theme, g.filter_button, .Filter, .Filter_Button, state.filter_open || filter_set, false, filter_set,
-			filter_ink, state, s, pointer,
+			list, theme, g.row, g.filter_button, .Filter, .Filter_Button, state.filter_open || filter_set, false,
+			filter_set, filter_ink, state, s, pointer,
 		)
 	}
 	if err == .None {
 		err = row_button_draw(
-			list, theme, g.tools_button, .More, .Tools_Button, state.tools_open || state.filter_open, false,
+			list, theme, g.row, g.tools_button, .More, .Tools_Button, state.tools_open || state.filter_open, false,
 			filter_set, filter_ink, state, s, pointer,
 		)
 	}

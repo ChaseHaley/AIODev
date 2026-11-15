@@ -62,6 +62,10 @@ Changes_Model :: struct {
 	// What the file list's search matches, parallel to file_labels: each path as the diff header shows it,
 	// borrowed from the result like `diff`.
 	file_paths:     []string,
+	// Parallel to file_labels: the file list's rows, borrowing from file_paths, and a number that changes
+	// with every result so the list measures them again.
+	file_rows:      []ui.Dropdown_Row,
+	file_serial:    int,
 	// Parallel to diff.files: the filter hides the file and it was not picked; the file list fades it.
 	faded:          []bool,
 	// Parallel to view.files: each shown file's index in diff.files.
@@ -347,7 +351,9 @@ changes_list_open :: proc(pane: ^Changes_Pane) -> bool {
 }
 
 @(private = "file")
-CHANGES_FILE_LIST_WIDTH :: f32(360)
+CHANGES_FILE_LIST_WIDTH :: f32(420)
+@(private = "file")
+CHANGES_FILE_LIST_ROWS :: 16
 
 // The file list's choices: one per file of the result, searched by path or regular expression, the files
 // the filter hides faded.
@@ -362,13 +368,20 @@ changes_dropdown_choices :: proc(pane: ^Changes_Pane) -> ui.Dropdown_Choices {
 		placeholder = "Search files",
 		empty_text = "No matching files",
 		min_width = CHANGES_FILE_LIST_WIDTH,
+		rows = pane.model.file_rows,
+		rows_serial = pane.model.file_serial,
+		fit_content = true,
+		max_rows = CHANGES_FILE_LIST_ROWS,
 	}
 }
 
 // The file list hangs under the files button, right-aligned to it and inside the pane.
 @(private = "file")
 changes_dropdown_anchor :: proc(pane: ^Changes_Pane, g: ui.Changes_Geometry) -> ui.Dropdown_Anchor {
-	return {field = g.files_button, row = g.files_button, bounds = g.area, align_end = true}
+	// The room it may use starts just under the button, so a tall list never flips over the row.
+	top := g.files_button.y + g.files_button.height - ui.SPACE_1 * g.scale
+	bounds := render.Rect{g.area.x, top, g.area.width, max(0, g.area.y + g.area.height - top)}
+	return {field = g.files_button, row = g.files_button, bounds = bounds, align_end = true}
 }
 
 @(private = "file")
@@ -1265,7 +1278,13 @@ changes_on_regex_toggle :: proc(w: ^Window, pane: ^Changes_Pane, g: ui.Changes_G
 changes_tooltip :: proc(app: ^App, w: ^Window, x, y: f32) -> string {
 	pane, hit, g, listed := changes_tooltip_hit(app, w, x, y)
 	if pane == nil {return ""}
-	if listed {return changes_on_regex_toggle(w, pane, g, x, y) ? "Use regular expression" : ""}
+	if listed {
+		if changes_on_regex_toggle(w, pane, g, x, y) {return "Use regular expression"}
+		// A row whose folder is shortened names its full path.
+		choices, anchor := changes_dropdown_choices(pane), changes_dropdown_anchor(pane, g)
+		source, cut := ui.dropdown_row_cut(&pane.dropdown, choices, anchor, &w.ui_text, x, y, w.scale)
+		return cut ? changes_list_identity(pane, source) : ""
+	}
 	view := &pane.model.view
 	#partial switch hit.part {
 	case .Summary:
