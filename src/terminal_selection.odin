@@ -21,6 +21,7 @@ copy_selection :: proc(app: ^App, entry: ^Session_Entry, explicit: bool) {
 		COPY_NOTICE_DURATION,
 		app.animations,
 		clock_now(&app.clock),
+		stack = true,
 	)
 	mark_all_dirty(app)
 	if explicit {term.clear_selection(entry.session)}

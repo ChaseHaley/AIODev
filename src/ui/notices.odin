@@ -225,7 +225,9 @@ notices_live :: proc(n: ^Notices) -> []Notice {
 	return n.items[:]
 }
 
-// Shows a notice. A nonzero key replaces the notice already shown under it; a zero duration is sticky.
+// Shows a notice. A nonzero key replaces the notice already shown under it, unless `stack`: then the
+// key only names the notice's source and every different notice from it stays, while one that repeats
+// a shown notice word for word replaces it, since it says nothing new. A zero duration is sticky.
 // `enabled` is the caller's animation policy, as for every notice transition; `now` dates the expiry.
 // A notice arriving while the deck is paused waits with the rest and runs its full time afterwards.
 // A nonempty `action` adds a button whose release notices_release reports with the notice's key.
@@ -239,6 +241,7 @@ notices_put :: proc(
 	now: time.Tick,
 	action := "",
 	action_key := "",
+	stack := false,
 ) {
 	// The new notice's storage is in place before a keyed notice it replaces starts to fade, so a
 	// notice that cannot be stored leaves the current one showing.
@@ -250,8 +253,12 @@ notices_put :: proc(
 		delete(owned, n.items.allocator)
 		return
 	}
-	if key != 0 {
+	if key != 0 && !stack {
 		notices_clear(n, key, enabled)
+	} else if stack {
+		for item, i in notices_live(n) {
+			if item.key == key && item.kind == kind && item.text == text {notice_fade(n, i, enabled); break}
+		}
 	}
 	n.next_id += 1
 	notice := Notice {

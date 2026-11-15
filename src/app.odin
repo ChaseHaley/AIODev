@@ -31,7 +31,9 @@ NOTICE_DURATION :: 6 * time.Second
 @(private)
 ERROR_NOTICE_DURATION :: 12 * time.Second
 
-// Every notice that replaces its own earlier copy has a key here, so no two features share one.
+// Every notice source has a key here, so no two features share one. A notice that tracks a state still
+// changing (settings problems, the font, a paste or Undo waiting, an update) replaces its own earlier
+// copy, so it never shows a stale state; the others stack, and their key only names them for the harness.
 @(private)
 Notice_Key :: enum u32 {
 	Transient = 1,
@@ -720,7 +722,7 @@ initial_geometry :: proc(app: ^App) -> term.Geometry {
 notify :: proc(app: ^App, kind: ui.Notice_Kind, text: string) {
 	duration := kind == .Error || kind == .Warning ? ERROR_NOTICE_DURATION : NOTICE_DURATION
 	key := u32(Notice_Key.Transient)
-	ui.notices_put(&app.notices, key, kind, text, duration, app.animations, clock_now(&app.clock))
+	ui.notices_put(&app.notices, key, kind, text, duration, app.animations, clock_now(&app.clock), stack = true)
 	mark_all_dirty(app)
 }
 

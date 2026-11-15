@@ -409,3 +409,25 @@ notices_open_deck_eases_cards_into_a_leaving_cards_room :: proc(t: ^testing.T) {
 	_ = ui.notices_hit(&n, &text, 1000, 800, 1, 0, 0)
 	testing.expect_value(t, ui.notices_live(&n)[0].card.box.y, oldest + middle.height + 8)
 }
+
+// A stacking source keeps every different notice it shows, and a word-for-word repeat comes to the front
+// with its full time instead of adding a copy; a replacing source keeps only its latest.
+@(test)
+notices_from_a_stacking_source_all_stay :: proc(t: ^testing.T) {
+	n: ui.Notices
+	ui.notices_init(&n)
+	defer ui.notices_destroy(&n)
+	now := time.tick_now()
+	ui.notices_put(&n, 1, .Warning, "first", time.Hour, false, now, stack = true)
+	ui.notices_put(&n, 1, .Error, "second", time.Hour, false, now, stack = true)
+	ui.notices_put(&n, 2, .Warning, "stale", time.Hour, false, now)
+	ui.notices_put(&n, 2, .Warning, "current", time.Hour, false, now)
+	later := time.tick_add(now, time.Minute)
+	ui.notices_put(&n, 1, .Warning, "first", time.Hour, false, later, stack = true)
+	live := ui.notices_live(&n)
+	if !testing.expect_value(t, len(live), 3) {return}
+	testing.expect_value(t, live[0].text, "second")
+	testing.expect_value(t, live[1].text, "current")
+	testing.expect_value(t, live[2].text, "first")
+	testing.expect_value(t, ui.notice_expiry(live[2]).?, time.tick_add(later, time.Hour))
+}
