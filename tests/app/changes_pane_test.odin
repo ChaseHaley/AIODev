@@ -670,7 +670,7 @@ every_control_says_what_it_does :: proc(t: ^testing.T) {
 	testing.expect_value(t, tooltip_at(&f, w, empty.filter_button), "Filter files")
 	// The summary and the arrow open the panel, and name the key that does.
 	testing.expect_value(t, tooltip_at(&f, w, empty.panel_button), "Source, turns and files")
-	testing.expect_value(t, tooltip_at(&f, w, empty.rail_summary), "Source, turns and files")
+	testing.expect_value(t, tooltip_at(&f, w, empty.summary), "Source, turns and files")
 	testing.expect_value(t, key_at(&f, w, empty.panel_button), commands.Shortcut{.K, {.Control}})
 	lines := make([]turns.Diff_Line, 4)
 	defer delete(lines)
@@ -699,7 +699,7 @@ every_control_says_what_it_does :: proc(t: ^testing.T) {
 	testing.expect_value(t, tooltip_at(&f, w, g.source_chips[0]), pane.model.sources[0])
 	testing.expect(t, g.overview.width > 0)
 	testing.expect_value(t, tooltip_at(&f, w, g.overview), "Overview: click or drag to scroll")
-	header := render.Rect{g.diff.x + 40, g.diff.y + 2, 4, 4}
+	header := render.Rect{g.diff.x + 600, g.diff.y + 2, 4, 4}
 	testing.expect_value(t, tooltip_at(&f, w, header), "Collapse file")
 	app.changes_model_fold(&pane.model, 0)
 	_ = app.changes_geometry_of(&f.state, w, pane, shown)
@@ -916,7 +916,7 @@ the_panel_opens_from_the_arrow_the_summary_and_ctrl_k_and_closes_on_escape_or_an
 	view := &pane.model.view
 	state := &pane.state
 
-	// The arrow opens the panel with the file list under it; a second click on it closes both.
+	// The chevron button opens the panel with the file list under it; a second click on it closes both.
 	g := app.changes_geometry_of(&f.state, w, pane, shown)
 	click(&f.state, w, g.panel_button)
 	testing.expect(t, state.panel_open && pane.files_open)
@@ -924,7 +924,7 @@ the_panel_opens_from_the_arrow_the_summary_and_ctrl_k_and_closes_on_escape_or_an
 	testing.expect(t, !state.panel_open && !pane.files_open)
 
 	// The summary opens it too, and Escape closes it.
-	click(&f.state, w, g.rail_summary)
+	click(&f.state, w, g.summary)
 	testing.expect(t, state.panel_open && pane.files_open)
 	tap(&f.state, w, .Escape)
 	testing.expect(t, !state.panel_open && !pane.files_open)
@@ -937,11 +937,11 @@ the_panel_opens_from_the_arrow_the_summary_and_ctrl_k_and_closes_on_escape_or_an
 
 	// A press outside the panel and its list only closes them: the header it lands on does not fold.
 	chord(&f.state, w, .K, {.Control})
-	click(&f.state, w, {g.diff.x + 10, g.diff.y + 5, 4, 4})
+	click(&f.state, w, {g.diff.x + 600, g.diff.y + 5, 4, 4})
 	testing.expect(t, !state.panel_open && !pane.files_open)
 	testing.expect(t, !view.collapsed[0])
 
-	// The overlays exclude each other: a press on the filter circle only closes the panel, and opening the
+	// The overlays exclude each other: a press on the filter button only closes the panel, and opening the
 	// popover then Ctrl+K swaps it for the panel.
 	chord(&f.state, w, .K, {.Control})
 	click(&f.state, w, g.filter_button)
@@ -1022,7 +1022,7 @@ the_chips_choose_the_source_and_the_worktree_and_leave_the_panel_open :: proc(t:
 }
 
 @(test)
-the_tools_menu_holds_the_view_buttons_when_the_rail_runs_out_of_room :: proc(t: ^testing.T) {
+the_tools_menu_holds_the_view_buttons_when_the_row_runs_out_of_room :: proc(t: ^testing.T) {
 	f: Fixture
 	defer {
 		app.app_destroy(&f.state)
@@ -1045,16 +1045,16 @@ the_tools_menu_holds_the_view_buttons_when_the_rail_runs_out_of_room :: proc(t: 
 	view := &pane.model.view
 	state := &pane.state
 
-	// Narrow the window until the rail has given up its circles.
+	// Narrow the window until the row has given up its buttons.
 	g := app.changes_geometry_of(&f.state, w, pane, shown)
 	for width in ([?]i32{600, 500, 400, 320}) {
-		if g.rail_steps >= 1 {break}
+		if g.row_steps >= 1 {break}
 		app.window_resize(&f.state, w, width, 900)
 		shown, found = changes_pane_of(&f.state, w)
 		if !testing.expect(t, found) {return}
 		g = app.changes_geometry_of(&f.state, w, pane, shown)
 	}
-	if !testing.expect(t, g.rail_steps >= 1 && g.tools_button.width > 0) {return}
+	if !testing.expect(t, g.row_steps >= 1 && g.tools_button.width > 0) {return}
 	testing.expect_value(t, g.layout_button, render.Rect{})
 
 	// The Side-by-side row toggles the layout and the menu closes with it.
@@ -1079,7 +1079,7 @@ the_tools_menu_holds_the_view_buttons_when_the_rail_runs_out_of_room :: proc(t: 
 	click(&f.state, w, g.tools_rows[1])
 	testing.expect(t, !view.any_expanded && !state.tools_open)
 
-	// Filter files… opens the popover under the ⋯ circle and closes the menu.
+	// Filter files… opens the popover under the ⋯ button and closes the menu.
 	click(&f.state, w, g.tools_button)
 	g = app.changes_geometry_of(&f.state, w, pane, shown)
 	click(&f.state, w, g.tools_rows[2])

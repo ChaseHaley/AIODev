@@ -52,7 +52,7 @@ Changes_Model :: struct {
 	agents:         []Changes_Agent,
 	// The source chips' labels: one per agent, owned, then the fixed scope labels.
 	sources:        []string,
-	// The label of the pane's own agent, which the rail names in the Agent scope.
+	// The label of the pane's own agent, which the summary names in the Agent scope.
 	agent_label:    string,
 	// The result's files and what runs parallel to them, borrowed from the result, so the diff filter can
 	// refill the view without asking the worker again.
@@ -794,7 +794,7 @@ changes_has_live :: proc(view: ^ui.Changes_View) -> bool {
 	return false
 }
 
-// The pane's band, diff and overview strip, or its notice, inside the card. `scrollable` is always false:
+// The pane's row, diff and overview strip, or its notice, inside the card. `scrollable` is always false:
 // the overview strip scrolls the diff, so no pane scrollbar belongs beside it.
 @(require_results)
 changes_pane_draw :: proc(
@@ -973,7 +973,7 @@ changes_cursor :: proc(hit: ui.Changes_Hit) -> platform.Cursor_Shape {
 	case .Hooks, .Notice_Button, .File_Header, .Strip_Bar, .Step_Back, .Step_Forward, .Range_Label,
 	     .Hunk_Comment, .Comment_Button, .Comment_Card, .Comment_Delete, .Send, .Copy, .Discard,
 	     .Layout_Button, .Filter_Button, .Filter_Clear, .Filter_Bar_Clear, .Fold_Button, .Sticky_Header,
-	     .Strip_Older, .Strip_Newer, .Rail_Summary, .Panel_Button, .Tools_Button, .Source_Chip,
+	     .Strip_Older, .Strip_Newer, .Summary, .Panel_Button, .Tools_Button, .Source_Chip,
 	     .Worktree_Chip:
 		return .Hand
 	case .Turn_List_Row, .Tools_Row:
@@ -1128,7 +1128,7 @@ changes_press :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) {
 		return
 	}
 	#partial switch hit.part {
-	case .Rail_Summary, .Panel_Button:
+	case .Summary, .Panel_Button:
 		changes_panel_set(app, w, pane, true)
 	case .Tools_Button:
 		changes_tools_open(app, w, pane)
@@ -1267,7 +1267,7 @@ changes_tooltip :: proc(app: ^App, w: ^Window, x, y: f32) -> string {
 	if listed {return changes_on_regex_toggle(w, pane, g, x, y) ? "Use regular expression" : ""}
 	view := &pane.model.view
 	#partial switch hit.part {
-	case .Rail_Summary, .Panel_Button:
+	case .Summary, .Panel_Button:
 		return "Source, turns and files"
 	case .Tools_Button:
 		return "Layout, fold and filter"
@@ -1330,7 +1330,7 @@ changes_tooltip :: proc(app: ^App, w: ^Window, x, y: f32) -> string {
 @(private = "file", rodata)
 CHANGES_STEP_KEYS := [2]commands.Shortcut{{.Arrow_Left, {}}, {.Arrow_Right, {}}}
 
-// The key that toggles the panel, which the rail's summary and arrow name.
+// The key that toggles the panel, which the row's summary and chevron button name.
 @(private = "file", rodata)
 CHANGES_PANEL_KEY := commands.Shortcut{.K, {.Control}}
 
@@ -1348,7 +1348,7 @@ changes_shortcut :: proc(app: ^App, w: ^Window, x, y: f32) -> Tooltip_Shortcut {
 		return CHANGES_STEP_KEYS[0]
 	case .Step_Forward:
 		return CHANGES_STEP_KEYS[1]
-	case .Rail_Summary, .Panel_Button:
+	case .Summary, .Panel_Button:
 		return CHANGES_PANEL_KEY
 	}
 	return nil
@@ -1386,9 +1386,9 @@ when AIO_CONTROL {
 		layout_button_rect, fold_button_rect, filter_button_rect: render.Rect
 		filter_field_rect, filter_clear_rect, filter_bar_clear_rect: render.Rect
 		regex_rect, sticky_rect, strip_older_rect, strip_newer_rect: render.Rect
-		rail_rect, rail_summary_rect, panel_rect, panel_button_rect, tools_button_rect: render.Rect
+		row_rect, summary_rect, panel_rect, panel_button_rect, tools_button_rect: render.Rect
 		overview_rect, overview_box_rect, turn_title_rect: render.Rect
-		rail_steps := 0
+		row_steps := 0
 		range_title := ""
 		title_buffer: [96]u8
 		top_file, sticky_file := -1, -1
@@ -1402,7 +1402,7 @@ when AIO_CONTROL {
 			turn_count, first, last, files = len(view.turns), view.first, view.last, len(view.files)
 			if shown, found := changes_pane_rect(w, pane.id); found {
 				g := changes_geometry_of(app, w, pane, shown)
-				rail_rect, rail_summary_rect, rail_steps = g.rail, g.rail_summary, g.rail_steps
+				row_rect, summary_rect, row_steps = g.row, g.summary, g.row_steps
 				panel_button_rect, tools_button_rect = g.panel_button, g.tools_button
 				layout_button_rect, fold_button_rect, filter_button_rect = g.layout_button, g.fold_button, g.filter_button
 				filter_bar_clear_rect = g.filter_bar_clear
@@ -1514,7 +1514,7 @@ when AIO_CONTROL {
 		state_value(r, "changes.files_open", pane != nil && pane.files_open)
 		state_value(r, "changes.panel_open", pane != nil && pane.state.panel_open)
 		state_value(r, "changes.tools_open", pane != nil && pane.state.tools_open)
-		state_value(r, "changes.rail_steps", rail_steps)
+		state_value(r, "changes.row_steps", row_steps)
 		state_value(r, "changes.side_by_side", pane != nil && pane.side_by_side)
 		state_value(r, "changes.diff_scroll", pane != nil ? pane.state.diff_scroll : 0)
 		state_value(r, "changes.top_file", top_file)
@@ -1546,8 +1546,8 @@ when AIO_CONTROL {
 		state_text(r, "changes.file_list_empty", list_empty)
 		state_text(r, "changes.range_label", range_label)
 		state_text(r, "changes.range_title", range_title)
-		state_rect(r, "changes.rail_rect", rail_rect)
-		state_rect(r, "changes.rail_summary_rect", rail_summary_rect)
+		state_rect(r, "changes.row_rect", row_rect)
+		state_rect(r, "changes.summary_rect", summary_rect)
 		state_rect(r, "changes.panel_rect", panel_rect)
 		state_rect(r, "changes.panel_button_rect", panel_button_rect)
 		state_rect(r, "changes.tools_button_rect", tools_button_rect)

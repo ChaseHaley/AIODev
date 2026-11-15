@@ -61,7 +61,7 @@ changes_range_label :: proc(view: ^Changes_View, buf: []u8) -> string {
 	return fmt.bprintf(buf, "Turns %d–%d", count - last, count - view.first)
 }
 
-// The range label for a rail short of room: "T7" and "T7–11".
+// The range label for a row short of room: "T7" and "T7–11".
 changes_range_label_short :: proc(view: ^Changes_View, buf: []u8) -> string {
 	count := len(view.turns)
 	if count == 0 {return "No turns"}
@@ -539,7 +539,7 @@ range_label_draw :: proc(
 	return .Ok, spinning
 }
 
-// The filter bar under the band: its row and the Clear button at the right.
+// The filter bar under the row: its row and the Clear button at the right.
 @(private)
 filter_bar_place :: proc(g: ^Changes_Geometry, text: ^Text, y: f32) {
 	s := g.scale
@@ -565,7 +565,7 @@ filter_popover_place :: proc(g: ^Changes_Geometry, view: ^Changes_View, text: ^T
 	anchor := g.filter_button.width > 0 ? g.filter_button : g.tools_button
 	right := anchor.x + anchor.width
 	x := clamp(right - width, area.x + pad, max(area.x + pad, area.x + area.width - pad - width))
-	y := g.rail.y + g.rail.height + SPACE_1 * s
+	y := g.row.y + g.row.height + SPACE_1 * s
 	small := text_styled(text, .Detail)
 	field := math.round(HEIGHT_STANDARD * s)
 	g.filter_popover = {x, y, width, math.round(2 * inset + field + SPACE_2 * s + small.line_height)}

@@ -4,29 +4,30 @@ import "aio:render"
 import "core:fmt"
 import "core:math"
 
-// The panel under the rail: the source as chips, the worktree as chips in git scopes, the turn strip with
-// the title of the selected turns in turn scopes, and a caption for the file list that hangs under it. It
-// opens from the rail's arrow or summary and from Ctrl+K. It is laid out whether or not it is open, so the
-// strip's keys and offsets never depend on it; only drawing and hit testing do.
+// The panel under the row's summary: the source as chips, the worktree as chips in git scopes, the turn
+// strip with the title of the selected turns in turn scopes, and a caption for the file list that hangs
+// under it. It opens from the row's summary or chevron button and from Ctrl+K. It is laid out whether or
+// not it is open, so the strip's
+// keys and offsets never depend on it; only drawing and hit testing do.
 
 @(private = "file")
 CHANGES_PANEL_WIDTH :: f32(560)
 @(private = "file")
-CHIP_HEIGHT :: f32(26)
+CHIP_HEIGHT :: HEIGHT_COMPACT
 @(private = "file")
-CHIP_PAD :: f32(9)
+CHIP_PAD :: f32(8)
 @(private = "file")
 CHIP_DOT :: f32(8)
 @(private = "file")
 CHIP_GAP :: f32(6)
 @(private = "file")
-SOURCE_CAPTION :: "SOURCE"
+SOURCE_CAPTION :: "Source"
 @(private = "file")
-WORKTREE_CAPTION :: "WORKTREE"
+WORKTREE_CAPTION :: "Worktree"
 @(private = "file")
-TURNS_CAPTION :: "TURNS"
+TURNS_CAPTION :: "Turns"
 @(private = "file")
-FILES_CAPTION :: "FILES"
+FILES_CAPTION :: "Files"
 @(private = "file")
 FOLLOWING_LABEL :: "Following the agent"
 
@@ -63,7 +64,8 @@ chips_place :: proc(
 	return made, cy + height
 }
 
-// Places the panel centred under the rail, its sections top to bottom, and the turn strip inside it.
+// Places the panel under the summary, from its left edge, its sections top to bottom, and the turn strip
+// inside it.
 @(private)
 panel_place :: proc(
 	g: ^Changes_Geometry, view: ^Changes_View, text, body: ^Text, state: ^Changes_State,
@@ -73,10 +75,9 @@ panel_place :: proc(
 	margin, inset := SPACE_2 * s, SPACE_3 * s
 	width := math.round(min(CHANGES_PANEL_WIDTH * s, max(0, area.width - 2 * margin)))
 	if width <= 2 * inset + 8 * s {return}
-	centre := g.rail.width > 0 ? g.rail.x + g.rail.width / 2 : area.x + area.width / 2
 	right := area.x + area.width - margin - width
-	x := clamp(math.round(centre - width / 2), area.x + margin, max(area.x + margin, right))
-	top := g.band.y + g.band.height - SPACE_1 * s
+	x := clamp(math.round(g.summary.x), area.x + margin, max(area.x + margin, right))
+	top := g.row.y + g.row.height + SPACE_1 * s
 	limit := area.y + area.height - margin
 	if limit <= top {return}
 	left, inner := x + inset, width - 2 * inset
@@ -150,7 +151,7 @@ panel_hit :: proc(g: Changes_Geometry, view: ^Changes_View, state: ^Changes_Stat
 	return {}
 }
 
-// A section's caption: faint capitals at the left and an optional note at the right.
+// A section's caption: faint sentence case at the left and an optional note at the right.
 @(private = "file")
 caption_draw :: proc(
 	list: ^render.Draw_List, small: ^Text, theme: Theme, rect: render.Rect, label, note: string, scale: f32,
@@ -164,8 +165,8 @@ caption_draw :: proc(
 	return draw_text(small, list, note, rect.x + rect.width - note_width, rect.y + small.ascent, theme.faint)
 }
 
-// One chip: its dot and label on a pill, lit (selection fill, accent text and outline) when it is the
-// current one.
+// One chip: its dot and label on a faint fill that deepens under the pointer; the current one has the
+// selection fill and full-strength text.
 @(private = "file")
 chip_draw :: proc(
 	list: ^render.Draw_List,
@@ -182,22 +183,23 @@ chip_draw :: proc(
 ) -> render.Build_Status {
 	if rect.width <= 0 {return .Ok}
 	hover, press := changes_lit(state, hit)
-	radius := rect.height / 2
-	if !current {draw_rect(list, {rect = rect, color = theme.hover, radius = radius})}
+	radius := RADIUS_CONTROL * scale
+	if !current {
+		draw_rect(list, {rect = rect, color = theme.hover, radius = radius})
+		fill := theme.pressed
+		fill.a *= clamp(hover, 0, 1)
+		draw_rect(list, {rect = rect, color = fill, radius = radius})
+	}
 	b := Button {
 		rect     = rect,
 		hover    = hover,
 		press    = press,
-		radius   = CHIP_HEIGHT / 2,
-		surface  = .Flat,
+		radius   = RADIUS_CONTROL,
+		surface  = .Flat_Unfilled,
 		selected = current,
 	}
 	face, ink, err := button_draw(list, theme, b, scale, pointer)
 	if err != .None {return .Ok}
-	if current {
-		draw_rect(list, {rect = rect, color = theme.focus, radius = radius, stroke = scale})
-		ink = theme.accent
-	}
 	mark := CHIP_DOT * scale
 	dot := render.Rect{face.x + CHIP_PAD * scale, face.y + (face.height - mark) / 2, mark, mark}
 	draw_rect(list, {rect = dot, color = tint, radius = dot.width / 2})

@@ -10,7 +10,7 @@ import "core:testing"
 middle :: proc(r: render.Rect) -> (x, y: f32) {return r.x + r.width / 2, r.y + r.height / 2}
 
 @(test)
-changes_rail_sits_centred_in_the_band_with_its_circles_in_order :: proc(t: ^testing.T) {
+changes_row_has_the_summary_at_the_left_and_its_buttons_at_the_right :: proc(t: ^testing.T) {
 	f: Changes_Fixture
 	view: ui.Changes_View
 	if !fixture_make(t, &f, &view) {return}
@@ -20,29 +20,30 @@ changes_rail_sits_centred_in_the_band_with_its_circles_in_order :: proc(t: ^test
 
 	g := ui.changes_geometry({0, 0, 900, 600}, 1, &view, &f.text)
 	ui.changes_layout(&state, &view, &f.text, &f.mono, g.diff.width, 1)
-	// A wide pane takes no step: the summary and the three circles show.
-	testing.expect_value(t, g.rail_steps, 0)
+	// A wide pane takes no step: the summary and the three buttons show.
+	testing.expect_value(t, g.row_steps, 0)
 	testing.expect_value(t, g.tools_button, render.Rect{})
-	// A 34 tall pill, centred in the band's 46 and over the diff, not the overview strip.
-	testing.expect_value(t, g.rail.height, f32(34))
-	testing.expect_value(t, g.rail.y, f32(6))
-	testing.expect(t, abs(g.rail.x + g.rail.width / 2 - 444) <= 1)
-	testing.expect(t, g.rail.width <= 900 - 12 - 16)
-	// The summary leads, then a divider, three 26 circles 4 apart, then the arrow.
-	testing.expect_value(t, g.rail_summary.x, g.rail.x + 4)
-	testing.expect_value(t, g.rail_summary.height, f32(28))
-	testing.expect_value(t, g.rail_divider.x, g.rail_summary.x + g.rail_summary.width + 4)
-	testing.expect_value(t, g.rail_divider.width, f32(1))
-	testing.expect_value(t, g.rail_divider.height, f32(16))
-	testing.expect_value(t, g.layout_button, render.Rect{g.rail_divider.x + 1 + 4, g.rail.y + 4, 26, 26})
-	testing.expect_value(t, g.fold_button, render.Rect{g.layout_button.x + 30, g.rail.y + 4, 26, 26})
-	testing.expect_value(t, g.filter_button, render.Rect{g.fold_button.x + 30, g.rail.y + 4, 26, 26})
-	testing.expect_value(t, g.panel_button, render.Rect{g.filter_button.x + 30 + 2, g.rail.y + 4, 26, 26})
-	testing.expect_value(t, g.panel_button.x + g.panel_button.width + 4, g.rail.x + g.rail.width)
+	// A 32 tall row across the whole pane at its top, the diff under it.
+	testing.expect_value(t, g.row, render.Rect{0, 0, 900, 32})
+	testing.expect_value(t, g.diff.y, f32(32))
+	// The summary is a 24 tall ghost button 4 from the left edge, not centred.
+	testing.expect_value(t, g.summary.x, f32(4))
+	testing.expect_value(t, g.summary.y, f32(4))
+	testing.expect_value(t, g.summary.height, f32(24))
+	testing.expect(t, g.summary.x + g.summary.width < 450)
+	// At the right end, 5 from the edge: layout, fold and filter 22 wide and 2 apart, a 4 DIP gap, a 14 tall
+	// hairline with 4 on each side, then the chevron button.
+	testing.expect_value(t, g.panel_button, render.Rect{900 - 5 - 22, 5, 22, 22})
+	testing.expect_value(t, g.buttons_divider, render.Rect{g.panel_button.x - 4 - 1, 9, 1, 14})
+	testing.expect_value(t, g.filter_button, render.Rect{g.buttons_divider.x - 4 - 22, 5, 22, 22})
+	testing.expect_value(t, g.fold_button, render.Rect{g.filter_button.x - 2 - 22, 5, 22, 22})
+	testing.expect_value(t, g.layout_button, render.Rect{g.fold_button.x - 2 - 22, 5, 22, 22})
+	// The room between the summary and the buttons stays empty.
+	testing.expect(t, g.layout_button.x - (g.summary.x + g.summary.width) > 100)
 
 	// Each part answers as its own hit.
-	x, y := middle(g.rail_summary)
-	testing.expect_value(t, ui.changes_hit(g, &view, &state, x, y), ui.Changes_Hit{.Rail_Summary, 0, 0})
+	x, y := middle(g.summary)
+	testing.expect_value(t, ui.changes_hit(g, &view, &state, x, y), ui.Changes_Hit{.Summary, 0, 0})
 	x, y = middle(g.layout_button)
 	testing.expect_value(t, ui.changes_hit(g, &view, &state, x, y), ui.Changes_Hit{.Layout_Button, 0, 0})
 	x, y = middle(g.fold_button)
@@ -64,20 +65,27 @@ changes_rail_sits_centred_in_the_band_with_its_circles_in_order :: proc(t: ^test
 	testing.expect_value(t, same.fold_button, g.fold_button)
 	view.scope, view.turns = .Staged, nil
 	git := ui.changes_geometry({0, 0, 900, 600}, 1, &view, &f.text)
-	testing.expect_value(t, git.rail_steps, 0)
+	testing.expect_value(t, git.row_steps, 0)
 	testing.expect(t, git.layout_button.x < git.fold_button.x && git.fold_button.x < git.filter_button.x)
 	testing.expect(t, git.filter_button.x < git.panel_button.x)
 
 	// At twice the scale every DIP doubles.
 	view.scope, view.turns = .Agent, f.rows[:]
 	double := ui.changes_geometry({0, 0, 1800, 1200}, 2, &view, &f.text)
-	testing.expect_value(t, double.rail.height, f32(68))
-	testing.expect_value(t, double.layout_button.width, f32(52))
-	testing.expect_value(t, double.fold_button.x, double.layout_button.x + 60)
+	testing.expect_value(t, double.row.height, f32(64))
+	testing.expect_value(t, double.layout_button.width, f32(44))
+	testing.expect_value(t, double.fold_button.x, double.layout_button.x + 48)
 }
 
-// Sweeps the pane from wide to narrow and checks the collapse ladder: no step while the rail fits, each
-// step taken only when the one before no longer fits, the circles becoming one ⋯ at the first.
+// The x of the leftmost button of the row's right end.
+@(private = "file")
+buttons_left :: proc(g: ui.Changes_Geometry) -> f32 {
+	return g.layout_button.width > 0 ? g.layout_button.x : g.tools_button.x
+}
+
+// Sweeps the pane from wide to narrow and checks the collapse ladder: no step while the summary fits with
+// 4 DIP to spare before the buttons, each step taken only when the one before no longer fits, the three
+// buttons becoming one ⋯ at the first.
 @(private = "file")
 ladder_check :: proc(t: ^testing.T, f: ^Changes_Fixture, view: ^ui.Changes_View, skipped: int) {
 	state: ui.Changes_State
@@ -87,17 +95,18 @@ ladder_check :: proc(t: ^testing.T, f: ^Changes_Fixture, view: ^ui.Changes_View,
 	reached: [6]bool
 	for width := f32(1400); width >= 100; width -= 1 {
 		g := ui.changes_geometry({0, 0, width, 600}, 1, view, &f.text)
-		most := width - 12 - 16
-		testing.expect(t, g.rail.width <= most)
-		testing.expect(t, g.rail_steps >= steps)
-		testing.expect(t, g.rail_steps != skipped)
-		reached[g.rail_steps] = true
-		if g.rail_steps > steps {
-			// It did not fit at this width, and did one pixel wider.
-			testing.expect(t, previous.rail.width <= most + 1)
+		testing.expect_value(t, g.row.width, width)
+		testing.expect(t, g.row_steps >= steps)
+		testing.expect(t, g.row_steps != skipped)
+		reached[g.row_steps] = true
+		// The summary never runs into the buttons.
+		testing.expect(t, g.summary.x + g.summary.width <= buttons_left(g))
+		if g.row_steps > steps {
+			// It did not fit at this width, and did one pixel wider, with exactly the 4 DIP gap.
+			testing.expect_value(t, buttons_left(previous) - (previous.summary.x + previous.summary.width), f32(4))
 			testing.expect(t, width < 1400)
 		}
-		if g.rail_steps == 0 {
+		if g.row_steps == 0 {
 			testing.expect(t, g.layout_button.width > 0 && g.fold_button.width > 0 && g.filter_button.width > 0)
 			testing.expect_value(t, g.tools_button, render.Rect{})
 		} else {
@@ -107,7 +116,7 @@ ladder_check :: proc(t: ^testing.T, f: ^Changes_Fixture, view: ^ui.Changes_View,
 			testing.expect(t, g.tools_button.width > 0)
 		}
 		testing.expect(t, g.panel_button.width > 0)
-		steps, previous = g.rail_steps, g
+		steps, previous = g.row_steps, g
 	}
 	testing.expect(t, reached[0] && reached[1] && reached[2] && reached[3])
 	testing.expect(t, reached[5])
@@ -115,7 +124,7 @@ ladder_check :: proc(t: ^testing.T, f: ^Changes_Fixture, view: ^ui.Changes_View,
 	// Natural widths only fall: each step gave something up.
 	wide := ui.changes_geometry({0, 0, 1400, 600}, 1, view, &f.text)
 	narrow := ui.changes_geometry({0, 0, 300, 600}, 1, view, &f.text)
-	testing.expect(t, narrow.rail.width < wide.rail.width)
+	testing.expect(t, narrow.summary.width < wide.summary.width)
 }
 
 @(test)
@@ -144,7 +153,7 @@ changes_rail_skips_the_agent_name_step_in_git_scopes :: proc(t: ^testing.T) {
 }
 
 @(test)
-changes_range_label_shortens_for_a_rail_short_of_room :: proc(t: ^testing.T) {
+changes_range_label_shortens_for_a_row_short_of_room :: proc(t: ^testing.T) {
 	f: Changes_Fixture
 	view: ui.Changes_View
 	if !fixture_make(t, &f, &view) {return}
@@ -172,7 +181,7 @@ changes_range_label_shortens_for_a_rail_short_of_room :: proc(t: ^testing.T) {
 }
 
 @(test)
-changes_tools_menu_hangs_under_the_collapsed_circle_and_answers_first :: proc(t: ^testing.T) {
+changes_tools_menu_hangs_under_the_collapsed_button_and_answers_first :: proc(t: ^testing.T) {
 	f: Changes_Fixture
 	view: ui.Changes_View
 	if !fixture_make(t, &f, &view) {return}
@@ -180,20 +189,20 @@ changes_tools_menu_hangs_under_the_collapsed_circle_and_answers_first :: proc(t:
 	state: ui.Changes_State
 	defer ui.changes_state_destroy(&state)
 
-	// The wide rail has no menu.
+	// The wide row has no menu.
 	wide := ui.changes_geometry({0, 0, 900, 600}, 1, &view, &f.text)
 	testing.expect_value(t, wide.tools_menu, render.Rect{})
 
-	g := ui.changes_geometry({0, 0, 320, 600}, 1, &view, &f.text)
-	if !testing.expect(t, g.rail_steps >= 1 && g.tools_button.width > 0) {return}
+	g := ui.changes_geometry({0, 0, 260, 600}, 1, &view, &f.text)
+	if !testing.expect(t, g.row_steps >= 1 && g.tools_button.width > 0) {return}
 	ui.changes_layout(&state, &view, &f.text, &f.mono, g.diff.width, 1)
-	testing.expect_value(t, g.tools_button.width, f32(26))
-	testing.expect_value(t, g.panel_button.x, g.tools_button.x + 26 + 4 + 2)
-	// Three 32 rows under the circle, right-aligned to it and inside the pane.
+	testing.expect_value(t, g.tools_button.width, f32(22))
+	testing.expect_value(t, g.panel_button.x, g.tools_button.x + 22 + 4 + 1 + 4)
+	// Three 32 rows under the button, right-aligned to it and inside the pane.
 	menu := g.tools_menu
-	testing.expect_value(t, menu.y, g.rail.y + g.rail.height + 4)
+	testing.expect_value(t, menu.y, g.row.y + g.row.height + 4)
 	testing.expect_value(t, menu.height, f32(3 * 32 + 8))
-	testing.expect(t, menu.x >= 8 && menu.x + menu.width <= 320 - 8)
+	testing.expect(t, menu.x >= 8 && menu.x + menu.width <= 260 - 8)
 	for row, i in g.tools_rows {
 		testing.expect_value(t, row.height, f32(32))
 		testing.expect_value(t, row.y, menu.y + 4 + f32(i) * 32)
@@ -215,7 +224,7 @@ changes_tools_menu_hangs_under_the_collapsed_circle_and_answers_first :: proc(t:
 	ui.changes_layout(&state, &view, &f.text, &f.mono, g.diff.width, 1)
 	x, y = middle(g.tools_rows[1])
 	testing.expect_value(t, ui.changes_hit(g, &view, &state, x, y), ui.Changes_Hit{})
-	// The circle itself is a hit while the menu is closed or open.
+	// The button itself is a hit while the menu is closed or open.
 	x, y = middle(g.tools_button)
 	testing.expect_value(t, ui.changes_hit(g, &view, &state, x, y), ui.Changes_Hit{.Tools_Button, 0, 0})
 	// The filter popover hangs under ⋯ too, and answers before the menu.
@@ -247,7 +256,7 @@ changes_panel_lists_the_source_and_worktree_chips :: proc(t: ^testing.T) {
 	testing.expect_value(t, len(g.worktree_chips), 0)
 	inner := render.Rect{g.panel.x + 12, g.panel.y, g.panel.width - 24, g.panel.height}
 	for chip, i in g.source_chips {
-		testing.expect_value(t, chip.height, f32(26))
+		testing.expect_value(t, chip.height, f32(24))
 		testing.expect(t, chip.x >= inner.x && chip.x + chip.width <= inner.x + inner.width)
 		testing.expect(t, chip.y >= g.source_caption.y + g.source_caption.height)
 		testing.expect(t, chip.y + chip.height <= g.panel.y + g.panel.height)
@@ -275,7 +284,7 @@ changes_panel_lists_the_source_and_worktree_chips :: proc(t: ^testing.T) {
 	for chip in narrow.source_chips {
 		testing.expect(t, chip.x >= narrow.panel.x && chip.x + chip.width <= narrow.panel.x + narrow.panel.width)
 	}
-	testing.expect(t, narrow.step_back.y > narrow.source_chips[5].y + 26)
+	testing.expect(t, narrow.step_back.y > narrow.source_chips[5].y + 24)
 
 	// A git scope lists its worktrees instead of turns, and the strip goes.
 	labels := [3]string{"Follow the agent", "odin-wt-a", "odin-wt-b"}
@@ -283,7 +292,7 @@ changes_panel_lists_the_source_and_worktree_chips :: proc(t: ^testing.T) {
 	view.worktree_labels, view.worktree_current = labels[:], 1
 	git := ui.changes_geometry({0, 0, 900, 600}, 1, &view, &f.text)
 	if !testing.expect_value(t, len(git.worktree_chips), 3) {return}
-	testing.expect(t, git.worktree_caption.y >= git.source_chips[0].y + 26)
+	testing.expect(t, git.worktree_caption.y >= git.source_chips[0].y + 24)
 	testing.expect(t, git.worktree_chips[0].y >= git.worktree_caption.y + git.worktree_caption.height)
 	testing.expect_value(t, git.turns_caption, render.Rect{})
 	testing.expect_value(t, git.strip, render.Rect{})
@@ -329,7 +338,7 @@ changes_overview_maps_the_stream_and_scrolls_like_a_scrollbar :: proc(t: ^testin
 	g := ui.changes_geometry({0, 0, 900, 150}, 1, &view, &f.text)
 	ui.changes_layout(&state, &view, &f.text, &f.mono, g.diff.width, 1)
 	lane := g.overview
-	testing.expect_value(t, lane, render.Rect{888, 46, 12, 104})
+	testing.expect_value(t, lane, render.Rect{888, 32, 12, 118})
 	total, visible := state.rows.total, int(g.diff.height)
 	limit := total - visible
 	if !testing.expect(t, limit > 0) {return}
@@ -433,7 +442,7 @@ changes_layout_builds_the_overview_ticks_once_per_layout :: proc(t: ^testing.T) 
 }
 
 @(test)
-changes_draw_paints_the_rail_the_panel_the_menu_and_the_overview :: proc(t: ^testing.T) {
+changes_draw_paints_the_row_the_panel_the_menu_and_the_overview :: proc(t: ^testing.T) {
 	device, device_error := render.device_create(.Warp)
 	if !testing.expect_value(t, device_error, render.Error.None) {return}
 	defer render.device_destroy(device)
@@ -450,14 +459,14 @@ changes_draw_paints_the_rail_the_panel_the_menu_and_the_overview :: proc(t: ^tes
 	defer ui.changes_state_destroy(&state)
 	list := render.draw_list_init()
 	defer render.draw_list_destroy(&list)
-	view.source_label = "A very long agent name that cannot possibly fit in a narrow rail at all"
+	view.source_label = "A very long agent name that cannot possibly fit in a narrow row at all"
 	view.shown_added, view.shown_removed = 120, 30
 	view.first, view.last = 1, 3
 	sources := [3]string{"Claude Code", "All agents", "Uncommitted changes"}
 	view.sources, view.source_current = sources[:], 0
 	expand_files(&f, &view)
 
-	// The summary's text stays inside the pill at every width, clipped when nothing else is left to give up.
+	// The summary's text stays inside the summary at every width, clipped when nothing else is left to give up.
 	for width := f32(1000); width >= 100; width -= 37 {
 		g := ui.changes_geometry({0, 0, width, 600}, 1, &view, &f.text, &state)
 		ui.changes_layout(&state, &view, &f.text, &f.mono, g.diff.width, 1)
@@ -465,11 +474,11 @@ changes_draw_paints_the_rail_the_panel_the_menu_and_the_overview :: proc(t: ^tes
 		inside := 0
 		for glyph in list.glyphs {
 			y := glyph.rect.y + glyph.rect.height / 2
-			if y < g.rail.y || y >= g.rail.y + g.rail.height {continue}
+			if y < g.row.y || y >= g.row.y + g.row.height {continue}
 			inside += 1
-			testing.expect(t, glyph.rect.x >= g.rail.x && glyph.rect.x < g.rail.x + g.rail.width)
+			testing.expect(t, glyph.rect.x >= g.summary.x && glyph.rect.x < g.summary.x + g.summary.width)
 		}
-		testing.expect(t, inside > 0 || g.rail_summary.width < 40)
+		testing.expect(t, inside > 0 || g.summary.width < 60)
 	}
 
 	// Open, the panel paints its captions and chips inside itself, and the file count shows in its caption.
@@ -499,9 +508,9 @@ changes_draw_paints_the_rail_the_panel_the_menu_and_the_overview :: proc(t: ^tes
 	// "All agents".
 	testing.expect(t, on_chip >= 8)
 
-	// The ⋯ menu paints its three rows when the rail is collapsed.
+	// The ⋯ menu paints its three rows when the row is collapsed.
 	state.panel_open, state.tools_open = false, true
-	narrow := ui.changes_geometry({0, 0, 320, 600}, 1, &view, &f.text, &state)
+	narrow := ui.changes_geometry({0, 0, 260, 600}, 1, &view, &f.text, &state)
 	ui.changes_layout(&state, &view, &f.text, &f.mono, narrow.diff.width, 1)
 	if !draw_into(t, &f, &list, &view, &state, narrow) {return}
 	for row, i in narrow.tools_rows {

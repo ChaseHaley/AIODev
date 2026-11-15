@@ -60,22 +60,22 @@ fixture_make :: proc(t: ^testing.T, f: ^Changes_Fixture, view: ^ui.Changes_View)
 centre :: proc(r: render.Rect) -> (x, y: f32) {return r.x + r.width / 2, r.y + r.height / 2}
 
 @(test)
-changes_geometry_puts_the_band_the_overview_and_the_diff_across_the_pane :: proc(t: ^testing.T) {
+changes_geometry_puts_the_row_the_overview_and_the_diff_across_the_pane :: proc(t: ^testing.T) {
 	f: Changes_Fixture
 	view: ui.Changes_View
 	if !fixture_make(t, &f, &view) {return}
 	defer font.system_destroy(f.fonts)
 
 	g := ui.changes_geometry({0, 0, 900, 600}, 1, &view, &f.text)
-	testing.expect_value(t, g.band, render.Rect{0, 0, 900, 46})
-	// The overview strip takes 12 off the diff's right edge; the diff starts under the band.
-	testing.expect_value(t, g.diff, render.Rect{0, 46, 888, 554})
-	testing.expect_value(t, g.overview, render.Rect{888, 46, 12, 554})
+	testing.expect_value(t, g.row, render.Rect{0, 0, 900, 32})
+	// The overview strip takes 12 off the diff's right edge; the diff starts under the row.
+	testing.expect_value(t, g.diff, render.Rect{0, 32, 888, 568})
+	testing.expect_value(t, g.overview, render.Rect{888, 32, 12, 568})
 	testing.expect_value(t, g.send_bar, render.Rect{})
-	// The panel is 560 wide, centred on the rail, its top 4 above the band's bottom.
+	// The panel is 560 wide, hanging from the summary's left edge kept 8 inside the pane, its top 4 under the row.
 	testing.expect_value(t, g.panel.width, f32(560))
-	testing.expect_value(t, g.panel.y, f32(42))
-	testing.expect(t, abs(g.panel.x + g.panel.width / 2 - (g.rail.x + g.rail.width / 2)) <= 1)
+	testing.expect_value(t, g.panel.y, f32(36))
+	testing.expect_value(t, g.panel.x, f32(8))
 	// The strip row sits in the panel: five bars 8 wide, 3 apart, between the step buttons.
 	testing.expect_value(t, g.step_back.width, f32(24))
 	testing.expect(t, g.step_back.x >= g.panel.x && g.step_back.y >= g.panel.y)
@@ -102,7 +102,7 @@ changes_geometry_puts_the_band_the_overview_and_the_diff_across_the_pane :: proc
 	testing.expect_value(t, git.turn_list, render.Rect{})
 	testing.expect_value(t, git.turns_caption, render.Rect{})
 	testing.expect_value(t, git.strip_bars, 0)
-	testing.expect_value(t, git.diff, render.Rect{0, 46, 888, 554})
+	testing.expect_value(t, git.diff, render.Rect{0, 32, 888, 568})
 
 	// A turn scope without turns keeps its controls; the strip and the list stay empty.
 	view.scope = .Repository
@@ -118,10 +118,10 @@ changes_geometry_puts_the_band_the_overview_and_the_diff_across_the_pane :: proc
 	view.turns = f.rows[:]
 	double := ui.changes_geometry({0, 0, 1800, 1200}, 2, &view, &f.text)
 	testing.expect_value(t, double.turn_row, f32(80))
-	testing.expect_value(t, double.band.height, f32(92))
+	testing.expect_value(t, double.row.height, f32(64))
 	testing.expect_value(t, double.strip.width, f32(5 * 22 - 6))
-	testing.expect_value(t, double.diff, render.Rect{0, 92, 1776, 1108})
-	testing.expect_value(t, double.overview, render.Rect{1776, 92, 24, 1108})
+	testing.expect_value(t, double.diff, render.Rect{0, 64, 1776, 1136})
+	testing.expect_value(t, double.overview, render.Rect{1776, 64, 24, 1136})
 }
 
 @(test)
@@ -140,12 +140,12 @@ changes_filter_popover_hangs_under_its_button_and_answers_first :: proc(t: ^test
 	g := ui.changes_geometry({0, 0, 900, 600}, 1, &view, &f.text)
 	small := ui.text_styled(&f.text, .Detail)
 	height := f32(int(24 + 32 + 8 + small.line_height + 0.5))
-	// 360 wide, its right edge on the filter circle's, hanging under the rail.
+	// 360 wide, its right edge on the filter button's, hanging under the row.
 	popover := g.filter_popover
 	testing.expect_value(t, popover.width, f32(360))
 	testing.expect_value(t, popover.height, height)
 	testing.expect_value(t, popover.x + popover.width, g.filter_button.x + g.filter_button.width)
-	testing.expect_value(t, popover.y, g.rail.y + g.rail.height + 4)
+	testing.expect_value(t, popover.y, g.row.y + g.row.height + 4)
 	testing.expect_value(t, g.filter_field, render.Rect{popover.x + 12, popover.y + 12, 336, 32})
 	testing.expect_value(t, g.filter_clear, render.Rect{})
 	box, shown := ui.changes_filter_box(g, &view, &f.text)
@@ -196,21 +196,21 @@ changes_filter_bar_shows_only_while_the_filter_hides_files :: proc(t: ^testing.T
 
 	plain := ui.changes_geometry({0, 0, 900, 600}, 1, &view, &f.text)
 	testing.expect_value(t, plain.filter_bar, render.Rect{})
-	testing.expect_value(t, plain.diff, render.Rect{0, 46, 888, 554})
+	testing.expect_value(t, plain.diff, render.Rect{0, 32, 888, 568})
 
 	view.filter_active, view.hidden_count, view.total_files = true, 3, 5
 	g := ui.changes_geometry({0, 0, 900, 600}, 1, &view, &f.text)
-	testing.expect_value(t, g.filter_bar, render.Rect{0, 46, 900, 24})
-	testing.expect_value(t, g.diff, render.Rect{0, 70, 888, 530})
+	testing.expect_value(t, g.filter_bar, render.Rect{0, 32, 900, 24})
+	testing.expect_value(t, g.diff, render.Rect{0, 56, 888, 544})
 	clear := g.filter_bar_clear
 	testing.expect(t, clear.width > 0 && clear.x + clear.width == 892)
-	testing.expect(t, clear.y >= 46 && clear.y + clear.height <= 70)
+	testing.expect(t, clear.y >= 32 && clear.y + clear.height <= 56)
 	ui.changes_layout(&state, &view, &f.text, &f.mono, g.diff.width, 1)
 	x, y := centre(clear)
 	testing.expect_value(t, ui.changes_hit(g, &view, &state, x, y), ui.Changes_Hit{.Filter_Bar_Clear, 0, 0})
-	testing.expect_value(t, ui.changes_hit(g, &view, &state, 40, 58), ui.Changes_Hit{})
+	testing.expect_value(t, ui.changes_hit(g, &view, &state, 40, 44), ui.Changes_Hit{})
 	// The first file's header now starts under the bar.
-	header := ui.changes_hit(g, &view, &state, 50, 70 + 5)
+	header := ui.changes_hit(g, &view, &state, 50, 56 + 5)
 	testing.expect_value(t, header, ui.Changes_Hit{.File_Header, 0, 0})
 
 	// Active but hiding nothing, or invalid, there is no bar.
@@ -220,12 +220,12 @@ changes_filter_bar_shows_only_while_the_filter_hides_files :: proc(t: ^testing.T
 	view.hidden_count, view.filter_active, view.filter_invalid = 3, false, true
 	invalid := ui.changes_geometry({0, 0, 900, 600}, 1, &view, &f.text)
 	testing.expect_value(t, invalid.filter_bar, render.Rect{})
-	testing.expect_value(t, invalid.diff.y, f32(46))
+	testing.expect_value(t, invalid.diff.y, f32(32))
 
 	// A send bar still sits at the bottom with the filter bar at the top.
 	view.filter_active, view.filter_invalid, view.send.count = true, false, 1
 	both := ui.changes_geometry({0, 0, 900, 600}, 1, &view, &f.text)
-	testing.expect_value(t, both.diff.y, f32(70))
+	testing.expect_value(t, both.diff.y, f32(56))
 	testing.expect_value(t, both.diff.y + both.diff.height, both.send_bar.y)
 }
 
@@ -327,7 +327,7 @@ changes_geometry_keeps_the_send_bar_under_the_diff :: proc(t: ^testing.T) {
 	height := ui.changes_send_bar_height(&view, 1)
 	if !testing.expect(t, height > 0) {return}
 	testing.expect_value(t, g.send_bar, render.Rect{0, 600 - height, 900, height})
-	testing.expect_value(t, g.diff, render.Rect{0, 46, 888, 554 - height})
+	testing.expect_value(t, g.diff, render.Rect{0, 32, 888, 568 - height})
 
 	// The notice centres in what is left above the bar.
 	view.notice = .No_Changes
@@ -377,7 +377,7 @@ changes_geometry_centres_the_notice_below_the_toolbar :: proc(t: ^testing.T) {
 	view.notice = .Recording_Off
 	g := ui.changes_geometry({0, 0, 800, 500}, 1, &view, &f.text)
 	diff := g.diff
-	testing.expect_value(t, diff, render.Rect{0, 46, 800, 454})
+	testing.expect_value(t, diff, render.Rect{0, 32, 800, 468})
 	n, b := g.notice, g.notice_button
 	testing.expect(t, n.width > 0 && n.width <= 360)
 	testing.expect(t, n.x >= diff.x && n.x + n.width <= diff.x + diff.width)
@@ -398,7 +398,7 @@ changes_geometry_centres_the_notice_below_the_toolbar :: proc(t: ^testing.T) {
 	view.notice = .No_Changes
 	kept := ui.changes_geometry({0, 0, 900, 600}, 1, &view, &f.text)
 	testing.expect_value(t, kept.strip_bars, 5)
-	testing.expect_value(t, kept.diff, render.Rect{0, 46, 900, 554})
+	testing.expect_value(t, kept.diff, render.Rect{0, 32, 900, 568})
 	testing.expect(t, abs(kept.notice.x + kept.notice.width / 2 - 450) <= 1)
 }
 
@@ -537,22 +537,22 @@ changes_hit_finds_toolbar_parts_headers_and_notice_button :: proc(t: ^testing.T)
 	label := ui.changes_hit(g, &view, &state, label_x, label_y)
 	testing.expect_value(t, label, ui.Changes_Hit{.Range_Label, 0, 0})
 
-	first_header := ui.changes_hit(g, &view, &state, g.diff.x + 50, g.diff.y + 5)
+	first_header := ui.changes_hit(g, &view, &state, g.diff.x + 600, g.diff.y + 5)
 	testing.expect_value(t, first_header, ui.Changes_Hit{.File_Header, 0, 0})
-	second := ui.changes_hit(g, &view, &state, g.diff.x + 50, g.diff.y + f32(tops[1]) + 4)
+	second := ui.changes_hit(g, &view, &state, g.diff.x + 600, g.diff.y + f32(tops[1]) + 4)
 	testing.expect_value(t, second, ui.Changes_Hit{.File_Header, 1, 0})
-	past := ui.changes_hit(g, &view, &state, g.diff.x + 50, g.diff.y + f32(tops[2]) + 20)
+	past := ui.changes_hit(g, &view, &state, g.diff.x + 600, g.diff.y + f32(tops[2]) + 20)
 	testing.expect_value(t, past, ui.Changes_Hit{.Diff, -1, 0})
 	state.diff_scroll = tops[1]
-	moved := ui.changes_hit(g, &view, &state, g.diff.x + 50, g.diff.y + 5)
+	moved := ui.changes_hit(g, &view, &state, g.diff.x + 600, g.diff.y + 5)
 	testing.expect_value(t, moved, ui.Changes_Hit{.File_Header, 1, 0})
 	state.diff_scroll = 0
 
 	hooks := ui.changes_hit(g, &view, &state, g.hooks.x + 3, g.hooks.y + 3)
 	testing.expect_value(t, hooks, ui.Changes_Hit{.Hooks, 0, 0})
-	summary_x, summary_y := centre(g.rail_summary)
+	summary_x, summary_y := centre(g.summary)
 	summary := ui.changes_hit(g, &view, &state, summary_x, summary_y)
-	testing.expect_value(t, summary, ui.Changes_Hit{.Rail_Summary, 0, 0})
+	testing.expect_value(t, summary, ui.Changes_Hit{.Summary, 0, 0})
 	// The panel's padding answers nothing, and closed it answers nothing at all: its parts belong to the
 	// diff under them.
 	padding := ui.changes_hit(g, &view, &state, g.panel.x + 2, g.panel.y + g.panel.height - 2)
@@ -1050,7 +1050,7 @@ changes_comments_stay_reachable_under_a_notice :: proc(t: ^testing.T) {
 
 	// The notice moves to the top and the stream, now only the comments, sits under it.
 	testing.expect(t, g.notice.width > 0 && g.notice.y + g.notice.height <= g.diff.y)
-	testing.expect_value(t, g.notice.y, f32(46 + 24))
+	testing.expect_value(t, g.notice.y, f32(32 + 24))
 	testing.expect_value(t, g.diff.y + g.diff.height, g.send_bar.y)
 	rows := state.rows
 	if !testing.expect(t, rows.detached > 0 && len(rows.cards) > 0 && rows.cards[0] > 0) {return}

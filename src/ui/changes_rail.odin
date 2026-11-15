@@ -4,54 +4,55 @@ import "aio:render"
 import "core:fmt"
 import "core:math"
 
-// The rail: a pill centred in the band at the top of the Agent changes pane. Its summary names what the pane
-// shows (source, turns, totals, file count) and opens the panel, as does the arrow at its end; between them
-// sit the layout, fold and filter circles. The rail gives things up only when it runs out of room, one step
-// at a time, measured with the text: nothing collapses on a fixed width. The ⋯ menu holds the circles'
-// actions once they have become one circle.
+// The header row: the first row of the Agent changes pane, `HEIGHT_STANDARD` tall and as wide as the pane,
+// with a hairline under it. A ghost summary button at the left names what the pane shows (source, turns,
+// totals, file count) and opens the panel, as does the chevron button at the right end; beside that sit the
+// layout, fold and filter icon buttons, as small as the pane header's. The row gives things up only when it
+// runs out of room, one step at a time, measured with the text: nothing collapses on a fixed width. The ⋯
+// menu holds the buttons' actions once they have become one button.
 
 @(private)
 CHANGES_TOOLS_ROWS :: 3
 @(private = "file")
-RAIL_HEIGHT :: f32(34)
+ROW_PAD_LEFT :: f32(4)
 @(private = "file")
-RAIL_PAD :: f32(4)
+ROW_PAD_RIGHT :: f32(5)
 @(private = "file")
-RAIL_GAP :: f32(4)
+ROW_SUMMARY_GAP :: f32(4)
 @(private = "file")
-RAIL_CIRCLE :: f32(26)
+ROW_BUTTON :: f32(22)
 @(private = "file")
-RAIL_SUMMARY_HEIGHT :: f32(28)
+ROW_BUTTON_GAP :: f32(2)
 @(private = "file")
-RAIL_SUMMARY_PAD_LEFT :: f32(10)
+ROW_DIVIDER_MARGIN :: f32(4)
 @(private = "file")
-RAIL_SUMMARY_PAD_RIGHT :: f32(8)
+ROW_DIVIDER_HEIGHT :: f32(14)
 @(private = "file")
-RAIL_DOT :: f32(8)
+ROW_SUMMARY_PAD_LEFT :: f32(7)
 @(private = "file")
-RAIL_DIVIDER_HEIGHT :: f32(16)
+ROW_SUMMARY_PAD_RIGHT :: f32(6)
 @(private = "file")
-RAIL_SEPARATOR_HEIGHT :: f32(14)
+ROW_DOT :: f32(8)
 @(private = "file")
-RAIL_ARROW_MARGIN :: f32(2)
+ROW_SEPARATOR_HEIGHT :: f32(14)
 @(private = "file")
-RAIL_STEPS :: 5
+ROW_STEPS :: 5
 @(private = "file")
-RAIL_FILTER_DOT :: f32(6)
+ROW_FILTER_DOT :: f32(6)
 @(private = "file")
 TOOLS_ROW_HEIGHT :: HEIGHT_STANDARD
 
-// What the rail's summary shows at a collapse step: the circles, the file count, the totals and the agent
+// What the row shows at a collapse step: the three buttons, the file count, the totals and the agent
 // name stay until their step, and the range gets short at the last one.
 @(private = "file")
-Rail_Plan :: struct {
-	circles, count, totals, name, short: bool,
+Row_Plan :: struct {
+	buttons, count, totals, name, short: bool,
 }
 
 @(private = "file")
-rail_plan :: proc(steps: int, git: bool) -> Rail_Plan {
+row_plan :: proc(steps: int, git: bool) -> Row_Plan {
 	return {
-		circles = steps < 1,
+		buttons = steps < 1,
 		count   = steps < 2,
 		totals  = steps < 3,
 		name    = steps < 4 && !git,
@@ -62,8 +63,8 @@ rail_plan :: proc(steps: int, git: bool) -> Rail_Plan {
 // The texts of the summary for a plan, with the width each takes; the strings point into the caller's
 // buffers. `range` is the turn range, or in a git scope the scope's name.
 @(private = "file")
-Rail_Texts :: struct {
-	plan:                                   Rail_Plan,
+Row_Texts :: struct {
+	plan:                                   Row_Plan,
 	name, range, count:                     string,
 	totals, live:                           bool,
 	name_width, range_width, totals_width:  f32,
@@ -71,7 +72,7 @@ Rail_Texts :: struct {
 }
 
 @(private = "file")
-rail_totals_width :: proc(body: ^Text, view: ^Changes_View, scale: f32) -> f32 {
+row_totals_width :: proc(body: ^Text, view: ^Changes_View, scale: f32) -> f32 {
 	plus_buf, minus_buf: [24]u8
 	plus := fmt.bprintf(plus_buf[:], "+%d", view.shown_added)
 	minus := fmt.bprintf(minus_buf[:], "−%d", view.shown_removed)
@@ -79,10 +80,10 @@ rail_totals_width :: proc(body: ^Text, view: ^Changes_View, scale: f32) -> f32 {
 }
 
 @(private = "file")
-rail_texts :: proc(
-	view: ^Changes_View, text: ^Text, plan: Rail_Plan, scale: f32, range_buf, count_buf: []u8,
+row_texts :: proc(
+	view: ^Changes_View, text: ^Text, plan: Row_Plan, scale: f32, range_buf, count_buf: []u8,
 ) -> (
-	t: Rail_Texts,
+	t: Row_Texts,
 ) {
 	body := text_styled(text, .Body)
 	strong := text_styled(text, .Strong)
@@ -112,7 +113,7 @@ rail_texts :: proc(
 	if t.live {t.range_width += (ICON_INDICATOR + SPACE_1) * scale}
 	if plan.totals && (view.shown_added > 0 || view.shown_removed > 0) {
 		t.totals = true
-		t.totals_width = math.ceil(rail_totals_width(&body, view, scale))
+		t.totals_width = math.ceil(row_totals_width(&body, view, scale))
 	}
 	if plan.count {
 		count := len(view.files)
@@ -122,85 +123,78 @@ rail_texts :: proc(
 	return
 }
 
-// The summary's natural width: the dot, then each part behind a divider, inside the pill's padding.
+// The summary's natural width: the dot, then each part behind a divider, then the chevron,
+// inside the button's padding.
 @(private = "file")
-rail_summary_width :: proc(t: Rail_Texts, scale: f32) -> f32 {
+summary_width :: proc(t: Row_Texts, scale: f32) -> f32 {
 	gap := SPACE_2 * scale
-	width := (RAIL_SUMMARY_PAD_LEFT + RAIL_DOT + RAIL_SUMMARY_PAD_RIGHT) * scale
-	width += gap + t.range_width
+	width := (ROW_SUMMARY_PAD_LEFT + ROW_DOT + ICON_INDICATOR + ROW_SUMMARY_PAD_RIGHT) * scale
+	width += 2 * gap + t.range_width
 	if t.name_width > 0 {width += 2 * gap + scale + t.name_width}
 	if t.totals {width += 2 * gap + scale + t.totals_width}
 	if t.count != "" {width += 2 * gap + scale + t.count_width}
 	return width
 }
 
-// The rail's width at `steps`, and the summary's part of it.
+// The row's width at `steps`, and the summary's part of it: both paddings, the buttons and the divider.
 @(private = "file")
-rail_width :: proc(
+row_width :: proc(
 	view: ^Changes_View, text: ^Text, steps: int, scale: f32, range_buf, count_buf: []u8,
 ) -> (
 	width, summary: f32,
 ) {
-	plan := rail_plan(steps, !changes_scope_turns(view.scope))
-	t := rail_texts(view, text, plan, scale, range_buf, count_buf)
-	summary = math.ceil(rail_summary_width(t, scale))
-	circles := plan.circles ? 3 : 1
-	width = 2 * RAIL_PAD * scale + summary + 2 * RAIL_GAP * scale + math.round(scale)
-	width += f32(circles) * (RAIL_CIRCLE + RAIL_GAP) * scale + RAIL_ARROW_MARGIN * scale + RAIL_CIRCLE * scale
+	plan := row_plan(steps, !changes_scope_turns(view.scope))
+	t := row_texts(view, text, plan, scale, range_buf, count_buf)
+	summary = math.ceil(summary_width(t, scale))
+	buttons := plan.buttons ? 3 : 1
+	button := math.round(ROW_BUTTON * scale)
+	width = (ROW_PAD_LEFT + ROW_SUMMARY_GAP + ROW_PAD_RIGHT + 2 * ROW_DIVIDER_MARGIN) * scale + summary
+	width += math.round(scale) + f32(buttons) * button + f32(buttons - 1) * ROW_BUTTON_GAP * scale + button
 	return
 }
 
-// Places the band's rail: the whole summary and circles while they fit, else the first collapse step that
-// does. `lane` is the overview strip's width, which the rail is centred clear of.
+// Places the header row's summary and buttons: the whole summary and every button while they fit, else the
+// first collapse step that does. The room is the row's width; the summary sits at the left, the buttons at
+// the right end, and the space between them stays empty.
 @(private)
-rail_place :: proc(g: ^Changes_Geometry, view: ^Changes_View, text: ^Text, lane: f32) {
+row_place :: proc(g: ^Changes_Geometry, view: ^Changes_View, text: ^Text) {
 	s := g.scale
-	band := g.band
-	height := min(math.round(RAIL_HEIGHT * s), band.height)
-	if height <= 0 {return}
-	margin := SPACE_2 * s
-	most := max(0, band.width - lane - 2 * margin)
+	row := g.row
+	if row.height <= 0 || row.width <= 0 {return}
+	most := row.width
 	range_buf, count_buf: [RANGE_LABEL_BYTES]u8
 	git := !changes_scope_turns(view.scope)
 	steps := 0
-	width, summary := rail_width(view, text, steps, s, range_buf[:], count_buf[:])
-	for steps < RAIL_STEPS && width > most {
+	width, summary := row_width(view, text, steps, s, range_buf[:], count_buf[:])
+	for steps < ROW_STEPS && width > most {
 		steps += 1
 		if steps == 4 && git {steps += 1}
-		width, summary = rail_width(view, text, steps, s, range_buf[:], count_buf[:])
+		width, summary = row_width(view, text, steps, s, range_buf[:], count_buf[:])
 	}
-	g.rail_steps = steps
-	if width > most {
-		summary = max(0, summary - (width - most))
-		width = most
-	}
-	if width <= 0 {return}
-	centre := band.x + (band.width - lane) / 2
-	x := math.round(centre - width / 2)
-	y := math.round(band.y + (band.height - height) / 2)
-	g.rail = {x, y, width, height}
-	pad, gap, circle := RAIL_PAD * s, RAIL_GAP * s, math.round(RAIL_CIRCLE * s)
-	inside := math.round((height - circle) / 2)
-	sum_height := min(math.round(RAIL_SUMMARY_HEIGHT * s), height)
-	g.rail_summary = {x + pad, y + math.round((height - sum_height) / 2), summary, sum_height}
-	cursor := x + pad + summary + gap
+	g.row_steps = steps
+	if width > most {summary = max(0, summary - (width - most))}
+	button := math.round(ROW_BUTTON * s)
 	rule := max(1, math.round(s))
-	divider := min(math.round(RAIL_DIVIDER_HEIGHT * s), height)
-	g.rail_divider = {cursor, y + math.round((height - divider) / 2), rule, divider}
-	cursor += rule + gap
+	sum_height := min(math.round(HEIGHT_COMPACT * s), row.height)
+	sum_top := row.y + math.round((row.height - sum_height) / 2)
+	g.summary = {row.x + ROW_PAD_LEFT * s, sum_top, summary, sum_height}
+	top := row.y + math.round((row.height - button) / 2)
+	cursor := row.x + row.width - ROW_PAD_RIGHT * s - button
+	g.panel_button = {cursor, top, button, button}
+	divider := min(math.round(ROW_DIVIDER_HEIGHT * s), row.height)
+	cursor -= ROW_DIVIDER_MARGIN * s + rule
+	g.buttons_divider = {cursor, row.y + math.round((row.height - divider) / 2), rule, divider}
+	cursor -= ROW_DIVIDER_MARGIN * s + button
+	gap := ROW_BUTTON_GAP * s
 	if steps < 1 {
-		g.layout_button = {cursor, y + inside, circle, circle}
-		cursor += circle + gap
-		g.fold_button = {cursor, y + inside, circle, circle}
-		cursor += circle + gap
-		g.filter_button = {cursor, y + inside, circle, circle}
-		cursor += circle + gap
+		g.filter_button = {cursor, top, button, button}
+		cursor -= gap + button
+		g.fold_button = {cursor, top, button, button}
+		cursor -= gap + button
+		g.layout_button = {cursor, top, button, button}
 	} else {
-		g.tools_button = {cursor, y + inside, circle, circle}
-		cursor += circle + gap
+		g.tools_button = {cursor, top, button, button}
 	}
-	cursor += RAIL_ARROW_MARGIN * s
-	g.panel_button = {cursor, y + inside, circle, circle}
 	if g.tools_button.width > 0 {tools_place(g, view, text)}
 }
 
@@ -239,7 +233,7 @@ tools_place :: proc(g: ^Changes_Geometry, view: ^Changes_View, text: ^Text) {
 	right := g.tools_button.x + g.tools_button.width
 	left := area.x + SPACE_2 * s
 	x := clamp(right - width, left, max(left, area.x + area.width - SPACE_2 * s - width))
-	y := g.rail.y + g.rail.height + SPACE_1 * s
+	y := g.row.y + g.row.height + SPACE_1 * s
 	g.tools_menu = {x, y, width, f32(CHANGES_TOOLS_ROWS) * row + 2 * pad}
 	for i in 0 ..< CHANGES_TOOLS_ROWS {
 		g.tools_rows[i] = {x + pad, y + pad + f32(i) * row, width - 2 * pad, row}
@@ -256,7 +250,7 @@ source_tint :: proc(theme: Theme, agent: int) -> render.Color {
 }
 
 @(private = "file")
-rail_dot_color :: proc(theme: Theme, view: ^Changes_View) -> render.Color {
+summary_dot_color :: proc(theme: Theme, view: ^Changes_View) -> render.Color {
 	switch {
 	case !changes_scope_turns(view.scope):
 		return theme.muted
@@ -268,8 +262,8 @@ rail_dot_color :: proc(theme: Theme, view: ^Changes_View) -> render.Color {
 
 // A divider between the summary's parts, centred on the summary.
 @(private = "file")
-rail_separator_draw :: proc(list: ^render.Draw_List, theme: Theme, sum: render.Rect, x, scale: f32) {
-	height := math.round(RAIL_SEPARATOR_HEIGHT * scale)
+summary_separator_draw :: proc(list: ^render.Draw_List, theme: Theme, sum: render.Rect, x, scale: f32) {
+	height := math.round(ROW_SEPARATOR_HEIGHT * scale)
 	y := sum.y + math.round((sum.height - height) / 2)
 	draw_rect(list, {rect = {x, y, max(1, math.round(scale)), height}, color = theme.border})
 }
@@ -277,7 +271,7 @@ rail_separator_draw :: proc(list: ^render.Draw_List, theme: Theme, sum: render.R
 // The summary's content: the dot, then the name, the range (behind the working spinner while a turn is
 // live), the totals and the file count, each after a divider and clipped to the room the summary has.
 @(private = "file")
-rail_summary_draw :: proc(
+summary_draw :: proc(
 	list: ^render.Draw_List,
 	text: ^Text,
 	theme: Theme,
@@ -289,17 +283,21 @@ rail_summary_draw :: proc(
 	spinning: bool,
 ) {
 	s := g.scale
-	sum := g.rail_summary
+	sum := g.summary
 	range_buf, count_buf: [RANGE_LABEL_BYTES]u8
-	plan := rail_plan(g.rail_steps, !changes_scope_turns(view.scope))
-	t := rail_texts(view, text, plan, s, range_buf[:], count_buf[:])
+	plan := row_plan(g.row_steps, !changes_scope_turns(view.scope))
+	t := row_texts(view, text, plan, s, range_buf[:], count_buf[:])
 	body := text_styled(text, .Body)
 	strong := text_styled(text, .Strong)
 	gap := SPACE_2 * s
-	x := sum.x + RAIL_SUMMARY_PAD_LEFT * s
-	limit := sum.x + sum.width - RAIL_SUMMARY_PAD_RIGHT * s
-	dot := render.Rect{x, sum.y + (sum.height - RAIL_DOT * s) / 2, RAIL_DOT * s, RAIL_DOT * s}
-	draw_rect(list, {rect = dot, color = rail_dot_color(theme, view), radius = dot.width / 2})
+	chevron := render.Rect {
+		sum.x + sum.width - ROW_SUMMARY_PAD_RIGHT * s - ICON_INDICATOR * s, sum.y, ICON_INDICATOR * s, sum.height,
+	}
+	icon_draw(list, .Chevron_Down, chevron, theme.muted, ICON_INDICATOR, s)
+	x := sum.x + ROW_SUMMARY_PAD_LEFT * s
+	limit := chevron.x - gap
+	dot := render.Rect{x, sum.y + (sum.height - ROW_DOT * s) / 2, ROW_DOT * s, ROW_DOT * s}
+	draw_rect(list, {rect = dot, color = summary_dot_color(theme, view), radius = dot.width / 2})
 	x += dot.width + gap
 	first := true
 	// One part: a divider unless it is the first, then its text in `width`, then the gap to the next.
@@ -312,7 +310,7 @@ rail_summary_draw :: proc(
 		first = false
 	}
 	if !first {
-		rail_separator_draw(list, theme, sum, x, s)
+		summary_separator_draw(list, theme, sum, x, s)
 		x += s + gap
 	}
 	start := x
@@ -330,7 +328,7 @@ rail_summary_draw :: proc(
 	); status != .Ok {return}
 	x = start + t.range_width + gap
 	if t.totals && x + s + gap + t.totals_width <= limit {
-		rail_separator_draw(list, theme, sum, x, s)
+		summary_separator_draw(list, theme, sum, x, s)
 		x += s + gap
 		baseline := baseline_in(sum.y, sum.height, &body)
 		right := x + t.totals_width
@@ -339,7 +337,7 @@ rail_summary_draw :: proc(
 		x += t.totals_width + gap
 	}
 	if t.count != "" && x < limit {
-		rail_separator_draw(list, theme, sum, x, s)
+		summary_separator_draw(list, theme, sum, x, s)
 		x += s + gap
 		status = draw_fading_text(
 			&body, list, t.count, x, baseline_in(sum.y, sum.height, &body), theme.muted, min(t.count_width, limit - x),
@@ -348,10 +346,11 @@ rail_summary_draw :: proc(
 	return
 }
 
-// One round button: its rest fill, then the shared button surface. `lit` is the selected look (selection
-// fill, accent ink and a focus outline); `dot` marks a set filter at the top right.
+// One 22 DIP header-style icon button: the shared button surface with the muted icon and the raised hover.
+// `lit` is the "on" look, the pressed fill under the surface and the full-strength ink, never an accent;
+// `dot` marks a set filter at the top right.
 @(private = "file")
-circle_draw :: proc(
+row_button_draw :: proc(
 	list: ^render.Draw_List,
 	theme: Theme,
 	rect: render.Rect,
@@ -365,34 +364,21 @@ circle_draw :: proc(
 ) -> render.Error {
 	if rect.width <= 0 {return .None}
 	hover, press := changes_lit(state, {part, 0, 0})
-	radius := rect.width / 2
-	if !lit {draw_rect(list, {rect = rect, color = theme.hover, radius = radius})}
+	if lit {draw_rect(list, {rect = rect, color = theme.pressed, radius = RADIUS_BUTTON * scale})}
 	b := Button {
 		rect     = rect,
 		hover    = hover,
 		press    = press,
-		radius   = RAIL_CIRCLE / 2,
-		surface  = .Flat,
-		selected = lit,
 		disabled = disabled,
 	}
 	face, ink, err := button_draw(list, theme, b, scale, pointer)
 	if err != .None {return err}
-	switch {
-	case disabled:
-		ink = theme.muted
-		ink.a *= DISABLED_ALPHA
-	case lit:
-		ink = theme.accent
-	}
+	if lit && !disabled {ink = theme.text}
 	if colour, set := ink_override.?; set && !disabled {ink = colour}
-	if lit {draw_rect(list, {rect = rect, color = theme.focus, radius = radius, stroke = scale})}
 	icon_draw(list, icon, face, ink, ICON_BUTTON, scale)
 	if dot {
-		size := RAIL_FILTER_DOT * scale
-		mark := render.Rect{rect.x + rect.width - 3 * scale - size, rect.y + 3 * scale, size, size}
-		ring := render.Rect{mark.x - 1.5 * scale, mark.y - 1.5 * scale, size + 3 * scale, size + 3 * scale}
-		draw_rect(list, {rect = ring, color = theme.surface, radius = ring.width / 2})
+		size := ROW_FILTER_DOT * scale
+		mark := render.Rect{face.x + face.width - 2 * scale - size, face.y + 2 * scale, size, size}
 		draw_rect(list, {rect = mark, color = theme.accent, radius = size / 2})
 	}
 	return .None
@@ -404,10 +390,10 @@ changes_filter_set :: proc(view: ^Changes_View) -> bool {
 	return view.filter_active || view.filter_invalid
 }
 
-// Draws the rail: its pill, the summary, and the circles or the one ⋯ circle, then the arrow. `spinning`
-// reports a working spinner in the summary.
+// Draws the header row: the summary, and the icon buttons (or the one ⋯ button), the divider and the
+// chevron button. `spinning` reports a working spinner in the summary.
 @(private)
-rail_draw :: proc(
+row_draw :: proc(
 	list: ^render.Draw_List,
 	text: ^Text,
 	theme: Theme,
@@ -420,64 +406,55 @@ rail_draw :: proc(
 	status: render.Build_Status,
 	spinning: bool,
 ) {
-	if g.rail.width <= 0 || g.rail.height <= 0 {return .Ok, false}
+	if g.row.width <= 0 || g.row.height <= 0 {return .Ok, false}
 	s := g.scale
 	scope, opened := clip_scope_open(list, g.area)
 	if !opened {return .Ok, false}
 	defer clip_scope_close(list, scope)
-	pill := Panel {
-		rect     = g.rail,
-		radius   = g.rail.height / 2,
-		scale    = s,
-		shadow_y = 3,
-		softness = 10,
-		border   = .Stroked,
-	}
-	if panel_draw(list, pill, theme) != .None {return .Ok, false}
-	hover, press := changes_lit(state, {.Rail_Summary, 0, 0})
+	hover, press := changes_lit(state, {.Summary, 0, 0})
 	b := Button {
-		rect    = g.rail_summary,
+		rect    = g.summary,
 		hover   = hover,
 		press   = press,
-		radius  = RAIL_SUMMARY_HEIGHT / 2,
+		radius  = RADIUS_CONTROL,
 		surface = .Flat,
 	}
 	if _, _, err := button_draw(list, theme, b, s, pointer); err != .None {return .Ok, false}
-	draw_rect(list, {rect = g.rail_divider, color = theme.border})
+	draw_rect(list, {rect = g.buttons_divider, color = theme.border})
 	filter_set := changes_filter_set(view)
 	filter_ink: Maybe(render.Color)
 	if view.filter_invalid {filter_ink = theme.warning}
 	enabled := len(view.files) > 0
-	err := circle_draw(
+	err := row_button_draw(
 		list, theme, g.layout_button, .Side_By_Side, .Layout_Button, view.side_by_side, false, false, nil, state, s,
 		pointer,
 	)
 	if err == .None {
-		err = circle_draw(
+		err = row_button_draw(
 			list, theme, g.fold_button, view.any_expanded ? .Collapse_All : .Expand_All, .Fold_Button, false, !enabled,
 			false, nil, state, s, pointer,
 		)
 	}
 	if err == .None {
-		err = circle_draw(
+		err = row_button_draw(
 			list, theme, g.filter_button, .Filter, .Filter_Button, state.filter_open || filter_set, false, filter_set,
 			filter_ink, state, s, pointer,
 		)
 	}
 	if err == .None {
-		err = circle_draw(
+		err = row_button_draw(
 			list, theme, g.tools_button, .More, .Tools_Button, state.tools_open || state.filter_open, false,
 			filter_set, filter_ink, state, s, pointer,
 		)
 	}
 	if err == .None {
-		err = circle_draw(
+		err = row_button_draw(
 			list, theme, g.panel_button, .Chevron_Down, .Panel_Button, state.panel_open, false, false, nil, state, s,
 			pointer,
 		)
 	}
 	if err != .None {return .Ok, false}
-	return rail_summary_draw(list, text, theme, g, view, phase)
+	return summary_draw(list, text, theme, g, view, phase)
 }
 
 // The open ⋯ menu: Side-by-side (checked while on), the fold row and Filter files….

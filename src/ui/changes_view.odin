@@ -5,12 +5,12 @@ import "aio:syntax"
 import tr "aio:turns"
 import "core:math"
 
-// The Agent changes pane: a band at the top that holds a floating rail (what the pane shows, the layout,
-// fold and filter buttons, and an arrow), a panel under the rail for the source, the worktree, the turn
-// strip and the file list, then one diff stream across the pane with an overview strip at its right
-// edge. The pane keeps the model and the scroll state; this file lays the view out, draws it and answers
-// where a point lands. Heights of the diff stream are cached in whole pixels, so scrolling and hit
-// testing agree with what is drawn.
+// The Agent changes pane: a header row at the top (a summary of what the pane shows on the left; the layout,
+// fold and filter buttons and a chevron button on the right), a panel under the summary for the source, the
+// worktree, the turn strip and the file list, then one diff stream across the pane with an
+// overview strip at its right edge. The pane keeps the model and the scroll state; this file lays the
+// view out, draws it and answers where a point lands. Heights of the diff stream are cached in whole pixels,
+// so scrolling and hit testing agree with what is drawn.
 
 Changes_Scope :: enum u8 {
 	Agent,
@@ -88,7 +88,7 @@ Changes_View :: struct {
 	following:   bool,
 	// The source chips: one label per agent, then All agents and the git scopes, borrowed from the pane.
 	// `source_current` is the lit one (-1 for none); `source_agent` the pane's own agent among the
-	// repository's agents, which tints the rail's dot (-1 when unknown).
+	// repository's agents, which tints the summary's dot (-1 when unknown).
 	sources:      []string,
 	source_current, source_agent: int,
 	// The worktree chips of a git scope: "Follow the agent", then one per worktree, borrowed from the pane;
@@ -167,10 +167,10 @@ Changes_Part :: enum u8 {
 	Sticky_Header,
 	Strip_Older,
 	Strip_Newer,
-	// The rail's summary, which opens the panel, and the arrow, which does too.
-	Rail_Summary,
+	// The row's summary, which opens the panel, and the chevron button, which does too.
+	Summary,
 	Panel_Button,
-	// The one ⋯ circle that holds the layout, fold and filter buttons when the rail is short of room, and the
+	// The one ⋯ button that holds the layout, fold and filter buttons when the row is short of room, and the
 	// rows of its menu.
 	Tools_Button,
 	Tools_Row,
@@ -184,7 +184,7 @@ Changes_Part :: enum u8 {
 // What a point is over. `index` is the bar or list row for the strip parts; the file for File_Header,
 // Sticky_Header, Diff, Line and Hunk_Comment (-1 below the last file); the comment for the comment parts;
 // the chip for Source_Chip and Worktree_Chip; the row for Tools_Row (-1 on the menu's padding); -1 for
-// Filter_Field on the filter popover's padding; else 0, as for the rail's buttons (Fold_Button,
+// Filter_Field on the filter popover's padding; else 0, as for the row's buttons (Fold_Button,
 // Filter_Button, Layout_Button, ...). `line` is the flat line in file `index`.
 Changes_Hit :: struct {
 	part:  Changes_Part,
@@ -237,7 +237,7 @@ Changes_State :: struct {
 	lit:                      Changes_Hit,
 	// The panel is open, so its arrow stays lit.
 	panel_open:               bool,
-	// The ⋯ menu is open, so its circle stays lit.
+	// The ⋯ menu is open, so its button stays lit.
 	tools_open:               bool,
 	// The filter popover is open, so its button stays outlined.
 	filter_open:              bool,
@@ -260,23 +260,23 @@ changes_state_destroy :: proc(state: ^Changes_State) {
 }
 
 // Where everything goes, in window pixels. `diff` holds the diff stream or the notice, left of the overview
-// strip. The rail and its buttons sit in the band; the panel, with its chips, hooks button and turn strip,
+// strip. The summary and the buttons sit in the row; the panel, with its chips, hooks button and turn strip,
 // is laid out whether or not it is open, and the strip, its step buttons and the range label are empty in
 // git scopes. The chip slices live in temporary memory, valid until the frame's temporary memory is freed.
 Changes_Geometry :: struct {
-	area, band, hooks, diff, notice, notice_button: render.Rect,
-	// The pill in the band: its summary (one hit part), the divider after it and its circles. The three view
-	// circles are empty while `rail_steps` is 1 or more, when `tools_button` stands for them.
-	rail, rail_summary, rail_divider:               render.Rect,
+	area, row, hooks, diff, notice, notice_button: render.Rect,
+	// The header row: its summary (one hit part), the divider before the panel button and the buttons. The three
+	// view buttons are empty while `row_steps` is 1 or more, when `tools_button` stands for them.
+	summary, buttons_divider:                       render.Rect,
 	layout_button, fold_button, filter_button:      render.Rect,
 	tools_button, panel_button:                     render.Rect,
-	// How far the rail's collapse ladder went, 0 to 5: 1 the circles became one, 2 the file count went, 3 the
+	// How far the row's collapse ladder went, 0 to 5: 1 the buttons became one, 2 the file count went, 3 the
 	// totals, 4 the agent name, 5 the range got short.
-	rail_steps:                                     int,
+	row_steps:                                     int,
 	// The ⋯ menu under the tools button and its rows; empty without that button.
 	tools_menu:                                     render.Rect,
 	tools_rows:                                     [CHANGES_TOOLS_ROWS]render.Rect,
-	// The panel under the rail, its section captions, the chips of its Source and Worktree sections, and the
+	// The panel under the summary, its section captions, the chips of its Source and Worktree sections, and the
 	// line under the strip that names the selected turns.
 	panel:                                          render.Rect,
 	source_caption, worktree_caption, turns_caption, files_caption, turn_title: render.Rect,
@@ -289,11 +289,11 @@ Changes_Geometry :: struct {
 	turn_list:                                      render.Rect,
 	// The comments' send bar under the diff; empty without comments.
 	send_bar:                                       render.Rect,
-	// The filter popover under the filter circle, or under ⋯ while the circles are collapsed, with its field
+	// The filter popover under the filter button, or under ⋯ while the buttons are collapsed, with its field
 	// and the field's clear button; where it goes whenever there is such a button, and shown only while
 	// state.filter_open.
 	filter_popover, filter_field, filter_clear:     render.Rect,
-	// The row under the band while the filter hides files, and its Clear button.
+	// The row under the header row while the filter hides files, and its Clear button.
 	filter_bar, filter_bar_clear:                   render.Rect,
 	// The overview strip at the diff's right edge; empty under a notice.
 	overview:                                       render.Rect,
@@ -307,7 +307,7 @@ Changes_Geometry :: struct {
 @(private = "file")
 CHANGES_TURN_ROW_HEIGHT :: f32(40)
 @(private)
-CHANGES_BAND_HEIGHT :: f32(46)
+CHANGES_ROW_HEIGHT :: HEIGHT_STANDARD
 @(private)
 CHANGES_OVERVIEW_WIDTH :: f32(12)
 @(private = "file")
@@ -378,14 +378,14 @@ changes_geometry :: proc(
 		scale    = s,
 		turn_row = math.round(CHANGES_TURN_ROW_HEIGHT * s),
 	}
-	g.band = {area.x, area.y, area.width, min(math.round(CHANGES_BAND_HEIGHT * s), area.height)}
+	g.row = {area.x, area.y, area.width, min(math.round(CHANGES_ROW_HEIGHT * s), area.height)}
 	lane := math.round(CHANGES_OVERVIEW_WIDTH * s)
 	if view.notice != .None || area.width < 8 * lane {lane = 0}
 	body_text := text_styled(text, .Body)
-	rail_place(&g, view, text, lane)
+	row_place(&g, view, text)
 	panel_place(&g, view, text, &body_text, state)
 
-	body := render.Rect{area.x, g.band.y + g.band.height, area.width, 0}
+	body := render.Rect{area.x, g.row.y + g.row.height, area.width, 0}
 	if view.filter_active && view.hidden_count > 0 {
 		filter_bar_place(&g, text, body.y)
 		body.y += g.filter_bar.height
@@ -549,7 +549,7 @@ changes_scroll_diff :: proc(state: ^Changes_State, g: Changes_Geometry, delta: i
 }
 
 // What lies at the point: the open filter popover, ⋯ menu and turn list first, then the open panel, the
-// rail and the filter bar, then the overview strip, the diff area and the send bar. Needs the rows of the
+// row and the filter bar, then the overview strip, the diff area and the send bar. Needs the rows of the
 // latest changes_layout.
 changes_hit :: proc(
 	g: Changes_Geometry, view: ^Changes_View, state: ^Changes_State, x, y: f32,
@@ -569,7 +569,7 @@ changes_hit :: proc(
 		return {.Turn_List_Row, turn_list_row_at(g, state, view, y), 0}
 	}
 	if state.panel_open && render.rect_contains(g.panel, x, y) {return panel_hit(g, view, state, x, y)}
-	if render.rect_contains(g.rail_summary, x, y) {return {.Rail_Summary, 0, 0}}
+	if render.rect_contains(g.summary, x, y) {return {.Summary, 0, 0}}
 	if render.rect_contains(g.fold_button, x, y) {return len(view.files) > 0 ? {.Fold_Button, 0, 0} : {}}
 	if render.rect_contains(g.filter_button, x, y) {return {.Filter_Button, 0, 0}}
 	if render.rect_contains(g.layout_button, x, y) {return {.Layout_Button, 0, 0}}
@@ -586,7 +586,7 @@ changes_animated :: proc(hit: Changes_Hit) -> bool {
 	#partial switch hit.part {
 	case .Hooks, .Notice_Button, .File_Header, .Step_Back, .Step_Forward, .Range_Label, .Hunk_Comment,
 	     .Comment_Button, .Comment_Delete, .Send, .Copy, .Discard, .Layout_Button, .Filter_Button, .Filter_Clear,
-	     .Filter_Bar_Clear, .Fold_Button, .Sticky_Header, .Strip_Older, .Strip_Newer, .Rail_Summary,
+	     .Filter_Bar_Clear, .Fold_Button, .Sticky_Header, .Strip_Older, .Strip_Newer, .Summary,
 	     .Panel_Button, .Tools_Button, .Source_Chip, .Worktree_Chip:
 		return true
 	}
@@ -692,7 +692,7 @@ changes_draw :: proc(
 	}
 	state.turn_list_scroll = clamp(state.turn_list_scroll, 0, turn_list_limit(g, view))
 	state.diff_scroll = clamp(state.diff_scroll, 0, max(0, state.rows.total - int(g.diff.height)))
-	rule := render.Rect{g.band.x, g.band.y + g.band.height - scale, g.band.width, scale}
+	rule := render.Rect{g.row.x, g.row.y + g.row.height - scale, g.row.width, scale}
 	draw_rect(list, {rect = rule, color = t.border})
 	if status = filter_bar_draw(list, text, t, g, view, state, pointer); status != .Ok {return}
 	if view.notice != .None {
@@ -701,7 +701,7 @@ changes_draw :: proc(
 	if status = diff_draw(list, text, mono, t, g, view, state, pointer); status != .Ok {return}
 	if status = changes_send_bar_draw(list, text, t, g, view, state, pointer); status != .Ok {return}
 	overview_draw(list, t, g, view, state, pointer)
-	status, spinning = rail_draw(list, text, t, g, view, state, pointer, spin_phase)
+	status, spinning = row_draw(list, text, t, g, view, state, pointer, spin_phase)
 	if status != .Ok {return}
 	if status = tools_menu_draw(list, text, t, g, view, state, pointer); status != .Ok {return}
 	panel_spun: bool
