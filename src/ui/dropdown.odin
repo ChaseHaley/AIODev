@@ -341,6 +341,7 @@ dropdown_pointer :: proc(
 	s := scale
 	if bar, visible := dropdown_scrollbar(d, c, a, s); visible && scrollbar_contains(bar, x, y) {return .Arrow}
 	if render.rect_contains(dropdown_toggle_rect(c, r, s), x, y) {return .Hand}
+	if !render.rect_contains(r, x, y) {return .Arrow}
 	if c.searchable && y < r.y + OVERLAY_PADDING * s + dropdown_header(c, s) {return .Text}
 	return dropdown_option_at(d, c, a, x, y, s) >= 0 ? .Hand : .Arrow
 }
