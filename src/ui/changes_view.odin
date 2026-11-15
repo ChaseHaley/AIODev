@@ -1,13 +1,14 @@
 package ui
 
 import "aio:render"
+import "aio:syntax"
 import tr "aio:turns"
 import "core:math"
 
-// The Agent changes pane: a toolbar with the scope, a list of recorded turns, and one diff stream. The
-// pane keeps the model and the scroll state; this file lays the view out, draws it and answers where a
-// point lands. Heights of the diff stream are cached in whole pixels, so scrolling and hit testing
-// agree with what is drawn.
+// The Agent changes pane: a toolbar with the source and, for turns, a strip of turn bars, then one diff
+// stream across the pane. The pane keeps the model and the scroll state; this file lays the view out,
+// draws it and answers where a point lands. Heights of the diff stream are cached in whole pixels, so
+// scrolling and hit testing agree with what is drawn.
 
 Changes_Scope :: enum u8 {
 	Agent,
@@ -19,7 +20,7 @@ Changes_Scope :: enum u8 {
 
 CHANGES_SCOPE_LABELS :: [Changes_Scope]string {
 	.Agent       = "This agent's turns",
-	.Repository  = "All turns in this repository",
+	.Repository  = "All agents",
 	.Uncommitted = "Uncommitted changes",
 	.Staged      = "Staged changes",
 	.Unstaged    = "Unstaged changes",
@@ -40,20 +41,46 @@ Changes_Notice :: enum u8 {
 	No_Changes,
 }
 
-// One row of the turn list. `between` is what changed while no agent worked.
+// One turn. `between` is what changed while no agent worked; `live` is a turn still open; `agent` is
+// the index of the turn's agent among the repository's agents in the All agents scope, else -1.
 Changes_Turn :: struct {
 	title, detail:         string,
 	files, added, removed: int,
-	between:               bool,
+	between, live:         bool,
+	agent:                 int,
+}
+
+// Flat line indices within one file: the file's diff lines in hunk order, as syntax.File_Lines and
+// comments count them.
+Changes_Selection :: struct {
+	file, first, last: int,
+	active:            bool,
+}
+
+// A comment as the diff shows it. `detached`: its lines are not in this diff.
+Changes_Comment_View :: struct {
+	file, first, last: int,
+	text:              string,
+	detached:          bool,
+}
+
+// The send bar: how many comments, which agent they go to, and why Send is off when it is.
+Changes_Send_View :: struct {
+	count:    int,
+	target:   string,
+	can_send: bool,
+	reason:   string,
 }
 
 Changes_View :: struct {
 	scope:       Changes_Scope,
 	notice:      Changes_Notice,
 	// Extra notice text, such as the git error.
-	detail:      string,
+	detail:       string,
+	// The source field's label: the agent's name, All agents or the git scope.
+	source_label: string,
 	// The label in the toolbar.
-	repository:  string,
+	repository:   string,
 	// The folder name of the worktree a git scope shows, and whether it was chosen by following the agent.
 	worktree:    string,
 	following:   bool,
@@ -70,6 +97,15 @@ Changes_View :: struct {
 	collapsed:   []bool,
 	// Untracked files left out of an Uncommitted diff.
 	omitted:     int,
+	// Parallel to `files`: each file's spans per flat diff line, or an empty entry when not highlighted.
+	highlights:  []syntax.File_Lines,
+	selection:   Changes_Selection,
+	comments:    []Changes_Comment_View,
+	// -1 when no comment is being written; an index into `comments` edits that one; len(comments) writes a
+	// new one below the selection.
+	editing:     int,
+	editor:      ^Text_Field,
+	send:        Changes_Send_View,
 	// Show the "Install turn hooks" toolbar button.
 	hooks_offer: bool,
 	// Bumps whenever the content changes, so the cached row layout refreshes.
@@ -82,17 +118,31 @@ Changes_Part :: enum u8 {
 	Worktree,
 	Hooks,
 	Notice_Button,
-	Turn,
 	File_Header,
 	Diff,
-	Turn_List,
+	Strip_Bar,
+	Step_Back,
+	Step_Forward,
+	Range_Label,
+	Turn_List_Row,
+	Line,
+	Hunk_Comment,
+	Comment_Button,
+	Comment_Card,
+	Comment_Delete,
+	Comment_Editor,
+	Send,
+	Copy,
+	Discard,
 }
 
-// What a point is over. `index` is the turn row for Turn and the file for File_Header and Diff (-1 below
-// the last file).
+// What a point is over. `index` is the bar or list row for the strip parts, the file for File_Header,
+// Diff, Line and Hunk_Comment (-1 below the last file), and the comment for the comment parts; `line`
+// is the flat line in file `index`.
 Changes_Hit :: struct {
 	part:  Changes_Part,
 	index: int,
+	line:  int,
 }
 
 // The cached layout of the diff stream, in whole pixels. Each file is its header, its body unless
@@ -104,15 +154,31 @@ Changes_Rows :: struct {
 	notice:                                 Changes_Notice,
 	files, omitted:                         int,
 	scale, line_height:                     f32,
+	// The diff width and Body line height the comment cards were wrapped at.
+	width, body_line:                       f32,
+	comments_key:                           u64,
 	header, hunk, line, note, gap, footer:  int,
 	// The top of each file, then the end of the last one.
 	tops:                                   [dynamic]int,
+	// The height of each comment card, measured by changes_cards_measure.
+	cards:                                  [dynamic]int,
+	// The "Not in this diff" group at the end of the stream.
+	detached:                               int,
 	total:                                  int,
 }
 
 // Per pane. The pane owns it and frees it with changes_state_destroy.
 Changes_State :: struct {
-	turn_scroll, diff_scroll: int,
+	diff_scroll:              int,
+	// Strip bars hidden at the left, and the turn list's scroll in pixels.
+	strip_offset:             int,
+	// The strip's bar room, turn count and selection at the last draw: when any changes, the draw
+	// reveals the selection again, so a resize or a pane drawn after a tab switch keeps it in view.
+	strip_seen_bars:          int,
+	strip_seen_turns:         int,
+	strip_seen_first:         int,
+	turn_list_scroll:         int,
+	turn_list_open:           bool,
 	hover, press:             Changes_Hit,
 	// The control whose hover and press `motion` plays: it keeps fading after the pointer leaves.
 	lit:                      Changes_Hit,
@@ -122,31 +188,31 @@ Changes_State :: struct {
 	worktree_open:            bool,
 	motion:                   Control_Motion,
 	rows:                     Changes_Rows,
-	turn_bar, diff_bar:       Scroll_Drag,
+	turn_list_bar, diff_bar:  Scroll_Drag,
 }
 
 changes_state_destroy :: proc(state: ^Changes_State) {
 	delete(state.rows.tops)
+	delete(state.rows.cards)
 	state.rows = {}
 }
 
 // Where everything goes, in window pixels. `diff` holds the diff stream or the notice and is the area
-// the pane scrollbar belongs to; `turns` is empty without a turn list.
+// the pane scrollbar belongs to. The strip, its step buttons and the range label are empty in git scopes.
 Changes_Geometry :: struct {
-	area, toolbar, scope, worktree, hooks, repository, turns, diff, notice, notice_button: render.Rect,
-	scale, turn_row:                                                             f32,
-	// The turn list sits above the diff rather than beside it.
-	narrow:                                                                      bool,
+	area, toolbar, scope, worktree, hooks, repository, diff, notice, notice_button: render.Rect,
+	strip, step_back, step_forward, range_label:                                   render.Rect,
+	// Where the turn list goes under the range label while state.turn_list_open; empty without turns.
+	turn_list:                                                                     render.Rect,
+	// The comments' send bar under the diff; empty without comments.
+	send_bar:                                                                      render.Rect,
+	scale, turn_row:                                                               f32,
+	// How many bars the strip has room for.
+	strip_bars:                                                                    int,
 }
 
 @(private = "file")
-CHANGES_TURN_LIST_WIDTH :: f32(264)
-@(private = "file")
 CHANGES_TURN_ROW_HEIGHT :: f32(40)
-@(private = "file")
-CHANGES_NARROW_BODY :: f32(560)
-@(private = "file")
-CHANGES_NARROW_SHARE :: f32(0.3)
 @(private = "file")
 CHANGES_SCOPE_WIDTH :: f32(216)
 @(private = "file")
@@ -231,7 +297,9 @@ changes_geometry :: proc(
 	if hooks_width > 0 {g.hooks = {area.x + area.width - pad - hooks_width, top, hooks_width, control}}
 	left := g.scope.x + g.scope.width + gap
 	right := hooks_width > 0 ? g.hooks.x - gap : area.x + area.width - pad
-	if !changes_scope_turns(view.scope) {
+	if changes_scope_turns(view.scope) {
+		left = strip_place(&g, view, &body_text, left, right, top, control)
+	} else {
 		g.worktree = {left, top, min(CHANGES_WORKTREE_WIDTH * s, max(0, right - left)), control}
 		if g.worktree.width > 0 {left += g.worktree.width + gap}
 	}
@@ -239,23 +307,17 @@ changes_geometry :: proc(
 
 	bottom := max(0, area.height - g.toolbar.height)
 	body := render.Rect{area.x, g.toolbar.y + g.toolbar.height, area.width, bottom}
-	g.diff = body
-	if changes_scope_turns(view.scope) && len(view.turns) > 0 {
-		if body.width >= CHANGES_NARROW_BODY * s {
-			width := min(math.round(CHANGES_TURN_LIST_WIDTH * s), body.width)
-			g.turns = {body.x, body.y, width, body.height}
-			g.diff = {body.x + width, body.y, body.width - width, body.height}
-		} else {
-			g.narrow = true
-			height := math.round(body.height * CHANGES_NARROW_SHARE)
-			g.turns = {body.x, body.y, body.width, height}
-			g.diff = {body.x, body.y + height, body.width, body.height - height}
-		}
-	}
+	send := min(changes_send_bar_height(view, s), body.height)
+	g.diff = {body.x, body.y, body.width, body.height - send}
+	if send > 0 {g.send_bar = {body.x, body.y + body.height - send, body.width, send}}
+	if changes_scope_turns(view.scope) {turn_list_place(&g, view)}
 	if view.notice != .None {changes_notice_place(&g, view, text, &body_text)}
 	return g
 }
 
+// Centres the notice in the diff area. With comments it sits at the top instead, and the diff area
+// shrinks to below it: the stream then holds only the comments, so they can still be read, edited and
+// deleted while no diff shows.
 @(private = "file")
 changes_notice_place :: proc(g: ^Changes_Geometry, view: ^Changes_View, text, body_text: ^Text) {
 	s := g.scale
@@ -269,6 +331,11 @@ changes_notice_place :: proc(g: ^Changes_Geometry, view: ^Changes_View, text, bo
 	if button {height += SPACE_4 * s + HEIGHT_STANDARD * s}
 	x := math.round(g.diff.x + (g.diff.width - width) / 2)
 	y := math.round(g.diff.y + max(0, (g.diff.height - height) / 2))
+	if len(view.comments) > 0 {
+		y = math.round(g.diff.y + SPACE_6 * s)
+		below := math.round(y + height + SPACE_4 * s)
+		g.diff = {g.diff.x, below, g.diff.width, max(0, g.diff.y + g.diff.height - below)}
+	}
 	g.notice = {x, y, width, height}
 	if button {
 		label := text_width(&strong, CHANGES_RECORD_LABEL) + 2 * SPACE_6 * s
@@ -343,36 +410,43 @@ changes_badge_forms :: proc(
 	return
 }
 
-// Refreshes the cached rows when the content, the line height or the scale changed. Collapsing is the
-// pane's own state, so it is part of the key too.
-changes_layout :: proc(state: ^Changes_State, view: ^Changes_View, mono: ^Text, scale: f32) {
+// Refreshes the cached rows when the content, the line height, the width or the scale changed.
+// Collapsing and comments are the pane's own state, so they are part of the key too. `text` wraps the
+// comment cards at `width`, the diff area's width.
+changes_layout :: proc(state: ^Changes_State, view: ^Changes_View, text, mono: ^Text, width, scale: f32) {
 	rows := &state.rows
 	key := collapsed_key(view)
+	comments := changes_comments_key(view)
 	if rows.valid && rows.revision == view.revision && rows.collapsed_key == key &&
 	   rows.notice == view.notice && rows.files == len(view.files) && rows.omitted == view.omitted &&
-	   rows.line_height == mono.line_height && rows.scale == scale {return}
+	   rows.line_height == mono.line_height && rows.scale == scale && rows.width == width &&
+	   rows.body_line == text.line_height && rows.comments_key == comments {return}
 	rows.valid, rows.revision, rows.collapsed_key, rows.notice = true, view.revision, key, view.notice
 	rows.files, rows.omitted = len(view.files), view.omitted
 	rows.scale, rows.line_height = scale, mono.line_height
+	rows.width, rows.body_line, rows.comments_key = width, text.line_height, comments
 	rows.header = int(math.round(HEIGHT_STANDARD * scale))
 	rows.line = max(1, int(mono.line_height) + int(math.round(2 * scale)))
 	rows.hunk = rows.line + int(math.round(SPACE_1 * scale))
 	rows.note = int(math.round(HEIGHT_COMPACT * scale))
 	rows.gap = int(math.round(SPACE_2 * scale))
 	rows.footer = int(math.round(HEIGHT_STANDARD * scale))
+	changes_cards_measure(rows, view, text)
 	clear(&rows.tops)
 	y := 0
 	if view.notice == .None {
 		for i in 0 ..< len(view.files) {
 			append(&rows.tops, y)
 			y += rows.header
-			if !changes_collapsed(view, i) {y += file_body_height(rows, &view.files[i])}
+			if !changes_collapsed(view, i) {y += file_body_height(rows, view, i)}
 			y += rows.gap
 		}
 	}
 	append(&rows.tops, y)
 	rows.total = y
 	if view.notice == .None && view.omitted > 0 {rows.total += rows.footer}
+	rows.detached = changes_detached_height(rows, view)
+	rows.total += rows.detached
 }
 
 changes_diff_extent :: proc(state: ^Changes_State, g: Changes_Geometry) -> Scroll_Extent {
@@ -384,16 +458,6 @@ changes_diff_extent :: proc(state: ^Changes_State, g: Changes_Geometry) -> Scrol
 	}
 }
 
-// Scroll by `delta` pixels, positive toward the end; true when the position changed.
-changes_scroll_turns :: proc(
-	state: ^Changes_State, g: Changes_Geometry, view: ^Changes_View, delta: int,
-) -> bool {
-	limit := max(0, len(view.turns) * int(g.turn_row) - int(g.turns.height))
-	before := state.turn_scroll
-	state.turn_scroll = clamp(before + delta, 0, limit)
-	return state.turn_scroll != before
-}
-
 changes_scroll_diff :: proc(state: ^Changes_State, g: Changes_Geometry, delta: int) -> bool {
 	limit := max(0, state.rows.total - int(g.diff.height))
 	before := state.diff_scroll
@@ -401,34 +465,34 @@ changes_scroll_diff :: proc(state: ^Changes_State, g: Changes_Geometry, delta: i
 	return state.diff_scroll != before
 }
 
-// What lies at the point. Needs the rows of the latest changes_layout.
+// What lies at the point: the open turn list first, then the toolbar, then the diff area and the send
+// bar. Needs the rows of the latest changes_layout.
 changes_hit :: proc(
 	g: Changes_Geometry, view: ^Changes_View, state: ^Changes_State, x, y: f32,
 ) -> Changes_Hit {
-	if render.rect_contains(g.scope, x, y) {return {.Scope, 0}}
-	if render.rect_contains(g.worktree, x, y) {return {.Worktree, 0}}
-	if render.rect_contains(g.hooks, x, y) {return {.Hooks, 0}}
-	if render.rect_contains(g.notice_button, x, y) {return {.Notice_Button, 0}}
-	if render.rect_contains(g.turns, x, y) && g.turn_row > 0 {
-		row := int((y - g.turns.y + f32(state.turn_scroll)) / g.turn_row)
-		if row >= 0 && row < len(view.turns) {return {.Turn, row}}
-		return {.Turn_List, 0}
+	if state.turn_list_open && render.rect_contains(g.turn_list, x, y) {
+		return {.Turn_List_Row, turn_list_row_at(g, state, view, y), 0}
 	}
-	if view.notice == .None && render.rect_contains(g.diff, x, y) {
-		rows := &state.rows
-		at := int(y - g.diff.y) + state.diff_scroll
-		file := changes_file_at(rows, at)
-		if file < 0 || file >= len(rows.tops) - 1 {return {.Diff, -1}}
-		if at < rows.tops[file] + rows.header {return {.File_Header, file}}
-		return {.Diff, file}
+	if render.rect_contains(g.scope, x, y) {return {.Scope, 0, 0}}
+	if render.rect_contains(g.worktree, x, y) {return {.Worktree, 0, 0}}
+	if render.rect_contains(g.hooks, x, y) {return {.Hooks, 0, 0}}
+	back, forward := changes_step_enabled(view)
+	if render.rect_contains(g.step_back, x, y) {return back ? {.Step_Back, 0, 0} : {}}
+	if render.rect_contains(g.step_forward, x, y) {return forward ? {.Step_Forward, 0, 0} : {}}
+	if render.rect_contains(g.strip, x, y) {
+		if bar := strip_bar_at(g, state, view, x); bar >= 0 {return {.Strip_Bar, bar, 0}}
+		return {}
 	}
-	return {}
+	if render.rect_contains(g.range_label, x, y) {return {.Range_Label, 0, 0}}
+	if render.rect_contains(g.notice_button, x, y) {return {.Notice_Button, 0, 0}}
+	return changes_diff_hit(g, view, state, x, y)
 }
 
 @(private = "file")
 changes_animated :: proc(hit: Changes_Hit) -> bool {
 	#partial switch hit.part {
-	case .Scope, .Worktree, .Hooks, .Notice_Button, .File_Header:
+	case .Scope, .Worktree, .Hooks, .Notice_Button, .File_Header, .Step_Back, .Step_Forward, .Range_Label,
+	     .Hunk_Comment, .Comment_Button, .Comment_Delete, .Send, .Copy, .Discard:
 		return true
 	}
 	return false
@@ -496,7 +560,7 @@ notice_draw :: proc(
 		}
 	}
 	if view.notice == .Recording_Off {
-		hover, press := changes_lit(state, {.Notice_Button, 0})
+		hover, press := changes_lit(state, {.Notice_Button, 0, 0})
 		return primary_button_draw(
 			list, text, theme, g.notice_button, CHANGES_RECORD_LABEL, hover, press, false, g.scale, pointer,
 		)
@@ -504,6 +568,8 @@ notice_draw :: proc(
 	return .Ok
 }
 
+// Draws the pane. `spin_phase` places the working spinner of a live turn; `spinning` reports that one
+// was drawn, so the caller keeps frames coming while it turns.
 changes_draw :: proc(
 	list: ^render.Draw_List,
 	text, mono: ^Text,
@@ -513,27 +579,23 @@ changes_draw :: proc(
 	state: ^Changes_State,
 	scale: f32,
 	pointer: [2]f32,
-) -> render.Build_Status {
-	s := scale
+	spin_phase: f32,
+) -> (
+	status: render.Build_Status,
+	spinning: bool,
+) {
 	t := theme^
-	turn_total := len(view.turns) * int(g.turn_row)
-	state.turn_scroll = clamp(state.turn_scroll, 0, max(0, turn_total - int(g.turns.height)))
+	strip_follow(state, g, view)
+	state.turn_list_scroll = clamp(state.turn_list_scroll, 0, turn_list_limit(g, view))
 	state.diff_scroll = clamp(state.diff_scroll, 0, max(0, state.rows.total - int(g.diff.height)))
-	if r := toolbar_draw(list, text, t, g, view, state, pointer); r != .Ok {return r}
-	if g.turns.width > 0 {
-		if r := turns_draw(list, text, t, g, view, state, pointer); r != .Ok {return r}
-		edge := render.Rect{g.turns.x + g.turns.width - s, g.turns.y, s, g.turns.height}
-		if g.narrow {edge = {g.turns.x, g.turns.y + g.turns.height - s, g.turns.width, s}}
-		draw_rect(list, {rect = edge, color = t.border})
-		held := state.turn_bar
-		if track, shown := changes_turn_scrollbar(state, g, view); shown {
-			over := render.rect_contains(track.track, pointer.x, pointer.y)
-			bar_state := scrollbar_state(over, held)
-			if bar, drawn := changes_turn_scrollbar(state, g, view, bar_state); drawn {
-				scrollbar_draw(list, t, bar, bar_state)
-			}
-		}
+	status, spinning = toolbar_draw(list, text, t, g, view, state, pointer, spin_phase)
+	if status != .Ok {return}
+	if view.notice != .None {
+		if status = notice_draw(list, text, t, g, view, state, pointer); status != .Ok {return}
 	}
-	if view.notice != .None {return notice_draw(list, text, t, g, view, state, pointer)}
-	return diff_draw(list, text, mono, t, g, view, state, pointer)
+	if status = diff_draw(list, text, mono, t, g, view, state, pointer); status != .Ok {return}
+	if status = changes_send_bar_draw(list, text, t, g, view, state, pointer); status != .Ok {return}
+	listed: bool
+	status, listed = turn_list_draw(list, text, t, g, view, state, pointer, spin_phase)
+	return status, spinning || listed
 }

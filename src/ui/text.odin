@@ -23,6 +23,9 @@ Theme :: struct {
 	code_background: render.Color,
 	// The fills behind added and removed lines of a diff.
 	diff_added, diff_removed: render.Color,
+	// The terminal's 16 colours, which syntax colouring and per-agent tints take their hues from, so
+	// every theme's code reads like its terminal.
+	palette:                  [16]render.Color,
 	// The shared raised-hover look. `rim` is the colour of the pointer-following edge light;
 	// `hover_edge` is the hairline that holds a light fill's shape. lift and gloss are the
 	// interface.hover_lift and interface.hover_gloss settings.
@@ -38,7 +41,10 @@ theme_from :: proc(t: settings.Theme, interface: settings.Interface_Settings) ->
 		return colour.rgba(value.rgb, f32(value.a) / 255)
 	}
 	text, raised, accent := t.colors[.Text].rgb, t.colors[.Surface].rgb, t.colors[.Accent].rgb
+	palette: [16]render.Color
+	for &entry, i in palette {entry = c(t, settings.Theme_Token(int(settings.Theme_Token.Palette_0) + i))}
 	return {
+		palette = palette,
 		window = c(t, .Window),
 		pane = c(t, .Pane),
 		surface = c(t, .Surface),
