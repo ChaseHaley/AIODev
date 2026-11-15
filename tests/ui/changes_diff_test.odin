@@ -526,3 +526,125 @@ changes_pairs_rebuild_only_for_a_new_diff_or_layout :: proc(t: ^testing.T) {
 	lay_out(&f, &view, &state)
 	testing.expect_value(t, pairs.pairs[0], ui.Changes_Pair{0, 0})
 }
+
+@(test)
+changes_sticky_header_pins_until_the_next_header_pushes_it_up :: proc(t: ^testing.T) {
+	f: Diff_Fixture
+	view: ui.Changes_View
+	if !diff_fixture_make(t, &f, &view) {return}
+	defer diff_fixture_destroy(&f)
+	side_by_side_use(&f, &view)
+	state: ui.Changes_State
+	defer ui.changes_state_destroy(&state)
+
+	for side in ([2]bool{false, true}) {
+		view.side_by_side = side
+		g := lay_out(&f, &view, &state)
+		rows := &state.rows
+		header := f32(rows.header)
+
+		// At the top of the stream every header is in its place.
+		state.diff_scroll = 0
+		file, rect := ui.changes_sticky_header(&state, &view, g)
+		testing.expect_value(t, file, -1)
+
+		// Scrolled into the first file, its header pins to the top of the diff and takes the hits there.
+		state.diff_scroll = 40
+		file, rect = ui.changes_sticky_header(&state, &view, g)
+		testing.expect_value(t, file, 0)
+		testing.expect_value(t, rect, render.Rect{g.diff.x, g.diff.y, g.diff.width, header})
+		at := centre(rect)
+		pinned := ui.changes_diff_hit(g, &view, &state, at.x, at.y)
+		testing.expect_value(t, pinned, ui.Changes_Hit{.Sticky_Header, 0, 0})
+		below := ui.changes_diff_hit(g, &view, &state, at.x, rect.y + header + 1)
+		testing.expect(t, below.part != .Sticky_Header)
+
+		// The end of the file's body pushes it up as the next header arrives.
+		end := rows.tops[1] - rows.gap
+		state.diff_scroll = rows.tops[1] - 10
+		file, rect = ui.changes_sticky_header(&state, &view, g)
+		testing.expect_value(t, file, 0)
+		testing.expect_value(t, rect.y, g.diff.y + 10 - f32(rows.gap) - header)
+		// One pixel of it is left at the body's last row; its border falls in the gap, above the next header.
+		state.diff_scroll = end - 1
+		file, rect = ui.changes_sticky_header(&state, &view, g)
+		testing.expect_value(t, file, 0)
+		testing.expect_value(t, rect.y + rect.height, g.diff.y + 1)
+		next_header := g.diff.y + f32(rows.tops[1] - state.diff_scroll)
+		testing.expect(t, rect.y + rect.height + 1 <= next_header)
+		// Once only the gap after the body is left, nothing sticks; then the second file's header does.
+		state.diff_scroll = rows.tops[1] - rows.gap / 2
+		file, _ = ui.changes_sticky_header(&state, &view, g)
+		testing.expect_value(t, file, -1)
+		state.diff_scroll = rows.tops[1] + 5
+		file, rect = ui.changes_sticky_header(&state, &view, g)
+		testing.expect_value(t, file, 1)
+		testing.expect_value(t, rect.y, g.diff.y)
+	}
+
+	// A collapsed file has no body to stick over.
+	collapsed := [2]bool{true, false}
+	view.collapsed = collapsed[:]
+	g := lay_out(&f, &view, &state)
+	state.diff_scroll = 5
+	file, _ := ui.changes_sticky_header(&state, &view, g)
+	testing.expect_value(t, file, -1)
+	in_place := ui.changes_diff_hit(g, &view, &state, g.diff.x + 50, g.diff.y + 2)
+	testing.expect_value(t, in_place, ui.Changes_Hit{.File_Header, 0, 0})
+}
+
+// A layer draws its rects before its text, so the pinned header must sit in a later layer than the stream
+// or the lines under it show through its fill.
+@(test)
+changes_sticky_header_draws_in_a_layer_above_the_stream :: proc(t: ^testing.T) {
+	device, device_error := render.device_create(.Warp)
+	if !testing.expect_value(t, device_error, render.Error.None) {return}
+	defer render.device_destroy(device)
+	f: Diff_Fixture
+	view: ui.Changes_View
+	if !diff_fixture_make(t, &f, &view) {return}
+	defer diff_fixture_destroy(&f)
+	cache: glyphs.Cache
+	glyphs.init(&cache, f.fonts, device)
+	defer glyphs.destroy(&cache)
+	if !testing.expect(t, ui.text_init(&f.text, f.fonts, &cache, 13)) {return}
+	f.mono = ui.text_mono(&f.text, f.text.family)
+	side_by_side_use(&f, &view)
+	view.side_by_side = false
+	state: ui.Changes_State
+	defer ui.changes_state_destroy(&state)
+	// A short pane, so the draw keeps the scroll inside the first file.
+	g := ui.changes_geometry({0, 0, 900, 150}, 1, &view, &f.text)
+	ui.changes_layout(&state, &view, &f.text, &f.mono, g.diff.width, 1)
+	state.diff_scroll = 40
+	sticky, rect := ui.changes_sticky_header(&state, &view, g)
+	if !testing.expect_value(t, sticky, 0) {return}
+
+	theme: ui.Theme
+	theme.text = {1, 1, 1, 1}
+	theme.pane = {0.1, 0.2, 0.3, 1}
+	list := render.draw_list_init()
+	defer render.draw_list_destroy(&list)
+	testing.expect_value(t, render.push_layer(&list, g.area), render.Error.None)
+	status, _ := ui.changes_draw(&list, &f.text, &f.mono, &theme, g, &view, &state, 1, {-1, -1}, 0)
+	testing.expect_value(t, status, render.Build_Status.Ok)
+
+	fill := -1
+	for r, i in list.rects {
+		if r.color == theme.pane && r.rect == rect {fill = i}
+	}
+	if !testing.expect(t, fill >= 0) {return}
+	layer := -1
+	for l, i in list.layers {
+		if fill >= l.rect_start && fill < l.rect_start + l.rect_count {layer = i}
+	}
+	if !testing.expect(t, layer > 0) {return}
+	pinned := list.layers[layer]
+	testing.expect_value(t, pinned.clip, g.diff)
+	// The stream's text went into earlier layers; the header's own text is in this one.
+	testing.expect_value(t, pinned.rect_start, fill)
+	stream := 0
+	for l in list.layers[:layer] {stream += l.glyph_count}
+	testing.expect(t, stream > 0)
+	testing.expect(t, pinned.glyph_count > 0)
+}

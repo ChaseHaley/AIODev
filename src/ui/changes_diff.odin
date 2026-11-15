@@ -519,6 +519,28 @@ changes_top_file :: proc(state: ^Changes_State, view: ^Changes_View) -> int {
 	return file
 }
 
+// The file whose header is pinned at the top of the diff area, and where it is drawn: across the diff
+// area, at its top, or above it as the end of its file's body pushes it up, so it leaves with the body and
+// its border never lands on the next header. A header sticks while it has scrolled above the top and some
+// of its file's body is still in view, so a collapsed file never does. `file` is -1 when none sticks.
+changes_sticky_header :: proc(
+	state: ^Changes_State, view: ^Changes_View, g: Changes_Geometry,
+) -> (
+	file: int,
+	rect: render.Rect,
+) {
+	file = -1
+	rows := &state.rows
+	if !rows.valid || view.notice != .None || g.diff.height <= 0 {return}
+	scroll := state.diff_scroll
+	at := changes_file_at(rows, scroll)
+	if at < 0 || at >= len(view.files) || at >= len(rows.tops) - 1 || changes_collapsed(view, at) {return}
+	end := rows.tops[at + 1] - rows.gap
+	if rows.tops[at] >= scroll || scroll >= end {return}
+	y := g.diff.y + f32(min(0, end - scroll - rows.header))
+	return at, {g.diff.x, y, g.diff.width, f32(rows.header)}
+}
+
 // The Comment button at the right end of the lowest row holding a selected line, while nothing is being
 // written; side by side, at the right end of that row's selected cell, the right one when both are. Zero
 // when it is not on screen.
@@ -613,6 +635,9 @@ changes_diff_hit :: proc(
 	rows := &state.rows
 	if !rows.valid {return {.Diff, -1, 0}}
 	s := view.selection
+	if sticky, rect := changes_sticky_header(state, view, g); sticky >= 0 {
+		if render.rect_contains(rect, x, y) {return {.Sticky_Header, sticky, 0}}
+	}
 	if render.rect_contains(changes_comment_button_rect(g, view, state), x, y) {
 		return {.Comment_Button, s.file, max(s.first, s.last)}
 	}
@@ -991,14 +1016,15 @@ paint_hunk :: proc(
 	return .Ok
 }
 
+// A file's header in `head`: the fold chevron, the status mark, the path, the badges and the counts, on
+// a button surface that plays the hover and press of `part`.
 @(private = "file")
-paint_file :: proc(p: ^Diff_Paint, rows: ^Changes_Rows, i: int, y: f32) -> render.Build_Status {
+paint_header :: proc(p: ^Diff_Paint, i: int, head: render.Rect, part: Changes_Part) -> render.Build_Status {
 	t, s := p.theme, p.scale
 	view := p.view
 	f := &view.files[i]
-	head := render.Rect{p.card_x, y, p.card_width, f32(rows.header)}
 	collapsed := changes_collapsed(view, i)
-	hover, press := changes_lit(p.state, {.File_Header, i, 0})
+	hover, press := changes_lit(p.state, {part, i, 0})
 	draw_rect(p.list, {rect = head, color = t.surface, radius = RADIUS_CONTROL * s})
 	face, ink, err := button_draw(
 		p.list,
@@ -1049,11 +1075,21 @@ paint_file :: proc(p: ^Diff_Paint, rows: ^Changes_Rows, i: int, y: f32) -> rende
 	}
 	label_buf: [512]u8
 	body := p.body
-	if r := draw_fading_text(
+	return draw_fading_text(
 		body, p.list, file_label(label_buf[:], f), x, baseline_in(face.y, face.height, body), t.text,
 		right - x,
-	); r != .Ok {return r}
-	if collapsed {return .Ok}
+	)
+}
+
+@(private = "file")
+paint_file :: proc(p: ^Diff_Paint, rows: ^Changes_Rows, i: int, y: f32) -> render.Build_Status {
+	s := p.scale
+	view := p.view
+	f := &view.files[i]
+	head := render.Rect{p.card_x, y, p.card_width, f32(rows.header)}
+	if r := paint_header(p, i, head, .File_Header); r != .Ok {return r}
+	if changes_collapsed(view, i) {return .Ok}
+	t := p.theme
 
 	top := y + f32(rows.header)
 	if f.binary || len(f.hunks) == 0 {
@@ -1208,7 +1244,15 @@ diff_draw :: proc(
 			); r != .Ok {return r}
 		}
 	}
-	return paint_comments(&p, g, rows)
+	if r := paint_comments(&p, g, rows); r != .Ok {return r}
+	// The pinned header covers whatever scrolled under it: lines, cards and the Comment button. A layer
+	// draws its rects before its text, so the header takes a layer of its own above the stream's text.
+	sticky, rect := changes_sticky_header(state, view, g)
+	if sticky < 0 {return .Ok}
+	if render.push_layer(list, g.diff) != .None {return .Ok}
+	draw_rect(list, {rect = rect, color = theme.pane})
+	draw_rect(list, {rect = {rect.x, rect.y + rect.height, rect.width, 1}, color = theme.border})
+	return paint_header(&p, sticky, {p.card_x, rect.y, p.card_width, rect.height}, .Sticky_Header)
 }
 
 // The send bar under the diff: the count and the agent they go to, then Send, Copy and Discard. Send

@@ -76,6 +76,10 @@ Icon :: enum {
 	Side_By_Side,
 	// A funnel: filter what shows.
 	Filter,
+	// Two chevrons pointing together: collapse every section.
+	Collapse_All,
+	// Two chevrons pointing apart: expand every section.
+	Expand_All,
 }
 
 ICON_STROKE :: f32(1.25)
@@ -222,6 +226,12 @@ icon_draw :: proc(
 		pen_path(p, {10, 9}, {12.5, 9})
 	case .Filter:
 		pen_path(p, {2, 3}, {14, 3}, {9.5, 8.5}, {9.5, 13.5}, {6.5, 12}, {6.5, 8.5}, {2, 3})
+	case .Collapse_All:
+		pen_path(p, {4, 2.5}, {8, 6.5}, {12, 2.5})
+		pen_path(p, {4, 13.5}, {8, 9.5}, {12, 13.5})
+	case .Expand_All:
+		pen_path(p, {4, 6.5}, {8, 2.5}, {12, 6.5})
+		pen_path(p, {4, 9.5}, {8, 13.5}, {12, 9.5})
 	case .Changes:
 		pen_path(p, {3, 2}, {10, 2}, {13, 5}, {13, 14}, {3, 14}, {3, 2})
 		pen_path(p, {6.5, 6}, {9.5, 6})

@@ -115,7 +115,11 @@ Changes_View :: struct {
 	filter_active, filter_invalid: bool,
 	filter_error: string,
 	hidden_count, total_files: int,
+	// Lines added and removed in the files shown, and in every file of the result.
+	shown_added, shown_removed, total_added, total_removed: int,
 	filter_editor: ^Text_Field,
+	// Some shown file is expanded, so the fold button collapses every file rather than expanding them.
+	any_expanded: bool,
 	// Bumps whenever the content changes, so the cached row layout refreshes.
 	revision:    u64,
 }
@@ -148,11 +152,14 @@ Changes_Part :: enum u8 {
 	Filter_Field,
 	Filter_Clear,
 	Filter_Bar_Clear,
+	Fold_Button,
+	Sticky_Header,
 }
 
-// What a point is over. `index` is the bar or list row for the strip parts, the file for File_Header,
-// Diff, Line and Hunk_Comment (-1 below the last file), and the comment for the comment parts; `line`
-// is the flat line in file `index`.
+// What a point is over. `index` is the bar or list row for the strip parts; the file for File_Header,
+// Sticky_Header, Diff, Line and Hunk_Comment (-1 below the last file); the comment for the comment parts;
+// -1 for Filter_Field on the filter popover's padding; else 0, as for the toolbar buttons (Fold_Button,
+// Filter_Button, Layout_Button, Files_Button). `line` is the flat line in file `index`.
 Changes_Hit :: struct {
 	part:  Changes_Part,
 	index: int,
@@ -227,8 +234,8 @@ Changes_Geometry :: struct {
 	turn_list:                                                                     render.Rect,
 	// The comments' send bar under the diff; empty without comments.
 	send_bar:                                                                      render.Rect,
-	// The filter, layout and file list buttons at the toolbar's right end, in every scope.
-	filter_button, layout_button, files_button:                                    render.Rect,
+	// The fold, filter, layout and file list buttons at the toolbar's right end, in every scope.
+	fold_button, filter_button, layout_button, files_button:                       render.Rect,
 	// The filter popover under its button, with its field and the field's clear button; where it goes
 	// whenever there is a filter button, and shown only while state.filter_open.
 	filter_popover, filter_field, filter_clear:                                   render.Rect,
@@ -316,14 +323,15 @@ changes_geometry :: proc(
 	top := g.toolbar.y + (g.toolbar.height - control) / 2
 	room := max(0, area.width - 2 * pad)
 	end := area.x + area.width - pad
-	// The filter, layout and file list buttons hold the right end, all three or none; everything else
-	// fits before them.
-	buttons := 3 * control + 2 * SPACE_1 * s
+	// The fold, filter, layout and file list buttons hold the right end, all four or none; everything
+	// else fits before them.
+	buttons := 4 * control + 3 * SPACE_1 * s
 	if room >= buttons {
 		g.files_button = {end - control, top, control, control}
 		g.layout_button = {g.files_button.x - SPACE_1 * s - control, top, control, control}
 		g.filter_button = {g.layout_button.x - SPACE_1 * s - control, top, control, control}
-		end = g.filter_button.x - gap
+		g.fold_button = {g.filter_button.x - SPACE_1 * s - control, top, control, control}
+		end = g.fold_button.x - gap
 		room = max(0, room - buttons - gap)
 	}
 	body_text := text_styled(text, .Body)
@@ -527,6 +535,7 @@ changes_hit :: proc(
 	if render.rect_contains(g.scope, x, y) {return {.Scope, 0, 0}}
 	if render.rect_contains(g.worktree, x, y) {return {.Worktree, 0, 0}}
 	if render.rect_contains(g.hooks, x, y) {return {.Hooks, 0, 0}}
+	if render.rect_contains(g.fold_button, x, y) {return len(view.files) > 0 ? {.Fold_Button, 0, 0} : {}}
 	if render.rect_contains(g.filter_button, x, y) {return {.Filter_Button, 0, 0}}
 	if render.rect_contains(g.layout_button, x, y) {return {.Layout_Button, 0, 0}}
 	if render.rect_contains(g.files_button, x, y) {
@@ -550,7 +559,7 @@ changes_animated :: proc(hit: Changes_Hit) -> bool {
 	#partial switch hit.part {
 	case .Scope, .Worktree, .Hooks, .Notice_Button, .File_Header, .Step_Back, .Step_Forward, .Range_Label,
 	     .Hunk_Comment, .Comment_Button, .Comment_Delete, .Send, .Copy, .Discard, .Files_Button,
-	     .Layout_Button, .Filter_Button, .Filter_Clear, .Filter_Bar_Clear:
+	     .Layout_Button, .Filter_Button, .Filter_Clear, .Filter_Bar_Clear, .Fold_Button, .Sticky_Header:
 		return true
 	}
 	return false

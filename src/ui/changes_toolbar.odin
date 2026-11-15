@@ -509,7 +509,8 @@ changes_filter_box :: proc(
 	return field_box_standard(view.filter_editor, text, rect, g.scale), true
 }
 
-// "N of M files hidden by the filter" and its Clear button.
+// "N of M files hidden · showing +A −R of +A −R", the counts in the added and removed colours as the
+// file headers show them, fading before the Clear button, which always stays.
 @(private)
 filter_bar_draw :: proc(
 	list: ^render.Draw_List,
@@ -525,15 +526,39 @@ filter_bar_draw :: proc(
 	s := g.scale
 	draw_rect(list, {rect = {bar.x, bar.y + bar.height - s, bar.width, s}, color = theme.border})
 	small := text_styled(text, .Detail)
-	buf: [96]u8
+	head_buf: [96]u8
+	count_bufs: [4][24]u8
 	noun := view.total_files == 1 ? "file" : "files"
-	label := fmt.bprintf(buf[:], "%d of %d %s hidden by the filter", view.hidden_count, view.total_files, noun)
+	Run :: struct {
+		s:     string,
+		color: render.Color,
+	}
+	runs: [8]Run
+	count := 1
+	stats := view.total_added > 0 || view.total_removed > 0
+	head := stats ? "%d of %d %s hidden · showing " : "%d of %d %s hidden"
+	runs[0] = {fmt.bprintf(head_buf[:], head, view.hidden_count, view.total_files, noun), theme.muted}
+	if stats {
+		runs[1] = {fmt.bprintf(count_bufs[0][:], "+%d", view.shown_added), theme.success}
+		runs[2] = {" ", theme.muted}
+		runs[3] = {fmt.bprintf(count_bufs[1][:], "−%d", view.shown_removed), theme.error}
+		runs[4] = {" of ", theme.muted}
+		runs[5] = {fmt.bprintf(count_bufs[2][:], "+%d", view.total_added), theme.success}
+		runs[6] = {" ", theme.muted}
+		runs[7] = {fmt.bprintf(count_bufs[3][:], "−%d", view.total_removed), theme.error}
+		count = len(runs)
+	}
 	clear := g.filter_bar_clear
 	x := bar.x + SPACE_3 * s
-	if status := draw_fading_text(
-		&small, list, label, x, baseline_in(bar.y, bar.height, &small), theme.muted,
-		max(0, clear.x - SPACE_2 * s - x),
-	); status != .Ok {return status}
+	limit := clear.width > 0 ? clear.x - SPACE_2 * s : bar.x + bar.width - SPACE_3 * s
+	baseline := baseline_in(bar.y, bar.height, &small)
+	for run in runs[:count] {
+		if x >= limit {break}
+		if status := draw_fading_text(&small, list, run.s, x, baseline, run.color, limit - x); status != .Ok {
+			return status
+		}
+		x += text_width(&small, run.s)
+	}
 	if clear.width <= 0 {return .Ok}
 	hover, press := changes_lit(state, {.Filter_Bar_Clear, 0, 0})
 	b := Button {
@@ -594,7 +619,8 @@ filter_popover_draw :: proc(
 	return draw_fading_text(&small, list, hint, field.x, baseline, ink, field.width)
 }
 
-// The filter button (accent on the selected fill while a filter hides files, warning ink while it is
+// The fold button (collapse all while any shown file is expanded, else expand all; faded without files),
+// the filter button (accent on the selected fill while a filter hides files, warning ink while it is
 // invalid, outlined while its popover is open), the layout toggle (accent on the selected fill while
 // side by side) and the file list button (outlined while its list is open, faded without files).
 @(private = "file")
@@ -607,6 +633,23 @@ view_buttons_draw :: proc(
 	pointer: [2]f32,
 ) -> render.Error {
 	s := g.scale
+	if g.fold_button.width > 0 {
+		enabled := len(view.files) > 0
+		hover, press := changes_lit(state, {.Fold_Button, 0, 0})
+		b := Button {
+			rect     = g.fold_button,
+			hover    = hover,
+			press    = press,
+			disabled = !enabled,
+		}
+		face, ink, err := button_draw(list, theme, b, s, pointer)
+		if err != .None {return err}
+		if !enabled {
+			ink = theme.muted
+			ink.a *= DISABLED_ALPHA
+		}
+		icon_draw(list, view.any_expanded ? .Collapse_All : .Expand_All, face, ink, ICON_BUTTON, s)
+	}
 	if g.filter_button.width > 0 {
 		hover, press := changes_lit(state, {.Filter_Button, 0, 0})
 		b := Button {
