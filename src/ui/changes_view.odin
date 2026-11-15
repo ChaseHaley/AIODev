@@ -110,6 +110,12 @@ Changes_View :: struct {
 	hooks_offer: bool,
 	// Old and new side by side rather than one unified stream; the pane's own choice.
 	side_by_side: bool,
+	// The diff filter: active when its text is non-empty and valid; invalid shows `filter_error` and hides
+	// nothing. `files` holds only the files it shows: `hidden_count` of `total_files` are left out.
+	filter_active, filter_invalid: bool,
+	filter_error: string,
+	hidden_count, total_files: int,
+	filter_editor: ^Text_Field,
 	// Bumps whenever the content changes, so the cached row layout refreshes.
 	revision:    u64,
 }
@@ -138,6 +144,10 @@ Changes_Part :: enum u8 {
 	Discard,
 	Files_Button,
 	Layout_Button,
+	Filter_Button,
+	Filter_Field,
+	Filter_Clear,
+	Filter_Bar_Clear,
 }
 
 // What a point is over. `index` is the bar or list row for the strip parts, the file for File_Header,
@@ -194,6 +204,8 @@ Changes_State :: struct {
 	worktree_open:            bool,
 	// The file list is open, so its button stays outlined.
 	files_open:               bool,
+	// The filter popover is open, so its button stays outlined.
+	filter_open:              bool,
 	motion:                   Control_Motion,
 	rows:                     Changes_Rows,
 	turn_list_bar, diff_bar:  Scroll_Drag,
@@ -215,8 +227,13 @@ Changes_Geometry :: struct {
 	turn_list:                                                                     render.Rect,
 	// The comments' send bar under the diff; empty without comments.
 	send_bar:                                                                      render.Rect,
-	// The layout toggle and the file list button at the toolbar's right end, in every scope.
-	layout_button, files_button:                                                   render.Rect,
+	// The filter, layout and file list buttons at the toolbar's right end, in every scope.
+	filter_button, layout_button, files_button:                                    render.Rect,
+	// The filter popover under its button, with its field and the field's clear button; where it goes
+	// whenever there is a filter button, and shown only while state.filter_open.
+	filter_popover, filter_field, filter_clear:                                   render.Rect,
+	// The row under the toolbar while the filter hides files, and its Clear button.
+	filter_bar, filter_bar_clear:                                                 render.Rect,
 	scale, turn_row:                                                               f32,
 	// How many bars the strip has room for.
 	strip_bars:                                                                    int,
@@ -299,12 +316,14 @@ changes_geometry :: proc(
 	top := g.toolbar.y + (g.toolbar.height - control) / 2
 	room := max(0, area.width - 2 * pad)
 	end := area.x + area.width - pad
-	// The layout toggle and the file list button hold the right end; everything else fits before them.
-	buttons := 2 * control + SPACE_1 * s
+	// The filter, layout and file list buttons hold the right end, all three or none; everything else
+	// fits before them.
+	buttons := 3 * control + 2 * SPACE_1 * s
 	if room >= buttons {
 		g.files_button = {end - control, top, control, control}
 		g.layout_button = {g.files_button.x - SPACE_1 * s - control, top, control, control}
-		end = g.layout_button.x - gap
+		g.filter_button = {g.layout_button.x - SPACE_1 * s - control, top, control, control}
+		end = g.filter_button.x - gap
 		room = max(0, room - buttons - gap)
 	}
 	body_text := text_styled(text, .Body)
@@ -325,8 +344,13 @@ changes_geometry :: proc(
 	}
 	g.repository = {left, g.toolbar.y, max(0, right - left), g.toolbar.height}
 
-	bottom := max(0, area.height - g.toolbar.height)
-	body := render.Rect{area.x, g.toolbar.y + g.toolbar.height, area.width, bottom}
+	body := render.Rect{area.x, g.toolbar.y + g.toolbar.height, area.width, 0}
+	if view.filter_active && view.hidden_count > 0 {
+		filter_bar_place(&g, text, body.y)
+		body.y += g.filter_bar.height
+	}
+	body.height = max(0, area.y + area.height - body.y)
+	if g.filter_button.width > 0 {filter_popover_place(&g, view, text)}
 	send := min(changes_send_bar_height(view, s), body.height)
 	g.diff = {body.x, body.y, body.width, body.height - send}
 	if send > 0 {g.send_bar = {body.x, body.y + body.height - send, body.width, send}}
@@ -487,19 +511,27 @@ changes_scroll_diff :: proc(state: ^Changes_State, g: Changes_Geometry, delta: i
 	return state.diff_scroll != before
 }
 
-// What lies at the point: the open turn list first, then the toolbar, then the diff area and the send
-// bar. Needs the rows of the latest changes_layout.
+// What lies at the point: the open filter popover and turn list first, then the toolbar and the filter
+// bar, then the diff area and the send bar. Needs the rows of the latest changes_layout.
 changes_hit :: proc(
 	g: Changes_Geometry, view: ^Changes_View, state: ^Changes_State, x, y: f32,
 ) -> Changes_Hit {
+	if state.filter_open && render.rect_contains(g.filter_popover, x, y) {
+		if render.rect_contains(g.filter_clear, x, y) {return {.Filter_Clear, 0, 0}}
+		if render.rect_contains(g.filter_field, x, y) {return {.Filter_Field, 0, 0}}
+		return {.Filter_Field, -1, 0}
+	}
 	if state.turn_list_open && render.rect_contains(g.turn_list, x, y) {
 		return {.Turn_List_Row, turn_list_row_at(g, state, view, y), 0}
 	}
 	if render.rect_contains(g.scope, x, y) {return {.Scope, 0, 0}}
 	if render.rect_contains(g.worktree, x, y) {return {.Worktree, 0, 0}}
 	if render.rect_contains(g.hooks, x, y) {return {.Hooks, 0, 0}}
+	if render.rect_contains(g.filter_button, x, y) {return {.Filter_Button, 0, 0}}
 	if render.rect_contains(g.layout_button, x, y) {return {.Layout_Button, 0, 0}}
-	if render.rect_contains(g.files_button, x, y) {return len(view.files) > 0 ? {.Files_Button, 0, 0} : {}}
+	if render.rect_contains(g.files_button, x, y) {
+		return changes_files_listed(view) ? {.Files_Button, 0, 0} : {}
+	}
 	back, forward := changes_step_enabled(view)
 	if render.rect_contains(g.step_back, x, y) {return back ? {.Step_Back, 0, 0} : {}}
 	if render.rect_contains(g.step_forward, x, y) {return forward ? {.Step_Forward, 0, 0} : {}}
@@ -508,6 +540,7 @@ changes_hit :: proc(
 		return {}
 	}
 	if render.rect_contains(g.range_label, x, y) {return {.Range_Label, 0, 0}}
+	if render.rect_contains(g.filter_bar_clear, x, y) {return {.Filter_Bar_Clear, 0, 0}}
 	if render.rect_contains(g.notice_button, x, y) {return {.Notice_Button, 0, 0}}
 	return changes_diff_hit(g, view, state, x, y)
 }
@@ -517,7 +550,7 @@ changes_animated :: proc(hit: Changes_Hit) -> bool {
 	#partial switch hit.part {
 	case .Scope, .Worktree, .Hooks, .Notice_Button, .File_Header, .Step_Back, .Step_Forward, .Range_Label,
 	     .Hunk_Comment, .Comment_Button, .Comment_Delete, .Send, .Copy, .Discard, .Files_Button,
-	     .Layout_Button:
+	     .Layout_Button, .Filter_Button, .Filter_Clear, .Filter_Bar_Clear:
 		return true
 	}
 	return false
@@ -615,6 +648,7 @@ changes_draw :: proc(
 	state.diff_scroll = clamp(state.diff_scroll, 0, max(0, state.rows.total - int(g.diff.height)))
 	status, spinning = toolbar_draw(list, text, t, g, view, state, pointer, spin_phase)
 	if status != .Ok {return}
+	if status = filter_bar_draw(list, text, t, g, view, state, pointer); status != .Ok {return}
 	if view.notice != .None {
 		if status = notice_draw(list, text, t, g, view, state, pointer); status != .Ok {return}
 	}
@@ -622,5 +656,7 @@ changes_draw :: proc(
 	if status = changes_send_bar_draw(list, text, t, g, view, state, pointer); status != .Ok {return}
 	listed: bool
 	status, listed = turn_list_draw(list, text, t, g, view, state, pointer, spin_phase)
+	if status != .Ok {return}
+	status = filter_popover_draw(list, text, t, g, view, state, pointer)
 	return status, spinning || listed
 }

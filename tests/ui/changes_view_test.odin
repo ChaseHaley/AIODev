@@ -116,7 +116,7 @@ changes_geometry_puts_the_strip_in_the_toolbar_and_the_diff_across_the_pane :: p
 }
 
 @(test)
-changes_toolbar_ends_with_the_layout_toggle_and_the_file_list_button :: proc(t: ^testing.T) {
+changes_toolbar_ends_with_the_filter_layout_and_file_list_buttons :: proc(t: ^testing.T) {
 	f: Changes_Fixture
 	view: ui.Changes_View
 	if !fixture_make(t, &f, &view) {return}
@@ -124,12 +124,13 @@ changes_toolbar_ends_with_the_layout_toggle_and_the_file_list_button :: proc(t: 
 	state: ui.Changes_State
 	defer ui.changes_state_destroy(&state)
 
-	// The file list button is the far-right control, the layout toggle just before it.
+	// The file list button is the far-right control, then the layout toggle, then the filter button.
 	g := ui.changes_geometry({0, 0, 900, 600}, 1, &view, &f.text)
 	testing.expect_value(t, g.files_button, render.Rect{868, 2, 24, 24})
 	testing.expect_value(t, g.layout_button, render.Rect{840, 2, 24, 24})
-	testing.expect(t, g.range_label.x + g.range_label.width <= g.layout_button.x)
-	testing.expect(t, g.repository.x + g.repository.width <= g.layout_button.x)
+	testing.expect_value(t, g.filter_button, render.Rect{812, 2, 24, 24})
+	testing.expect(t, g.range_label.x + g.range_label.width <= g.filter_button.x)
+	testing.expect(t, g.repository.x + g.repository.width <= g.filter_button.x)
 	ui.changes_layout(&state, &view, &f.text, &f.mono, g.diff.width, 1)
 	files_x, files_y := centre(g.files_button)
 	layout_x, layout_y := centre(g.layout_button)
@@ -137,6 +138,9 @@ changes_toolbar_ends_with_the_layout_toggle_and_the_file_list_button :: proc(t: 
 	testing.expect_value(t, files, ui.Changes_Hit{.Files_Button, 0, 0})
 	layout := ui.changes_hit(g, &view, &state, layout_x, layout_y)
 	testing.expect_value(t, layout, ui.Changes_Hit{.Layout_Button, 0, 0})
+	filter_x, filter_y := centre(g.filter_button)
+	filter := ui.changes_hit(g, &view, &state, filter_x, filter_y)
+	testing.expect_value(t, filter, ui.Changes_Hit{.Filter_Button, 0, 0})
 	// The view a pane shows doesn't move the buttons.
 	view.side_by_side = true
 	side := ui.changes_geometry({0, 0, 900, 600}, 1, &view, &f.text)
@@ -148,7 +152,8 @@ changes_toolbar_ends_with_the_layout_toggle_and_the_file_list_button :: proc(t: 
 	git := ui.changes_geometry({0, 0, 900, 600}, 1, &view, &f.text)
 	testing.expect_value(t, git.files_button, g.files_button)
 	testing.expect_value(t, git.layout_button, g.layout_button)
-	testing.expect(t, git.repository.x + git.repository.width <= git.layout_button.x)
+	testing.expect_value(t, git.filter_button, g.filter_button)
+	testing.expect(t, git.repository.x + git.repository.width <= git.filter_button.x)
 
 	// Without files the file list button is disabled and answers nothing; the toggle still works.
 	view.files = nil
@@ -157,14 +162,174 @@ changes_toolbar_ends_with_the_layout_toggle_and_the_file_list_button :: proc(t: 
 	testing.expect_value(t, ui.changes_hit(git, &view, &state, files_x, files_y), ui.Changes_Hit{})
 	layout = ui.changes_hit(git, &view, &state, layout_x, layout_y)
 	testing.expect_value(t, layout, ui.Changes_Hit{.Layout_Button, 0, 0})
+	// A filter that hides every file leaves the list open to pick one: it keeps the hidden files.
+	view.filter_active, view.hidden_count, view.total_files = true, 2, 2
+	hidden := ui.changes_geometry({0, 0, 900, 600}, 1, &view, &f.text)
+	testing.expect_value(t, hidden.files_button, g.files_button)
+	all_hidden := ui.changes_hit(hidden, &view, &state, files_x, files_y)
+	testing.expect_value(t, all_hidden, ui.Changes_Hit{.Files_Button, 0, 0})
+	view.filter_active, view.hidden_count, view.total_files = false, 0, 0
 
 	double := ui.changes_geometry({0, 0, 1800, 1200}, 2, &view, &f.text)
 	testing.expect_value(t, double.files_button, render.Rect{1736, 4, 48, 48})
 	testing.expect_value(t, double.layout_button, render.Rect{1680, 4, 48, 48})
-	// A pane too narrow for both leaves them out.
-	sliver := ui.changes_geometry({0, 0, 50, 200}, 1, &view, &f.text)
+	testing.expect_value(t, double.filter_button, render.Rect{1624, 4, 48, 48})
+	// A pane too narrow for all three leaves them all out.
+	sliver := ui.changes_geometry({0, 0, 80, 200}, 1, &view, &f.text)
 	testing.expect_value(t, sliver.files_button, render.Rect{})
 	testing.expect_value(t, sliver.layout_button, render.Rect{})
+	testing.expect_value(t, sliver.filter_button, render.Rect{})
+	testing.expect_value(t, sliver.filter_popover, render.Rect{})
+	room := ui.changes_geometry({0, 0, 96, 200}, 1, &view, &f.text)
+	testing.expect(t, room.files_button.width > 0 && room.layout_button.width > 0)
+	testing.expect(t, room.filter_button.width > 0)
+}
+
+@(test)
+changes_filter_popover_hangs_under_its_button_and_answers_first :: proc(t: ^testing.T) {
+	f: Changes_Fixture
+	view: ui.Changes_View
+	if !fixture_make(t, &f, &view) {return}
+	defer font.system_destroy(f.fonts)
+	state: ui.Changes_State
+	defer ui.changes_state_destroy(&state)
+	editor: ui.Text_Field
+	defer delete(editor.bytes)
+	view.filter_editor = &editor
+
+	// Empty: no clear button, and the editing box spans the field.
+	g := ui.changes_geometry({0, 0, 900, 600}, 1, &view, &f.text)
+	small := ui.text_styled(&f.text, .Detail)
+	height := f32(int(24 + 32 + 8 + small.line_height + 0.5))
+	// 360 wide, its right edge on the button's.
+	testing.expect_value(t, g.filter_popover, render.Rect{476, 32, 360, height})
+	testing.expect_value(t, g.filter_field, render.Rect{488, 44, 336, 32})
+	testing.expect_value(t, g.filter_clear, render.Rect{})
+	box, shown := ui.changes_filter_box(g, &view, &f.text)
+	testing.expect(t, shown && box.rect == g.filter_field)
+
+	testing.expect(t, ui.field_set(&editor, "foo !.json") == nil)
+	g = ui.changes_geometry({0, 0, 900, 600}, 1, &view, &f.text)
+	testing.expect_value(t, g.filter_clear, render.Rect{796, 48, 24, 24})
+	box, shown = ui.changes_filter_box(g, &view, &f.text)
+	testing.expect(t, shown && box.rect.width == 796 - 488)
+	ui.changes_layout(&state, &view, &f.text, &f.mono, g.diff.width, 1)
+
+	field_x, field_y := centre(g.filter_field)
+	clear_x, clear_y := centre(g.filter_clear)
+	pad_x, pad_y := g.filter_popover.x + 4, g.filter_popover.y + g.filter_popover.height - 4
+	// Closed, the points belong to what lies under the popover.
+	testing.expect(t, ui.changes_hit(g, &view, &state, field_x, field_y).part != .Filter_Field)
+	testing.expect(t, ui.changes_hit(g, &view, &state, clear_x, clear_y).part != .Filter_Clear)
+	state.filter_open = true
+	on_field := ui.changes_hit(g, &view, &state, field_x, field_y)
+	testing.expect_value(t, on_field, ui.Changes_Hit{.Filter_Field, 0, 0})
+	on_clear := ui.changes_hit(g, &view, &state, clear_x, clear_y)
+	testing.expect_value(t, on_clear, ui.Changes_Hit{.Filter_Clear, 0, 0})
+	on_padding := ui.changes_hit(g, &view, &state, pad_x, pad_y)
+	testing.expect_value(t, on_padding, ui.Changes_Hit{.Filter_Field, -1, 0})
+	// The open popover answers before the turn list under it.
+	state.turn_list_open = true
+	on_field = ui.changes_hit(g, &view, &state, field_x, field_y)
+	testing.expect_value(t, on_field, ui.Changes_Hit{.Filter_Field, 0, 0})
+
+	// A narrow pane keeps it inside, still under the button.
+	narrow := ui.changes_geometry({0, 0, 300, 400}, 1, &view, &f.text)
+	testing.expect_value(t, narrow.filter_popover.x, f32(8))
+	testing.expect_value(t, narrow.filter_popover.width, f32(284))
+}
+
+@(test)
+changes_filter_bar_shows_only_while_the_filter_hides_files :: proc(t: ^testing.T) {
+	f: Changes_Fixture
+	view: ui.Changes_View
+	if !fixture_make(t, &f, &view) {return}
+	defer font.system_destroy(f.fonts)
+	state: ui.Changes_State
+	defer ui.changes_state_destroy(&state)
+
+	plain := ui.changes_geometry({0, 0, 900, 600}, 1, &view, &f.text)
+	testing.expect_value(t, plain.filter_bar, render.Rect{})
+	testing.expect_value(t, plain.diff, render.Rect{0, 28, 900, 572})
+
+	view.filter_active, view.hidden_count, view.total_files = true, 3, 5
+	g := ui.changes_geometry({0, 0, 900, 600}, 1, &view, &f.text)
+	testing.expect_value(t, g.filter_bar, render.Rect{0, 28, 900, 24})
+	testing.expect_value(t, g.diff, render.Rect{0, 52, 900, 548})
+	clear := g.filter_bar_clear
+	testing.expect(t, clear.width > 0 && clear.x + clear.width == 892)
+	testing.expect(t, clear.y >= 28 && clear.y + clear.height <= 52)
+	ui.changes_layout(&state, &view, &f.text, &f.mono, g.diff.width, 1)
+	x, y := centre(clear)
+	testing.expect_value(t, ui.changes_hit(g, &view, &state, x, y), ui.Changes_Hit{.Filter_Bar_Clear, 0, 0})
+	testing.expect_value(t, ui.changes_hit(g, &view, &state, 40, 40), ui.Changes_Hit{})
+	// The first file's header now starts under the bar.
+	header := ui.changes_hit(g, &view, &state, 50, 52 + 5)
+	testing.expect_value(t, header, ui.Changes_Hit{.File_Header, 0, 0})
+
+	// Active but hiding nothing, or invalid, there is no bar.
+	view.hidden_count = 0
+	quiet := ui.changes_geometry({0, 0, 900, 600}, 1, &view, &f.text)
+	testing.expect_value(t, quiet.filter_bar, render.Rect{})
+	view.hidden_count, view.filter_active, view.filter_invalid = 3, false, true
+	invalid := ui.changes_geometry({0, 0, 900, 600}, 1, &view, &f.text)
+	testing.expect_value(t, invalid.filter_bar, render.Rect{})
+	testing.expect_value(t, invalid.diff.y, f32(28))
+
+	// A send bar still sits at the bottom with the filter bar at the top.
+	view.filter_active, view.filter_invalid, view.send.count = true, false, 1
+	both := ui.changes_geometry({0, 0, 900, 600}, 1, &view, &f.text)
+	testing.expect_value(t, both.diff.y, f32(52))
+	testing.expect_value(t, both.diff.y + both.diff.height, both.send_bar.y)
+}
+
+@(test)
+changes_draw_shows_the_filter_bar_and_the_open_popover :: proc(t: ^testing.T) {
+	device, device_error := render.device_create(.Warp)
+	if !testing.expect_value(t, device_error, render.Error.None) {return}
+	defer render.device_destroy(device)
+	f: Changes_Fixture
+	view: ui.Changes_View
+	if !fixture_make(t, &f, &view) {return}
+	defer font.system_destroy(f.fonts)
+	cache: glyphs.Cache
+	glyphs.init(&cache, f.fonts, device)
+	defer glyphs.destroy(&cache)
+	if !testing.expect(t, ui.text_init(&f.text, f.fonts, &cache, 13)) {return}
+	f.mono = ui.text_mono(&f.text, f.text.family)
+	state: ui.Changes_State
+	defer ui.changes_state_destroy(&state)
+	list := render.draw_list_init()
+	defer render.draw_list_destroy(&list)
+	editor: ui.Text_Field
+	defer delete(editor.bytes)
+	testing.expect(t, ui.field_set(&editor, "a") == nil)
+	view.filter_editor = &editor
+	view.filter_active, view.hidden_count, view.total_files = true, 1, 3
+	state.filter_open = true
+
+	g := ui.changes_geometry({0, 0, 900, 600}, 1, &view, &f.text)
+	ui.changes_layout(&state, &view, &f.text, &f.mono, g.diff.width, 1)
+	if !draw_into(t, &f, &list, &view, &state, g) {return}
+	bar, hint := 0, 0
+	hint_top := g.filter_field.y + g.filter_field.height
+	for glyph in list.glyphs {
+		y := glyph.rect.y + glyph.rect.height / 2
+		x := glyph.rect.x
+		in_bar := y >= g.filter_bar.y && y < g.filter_bar.y + g.filter_bar.height
+		if in_bar && x < g.filter_popover.x {bar += 1}
+		inside := x >= g.filter_field.x && x < g.filter_field.x + g.filter_field.width
+		if inside && y > hint_top && y < g.filter_popover.y + g.filter_popover.height {hint += 1}
+	}
+	testing.expect(t, bar > 0)
+	testing.expect(t, hint > 0)
+
+	// Invalid: the error replaces the hint, and the bar goes.
+	view.filter_active, view.filter_invalid = false, true
+	view.filter_error = "Invalid regular expression: ["
+	g = ui.changes_geometry({0, 0, 900, 600}, 1, &view, &f.text)
+	testing.expect_value(t, g.filter_bar, render.Rect{})
+	if !draw_into(t, &f, &list, &view, &state, g) {return}
 }
 
 @(test)
@@ -199,8 +364,8 @@ changes_geometry_fits_the_toolbar_controls :: proc(t: ^testing.T) {
 	view.hooks_offer = true
 	offered := ui.changes_geometry({0, 0, 900, 600}, 1, &view, &f.text)
 	testing.expect(t, offered.hooks.width > 0)
-	// Install turn hooks sits left of the layout toggle and the file list button.
-	testing.expect(t, abs(offered.hooks.x + offered.hooks.width - (offered.layout_button.x - 8)) < 0.01)
+	// Install turn hooks sits left of the filter, layout and file list buttons.
+	testing.expect(t, abs(offered.hooks.x + offered.hooks.width - (offered.filter_button.x - 8)) < 0.01)
 	testing.expect(t, offered.scope.x + offered.scope.width <= offered.hooks.x)
 	testing.expect(t, offered.range_label.x + offered.range_label.width <= offered.hooks.x)
 	testing.expect(t, offered.repository.x + offered.repository.width <= offered.hooks.x)

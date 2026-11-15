@@ -36,9 +36,15 @@ TURN_LIST_ROWS :: 10
 @(private = "file")
 RANGE_LABEL_BYTES :: 64
 @(private = "file")
-CHANGES_DISABLED_ALPHA :: f32(0.45)
-@(private = "file")
 WORKING_MARK :: Status_Mark{glyph = .Working, progress = -1}
+@(private = "file")
+FILTER_POPOVER_WIDTH :: f32(360)
+@(private = "file")
+FILTER_PLACEHOLDER :: "Show files matching…"
+@(private = "file")
+FILTER_HINT :: "Space-separated regular expressions; !term hides matches"
+@(private = "file")
+FILTER_CLEAR_LABEL :: "Clear"
 
 // The range label's text. Turns are numbered from the oldest, which is 1.
 changes_range_label :: proc(view: ^Changes_View, buf: []u8) -> string {
@@ -59,6 +65,13 @@ changes_step_enabled :: proc(view: ^Changes_View) -> (back, forward: bool) {
 	if count == 0 {return false, false}
 	if view.first < 0 || view.first >= count {return true, true}
 	return max(view.first, view.last) < count - 1, view.first > 0
+}
+
+// Whether the file list has anything to list. It keeps the files the filter hides, so it opens while
+// the diff has any file, shown or not.
+@(private)
+changes_files_listed :: proc(view: ^Changes_View) -> bool {
+	return len(view.files) > 0 || view.hidden_count > 0
 }
 
 // The first live turn's row, or -1.
@@ -446,8 +459,144 @@ range_label_draw :: proc(
 	return .Ok, spinning
 }
 
-// The layout toggle, inked in the accent on the selected fill while side by side, and the file list
-// button: outlined while its list is open, faded without files.
+// The filter bar under the toolbar: its row and the Clear button at the right.
+@(private)
+filter_bar_place :: proc(g: ^Changes_Geometry, text: ^Text, y: f32) {
+	s := g.scale
+	area := g.area
+	height := min(math.round(HEIGHT_COMPACT * s), max(0, area.y + area.height - y))
+	if height <= 0 {return}
+	g.filter_bar = {area.x, y, area.width, height}
+	small := text_styled(text, .Detail)
+	width := math.ceil(text_width(&small, FILTER_CLEAR_LABEL) + 2 * CONTROL_INSET * s)
+	button := max(0, height - 2 * math.round(2 * s))
+	g.filter_bar_clear = {area.x + area.width - SPACE_2 * s - width, y + (height - button) / 2, width, button}
+}
+
+// The filter popover under its button, right-aligned to it inside the pane: the field, with its clear
+// button while it has text, and a hint line below.
+@(private)
+filter_popover_place :: proc(g: ^Changes_Geometry, view: ^Changes_View, text: ^Text) {
+	s := g.scale
+	area := g.area
+	pad, inset := SPACE_2 * s, SPACE_3 * s
+	width := min(math.round(FILTER_POPOVER_WIDTH * s), max(0, area.width - 2 * pad))
+	if width <= 2 * inset {return}
+	right := g.filter_button.x + g.filter_button.width
+	x := clamp(right - width, area.x + pad, max(area.x + pad, area.x + area.width - pad - width))
+	y := g.toolbar.y + g.toolbar.height + SPACE_1 * s
+	small := text_styled(text, .Detail)
+	field := math.round(HEIGHT_STANDARD * s)
+	g.filter_popover = {x, y, width, math.round(2 * inset + field + SPACE_2 * s + small.line_height)}
+	g.filter_field = {x + inset, y + inset, width - 2 * inset, field}
+	if view.filter_editor != nil && len(view.filter_editor.bytes) > 0 {
+		size := HEIGHT_COMPACT * s
+		f := g.filter_field
+		g.filter_clear = {f.x + f.width - SPACE_1 * s - size, f.y + (f.height - size) / 2, size, size}
+	}
+}
+
+// The filter field's editing box, short of the clear button; false without an editor or a field.
+changes_filter_box :: proc(
+	g: Changes_Geometry, view: ^Changes_View, text: ^Text,
+) -> (
+	box: Field_Box,
+	shown: bool,
+) {
+	if view.filter_editor == nil || g.filter_field.width <= 0 {return}
+	rect := g.filter_field
+	if g.filter_clear.width > 0 {rect.width = max(0, g.filter_clear.x - rect.x)}
+	return field_box_standard(view.filter_editor, text, rect, g.scale), true
+}
+
+// "N of M files hidden by the filter" and its Clear button.
+@(private)
+filter_bar_draw :: proc(
+	list: ^render.Draw_List,
+	text: ^Text,
+	theme: Theme,
+	g: Changes_Geometry,
+	view: ^Changes_View,
+	state: ^Changes_State,
+	pointer: [2]f32,
+) -> render.Build_Status {
+	bar := g.filter_bar
+	if bar.height <= 0 || bar.width <= 0 {return .Ok}
+	s := g.scale
+	draw_rect(list, {rect = {bar.x, bar.y + bar.height - s, bar.width, s}, color = theme.border})
+	small := text_styled(text, .Detail)
+	buf: [96]u8
+	noun := view.total_files == 1 ? "file" : "files"
+	label := fmt.bprintf(buf[:], "%d of %d %s hidden by the filter", view.hidden_count, view.total_files, noun)
+	clear := g.filter_bar_clear
+	x := bar.x + SPACE_3 * s
+	if status := draw_fading_text(
+		&small, list, label, x, baseline_in(bar.y, bar.height, &small), theme.muted,
+		max(0, clear.x - SPACE_2 * s - x),
+	); status != .Ok {return status}
+	if clear.width <= 0 {return .Ok}
+	hover, press := changes_lit(state, {.Filter_Bar_Clear, 0, 0})
+	b := Button {
+		rect    = clear,
+		hover   = hover,
+		press   = press,
+		radius  = RADIUS_CONTROL,
+		surface = .Flat,
+	}
+	face, ink, err := button_draw(list, theme, b, s, pointer)
+	if err != .None {return .Ok}
+	width := min(text_width(&small, FILTER_CLEAR_LABEL), face.width)
+	return draw_text(
+		&small, list, FILTER_CLEAR_LABEL, face.x + (face.width - width) / 2,
+		baseline_in(face.y, face.height, &small), ink, face.width,
+	)
+}
+
+// The open filter popover: the field (outlined in the error colour while the filter is invalid), its
+// clear button, and the hint or the error below.
+@(private)
+filter_popover_draw :: proc(
+	list: ^render.Draw_List,
+	text: ^Text,
+	theme: Theme,
+	g: Changes_Geometry,
+	view: ^Changes_View,
+	state: ^Changes_State,
+	pointer: [2]f32,
+) -> render.Build_Status {
+	if !state.filter_open || g.filter_popover.width <= 0 {return .Ok}
+	s := g.scale
+	scope, opened := clip_scope_open(list, g.area)
+	if !opened {return .Ok}
+	defer clip_scope_close(list, scope)
+	if panel_draw(list, popover_panel(g.filter_popover, s), theme) != .None {return .Ok}
+	field := g.filter_field
+	box_draw(list, field, theme, !view.filter_invalid, s)
+	if view.filter_invalid {
+		ring := render.Rect{field.x - 2 * s, field.y - 2 * s, field.width + 4 * s, field.height + 4 * s}
+		draw_rect(list, {rect = ring, color = theme.error, radius = (RADIUS_CONTROL + 2) * s, stroke = 2 * s})
+	}
+	if box, shown := changes_filter_box(g, view, text); shown {
+		status := field_box_draw(box, list, theme, field_box_baseline(box), true, FILTER_PLACEHOLDER)
+		if status != .Ok {return status}
+	}
+	if g.filter_clear.width > 0 {
+		hover, press := changes_lit(state, {.Filter_Clear, 0, 0})
+		err := icon_button_draw(
+			list, theme, g.filter_clear, .Close, hover, press, s, pointer, ICON_INDICATOR, RADIUS_CONTROL,
+		)
+		if err != .None {return .Ok}
+	}
+	small := text_styled(text, .Detail)
+	hint, ink := FILTER_HINT, theme.muted
+	if view.filter_invalid {hint, ink = clip_bytes(view.filter_error, CHANGES_CLIP_BYTES), theme.error}
+	baseline := field.y + field.height + SPACE_2 * s + small.ascent
+	return draw_fading_text(&small, list, hint, field.x, baseline, ink, field.width)
+}
+
+// The filter button (accent on the selected fill while a filter hides files, warning ink while it is
+// invalid, outlined while its popover is open), the layout toggle (accent on the selected fill while
+// side by side) and the file list button (outlined while its list is open, faded without files).
 @(private = "file")
 view_buttons_draw :: proc(
 	list: ^render.Draw_List,
@@ -458,6 +607,24 @@ view_buttons_draw :: proc(
 	pointer: [2]f32,
 ) -> render.Error {
 	s := g.scale
+	if g.filter_button.width > 0 {
+		hover, press := changes_lit(state, {.Filter_Button, 0, 0})
+		b := Button {
+			rect     = g.filter_button,
+			hover    = hover,
+			press    = press,
+			selected = view.filter_active,
+		}
+		face, ink, err := button_draw(list, theme, b, s, pointer)
+		if err != .None {return err}
+		if view.filter_invalid {
+			ink = theme.warning
+		} else if view.filter_active {
+			ink = theme.accent
+		}
+		icon_draw(list, .Filter, face, ink, ICON_BUTTON, s)
+		if state.filter_open {focus_ring_draw(list, face, theme, s)}
+	}
 	if g.layout_button.width > 0 {
 		hover, press := changes_lit(state, {.Layout_Button, 0, 0})
 		b := Button {
@@ -471,7 +638,7 @@ view_buttons_draw :: proc(
 		icon_draw(list, .Side_By_Side, face, view.side_by_side ? theme.accent : ink, ICON_BUTTON, s)
 	}
 	if g.files_button.width > 0 {
-		enabled := len(view.files) > 0
+		enabled := changes_files_listed(view)
 		hover, press := changes_lit(state, {.Files_Button, 0, 0})
 		b := Button {
 			rect     = g.files_button,
@@ -483,7 +650,7 @@ view_buttons_draw :: proc(
 		if err != .None {return err}
 		if !enabled {
 			ink = theme.muted
-			ink.a *= CHANGES_DISABLED_ALPHA
+			ink.a *= DISABLED_ALPHA
 		}
 		icon_draw(list, .Files, face, ink, ICON_BUTTON, s)
 		if state.files_open {focus_ring_draw(list, face, theme, s)}

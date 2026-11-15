@@ -74,6 +74,8 @@ Icon :: enum {
 	Files,
 	// A frame split into two columns of lines: old and new side by side.
 	Side_By_Side,
+	// A funnel: filter what shows.
+	Filter,
 }
 
 ICON_STROKE :: f32(1.25)
@@ -218,6 +220,8 @@ icon_draw :: proc(
 		pen_path(p, {3.5, 9}, {6, 9})
 		pen_path(p, {10, 6}, {12.5, 6})
 		pen_path(p, {10, 9}, {12.5, 9})
+	case .Filter:
+		pen_path(p, {2, 3}, {14, 3}, {9.5, 8.5}, {9.5, 13.5}, {6.5, 12}, {6.5, 8.5}, {2, 3})
 	case .Changes:
 		pen_path(p, {3, 2}, {10, 2}, {13, 5}, {13, 14}, {3, 14}, {3, 2})
 		pen_path(p, {6.5, 6}, {9.5, 6})
