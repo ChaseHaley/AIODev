@@ -382,7 +382,8 @@ changes_shown_release :: proc(model: ^Changes_Model) {
 	view.marked, view.ambiguous, view.collapsed = nil, nil, nil
 	model.faded, model.file_index, model.shown_files, model.shown_highlights = nil, nil, nil, nil
 	view.files, view.highlights = nil, nil
-	view.total_files, view.hidden_count = 0, 0
+	view.total_files, view.hidden_count, view.any_expanded = 0, 0, false
+	view.shown_added, view.shown_removed, view.total_added, view.total_removed = 0, 0, 0, 0
 }
 
 // Frees what the view owns beside the result: the row arrays, the file list's labels and the shown files.
@@ -496,6 +497,8 @@ changes_view_filter :: proc(pane: ^Changes_Pane) -> bool {
 	}
 	at := 0
 	for file, i in files {
+		view.total_added += file.added
+		view.total_removed += file.removed
 		if faded[i] {continue}
 		index[at], entries[at] = i, file
 		marked[at] = i < len(model.diff.marked) && model.diff.marked[i]
@@ -503,12 +506,15 @@ changes_view_filter :: proc(pane: ^Changes_Pane) -> bool {
 		_, folded := model.folded[file.new_path]
 		collapsed[at] = folded
 		if highlighted {highlights[at] = model.diff.highlights[i]}
+		view.shown_added += file.added
+		view.shown_removed += file.removed
 		at += 1
 	}
 	model.file_index, model.shown_files, model.shown_highlights = index, entries, highlights
 	view.marked, view.ambiguous, view.collapsed = marked, ambiguous, collapsed
 	view.files, view.highlights = entries, highlights
 	view.total_files, view.hidden_count = len(files), hidden
+	changes_expanded_sync(view)
 	return true
 }
 
@@ -537,12 +543,25 @@ changes_status_mark :: proc(status: turns.File_Status) -> string {
 	return "M"
 }
 
+// Whether some shown file is expanded, which the fold button reads to collapse rather than expand.
+@(private = "file")
+changes_expanded_sync :: proc(view: ^ui.Changes_View) {
+	view.any_expanded = false
+	for _, i in view.files {
+		if i >= len(view.collapsed) || !view.collapsed[i] {
+			view.any_expanded = true
+			return
+		}
+	}
+}
+
 // Folds or unfolds a file and remembers it by path, so the next result keeps it.
 changes_model_fold :: proc(model: ^Changes_Model, index: int) {
 	view := &model.view
 	if index < 0 || index >= len(view.collapsed) || index >= len(view.files) {return}
 	view.collapsed[index] = !view.collapsed[index]
 	view.revision += 1
+	changes_expanded_sync(view)
 	path := view.files[index].new_path
 	if view.collapsed[index] {
 		if path in model.folded {return}
@@ -550,6 +569,25 @@ changes_model_fold :: proc(model: ^Changes_Model, index: int) {
 	} else if key, _ := delete_key(&model.folded, path); key != "" {
 		delete(key)
 	}
+}
+
+// Folds every file of the result, the ones the filter hides too, or unfolds them all; remembered by path
+// as one fold is.
+changes_model_fold_all :: proc(model: ^Changes_Model, collapse: bool) {
+	view := &model.view
+	for file in model.diff.files {
+		path := file.new_path
+		if !collapse {
+			if key, _ := delete_key(&model.folded, path); key != "" {delete(key)}
+		} else if path not_in model.folded {
+			if key, err := strings.clone(path); err == nil {model.folded[key] = {}}
+		}
+	}
+	for file, i in view.files {
+		if i < len(view.collapsed) {view.collapsed[i] = file.new_path in model.folded}
+	}
+	view.revision += 1
+	changes_expanded_sync(view)
 }
 
 // Replaces the view's turns and diff with a turn query's, and the agents the source dropdown lists. Nothing

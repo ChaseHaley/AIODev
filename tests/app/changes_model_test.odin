@@ -414,6 +414,7 @@ the_diff_filter_hides_files_the_file_list_fades_and_a_pick_reveals :: proc(t: ^t
 	filter_to(pane, "!.json")
 	testing.expect(t, view.filter_active)
 	files := []turns.Diff_File{file_of("a.odin"), file_of("b.json"), file_of("c.odin")}
+	files[1].added, files[1].removed = 200, 5
 	q := app.Result_Query {
 		pane   = pane.id,
 		diff   = {files = files},
@@ -430,12 +431,18 @@ the_diff_filter_hides_files_the_file_list_fades_and_a_pick_reveals :: proc(t: ^t
 	testing.expect_value(t, pane.model.faded[0], false)
 	testing.expect_value(t, pane.model.faded[1], true)
 	testing.expect_value(t, pane.model.file_index[1], 2)
+	testing.expect_value(t, view.shown_added, 2)
+	testing.expect_value(t, view.shown_removed, 0)
+	testing.expect_value(t, view.total_added, 202)
+	testing.expect_value(t, view.total_removed, 5)
 
 	// A file picked from the list shows despite the filter and is no longer faded.
 	app.changes_filter_reveal(pane, "b.json")
 	testing.expect_value(t, len(view.files), 3)
 	testing.expect_value(t, view.hidden_count, 0)
 	testing.expect_value(t, pane.model.faded[1], false)
+	testing.expect_value(t, view.shown_added, 202)
+	testing.expect_value(t, view.shown_removed, 5)
 	// A refresh keeps it shown.
 	app.changes_fill_query(&state, pane, &q, now_time(), true)
 	testing.expect_value(t, len(view.files), 3)
@@ -475,6 +482,39 @@ an_invalid_diff_filter_shows_every_file_and_says_why :: proc(t: ^testing.T) {
 	filter_to(pane, "")
 	testing.expect(t, !view.filter_active)
 	testing.expect_value(t, len(view.files), 2)
+}
+
+@(test)
+fold_all_folds_every_file_the_hidden_ones_too :: proc(t: ^testing.T) {
+	state: app.App
+	defer app.changes_app_destroy(&state.changes_state)
+	pane := pane_start(&state, .Repository)
+	if !testing.expect(t, pane != nil) {return}
+	view := &pane.model.view
+	files := []turns.Diff_File{file_of("a.odin"), file_of("b.json"), file_of("c.odin")}
+	q := app.Result_Query {
+		pane = pane.id,
+		diff = {files = files},
+	}
+	app.changes_fill_query(&state, pane, &q, now_time(), true)
+	testing.expect(t, view.any_expanded)
+	filter_to(pane, "!json")
+	app.changes_model_fold(&pane.model, 0)
+	testing.expect(t, view.any_expanded, "c.odin is still expanded")
+	app.changes_model_fold_all(&pane.model, true)
+	testing.expect(t, view.collapsed[0] && view.collapsed[1])
+	testing.expect(t, !view.any_expanded)
+	// The hidden file was folded too, so revealing it shows it folded.
+	app.changes_filter_reveal(pane, "b.json")
+	if !testing.expect_value(t, len(view.files), 3) {return}
+	testing.expect(t, view.collapsed[1])
+	app.changes_model_fold_all(&pane.model, false)
+	testing.expect(t, !view.collapsed[0] && !view.collapsed[1] && !view.collapsed[2])
+	testing.expect(t, view.any_expanded)
+	// A refresh keeps the folds by path.
+	app.changes_model_fold_all(&pane.model, true)
+	app.changes_fill_query(&state, pane, &q, now_time(), true)
+	testing.expect(t, !view.any_expanded)
 }
 
 @(test)

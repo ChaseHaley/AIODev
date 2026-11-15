@@ -339,6 +339,87 @@ the_file_list_keeps_its_highlight_when_a_new_result_arrives :: proc(t: ^testing.
 }
 
 @(test)
+fold_all_and_the_sticky_header_keep_the_file_at_the_top :: proc(t: ^testing.T) {
+	f: Fixture
+	defer {
+		app.app_destroy(&f.state)
+		testing.expect_value(t, os.remove_all(f.directory), nil)
+		delete(f.directory)
+	}
+	if !fixture_start(t, &f, "FoldAll") {return}
+	w := f.state.windows[0]
+	app.run_action(&f.state, w, .Agent_Changes)
+	if !testing.expect_value(t, len(f.state.changes_panes), 1) {return}
+	pane := f.state.changes_panes[0]
+	shown, found := changes_pane_of(&f.state, w)
+	if !testing.expect(t, found) {return}
+	view := &pane.model.view
+	lines := make([]turns.Diff_Line, 60)
+	defer delete(lines)
+	for &line, i in lines {line = {kind = .Context, old_line = i32(i + 1), new_line = i32(i + 1), text = "line"}}
+	hunks := []turns.Hunk{{old_start = 1, old_count = 60, new_start = 1, new_count = 60, lines = lines}}
+	names: [60]string
+	for &name, i in names {name = fmt.tprintf("file_%02d.odin", i)}
+	files := files_named(names[:], hunks)
+	defer delete(files)
+	plain := app.Result_Plain {
+		pane = pane.id,
+		diff = {files = files},
+	}
+	app.changes_fill_plain(&f.state, pane, &plain)
+	testing.expect(t, view.any_expanded)
+	top_of :: proc(f: ^Fixture, w: ^app.Window, pane: ^app.Changes_Pane, shown: layout.Pane_Rect) -> int {
+		_ = app.changes_geometry_of(&f.state, w, pane, shown)
+		return ui.changes_top_file(&pane.state, &pane.model.view)
+	}
+
+	// Collapsing every file keeps the file at the top there; expanding brings it back the same way.
+	app.changes_file_pick(&f.state, w, pane, 20)
+	testing.expect_value(t, top_of(&f, w, pane, shown), 20)
+	g := app.changes_geometry_of(&f.state, w, pane, shown)
+	click(&f.state, w, g.fold_button)
+	for folded, i in view.collapsed {testing.expectf(t, folded, "file %d collapses", i)}
+	testing.expect(t, !view.any_expanded)
+	testing.expect_value(t, top_of(&f, w, pane, shown), 20)
+	g = app.changes_geometry_of(&f.state, w, pane, shown)
+	click(&f.state, w, g.fold_button)
+	for folded, i in view.collapsed {testing.expectf(t, !folded, "file %d expands", i)}
+	testing.expect(t, view.any_expanded)
+	testing.expect_value(t, top_of(&f, w, pane, shown), 20)
+
+	// Collapsing from the pinned header puts that file's header at the top.
+	pane.state.diff_scroll = ui.changes_diff_file_top(&pane.state, view, 20) + 300
+	g = app.changes_geometry_of(&f.state, w, pane, shown)
+	sticky, sticky_rect := ui.changes_sticky_header(&pane.state, view, g)
+	if !testing.expect_value(t, sticky, 20) {return}
+	click(&f.state, w, sticky_rect)
+	testing.expect(t, view.collapsed[20])
+	testing.expect_value(t, top_of(&f, w, pane, shown), 20)
+	testing.expect_value(t, pane.state.diff_scroll, ui.changes_diff_file_top(&pane.state, view, 20))
+	g = app.changes_geometry_of(&f.state, w, pane, shown)
+	sticky, _ = ui.changes_sticky_header(&pane.state, view, g)
+	testing.expect_value(t, sticky, -1)
+	// The file's own header, now under the pointer, keeps the hover the pinned one had.
+	testing.expect_value(t, pane.state.hover, ui.Changes_Hit{.File_Header, 20, 0})
+	testing.expect_value(t, pane.state.lit, ui.Changes_Hit{.File_Header, 20, 0})
+
+	// A header in its own place collapses without moving the diff.
+	pane.state.diff_scroll = ui.changes_diff_file_top(&pane.state, view, 2) - 100
+	g = app.changes_geometry_of(&f.state, w, pane, shown)
+	before := pane.state.diff_scroll
+	click(&f.state, w, {g.diff.x + 40, g.diff.y + 102, 10, 4})
+	testing.expect(t, view.collapsed[2], "the header in place collapses")
+	testing.expect_value(t, pane.state.diff_scroll, before)
+
+	// A page leaves out the row a pinned header covers.
+	pane.state.diff_scroll = ui.changes_diff_file_top(&pane.state, view, 10)
+	g = app.changes_geometry_of(&f.state, w, pane, shown)
+	before = pane.state.diff_scroll
+	tap(&f.state, w, .Page_Down)
+	testing.expect_value(t, pane.state.diff_scroll, before + int(g.diff.height) - pane.state.rows.header)
+}
+
+@(test)
 the_file_list_regex_search_matches_paths_not_labels :: proc(t: ^testing.T) {
 	f: Fixture
 	defer {

@@ -472,13 +472,33 @@ changes_file_pick :: proc(app: ^App, w: ^Window, pane: ^Changes_Pane, choice: in
 	}
 	if index < 0 {return}
 	if index < len(view.collapsed) && view.collapsed[index] {changes_model_fold(model, index)}
+	changes_scroll_to_file(app, w, pane, index)
+}
+
+// Lays the pane out again and scrolls the diff so shown file `index` has its header at the top. Laid out
+// first, so the file's top counts a body just folded or unfolded; then kept within what can scroll.
+@(private = "file")
+changes_scroll_to_file :: proc(app: ^App, w: ^Window, pane: ^Changes_Pane, index: int) {
+	w.dirty = true
 	shown, found := changes_pane_rect(w, pane.id)
 	if !found {return}
-	// Laid out first, so the file's top counts the unfolded body; then kept within what can scroll.
 	g := changes_geometry_of(app, w, pane, shown)
-	pane.state.diff_scroll = ui.changes_diff_file_top(&pane.state, view, index)
+	pane.state.diff_scroll = ui.changes_diff_file_top(&pane.state, &pane.model.view, index)
 	_ = ui.changes_scroll_diff(&pane.state, g, 0)
+}
+
+// Collapses every file while any shown one is expanded, else expands them all; the file at the top of the
+// diff stays there.
+changes_fold_all :: proc(app: ^App, w: ^Window, pane: ^Changes_Pane) {
+	view := &pane.model.view
+	top := -1
+	if shown, found := changes_pane_rect(w, pane.id); found {
+		_ = changes_geometry_of(app, w, pane, shown)
+		top = ui.changes_top_file(&pane.state, view)
+	}
+	changes_model_fold_all(&pane.model, view.any_expanded)
 	w.dirty = true
+	if top >= 0 {changes_scroll_to_file(app, w, pane, top)}
 }
 
 // Switches the pane between the unified and side-by-side diff, keeping the file at the top in view.
@@ -771,7 +791,8 @@ changes_key :: proc(app: ^App, w: ^Window, e: input.Key_Event) {
 	g := changes_geometry_of(app, w, pane, shown)
 	view := &pane.model.view
 	turn_scope := ui.changes_scope_turns(pane.scope)
-	page := max(1, int(g.diff.height))
+	// A page leaves out the row a pinned header covers, so nothing slides under it unseen.
+	page := max(1, int(g.diff.height) - pane.state.rows.header)
 	#partial switch key.logical.key {
 	case .Arrow_Left:
 		// Older turns sit to the left in the strip.
@@ -852,7 +873,8 @@ changes_cursor :: proc(hit: ui.Changes_Hit) -> platform.Cursor_Shape {
 	#partial switch hit.part {
 	case .Scope, .Worktree, .Hooks, .Notice_Button, .File_Header, .Strip_Bar, .Step_Back, .Step_Forward,
 	     .Range_Label, .Hunk_Comment, .Comment_Button, .Comment_Card, .Comment_Delete, .Send, .Copy, .Discard,
-	     .Files_Button, .Layout_Button, .Filter_Button, .Filter_Clear, .Filter_Bar_Clear:
+	     .Files_Button, .Layout_Button, .Filter_Button, .Filter_Clear, .Filter_Bar_Clear, .Fold_Button,
+	     .Sticky_Header:
 		return .Hand
 	case .Turn_List_Row:
 		if hit.index >= 0 {return .Hand}
@@ -1017,6 +1039,17 @@ changes_press :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) {
 		}
 	case .File_Header:
 		changes_model_fold(&pane.model, hit.index)
+	case .Sticky_Header:
+		// The pinned header's file goes to the top, so what its press folds stays under the pointer: the
+		// file's own header, which takes over the pinned one's hover and press.
+		changes_model_fold(&pane.model, hit.index)
+		changes_scroll_to_file(app, w, pane, hit.index)
+		header := ui.changes_hit(changes_geometry_of(app, w, pane, shown), view, &pane.state, x, y)
+		if header == (ui.Changes_Hit{.File_Header, hit.index, 0}) {
+			pane.state.hover, pane.state.press, pane.state.lit = header, header, header
+		}
+	case .Fold_Button:
+		changes_fold_all(app, w, pane)
 	case .Files_Button:
 		if len(pane.model.file_labels) > 0 {
 			changes_list_begin(app, pane)
@@ -1091,6 +1124,8 @@ changes_tooltip :: proc(app: ^App, w: ^Window, x, y: f32) -> string {
 		return "Files in this diff"
 	case .Filter_Button:
 		return "Filter files"
+	case .Fold_Button:
+		return view.any_expanded ? "Collapse all files" : "Expand all files"
 	}
 	return ""
 }
@@ -1126,8 +1161,8 @@ when AIO_CONTROL {
 		step_back_rect, step_forward_rect, range_label_rect: render.Rect
 		files_button_rect, layout_button_rect: render.Rect
 		filter_button_rect, filter_field_rect, filter_clear_rect, filter_bar_clear_rect: render.Rect
-		regex_rect: render.Rect
-		top_file := -1
+		regex_rect, fold_button_rect, sticky_rect: render.Rect
+		top_file, sticky_file := -1, -1
 		list_empty := ""
 		label_buffer: [64]u8
 		if pane != nil {
@@ -1152,6 +1187,8 @@ when AIO_CONTROL {
 					regex_rect = ui.dropdown_regex_rect(&pane.dropdown, choices, anchor, w.scale)
 				}
 				top_file = ui.changes_top_file(&pane.state, view)
+				fold_button_rect = g.fold_button
+				sticky_file, sticky_rect = ui.changes_sticky_header(&pane.state, view, g)
 				for i in 0 ..< len(view.turns) {
 					rect := ui.changes_strip_bar_rect(g, &pane.state, view, i)
 					if rect.width <= 0 || rect.height <= 0 {continue}
@@ -1220,6 +1257,8 @@ when AIO_CONTROL {
 		state_value(r, "changes.side_by_side", pane != nil && pane.side_by_side)
 		state_value(r, "changes.diff_scroll", pane != nil ? pane.state.diff_scroll : 0)
 		state_value(r, "changes.top_file", top_file)
+		state_value(r, "changes.any_expanded", pane != nil && pane.model.view.any_expanded)
+		state_value(r, "changes.sticky_file", sticky_file)
 		state_text(r, "changes.filter", pane != nil ? changes_filter_text(pane) : "")
 		state_value(r, "changes.filter_open", pane != nil && pane.state.filter_open)
 		state_value(r, "changes.filter_active", pane != nil && pane.model.view.filter_active)
@@ -1227,6 +1266,10 @@ when AIO_CONTROL {
 		state_text(r, "changes.filter_error", pane != nil ? pane.filter_error : "")
 		state_value(r, "changes.hidden_files", pane != nil ? pane.model.view.hidden_count : 0)
 		state_value(r, "changes.total_files", pane != nil ? pane.model.view.total_files : 0)
+		state_value(r, "changes.shown_added", pane != nil ? pane.model.view.shown_added : 0)
+		state_value(r, "changes.shown_removed", pane != nil ? pane.model.view.shown_removed : 0)
+		state_value(r, "changes.total_added", pane != nil ? pane.model.view.total_added : 0)
+		state_value(r, "changes.total_removed", pane != nil ? pane.model.view.total_removed : 0)
 		state_value(r, "changes.file_list_regex", pane != nil && pane.dropdown.regex)
 		state_text(r, "changes.file_list_empty", list_empty)
 		state_text(r, "changes.range_label", range_label)
@@ -1244,6 +1287,8 @@ when AIO_CONTROL {
 		state_rect(r, "changes.filter_clear_rect", filter_clear_rect)
 		state_rect(r, "changes.filter_bar_clear_rect", filter_bar_clear_rect)
 		state_rect(r, "changes.file_list_regex_rect", regex_rect)
+		state_rect(r, "changes.fold_button_rect", fold_button_rect)
+		state_rect(r, "changes.sticky_rect", sticky_rect)
 		changes_comments_state_report(r, app, w, pane)
 	}
 }
