@@ -3,6 +3,8 @@ package main
 import "aio:layout"
 import "aio:platform"
 import "aio:procinfo"
+import "aio:settings"
+import "aio:turns"
 import "core:encoding/json"
 import "core:log"
 import "core:os"
@@ -66,6 +68,15 @@ Saved_Node :: struct {
 	name:      string `json:"name,omitempty"`,
 	// The file a Markdown pane shows.
 	path:      string `json:"path,omitempty"`,
+	// A Changes pane's agent (the key of the pane it ran in, its harness and session), scope name and diff
+	// view ("unified" or "side_by_side"; missing is the setting's default); its directory is `directory`.
+	changes_agent_pane:    string `json:"changes_agent_pane,omitempty"`,
+	changes_agent_harness: string `json:"changes_agent_harness,omitempty"`,
+	changes_agent_session: string `json:"changes_agent_session,omitempty"`,
+	changes_scope:         string `json:"changes_scope,omitempty"`,
+	changes_view:          string `json:"changes_view,omitempty"`,
+	// A Changes pane's diff filter, written even when empty because missing is the setting's default.
+	changes_filter:        Maybe(string) `json:"changes_filter,omitempty"`,
 	keep_open: bool,
 	// What the pane was running, shown above the fresh shell's prompt when it comes back.
 	command:   string `json:"command,omitempty"`,
@@ -321,6 +332,17 @@ layout_pane_encode :: proc(
 			saved.path, saved.documents = pane.path, pane.documents[:]
 		}
 	}
+	if content.kind == .Changes {
+		if pane := changes_find(app, content.id); pane != nil {
+			saved.directory, saved.changes_scope = pane.directory, changes_scope_name(pane.scope)
+			saved.changes_agent_pane, saved.changes_agent_harness = pane.agent.pane_key, pane.agent.harness
+			saved.changes_agent_session = pane.agent.session
+			view := pane.side_by_side ? settings.Diff_View.Side_By_Side : settings.Diff_View.Unified
+			views := settings.DIFF_VIEW_NAME
+			saved.changes_view = views[view]
+			saved.changes_filter = changes_filter_text(pane)
+		}
+	}
 	if !pane_owns_session(content.kind) {return saved}
 	entry := session_find(app, content.id)
 	if entry == nil {return saved}
@@ -565,6 +587,24 @@ layout_tab_restore :: proc(
 			if restored {
 				pane.content.id = document.id
 				documents_restore(&document.documents, saved.nodes[i].documents)
+			}
+		case .Changes:
+			// A repository that is gone only empties the pane; the tab still comes back.
+			node := &saved.nodes[i]
+			agent: turns.Session
+			if utf8.valid_string(node.changes_agent_pane) {agent.pane_key = node.changes_agent_pane}
+			if utf8.valid_string(node.changes_agent_harness) {agent.harness = node.changes_agent_harness}
+			if utf8.valid_string(node.changes_agent_session) {agent.session = node.changes_agent_session}
+			directory := utf8.valid_string(node.directory) ? node.directory : ""
+			scope := changes_scope_parse(node.changes_scope)
+			side_by_side := app.settings.turns.diff_view == .Side_By_Side
+			views := settings.DIFF_VIEW_NAME
+			if node.changes_view == views[.Unified] {side_by_side = false}
+			if node.changes_view == views[.Side_By_Side] {side_by_side = true}
+			filter := app.settings.turns.diff_filter
+			if text, kept := node.changes_filter.?; kept && utf8.valid_string(text) {filter = text}
+			if created := changes_pane_create(app, agent, directory, scope, side_by_side, filter); created != nil {
+				pane.content.id, restored = created.id, true
 			}
 		}
 		if restored && CONTENT_POLICY[kind].one_per_workspace {

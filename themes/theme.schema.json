@@ -48,6 +48,8 @@
         "scrollbar_hover": {"type":"string","title":"Scrollbar hover","description":"Scrollbar thumb under the pointer.","pattern":"^#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?$"},
         "scrollbar_active": {"type":"string","title":"Scrollbar pressed","description":"Scrollbar thumb while dragged.","pattern":"^#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?$"},
         "code_background": {"type":"string","title":"Code background","description":"Code, inline code and frontmatter in Markdown panes.","pattern":"^#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?$"},
+        "diff_added": {"type":"string","title":"Added lines","description":"Lines a change added in Agent changes.","pattern":"^#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?$"},
+        "diff_removed": {"type":"string","title":"Removed lines","description":"Lines a change removed in Agent changes.","pattern":"^#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?$"},
         "foreground": {"type":"string","title":"Foreground","description":"Default shell text.","pattern":"^#[0-9a-fA-F]{6}$"},
         "background": {"type":"string","title":"Background","description":"Default shell background and its pane card.","pattern":"^#[0-9a-fA-F]{6}$"},
         "cursor": {"type":"string","title":"Cursor","description":"Cursor color.","pattern":"^#[0-9a-fA-F]{6}$"},

@@ -24,12 +24,15 @@ Confirmation_Subject :: union {
 	Opener_Remove,
 	Settings_Reset,
 	Update_Restart,
+	Turns_Delete,
 }
 
 Confirmation_Text :: struct {
 	title, body, label, note: string,
 	// The checkbox beside the buttons; empty shows none.
 	option:                   string,
+	// The Cancel button's words; empty keeps "Cancel".
+	cancel:                   string,
 }
 
 // The question the window shows, asking or closing; nil when it asks nothing.
@@ -104,6 +107,8 @@ confirmation_finish :: proc(app: ^App, w: ^Window, accept: bool) {
 		settings_reset_finish(app, subject, accept)
 	case Update_Restart:
 		update_restart_finish(app, accept)
+	case Turns_Delete:
+		turns_delete_finish(app, accept)
 	}
 }
 
@@ -128,6 +133,7 @@ confirmation_clear :: proc(w: ^Window) {
 		settings_reset_destroy(&subject)
 	case Update_Restart:
 		update_restart_destroy(&subject)
+	case Turns_Delete:
 	}
 	w.confirmation = nil
 }
@@ -235,6 +241,8 @@ confirmation_text :: proc(app: ^App, w: ^Window, c: ^Confirmation, recount: bool
 		return settings_reset_text()
 	case Update_Restart:
 		return update_restart_text(subject)
+	case Turns_Delete:
+		return turns_delete_text()
 	}
 	return {}
 }
@@ -247,6 +255,7 @@ confirmation_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 		&c.dialog, &w.list, &w.ui_text, app.theme, f32(w.width), f32(w.height), w.scale,
 		text.title, text.body, text.label, text.note, text.option,
 		ui.presence_fade(c.dialog.presence, ui.RISE_DIALOG * w.scale), w.pointer,
+		text.cancel != "" ? text.cancel : "Cancel",
 	)
 }
 

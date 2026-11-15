@@ -34,6 +34,8 @@
     "scrollbar_hover": "#ebdbb280",
     "scrollbar_active": "#ebdbb2b3",
     "code_background": "#ebdbb217",
+    "diff_added": "#b8bb2624",
+    "diff_removed": "#fc7c6d24",
     "foreground": "#ebdbb2",
     "background": "#282828",
     "cursor": "#ebdbb2",

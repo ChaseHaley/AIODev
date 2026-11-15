@@ -30,6 +30,7 @@ SETTINGS_FILE :: "settings.ini"
 LOGS_DIRECTORY :: "logs"
 CAPTURES_DIRECTORY :: "captures"
 AGENTS_DIRECTORY :: "agent-sessions"
+TURNS_DIRECTORY :: "agent-turns"
 
 Options :: struct {
 	name:      string,
@@ -133,6 +134,8 @@ Paths :: struct {
 	palette:  string,
 	// The record each pane's agent session hook writes, one file per pane key.
 	agents:   string,
+	// What agent turns recorded, the hook inbox and the recording marker; see package turns.
+	turns:    string,
 	// <--data-dir>\settings.ini, else the roaming AIODev\settings.ini, which named instances share
 	// with the default instance.
 	settings: string,
@@ -183,6 +186,9 @@ paths_resolve :: proc(
 	agents_name := strings.concatenate({AGENTS_DIRECTORY, suffix, options.name}, allocator) or_return
 	defer delete(agents_name, allocator)
 	p.agents = filepath.join({p.local, agents_name}, allocator) or_return
+	turns_name := strings.concatenate({TURNS_DIRECTORY, suffix, options.name}, allocator) or_return
+	defer delete(turns_name, allocator)
+	p.turns = filepath.join({p.local, turns_name}, allocator) or_return
 	return p, nil
 }
 
@@ -193,6 +199,7 @@ paths_destroy :: proc(p: ^Paths, allocator := context.allocator) {
 	delete(p.layout, allocator)
 	delete(p.palette, allocator)
 	delete(p.agents, allocator)
+	delete(p.turns, allocator)
 	delete(p.settings, allocator)
 	delete(p.captures, allocator)
 	p^ = {}

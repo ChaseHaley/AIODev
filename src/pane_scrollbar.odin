@@ -71,6 +71,12 @@ pane_scrollbar_geometry :: proc(
 		if page == nil || markdown_document(page) == nil {return}
 		area = pane_scrollbar_area(markdown_geometry_of(app, w, pane).area, w.scale)
 		extent = {ui.markdown_total(&page.view), int(area.height), page.view.scroll}
+	case .Changes:
+		page := changes_find(app, pane.content.id)
+		if page == nil {return}
+		g := changes_geometry_of(app, w, page, pane)
+		area = pane_scrollbar_area(g.diff, w.scale)
+		extent = ui.changes_diff_extent(&page.state, g)
 	case:
 		return
 	}
@@ -103,6 +109,8 @@ pane_scrollbar_drag_to :: proc(app: ^App, content: layout.Content, offset: int) 
 		}
 	case .Markdown:
 		if page := markdown_find(app, content.id); page != nil {page.view.scroll = offset}
+	case .Changes:
+		if page := changes_find(app, content.id); page != nil {page.state.diff_scroll = offset}
 	}
 }
 
@@ -122,6 +130,8 @@ pane_scrollbar_press :: proc(app: ^App, w: ^Window, pane: layout.Pane_Rect, x, y
 		}
 	case .Markdown:
 		if page := markdown_find(app, pane.content.id); page != nil {page.view.scroll = offset}
+	case .Changes:
+		if page := changes_find(app, pane.content.id); page != nil {page.state.diff_scroll = offset}
 	}
 	w.scrollbars.drag = nil
 	if grab.active {w.scrollbars.drag = Pane_Scroll_Drag{pane.content, grab}}
@@ -140,6 +150,7 @@ pane_scrollbar_move :: proc(app: ^App, w: ^Window, x, y: f32) {
 			page := markdown_find(app, held.content.id)
 			if page == nil || markdown_document(page) == nil {break}
 		}
+		if held.content.kind == .Changes && changes_find(app, held.content.id) == nil {break}
 		bar, visible := pane_scrollbar_geometry(app, w, pane)
 		if !visible {return}
 		pane_scrollbar_drag_to(app, held.content, ui.scrollbar_drag(held.grab, bar, y))
@@ -147,7 +158,7 @@ pane_scrollbar_move :: proc(app: ^App, w: ^Window, x, y: f32) {
 		return
 	}
 	w.scrollbars.drag = nil
-	if held.content.kind == .Markdown {w.dirty = true}
+	if held.content.kind == .Markdown || held.content.kind == .Changes {w.dirty = true}
 }
 
 // Ends a held thumb of `kind`; reports whether there was one.

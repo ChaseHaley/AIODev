@@ -1,0 +1,101 @@
+package app_test
+
+import "core:strings"
+import "core:testing"
+import app "../../src"
+
+@(private = "file")
+PATHS :: [?]string{"src/foo.odin", "src/foo.json", "tests/foo_test.odin", "docs/bar.md", "README.md"}
+
+// The paths the filter `text` shows, space-separated, and what setting it reported.
+@(private = "file")
+filter_shows :: proc(text: string) -> (shown: string, ok: bool, error: string) {
+	f: app.Changes_Filter
+	defer app.changes_filter_destroy(&f)
+	ok, error = app.changes_filter_set(&f, text)
+	b := strings.builder_make(context.temp_allocator)
+	for path in PATHS {
+		if !app.changes_filter_shows(&f, path) {continue}
+		if strings.builder_len(b) > 0 {strings.write_byte(&b, ' ')}
+		strings.write_string(&b, path)
+	}
+	return strings.to_string(b), ok, error
+}
+
+@(test)
+the_diff_filter_keeps_paths_matching_every_term_and_no_excluded_one :: proc(t: ^testing.T) {
+	Case :: struct {
+		text, shown: string,
+	}
+	every := "src/foo.odin src/foo.json tests/foo_test.odin docs/bar.md README.md"
+	cases := []Case {
+		{"", every},
+		{"   ", every},
+		{"foo", "src/foo.odin src/foo.json tests/foo_test.odin"},
+		{"FOO", "src/foo.odin src/foo.json tests/foo_test.odin"},
+		{"foo !.json", "src/foo.odin tests/foo_test.odin"},
+		{"!test", "src/foo.odin src/foo.json docs/bar.md README.md"},
+		{"src odin", "src/foo.odin"},
+		{"bar|readme", "docs/bar.md README.md"},
+		{`\.md$ !^docs/`, "README.md"},
+		// A lone ! is no term.
+		{"! foo", "src/foo.odin src/foo.json tests/foo_test.odin"},
+	}
+	for c in cases {
+		shown, ok, error := filter_shows(c.text)
+		testing.expectf(t, ok, "%q is valid", c.text)
+		testing.expect_value(t, error, "")
+		testing.expectf(t, shown == c.shown, "%q shows %q, not %q", c.text, shown, c.shown)
+	}
+}
+
+@(test)
+an_invalid_diff_filter_hides_nothing_and_names_the_term :: proc(t: ^testing.T) {
+	every := "src/foo.odin src/foo.json tests/foo_test.odin docs/bar.md README.md"
+	shown, ok, error := filter_shows("foo [")
+	testing.expect(t, !ok)
+	testing.expect_value(t, error, "Invalid regular expression: [")
+	testing.expect_value(t, shown, every)
+	shown, ok, error = filter_shows("!(")
+	testing.expect(t, !ok)
+	testing.expect_value(t, error, "Invalid regular expression: !(")
+	testing.expect_value(t, shown, every)
+
+	// A filter set again after a failure works as usual.
+	f: app.Changes_Filter
+	defer app.changes_filter_destroy(&f)
+	_, _ = app.changes_filter_set(&f, "[")
+	again, again_error := app.changes_filter_set(&f, "json")
+	testing.expect(t, again)
+	testing.expect_value(t, again_error, "")
+	testing.expect(t, app.changes_filter_shows(&f, "a.json"))
+	testing.expect(t, !app.changes_filter_shows(&f, "a.odin"))
+}
+
+@(test)
+a_renamed_file_matches_the_diff_filter_by_either_path :: proc(t: ^testing.T) {
+	Case :: struct {
+		text:  string,
+		shows: bool,
+	}
+	cases := []Case {
+		{"old_name", true},
+		{"new_name", true},
+		{"!old_name", false},
+		{"!new_name", false},
+		// Each plain term may match either path.
+		{"old_name new_name", true},
+		{"new_name !old_name", false},
+		{"other", false},
+	}
+	for c in cases {
+		f: app.Changes_Filter
+		ok, _ := app.changes_filter_set(&f, c.text)
+		testing.expect(t, ok)
+		shows := app.changes_filter_shows(&f, "src/new_name.odin", "src/old_name.odin")
+		testing.expectf(t, shows == c.shows, "%q shows the rename: %v", c.text, shows)
+		// Without the old path only the new one counts.
+		if c.text == "!old_name" {testing.expect(t, app.changes_filter_shows(&f, "src/new_name.odin"))}
+		app.changes_filter_destroy(&f)
+	}
+}

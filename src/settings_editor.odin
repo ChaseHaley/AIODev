@@ -205,6 +205,7 @@ SETTINGS_GROUP_AREAS := [?]struct {
 	{"Scrollback", .General},
 	{"Shell", .General},
 	{"Activity", .General},
+	{"Agent changes", .General},
 	{"Motion", .Advanced},
 	{"Profiles", .Advanced},
 	{"Link programs", .Advanced},

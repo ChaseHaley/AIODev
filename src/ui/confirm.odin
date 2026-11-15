@@ -254,6 +254,7 @@ confirm_draw :: proc(
 	option_label: string = "",
 	fade := FADE_NONE,
 	pointer: [2]f32 = {},
+	cancel_label := "Cancel",
 ) -> render.Build_Status {
 	l := confirm_layout(width, height, scale, c.extended, c.show_option)
 	s := scale
@@ -316,7 +317,7 @@ confirm_draw :: proc(
 			max(0, l.option.width - box.width - 8 * s),
 		); r != .Ok {return r}
 	}
-	if r := confirm_button_draw(c, list, text, theme, l.cancel, .Cancel, "Cancel", s, pointer);
+	if r := confirm_button_draw(c, list, text, theme, l.cancel, .Cancel, cancel_label, s, pointer);
 	   r != .Ok {return r}
 	return confirm_button_draw(c, list, text, theme, l.accept, .Accept, accept_label, s, pointer)
 }

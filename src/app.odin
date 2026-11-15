@@ -62,6 +62,7 @@ App :: struct {
 	settings_inputs:       settings.Inputs,
 	settings:              settings.Settings,
 	using markdown_state:  Markdown_App,
+	using changes_state:   Changes_App,
 	dialogs:               File_Dialogs,
 	// The settings file this app reads and saves; app_init takes it from paths.
 	settings_path:         string,
@@ -131,6 +132,8 @@ App :: struct {
 	next_prompt_id:         u64,
 	// init.lua's state, actions and timers; see lua_host.odin.
 	lua:                   Lua_Host,
+	// What agent turns changed, recorded or being recorded; see turn_recorder.odin.
+	turn_recorder:         Turn_Recorder,
 }
 
 // Creates the graphics device on a thread of its own. The driver takes longer to create one than
@@ -283,6 +286,7 @@ app_init :: proc(app: ^App) -> bool {
 		if _, created := tab_create(app, fresh); !created {return false}
 	}
 	if fresh != nil && !window_open(app, fresh) {return false}
+	turns_apply_settings(app)
 	agent_records_prune(app)
 	when AIO_CONTROL {verify_start(app)}
 	control_cli_sync(app)
@@ -309,6 +313,7 @@ app_destroy :: proc(app: ^App) {
 		tray_destroy(app)
 	}
 	process_worker_destroy(&app.processes)
+	turn_recorder_destroy(app)
 	program_icon_cache_destroy(&app.program_icons)
 	program_art.catalogue_destroy(&app.program_art)
 	shell_icons_destroy(&app.shell_icons)
@@ -325,6 +330,7 @@ app_destroy :: proc(app: ^App) {
 	focus_jumps_destroy(&app.focus_jumps)
 	file_dialogs_destroy(app)
 	markdown_app_destroy(&app.markdown_state)
+	changes_app_destroy(&app.changes_state)
 	ui.notices_destroy(&app.notices)
 	shortcut_undo_destroy(&app.shortcut_undo)
 	commands.destroy(&app.registry)
@@ -476,6 +482,8 @@ App_Timer :: enum u8 {
 	Palette_Usage_Save,
 	File_Dialogs,
 	Markdown,
+	Changes,
+	Turns,
 	Update,
 	// init.lua's timers, process polls and the step after any Lua code ran.
 	Lua,
@@ -492,9 +500,9 @@ Timer_Phase :: enum u8 {
 @(private = "file")
 app_timer_phase :: proc(timer: App_Timer) -> Timer_Phase {
 	switch timer {
-	case .Processes, .Notices, .Drag_Hover, .Lua:
+	case .Processes, .Notices, .Drag_Hover, .Turns, .Lua:
 		return .Before_Draw
-	case .Verify, .Layout_Save, .Palette_Usage_Save, .File_Dialogs, .Markdown, .Update:
+	case .Verify, .Layout_Save, .Palette_Usage_Save, .File_Dialogs, .Markdown, .Changes, .Update:
 		return .After_Draw
 	}
 	return .Before_Draw
@@ -521,8 +529,12 @@ app_timers_advance :: proc(app: ^App, phase: Timer_Phase) {
 			file_dialogs_tick(app)
 		case .Markdown:
 			markdown_tick(app)
+		case .Changes:
+			changes_tick(app)
 		case .Update:
 			app_update_tick(app)
+		case .Turns:
+			turns_tick(app)
 		case .Lua:
 			lua_host_tick(app)
 		}
@@ -550,6 +562,10 @@ app_timer_deadline :: proc(app: ^App, timer: App_Timer) -> (next: time.Tick, pen
 		// A finished dialog wakes the loop itself.
 	case .Markdown:
 		return markdown_poll_deadline(app)
+	case .Changes:
+		return changes_poll_deadline(app)
+	case .Turns:
+		return turns_deadline(app)
 	case .Update:
 		// A finished updater wakes the loop itself.
 	case .Lua:

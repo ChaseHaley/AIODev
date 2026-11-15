@@ -28,6 +28,7 @@ Window_Motion :: enum u8 {
 	Cursor,
 	Field_Carets,
 	Confirmation,
+	Changes,
 }
 
 // Advances one part to `frame`; true when the window must draw again.
@@ -75,12 +76,14 @@ window_motion_advance :: proc(app: ^App, w: ^Window, part: Window_Motion, frame:
 		return w.carets.moving
 	case .Confirmation:
 		confirmation_advance(app, w, frame)
+	case .Changes:
+		return changes_animate(app, w, frame)
 	}
 	return false
 }
 
 @(private = "file")
-window_motion_running :: proc(w: ^Window, part: Window_Motion) -> bool {
+window_motion_running :: proc(app: ^App, w: ^Window, part: Window_Motion) -> bool {
 	switch part {
 	case .Workspace_Picker:
 		return workspace_picker_animating(w)
@@ -120,6 +123,8 @@ window_motion_running :: proc(w: ^Window, part: Window_Motion) -> bool {
 		return w.carets.moving
 	case .Confirmation:
 		return confirmation_active(w)
+	case .Changes:
+		return changes_animating(app, w)
 	}
 	return false
 }
@@ -155,7 +160,7 @@ window_animating :: proc(app: ^App, w: ^Window) -> bool {
 	if palette_owner_id(app) == w.id && palette_animating(app) {return true}
 	if app.notice_window == w.id && ui.notices_animating(&app.notices) {return true}
 	for part in Window_Motion {
-		if window_motion_running(w, part) {return true}
+		if window_motion_running(app, w, part) {return true}
 	}
 	return false
 }

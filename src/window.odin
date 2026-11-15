@@ -852,6 +852,10 @@ pane_draw :: proc(app: ^App, w: ^Window, pane: layout.Pane_Rect, blinking: ^bool
 		drawn, result := markdown_pane_draw(app, w, pane)
 		if result != .Ok {return result}
 		scrollbar = drawn
+	case .Changes:
+		drawn, result := changes_pane_draw(app, w, pane)
+		if result != .Ok {return result}
+		scrollbar = drawn
 	}
 	pane_frame_content(w, f, content)
 	if card < len(w.list.rects) {w.list.rects[card].color = background}

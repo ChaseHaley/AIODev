@@ -535,6 +535,31 @@ Status_Settings :: struct {
 	keep_finished:                         Status_Keep,
 	ignore_apps:                           string,
 }
+// How a new Agent changes pane shows diffs; each pane then switches on its own.
+Diff_View :: enum int {
+	Unified,
+	Side_By_Side,
+}
+DIFF_VIEW_NAME :: [Diff_View]string {
+	.Unified      = "unified",
+	.Side_By_Side = "side_by_side",
+}
+DIFF_VIEW_LABEL :: [Diff_View]string {
+	.Unified      = "Unified",
+	.Side_By_Side = "Side by side",
+}
+#assert(len(Diff_View) == 2)
+DIFF_VIEW_NAMES :: []string{DIFF_VIEW_NAME[Diff_View(0)], DIFF_VIEW_NAME[Diff_View(1)]}
+DIFF_VIEW_LABELS :: []string{DIFF_VIEW_LABEL[Diff_View(0)], DIFF_VIEW_LABEL[Diff_View(1)]}
+// Agent changes: whether to keep a private copy of the files agents change in each turn, for how many
+// days, and how new panes show diffs, which files they show and how legible their code text stays.
+Turns_Settings :: struct {
+	record:                bool,
+	retention_days:        int,
+	diff_view:             Diff_View,
+	diff_filter:           string,
+	diff_minimum_contrast: f64,
+}
 Window_Settings :: struct {
 	columns, rows, padding: int,
 	tray_notification:      bool,
@@ -619,6 +644,7 @@ Settings :: struct {
 	motion:          Motion_Settings,
 	tabs:            Tabs_Settings,
 	status:          Status_Settings,
+	turns:           Turns_Settings,
 	control:         Control_Settings,
 	profiles:        Profiles,
 	openers:         Openers,
@@ -743,6 +769,8 @@ group_title :: proc(key: string) -> string {
 		return "Tabs"
 	case "status":
 		return "Activity"
+	case "turns":
+		return "Agent changes"
 	case "shell":
 		return "Shell"
 	case "input":
@@ -1438,6 +1466,55 @@ SCHEMA :: [?]Schema_Entry {
 		valid = {0, 256},
 		description = "Comma-separated program names, the OSC 7501 app key such as vite or cargo, whose status " +
 			"is never shown.",
+	},
+	{
+		key = "turns.record",
+		title = "Record agent turns",
+		kind = .Bool,
+		offset = offset_of(Settings, turns) + offset_of(Turns_Settings, record),
+		default_value = "false",
+		description = "Keep a private copy of the files agents change in each turn, so Agent changes can show " +
+			"what a turn changed. Only git repositories are recorded. Off stops recording and offers to " +
+			"delete the copies.",
+	},
+	{
+		key = "turns.retention_days",
+		title = "Keep recorded turns (days)",
+		kind = .Int,
+		offset = offset_of(Settings, turns) + offset_of(Turns_Settings, retention_days),
+		default_value = "14",
+		valid = {1, 365},
+		description = "Recorded turns older than this are deleted.",
+	},
+	{
+		key = "turns.diff_view",
+		title = "Default diff view",
+		kind = .Enum,
+		offset = offset_of(Settings, turns) + offset_of(Turns_Settings, diff_view),
+		default_value = "unified",
+		names = DIFF_VIEW_NAMES,
+		labels = DIFF_VIEW_LABELS,
+		description = "How a new Agent changes pane shows diffs. Each pane can switch with its toolbar toggle.",
+	},
+	{
+		key = "turns.diff_filter",
+		title = "Default diff filter",
+		kind = .String,
+		offset = offset_of(Settings, turns) + offset_of(Turns_Settings, diff_filter),
+		default_value = "",
+		valid = {0, 256},
+		description = "The filter a new Agent changes pane starts with: space-separated regular expressions on " +
+			"file paths; a term starting with ! hides matching files. Empty shows every file.",
+	},
+	{
+		key = "turns.diff_minimum_contrast",
+		title = "Minimum diff text contrast",
+		kind = .Float,
+		offset = offset_of(Settings, turns) + offset_of(Turns_Settings, diff_minimum_contrast),
+		default_value = "4.5",
+		valid = {1, 21},
+		description = "Minimum contrast for code text in Agent changes diffs, in every theme. One keeps the " +
+			"theme's exact colours.",
 	},
 	{
 		key = "shell.default_profile",

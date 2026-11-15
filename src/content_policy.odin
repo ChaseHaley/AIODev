@@ -34,6 +34,7 @@ CONTENT_POLICY := [layout.Content_Kind]Content_Policy {
 	},
 	.Settings = {one_per_workspace = true, icon = .Settings, display_name = "Settings"},
 	.Markdown = {linkable = true, documents = true, file = true, icon = .Markdown, display_name = "Markdown"},
+	.Changes = {linkable = true, icon = .Changes, display_name = "Agent changes"},
 }
 
 // The title of content that does not title itself through a session.
@@ -45,6 +46,8 @@ content_title :: proc(app: ^App, content: layout.Content) -> string {
 		return CONTENT_POLICY[.Settings].display_name
 	case .Markdown:
 		if pane := markdown_find(app, content.id); pane != nil {return pane.title}
+	case .Changes:
+		return CONTENT_POLICY[.Changes].display_name
 	}
 	return ""
 }
@@ -87,9 +90,13 @@ content_badge :: proc(
 // Where content lives, shown after its title. Sessions report their own directory.
 @(require_results)
 content_directory :: proc(app: ^App, content: layout.Content) -> string {
-	if content.kind != .Markdown {return ""}
-	pane := markdown_find(app, content.id)
-	return pane != nil ? pane.directory : ""
+	#partial switch content.kind {
+	case .Markdown:
+		if pane := markdown_find(app, content.id); pane != nil {return pane.directory}
+	case .Changes:
+		if pane := changes_find(app, content.id); pane != nil {return pane.directory}
+	}
+	return ""
 }
 
 pane_owns_session :: proc(kind: layout.Content_Kind) -> bool {
@@ -105,6 +112,7 @@ content_documents :: proc(app: ^App, content: layout.Content) -> ^Document_List 
 	case .Markdown:
 		if pane := markdown_find(app, content.id); pane != nil {return &pane.documents}
 	case .Settings:
+	case .Changes:
 	}
 	return nil
 }
