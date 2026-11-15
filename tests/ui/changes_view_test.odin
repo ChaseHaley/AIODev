@@ -8,7 +8,6 @@ import "aio:ui"
 import "core:strings"
 import "core:testing"
 
-@(private = "file")
 Changes_Fixture :: struct {
 	fonts:     ^font.System,
 	text, mono: ui.Text,
@@ -21,7 +20,6 @@ Changes_Fixture :: struct {
 
 // Two files of one hunk (one context, one removed, one added line each), the second collapsed, and five
 // turns. The fixture is filled in place, so the slices it hands out stay valid.
-@(private = "file")
 fixture_make :: proc(t: ^testing.T, f: ^Changes_Fixture, view: ^ui.Changes_View) -> bool {
 	err: font.Error
 	f.fonts, err = font.system_create()
@@ -62,28 +60,37 @@ fixture_make :: proc(t: ^testing.T, f: ^Changes_Fixture, view: ^ui.Changes_View)
 centre :: proc(r: render.Rect) -> (x, y: f32) {return r.x + r.width / 2, r.y + r.height / 2}
 
 @(test)
-changes_geometry_puts_the_strip_in_the_toolbar_and_the_diff_across_the_pane :: proc(t: ^testing.T) {
+changes_geometry_puts_the_band_the_overview_and_the_diff_across_the_pane :: proc(t: ^testing.T) {
 	f: Changes_Fixture
 	view: ui.Changes_View
 	if !fixture_make(t, &f, &view) {return}
 	defer font.system_destroy(f.fonts)
 
 	g := ui.changes_geometry({0, 0, 900, 600}, 1, &view, &f.text)
-	testing.expect_value(t, g.toolbar, render.Rect{0, 0, 900, 28})
-	testing.expect_value(t, g.diff, render.Rect{0, 28, 900, 572})
+	testing.expect_value(t, g.band, render.Rect{0, 0, 900, 46})
+	// The overview strip takes 12 off the diff's right edge; the diff starts under the band.
+	testing.expect_value(t, g.diff, render.Rect{0, 46, 888, 554})
+	testing.expect_value(t, g.overview, render.Rect{888, 46, 12, 554})
 	testing.expect_value(t, g.send_bar, render.Rect{})
-	testing.expect_value(t, g.scope, render.Rect{8, 2, 216, 24})
-	testing.expect_value(t, g.step_back, render.Rect{232, 2, 24, 24})
-	// Five bars 8 wide, 3 apart, between the step buttons.
+	// The panel is 560 wide, centred on the rail, its top 4 above the band's bottom.
+	testing.expect_value(t, g.panel.width, f32(560))
+	testing.expect_value(t, g.panel.y, f32(42))
+	testing.expect(t, abs(g.panel.x + g.panel.width / 2 - (g.rail.x + g.rail.width / 2)) <= 1)
+	// The strip row sits in the panel: five bars 8 wide, 3 apart, between the step buttons.
+	testing.expect_value(t, g.step_back.width, f32(24))
+	testing.expect(t, g.step_back.x >= g.panel.x && g.step_back.y >= g.panel.y)
 	testing.expect_value(t, g.strip_bars, 5)
-	testing.expect_value(t, g.strip, render.Rect{260, 2, 52, 24})
-	testing.expect_value(t, g.step_forward, render.Rect{316, 2, 24, 24})
-	testing.expect_value(t, g.range_label.x, f32(344))
+	testing.expect_value(t, g.strip.width, f32(5 * 11 - 3))
+	testing.expect_value(t, g.strip.x, g.step_back.x + g.step_back.width + 4)
+	testing.expect_value(t, g.step_forward.x, g.strip.x + g.strip.width + 4)
+	testing.expect_value(t, g.range_label.x, g.step_forward.x + g.step_forward.width + 4)
 	testing.expect(t, g.range_label.width > 0 && g.range_label.height == 24)
-	testing.expect(t, g.repository.x >= g.range_label.x + g.range_label.width)
+	testing.expect(t, g.range_label.x + g.range_label.width <= g.panel.x + g.panel.width)
+	testing.expect(t, g.turn_title.width > 0 || view.first < 0)
 	testing.expect_value(t, g.turn_row, f32(40))
 	// The turn list hangs under the range label: ten rows at most, five here, plus its padding.
-	testing.expect_value(t, g.turn_list, render.Rect{344, 32, 320, 5 * 40 + 8})
+	top := g.range_label.y + g.range_label.height + 4
+	testing.expect_value(t, g.turn_list, render.Rect{g.range_label.x, top, 320, 5 * 40 + 8})
 
 	view.scope = .Uncommitted
 	view.turns = nil
@@ -93,16 +100,17 @@ changes_geometry_puts_the_strip_in_the_toolbar_and_the_diff_across_the_pane :: p
 	testing.expect_value(t, git.step_forward, render.Rect{})
 	testing.expect_value(t, git.range_label, render.Rect{})
 	testing.expect_value(t, git.turn_list, render.Rect{})
+	testing.expect_value(t, git.turns_caption, render.Rect{})
 	testing.expect_value(t, git.strip_bars, 0)
-	testing.expect_value(t, git.diff, render.Rect{0, 28, 900, 572})
+	testing.expect_value(t, git.diff, render.Rect{0, 46, 888, 554})
 
 	// A turn scope without turns keeps its controls; the strip and the list stay empty.
 	view.scope = .Repository
 	empty := ui.changes_geometry({0, 0, 900, 600}, 1, &view, &f.text)
 	testing.expect_value(t, empty.strip_bars, 0)
 	testing.expect_value(t, empty.strip, render.Rect{})
-	testing.expect_value(t, empty.step_back, render.Rect{232, 2, 24, 24})
-	testing.expect_value(t, empty.step_forward, render.Rect{260, 2, 24, 24})
+	testing.expect_value(t, empty.step_back.width, f32(24))
+	testing.expect_value(t, empty.step_forward.x, empty.step_back.x + 28)
 	testing.expect(t, empty.range_label.width > 0)
 	testing.expect_value(t, empty.turn_list, render.Rect{})
 
@@ -110,95 +118,10 @@ changes_geometry_puts_the_strip_in_the_toolbar_and_the_diff_across_the_pane :: p
 	view.turns = f.rows[:]
 	double := ui.changes_geometry({0, 0, 1800, 1200}, 2, &view, &f.text)
 	testing.expect_value(t, double.turn_row, f32(80))
-	testing.expect_value(t, double.toolbar.height, f32(56))
+	testing.expect_value(t, double.band.height, f32(92))
 	testing.expect_value(t, double.strip.width, f32(5 * 22 - 6))
-	testing.expect_value(t, double.diff, render.Rect{0, 56, 1800, 1144})
-}
-
-@(test)
-changes_toolbar_ends_with_the_fold_filter_layout_and_file_list_buttons :: proc(t: ^testing.T) {
-	f: Changes_Fixture
-	view: ui.Changes_View
-	if !fixture_make(t, &f, &view) {return}
-	defer font.system_destroy(f.fonts)
-	state: ui.Changes_State
-	defer ui.changes_state_destroy(&state)
-
-	// The file list button is the far-right control, then the layout toggle, the filter and fold buttons.
-	g := ui.changes_geometry({0, 0, 900, 600}, 1, &view, &f.text)
-	testing.expect_value(t, g.files_button, render.Rect{868, 2, 24, 24})
-	testing.expect_value(t, g.layout_button, render.Rect{840, 2, 24, 24})
-	testing.expect_value(t, g.filter_button, render.Rect{812, 2, 24, 24})
-	testing.expect_value(t, g.fold_button, render.Rect{784, 2, 24, 24})
-	testing.expect(t, g.range_label.x + g.range_label.width <= g.fold_button.x)
-	testing.expect(t, g.repository.x + g.repository.width <= g.fold_button.x)
-	ui.changes_layout(&state, &view, &f.text, &f.mono, g.diff.width, 1)
-	files_x, files_y := centre(g.files_button)
-	layout_x, layout_y := centre(g.layout_button)
-	files := ui.changes_hit(g, &view, &state, files_x, files_y)
-	testing.expect_value(t, files, ui.Changes_Hit{.Files_Button, 0, 0})
-	layout := ui.changes_hit(g, &view, &state, layout_x, layout_y)
-	testing.expect_value(t, layout, ui.Changes_Hit{.Layout_Button, 0, 0})
-	filter_x, filter_y := centre(g.filter_button)
-	filter := ui.changes_hit(g, &view, &state, filter_x, filter_y)
-	testing.expect_value(t, filter, ui.Changes_Hit{.Filter_Button, 0, 0})
-	fold_x, fold_y := centre(g.fold_button)
-	fold := ui.changes_hit(g, &view, &state, fold_x, fold_y)
-	testing.expect_value(t, fold, ui.Changes_Hit{.Fold_Button, 0, 0})
-	// Collapsing or expanding swaps its icon, not its place.
-	view.any_expanded = true
-	expanded := ui.changes_geometry({0, 0, 900, 600}, 1, &view, &f.text)
-	testing.expect_value(t, expanded.fold_button, g.fold_button)
-	view.any_expanded = false
-	// The view a pane shows doesn't move the buttons.
-	view.side_by_side = true
-	side := ui.changes_geometry({0, 0, 900, 600}, 1, &view, &f.text)
-	testing.expect_value(t, side.files_button, g.files_button)
-	view.side_by_side = false
-
-	// Git scopes have them in the same place.
-	view.scope, view.turns = .Staged, nil
-	git := ui.changes_geometry({0, 0, 900, 600}, 1, &view, &f.text)
-	testing.expect_value(t, git.files_button, g.files_button)
-	testing.expect_value(t, git.layout_button, g.layout_button)
-	testing.expect_value(t, git.filter_button, g.filter_button)
-	testing.expect_value(t, git.fold_button, g.fold_button)
-	testing.expect(t, git.repository.x + git.repository.width <= git.fold_button.x)
-
-	// Without files the file list and fold buttons are disabled and answer nothing; the toggle still
-	// works.
-	view.files = nil
-	view.revision += 1
-	ui.changes_layout(&state, &view, &f.text, &f.mono, git.diff.width, 1)
-	testing.expect_value(t, ui.changes_hit(git, &view, &state, files_x, files_y), ui.Changes_Hit{})
-	testing.expect_value(t, ui.changes_hit(git, &view, &state, fold_x, fold_y), ui.Changes_Hit{})
-	layout = ui.changes_hit(git, &view, &state, layout_x, layout_y)
-	testing.expect_value(t, layout, ui.Changes_Hit{.Layout_Button, 0, 0})
-	// A filter that hides every file leaves the list open to pick one: it keeps the hidden files.
-	view.filter_active, view.hidden_count, view.total_files = true, 2, 2
-	hidden := ui.changes_geometry({0, 0, 900, 600}, 1, &view, &f.text)
-	testing.expect_value(t, hidden.files_button, g.files_button)
-	all_hidden := ui.changes_hit(hidden, &view, &state, files_x, files_y)
-	testing.expect_value(t, all_hidden, ui.Changes_Hit{.Files_Button, 0, 0})
-	// Folding only acts on the files the view shows.
-	testing.expect_value(t, ui.changes_hit(hidden, &view, &state, fold_x, fold_y), ui.Changes_Hit{})
-	view.filter_active, view.hidden_count, view.total_files = false, 0, 0
-
-	double := ui.changes_geometry({0, 0, 1800, 1200}, 2, &view, &f.text)
-	testing.expect_value(t, double.files_button, render.Rect{1736, 4, 48, 48})
-	testing.expect_value(t, double.layout_button, render.Rect{1680, 4, 48, 48})
-	testing.expect_value(t, double.filter_button, render.Rect{1624, 4, 48, 48})
-	testing.expect_value(t, double.fold_button, render.Rect{1568, 4, 48, 48})
-	// A pane too narrow for all four leaves them all out.
-	sliver := ui.changes_geometry({0, 0, 120, 200}, 1, &view, &f.text)
-	testing.expect_value(t, sliver.files_button, render.Rect{})
-	testing.expect_value(t, sliver.layout_button, render.Rect{})
-	testing.expect_value(t, sliver.filter_button, render.Rect{})
-	testing.expect_value(t, sliver.fold_button, render.Rect{})
-	testing.expect_value(t, sliver.filter_popover, render.Rect{})
-	room := ui.changes_geometry({0, 0, 124, 200}, 1, &view, &f.text)
-	testing.expect(t, room.files_button.width > 0 && room.layout_button.width > 0)
-	testing.expect(t, room.filter_button.width > 0 && room.fold_button.width > 0)
+	testing.expect_value(t, double.diff, render.Rect{0, 92, 1776, 1108})
+	testing.expect_value(t, double.overview, render.Rect{1776, 92, 24, 1108})
 }
 
 @(test)
@@ -217,18 +140,23 @@ changes_filter_popover_hangs_under_its_button_and_answers_first :: proc(t: ^test
 	g := ui.changes_geometry({0, 0, 900, 600}, 1, &view, &f.text)
 	small := ui.text_styled(&f.text, .Detail)
 	height := f32(int(24 + 32 + 8 + small.line_height + 0.5))
-	// 360 wide, its right edge on the button's.
-	testing.expect_value(t, g.filter_popover, render.Rect{476, 32, 360, height})
-	testing.expect_value(t, g.filter_field, render.Rect{488, 44, 336, 32})
+	// 360 wide, its right edge on the filter circle's, hanging under the rail.
+	popover := g.filter_popover
+	testing.expect_value(t, popover.width, f32(360))
+	testing.expect_value(t, popover.height, height)
+	testing.expect_value(t, popover.x + popover.width, g.filter_button.x + g.filter_button.width)
+	testing.expect_value(t, popover.y, g.rail.y + g.rail.height + 4)
+	testing.expect_value(t, g.filter_field, render.Rect{popover.x + 12, popover.y + 12, 336, 32})
 	testing.expect_value(t, g.filter_clear, render.Rect{})
 	box, shown := ui.changes_filter_box(g, &view, &f.text)
 	testing.expect(t, shown && box.rect == g.filter_field)
 
 	testing.expect(t, ui.field_set(&editor, "foo !.json") == nil)
 	g = ui.changes_geometry({0, 0, 900, 600}, 1, &view, &f.text)
-	testing.expect_value(t, g.filter_clear, render.Rect{796, 48, 24, 24})
+	field := g.filter_field
+	testing.expect_value(t, g.filter_clear, render.Rect{field.x + field.width - 4 - 24, field.y + 4, 24, 24})
 	box, shown = ui.changes_filter_box(g, &view, &f.text)
-	testing.expect(t, shown && box.rect.width == 796 - 488)
+	testing.expect(t, shown && box.rect.width == g.filter_clear.x - field.x)
 	ui.changes_layout(&state, &view, &f.text, &f.mono, g.diff.width, 1)
 
 	field_x, field_y := centre(g.filter_field)
@@ -251,8 +179,10 @@ changes_filter_popover_hangs_under_its_button_and_answers_first :: proc(t: ^test
 
 	// A narrow pane keeps it inside, still under the button.
 	narrow := ui.changes_geometry({0, 0, 300, 400}, 1, &view, &f.text)
+	testing.expect(t, narrow.tools_button.width > 0 && narrow.filter_button.width == 0)
 	testing.expect_value(t, narrow.filter_popover.x, f32(8))
 	testing.expect_value(t, narrow.filter_popover.width, f32(284))
+	testing.expect_value(t, narrow.filter_popover.x + narrow.filter_popover.width, f32(292))
 }
 
 @(test)
@@ -266,21 +196,21 @@ changes_filter_bar_shows_only_while_the_filter_hides_files :: proc(t: ^testing.T
 
 	plain := ui.changes_geometry({0, 0, 900, 600}, 1, &view, &f.text)
 	testing.expect_value(t, plain.filter_bar, render.Rect{})
-	testing.expect_value(t, plain.diff, render.Rect{0, 28, 900, 572})
+	testing.expect_value(t, plain.diff, render.Rect{0, 46, 888, 554})
 
 	view.filter_active, view.hidden_count, view.total_files = true, 3, 5
 	g := ui.changes_geometry({0, 0, 900, 600}, 1, &view, &f.text)
-	testing.expect_value(t, g.filter_bar, render.Rect{0, 28, 900, 24})
-	testing.expect_value(t, g.diff, render.Rect{0, 52, 900, 548})
+	testing.expect_value(t, g.filter_bar, render.Rect{0, 46, 900, 24})
+	testing.expect_value(t, g.diff, render.Rect{0, 70, 888, 530})
 	clear := g.filter_bar_clear
 	testing.expect(t, clear.width > 0 && clear.x + clear.width == 892)
-	testing.expect(t, clear.y >= 28 && clear.y + clear.height <= 52)
+	testing.expect(t, clear.y >= 46 && clear.y + clear.height <= 70)
 	ui.changes_layout(&state, &view, &f.text, &f.mono, g.diff.width, 1)
 	x, y := centre(clear)
 	testing.expect_value(t, ui.changes_hit(g, &view, &state, x, y), ui.Changes_Hit{.Filter_Bar_Clear, 0, 0})
-	testing.expect_value(t, ui.changes_hit(g, &view, &state, 40, 40), ui.Changes_Hit{})
+	testing.expect_value(t, ui.changes_hit(g, &view, &state, 40, 58), ui.Changes_Hit{})
 	// The first file's header now starts under the bar.
-	header := ui.changes_hit(g, &view, &state, 50, 52 + 5)
+	header := ui.changes_hit(g, &view, &state, 50, 70 + 5)
 	testing.expect_value(t, header, ui.Changes_Hit{.File_Header, 0, 0})
 
 	// Active but hiding nothing, or invalid, there is no bar.
@@ -290,12 +220,12 @@ changes_filter_bar_shows_only_while_the_filter_hides_files :: proc(t: ^testing.T
 	view.hidden_count, view.filter_active, view.filter_invalid = 3, false, true
 	invalid := ui.changes_geometry({0, 0, 900, 600}, 1, &view, &f.text)
 	testing.expect_value(t, invalid.filter_bar, render.Rect{})
-	testing.expect_value(t, invalid.diff.y, f32(28))
+	testing.expect_value(t, invalid.diff.y, f32(46))
 
 	// A send bar still sits at the bottom with the filter bar at the top.
 	view.filter_active, view.filter_invalid, view.send.count = true, false, 1
 	both := ui.changes_geometry({0, 0, 900, 600}, 1, &view, &f.text)
-	testing.expect_value(t, both.diff.y, f32(52))
+	testing.expect_value(t, both.diff.y, f32(70))
 	testing.expect_value(t, both.diff.y + both.diff.height, both.send_bar.y)
 }
 
@@ -397,7 +327,7 @@ changes_geometry_keeps_the_send_bar_under_the_diff :: proc(t: ^testing.T) {
 	height := ui.changes_send_bar_height(&view, 1)
 	if !testing.expect(t, height > 0) {return}
 	testing.expect_value(t, g.send_bar, render.Rect{0, 600 - height, 900, height})
-	testing.expect_value(t, g.diff, render.Rect{0, 28, 900, 572 - height})
+	testing.expect_value(t, g.diff, render.Rect{0, 46, 888, 554 - height})
 
 	// The notice centres in what is left above the bar.
 	view.notice = .No_Changes
@@ -406,30 +336,33 @@ changes_geometry_keeps_the_send_bar_under_the_diff :: proc(t: ^testing.T) {
 }
 
 @(test)
-changes_geometry_fits_the_toolbar_controls :: proc(t: ^testing.T) {
+changes_panel_holds_the_hooks_button_under_the_source_chips :: proc(t: ^testing.T) {
 	f: Changes_Fixture
 	view: ui.Changes_View
 	if !fixture_make(t, &f, &view) {return}
 	defer font.system_destroy(f.fonts)
+	labels := [3]string{"Claude Code", "All agents", "Uncommitted changes"}
+	view.sources = labels[:]
 
 	without := ui.changes_geometry({0, 0, 900, 600}, 1, &view, &f.text)
 	testing.expect_value(t, without.hooks.width, f32(0))
 	view.hooks_offer = true
 	offered := ui.changes_geometry({0, 0, 900, 600}, 1, &view, &f.text)
 	testing.expect(t, offered.hooks.width > 0)
-	// Install turn hooks sits left of the fold, filter, layout and file list buttons.
-	testing.expect(t, abs(offered.hooks.x + offered.hooks.width - (offered.fold_button.x - 8)) < 0.01)
-	testing.expect(t, offered.scope.x + offered.scope.width <= offered.hooks.x)
-	testing.expect(t, offered.range_label.x + offered.range_label.width <= offered.hooks.x)
-	testing.expect(t, offered.repository.x + offered.repository.width <= offered.hooks.x)
+	testing.expect_value(t, offered.hooks.height, f32(24))
+	// Install turn hooks ends the Source section: under the last chip, in line with the first.
+	chips := offered.source_chips
+	if !testing.expect_value(t, len(chips), 3) {return}
+	testing.expect(t, offered.hooks.y >= chips[2].y + chips[2].height)
+	testing.expect_value(t, offered.hooks.x, chips[0].x)
+	testing.expect(t, offered.hooks.x + offered.hooks.width <= offered.panel.x + offered.panel.width)
+	// The sections below move down by its row.
+	testing.expect(t, offered.step_back.y > without.step_back.y)
 
 	tiny := ui.changes_geometry({0, 0, 120, 200}, 1, &view, &f.text)
-	testing.expect(t, tiny.scope.x + tiny.scope.width <= tiny.hooks.x || tiny.scope.width == 0)
-	testing.expect(t, tiny.hooks.x + tiny.hooks.width <= 120)
+	testing.expect(t, tiny.hooks.x >= tiny.panel.x)
+	testing.expect(t, tiny.hooks.x + tiny.hooks.width <= tiny.panel.x + tiny.panel.width)
 	testing.expect_value(t, tiny.strip_bars, 0)
-	for r in ([]render.Rect{tiny.step_back, tiny.strip, tiny.step_forward, tiny.range_label}) {
-		testing.expect(t, r.width == 0 || r.x + r.width <= tiny.hooks.x)
-	}
 }
 
 @(test)
@@ -444,7 +377,7 @@ changes_geometry_centres_the_notice_below_the_toolbar :: proc(t: ^testing.T) {
 	view.notice = .Recording_Off
 	g := ui.changes_geometry({0, 0, 800, 500}, 1, &view, &f.text)
 	diff := g.diff
-	testing.expect_value(t, diff, render.Rect{0, 28, 800, 472})
+	testing.expect_value(t, diff, render.Rect{0, 46, 800, 454})
 	n, b := g.notice, g.notice_button
 	testing.expect(t, n.width > 0 && n.width <= 360)
 	testing.expect(t, n.x >= diff.x && n.x + n.width <= diff.x + diff.width)
@@ -465,7 +398,7 @@ changes_geometry_centres_the_notice_below_the_toolbar :: proc(t: ^testing.T) {
 	view.notice = .No_Changes
 	kept := ui.changes_geometry({0, 0, 900, 600}, 1, &view, &f.text)
 	testing.expect_value(t, kept.strip_bars, 5)
-	testing.expect_value(t, kept.diff, render.Rect{0, 28, 900, 572})
+	testing.expect_value(t, kept.diff, render.Rect{0, 46, 900, 554})
 	testing.expect(t, abs(kept.notice.x + kept.notice.width / 2 - 450) <= 1)
 }
 
@@ -565,6 +498,7 @@ changes_hit_finds_toolbar_parts_headers_and_notice_button :: proc(t: ^testing.T)
 	state: ui.Changes_State
 	defer ui.changes_state_destroy(&state)
 	view.hooks_offer = true
+	state.panel_open = true
 	g := ui.changes_geometry({0, 0, 900, 600}, 1, &view, &f.text)
 	ui.changes_layout(&state, &view, &f.text, &f.mono, g.diff.width, 1)
 	tops := state.rows.tops
@@ -614,12 +548,19 @@ changes_hit_finds_toolbar_parts_headers_and_notice_button :: proc(t: ^testing.T)
 	testing.expect_value(t, moved, ui.Changes_Hit{.File_Header, 1, 0})
 	state.diff_scroll = 0
 
-	scope := ui.changes_hit(g, &view, &state, g.scope.x + g.scope.width / 2, g.scope.y + 5)
-	testing.expect_value(t, scope, ui.Changes_Hit{.Scope, 0, 0})
 	hooks := ui.changes_hit(g, &view, &state, g.hooks.x + 3, g.hooks.y + 3)
 	testing.expect_value(t, hooks, ui.Changes_Hit{.Hooks, 0, 0})
-	gap := ui.changes_hit(g, &view, &state, g.repository.x + 1, g.repository.y + 3)
-	testing.expect_value(t, gap, ui.Changes_Hit{})
+	summary_x, summary_y := centre(g.rail_summary)
+	summary := ui.changes_hit(g, &view, &state, summary_x, summary_y)
+	testing.expect_value(t, summary, ui.Changes_Hit{.Rail_Summary, 0, 0})
+	// The panel's padding answers nothing, and closed it answers nothing at all: its parts belong to the
+	// diff under them.
+	padding := ui.changes_hit(g, &view, &state, g.panel.x + 2, g.panel.y + g.panel.height - 2)
+	testing.expect_value(t, padding, ui.Changes_Hit{})
+	state.panel_open = false
+	hidden := ui.changes_hit(g, &view, &state, back_x, back_y)
+	testing.expect(t, hidden.part != .Step_Back && hidden.part != .Hooks)
+	state.panel_open = true
 	outside := ui.changes_hit(g, &view, &state, -5, -5)
 	testing.expect_value(t, outside, ui.Changes_Hit{})
 
@@ -651,7 +592,7 @@ changes_hit_answers_the_open_turn_list_first :: proc(t: ^testing.T) {
 
 	// Closed, the point belongs to the diff under it.
 	testing.expect(t, ui.changes_hit(g, &view, &state, x, third).part != .Turn_List_Row)
-	state.turn_list_open = true
+	state.turn_list_open, state.panel_open = true, true
 	testing.expect_value(t, ui.changes_hit(g, &view, &state, x, third), ui.Changes_Hit{.Turn_List_Row, 2, 0})
 	first := ui.changes_hit(g, &view, &state, x, list.y + 4 + 1)
 	testing.expect_value(t, first, ui.Changes_Hit{.Turn_List_Row, 0, 0})
@@ -663,8 +604,9 @@ changes_hit_answers_the_open_turn_list_first :: proc(t: ^testing.T) {
 	testing.expect_value(t, label, ui.Changes_Hit{.Range_Label, 0, 0})
 
 	// A short pane cuts the list, which then scrolls on its own.
-	short := ui.changes_geometry({0, 0, 900, 150}, 1, &view, &f.text)
-	testing.expect_value(t, short.turn_list, render.Rect{short.range_label.x, 32, 320, 150 - 8 - 32})
+	short := ui.changes_geometry({0, 0, 900, 260}, 1, &view, &f.text)
+	short_top := short.range_label.y + short.range_label.height + 4
+	testing.expect_value(t, short.turn_list, render.Rect{short.range_label.x, short_top, 320, 260 - 8 - short_top})
 	limit := 5 * 40 - int(short.turn_list.height - 8)
 	testing.expect(t, ui.changes_scroll_turn_list(&state, short, &view, 10_000))
 	testing.expect_value(t, state.turn_list_scroll, limit)
@@ -690,23 +632,25 @@ changes_strip_bars_grow_with_the_lines_and_follow_the_selection :: proc(t: ^test
 	defer font.system_destroy(f.fonts)
 	state: ui.Changes_State
 	defer ui.changes_state_destroy(&state)
+	state.panel_open = true
 	f.rows[2].between = true
 	f.rows[0].live = true
 
 	g := ui.changes_geometry({0, 0, 900, 600}, 1, &view, &f.text)
 	// Bottom-aligned 2 above the strip's bottom, 6 + 3 log2(lines + 1) high: five changed lines give 14.
-	testing.expect_value(t, ui.changes_strip_bar_rect(g, &state, &view, 4), render.Rect{260, 10, 8, 14})
-	testing.expect_value(t, ui.changes_strip_bar_rect(g, &state, &view, 3), render.Rect{271, 11, 8, 13})
+	s := g.strip
+	testing.expect_value(t, ui.changes_strip_bar_rect(g, &state, &view, 4), render.Rect{s.x, s.y + 8, 8, 14})
+	testing.expect_value(t, ui.changes_strip_bar_rect(g, &state, &view, 3), render.Rect{s.x + 11, s.y + 9, 8, 13})
 	// Between turns stay short; a live turn stands full height.
-	testing.expect_value(t, ui.changes_strip_bar_rect(g, &state, &view, 2), render.Rect{282, 16, 8, 8})
-	testing.expect_value(t, ui.changes_strip_bar_rect(g, &state, &view, 0), render.Rect{304, 4, 8, 20})
+	testing.expect_value(t, ui.changes_strip_bar_rect(g, &state, &view, 2), render.Rect{s.x + 22, s.y + 14, 8, 8})
+	testing.expect_value(t, ui.changes_strip_bar_rect(g, &state, &view, 0), render.Rect{s.x + 44, s.y + 2, 8, 20})
 	testing.expect_value(t, ui.changes_strip_bar_rect(g, &state, &view, 5), render.Rect{})
 	testing.expect_value(t, ui.changes_strip_bar_rect(g, &state, &view, -1), render.Rect{})
 
 	// A pane with room for two bars and the newer marker's slot.
 	view.first, view.last = 0, 0
 	narrow: ui.Changes_Geometry
-	for width := f32(700); width > 250; width -= 1 {
+	for width := f32(700); width > 60; width -= 1 {
 		narrow = ui.changes_geometry({0, 0, width, 600}, 1, &view, &f.text, &state)
 		if narrow.strip_bars == 2 {break}
 	}
@@ -770,7 +714,7 @@ changes_strip_stays_where_paged_and_keeps_a_bar :: proc(t: ^testing.T) {
 	state.strip_offset = 1000
 	area: render.Rect
 	g: ui.Changes_Geometry
-	for width := f32(900); width > 250; width -= 1 {
+	for width := f32(900); width > 60; width -= 1 {
 		area = {0, 0, width, 600}
 		g = ui.changes_geometry(area, 1, &view, &f.text, &state)
 		if g.strip_bars == 4 {break}
@@ -801,7 +745,7 @@ changes_strip_stays_where_paged_and_keeps_a_bar :: proc(t: ^testing.T) {
 	// and it is the selection's, with both markers beside it.
 	view.turns = f.rows[:]
 	state.strip_offset = 1000
-	for width := f32(900); width > 250; width -= 1 {
+	for width := f32(900); width > 60; width -= 1 {
 		area = {0, 0, width, 600}
 		g = ui.changes_geometry(area, 1, &view, &f.text, &state)
 		if g.strip_bars == 1 {break}
@@ -835,6 +779,7 @@ changes_strip_caps_at_ten_bars_and_counts_the_rest :: proc(t: ^testing.T) {
 	f.mono = ui.text_mono(&f.text, f.text.family)
 	state: ui.Changes_State
 	defer ui.changes_state_destroy(&state)
+	state.panel_open = true
 	list := render.draw_list_init()
 	defer render.draw_list_destroy(&list)
 	many: [100]ui.Changes_Turn
@@ -882,7 +827,8 @@ changes_strip_caps_at_ten_bars_and_counts_the_rest :: proc(t: ^testing.T) {
 	for glyph in list.glyphs {
 		x := glyph.rect.x + glyph.rect.width / 2
 		in_slot := x >= g.strip_older.x && x < g.strip_older.x + g.strip_older.width
-		if in_slot && glyph.rect.y < g.toolbar.y + g.toolbar.height {marked += 1}
+		on_row := glyph.rect.y >= g.strip_older.y && glyph.rect.y < g.strip_older.y + g.strip_older.height
+		if in_slot && on_row {marked += 1}
 	}
 	// "+90"
 	testing.expect(t, marked >= 2)
@@ -899,7 +845,7 @@ changes_strip_caps_at_ten_bars_and_counts_the_rest :: proc(t: ^testing.T) {
 	// A narrow pane fits fewer bars; the older count takes the shortfall too.
 	state.strip_offset = 1000
 	narrow: ui.Changes_Geometry
-	for width := f32(900); width > 250; width -= 1 {
+	for width := f32(900); width > 60; width -= 1 {
 		narrow = ui.changes_geometry({0, 0, width, 600}, 1, &view, &f.text, &state)
 		if narrow.strip_bars == 4 {break}
 	}
@@ -913,7 +859,7 @@ changes_strip_caps_at_ten_bars_and_counts_the_rest :: proc(t: ^testing.T) {
 	// Twelve turns with room for three bars and the older marker: three bars and nine older turns.
 	view.turns = many[:12]
 	twelve: ui.Changes_Geometry
-	for width := f32(900); width > 250; width -= 1 {
+	for width := f32(900); width > 60; width -= 1 {
 		twelve = ui.changes_geometry({0, 0, width, 600}, 1, &view, &f.text, &state)
 		if twelve.strip_bars == 3 {break}
 	}
@@ -928,7 +874,7 @@ changes_strip_caps_at_ten_bars_and_counts_the_rest :: proc(t: ^testing.T) {
 	// shows as many bars as fit beside the marker, never fewer than one while it and the marker fit.
 	view.turns = f.rows[:]
 	five: ui.Changes_Geometry
-	for width := f32(900); width > 250; width -= 1 {
+	for width := f32(900); width > 60; width -= 1 {
 		five = ui.changes_geometry({0, 0, width, 600}, 1, &view, &f.text, &state)
 		if five.strip_bars < 5 {break}
 	}
@@ -937,7 +883,7 @@ changes_strip_caps_at_ten_bars_and_counts_the_rest :: proc(t: ^testing.T) {
 	testing.expect_value(t, older, 5 - five.strip_bars)
 	testing.expect_value(t, newer, 0)
 	testing.expect(t, five.strip_older.width > 0)
-	for width := five.area.width; width > 250; width -= 1 {
+	for width := five.area.width; width > 60; width -= 1 {
 		five = ui.changes_geometry({0, 0, width, 600}, 1, &view, &f.text, &state)
 		if five.strip_bars <= 1 {break}
 	}
@@ -997,7 +943,6 @@ changes_range_label_and_tooltip_name_the_turns :: proc(t: ^testing.T) {
 }
 
 // Draws the pane into `list` as the pane does: a fresh list over a layer, with glyphs to draw text with.
-@(private = "file")
 draw_into :: proc(
 	t: ^testing.T,
 	f: ^Changes_Fixture,
@@ -1039,7 +984,7 @@ changes_draw_keeps_the_selected_bar_in_view_after_a_resize :: proc(t: ^testing.T
 	view.first, view.last = 0, 0
 
 	narrow: ui.Changes_Geometry
-	for width := f32(700); width > 250; width -= 1 {
+	for width := f32(700); width > 60; width -= 1 {
 		narrow = ui.changes_geometry({0, 0, width, 600}, 1, &view, &f.text)
 		if narrow.strip_bars == 2 {break}
 	}
@@ -1105,7 +1050,7 @@ changes_comments_stay_reachable_under_a_notice :: proc(t: ^testing.T) {
 
 	// The notice moves to the top and the stream, now only the comments, sits under it.
 	testing.expect(t, g.notice.width > 0 && g.notice.y + g.notice.height <= g.diff.y)
-	testing.expect_value(t, g.notice.y, f32(28 + 24))
+	testing.expect_value(t, g.notice.y, f32(46 + 24))
 	testing.expect_value(t, g.diff.y + g.diff.height, g.send_bar.y)
 	rows := state.rows
 	if !testing.expect(t, rows.detached > 0 && len(rows.cards) > 0 && rows.cards[0] > 0) {return}
@@ -1155,11 +1100,6 @@ changes_scroll_clamps_the_diff :: proc(t: ^testing.T) {
 	testing.expect(t, ui.changes_scroll_diff(&state, g, -10_000))
 	testing.expect_value(t, state.diff_scroll, 0)
 	testing.expect(t, !ui.changes_scroll_diff(&state, g, -1))
-
-	extent := ui.changes_diff_extent(&state, g)
-	testing.expect_value(t, extent, ui.Scroll_Extent{total = state.rows.total, visible = visible, offset = 0})
-	state.diff_scroll = 99_999
-	testing.expect_value(t, ui.changes_diff_extent(&state, g).offset, limit)
 }
 
 @(test)
@@ -1178,35 +1118,6 @@ changes_text_helpers_never_walk_a_whole_long_line :: proc(t: ^testing.T) {
 	testing.expect_value(t, len(clipped), 512)
 	testing.expect_value(t, ui.clip_bytes("abc", 512), "abc")
 	testing.expect_value(t, ui.clip_bytes("ééé", 3), "é")
-}
-
-@(test)
-changes_worktree_field_belongs_to_git_scopes_and_is_hit :: proc(t: ^testing.T) {
-	f: Changes_Fixture
-	view: ui.Changes_View
-	if !fixture_make(t, &f, &view) {return}
-	defer font.system_destroy(f.fonts)
-	state: ui.Changes_State
-	defer ui.changes_state_destroy(&state)
-
-	turns_g := ui.changes_geometry({0, 0, 900, 600}, 1, &view, &f.text)
-	testing.expect_value(t, turns_g.worktree.width, f32(0))
-
-	view.scope, view.turns, view.worktree, view.following = .Uncommitted, nil, "wt-a", true
-	view.hooks_offer = true
-	g := ui.changes_geometry({0, 0, 900, 600}, 1, &view, &f.text)
-	testing.expect(t, g.worktree.width > 0 && g.worktree.height == g.scope.height)
-	testing.expect(t, g.worktree.x >= g.scope.x + g.scope.width)
-	testing.expect(t, g.repository.x >= g.worktree.x + g.worktree.width)
-	testing.expect(t, g.worktree.x + g.worktree.width <= g.hooks.x)
-	ui.changes_layout(&state, &view, &f.text, &f.mono, g.diff.width, 1)
-	hit := ui.changes_hit(g, &view, &state, g.worktree.x + 4, g.worktree.y + 4)
-	testing.expect_value(t, hit, ui.Changes_Hit{.Worktree, 0, 0})
-	scope := ui.changes_hit(g, &view, &state, g.scope.x + 4, g.scope.y + 4)
-	testing.expect_value(t, scope, ui.Changes_Hit{.Scope, 0, 0})
-
-	tiny := ui.changes_geometry({0, 0, 120, 200}, 1, &view, &f.text)
-	testing.expect(t, tiny.worktree.x + tiny.worktree.width <= tiny.hooks.x || tiny.worktree.width == 0)
 }
 
 @(test)

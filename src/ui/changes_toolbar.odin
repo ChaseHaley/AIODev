@@ -4,12 +4,9 @@ import "aio:render"
 import "core:fmt"
 import "core:math"
 
-// The toolbar: the source field and, in git scopes, the worktree field; in turn scopes the step buttons
-// around the turn strip (one bar per turn, oldest at the left) and the range label that opens the turn
-// list.
-
-@(private = "file")
-CHANGES_FOLLOWING_LABEL :: "Following the agent"
+// The turn strip and what goes with it: the step buttons around the strip (one bar per turn, oldest at the
+// left), the range label that opens the turn list, the turn list, and the diff filter's bar and popover.
+// changes_panel.odin lays the strip out in the panel.
 
 // Terminal palette entries the All agents scope tints each agent's bars with, in agent order.
 CHANGES_AGENT_PALETTE :: [6]int{4, 5, 6, 2, 3, 1}
@@ -36,9 +33,11 @@ STRIP_INSET :: f32(2)
 TURN_LIST_WIDTH :: f32(320)
 @(private = "file")
 TURN_LIST_ROWS :: 10
-@(private = "file")
+@(private)
 RANGE_LABEL_BYTES :: 64
-@(private = "file")
+@(private)
+RANGE_TITLE_BYTES :: 96
+@(private)
 WORKING_MARK :: Status_Mark{glyph = .Working, progress = -1}
 @(private = "file")
 FILTER_POPOVER_WIDTH :: f32(360)
@@ -60,6 +59,30 @@ changes_range_label :: proc(view: ^Changes_View, buf: []u8) -> string {
 		return fmt.bprintf(buf, "Turn %d", count - last)
 	}
 	return fmt.bprintf(buf, "Turns %d–%d", count - last, count - view.first)
+}
+
+// The range label for a rail short of room: "T7" and "T7–11".
+changes_range_label_short :: proc(view: ^Changes_View, buf: []u8) -> string {
+	count := len(view.turns)
+	if count == 0 {return "No turns"}
+	if view.first < 0 || view.last < view.first || view.first >= count {return "No turn selected"}
+	last := min(view.last, count - 1)
+	if view.first == last {return fmt.bprintf(buf, "T%d", count - last)}
+	return fmt.bprintf(buf, "T%d–%d", count - last, count - view.first)
+}
+
+// The line under the turn strip: the title of the one selected turn, or for a run "N turns · first–last",
+// the oldest and newest turn's detail; "" without a selection.
+changes_range_title :: proc(view: ^Changes_View, buf: []u8) -> string {
+	count := len(view.turns)
+	if count == 0 || view.first < 0 || view.last < view.first || view.first >= count {return ""}
+	last := min(view.last, count - 1)
+	if view.first == last {return turn_title(&view.turns[last])}
+	run := last - view.first + 1
+	oldest := clip_bytes(view.turns[last].detail, 24)
+	newest := clip_bytes(view.turns[view.first].detail, 24)
+	if oldest == "" || newest == "" {return fmt.bprintf(buf, "%d turns", run)}
+	return fmt.bprintf(buf, "%d turns · %s–%s", run, oldest, newest)
 }
 
 // Whether ‹ (toward older turns) and › (toward newer turns) can step: not past either end.
@@ -142,15 +165,14 @@ range_label_width :: proc(view: ^Changes_View, body: ^Text, scale: f32) -> f32 {
 	return math.ceil(width)
 }
 
-// Lays out a turn scope's toolbar from `left` to `right`: ‹, the strip with as many bars as fit (at most
+// Lays out a turn scope's strip row from `left` to `right`: ‹, the strip with as many bars as fit (at most
 // CHANGES_STRIP_MAX_BARS; bars never shrink), ›, and the range label. A side that hides turns at the
 // strip's `offset` gets a slot for its "+N" marker, and the bars are fitted again in what is left; fewer
 // bars can only hide more, so a side never loses its slot and the fit settles within a few passes.
-// Returns where the repository label may start.
 @(private)
 strip_place :: proc(
 	g: ^Changes_Geometry, view: ^Changes_View, body: ^Text, left, right, top, control: f32, offset: int,
-) -> f32 {
+) {
 	s := g.scale
 	near := SPACE_1 * s
 	count := len(view.turns)
@@ -190,7 +212,6 @@ strip_place :: proc(
 	if newer {g.strip_newer = toolbar_take(&x, reach, marker, top, control, near)}
 	g.step_forward = toolbar_take(&x, right, control, top, control, near)
 	g.range_label = toolbar_take(&x, right, label, top, control, SPACE_2 * s)
-	return x
 }
 
 // How many bars fit in `room`, at most CHANGES_STRIP_MAX_BARS and the turn count.
@@ -228,7 +249,7 @@ turn_list_place :: proc(g: ^Changes_Geometry, view: ^Changes_View) {
 	area := g.area
 	width := min(math.round(TURN_LIST_WIDTH * s), max(0, area.width - 2 * pad))
 	x := clamp(g.range_label.x, area.x + pad, max(area.x + pad, area.x + area.width - pad - width))
-	y := g.toolbar.y + g.toolbar.height + SPACE_1 * s
+	y := g.range_label.y + g.range_label.height + SPACE_1 * s
 	rows := f32(min(count, TURN_LIST_ROWS))
 	height := min(rows * g.turn_row + 2 * OVERLAY_PADDING * s, max(0, area.y + area.height - pad - y))
 	if width <= 0 || height <= 0 {return}
@@ -518,7 +539,7 @@ range_label_draw :: proc(
 	return .Ok, spinning
 }
 
-// The filter bar under the toolbar: its row and the Clear button at the right.
+// The filter bar under the band: its row and the Clear button at the right.
 @(private)
 filter_bar_place :: proc(g: ^Changes_Geometry, text: ^Text, y: f32) {
 	s := g.scale
@@ -532,8 +553,8 @@ filter_bar_place :: proc(g: ^Changes_Geometry, text: ^Text, y: f32) {
 	g.filter_bar_clear = {area.x + area.width - SPACE_2 * s - width, y + (height - button) / 2, width, button}
 }
 
-// The filter popover under its button, right-aligned to it inside the pane: the field, with its clear
-// button while it has text, and a hint line below.
+// The filter popover under the filter circle, or under ⋯ while the circles are collapsed, right-aligned
+// to it inside the pane: the field, with its clear button while it has text, and a hint line below.
 @(private)
 filter_popover_place :: proc(g: ^Changes_Geometry, view: ^Changes_View, text: ^Text) {
 	s := g.scale
@@ -541,9 +562,10 @@ filter_popover_place :: proc(g: ^Changes_Geometry, view: ^Changes_View, text: ^T
 	pad, inset := SPACE_2 * s, SPACE_3 * s
 	width := min(math.round(FILTER_POPOVER_WIDTH * s), max(0, area.width - 2 * pad))
 	if width <= 2 * inset {return}
-	right := g.filter_button.x + g.filter_button.width
+	anchor := g.filter_button.width > 0 ? g.filter_button : g.tools_button
+	right := anchor.x + anchor.width
 	x := clamp(right - width, area.x + pad, max(area.x + pad, area.x + area.width - pad - width))
-	y := g.toolbar.y + g.toolbar.height + SPACE_1 * s
+	y := g.rail.y + g.rail.height + SPACE_1 * s
 	small := text_styled(text, .Detail)
 	field := math.round(HEIGHT_STANDARD * s)
 	g.filter_popover = {x, y, width, math.round(2 * inset + field + SPACE_2 * s + small.line_height)}
@@ -678,88 +700,6 @@ filter_popover_draw :: proc(
 	return draw_fading_text(&small, list, hint, field.x, baseline, ink, field.width)
 }
 
-// The fold button (collapse all while any shown file is expanded, else expand all; faded without files),
-// the filter button (accent on the selected fill while a filter hides files, warning ink while it is
-// invalid, outlined while its popover is open), the layout toggle (accent on the selected fill while
-// side by side) and the file list button (outlined while its list is open, faded without files).
-@(private = "file")
-view_buttons_draw :: proc(
-	list: ^render.Draw_List,
-	theme: Theme,
-	g: Changes_Geometry,
-	view: ^Changes_View,
-	state: ^Changes_State,
-	pointer: [2]f32,
-) -> render.Error {
-	s := g.scale
-	if g.fold_button.width > 0 {
-		enabled := len(view.files) > 0
-		hover, press := changes_lit(state, {.Fold_Button, 0, 0})
-		b := Button {
-			rect     = g.fold_button,
-			hover    = hover,
-			press    = press,
-			disabled = !enabled,
-		}
-		face, ink, err := button_draw(list, theme, b, s, pointer)
-		if err != .None {return err}
-		if !enabled {
-			ink = theme.muted
-			ink.a *= DISABLED_ALPHA
-		}
-		icon_draw(list, view.any_expanded ? .Collapse_All : .Expand_All, face, ink, ICON_BUTTON, s)
-	}
-	if g.filter_button.width > 0 {
-		hover, press := changes_lit(state, {.Filter_Button, 0, 0})
-		b := Button {
-			rect     = g.filter_button,
-			hover    = hover,
-			press    = press,
-			selected = view.filter_active,
-		}
-		face, ink, err := button_draw(list, theme, b, s, pointer)
-		if err != .None {return err}
-		if view.filter_invalid {
-			ink = theme.warning
-		} else if view.filter_active {
-			ink = theme.accent
-		}
-		icon_draw(list, .Filter, face, ink, ICON_BUTTON, s)
-		if state.filter_open {focus_ring_draw(list, face, theme, s)}
-	}
-	if g.layout_button.width > 0 {
-		hover, press := changes_lit(state, {.Layout_Button, 0, 0})
-		b := Button {
-			rect     = g.layout_button,
-			hover    = hover,
-			press    = press,
-			selected = view.side_by_side,
-		}
-		face, ink, err := button_draw(list, theme, b, s, pointer)
-		if err != .None {return err}
-		icon_draw(list, .Side_By_Side, face, view.side_by_side ? theme.accent : ink, ICON_BUTTON, s)
-	}
-	if g.files_button.width > 0 {
-		enabled := changes_files_listed(view)
-		hover, press := changes_lit(state, {.Files_Button, 0, 0})
-		b := Button {
-			rect     = g.files_button,
-			hover    = hover,
-			press    = press,
-			disabled = !enabled,
-		}
-		face, ink, err := button_draw(list, theme, b, s, pointer)
-		if err != .None {return err}
-		if !enabled {
-			ink = theme.muted
-			ink.a *= DISABLED_ALPHA
-		}
-		icon_draw(list, .Files, face, ink, ICON_BUTTON, s)
-		if state.files_open {focus_ring_draw(list, face, theme, s)}
-	}
-	return .None
-}
-
 // A "+N" marker beside the strip for the `hidden` turns it can't show on that side; nothing when none.
 @(private = "file")
 strip_marker_draw :: proc(
@@ -794,8 +734,10 @@ strip_marker_draw :: proc(
 	)
 }
 
+// The turn strip's row in the panel: ‹, the strip with its "+N" markers, ›, and the range label, led by
+// the working spinner while a turn is live.
 @(private)
-toolbar_draw :: proc(
+strip_row_draw :: proc(
 	list: ^render.Draw_List,
 	text: ^Text,
 	theme: Theme,
@@ -809,31 +751,6 @@ toolbar_draw :: proc(
 	spinning: bool,
 ) {
 	s := g.scale
-	rule := render.Rect{g.toolbar.x, g.toolbar.y + g.toolbar.height - s, g.toolbar.width, s}
-	draw_rect(list, {rect = rule, color = theme.border})
-	@(static, rodata)
-	labels := CHANGES_SCOPE_LABELS
-	if g.scope.width > 0 {
-		source := view.source_label != "" ? clip_bytes(view.source_label, CHANGES_CLIP_BYTES) : labels[view.scope]
-		if status = dropdown_field_draw(list, text, theme, g.scope, source, state.scope_open, s); status != .Ok {
-			return
-		}
-		hover, press := changes_lit(state, {.Scope, 0, 0})
-		b := Button{rect = g.scope, hover = hover, press = press, radius = RADIUS_CONTROL, surface = .Flat_Unfilled}
-		if _, _, err := button_draw(list, theme, b, s, pointer); err != .None {return .Ok, false}
-	}
-	if g.worktree.width > 0 {
-		if status = dropdown_field_draw(
-			list, text, theme, g.worktree, clip_bytes(view.worktree, CHANGES_CLIP_BYTES), state.worktree_open, s,
-		); status != .Ok {
-			return
-		}
-		hover, press := changes_lit(state, {.Worktree, 0, 0})
-		b := Button {
-			rect = g.worktree, hover = hover, press = press, radius = RADIUS_CONTROL, surface = .Flat_Unfilled,
-		}
-		if _, _, err := button_draw(list, theme, b, s, pointer); err != .None {return .Ok, false}
-	}
 	back, forward := changes_step_enabled(view)
 	if step_draw(list, theme, g.step_back, .Chevron_Left, .Step_Back, back, state, s, pointer) != .None {
 		return .Ok, false
@@ -845,39 +762,8 @@ toolbar_draw :: proc(
 	if status = strip_marker_draw(list, text, theme, g.strip_newer, .Strip_Newer, newer, state, s, pointer);
 	   status != .Ok {return}
 	ahead := step_draw(list, theme, g.step_forward, .Chevron_Right, .Step_Forward, forward, state, s, pointer)
-	if ahead != .None {
-		return .Ok, false
-	}
-	if status, spinning = range_label_draw(list, text, theme, g, view, state, pointer, phase); status != .Ok {
-		return
-	}
-	small := text_styled(text, .Detail)
-	note := changes_scope_turns(view.scope) ? view.repository : (view.following ? CHANGES_FOLLOWING_LABEL : "")
-	if note != "" && g.repository.width > 0 {
-		if status = draw_fading_text(
-			&small, list, clip_bytes(note, CHANGES_CLIP_BYTES), g.repository.x,
-			baseline_in(g.repository.y, g.repository.height, &small),
-			theme.muted, g.repository.width,
-		); status != .Ok {return}
-	}
-	if view_buttons_draw(list, theme, g, view, state, pointer) != .None {return .Ok, spinning}
-	if g.hooks.width > 0 {
-		radius := RADIUS_CONTROL * s
-		draw_rect(list, {rect = g.hooks, color = theme.surface, radius = radius})
-		draw_rect(list, {rect = g.hooks, color = theme.border, radius = radius, stroke = s})
-		hover, press := changes_lit(state, {.Hooks, 0, 0})
-		b := Button{rect = g.hooks, hover = hover, press = press, radius = RADIUS_CONTROL, surface = .Flat_Unfilled}
-		face, _, err := button_draw(list, theme, b, s, pointer)
-		if err != .None {return .Ok, spinning}
-		body := text_styled(text, .Body)
-		inset := CONTROL_INSET * s
-		width := min(text_width(&body, CHANGES_HOOKS_LABEL), max(0, face.width - 2 * inset))
-		status = draw_text(
-			&body, list, CHANGES_HOOKS_LABEL, face.x + (face.width - width) / 2,
-			baseline_in(face.y, face.height, &body), theme.text, max(1, face.width - 2 * inset),
-		)
-	}
-	return
+	if ahead != .None {return .Ok, false}
+	return range_label_draw(list, text, theme, g, view, state, pointer, phase)
 }
 
 // A turn list row: the title (after the spinner when live) and "+A −R" on the first line, the detail

@@ -108,15 +108,59 @@ function Agent-Index($s, $needle) {
         ForEach-Object { "$_=$($s[$_])" }) -join ', '
     throw "no agent label contains $needle; saw $labels"
 }
-# Picks choice `$index` of the focused pane's source dropdown: the agents, All agents, then Uncommitted,
-# Staged and Unstaged changes. The list stops at its ends, so enough Up presses reach the first choice
-# wherever it opened.
-function Choose-Source($index, $label) {
+# Shows `$key`'s rectangle, which the state reports as zero or leaves out while the part is not drawn.
+function Assert-Shown($s, $key) {
+    $r = Rect $s $key
+    if ($r.Count -ne 4 -or $r[2] -le 0 -or $r[3] -le 0) { throw "$key expected shown, observed '$($s[$key])'" }
+    Write-Output "PASS $key is shown"
+}
+function Assert-Hidden($s, $key) {
+    if (-not $s[$key]) { Write-Output "PASS $key is not reported"; return }
+    $r = Rect $s $key
+    if ($r.Count -eq 4 -and ($r[2] -gt 0 -or $r[3] -gt 0)) { throw "$key expected hidden, observed '$($s[$key])'" }
+    Write-Output "PASS $key is hidden"
+}
+# Opens the focused pane's panel through the rail's arrow when it is closed; with files, the panel's file
+# list opens under it. Returns the state with the panel open.
+function Open-Panel {
     $s = State
-    Click-Rect $s 'changes.scope_rect'
-    Await-State @{ 'changes.dropdown_open' = 'true' } "the source dropdown opens ($label)" | Out-Null
-    $keys = @(@('Up') * ([int]$s['changes.agents'] + 4)) + @(@('Down') * $index) + @('Enter')
-    Aio key @keys | Out-Null
+    if ($s['changes.panel_open'] -eq 'true') { return $s }
+    Click-Rect $s 'changes.panel_button_rect'
+    return Await-State @{ 'changes.panel_open' = 'true' } 'the arrow opens the panel'
+}
+function Open-Files {
+    Open-Panel | Out-Null
+    return Await-State @{ 'changes.files_open' = 'true'; 'changes.dropdown_open' = 'true' } 'the panel opens the file list'
+}
+# Esc closes the file list and the panel together.
+function Close-Panel {
+    Aio key Esc | Out-Null
+    return Await-State @{ 'changes.panel_open' = 'false'; 'changes.dropdown_open' = 'false' } 'Escape closes the panel and its list'
+}
+# Picks source chip `$index` of the focused pane's panel: the agents, All agents, then Uncommitted, Staged
+# and Unstaged changes. The panel stays open after a pick; this closes it.
+function Choose-Source($index, $label) {
+    $s = Open-Panel
+    Click-Rect $s "changes.source_chip.$index.rect"
+    Await-State @{ 'changes.source_chip_current' = $index } "the source chip picks ($label)" | Out-Null
+    Close-Panel | Out-Null
+}
+# Polls until a number the state reports is below `$limit`.
+function Await-Below($key, $limit, $label, $seconds = 10) {
+    $deadline = (Get-Date).AddSeconds($seconds)
+    while ((Get-Date) -lt $deadline) {
+        if ([double](State)[$key] -lt $limit) { Write-Output "PASS $label"; return }
+        Start-Sleep -Milliseconds 100
+    }
+    throw "$label expected $key < $limit, observed $((State)[$key])"
+}
+# Resizes the window to `$cols` columns. aioctl confirms a resize by the focused terminal's grid equalling the
+# request, which holds for no pane of a split tab, and an Agent changes pane has no terminal at all; the window
+# still resizes, so that one timeout reply is accepted and the journey reads the rail's steps instead.
+function Resize-Window($cols) {
+    $result = & $ctl --name $name resize "${cols}x46" 2>&1
+    if ($LASTEXITCODE -ne 0 -and "$result" -notlike '*resize timed out*') { throw "aioctl resize ${cols}x46: $result" }
+    Start-Sleep -Milliseconds 600
 }
 # Worktrees the journey adds beside the repository; the picker reports them with '/' separators.
 $wtA = "$work-wt-a"
@@ -296,7 +340,13 @@ try {
     Equal $s['changes.file.0.added'] 1 'the newest turn shows only its own a.txt line'
     Equal $s['changes.file.0.marked'] false 'an edit before the turn began is not marked in it'
 
-    # The toolbar strip has one bar per turn, oldest at the left; turns are numbered oldest = 1.
+    # The panel holds the turn strip, one bar per turn, oldest at the left; turns are numbered oldest = 1.
+    # Closed, the panel shows none of its parts.
+    Equal $s['changes.panel_open'] false 'the panel starts closed'
+    Assert-Hidden $s 'changes.strip.0.rect'
+    Assert-Hidden $s 'changes.step_back_rect'
+    $s = Open-Panel
+    Equal $s['changes.dropdown_open'] true 'opening the panel opens its file list'
     $newest = Rect $s 'changes.strip.0.rect'
     $older = Rect $s 'changes.strip.1.rect'
     if (-not ($newest[2] -gt 0 -and $older[2] -gt 0 -and $newest[0] -gt $older[0])) {
@@ -304,6 +354,8 @@ try {
     }
     Write-Output 'PASS the strip shows the newest turn right of the older one'
     Equal $s['changes.range_label'] 'Turn 2' 'the range label numbers the newest turn'
+    # Left and Right step the turns only while the file list is closed.
+    Close-Panel | Out-Null
     Aio key Left | Out-Null
     $s = Await-State @{
         'changes.first' = 1; 'changes.last' = 1; 'changes.files' = 2; 'changes.range_label' = 'Turn 1'
@@ -311,6 +363,7 @@ try {
     } 'Left steps to the older turn'
     Equal $s['changes.file.0.path'] 'a.txt' 'the first turn lists a.txt'
     Equal $s['changes.file.1.path'] 'c.txt' 'the first turn lists the new c.txt'
+    $s = Open-Panel
     Click-Rect $s 'changes.step_forward_rect'
     $s = Await-State @{
         'changes.first' = 0; 'changes.last' = 0; 'changes.range_label' = 'Turn 2'; 'changes.settled' = 'true'
@@ -319,18 +372,22 @@ try {
     Click-Rect $s 'changes.step_back_rect'
     $s = Await-State @{ 'changes.first' = 1; 'changes.last' = 1; 'changes.settled' = 'true'; 'changes.file.1.path' = 'c.txt' } `
         'the back step selects the older turn'
+    Close-Panel | Out-Null
     Aio key Shift+Right | Out-Null
     $s = Await-State @{ 'changes.first' = 0; 'changes.last' = 1; 'changes.files' = 3; 'changes.settled' = 'true' } `
         'Shift+Right extends the selection over both turns'
     # The en dash arrives escaped, so only the ends of the label are compared.
     Like $s['changes.range_label'] 'Turns 1*2' 'the range label names the selected run'
     # The range label opens the turn list; Escape closes it.
+    $s = Open-Panel
     Click-Rect $s 'changes.range_label_rect'
-    Await-State @{ 'changes.turn_list_open' = 'true' } 'the range label opens the turn list' | Out-Null
+    $s = Await-State @{ 'changes.turn_list_open' = 'true'; 'changes.dropdown_open' = 'false' } `
+        'the range label opens the turn list and closes the file list'
     Aio key Esc | Out-Null
     $s = Await-State @{
-        'changes.turn_list_open' = 'false'; 'changes.first' = 0; 'changes.last' = 1; 'changes.settled' = 'true'
-    } 'Escape closes the turn list and keeps the selection'
+        'changes.turn_list_open' = 'false'; 'changes.panel_open' = 'true'; 'changes.dropdown_open' = 'true'
+        'changes.first' = 0; 'changes.last' = 1; 'changes.settled' = 'true'
+    } 'Escape closes the turn list, keeps the selection and reopens the file list'
     # A click on the newest bar selects it alone; Shift+click on the older bar extends the selection again.
     Click-Rect $s 'changes.strip.0.rect'
     $s = Await-State @{
@@ -387,10 +444,13 @@ try {
     Equal $s['changes.worktrees'] 2 'the picker lists the main worktree and the new one'
     Equal $s['changes.file.0.path'] 'a.txt' 'the followed worktree lists its modified file'
     Aio capture --out "$data/agent-worktree.png" | Out-Null
-    # The picker lists Follow the agent, the followed worktree, then the folder's own.
-    Click-Rect $s 'changes.worktree_rect'
-    Await-State @{ 'changes.dropdown_open' = 'true' } 'the worktree picker opens' | Out-Null
-    Aio key Down Down Enter | Out-Null
+    # The panel lists Follow the agent, the followed worktree, then the folder's own.
+    $s = Open-Panel
+    Like $s['changes.worktree_chip.0.label'] '*Follow*' 'the first worktree chip follows the agent'
+    Click-Rect $s 'changes.worktree_chip.2.rect'
+    Await-State @{ 'changes.following' = 'false'; 'changes.worktree' = $workPath; 'changes.panel_open' = 'true' } `
+        'the worktree chip switches back to the main worktree and the panel stays open' | Out-Null
+    Close-Panel | Out-Null
     $s = Await-State @{
         'changes.following' = 'false'; 'changes.worktree' = $workPath; 'changes.dropdown_open' = 'false'
         'changes.files' = 3; 'changes.settled' = 'true'; 'changes.file.0.path' = 'a.txt'
@@ -603,24 +663,154 @@ try {
     Equal $s['changes.file.0.added'] 4 'live.py adds its four lines'
     Aio capture --out "$data/agent-live-highlight.png" | Out-Null
 
+    # (f) The rail: a wide pane keeps every control and the panel stays closed until asked.
+    $s = State
+    Equal $s['changes.rail_steps'] 0 'a wide pane takes no collapse step'
+    foreach ($key in 'changes.rail_rect', 'changes.rail_summary_rect', 'changes.panel_button_rect',
+        'changes.layout_button_rect', 'changes.fold_button_rect', 'changes.filter_button_rect') { Assert-Shown $s $key }
+    foreach ($key in 'changes.tools_button_rect', 'changes.panel_rect', 'changes.step_back_rect',
+        'changes.step_forward_rect', 'changes.range_label_rect', 'changes.strip.0.rect') { Assert-Hidden $s $key }
+    Equal $s['changes.panel_open'] false 'the panel is closed'
+    Equal $s['changes.tools_open'] false 'the tools menu is closed'
+    Assert-Hidden $s 'changes.source_chip.0.rect'
+    Aio capture --out "$data/agent-rail.png" | Out-Null
+    # The arrow opens the panel and its file list; a second click, outside the panel, closes both.
+    Click-Rect $s 'changes.panel_button_rect'
+    $s = Await-State @{ 'changes.panel_open' = 'true'; 'changes.dropdown_open' = 'true' } 'the arrow opens the panel and its file list'
+    Assert-Shown $s 'changes.panel_rect'
+    Assert-Shown $s 'changes.strip.0.rect'
+    Assert-Shown $s 'changes.range_label_rect'
+    # Source chips: the agents, then All agents, Uncommitted, Staged and Unstaged changes.
+    $agents = [int]$s['changes.agents']
+    for ($i = 0; $i -lt $agents; $i++) {
+        Assert-Shown $s "changes.source_chip.$i.rect"
+        Equal $s["changes.source_chip.$i.label"] $s["changes.agent.$i.label"] "source chip $i is its agent"
+    }
+    Like $s["changes.source_chip.$agents.label"] 'All agents*' 'the chip after the agents is All agents'
+    Like $s["changes.source_chip.$($agents + 1).label"] 'Uncommitted*' 'the next chip is Uncommitted changes'
+    Like $s["changes.source_chip.$($agents + 2).label"] 'Staged*' 'the next chip is Staged changes'
+    Like $s["changes.source_chip.$($agents + 3).label"] 'Unstaged*' 'the last chip is Unstaged changes'
+    Equal $s["changes.source_chip.$($agents + 4).rect"] '' 'no chip follows Unstaged changes'
+    Equal $s['changes.source_chip_current'] (Agent-Index $s 'Reviewer agent') 'the current chip is the reviewer agent'
+    Equal $s['changes.worktree_chip.0.rect'] '' 'the agent scope has no worktree chips'
+    Aio capture --out "$data/agent-rail-panel.png" | Out-Null
+    Click-Rect $s 'changes.panel_button_rect'
+    Await-State @{ 'changes.panel_open' = 'false'; 'changes.dropdown_open' = 'false' } 'a second click on the arrow closes the panel and its list' | Out-Null
+    Aio key Ctrl+K | Out-Null
+    Await-State @{ 'changes.panel_open' = 'true'; 'changes.dropdown_open' = 'true' } 'Ctrl+K opens the panel' | Out-Null
+    Close-Panel | Out-Null
+    $s = State
+    Click-Rect $s 'changes.rail_summary_rect'
+    $s = Await-State @{ 'changes.panel_open' = 'true' } 'the summary opens the panel'
+    # A press outside the panel and its list closes both and does nothing else, here selecting no line.
+    $pane = Rect $s "pane.$reviewChanges.rect"
+    $selection = $s['changes.selection']
+    Aio mouse click "$([int]($pane[0] + $pane[2] / 2)),$([int]($pane[1] + $pane[3] - 30))" --px | Out-Null
+    $s = Await-State @{ 'changes.panel_open' = 'false'; 'changes.dropdown_open' = 'false' } 'a press outside the panel closes it and its list'
+    Equal $s['changes.selection'] $selection 'the closing press selects nothing'
+
+    # The overview strip replaces the scrollbar: pressing it scrolls the diff, the point becoming the view centre.
+    Assert-Shown $s 'changes.overview_rect'
+    Assert-Shown $s 'changes.overview_box_rect'
+    $lane = Rect $s 'changes.overview_rect'
+    $scroll = [double]$s['changes.diff_scroll']
+    Aio mouse click "$([int]($lane[0] + $lane[2] / 2)),$([int]($lane[1] + $lane[3] * 0.9))" --px | Out-Null
+    Await-AtLeast 'changes.diff_scroll' ($scroll + 1) 'pressing the lower overview scrolls the diff down' | Out-Null
+    $scroll = [double](State)['changes.diff_scroll']
+    Aio mouse drag "$([int]($lane[0] + $lane[2] / 2)),$([int]($lane[1] + $lane[3] * 0.9))" "$([int]($lane[0] + $lane[2] / 2)),$([int]($lane[1] + $lane[3] * 0.2))" --px | Out-Null
+    Await-Below 'changes.diff_scroll' $scroll 'dragging the overview up scrolls the diff up'
+    Aio mouse click "$([int]($lane[0] + $lane[2] / 2)),$([int]($lane[1] + 2))" --px | Out-Null
+    Await-State @{ 'changes.diff_scroll' = '0' } 'pressing the top of the overview scrolls to the top' | Out-Null
+
+    # (g) Narrowing the window narrows the pane: the rail collapses its circles into one tools button first.
+    $narrow = $null
+    foreach ($cols in 110, 96, 84, 72, 62, 52) {
+        Resize-Window $cols
+        $s = State
+        if ([int]$s['changes.rail_steps'] -ge 1) { $narrow = $cols; break }
+    }
+    if (-not $narrow) { throw "narrowing expected rail_steps >= 1, observed $($s['changes.rail_steps'])" }
+    Write-Output "PASS the rail collapses at $narrow columns (step $($s['changes.rail_steps']))"
+    Assert-Shown $s 'changes.tools_button_rect'
+    foreach ($key in 'changes.layout_button_rect', 'changes.fold_button_rect', 'changes.filter_button_rect') { Assert-Hidden $s $key }
+    Assert-Shown $s 'changes.panel_button_rect'
+    Aio capture --out "$data/agent-rail-narrow.png" | Out-Null
+    # The tools menu: Side-by-side, Collapse all files, Filter files.
+    Click-Rect $s 'changes.tools_button_rect'
+    $s = Await-State @{ 'changes.tools_open' = 'true' } 'the tools button opens its menu'
+    foreach ($i in 0..2) { Assert-Shown $s "changes.tools_row.$i.rect" }
+    Aio capture --out "$data/agent-rail-menu.png" | Out-Null
+    Click-Rect $s 'changes.tools_row.0.rect'
+    $s = Await-State @{ 'changes.tools_open' = 'false'; 'changes.side_by_side' = 'true' } 'the Side-by-side row toggles the layout and closes the menu'
+    Click-Rect $s 'changes.tools_button_rect'
+    $s = Await-State @{ 'changes.tools_open' = 'true' } 'the menu opens again'
+    Click-Rect $s 'changes.tools_row.0.rect'
+    $s = Await-State @{ 'changes.tools_open' = 'false'; 'changes.side_by_side' = 'false' } 'the Side-by-side row toggles back'
+    Click-Rect $s 'changes.tools_button_rect'
+    $s = Await-State @{ 'changes.tools_open' = 'true' } 'the menu opens for the fold row'
+    Click-Rect $s 'changes.tools_row.1.rect'
+    $s = Await-State @{ 'changes.tools_open' = 'false'; 'changes.any_expanded' = 'false' } 'the fold row collapses every file'
+    Click-Rect $s 'changes.tools_button_rect'
+    $s = Await-State @{ 'changes.tools_open' = 'true' } 'the menu opens to expand'
+    Click-Rect $s 'changes.tools_row.1.rect'
+    Await-State @{ 'changes.tools_open' = 'false'; 'changes.any_expanded' = 'true' } 'the fold row expands every file again' | Out-Null
+    $s = State
+    Click-Rect $s 'changes.tools_button_rect'
+    $s = Await-State @{ 'changes.tools_open' = 'true' } 'the menu opens for the filter row'
+    Click-Rect $s 'changes.tools_row.2.rect'
+    Await-State @{ 'changes.tools_open' = 'false'; 'changes.filter_open' = 'true' } 'the Filter files row closes the menu and opens the filter popover' | Out-Null
+    Aio key Esc | Out-Null
+    $s = Await-State @{ 'changes.filter_open' = 'false' } 'Escape closes the filter popover'
+    # Escape or a press outside closes the menu.
+    Click-Rect $s 'changes.tools_button_rect'
+    Await-State @{ 'changes.tools_open' = 'true' } 'the menu opens for Escape' | Out-Null
+    Aio key Esc | Out-Null
+    $s = Await-State @{ 'changes.tools_open' = 'false' } 'Escape closes the menu'
+    Click-Rect $s 'changes.tools_button_rect'
+    Await-State @{ 'changes.tools_open' = 'true' } 'the menu opens for an outside press' | Out-Null
+    $pane = Rect $s "pane.$reviewChanges.rect"
+    Aio mouse click "$([int]($pane[0] + $pane[2] / 2)),$([int]($pane[1] + $pane[3] - 30))" --px | Out-Null
+    Await-State @{ 'changes.tools_open' = 'false' } 'a press outside closes the menu' | Out-Null
+    # The panel fits the narrow pane.
+    Aio key Ctrl+K | Out-Null
+    $s = Await-State @{ 'changes.panel_open' = 'true' } 'Ctrl+K opens the panel in the narrow pane'
+    $pane = Rect $s "pane.$reviewChanges.rect"
+    $panel = Rect $s 'changes.panel_rect'
+    if ($panel[0] -lt $pane[0] -or $panel[0] + $panel[2] -gt $pane[0] + $pane[2]) {
+        throw "the panel expected inside the pane $($pane -join ','), observed $($panel -join ',')"
+    }
+    Write-Output 'PASS the panel stays inside the narrow pane'
+    Aio capture --out "$data/agent-rail-narrow-panel.png" | Out-Null
+    Close-Panel | Out-Null
+    # Narrower still, the rail takes further steps and never un-collapses.
+    $last = [int](State)['changes.rail_steps']
+    foreach ($cols in 52, 44, 38) {
+        Resize-Window $cols
+        Start-Sleep -Milliseconds 600
+        $now = [int](State)['changes.rail_steps']
+        if ($now -lt $last) { throw "rail_steps expected >= $last at $cols columns, observed $now" }
+        $last = $now
+    }
+    Write-Output "PASS the rail reaches step $last at 38 columns without un-collapsing"
+    Resize-Window 150
+    Await-State @{ 'changes.rail_steps' = '0' } 'the wide window restores the whole rail' | Out-Null
+
     # The file list: typing part of a later file's path and Enter puts that file's header at the top.
-    Click-Rect $s 'changes.files_button_rect'
-    Await-State @{ 'changes.files_open' = 'true' } 'the files button opens the file list' | Out-Null
+    Open-Files | Out-Null
     Aio type 'long' | Out-Null
     Await-Like 'changes.file_list.0.label' '*long.txt*' 'the search keeps long.txt' | Out-Null
     Aio key Enter | Out-Null
-    $s = Await-State @{ 'changes.files_open' = 'false'; 'changes.top_file' = 1 } `
+    $s = Await-State @{ 'changes.files_open' = 'false'; 'changes.panel_open' = 'false'; 'changes.top_file' = 1 } `
         'picking long.txt scrolls its header to the top'
     # Side by side keeps the top file in view; a modified file shows its old line left of its new one.
     Click-Rect $s 'changes.layout_button_rect'
     $s = Await-State @{ 'changes.side_by_side' = 'true'; 'changes.top_file' = 1 } `
         'the layout toggle shows the diff side by side'
-    Click-Rect $s 'changes.files_button_rect'
-    Await-State @{ 'changes.files_open' = 'true' } 'the file list opens again' | Out-Null
+    Open-Files | Out-Null
     Aio type 'notes' | Out-Null
     Await-Like 'changes.file_list.0.label' '*notes.txt*' 'the search keeps notes.txt' | Out-Null
     Aio key Enter | Out-Null
-    $s = Await-State @{ 'changes.files_open' = 'false'; 'changes.side_by_side' = 'true' } 'picking notes.txt closes the list'
+    $s = Await-State @{ 'changes.files_open' = 'false'; 'changes.panel_open' = 'false'; 'changes.side_by_side' = 'true' } 'picking notes.txt closes the list and the panel'
     Aio capture --out "$data/agent-side-by-side.png" | Out-Null
     # notes.txt: alpha, -beta, +BETA, gamma, delta; the removed and the added line share a row.
     $old = Rect $s 'changes.line.2.1.rect'
@@ -633,17 +823,16 @@ try {
     Await-State @{ 'changes.selection' = '2:2-2' } 'a click on a right-half line selects the new line' | Out-Null
     # Back to unified, with live.py at the top again for the comments below.
     $s = State
-    Click-Rect $s 'changes.files_button_rect'
-    Await-State @{ 'changes.files_open' = 'true' } 'the file list opens a third time' | Out-Null
+    Open-Files | Out-Null
     Aio type 'live' | Out-Null
     Await-Like 'changes.file_list.0.label' '*live.py*' 'the search keeps live.py' | Out-Null
     Aio key Enter | Out-Null
-    $s = Await-State @{ 'changes.files_open' = 'false'; 'changes.top_file' = 0 } 'picking live.py scrolls to the top'
+    $s = Await-State @{ 'changes.files_open' = 'false'; 'changes.panel_open' = 'false'; 'changes.top_file' = 0 } 'picking live.py scrolls to the top'
     Click-Rect $s 'changes.layout_button_rect'
     $s = Await-State @{ 'changes.side_by_side' = 'false'; 'changes.top_file' = 0 } 'the layout toggle goes back to unified'
 
     # The file list's search takes a regular expression with its .* toggle; an invalid one matches nothing.
-    Click-Rect $s 'changes.files_button_rect'
+    Open-Files | Out-Null
     $s = Await-State @{ 'changes.files_open' = 'true'; 'changes.file_list_regex' = 'false' } `
         'the file list opens with plain search'
     Click-Rect $s 'changes.file_list_regex_rect'
@@ -657,7 +846,7 @@ try {
     Await-State @{ 'changes.file_list_empty' = 'Invalid regular expression'; 'changes.file_list.0.label' = '' } `
         'an invalid regular expression lists nothing and says why' | Out-Null
     Aio key Esc | Out-Null
-    Await-State @{ 'changes.files_open' = 'false' } 'Esc closes the file list' | Out-Null
+    Await-State @{ 'changes.files_open' = 'false'; 'changes.panel_open' = 'false' } 'Esc closes the file list and the panel' | Out-Null
 
     # The diff filter hides files whose path a !term matches; the file list keeps them, faded. Filter edits
     # refill the view from the result in memory, so the waits are on the filter keys and the paths.
@@ -677,7 +866,7 @@ try {
     Aio key Enter | Out-Null
     $s = Await-State @{ 'changes.filter_open' = 'false'; 'changes.filter' = '!long'; 'changes.files' = 3 } `
         'Enter closes the filter and keeps it'
-    Click-Rect $s 'changes.files_button_rect'
+    Open-Files | Out-Null
     $s = Await-State @{
         'changes.files_open' = 'true'; 'changes.file_list.0.faded' = 'false'; 'changes.file_list.1.faded' = 'true'
         'changes.file_list.2.faded' = 'false'; 'changes.file_list.3.faded' = 'false'
@@ -724,12 +913,11 @@ try {
     } 'Clear on the filter bar shows every file and every line'
 
     # Sticky header: inside long.txt its header stays pinned at the top of the diff.
-    Click-Rect $s 'changes.files_button_rect'
-    Await-State @{ 'changes.files_open' = 'true' } 'the file list opens for long.txt' | Out-Null
+    Open-Files | Out-Null
     Aio type 'long' | Out-Null
     Await-Like 'changes.file_list.0.label' '*long.txt*' 'the search finds long.txt' | Out-Null
     Aio key Enter | Out-Null
-    $s = Await-State @{ 'changes.files_open' = 'false'; 'changes.top_file' = 1 } 'picking long.txt puts it at the top'
+    $s = Await-State @{ 'changes.files_open' = 'false'; 'changes.panel_open' = 'false'; 'changes.top_file' = 1 } 'picking long.txt puts it at the top'
     # Wheel rows are positive toward the top, so a negative count scrolls down into the file.
     Aio mouse wheel (Middle (Rect $s "pane.$reviewChanges.rect")) -5 --px | Out-Null
     $s = Await-State @{ 'changes.top_file' = 1; 'changes.sticky_file' = 1 } 'the long.txt header sticks inside its body'
@@ -750,12 +938,11 @@ try {
         'changes.file.2.collapsed' = 'false'; 'changes.file.3.collapsed' = 'false'
     } 'the fold button expands every file again'
     # live.py at the top again for the comments below.
-    Click-Rect $s 'changes.files_button_rect'
-    Await-State @{ 'changes.files_open' = 'true' } 'the file list opens for live.py' | Out-Null
+    Open-Files | Out-Null
     Aio type 'live' | Out-Null
     Await-Like 'changes.file_list.0.label' '*live.py*' 'the search finds live.py again' | Out-Null
     Aio key Enter | Out-Null
-    $s = Await-State @{ 'changes.files_open' = 'false'; 'changes.top_file' = 0 } 'picking live.py scrolls back to the top'
+    $s = Await-State @{ 'changes.files_open' = 'false'; 'changes.panel_open' = 'false'; 'changes.top_file' = 0 } 'picking live.py scrolls back to the top'
 
     # Tokyo Night Moon draws comments faintly on added rows; the diff raises code text to the minimum contrast.
     $ini = Get-Content -LiteralPath "$data/settings.ini" -Raw
@@ -877,6 +1064,7 @@ try {
             'changes.turns' = 12; 'changes.first' = 0; 'changes.last' = 0; 'changes.settled' = 'true'
             'changes.strip_bars' = 10; 'changes.strip_older' = 2; 'changes.strip_newer' = 0
         } 'the strip shows ten bars and marks two older turns'
+        $s = Open-Panel
         Aio capture --out "$data/agent-strip-cap.png" | Out-Null
         Click-Rect $s 'changes.strip_older_rect'
         Await-AtLeast 'changes.strip_newer' 1 'the older marker shows older bars and marks newer ones' | Out-Null
@@ -891,8 +1079,19 @@ try {
     Like $s['changes.tooltip_key'] '*Left*' 'the back step tooltip names its key'
     Aio mouse move (Middle (Rect $s 'changes.range_label_rect')) --px | Out-Null
     $s = Await-State @{ 'changes.tooltip' = 'Choose turns' } 'the range label has its tooltip'
+    # The rail's controls sit outside the panel, so the panel closes first.
+    Close-Panel | Out-Null
+    $s = State
     Aio mouse move (Middle (Rect $s 'changes.filter_button_rect')) --px | Out-Null
     Await-State @{ 'changes.tooltip' = 'Filter files' } 'the filter button has its tooltip' | Out-Null
+    Aio mouse move (Middle (Rect $s 'changes.panel_button_rect')) --px | Out-Null
+    $s = Await-State @{ 'changes.tooltip' = 'Source, turns and files' } 'the arrow has its tooltip'
+    Like $s['changes.tooltip_key'] '*K*' 'the arrow tooltip names Ctrl+K'
+    Aio mouse move (Middle (Rect $s 'changes.rail_summary_rect')) --px | Out-Null
+    $s = Await-State @{ 'changes.tooltip' = 'Source, turns and files' } 'the summary has the same tooltip'
+    Like $s['changes.tooltip_key'] '*K*' 'the summary tooltip names Ctrl+K'
+    Aio mouse move (Middle (Rect $s 'changes.overview_rect')) --px | Out-Null
+    Await-State @{ 'changes.tooltip' = 'Overview: click or drag to scroll' } 'the overview strip has its tooltip' | Out-Null
 
     # Recording off asks to delete what was recorded.
     if ((Turn-Directories).Count -eq 0) { throw "no agent-turns directory under $data while recording" }

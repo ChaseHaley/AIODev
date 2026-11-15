@@ -1494,7 +1494,7 @@ SCHEMA :: [?]Schema_Entry {
 		default_value = "unified",
 		names = DIFF_VIEW_NAMES,
 		labels = DIFF_VIEW_LABELS,
-		description = "How a new Agent changes pane shows diffs. Each pane can switch with its toolbar toggle.",
+		description = "How a new Agent changes pane shows diffs. Each pane can switch with its layout button.",
 	},
 	{
 		key = "turns.diff_filter",

@@ -271,8 +271,8 @@ an_open_file_list_takes_typed_text_and_the_comment_draft_is_kept :: proc(t: ^tes
 	app.handle_event(&f.state, input.Text_Event{window = w.id, text = "draft"})
 	testing.expect_value(t, ui.field_string(&pane.comments.editor), "draft")
 	g := app.changes_geometry_of(&f.state, w, pane, shown)
-	click(&f.state, w, g.files_button)
-	if !testing.expect(t, pane.files_open, "the files button opens the list") {return}
+	click(&f.state, w, g.panel_button)
+	if !testing.expect(t, pane.files_open, "the arrow opens the panel and the file list under it") {return}
 	testing.expect_value(t, pane.comments.editing, -1)
 	if !testing.expect_value(t, len(pane.comments.items), 1) {return}
 	testing.expect_value(t, pane.comments.items[0].text, "draft")
@@ -318,7 +318,7 @@ the_file_list_keeps_its_highlight_when_a_new_result_arrives :: proc(t: ^testing.
 	if !testing.expect_value(t, len(pane.model.view.files), 4) {return}
 
 	g := app.changes_geometry_of(&f.state, w, pane, shown)
-	click(&f.state, w, g.files_button)
+	click(&f.state, w, g.panel_button)
 	if !testing.expect(t, pane.files_open) {return}
 	tap(&f.state, w, .Arrow_Down)
 	tap(&f.state, w, .Arrow_Down)
@@ -350,6 +350,7 @@ fold_all_and_the_sticky_header_keep_the_file_at_the_top :: proc(t: ^testing.T) {
 	}
 	if !fixture_start(t, &f, "FoldAll") {return}
 	w := f.state.windows[0]
+	app.window_resize(&f.state, w, 2400, 900)
 	app.run_action(&f.state, w, .Agent_Changes)
 	if !testing.expect_value(t, len(f.state.changes_panes), 1) {return}
 	pane := f.state.changes_panes[0]
@@ -452,7 +453,7 @@ the_file_list_regex_search_matches_paths_not_labels :: proc(t: ^testing.T) {
 	testing.expect_value(t, pane.model.file_paths[3], "src/old.py \u2192 src/new.py")
 
 	g := app.changes_geometry_of(&f.state, w, pane, shown)
-	click(&f.state, w, g.files_button)
+	click(&f.state, w, g.panel_button)
 	if !testing.expect(t, pane.files_open) {return}
 	app.handle_event(&f.state, input.Key_Event{window = w.id, key = .R, modifiers = {.Alt}, pressed = true})
 	app.handle_event(&f.state, input.Key_Event{window = w.id, key = .R, modifiers = {.Alt}})
@@ -524,6 +525,7 @@ the_filter_popover_edits_the_filter_and_the_bar_clears_it :: proc(t: ^testing.T)
 	}
 	if !fixture_start(t, &f, "FilterEdit") {return}
 	w := f.state.windows[0]
+	app.window_resize(&f.state, w, 2400, 900)
 	app.run_action(&f.state, w, .Agent_Changes)
 	if !testing.expect_value(t, len(f.state.changes_panes), 1) {return}
 	pane := f.state.changes_panes[0]
@@ -652,6 +654,7 @@ every_control_says_what_it_does :: proc(t: ^testing.T) {
 	}
 	if !fixture_start(t, &f, "Tooltips") {return}
 	w := f.state.windows[0]
+	app.window_resize(&f.state, w, 2400, 900)
 	app.run_action(&f.state, w, .Agent_Changes)
 	if !testing.expect_value(t, len(f.state.changes_panes), 1) {return}
 	pane := f.state.changes_panes[0]
@@ -663,7 +666,12 @@ every_control_says_what_it_does :: proc(t: ^testing.T) {
 	empty := app.changes_geometry_of(&f.state, w, pane, shown)
 	testing.expect_value(t, len(view.files), 0)
 	testing.expect_value(t, tooltip_at(&f, w, empty.fold_button), "Expand all files")
-	testing.expect_value(t, tooltip_at(&f, w, empty.files_button), "Files in this diff")
+	testing.expect_value(t, tooltip_at(&f, w, empty.layout_button), "Side-by-side view")
+	testing.expect_value(t, tooltip_at(&f, w, empty.filter_button), "Filter files")
+	// The summary and the arrow open the panel, and name the key that does.
+	testing.expect_value(t, tooltip_at(&f, w, empty.panel_button), "Source, turns and files")
+	testing.expect_value(t, tooltip_at(&f, w, empty.rail_summary), "Source, turns and files")
+	testing.expect_value(t, key_at(&f, w, empty.panel_button), commands.Shortcut{.K, {.Control}})
 	lines := make([]turns.Diff_Line, 4)
 	defer delete(lines)
 	for &line, i in lines {line = {kind = .Context, old_line = i32(i + 1), new_line = i32(i + 1), text = "line"}}
@@ -680,13 +688,17 @@ every_control_says_what_it_does :: proc(t: ^testing.T) {
 	app.changes_fill_query(&f.state, pane, &q, time.now(), true)
 
 	g := app.changes_geometry_of(&f.state, w, pane, shown)
+	// The strip, its steps and the chips are the panel's: they have tooltips while it is open.
+	pane.state.panel_open = true
 	testing.expect_value(t, tooltip_at(&f, w, g.step_back), "Older turn")
 	testing.expect_value(t, key_at(&f, w, g.step_back), commands.Shortcut{.Arrow_Left, {}})
 	// The newest turn is selected, so the newer step is off; it still says what it does.
 	testing.expect_value(t, tooltip_at(&f, w, g.step_forward), "Newer turn")
 	testing.expect_value(t, key_at(&f, w, g.step_forward), commands.Shortcut{.Arrow_Right, {}})
 	testing.expect_value(t, tooltip_at(&f, w, g.range_label), "Choose turns")
-	testing.expect_value(t, tooltip_at(&f, w, g.scope), "Show changes from")
+	testing.expect_value(t, tooltip_at(&f, w, g.source_chips[0]), pane.model.sources[0])
+	testing.expect(t, g.overview.width > 0)
+	testing.expect_value(t, tooltip_at(&f, w, g.overview), "Overview: click or drag to scroll")
 	header := render.Rect{g.diff.x + 40, g.diff.y + 2, 4, 4}
 	testing.expect_value(t, tooltip_at(&f, w, header), "Collapse file")
 	app.changes_model_fold(&pane.model, 0)
@@ -724,7 +736,7 @@ every_control_says_what_it_does :: proc(t: ^testing.T) {
 	// Nor outside the open turn list, except on the range label that closes it.
 	pane.state.turn_list_open = true
 	g = app.changes_geometry_of(&f.state, w, pane, shown)
-	testing.expect_value(t, tooltip_at(&f, w, g.scope), "")
+	testing.expect_value(t, tooltip_at(&f, w, g.panel_button), "")
 	testing.expect_value(t, tooltip_at(&f, w, g.range_label), "Choose turns")
 	pane.state.turn_list_open = false
 }
@@ -762,6 +774,11 @@ the_strip_markers_page_through_turns_it_cannot_show :: proc(t: ^testing.T) {
 	}
 	app.changes_model_result(&f.state, q)
 	if !testing.expect_value(t, len(view.turns), 25) {return}
+	// The strip lives in the panel: its arrow opens it, with the file list under it, and the strip's own
+	// markers still answer first.
+	opening := app.changes_geometry_of(&f.state, w, pane, shown)
+	click(&f.state, w, opening.panel_button)
+	testing.expect(t, pane.state.panel_open && pane.files_open)
 
 	g := app.changes_geometry_of(&f.state, w, pane, shown)
 	marker :: proc(g: ui.Changes_Geometry, pane: ^app.Changes_Pane, newer: bool) -> render.Rect {
@@ -799,6 +816,9 @@ the_strip_markers_page_through_turns_it_cannot_show :: proc(t: ^testing.T) {
 	testing.expect_value(t, older, shown_bars)
 	testing.expect_value(t, tooltip_at(&f, w, marker(g, pane, true)), fmt.tprintf("%d newer turns", newer))
 
+	// Escape closes the list and the panel; with both closed the keys step turns.
+	tap(&f.state, w, .Escape)
+	testing.expect(t, !pane.state.panel_open && !pane.files_open)
 	// The arrow keys the step tooltips name move the selection.
 	tap(&f.state, w, .Arrow_Left)
 	testing.expect_value(t, view.first, 1)
@@ -810,7 +830,7 @@ the_strip_markers_page_through_turns_it_cannot_show :: proc(t: ^testing.T) {
 		app.window_resize(&f.state, w, width, 900)
 		shown, found = changes_pane_of(&f.state, w)
 		if !found {continue}
-		pane.state.strip_offset = 25
+		pane.state.strip_offset, pane.state.panel_open = 25, true
 		g = app.changes_geometry_of(&f.state, w, pane, shown)
 		before, _ := ui.changes_strip_hidden(g, &pane.state, view)
 		older_marker := marker(g, pane, false)
@@ -840,4 +860,330 @@ the_record_button_turns_recording_on :: proc(t: ^testing.T) {
 	testing.expect(t, f.state.settings.turns.record)
 	app.changes_model_changed(&f.state, f.state.changes_panes[0])
 	testing.expect(t, f.state.changes_panes[0].model.view.notice != ui.Changes_Notice.Recording_Off)
+}
+
+@(private = "file")
+chord :: proc(state: ^app.App, w: ^app.Window, key: input.Key, modifiers: input.Modifiers) {
+	app.handle_event(state, input.Key_Event{window = w.id, key = key, modifiers = modifiers, pressed = true})
+	app.handle_event(state, input.Key_Event{window = w.id, key = key, modifiers = modifiers})
+}
+
+// Four 60-line files in a git scope with two worktrees, borrowed by the pane: the caller keeps `lines` and
+// `hunks` alive and deletes the returned files.
+@(private = "file")
+fill_four_files :: proc(
+	f: ^Fixture,
+	pane: ^app.Changes_Pane,
+	lines: []turns.Diff_Line,
+	hunks: ^[1]turns.Hunk,
+) -> []turns.Diff_File {
+	for &line, i in lines {line = {kind = .Context, old_line = i32(i + 1), new_line = i32(i + 1), text = "line"}}
+	hunks^ = {{old_start = 1, old_count = 60, new_start = 1, new_count = 60, lines = lines}}
+	files := files_named({"a.odin", "b.odin", "c.odin", "d.odin"}, hunks[:])
+	plain := app.Result_Plain {
+		pane      = pane.id,
+		worktree  = "C:/work/wt-a",
+		worktrees = {"C:/work/wt-a", "C:/work/wt-b"},
+		diff      = {files = files},
+	}
+	app.changes_fill_plain(&f.state, pane, &plain)
+	return files
+}
+
+@(test)
+the_panel_opens_from_the_arrow_the_summary_and_ctrl_k_and_closes_on_escape_or_an_outside_press :: proc(
+	t: ^testing.T,
+) {
+	f: Fixture
+	defer {
+		app.app_destroy(&f.state)
+		testing.expect_value(t, os.remove_all(f.directory), nil)
+		delete(f.directory)
+	}
+	if !fixture_start(t, &f, "Panel") {return}
+	w := f.state.windows[0]
+	app.window_resize(&f.state, w, 2400, 900)
+	app.run_action(&f.state, w, .Agent_Changes)
+	if !testing.expect_value(t, len(f.state.changes_panes), 1) {return}
+	pane := f.state.changes_panes[0]
+	shown, found := changes_pane_of(&f.state, w)
+	if !testing.expect(t, found) {return}
+	lines := make([]turns.Diff_Line, 60)
+	defer delete(lines)
+	hunks: [1]turns.Hunk
+	files := fill_four_files(&f, pane, lines, &hunks)
+	defer delete(files)
+	view := &pane.model.view
+	state := &pane.state
+
+	// The arrow opens the panel with the file list under it; a second click on it closes both.
+	g := app.changes_geometry_of(&f.state, w, pane, shown)
+	click(&f.state, w, g.panel_button)
+	testing.expect(t, state.panel_open && pane.files_open)
+	click(&f.state, w, g.panel_button)
+	testing.expect(t, !state.panel_open && !pane.files_open)
+
+	// The summary opens it too, and Escape closes it.
+	click(&f.state, w, g.rail_summary)
+	testing.expect(t, state.panel_open && pane.files_open)
+	tap(&f.state, w, .Escape)
+	testing.expect(t, !state.panel_open && !pane.files_open)
+
+	// Ctrl+K toggles it while the pane is focused.
+	chord(&f.state, w, .K, {.Control})
+	testing.expect(t, state.panel_open && pane.files_open)
+	chord(&f.state, w, .K, {.Control})
+	testing.expect(t, !state.panel_open && !pane.files_open)
+
+	// A press outside the panel and its list only closes them: the header it lands on does not fold.
+	chord(&f.state, w, .K, {.Control})
+	click(&f.state, w, {g.diff.x + 10, g.diff.y + 5, 4, 4})
+	testing.expect(t, !state.panel_open && !pane.files_open)
+	testing.expect(t, !view.collapsed[0])
+
+	// The overlays exclude each other: a press on the filter circle only closes the panel, and opening the
+	// popover then Ctrl+K swaps it for the panel.
+	chord(&f.state, w, .K, {.Control})
+	click(&f.state, w, g.filter_button)
+	testing.expect(t, !state.panel_open && !state.filter_open)
+	click(&f.state, w, g.filter_button)
+	testing.expect(t, state.filter_open && !state.panel_open)
+	chord(&f.state, w, .K, {.Control})
+	testing.expect(t, state.panel_open && !state.filter_open)
+	tap(&f.state, w, .Escape)
+
+	// Without files there is no list under the panel.
+	empty := app.Result_Plain {
+		pane = pane.id,
+	}
+	app.changes_fill_plain(&f.state, pane, &empty)
+	chord(&f.state, w, .K, {.Control})
+	testing.expect(t, state.panel_open && !pane.files_open)
+	tap(&f.state, w, .Escape)
+	testing.expect(t, !state.panel_open)
+}
+
+@(test)
+the_chips_choose_the_source_and_the_worktree_and_leave_the_panel_open :: proc(t: ^testing.T) {
+	f: Fixture
+	defer {
+		app.app_destroy(&f.state)
+		testing.expect_value(t, os.remove_all(f.directory), nil)
+		delete(f.directory)
+	}
+	if !fixture_start(t, &f, "Chips") {return}
+	w := f.state.windows[0]
+	app.window_resize(&f.state, w, 2400, 900)
+	app.run_action(&f.state, w, .Agent_Changes)
+	if !testing.expect_value(t, len(f.state.changes_panes), 1) {return}
+	pane := f.state.changes_panes[0]
+	shown, found := changes_pane_of(&f.state, w)
+	if !testing.expect(t, found) {return}
+	lines := make([]turns.Diff_Line, 60)
+	defer delete(lines)
+	hunks: [1]turns.Hunk
+	files := fill_four_files(&f, pane, lines, &hunks)
+	defer delete(files)
+	view := &pane.model.view
+
+	// No agent is listed, so the chips are the four scopes; Uncommitted is the pane's own.
+	g := app.changes_geometry_of(&f.state, w, pane, shown)
+	click(&f.state, w, g.panel_button)
+	g = app.changes_geometry_of(&f.state, w, pane, shown)
+	if !testing.expect_value(t, len(g.source_chips), 4) {return}
+	testing.expect_value(t, view.source_current, 1)
+	// Picking a chip is what choosing in the old dropdown was, and the panel stays open.
+	click(&f.state, w, g.source_chips[2])
+	testing.expect_value(t, pane.scope, ui.Changes_Scope.Staged)
+	testing.expect(t, pane.state.panel_open)
+	g = app.changes_geometry_of(&f.state, w, pane, shown)
+	testing.expect_value(t, view.source_current, 2)
+	click(&f.state, w, g.source_chips[0])
+	testing.expect_value(t, pane.scope, ui.Changes_Scope.Repository)
+	testing.expect(t, pane.state.panel_open)
+	click(&f.state, w, g.source_chips[1])
+	testing.expect_value(t, pane.scope, ui.Changes_Scope.Uncommitted)
+
+	// The worktree chips: Follow the agent first, then each worktree.
+	pane.scope = .Staged
+	previous := files
+	files = fill_four_files(&f, pane, lines, &hunks)
+	delete(previous)
+	g = app.changes_geometry_of(&f.state, w, pane, shown)
+	if !testing.expect_value(t, len(g.worktree_chips), 3) {return}
+	testing.expect_value(t, view.worktree_current, 0)
+	click(&f.state, w, g.worktree_chips[2])
+	testing.expect_value(t, pane.worktree_pick, "C:/work/wt-b")
+	g = app.changes_geometry_of(&f.state, w, pane, shown)
+	testing.expect_value(t, view.worktree_current, 2)
+	testing.expect(t, pane.state.panel_open)
+	click(&f.state, w, g.worktree_chips[0])
+	testing.expect_value(t, pane.worktree_pick, "")
+}
+
+@(test)
+the_tools_menu_holds_the_view_buttons_when_the_rail_runs_out_of_room :: proc(t: ^testing.T) {
+	f: Fixture
+	defer {
+		app.app_destroy(&f.state)
+		testing.expect_value(t, os.remove_all(f.directory), nil)
+		delete(f.directory)
+	}
+	if !fixture_start(t, &f, "Tools") {return}
+	w := f.state.windows[0]
+	app.window_resize(&f.state, w, 700, 900)
+	app.run_action(&f.state, w, .Agent_Changes)
+	if !testing.expect_value(t, len(f.state.changes_panes), 1) {return}
+	pane := f.state.changes_panes[0]
+	shown, found := changes_pane_of(&f.state, w)
+	if !testing.expect(t, found) {return}
+	lines := make([]turns.Diff_Line, 60)
+	defer delete(lines)
+	hunks: [1]turns.Hunk
+	files := fill_four_files(&f, pane, lines, &hunks)
+	defer delete(files)
+	view := &pane.model.view
+	state := &pane.state
+
+	// Narrow the window until the rail has given up its circles.
+	g := app.changes_geometry_of(&f.state, w, pane, shown)
+	for width in ([?]i32{600, 500, 400, 320}) {
+		if g.rail_steps >= 1 {break}
+		app.window_resize(&f.state, w, width, 900)
+		shown, found = changes_pane_of(&f.state, w)
+		if !testing.expect(t, found) {return}
+		g = app.changes_geometry_of(&f.state, w, pane, shown)
+	}
+	if !testing.expect(t, g.rail_steps >= 1 && g.tools_button.width > 0) {return}
+	testing.expect_value(t, g.layout_button, render.Rect{})
+
+	// The Side-by-side row toggles the layout and the menu closes with it.
+	click(&f.state, w, g.tools_button)
+	testing.expect(t, state.tools_open)
+	g = app.changes_geometry_of(&f.state, w, pane, shown)
+	click(&f.state, w, g.tools_rows[0])
+	testing.expect(t, pane.side_by_side && !state.tools_open)
+
+	// Escape closes it without acting; so does a press outside.
+	click(&f.state, w, g.tools_button)
+	testing.expect(t, state.tools_open)
+	tap(&f.state, w, .Escape)
+	testing.expect(t, !state.tools_open && pane.side_by_side)
+	click(&f.state, w, g.tools_button)
+	click(&f.state, w, {g.diff.x + 10, g.diff.y + 5, 4, 4})
+	testing.expect(t, !state.tools_open && !view.collapsed[0])
+
+	// The fold row folds every file.
+	click(&f.state, w, g.tools_button)
+	g = app.changes_geometry_of(&f.state, w, pane, shown)
+	click(&f.state, w, g.tools_rows[1])
+	testing.expect(t, !view.any_expanded && !state.tools_open)
+
+	// Filter files… opens the popover under the ⋯ circle and closes the menu.
+	click(&f.state, w, g.tools_button)
+	g = app.changes_geometry_of(&f.state, w, pane, shown)
+	click(&f.state, w, g.tools_rows[2])
+	testing.expect(t, state.filter_open && !state.tools_open)
+	g = app.changes_geometry_of(&f.state, w, pane, shown)
+	testing.expect(t, g.filter_popover.width > 0 && g.filter_button.width == 0)
+}
+
+@(test)
+the_overview_strip_scrolls_the_diff_by_press_and_drag :: proc(t: ^testing.T) {
+	f: Fixture
+	defer {
+		app.app_destroy(&f.state)
+		testing.expect_value(t, os.remove_all(f.directory), nil)
+		delete(f.directory)
+	}
+	if !fixture_start(t, &f, "Overview") {return}
+	w := f.state.windows[0]
+	app.window_resize(&f.state, w, 2400, 900)
+	app.run_action(&f.state, w, .Agent_Changes)
+	if !testing.expect_value(t, len(f.state.changes_panes), 1) {return}
+	pane := f.state.changes_panes[0]
+	shown, found := changes_pane_of(&f.state, w)
+	if !testing.expect(t, found) {return}
+	lines := make([]turns.Diff_Line, 60)
+	defer delete(lines)
+	hunks: [1]turns.Hunk
+	files := fill_four_files(&f, pane, lines, &hunks)
+	defer delete(files)
+
+	g := app.changes_geometry_of(&f.state, w, pane, shown)
+	lane := g.overview
+	if !testing.expect(t, lane.width > 0) {return}
+	total, visible := pane.state.rows.total, int(g.diff.height)
+	if !testing.expect(t, total > 2 * visible) {return}
+	testing.expect_value(t, pane.state.diff_scroll, 0)
+
+	// A press below the box puts that point at the centre of the view, and a click releases the strip.
+	k := lane.height / f32(total)
+	click(&f.state, w, {lane.x, lane.y + lane.height * 0.75 - 2, lane.width, 4})
+	testing.expect(t, !pane.state.overview_held)
+	middle := int((lane.height * 0.75 - f32(visible) * k / 2) / k)
+	testing.expect(t, abs(pane.state.diff_scroll - middle) <= int(2 / k) + 2)
+
+	// A press inside the box holds it, and moving the pointer scrolls by its distance.
+	pane.state.diff_scroll = 0
+	g = app.changes_geometry_of(&f.state, w, pane, shown)
+	x, y := i32(lane.x + lane.width / 2), i32(lane.y + 3)
+	app.handle_event(&f.state, input.Mouse_Button_Event{window = w.id, x = x, y = y, button = .Left, pressed = true})
+	testing.expect(t, pane.state.overview_held)
+	app.handle_event(&f.state, input.Mouse_Move_Event{window = w.id, x = x, y = y + 40, buttons = {.Left}})
+	moved := pane.state.diff_scroll
+	testing.expect(t, abs(f32(moved) - 40 / k) <= 2 / k + 2)
+	app.handle_event(&f.state, input.Mouse_Button_Event{window = w.id, x = x, y = y + 40, button = .Left})
+	testing.expect(t, !pane.state.overview_held)
+	// Released, moving no longer scrolls.
+	app.handle_event(&f.state, input.Mouse_Move_Event{window = w.id, x = x, y = y + 80})
+	testing.expect_value(t, pane.state.diff_scroll, moved)
+}
+
+@(test)
+the_turn_list_steps_in_front_of_the_file_list_and_gives_it_back :: proc(t: ^testing.T) {
+	f: Fixture
+	defer {
+		app.app_destroy(&f.state)
+		testing.expect_value(t, os.remove_all(f.directory), nil)
+		delete(f.directory)
+	}
+	if !fixture_start(t, &f, "TurnList") {return}
+	w := f.state.windows[0]
+	app.window_resize(&f.state, w, 2400, 900)
+	app.run_action(&f.state, w, .Agent_Changes)
+	if !testing.expect_value(t, len(f.state.changes_panes), 1) {return}
+	pane := f.state.changes_panes[0]
+	shown, found := changes_pane_of(&f.state, w)
+	if !testing.expect(t, found) {return}
+	view := &pane.model.view
+	pane.scope, view.scope = .Repository, .Repository
+	lines := make([]turns.Diff_Line, 4)
+	defer delete(lines)
+	for &line, i in lines {line = {kind = .Context, old_line = i32(i + 1), new_line = i32(i + 1), text = "line"}}
+	hunks := []turns.Hunk{{old_start = 1, old_count = 4, new_start = 1, new_count = 4, lines = lines}}
+	files := files_named({"a.odin", "b.odin"}, hunks)
+	defer delete(files)
+	rows := []app.Turn_Row{{id = 3, kind = .Turn, ended = 3}, {id = 2, kind = .Turn, ended = 2}, {id = 1, ended = 1}}
+	q := app.Result_Query {
+		pane     = pane.id,
+		rows     = rows,
+		selected = {3},
+		diff     = {files = files},
+	}
+	app.changes_fill_query(&f.state, pane, &q, time.now(), true)
+
+	g := app.changes_geometry_of(&f.state, w, pane, shown)
+	click(&f.state, w, g.panel_button)
+	testing.expect(t, pane.state.panel_open && pane.files_open)
+	// The range label sits in the panel, so its press goes to the panel, not to the open file list; the
+	// turn list then covers the file list, which steps aside.
+	g = app.changes_geometry_of(&f.state, w, pane, shown)
+	click(&f.state, w, g.range_label)
+	testing.expect(t, pane.state.turn_list_open && !pane.files_open && pane.state.panel_open)
+	// Escape closes the turn list first and the file list comes back under the panel.
+	tap(&f.state, w, .Escape)
+	testing.expect(t, !pane.state.turn_list_open && pane.files_open && pane.state.panel_open)
+	tap(&f.state, w, .Escape)
+	testing.expect(t, !pane.files_open && !pane.state.panel_open)
 }

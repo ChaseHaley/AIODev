@@ -21,11 +21,11 @@ WORKTREE_FOLLOW_LABEL :: "Follow the agent"
 @(private = "file")
 LIVE_DETAIL :: "Working\u2026"
 
-// The scopes the source dropdown lists after the agents, in its order.
+// The scopes the source chips list after the agents, in their order.
 @(private = "file")
-SOURCE_SCOPES :: [?]ui.Changes_Scope{.Repository, .Uncommitted, .Staged, .Unstaged}
+SOURCE_SCOPES :: ui.CHANGES_SOURCE_SCOPES
 
-// An agent the source dropdown lists: its session and its newest turn's title, both owned.
+// An agent the source chips list: its session and its newest turn's title, both owned.
 Changes_Agent :: struct {
 	session: turns.Session,
 	title:   string,
@@ -63,7 +63,7 @@ hooks_file_missing :: proc(directory, file, harness: string) -> bool {
 	return false
 }
 
-// Sets the toolbar button from the recording setting and the app's cached hook check, which reads the
+// Sets the panel's hooks button from the recording setting and the app's cached hook check, which reads the
 // settings files only when it is unknown.
 @(private = "file")
 changes_hooks_sync :: proc(app: ^App, model: ^Changes_Model) {
@@ -240,7 +240,7 @@ changes_agents_release :: proc(model: ^Changes_Model) {
 	model.agents = nil
 }
 
-// Keeps a copy of a result's agents, so the source dropdown lists them while the next read runs.
+// Keeps a copy of a result's agents, so the source chips list them while the next read runs.
 @(private = "file")
 changes_agents_set :: proc(model: ^Changes_Model, agents: []Turn_Agent) {
 	kept, err := make([]Changes_Agent, len(agents))
@@ -267,21 +267,20 @@ changes_source_label_set :: proc(pane: ^Changes_Pane) {
 	pane.model.view.source_label = pane.scope == .Agent ? pane.model.agent_label : labels[pane.scope]
 }
 
-// Rebuilds the source dropdown's labels and the pane's agent label when a name changed, such as the title
+// Rebuilds the source chips' labels and the pane's agent label when a name changed, such as the title
 // of the pane an agent runs in; labels two agents share get " (2)" and on. True when anything changed.
 changes_sources_refresh :: proc(app: ^App, pane: ^Changes_Pane) -> bool {
 	model := &pane.model
 	agents := len(model.agents)
 	bases := make([]string, agents, context.temp_allocator)
 	labels := make([]string, agents, context.temp_allocator)
-	own := -1
 	for agent, i in model.agents {
 		bases[i] = changes_agent_label(app, agent.session, agent.title)
 		repeats := 0
 		for j in 0 ..< i {if bases[j] == bases[i] {repeats += 1}}
 		labels[i] = repeats > 0 ? fmt.tprintf("%s (%d)", bases[i], repeats + 1) : bases[i]
-		if own < 0 && changes_session_same(agent.session, pane.agent) {own = i}
 	}
+	own := changes_own_agent(pane)
 	agent_label := own >= 0 ? labels[own] : changes_agent_label(app, pane.agent, "")
 	changed := len(model.sources) != agents + len(SOURCE_SCOPES) || model.agent_label != agent_label
 	for label, i in labels {
@@ -333,7 +332,7 @@ changes_agent_set :: proc(app: ^App, pane: ^Changes_Pane, agent: turns.Session) 
 	changes_model_changed(app, pane)
 }
 
-// Picks a source dropdown choice: an agent shows its turns, the others name a scope.
+// Picks a source chip: an agent shows its turns, the others name a scope.
 changes_source_pick :: proc(app: ^App, pane: ^Changes_Pane, index: int) {
 	model := &pane.model
 	if index < 0 || index >= len(model.sources) {return}
@@ -590,7 +589,7 @@ changes_model_fold_all :: proc(model: ^Changes_Model, collapse: bool) {
 	changes_expanded_sync(view)
 }
 
-// Replaces the view's turns and diff with a turn query's, and the agents the source dropdown lists. Nothing
+// Replaces the view's turns and diff with a turn query's, and the agents the source chips list. Nothing
 // here takes the result: the view borrows its diff and titles until the next fill, and whoever owns the
 // result keeps it alive.
 changes_fill_query :: proc(
@@ -651,7 +650,7 @@ changes_fill_query :: proc(
 	changes_notice_set(model, notice, detail)
 }
 
-// Replaces the view's diff with a git scope's, and the agents the source dropdown lists; git scopes list
+// Replaces the view's diff with a git scope's, and the agents the source chips list; git scopes list
 // no turns.
 changes_fill_plain :: proc(app: ^App, pane: ^Changes_Pane, r: ^Result_Plain) {
 	model, view := &pane.model, &pane.model.view
@@ -690,8 +689,8 @@ changes_worktrees_release :: proc(model: ^Changes_Model) {
 	model.worktree_labels, model.worktree_paths = nil, nil
 }
 
-// The choices the worktree dropdown lists: "Follow the agent", then each worktree by its folder name,
-// with the parent folder added where two share a name. Kept in the model because the dropdown borrows them.
+// The chips the worktree section lists: "Follow the agent", then each worktree by its folder name,
+// with the parent folder added where two share a name. Kept in the model because the view borrows them.
 @(private = "file")
 changes_worktrees_set :: proc(model: ^Changes_Model, paths: []string) {
 	changes_worktrees_release(model)
@@ -722,21 +721,43 @@ changes_worktrees_set :: proc(model: ^Changes_Model, paths: []string) {
 	model.worktree_labels, model.worktree_paths = labels, kept
 }
 
-// The label of the picked worktree in the dropdown's choices; the follow label for no pick or one the
-// result no longer lists.
+// The chip of the picked worktree: 0 follows the agent, which is also where a pick the result no longer
+// lists falls back to.
 @(require_results)
-changes_worktree_value :: proc(pane: ^Changes_Pane) -> string {
+changes_worktree_current :: proc(pane: ^Changes_Pane) -> int {
 	model := &pane.model
-	if len(model.worktree_labels) == 0 {return ""}
-	if pane.worktree_pick != "" {
-		for path, i in model.worktree_paths {
-			if path == pane.worktree_pick {return model.worktree_labels[i + 1]}
-		}
+	if pane.worktree_pick == "" {return 0}
+	for path, i in model.worktree_paths {
+		if path == pane.worktree_pick {return i + 1}
 	}
-	return model.worktree_labels[0]
+	return 0
 }
 
-// Picks a dropdown choice: 0 follows the agent, the others a worktree. Asks again when it changed.
+// The index of the pane's own agent among the repository's agents, or -1 while the result lists none of
+// the pane's.
+@(require_results)
+changes_own_agent :: proc(pane: ^Changes_Pane) -> int {
+	for agent, i in pane.model.agents {
+		if changes_session_same(agent.session, pane.agent) {return i}
+	}
+	return -1
+}
+
+// The source chip that is lit: the pane's own agent in the Agent scope, else the chip of the scope; -1 when
+// the agent is not listed.
+@(require_results)
+changes_source_current :: proc(pane: ^Changes_Pane) -> int {
+	agents := len(pane.model.sources) - len(SOURCE_SCOPES)
+	if agents < 0 {return -1}
+	if pane.scope == .Agent {return changes_own_agent(pane)}
+	scopes := SOURCE_SCOPES
+	for scope, i in scopes {
+		if scope == pane.scope {return agents + i}
+	}
+	return -1
+}
+
+// Picks a worktree chip: 0 follows the agent, the others a worktree. Asks again when it changed.
 changes_worktree_pick :: proc(app: ^App, pane: ^Changes_Pane, choice: int) {
 	model := &pane.model
 	pick := ""
@@ -892,6 +913,7 @@ changes_model_result :: proc(app: ^App, result: Turn_Result) {
 	}
 	changes_comments_reanchor(pane)
 	changes_list_refilter(pane, kept, highlighted)
+	changes_panel_files(pane)
 	changes_reveal(app, pane)
 	mark_all_dirty(app)
 }
@@ -931,7 +953,7 @@ changes_recording_changed :: proc(app: ^App) {
 }
 
 // What a pane keeps up on each poll: the setting it last saw, the ages in its rows and the names its
-// source field and dropdown show. True when the view changed and the windows need a frame.
+// source chips show. True when the view changed and the windows need a frame.
 @(require_results)
 changes_model_poll :: proc(app: ^App, pane: ^Changes_Pane) -> bool {
 	model, view := &pane.model, &pane.model.view

@@ -412,7 +412,7 @@ changes_comment_noun :: proc(count: int) -> string {
 	return count == 1 ? "comment" : "comments"
 }
 
-// "<harness> · <pane title>", as the source dropdown names the agent.
+// "<harness> · <pane title>", as the source chips name the agent.
 @(private = "file", require_results)
 changes_target_label :: proc(pane: ^Changes_Pane, entry: ^Session_Entry) -> string {
 	b := &pane.comments.target

@@ -397,6 +397,78 @@ changes_detached_height :: proc(rows: ^Changes_Rows, view: ^Changes_View) -> int
 	return rows.header + total + rows.gap
 }
 
+// What an overview tick marks.
+Changes_Tick_Kind :: enum u8 {
+	Added,
+	Removed,
+	Comment,
+}
+
+// A run of added or removed rows or a comment card, by its place in the stream, in whole pixels.
+Changes_Tick :: struct {
+	y, height: i32,
+	kind:      Changes_Tick_Kind,
+}
+
+// Adds a tick, or grows the one at `last` when `y` continues it; `last` follows the newest tick of its kind.
+@(private = "file")
+tick_add :: proc(rows: ^Changes_Rows, last: ^int, y, height: int, kind: Changes_Tick_Kind) {
+	if last^ >= 0 {
+		run := &rows.ticks[last^]
+		if int(run.y) + int(run.height) == y {
+			run.height += i32(height)
+			return
+		}
+	}
+	if _, err := append(&rows.ticks, Changes_Tick{i32(y), i32(height), kind}); err == nil {
+		last^ = len(rows.ticks) - 1
+	}
+}
+
+// The kind of flat line `line` of a hunk whose first line is `flat`; Context for a blank cell.
+@(private = "file")
+tick_line_kind :: proc(lines: []tr.Diff_Line, flat: int, line: i32) -> tr.Line_Kind {
+	at := int(line) - flat
+	if line < 0 || at < 0 || at >= len(lines) {return .Context}
+	return lines[at].kind
+}
+
+// Rebuilds the overview's ticks from the rows: for each expanded file, the runs of added and removed rows
+// (a side-by-side row can carry both), then the comment cards. Runs that continue across rows are one tick.
+// Called by changes_layout, so the strip never walks the diff while drawing.
+@(private)
+changes_ticks_build :: proc(rows: ^Changes_Rows, view: ^Changes_View) {
+	clear(&rows.ticks)
+	if view.notice != .None || len(rows.tops) != len(view.files) + 1 {return}
+	for file in 0 ..< len(view.files) {
+		f := &view.files[file]
+		if changes_collapsed(view, file) || f.binary || len(f.hunks) == 0 {continue}
+		y, flat := rows.tops[file] + rows.header, 0
+		for &hunk, h in f.hunks {
+			base, count := hunk_rows(rows, file, h)
+			y += rows.hunk
+			added, removed := -1, -1
+			for i in 0 ..< count {
+				pair := row_pair(rows, file, base + i)
+				if tick_line_kind(hunk.lines, flat, pair.left) == .Removed {
+					tick_add(rows, &removed, y, rows.line, .Removed)
+				}
+				if tick_line_kind(hunk.lines, flat, pair.right) == .Added {
+					tick_add(rows, &added, y, rows.line, .Added)
+				}
+				y += rows.line
+				if len(view.comments) > 0 {y += cards_through(rows, view, file, base + i, base + i)}
+			}
+			flat += len(hunk.lines)
+		}
+	}
+	for card in 0 ..< len(rows.cards) {
+		top, shown := card_top(rows, view, card)
+		if !shown {continue}
+		_, _ = append(&rows.ticks, Changes_Tick{i32(top), i32(rows.cards[card]), .Comment})
+	}
+}
+
 // Where row `i` of a hunk starts below the hunk's header: the rows above it and their cards. `base` is the
 // hunk's first row in its file.
 @(private = "file")

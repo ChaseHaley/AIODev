@@ -5,10 +5,12 @@ import "aio:syntax"
 import tr "aio:turns"
 import "core:math"
 
-// The Agent changes pane: a toolbar with the source and, for turns, a strip of turn bars, then one diff
-// stream across the pane. The pane keeps the model and the scroll state; this file lays the view out,
-// draws it and answers where a point lands. Heights of the diff stream are cached in whole pixels, so
-// scrolling and hit testing agree with what is drawn.
+// The Agent changes pane: a band at the top that holds a floating rail (what the pane shows, the layout,
+// fold and filter buttons, and an arrow), a panel under the rail for the source, the worktree, the turn
+// strip and the file list, then one diff stream across the pane with an overview strip at its right
+// edge. The pane keeps the model and the scroll state; this file lays the view out, draws it and answers
+// where a point lands. Heights of the diff stream are cached in whole pixels, so scrolling and hit
+// testing agree with what is drawn.
 
 Changes_Scope :: enum u8 {
 	Agent,
@@ -77,13 +79,22 @@ Changes_View :: struct {
 	notice:      Changes_Notice,
 	// Extra notice text, such as the git error.
 	detail:       string,
-	// The source field's label: the agent's name, All agents or the git scope.
+	// The label of the source: the agent's name, All agents or the git scope.
 	source_label: string,
-	// The label in the toolbar.
+	// The name of the repository a turn scope shows; the harness reports it.
 	repository:   string,
 	// The folder name of the worktree a git scope shows, and whether it was chosen by following the agent.
 	worktree:    string,
 	following:   bool,
+	// The source chips: one label per agent, then All agents and the git scopes, borrowed from the pane.
+	// `source_current` is the lit one (-1 for none); `source_agent` the pane's own agent among the
+	// repository's agents, which tints the rail's dot (-1 when unknown).
+	sources:      []string,
+	source_current, source_agent: int,
+	// The worktree chips of a git scope: "Follow the agent", then one per worktree, borrowed from the pane;
+	// `worktree_current` is the lit one.
+	worktree_labels: []string,
+	worktree_current: int,
 	// Newest first; empty in git scopes.
 	turns:       []Changes_Turn,
 	// The selected inclusive row range of `turns`, -1 when none.
@@ -109,7 +120,7 @@ Changes_View :: struct {
 	// The least WCAG contrast code text and signs keep against the row they sit on; 1 or less keeps the
 	// theme's colours.
 	minimum_contrast: f32,
-	// Show the "Install turn hooks" toolbar button.
+	// Show the "Install turn hooks" button in the panel.
 	hooks_offer: bool,
 	// Old and new side by side rather than one unified stream; the pane's own choice.
 	side_by_side: bool,
@@ -129,8 +140,6 @@ Changes_View :: struct {
 
 Changes_Part :: enum u8 {
 	None,
-	Scope,
-	Worktree,
 	Hooks,
 	Notice_Button,
 	File_Header,
@@ -149,7 +158,6 @@ Changes_Part :: enum u8 {
 	Send,
 	Copy,
 	Discard,
-	Files_Button,
 	Layout_Button,
 	Filter_Button,
 	Filter_Field,
@@ -159,12 +167,25 @@ Changes_Part :: enum u8 {
 	Sticky_Header,
 	Strip_Older,
 	Strip_Newer,
+	// The rail's summary, which opens the panel, and the arrow, which does too.
+	Rail_Summary,
+	Panel_Button,
+	// The one ⋯ circle that holds the layout, fold and filter buttons when the rail is short of room, and the
+	// rows of its menu.
+	Tools_Button,
+	Tools_Row,
+	// A chip of the panel's Source and Worktree sections.
+	Source_Chip,
+	Worktree_Chip,
+	// The overview strip at the right edge of the diff.
+	Overview,
 }
 
 // What a point is over. `index` is the bar or list row for the strip parts; the file for File_Header,
 // Sticky_Header, Diff, Line and Hunk_Comment (-1 below the last file); the comment for the comment parts;
-// -1 for Filter_Field on the filter popover's padding; else 0, as for the toolbar buttons (Fold_Button,
-// Filter_Button, Layout_Button, Files_Button). `line` is the flat line in file `index`.
+// the chip for Source_Chip and Worktree_Chip; the row for Tools_Row (-1 on the menu's padding); -1 for
+// Filter_Field on the filter popover's padding; else 0, as for the rail's buttons (Fold_Button,
+// Filter_Button, Layout_Button, ...). `line` is the flat line in file `index`.
 Changes_Hit :: struct {
 	part:  Changes_Part,
 	index: int,
@@ -188,6 +209,9 @@ Changes_Rows :: struct {
 	tops:                                   [dynamic]int,
 	// The height of each comment card, measured by changes_cards_measure.
 	cards:                                  [dynamic]int,
+	// What the overview strip draws: runs of added and removed lines and the comment cards, by their place in
+	// the stream, rebuilt with the rows.
+	ticks:                                  [dynamic]Changes_Tick,
 	// The "Not in this diff" group at the end of the stream.
 	detached:                               int,
 	// Each file's rows of diff lines, in either layout.
@@ -211,60 +235,81 @@ Changes_State :: struct {
 	hover, press:             Changes_Hit,
 	// The control whose hover and press `motion` plays: it keeps fading after the pointer leaves.
 	lit:                      Changes_Hit,
-	// The scope's list is open, so its field stays outlined.
-	scope_open:               bool,
-	// The worktree list is open.
-	worktree_open:            bool,
-	// The file list is open, so its button stays outlined.
-	files_open:               bool,
+	// The panel is open, so its arrow stays lit.
+	panel_open:               bool,
+	// The ⋯ menu is open, so its circle stays lit.
+	tools_open:               bool,
 	// The filter popover is open, so its button stays outlined.
 	filter_open:              bool,
 	motion:                   Control_Motion,
 	rows:                     Changes_Rows,
 	// Code text colours raised to `minimum_contrast` per row background, kept while the theme and ratio hold.
 	inks:                     Changes_Inks,
-	turn_list_bar, diff_bar:  Scroll_Drag,
+	turn_list_bar:            Scroll_Drag,
+	// The overview strip is held, and how far below the top of its box the pointer grabbed it.
+	overview_held:            bool,
+	overview_grab:            f32,
 }
 
 changes_state_destroy :: proc(state: ^Changes_State) {
 	delete(state.rows.tops)
 	delete(state.rows.cards)
+	delete(state.rows.ticks)
 	changes_pairs_destroy(&state.rows.pairs)
 	state.rows = {}
 }
 
-// Where everything goes, in window pixels. `diff` holds the diff stream or the notice and is the area
-// the pane scrollbar belongs to. The strip, its step buttons and the range label are empty in git scopes.
+// Where everything goes, in window pixels. `diff` holds the diff stream or the notice, left of the overview
+// strip. The rail and its buttons sit in the band; the panel, with its chips, hooks button and turn strip,
+// is laid out whether or not it is open, and the strip, its step buttons and the range label are empty in
+// git scopes. The chip slices live in temporary memory, valid until the frame's temporary memory is freed.
 Changes_Geometry :: struct {
-	area, toolbar, scope, worktree, hooks, repository, diff, notice, notice_button: render.Rect,
-	strip, step_back, step_forward, range_label:                                   render.Rect,
+	area, band, hooks, diff, notice, notice_button: render.Rect,
+	// The pill in the band: its summary (one hit part), the divider after it and its circles. The three view
+	// circles are empty while `rail_steps` is 1 or more, when `tools_button` stands for them.
+	rail, rail_summary, rail_divider:               render.Rect,
+	layout_button, fold_button, filter_button:      render.Rect,
+	tools_button, panel_button:                     render.Rect,
+	// How far the rail's collapse ladder went, 0 to 5: 1 the circles became one, 2 the file count went, 3 the
+	// totals, 4 the agent name, 5 the range got short.
+	rail_steps:                                     int,
+	// The ⋯ menu under the tools button and its rows; empty without that button.
+	tools_menu:                                     render.Rect,
+	tools_rows:                                     [CHANGES_TOOLS_ROWS]render.Rect,
+	// The panel under the rail, its section captions, the chips of its Source and Worktree sections, and the
+	// line under the strip that names the selected turns.
+	panel:                                          render.Rect,
+	source_caption, worktree_caption, turns_caption, files_caption, turn_title: render.Rect,
+	source_chips, worktree_chips:                   []render.Rect,
+	strip, step_back, step_forward, range_label:    render.Rect,
 	// The strip's "+N" markers for older (left) and newer (right) turns it can't show at the offset the
 	// layout was given; empty for a side that hides none.
-	strip_older, strip_newer:                                                      render.Rect,
+	strip_older, strip_newer:                       render.Rect,
 	// Where the turn list goes under the range label while state.turn_list_open; empty without turns.
-	turn_list:                                                                     render.Rect,
+	turn_list:                                      render.Rect,
 	// The comments' send bar under the diff; empty without comments.
-	send_bar:                                                                      render.Rect,
-	// The fold, filter, layout and file list buttons at the toolbar's right end, in every scope.
-	fold_button, filter_button, layout_button, files_button:                       render.Rect,
-	// The filter popover under its button, with its field and the field's clear button; where it goes
-	// whenever there is a filter button, and shown only while state.filter_open.
-	filter_popover, filter_field, filter_clear:                                   render.Rect,
-	// The row under the toolbar while the filter hides files, and its Clear button.
-	filter_bar, filter_bar_clear:                                                 render.Rect,
-	scale, turn_row:                                                               f32,
-	// The strip's room before any marker takes some: it changes only with the pane and the toolbar.
-	strip_room:                                                                    f32,
+	send_bar:                                       render.Rect,
+	// The filter popover under the filter circle, or under ⋯ while the circles are collapsed, with its field
+	// and the field's clear button; where it goes whenever there is such a button, and shown only while
+	// state.filter_open.
+	filter_popover, filter_field, filter_clear:     render.Rect,
+	// The row under the band while the filter hides files, and its Clear button.
+	filter_bar, filter_bar_clear:                   render.Rect,
+	// The overview strip at the diff's right edge; empty under a notice.
+	overview:                                       render.Rect,
+	scale, turn_row:                                f32,
+	// The strip's room before any marker takes some: it changes only with the pane and the panel.
+	strip_room:                                     f32,
 	// How many bars the strip has room for.
-	strip_bars:                                                                    int,
+	strip_bars:                                     int,
 }
 
 @(private = "file")
 CHANGES_TURN_ROW_HEIGHT :: f32(40)
-@(private = "file")
-CHANGES_SCOPE_WIDTH :: f32(216)
-@(private = "file")
-CHANGES_WORKTREE_WIDTH :: f32(180)
+@(private)
+CHANGES_BAND_HEIGHT :: f32(46)
+@(private)
+CHANGES_OVERVIEW_WIDTH :: f32(12)
 @(private = "file")
 CHANGES_NOTICE_WIDTH :: f32(360)
 @(private)
@@ -322,7 +367,8 @@ wrap_count :: proc(t: ^Text, s: string, width: f32) -> int {
 }
 
 // Lays the pane out. `state` gives the strip's offset, which decides which of its "+N" markers take room;
-// without it the strip is laid out scrolled to the oldest turn.
+// without it the strip is laid out scrolled to the oldest turn. The panel and the strip in it are laid out
+// whether or not the panel is open, so the keys that step through turns never depend on it.
 changes_geometry :: proc(
 	area: render.Rect, scale: f32, view: ^Changes_View, text: ^Text, state: ^Changes_State = nil,
 ) -> Changes_Geometry {
@@ -332,52 +378,27 @@ changes_geometry :: proc(
 		scale    = s,
 		turn_row = math.round(CHANGES_TURN_ROW_HEIGHT * s),
 	}
-	g.toolbar = {area.x, area.y, area.width, min(HEIGHT_TOOLBAR * s, area.height)}
-	pad, gap := SPACE_2 * s, SPACE_2 * s
-	control := min(HEIGHT_COMPACT * s, g.toolbar.height)
-	top := g.toolbar.y + (g.toolbar.height - control) / 2
-	room := max(0, area.width - 2 * pad)
-	end := area.x + area.width - pad
-	// The fold, filter, layout and file list buttons hold the right end, all four or none; everything
-	// else fits before them.
-	buttons := 4 * control + 3 * SPACE_1 * s
-	if room >= buttons {
-		g.files_button = {end - control, top, control, control}
-		g.layout_button = {g.files_button.x - SPACE_1 * s - control, top, control, control}
-		g.filter_button = {g.layout_button.x - SPACE_1 * s - control, top, control, control}
-		g.fold_button = {g.filter_button.x - SPACE_1 * s - control, top, control, control}
-		end = g.fold_button.x - gap
-		room = max(0, room - buttons - gap)
-	}
+	g.band = {area.x, area.y, area.width, min(math.round(CHANGES_BAND_HEIGHT * s), area.height)}
+	lane := math.round(CHANGES_OVERVIEW_WIDTH * s)
+	if view.notice != .None || area.width < 8 * lane {lane = 0}
 	body_text := text_styled(text, .Body)
-	hooks_width: f32
-	if view.hooks_offer {
-		hooks_width = min(text_width(&body_text, CHANGES_HOOKS_LABEL) + 2 * SPACE_3 * s, room / 2)
-	}
-	scope_room := room - hooks_width - (hooks_width > 0 ? gap : 0)
-	g.scope = {area.x + pad, top, min(CHANGES_SCOPE_WIDTH * s, max(0, scope_room)), control}
-	if hooks_width > 0 {g.hooks = {end - hooks_width, top, hooks_width, control}}
-	left := g.scope.x + g.scope.width + gap
-	right := hooks_width > 0 ? g.hooks.x - gap : end
-	if changes_scope_turns(view.scope) {
-		offset := state != nil ? state.strip_offset : 0
-		left = strip_place(&g, view, &body_text, left, right, top, control, offset)
-	} else {
-		g.worktree = {left, top, min(CHANGES_WORKTREE_WIDTH * s, max(0, right - left)), control}
-		if g.worktree.width > 0 {left += g.worktree.width + gap}
-	}
-	g.repository = {left, g.toolbar.y, max(0, right - left), g.toolbar.height}
+	rail_place(&g, view, text, lane)
+	panel_place(&g, view, text, &body_text, state)
 
-	body := render.Rect{area.x, g.toolbar.y + g.toolbar.height, area.width, 0}
+	body := render.Rect{area.x, g.band.y + g.band.height, area.width, 0}
 	if view.filter_active && view.hidden_count > 0 {
 		filter_bar_place(&g, text, body.y)
 		body.y += g.filter_bar.height
 	}
 	body.height = max(0, area.y + area.height - body.y)
-	if g.filter_button.width > 0 {filter_popover_place(&g, view, text)}
+	if g.filter_button.width > 0 || g.tools_button.width > 0 {filter_popover_place(&g, view, text)}
 	send := min(changes_send_bar_height(view, s), body.height)
 	g.diff = {body.x, body.y, body.width, body.height - send}
 	if send > 0 {g.send_bar = {body.x, body.y + body.height - send, body.width, send}}
+	if lane > 0 && g.diff.height > 0 {
+		g.overview = {g.diff.x + g.diff.width - lane, g.diff.y, lane, g.diff.height}
+		g.diff.width -= lane
+	}
 	if changes_scope_turns(view.scope) {turn_list_place(&g, view)}
 	if view.notice != .None {changes_notice_place(&g, view, text, &body_text)}
 	return g
@@ -517,15 +538,7 @@ changes_layout :: proc(state: ^Changes_State, view: ^Changes_View, text, mono: ^
 	if view.notice == .None && view.omitted > 0 {rows.total += rows.footer}
 	rows.detached = changes_detached_height(rows, view)
 	rows.total += rows.detached
-}
-
-changes_diff_extent :: proc(state: ^Changes_State, g: Changes_Geometry) -> Scroll_Extent {
-	visible := int(g.diff.height)
-	return {
-		total = state.rows.total,
-		visible = visible,
-		offset = clamp(state.diff_scroll, 0, max(0, state.rows.total - visible)),
-	}
+	changes_ticks_build(rows, view)
 }
 
 changes_scroll_diff :: proc(state: ^Changes_State, g: Changes_Geometry, delta: int) -> bool {
@@ -535,8 +548,9 @@ changes_scroll_diff :: proc(state: ^Changes_State, g: Changes_Geometry, delta: i
 	return state.diff_scroll != before
 }
 
-// What lies at the point: the open filter popover and turn list first, then the toolbar and the filter
-// bar, then the diff area and the send bar. Needs the rows of the latest changes_layout.
+// What lies at the point: the open filter popover, ⋯ menu and turn list first, then the open panel, the
+// rail and the filter bar, then the overview strip, the diff area and the send bar. Needs the rows of the
+// latest changes_layout.
 changes_hit :: proc(
 	g: Changes_Geometry, view: ^Changes_View, state: ^Changes_State, x, y: f32,
 ) -> Changes_Hit {
@@ -545,42 +559,35 @@ changes_hit :: proc(
 		if render.rect_contains(g.filter_field, x, y) {return {.Filter_Field, 0, 0}}
 		return {.Filter_Field, -1, 0}
 	}
+	if state.tools_open && render.rect_contains(g.tools_menu, x, y) {
+		for row, i in g.tools_rows {
+			if render.rect_contains(row, x, y) {return tools_row_enabled(view, i) ? {.Tools_Row, i, 0} : {}}
+		}
+		return {.Tools_Row, -1, 0}
+	}
 	if state.turn_list_open && render.rect_contains(g.turn_list, x, y) {
 		return {.Turn_List_Row, turn_list_row_at(g, state, view, y), 0}
 	}
-	if render.rect_contains(g.scope, x, y) {return {.Scope, 0, 0}}
-	if render.rect_contains(g.worktree, x, y) {return {.Worktree, 0, 0}}
-	if render.rect_contains(g.hooks, x, y) {return {.Hooks, 0, 0}}
+	if state.panel_open && render.rect_contains(g.panel, x, y) {return panel_hit(g, view, state, x, y)}
+	if render.rect_contains(g.rail_summary, x, y) {return {.Rail_Summary, 0, 0}}
 	if render.rect_contains(g.fold_button, x, y) {return len(view.files) > 0 ? {.Fold_Button, 0, 0} : {}}
 	if render.rect_contains(g.filter_button, x, y) {return {.Filter_Button, 0, 0}}
 	if render.rect_contains(g.layout_button, x, y) {return {.Layout_Button, 0, 0}}
-	if render.rect_contains(g.files_button, x, y) {
-		return changes_files_listed(view) ? {.Files_Button, 0, 0} : {}
-	}
-	back, forward := changes_step_enabled(view)
-	if render.rect_contains(g.step_back, x, y) {return back ? {.Step_Back, 0, 0} : {}}
-	if render.rect_contains(g.step_forward, x, y) {return forward ? {.Step_Forward, 0, 0} : {}}
-	older := changes_strip_marker_rect(g, state, view, false)
-	newer := changes_strip_marker_rect(g, state, view, true)
-	if render.rect_contains(older, x, y) {return {.Strip_Older, 0, 0}}
-	if render.rect_contains(newer, x, y) {return {.Strip_Newer, 0, 0}}
-	if render.rect_contains(g.strip, x, y) {
-		if bar := strip_bar_at(g, state, view, x); bar >= 0 {return {.Strip_Bar, bar, 0}}
-		return {}
-	}
-	if render.rect_contains(g.range_label, x, y) {return {.Range_Label, 0, 0}}
+	if render.rect_contains(g.tools_button, x, y) {return {.Tools_Button, 0, 0}}
+	if render.rect_contains(g.panel_button, x, y) {return {.Panel_Button, 0, 0}}
 	if render.rect_contains(g.filter_bar_clear, x, y) {return {.Filter_Bar_Clear, 0, 0}}
 	if render.rect_contains(g.notice_button, x, y) {return {.Notice_Button, 0, 0}}
+	if render.rect_contains(g.overview, x, y) {return {.Overview, 0, 0}}
 	return changes_diff_hit(g, view, state, x, y)
 }
 
 @(private = "file")
 changes_animated :: proc(hit: Changes_Hit) -> bool {
 	#partial switch hit.part {
-	case .Scope, .Worktree, .Hooks, .Notice_Button, .File_Header, .Step_Back, .Step_Forward, .Range_Label,
-	     .Hunk_Comment, .Comment_Button, .Comment_Delete, .Send, .Copy, .Discard, .Files_Button,
-	     .Layout_Button, .Filter_Button, .Filter_Clear, .Filter_Bar_Clear, .Fold_Button, .Sticky_Header,
-	     .Strip_Older, .Strip_Newer:
+	case .Hooks, .Notice_Button, .File_Header, .Step_Back, .Step_Forward, .Range_Label, .Hunk_Comment,
+	     .Comment_Button, .Comment_Delete, .Send, .Copy, .Discard, .Layout_Button, .Filter_Button, .Filter_Clear,
+	     .Filter_Bar_Clear, .Fold_Button, .Sticky_Header, .Strip_Older, .Strip_Newer, .Rail_Summary,
+	     .Panel_Button, .Tools_Button, .Source_Chip, .Worktree_Chip:
 		return true
 	}
 	return false
@@ -685,17 +692,24 @@ changes_draw :: proc(
 	}
 	state.turn_list_scroll = clamp(state.turn_list_scroll, 0, turn_list_limit(g, view))
 	state.diff_scroll = clamp(state.diff_scroll, 0, max(0, state.rows.total - int(g.diff.height)))
-	status, spinning = toolbar_draw(list, text, t, g, view, state, pointer, spin_phase)
-	if status != .Ok {return}
+	rule := render.Rect{g.band.x, g.band.y + g.band.height - scale, g.band.width, scale}
+	draw_rect(list, {rect = rule, color = t.border})
 	if status = filter_bar_draw(list, text, t, g, view, state, pointer); status != .Ok {return}
 	if view.notice != .None {
 		if status = notice_draw(list, text, t, g, view, state, pointer); status != .Ok {return}
 	}
 	if status = diff_draw(list, text, mono, t, g, view, state, pointer); status != .Ok {return}
 	if status = changes_send_bar_draw(list, text, t, g, view, state, pointer); status != .Ok {return}
+	overview_draw(list, t, g, view, state, pointer)
+	status, spinning = rail_draw(list, text, t, g, view, state, pointer, spin_phase)
+	if status != .Ok {return}
+	if status = tools_menu_draw(list, text, t, g, view, state, pointer); status != .Ok {return}
+	panel_spun: bool
+	status, panel_spun = changes_panel_draw(list, text, t, g, view, state, pointer, spin_phase)
+	if status != .Ok {return}
 	listed: bool
 	status, listed = turn_list_draw(list, text, t, g, view, state, pointer, spin_phase)
 	if status != .Ok {return}
 	status = filter_popover_draw(list, text, t, g, view, state, pointer)
-	return status, spinning || listed
+	return status, spinning || panel_spun || listed
 }

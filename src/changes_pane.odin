@@ -43,16 +43,16 @@ Changes_Model :: struct {
 	watching:       bool,
 	// The folder the view watch is on; it follows the worktree the result shows.
 	watched:        string,
-	// The worktree dropdown's choices: "Follow the agent", then one per worktree, and the worktrees'
-	// absolute paths, parallel to the choices after the first. Kept here because the dropdown borrows them.
+	// The worktree chips' labels: "Follow the agent", then one per worktree, and the worktrees' absolute
+	// paths, parallel to the labels after the first. Kept here because the view borrows them.
 	worktree_labels: []string,
 	worktree_paths: []string,
 	// The repository's agents from the last result that read them, newest first, owned here so the source
-	// dropdown keeps them while the next read runs.
+	// chips keep them while the next read runs.
 	agents:         []Changes_Agent,
-	// The source dropdown's choices: one label per agent, owned, then the fixed scope labels.
+	// The source chips' labels: one per agent, owned, then the fixed scope labels.
 	sources:        []string,
-	// The label of the pane's own agent, which the source field shows in the Agent scope.
+	// The label of the pane's own agent, which the rail names in the Agent scope.
 	agent_label:    string,
 	// The result's files and what runs parallel to them, borrowed from the result, so the diff filter can
 	// refill the view without asking the worker again.
@@ -95,12 +95,9 @@ Changes_Pane :: struct {
 	model:      Changes_Model,
 	comments:   Changes_Comments,
 	dropdown:   ui.Dropdown,
-	scope_open: bool,
-	// The worktree dropdown is open; it shares `dropdown` with the source's, and only one opens.
-	worktree_open: bool,
 	// The worktree the git scopes show; "" follows the agent. Not persisted.
 	worktree_pick: string,
-	// The file list is open; it shares `dropdown` too.
+	// The file list is open: it hangs under the open panel and uses `dropdown`.
 	files_open: bool,
 	// The diff shows old and new side by side. Persisted, and copied by a pane opened from this one.
 	side_by_side: bool,
@@ -306,9 +303,9 @@ changes_under_pointer :: proc(app: ^App, w: ^Window, x, y: f32) -> (^Changes_Pan
 	return changes_find(app, shown.content.id), shown
 }
 
-// The pane's geometry with its diff rows laid out. The comments' part of the view is filled first: it is
-// temporary memory, and the rows, the draw and every hit test read it. The code text contrast follows the
-// setting here, so a settings reload shows on the next frame.
+// The pane's geometry with its diff rows laid out. The comments' part of the view and the chips' are filled
+// first: they are temporary memory or borrowed from the model, and the rows, the draw and every hit test
+// read them. The code text contrast follows the setting here, so a settings reload shows on the next frame.
 @(require_results)
 changes_geometry_of :: proc(
 	app: ^App,
@@ -317,11 +314,21 @@ changes_geometry_of :: proc(
 	shown: layout.Pane_Rect,
 ) -> ui.Changes_Geometry {
 	changes_comments_view(app, pane)
+	changes_chips_view(pane)
 	pane.model.view.minimum_contrast = f32(app.settings.turns.diff_minimum_contrast)
 	mono := ui.text_mono(&w.ui_text, app.family)
 	g := ui.changes_geometry(pane_body_rect(w, shown), w.scale, &pane.model.view, &w.ui_text, &pane.state)
 	ui.changes_layout(&pane.state, &pane.model.view, &w.ui_text, &mono, g.diff.width, w.scale)
 	return g
+}
+
+// Points the view at the model's source and worktree labels and says which chip of each is current.
+@(private = "file")
+changes_chips_view :: proc(pane: ^Changes_Pane) {
+	model, view := &pane.model, &pane.model.view
+	view.sources, view.source_current = model.sources, changes_source_current(pane)
+	view.source_agent = changes_own_agent(pane)
+	view.worktree_labels, view.worktree_current = model.worktree_labels, changes_worktree_current(pane)
 }
 
 // Keeps the selection's newest end in the strip of the first window that shows the pane.
@@ -338,59 +345,115 @@ changes_reveal :: proc(app: ^App, pane: ^Changes_Pane) {
 
 @(private = "file", require_results)
 changes_list_open :: proc(pane: ^Changes_Pane) -> bool {
-	return pane.scope_open || pane.worktree_open || pane.files_open
+	return pane.files_open
 }
 
-@(private = "file")
-CHANGES_FILE_LIST_WIDTH :: f32(360)
-
+// The file list's choices: one per file of the result, searched by path or regular expression, the files
+// the filter hides faded.
 @(private = "file")
 changes_dropdown_choices :: proc(pane: ^Changes_Pane) -> ui.Dropdown_Choices {
-	if pane.worktree_open {
-		return {
-			choices = pane.model.worktree_labels,
-			value = changes_worktree_value(pane),
-			searchable = true,
-			placeholder = "Search worktrees",
-			empty_text = "No matching worktrees",
-		}
+	return {
+		choices = pane.model.file_labels,
+		search_text = pane.model.file_paths,
+		faded = pane.model.faded,
+		searchable = true,
+		regex_toggle = true,
+		placeholder = "Search files",
+		empty_text = "No matching files",
 	}
-	if pane.files_open {
-		return {
-			choices = pane.model.file_labels,
-			search_text = pane.model.file_paths,
-			faded = pane.model.faded,
-			searchable = true,
-			regex_toggle = true,
-			placeholder = "Search files",
-			empty_text = "No matching files",
-			min_width = CHANGES_FILE_LIST_WIDTH,
-		}
-	}
-	return {choices = pane.model.sources, value = pane.model.view.source_label}
 }
 
+// The file list hangs directly under the open panel, as wide as it: its row is a zero-height rect at the
+// panel's bottom edge, and the room it may use starts there, so it never flips over the panel.
 @(private = "file")
 changes_dropdown_anchor :: proc(pane: ^Changes_Pane, g: ui.Changes_Geometry) -> ui.Dropdown_Anchor {
-	if pane.files_open {
-		return {field = g.files_button, row = g.files_button, bounds = g.area, align_end = true}
-	}
-	field := pane.worktree_open ? g.worktree : g.scope
-	return {field = field, row = field, bounds = g.area}
+	bottom := g.panel.y + g.panel.height
+	row := render.Rect{g.panel.x, bottom, g.panel.width, 0}
+	field := render.Rect{g.panel.x, bottom - ui.SPACE_1 * g.scale, g.panel.width, 0}
+	top := bottom - ui.SPACE_2 * g.scale
+	bounds := render.Rect{g.area.x, top, g.area.width, max(0, g.area.y + g.area.height - top)}
+	return {field = field, row = row, bounds = bounds}
 }
 
 @(private = "file")
 changes_list_close :: proc(w: ^Window, pane: ^Changes_Pane) {
-	if !changes_list_open(pane) {return}
-	pane.scope_open, pane.state.scope_open = false, false
-	pane.worktree_open, pane.state.worktree_open = false, false
-	pane.files_open, pane.state.files_open = false, false
+	if !pane.files_open {return}
+	pane.files_open = false
 	ui.dropdown_close(&pane.dropdown)
 	w.dirty = true
 }
 
-// What the open list's highlighted choice is, so a new result can find it again: a file's path, a
-// worktree's path ("" for following the agent) or a source's label. In temporary memory.
+// Closes the panel with the file list and the turn list that belong to it.
+@(private = "file")
+changes_panel_close :: proc(w: ^Window, pane: ^Changes_Pane) {
+	state := &pane.state
+	changes_list_close(w, pane)
+	if !state.panel_open && !state.turn_list_open {return}
+	state.panel_open = false
+	state.turn_list_open, state.turn_list_bar = false, {}
+	w.dirty = true
+}
+
+// Opens the file list under the open panel when the result has files and nothing else is open over it.
+@(private)
+changes_panel_files :: proc(pane: ^Changes_Pane) {
+	if !pane.state.panel_open || pane.files_open || pane.state.turn_list_open {return}
+	if len(pane.model.file_labels) == 0 {return}
+	pane.files_open = true
+	ui.dropdown_open(&pane.dropdown, changes_dropdown_choices(pane))
+}
+
+// Opens or closes the panel. Opening closes the filter popover and the ⋯ menu, keeps the comment being
+// written as a list opening does, reads the agents again for the chips, and opens the file list under it.
+@(private = "file")
+changes_panel_set :: proc(app: ^App, w: ^Window, pane: ^Changes_Pane, open: bool) {
+	if pane.state.panel_open == open {return}
+	if !open {
+		changes_panel_close(w, pane)
+		return
+	}
+	changes_filter_popover(app, w, pane, false)
+	changes_tools_close(w, pane)
+	changes_list_begin(app, pane)
+	_ = changes_sources_refresh(app, pane)
+	pane.state.panel_open = true
+	changes_panel_files(pane)
+	w.dirty = true
+}
+
+@(private = "file")
+changes_tools_close :: proc(w: ^Window, pane: ^Changes_Pane) {
+	if !pane.state.tools_open {return}
+	pane.state.tools_open = false
+	w.dirty = true
+}
+
+// Opens the ⋯ menu, closing the panel and the filter popover.
+@(private = "file")
+changes_tools_open :: proc(app: ^App, w: ^Window, pane: ^Changes_Pane) {
+	changes_panel_close(w, pane)
+	changes_filter_popover(app, w, pane, false)
+	changes_list_begin(app, pane)
+	pane.state.tools_open = true
+	w.dirty = true
+}
+
+// Runs row `row` of the ⋯ menu, which closes with it: the layout toggle, fold all, or the filter popover.
+@(private = "file")
+changes_tools_row :: proc(app: ^App, w: ^Window, pane: ^Changes_Pane, row: int) {
+	changes_tools_close(w, pane)
+	switch row {
+	case 0:
+		changes_layout_toggle(app, w, pane)
+	case 1:
+		changes_fold_all(app, w, pane)
+	case 2:
+		changes_filter_popover(app, w, pane, true)
+	}
+}
+
+// What the open list's highlighted choice is, so a new result can find it again: a file's path. In
+// temporary memory.
 @(private)
 changes_list_highlight :: proc(pane: ^Changes_Pane) -> (identity: string, highlighted: bool) {
 	if !changes_list_open(pane) {return}
@@ -402,13 +465,7 @@ changes_list_highlight :: proc(pane: ^Changes_Pane) -> (identity: string, highli
 @(private = "file", require_results)
 changes_list_identity :: proc(pane: ^Changes_Pane, choice: int) -> string {
 	model := &pane.model
-	if pane.files_open {
-		return choice < len(model.diff.files) ? changes_file_path(model.diff.files[choice]) : ""
-	}
-	if pane.worktree_open {
-		return choice > 0 && choice <= len(model.worktree_paths) ? model.worktree_paths[choice - 1] : ""
-	}
-	return choice < len(model.sources) ? model.sources[choice] : ""
+	return choice < len(model.diff.files) ? changes_file_path(model.diff.files[choice]) : ""
 }
 
 // A new result rebuilt the open list's choices: its search runs again over them, and the highlight stays
@@ -446,17 +503,11 @@ changes_list_begin :: proc(app: ^App, pane: ^Changes_Pane) {
 	changes_editor_close(app, pane, true)
 }
 
-// Applies the highlighted choice of the open list.
+// Applies the highlighted choice of the open list: shows that file.
 @(private = "file")
 changes_list_choose :: proc(app: ^App, w: ^Window, pane: ^Changes_Pane, index: int) {
 	if index < 0 {return}
-	if pane.worktree_open {
-		changes_worktree_pick(app, pane, index)
-	} else if pane.files_open {
-		changes_file_pick(app, w, pane, index)
-	} else {
-		changes_source_pick(app, pane, index)
-	}
+	changes_file_pick(app, w, pane, index)
 }
 
 // Shows file `choice` of the result at the top of the diff: picked past the filter when it hides the
@@ -526,14 +577,14 @@ changes_layout_toggle :: proc(app: ^App, w: ^Window, pane: ^Changes_Pane) {
 	w.dirty = true
 }
 
-// Opens or closes the diff filter's popover. Opening closes the open list and the turn list and keeps the
-// comment being written, as a list opening does; closing keeps the text.
+// Opens or closes the diff filter's popover. Opening closes the panel, the ⋯ menu, the open list and the
+// turn list and keeps the comment being written, as a list opening does; closing keeps the text.
 @(private = "file")
 changes_filter_popover :: proc(app: ^App, w: ^Window, pane: ^Changes_Pane, open: bool) {
 	if pane.state.filter_open == open {return}
 	if open {
-		changes_list_close(w, pane)
-		pane.state.turn_list_open, pane.state.turn_list_bar = false, {}
+		changes_panel_close(w, pane)
+		changes_tools_close(w, pane)
 		changes_list_begin(app, pane)
 	} else {
 		_ = ui.field_release(&pane.filter_editor)
@@ -704,8 +755,12 @@ changes_turn_list_set :: proc(w: ^Window, pane: ^Changes_Pane, g: ui.Changes_Geo
 	pane.state.turn_list_open = open
 	pane.state.turn_list_bar = {}
 	if open {
+		// The list covers the file list under the panel, which steps aside until the turn list closes.
+		changes_list_close(w, pane)
 		at := pane.cursor >= 0 ? pane.cursor : pane.model.view.first
 		_ = ui.changes_turn_list_reveal(&pane.state, g, &pane.model.view, at)
+	} else {
+		changes_panel_files(pane)
 	}
 	w.dirty = true
 }
@@ -739,8 +794,8 @@ changes_has_live :: proc(view: ^ui.Changes_View) -> bool {
 	return false
 }
 
-// The pane's toolbar and diff, or its notice, inside the card; `scrollable` when its diff scrolls and a
-// scrollbar belongs beside it.
+// The pane's band, diff and overview strip, or its notice, inside the card. `scrollable` is always false:
+// the overview strip scrolls the diff, so no pane scrollbar belongs beside it.
 @(require_results)
 changes_pane_draw :: proc(
 	app: ^App,
@@ -761,14 +816,14 @@ changes_pane_draw :: proc(
 	result, _ = ui.changes_draw(
 		&w.list, &w.ui_text, &mono, &app.theme, g, view, &pane.state, w.scale, w.pointer, phase,
 	)
-	if result != .Ok {return true, result}
+	if result != .Ok {return false, result}
 	if changes_list_open(pane) {
 		result = ui.dropdown_draw(
 			&pane.dropdown, changes_dropdown_choices(pane), changes_dropdown_anchor(pane, g), &w.list, &w.ui_text,
 			app.theme, w.pointer, w.scale,
 		)
 	}
-	return view.notice == .None, result
+	return false, result
 }
 
 changes_key :: proc(app: ^App, w: ^Window, e: input.Key_Event) {
@@ -781,6 +836,11 @@ changes_key :: proc(app: ^App, w: ^Window, e: input.Key_Event) {
 	shown: layout.Pane_Rect
 	found := false
 	if pane != nil {shown, found = changes_pane_rect(w, pane.id)}
+	toggle := (e.modifiers & {.Control, .Shift, .Alt, .Super}) == {.Control}
+	if pane != nil && found && key.logical.key == .K && toggle {
+		changes_panel_set(app, w, pane, !pane.state.panel_open)
+		return
+	}
 	if pane != nil && changes_list_open(pane) && found {
 		g := changes_geometry_of(app, w, pane, shown)
 		outcome, taken := ui.dropdown_key(
@@ -791,9 +851,9 @@ changes_key :: proc(app: ^App, w: ^Window, e: input.Key_Event) {
 			changes_list_choose(
 				app, w, pane, ui.dropdown_highlighted(&pane.dropdown, changes_dropdown_choices(pane)),
 			)
-			changes_list_close(w, pane)
+			changes_panel_close(w, pane)
 		case .Closed:
-			changes_list_close(w, pane)
+			changes_panel_close(w, pane)
 		case:
 			w.dirty = true
 		}
@@ -804,6 +864,14 @@ changes_key :: proc(app: ^App, w: ^Window, e: input.Key_Event) {
 	}
 	if pane != nil && found && pane.state.turn_list_open && key.logical.key == .Escape {
 		changes_turn_list_set(w, pane, changes_geometry_of(app, w, pane, shown), false)
+		return
+	}
+	if pane != nil && found && pane.state.tools_open && key.logical.key == .Escape {
+		changes_tools_close(w, pane)
+		return
+	}
+	if pane != nil && found && pane.state.panel_open && key.logical.key == .Escape {
+		changes_panel_close(w, pane)
 		return
 	}
 	// The comment editor's keys come before shortcuts, as the Settings fields' do.
@@ -848,29 +916,31 @@ changes_key :: proc(app: ^App, w: ^Window, e: input.Key_Event) {
 	}
 }
 
-// Rows are the scrolled lines, positive toward the top, as the mouse wheel reports them.
+// Rows are the scrolled lines, positive toward the top, as the mouse wheel reports them. Over the open
+// panel only the strip scrolls; the file list under it takes the wheel elsewhere.
 @(require_results)
 changes_wheel :: proc(app: ^App, w: ^Window, x, y: f32, rows: int) -> bool {
 	pane, shown := changes_under_pointer(app, w, x, y)
 	if shown.content.kind != .Changes {return false}
 	if pane == nil {return true}
 	g := changes_geometry_of(app, w, pane, shown)
-	if changes_list_open(pane) {
+	view := &pane.model.view
+	mono := ui.text_mono(&w.ui_text, app.family)
+	delta := -rows * int(mono.line_height)
+	switch {
+	case pane.state.turn_list_open && render.rect_contains(g.turn_list, x, y):
+		if ui.changes_scroll_turn_list(&pane.state, g, view, delta) {w.dirty = true}
+	case pane.state.panel_open && render.rect_contains(g.panel, x, y):
+		// Scrolling up shows older bars, which sit to the left.
+		if render.rect_contains(g.strip, x, y) && ui.changes_scroll_strip(&pane.state, g, view, -rows) {
+			w.dirty = true
+		}
+	case changes_list_open(pane):
 		_ = ui.dropdown_wheel(
 			&pane.dropdown, changes_dropdown_choices(pane), changes_dropdown_anchor(pane, g), rows, w.scale,
 		)
 		w.dirty = true
-		return true
-	}
-	view := &pane.model.view
-	mono := ui.text_mono(&w.ui_text, app.family)
-	delta := -rows * int(mono.line_height)
-	if pane.state.turn_list_open && render.rect_contains(g.turn_list, x, y) {
-		if ui.changes_scroll_turn_list(&pane.state, g, view, delta) {w.dirty = true}
-	} else if render.rect_contains(g.strip, x, y) {
-		// Scrolling up shows older bars, which sit to the left.
-		if ui.changes_scroll_strip(&pane.state, g, view, -rows) {w.dirty = true}
-	} else {
+	case:
 		changes_diff_scroll(app, w, pane, shown, delta)
 	}
 	return true
@@ -895,18 +965,18 @@ changes_hover_clear :: proc(app: ^App, w: ^Window) {
 // The pointer is off every Agent changes pane.
 changes_leave :: proc(app: ^App, w: ^Window) {
 	changes_hover_clear(app, w)
-	pane_scrollbar_hover_leave(w, .Changes)
 }
 
 @(private = "file", require_results)
 changes_cursor :: proc(hit: ui.Changes_Hit) -> platform.Cursor_Shape {
 	#partial switch hit.part {
-	case .Scope, .Worktree, .Hooks, .Notice_Button, .File_Header, .Strip_Bar, .Step_Back, .Step_Forward,
-	     .Range_Label, .Hunk_Comment, .Comment_Button, .Comment_Card, .Comment_Delete, .Send, .Copy, .Discard,
-	     .Files_Button, .Layout_Button, .Filter_Button, .Filter_Clear, .Filter_Bar_Clear, .Fold_Button,
-	     .Sticky_Header, .Strip_Older, .Strip_Newer:
+	case .Hooks, .Notice_Button, .File_Header, .Strip_Bar, .Step_Back, .Step_Forward, .Range_Label,
+	     .Hunk_Comment, .Comment_Button, .Comment_Card, .Comment_Delete, .Send, .Copy, .Discard,
+	     .Layout_Button, .Filter_Button, .Filter_Clear, .Filter_Bar_Clear, .Fold_Button, .Sticky_Header,
+	     .Strip_Older, .Strip_Newer, .Rail_Summary, .Panel_Button, .Tools_Button, .Source_Chip,
+	     .Worktree_Chip:
 		return .Hand
-	case .Turn_List_Row:
+	case .Turn_List_Row, .Tools_Row:
 		if hit.index >= 0 {return .Hand}
 	case .Filter_Field:
 		if hit.index >= 0 {return .Text}
@@ -948,7 +1018,20 @@ changes_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: input.Mou
 		w.dirty = true
 		return
 	}
-	if changes_list_open(pane) {
+	if pane.state.overview_held {
+		if .Left in e.buttons {
+			pane.state.diff_scroll = ui.changes_overview_drag(&pane.state, g, y)
+			_ = ui.changes_scroll_diff(&pane.state, g, 0)
+		} else {
+			pane.state.overview_held = false
+		}
+		w.dirty = true
+		pointer_set(app, w, .Arrow)
+		return
+	}
+	// Over the open panel its own parts answer; elsewhere the file list under it takes the pointer.
+	if changes_list_open(pane) && !(pane.state.panel_open && render.rect_contains(g.panel, x, y)) {
+		if pane.state.hover != {} {pane.state.hover, w.dirty = {}, true}
 		if ui.dropdown_hover(
 			&pane.dropdown, changes_dropdown_choices(pane), changes_dropdown_anchor(pane, g), x, y, w.scale,
 		) {w.dirty = true}
@@ -968,20 +1051,12 @@ changes_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: input.Mou
 		return
 	}
 	if .Left not_in e.buttons {pane.dragging = .None}
-	shape := platform.Cursor_Shape.Arrow
-	hit: ui.Changes_Hit
-	bar, visible := pane_scrollbar_geometry(app, w, shown)
-	if pane.dragging == .None && !pane.comments.dragging && visible && ui.scrollbar_contains(bar, x, y) {
-		pane_scrollbar_hover_set(w, shown.content)
-	} else {
-		pane_scrollbar_hover_leave(w, .Changes)
-		hit = ui.changes_hit(g, view, &pane.state, x, y)
-		shape = changes_cursor(hit)
-		if pane.dragging != .None {
-			changes_drag_turns(app, pane, g, hit)
-		} else if pane.comments.dragging && .Left in e.buttons {
-			if changes_comments_drag(app, w, pane, hit) {w.dirty = true}
-		}
+	hit := ui.changes_hit(g, view, &pane.state, x, y)
+	shape := changes_cursor(hit)
+	if pane.dragging != .None {
+		changes_drag_turns(app, pane, g, hit)
+	} else if pane.comments.dragging && .Left in e.buttons {
+		if changes_comments_drag(app, w, pane, hit) {w.dirty = true}
 	}
 	if pane.state.hover != hit {pane.state.hover, w.dirty = hit, true}
 	pointer_set(app, w, shape)
@@ -995,32 +1070,34 @@ changes_press :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) {
 	if pane == nil || e.button != .Left {return}
 	w.dirty = true
 	g := changes_geometry_of(app, w, pane, shown)
-	if changes_list_open(pane) {
+	view, state := &pane.model.view, &pane.state
+	in_panel := state.panel_open && render.rect_contains(g.panel, x, y)
+	// The panel's own parts come first; elsewhere the file list under it takes the press, and a press
+	// outside both closes everything.
+	if changes_list_open(pane) && !in_panel {
 		choices, anchor := changes_dropdown_choices(pane), changes_dropdown_anchor(pane, g)
 		switch ui.dropdown_press(&pane.dropdown, choices, anchor, &w.ui_text, x, y, false, w.scale) {
 		case .Chosen:
 			changes_list_choose(app, w, pane, ui.dropdown_highlighted(&pane.dropdown, choices))
-			changes_list_close(w, pane)
+			changes_panel_close(w, pane)
 		case .None:
-			changes_list_close(w, pane)
+			changes_panel_close(w, pane)
 		case .Changed, .Closed, .Font_Filter:
 		}
 		return
 	}
-	view := &pane.model.view
-	if pane.state.turn_list_open {
-		if bar, visible := ui.changes_turn_list_scrollbar(&pane.state, g, view);
+	if state.turn_list_open {
+		if bar, visible := ui.changes_turn_list_scrollbar(state, g, view);
 		   visible && ui.scrollbar_contains(bar, x, y) {
-			pane.state.turn_list_scroll = ui.scrollbar_press(&pane.state.turn_list_bar, bar, y)
+			state.turn_list_scroll = ui.scrollbar_press(&state.turn_list_bar, bar, y)
 			return
 		}
 	}
-	if pane_scrollbar_press(app, w, shown, x, y) {return}
-	hit := ui.changes_hit(g, view, &pane.state, x, y)
-	pane.state.press = hit
+	hit := ui.changes_hit(g, view, state, x, y)
+	state.press = hit
 	extend := .Shift in e.modifiers
 	// While the filter popover is open, a press outside it, its button's own included, only closes it.
-	if pane.state.filter_open {
+	if state.filter_open {
 		#partial switch hit.part {
 		case .Filter_Field:
 			if hit.index >= 0 {changes_filter_point(w, pane, g, x, true, extend)}
@@ -1031,23 +1108,37 @@ changes_press :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) {
 		}
 		return
 	}
+	// The ⋯ menu answers on its rows; a press outside it only closes it.
+	if state.tools_open {
+		if hit.part == .Tools_Row {
+			if hit.index >= 0 {changes_tools_row(app, w, pane, hit.index)}
+		} else if !render.rect_contains(g.tools_menu, x, y) {
+			changes_tools_close(w, pane)
+		}
+		return
+	}
 	// A press outside the open turn list only closes it, as a press outside a dropdown does.
-	if pane.state.turn_list_open && hit.part != .Turn_List_Row && hit.part != .Range_Label {
+	if state.turn_list_open && hit.part != .Turn_List_Row && hit.part != .Range_Label {
 		changes_turn_list_set(w, pane, g, false)
 		return
 	}
+	// A press outside the open panel, its own arrow and summary included, only closes it.
+	if state.panel_open && !in_panel && hit.part != .Turn_List_Row {
+		changes_panel_close(w, pane)
+		return
+	}
 	#partial switch hit.part {
-	case .Scope:
-		changes_list_begin(app, pane)
-		_ = changes_sources_refresh(app, pane)
-		pane.scope_open, pane.state.scope_open = true, true
-		ui.dropdown_open(&pane.dropdown, changes_dropdown_choices(pane))
-	case .Worktree:
-		if len(pane.model.worktree_labels) > 0 {
-			changes_list_begin(app, pane)
-			pane.worktree_open, pane.state.worktree_open = true, true
-			ui.dropdown_open(&pane.dropdown, changes_dropdown_choices(pane))
-		}
+	case .Rail_Summary, .Panel_Button:
+		changes_panel_set(app, w, pane, true)
+	case .Tools_Button:
+		changes_tools_open(app, w, pane)
+	case .Source_Chip:
+		changes_source_pick(app, pane, hit.index)
+	case .Worktree_Chip:
+		changes_worktree_pick(app, pane, hit.index)
+	case .Overview:
+		state.diff_scroll = ui.changes_overview_press(state, g, y)
+		_ = ui.changes_scroll_diff(state, g, 0)
 	case .Hooks:
 		run_action(app, w, .Install_Turn_Hooks, .Button)
 	case .Notice_Button:
@@ -1065,7 +1156,7 @@ changes_press :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) {
 	case .Strip_Newer:
 		changes_strip_page(app, w, pane, shown, 1)
 	case .Range_Label:
-		changes_turn_list_set(w, pane, g, !pane.state.turn_list_open)
+		changes_turn_list_set(w, pane, g, !state.turn_list_open)
 	case .Turn_List_Row:
 		if hit.index >= 0 {
 			changes_select(app, pane, g, hit.index, extend)
@@ -1078,18 +1169,12 @@ changes_press :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) {
 		// file's own header, which takes over the pinned one's hover and press.
 		changes_model_fold(&pane.model, hit.index)
 		changes_scroll_to_file(app, w, pane, hit.index)
-		header := ui.changes_hit(changes_geometry_of(app, w, pane, shown), view, &pane.state, x, y)
+		header := ui.changes_hit(changes_geometry_of(app, w, pane, shown), view, state, x, y)
 		if header == (ui.Changes_Hit{.File_Header, hit.index, 0}) {
-			pane.state.hover, pane.state.press, pane.state.lit = header, header, header
+			state.hover, state.press, state.lit = header, header, header
 		}
 	case .Fold_Button:
 		changes_fold_all(app, w, pane)
-	case .Files_Button:
-		if len(pane.model.file_labels) > 0 {
-			changes_list_begin(app, pane)
-			pane.files_open, pane.state.files_open = true, true
-			ui.dropdown_open(&pane.dropdown, changes_dropdown_choices(pane))
-		}
 	case .Layout_Button:
 		changes_layout_toggle(app, w, pane)
 	case .Filter_Button:
@@ -1104,16 +1189,13 @@ changes_press :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) {
 
 changes_release :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) -> bool {
 	if e.button != .Left {return false}
-	if pane_scrollbar_end(w, .Changes) {
-		w.dirty = true
-		return true
-	}
 	cleared := false
 	for shown in w.panes {
 		if shown.content.kind != .Changes {continue}
 		pane := changes_find(app, shown.content.id)
 		if pane == nil {continue}
 		if pane.state.turn_list_bar.active {pane.state.turn_list_bar, cleared = {}, true}
+		if pane.state.overview_held {pane.state.overview_held, cleared = false, true}
 		if pane.state.press != {} {pane.state.press, cleared = {}, true}
 		if pane.dragging != .None {pane.dragging, cleared = .None, true}
 		if ui.field_release(&pane.filter_editor) {cleared = true}
@@ -1124,15 +1206,15 @@ changes_release :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) -> b
 	return cleared
 }
 
-// Ends whatever the pointer holds on an Agent changes pane: a press, a drag or a scrollbar thumb.
+// Ends whatever the pointer holds on an Agent changes pane: a press, a drag or the overview strip.
 changes_cancel :: proc(app: ^App, w: ^Window) {
 	_ = changes_release(app, w, {button = .Left})
 }
 
 // The control a tooltip describes: what a press would reach, as changes_press finds it, or a disabled
-// button, whose tooltip still says what it does. `listed` while a list is open over the pane, which then
-// takes every point; while the filter popover or the turn list is open, a point outside it only closes it,
-// so it names nothing.
+// button, whose tooltip still says what it does. `listed` while the file list is open under the panel,
+// which then takes every point outside the panel; while the filter popover, the ⋯ menu or the turn list is
+// open, a point outside it only closes it, so it names nothing.
 @(private = "file")
 changes_tooltip_hit :: proc(
 	app: ^App,
@@ -1148,23 +1230,24 @@ changes_tooltip_hit :: proc(
 	pane, shown = changes_under_pointer(app, w, x, y)
 	if pane == nil {return}
 	g = changes_geometry_of(app, w, pane, shown)
-	if changes_list_open(pane) {return pane, {}, g, true}
-	if pane.state.filter_open && !render.rect_contains(g.filter_popover, x, y) {return}
-	if pane.state.turn_list_open && !render.rect_contains(g.turn_list, x, y) &&
+	state := &pane.state
+	in_panel := state.panel_open && render.rect_contains(g.panel, x, y)
+	if changes_list_open(pane) && !in_panel {return pane, {}, g, true}
+	if state.filter_open && !render.rect_contains(g.filter_popover, x, y) {return}
+	if state.tools_open && !render.rect_contains(g.tools_menu, x, y) {return}
+	if state.turn_list_open && !render.rect_contains(g.turn_list, x, y) &&
 	   !render.rect_contains(g.range_label, x, y) {
 		return
 	}
-	hit = ui.changes_hit(g, &pane.model.view, &pane.state, x, y)
+	hit = ui.changes_hit(g, &pane.model.view, state, x, y)
 	if hit.part != .None {return}
 	switch {
-	case render.rect_contains(g.step_back, x, y):
+	case in_panel && render.rect_contains(g.step_back, x, y):
 		hit.part = .Step_Back
-	case render.rect_contains(g.step_forward, x, y):
+	case in_panel && render.rect_contains(g.step_forward, x, y):
 		hit.part = .Step_Forward
 	case render.rect_contains(g.fold_button, x, y):
 		hit.part = .Fold_Button
-	case render.rect_contains(g.files_button, x, y):
-		hit.part = .Files_Button
 	}
 	return
 }
@@ -1184,10 +1267,16 @@ changes_tooltip :: proc(app: ^App, w: ^Window, x, y: f32) -> string {
 	if listed {return changes_on_regex_toggle(w, pane, g, x, y) ? "Use regular expression" : ""}
 	view := &pane.model.view
 	#partial switch hit.part {
-	case .Scope:
-		return "Show changes from"
-	case .Worktree:
-		return "Worktree the git view shows"
+	case .Rail_Summary, .Panel_Button:
+		return "Source, turns and files"
+	case .Tools_Button:
+		return "Layout, fold and filter"
+	case .Source_Chip:
+		if hit.index >= 0 && hit.index < len(view.sources) {return view.sources[hit.index]}
+	case .Worktree_Chip:
+		if hit.index >= 0 && hit.index < len(view.worktree_labels) {return view.worktree_labels[hit.index]}
+	case .Overview:
+		return "Overview: click or drag to scroll"
 	case .Hooks:
 		return "Install hooks so turns begin before the first edit"
 	case .Step_Back:
@@ -1213,8 +1302,6 @@ changes_tooltip :: proc(app: ^App, w: ^Window, x, y: f32) -> string {
 		return "Clear the filter"
 	case .Layout_Button:
 		return pane.side_by_side ? "Unified view" : "Side-by-side view"
-	case .Files_Button:
-		return "Files in this diff"
 	case .File_Header, .Sticky_Header:
 		folded := hit.index >= 0 && hit.index < len(view.collapsed) && view.collapsed[hit.index]
 		return folded ? "Expand file" : "Collapse file"
@@ -1243,6 +1330,10 @@ changes_tooltip :: proc(app: ^App, w: ^Window, x, y: f32) -> string {
 @(private = "file", rodata)
 CHANGES_STEP_KEYS := [2]commands.Shortcut{{.Arrow_Left, {}}, {.Arrow_Right, {}}}
 
+// The key that toggles the panel, which the rail's summary and arrow name.
+@(private = "file", rodata)
+CHANGES_PANEL_KEY := commands.Shortcut{.K, {.Control}}
+
 // The fixed keys the step buttons and the file list's regular expression toggle answer to; the toggle's is
 // the find bar's, which the list shares.
 changes_shortcut :: proc(app: ^App, w: ^Window, x, y: f32) -> Tooltip_Shortcut {
@@ -1257,6 +1348,8 @@ changes_shortcut :: proc(app: ^App, w: ^Window, x, y: f32) -> Tooltip_Shortcut {
 		return CHANGES_STEP_KEYS[0]
 	case .Step_Forward:
 		return CHANGES_STEP_KEYS[1]
+	case .Rail_Summary, .Panel_Button:
+		return CHANGES_PANEL_KEY
 	}
 	return nil
 }
@@ -1288,11 +1381,16 @@ when AIO_CONTROL {
 		pane := changes_focused(app, w)
 		scope, notice, range_label := "none", "none", ""
 		turn_count, first, last, files := 0, -1, -1, 0
-		scope_rect, worktree_rect, notice_rect, hooks_rect: render.Rect
+		notice_rect, hooks_rect: render.Rect
 		step_back_rect, step_forward_rect, range_label_rect: render.Rect
-		files_button_rect, layout_button_rect: render.Rect
-		filter_button_rect, filter_field_rect, filter_clear_rect, filter_bar_clear_rect: render.Rect
-		regex_rect, fold_button_rect, sticky_rect, strip_older_rect, strip_newer_rect: render.Rect
+		layout_button_rect, fold_button_rect, filter_button_rect: render.Rect
+		filter_field_rect, filter_clear_rect, filter_bar_clear_rect: render.Rect
+		regex_rect, sticky_rect, strip_older_rect, strip_newer_rect: render.Rect
+		rail_rect, rail_summary_rect, panel_rect, panel_button_rect, tools_button_rect: render.Rect
+		overview_rect, overview_box_rect, turn_title_rect: render.Rect
+		rail_steps := 0
+		range_title := ""
+		title_buffer: [96]u8
 		top_file, sticky_file := -1, -1
 		strip_older, strip_newer, strip_bars := 0, 0, 0
 		list_empty := ""
@@ -1304,12 +1402,30 @@ when AIO_CONTROL {
 			turn_count, first, last, files = len(view.turns), view.first, view.last, len(view.files)
 			if shown, found := changes_pane_rect(w, pane.id); found {
 				g := changes_geometry_of(app, w, pane, shown)
-				scope_rect, worktree_rect = g.scope, g.worktree
-				step_back_rect, step_forward_rect, range_label_rect = g.step_back, g.step_forward, g.range_label
+				rail_rect, rail_summary_rect, rail_steps = g.rail, g.rail_summary, g.rail_steps
+				panel_button_rect, tools_button_rect = g.panel_button, g.tools_button
+				layout_button_rect, fold_button_rect, filter_button_rect = g.layout_button, g.fold_button, g.filter_button
+				filter_bar_clear_rect = g.filter_bar_clear
+				overview_rect, overview_box_rect = g.overview, ui.changes_overview_box(&pane.state, g)
 				if view.notice == .Recording_Off {notice_rect = g.notice_button}
-				if view.hooks_offer {hooks_rect = g.hooks}
-				files_button_rect, layout_button_rect = g.files_button, g.layout_button
-				filter_button_rect, filter_bar_clear_rect = g.filter_button, g.filter_bar_clear
+				// The panel's parts exist while it is open: the chips, the hooks button and the turn strip.
+				if pane.state.panel_open {
+					panel_rect, turn_title_rect = g.panel, g.turn_title
+					if view.hooks_offer {hooks_rect = g.hooks}
+					step_back_rect, step_forward_rect, range_label_rect = g.step_back, g.step_forward, g.range_label
+					for chip, i in g.source_chips {
+						state_rect(r, changes_report_key("source_chip", i, "rect"), chip)
+						state_text(r, changes_report_key("source_chip", i, "label"), view.sources[i])
+					}
+					state_value(r, "changes.source_chip_current", view.source_current)
+					for chip, i in g.worktree_chips {
+						state_rect(r, changes_report_key("worktree_chip", i, "rect"), chip)
+						state_text(r, changes_report_key("worktree_chip", i, "label"), view.worktree_labels[i])
+					}
+				}
+				if pane.state.tools_open {
+					for row, i in g.tools_rows {state_rect(r, changes_report_key("tools_row", i, "rect"), row)}
+				}
 				if pane.state.filter_open {
 					filter_field_rect = g.filter_field
 					if changes_filter_text(pane) != "" {filter_clear_rect = g.filter_clear}
@@ -1319,24 +1435,28 @@ when AIO_CONTROL {
 					regex_rect = ui.dropdown_regex_rect(&pane.dropdown, choices, anchor, w.scale)
 				}
 				top_file = ui.changes_top_file(&pane.state, view)
-				fold_button_rect = g.fold_button
 				sticky_file, sticky_rect = ui.changes_sticky_header(&pane.state, view, g)
 				if ui.changes_scope_turns(pane.scope) {
 					strip_older, strip_newer = ui.changes_strip_hidden(g, &pane.state, view)
 					strip_bars = g.strip_bars
-					strip_older_rect = ui.changes_strip_marker_rect(g, &pane.state, view, false)
-					strip_newer_rect = ui.changes_strip_marker_rect(g, &pane.state, view, true)
 				}
-				for i in 0 ..< len(view.turns) {
-					rect := ui.changes_strip_bar_rect(g, &pane.state, view, i)
-					if rect.width <= 0 || rect.height <= 0 {continue}
-					state_rect(r, changes_report_key("strip", i, "rect"), rect)
+				if pane.state.panel_open {
+					if ui.changes_scope_turns(pane.scope) {
+						strip_older_rect = ui.changes_strip_marker_rect(g, &pane.state, view, false)
+						strip_newer_rect = ui.changes_strip_marker_rect(g, &pane.state, view, true)
+					}
+					for i in 0 ..< len(view.turns) {
+						rect := ui.changes_strip_bar_rect(g, &pane.state, view, i)
+						if rect.width <= 0 || rect.height <= 0 {continue}
+						state_rect(r, changes_report_key("strip", i, "rect"), rect)
+					}
 				}
 			}
 			// State entries borrow their text until the report is written, after this returns.
 			if ui.changes_scope_turns(pane.scope) {
 				range_label = strings.clone(ui.changes_range_label(view, label_buffer[:]), context.temp_allocator)
 			}
+			range_title = strings.clone(ui.changes_range_title(view, title_buffer[:]), context.temp_allocator)
 			for turn, i in view.turns {state_value(r, changes_report_key("turn", i, "live"), turn.live)}
 			for i in 0 ..< min(len(pane.model.agents), len(pane.model.sources)) {
 				state_text(r, changes_report_key("agent", i, "label"), pane.model.sources[i])
@@ -1392,6 +1512,9 @@ when AIO_CONTROL {
 		state_value(r, "changes.dropdown_open", pane != nil && changes_list_open(pane))
 		state_value(r, "changes.turn_list_open", pane != nil && pane.state.turn_list_open)
 		state_value(r, "changes.files_open", pane != nil && pane.files_open)
+		state_value(r, "changes.panel_open", pane != nil && pane.state.panel_open)
+		state_value(r, "changes.tools_open", pane != nil && pane.state.tools_open)
+		state_value(r, "changes.rail_steps", rail_steps)
 		state_value(r, "changes.side_by_side", pane != nil && pane.side_by_side)
 		state_value(r, "changes.diff_scroll", pane != nil ? pane.state.diff_scroll : 0)
 		state_value(r, "changes.top_file", top_file)
@@ -1422,14 +1545,20 @@ when AIO_CONTROL {
 		state_value(r, "changes.file_list_regex", pane != nil && pane.dropdown.regex)
 		state_text(r, "changes.file_list_empty", list_empty)
 		state_text(r, "changes.range_label", range_label)
-		state_rect(r, "changes.scope_rect", scope_rect)
-		state_rect(r, "changes.worktree_rect", worktree_rect)
+		state_text(r, "changes.range_title", range_title)
+		state_rect(r, "changes.rail_rect", rail_rect)
+		state_rect(r, "changes.rail_summary_rect", rail_summary_rect)
+		state_rect(r, "changes.panel_rect", panel_rect)
+		state_rect(r, "changes.panel_button_rect", panel_button_rect)
+		state_rect(r, "changes.tools_button_rect", tools_button_rect)
+		state_rect(r, "changes.overview_rect", overview_rect)
+		state_rect(r, "changes.overview_box_rect", overview_box_rect)
+		state_rect(r, "changes.turn_title_rect", turn_title_rect)
 		state_rect(r, "changes.notice_button_rect", notice_rect)
 		state_rect(r, "changes.hooks_rect", hooks_rect)
 		state_rect(r, "changes.step_back_rect", step_back_rect)
 		state_rect(r, "changes.step_forward_rect", step_forward_rect)
 		state_rect(r, "changes.range_label_rect", range_label_rect)
-		state_rect(r, "changes.files_button_rect", files_button_rect)
 		state_rect(r, "changes.layout_button_rect", layout_button_rect)
 		state_rect(r, "changes.filter_button_rect", filter_button_rect)
 		state_rect(r, "changes.filter_field_rect", filter_field_rect)
