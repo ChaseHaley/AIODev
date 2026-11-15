@@ -535,11 +535,28 @@ Status_Settings :: struct {
 	keep_finished:                         Status_Keep,
 	ignore_apps:                           string,
 }
-// Agent changes: whether to keep a private copy of the files agents change in each turn, and for how
-// many days.
+// How a new Agent changes pane shows diffs; each pane then switches on its own.
+Diff_View :: enum int {
+	Unified,
+	Side_By_Side,
+}
+DIFF_VIEW_NAME :: [Diff_View]string {
+	.Unified      = "unified",
+	.Side_By_Side = "side_by_side",
+}
+DIFF_VIEW_LABEL :: [Diff_View]string {
+	.Unified      = "Unified",
+	.Side_By_Side = "Side by side",
+}
+#assert(len(Diff_View) == 2)
+DIFF_VIEW_NAMES :: []string{DIFF_VIEW_NAME[Diff_View(0)], DIFF_VIEW_NAME[Diff_View(1)]}
+DIFF_VIEW_LABELS :: []string{DIFF_VIEW_LABEL[Diff_View(0)], DIFF_VIEW_LABEL[Diff_View(1)]}
+// Agent changes: whether to keep a private copy of the files agents change in each turn, for how many
+// days, and how new panes show diffs.
 Turns_Settings :: struct {
 	record:         bool,
 	retention_days: int,
+	diff_view:      Diff_View,
 }
 Window_Settings :: struct {
 	columns, rows, padding: int,
@@ -1466,6 +1483,16 @@ SCHEMA :: [?]Schema_Entry {
 		default_value = "14",
 		valid = {1, 365},
 		description = "Recorded turns older than this are deleted.",
+	},
+	{
+		key = "turns.diff_view",
+		title = "Default diff view",
+		kind = .Enum,
+		offset = offset_of(Settings, turns) + offset_of(Turns_Settings, diff_view),
+		default_value = "unified",
+		names = DIFF_VIEW_NAMES,
+		labels = DIFF_VIEW_LABELS,
+		description = "How a new Agent changes pane shows diffs. Each pane can switch with its toolbar toggle.",
 	},
 	{
 		key = "shell.default_profile",

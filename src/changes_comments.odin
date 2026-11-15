@@ -362,7 +362,7 @@ changes_comment_add :: proc(pane: ^Changes_Pane, text: string) -> bool {
 
 // Ends editing; with `save`, the text replaces the comment's or becomes a new one. Empty text saves
 // nothing.
-@(private = "file")
+@(private)
 changes_editor_close :: proc(app: ^App, pane: ^Changes_Pane, save: bool) {
 	c := &pane.comments
 	if c.editing < 0 {return}

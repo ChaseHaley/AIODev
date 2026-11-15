@@ -51,6 +51,8 @@ Changes_Model :: struct {
 	sources:        []string,
 	// The label of the pane's own agent, which the source field shows in the Agent scope.
 	agent_label:    string,
+	// The file list's choices, parallel to view.files and owned: "<status mark> <path>  +A −R".
+	file_labels:    []string,
 	// turns.record when the pane last asked, so a change is noticed.
 	recording:      bool,
 	// The wall-clock minute the row ages were written for.
@@ -82,6 +84,10 @@ Changes_Pane :: struct {
 	worktree_open: bool,
 	// The worktree the git scopes show; "" follows the agent. Not persisted.
 	worktree_pick: string,
+	// The file list is open; it shares `dropdown` too.
+	files_open: bool,
+	// The diff shows old and new side by side. Persisted, and copied by a pane opened from this one.
+	side_by_side: bool,
 	// The turn a selection extends from, and the turn the keys move; -1 for none.
 	anchor:     int,
 	cursor:     int,
@@ -152,6 +158,7 @@ changes_pane_create :: proc(
 	agent: turns.Session,
 	directory: string,
 	scope: ui.Changes_Scope,
+	side_by_side := false,
 ) -> ^Changes_Pane {
 	pane, err := new(Changes_Pane)
 	if err != nil {return nil}
@@ -164,6 +171,7 @@ changes_pane_create :: proc(
 		return nil
 	}
 	pane.agent, pane.directory, pane.scope = cloned_agent, cloned_directory, scope
+	pane.side_by_side, pane.model.view.side_by_side = side_by_side, side_by_side
 	pane.anchor, pane.cursor = -1, -1
 	pane.model.view.first, pane.model.view.last = -1, -1
 	pane.comments.editing, pane.model.view.editing = -1, -1
@@ -212,8 +220,8 @@ changes_poll_deadline :: proc(app: ^App) -> (next: time.Tick, pending: bool) {
 	return app.changes_deadline, true
 }
 
-// Opens another Agent changes pane beside the focused pane: for the focused pane's agent, or with the
-// agent, scope and directory of the focused Agent changes pane.
+// Opens another Agent changes pane beside the focused pane: for the focused pane's agent in the default
+// diff view, or with the agent, scope, directory and diff view of the focused Agent changes pane.
 changes_open :: proc(app: ^App, w: ^Window) {
 	acting := pane_link_acting_window(app, w)
 	workspace := acting.workspace
@@ -222,8 +230,9 @@ changes_open :: proc(app: ^App, w: ^Window) {
 	agent: turns.Session
 	directory := ""
 	scope := ui.Changes_Scope.Uncommitted
+	side_by_side := app.settings.turns.diff_view == .Side_By_Side
 	if from := changes_focused(app, acting); from != nil {
-		agent, directory, scope = from.agent, from.directory, from.scope
+		agent, directory, scope, side_by_side = from.agent, from.directory, from.scope, from.side_by_side
 	} else if entry := focused_session(app, acting); entry != nil {
 		agent = turn_recorder_session(app, entry.key)
 		directory, _ = pane_directory(app, entry)
@@ -232,7 +241,7 @@ changes_open :: proc(app: ^App, w: ^Window) {
 		directory = page.directory
 	}
 	if directory == "" {directory = home_directory()}
-	pane := changes_pane_create(app, agent, directory, scope)
+	pane := changes_pane_create(app, agent, directory, scope, side_by_side)
 	if pane == nil {
 		notify(app, .Error, "Could not open Agent changes.")
 		return
@@ -298,8 +307,11 @@ changes_reveal :: proc(app: ^App, pane: ^Changes_Pane) {
 
 @(private = "file", require_results)
 changes_list_open :: proc(pane: ^Changes_Pane) -> bool {
-	return pane.scope_open || pane.worktree_open
+	return pane.scope_open || pane.worktree_open || pane.files_open
 }
+
+@(private = "file")
+CHANGES_FILE_LIST_WIDTH :: f32(360)
 
 @(private = "file")
 changes_dropdown_choices :: proc(pane: ^Changes_Pane) -> ui.Dropdown_Choices {
@@ -311,11 +323,22 @@ changes_dropdown_choices :: proc(pane: ^Changes_Pane) -> ui.Dropdown_Choices {
 			placeholder = "Search worktrees",
 		}
 	}
+	if pane.files_open {
+		return {
+			choices = pane.model.file_labels,
+			searchable = true,
+			placeholder = "Search files",
+			min_width = CHANGES_FILE_LIST_WIDTH,
+		}
+	}
 	return {choices = pane.model.sources, value = pane.model.view.source_label}
 }
 
 @(private = "file")
 changes_dropdown_anchor :: proc(pane: ^Changes_Pane, g: ui.Changes_Geometry) -> ui.Dropdown_Anchor {
+	if pane.files_open {
+		return {field = g.files_button, row = g.files_button, bounds = g.area, align_end = true}
+	}
 	field := pane.worktree_open ? g.worktree : g.scope
 	return {field = field, row = field, bounds = g.area}
 }
@@ -325,29 +348,125 @@ changes_list_close :: proc(w: ^Window, pane: ^Changes_Pane) {
 	if !changes_list_open(pane) {return}
 	pane.scope_open, pane.state.scope_open = false, false
 	pane.worktree_open, pane.state.worktree_open = false, false
+	pane.files_open, pane.state.files_open = false, false
 	ui.dropdown_close(&pane.dropdown)
 	w.dirty = true
 }
 
+// What the open list's highlighted choice is, so a new result can find it again: a file's path, a
+// worktree's path ("" for following the agent) or a source's label. In temporary memory.
+@(private)
+changes_list_highlight :: proc(pane: ^Changes_Pane) -> (identity: string, highlighted: bool) {
+	if !changes_list_open(pane) {return}
+	index := ui.dropdown_highlighted(&pane.dropdown, changes_dropdown_choices(pane))
+	if index < 0 {return}
+	return strings.clone(changes_list_identity(pane, index), context.temp_allocator), true
+}
+
+@(private = "file", require_results)
+changes_list_identity :: proc(pane: ^Changes_Pane, choice: int) -> string {
+	model := &pane.model
+	if pane.files_open {
+		return choice < len(model.view.files) ? changes_file_path(model.view.files[choice]) : ""
+	}
+	if pane.worktree_open {
+		return choice > 0 && choice <= len(model.worktree_paths) ? model.worktree_paths[choice - 1] : ""
+	}
+	return choice < len(model.sources) ? model.sources[choice] : ""
+}
+
+// A new result rebuilt the open list's choices: its search runs again over them, and the highlight stays
+// on the choice it was on (`kept`, from changes_list_highlight) at the same row of the list, or on the
+// nearest row when that choice is gone.
+@(private)
+changes_list_refilter :: proc(pane: ^Changes_Pane, kept: string, highlighted: bool) {
+	if !changes_list_open(pane) {return}
+	d := &pane.dropdown
+	choices := changes_dropdown_choices(pane)
+	index, scroll := d.list.index, d.list.scroll
+	if choices.searchable {
+		query := strings.clone(ui.field_string(&d.search), context.temp_allocator)
+		ui.dropdown_restore(d, choices, query, false)
+	}
+	count := ui.dropdown_count(d, choices)
+	position := -1
+	for i in 0 ..< count {
+		if !highlighted {break}
+		choice := choices.searchable ? d.matches[i] : i
+		if changes_list_identity(pane, choice) == kept {
+			position = i
+			break
+		}
+	}
+	if position < 0 {position = min(index, count - 1)}
+	d.list.index = position
+	d.list.scroll = clamp(scroll + position - index, 0, max(0, count - 1))
+}
+
+// A list opening takes the keyboard from the comment editor, which keeps what it holds, as a press on a
+// line does.
+@(private = "file")
+changes_list_begin :: proc(app: ^App, pane: ^Changes_Pane) {
+	changes_editor_close(app, pane, true)
+}
+
 // Applies the highlighted choice of the open list.
 @(private = "file")
-changes_list_choose :: proc(app: ^App, pane: ^Changes_Pane, index: int) {
+changes_list_choose :: proc(app: ^App, w: ^Window, pane: ^Changes_Pane, index: int) {
 	if index < 0 {return}
 	if pane.worktree_open {
 		changes_worktree_pick(app, pane, index)
+	} else if pane.files_open {
+		changes_file_pick(app, w, pane, index)
 	} else {
 		changes_source_pick(app, pane, index)
 	}
 }
 
-// Typed or pasted text goes to the comment being written, else to the open worktree picker's search.
+// Unfolds file `index` and scrolls the diff so its header is at the top.
+changes_file_pick :: proc(app: ^App, w: ^Window, pane: ^Changes_Pane, index: int) {
+	view := &pane.model.view
+	if index < 0 || index >= len(view.files) {return}
+	if index < len(view.collapsed) && view.collapsed[index] {changes_model_fold(&pane.model, index)}
+	shown, found := changes_pane_rect(w, pane.id)
+	if !found {return}
+	// Laid out first, so the file's top counts the unfolded body; then kept within what can scroll.
+	g := changes_geometry_of(app, w, pane, shown)
+	pane.state.diff_scroll = ui.changes_diff_file_top(&pane.state, view, index)
+	_ = ui.changes_scroll_diff(&pane.state, g, 0)
+	w.dirty = true
+}
+
+// Switches the pane between the unified and side-by-side diff, keeping the file at the top in view.
+changes_layout_toggle :: proc(app: ^App, w: ^Window, pane: ^Changes_Pane) {
+	view := &pane.model.view
+	shown, found := changes_pane_rect(w, pane.id)
+	top := -1
+	if found {
+		_ = changes_geometry_of(app, w, pane, shown)
+		top = ui.changes_top_file(&pane.state, view)
+	}
+	pane.side_by_side = !pane.side_by_side
+	view.side_by_side = pane.side_by_side
+	view.revision += 1
+	if found && top >= 0 {
+		g := changes_geometry_of(app, w, pane, shown)
+		pane.state.diff_scroll = ui.changes_diff_file_top(&pane.state, view, top)
+		_ = ui.changes_scroll_diff(&pane.state, g, 0)
+	}
+	layout_state_touch(app)
+	w.dirty = true
+}
+
+// Typed or pasted text goes to the open list's search, else to the comment being written.
 changes_text :: proc(app: ^App, w: ^Window, text: string) -> bool {
 	pane := changes_focused(app, w)
 	if pane == nil {return false}
-	if changes_comments_text(app, w, pane, text) {return true}
-	if !changes_list_open(pane) {return false}
-	if ui.dropdown_text(&pane.dropdown, changes_dropdown_choices(pane), text) {w.dirty = true}
-	return true
+	if changes_list_open(pane) {
+		if ui.dropdown_text(&pane.dropdown, changes_dropdown_choices(pane), text) {w.dirty = true}
+		return true
+	}
+	return changes_comments_text(app, w, pane, text)
 }
 
 // Selects turn `index`, or with `extend` the run from the anchor to it, and keeps it in the strip.
@@ -475,7 +594,9 @@ changes_key :: proc(app: ^App, w: ^Window, e: input.Key_Event) {
 		)
 		#partial switch outcome {
 		case .Chosen:
-			changes_list_choose(app, pane, ui.dropdown_highlighted(&pane.dropdown, changes_dropdown_choices(pane)))
+			changes_list_choose(
+				app, w, pane, ui.dropdown_highlighted(&pane.dropdown, changes_dropdown_choices(pane)),
+			)
 			changes_list_close(w, pane)
 		case .Closed:
 			changes_list_close(w, pane)
@@ -582,7 +703,8 @@ changes_leave :: proc(app: ^App, w: ^Window) {
 changes_cursor :: proc(hit: ui.Changes_Hit) -> platform.Cursor_Shape {
 	#partial switch hit.part {
 	case .Scope, .Worktree, .Hooks, .Notice_Button, .File_Header, .Strip_Bar, .Step_Back, .Step_Forward,
-	     .Range_Label, .Hunk_Comment, .Comment_Button, .Comment_Card, .Comment_Delete, .Send, .Copy, .Discard:
+	     .Range_Label, .Hunk_Comment, .Comment_Button, .Comment_Card, .Comment_Delete, .Send, .Copy, .Discard,
+	     .Files_Button, .Layout_Button:
 		return .Hand
 	case .Turn_List_Row:
 		if hit.index >= 0 {return .Hand}
@@ -666,7 +788,7 @@ changes_press :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) {
 		choices, anchor := changes_dropdown_choices(pane), changes_dropdown_anchor(pane, g)
 		switch ui.dropdown_press(&pane.dropdown, choices, anchor, &w.ui_text, x, y, false, w.scale) {
 		case .Chosen:
-			changes_list_choose(app, pane, ui.dropdown_highlighted(&pane.dropdown, choices))
+			changes_list_choose(app, w, pane, ui.dropdown_highlighted(&pane.dropdown, choices))
 			changes_list_close(w, pane)
 		case .None:
 			changes_list_close(w, pane)
@@ -693,11 +815,13 @@ changes_press :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) {
 	}
 	#partial switch hit.part {
 	case .Scope:
+		changes_list_begin(app, pane)
 		_ = changes_sources_refresh(app, pane)
 		pane.scope_open, pane.state.scope_open = true, true
 		ui.dropdown_open(&pane.dropdown, changes_dropdown_choices(pane))
 	case .Worktree:
 		if len(pane.model.worktree_labels) > 0 {
+			changes_list_begin(app, pane)
 			pane.worktree_open, pane.state.worktree_open = true, true
 			ui.dropdown_open(&pane.dropdown, changes_dropdown_choices(pane))
 		}
@@ -722,6 +846,14 @@ changes_press :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) {
 		}
 	case .File_Header:
 		changes_model_fold(&pane.model, hit.index)
+	case .Files_Button:
+		if len(pane.model.file_labels) > 0 {
+			changes_list_begin(app, pane)
+			pane.files_open, pane.state.files_open = true, true
+			ui.dropdown_open(&pane.dropdown, changes_dropdown_choices(pane))
+		}
+	case .Layout_Button:
+		changes_layout_toggle(app, w, pane)
 	case .Line, .Hunk_Comment, .Comment_Button, .Comment_Card, .Comment_Delete, .Comment_Editor, .Send, .Copy,
 	     .Discard:
 		_ = changes_comments_press(app, w, pane, hit, e)
@@ -754,7 +886,7 @@ changes_cancel :: proc(app: ^App, w: ^Window) {
 	_ = changes_release(app, w, {button = .Left})
 }
 
-// The strip bar's turn, why Send is off, and what the hunk button does.
+// The strip bar's turn, why Send is off, and what the toolbar and hunk buttons do.
 @(private)
 changes_tooltip :: proc(app: ^App, w: ^Window, x, y: f32) -> string {
 	pane, shown := changes_under_pointer(app, w, x, y)
@@ -769,6 +901,10 @@ changes_tooltip :: proc(app: ^App, w: ^Window, x, y: f32) -> string {
 		if !view.send.can_send {return view.send.reason}
 	case .Hunk_Comment:
 		return "Comment on this hunk"
+	case .Layout_Button:
+		return pane.side_by_side ? "Unified view" : "Side-by-side view"
+	case .Files_Button:
+		return "Files in this diff"
 	}
 	return ""
 }
@@ -802,6 +938,8 @@ when AIO_CONTROL {
 		turn_count, first, last, files := 0, -1, -1, 0
 		scope_rect, worktree_rect, notice_rect, hooks_rect: render.Rect
 		step_back_rect, step_forward_rect, range_label_rect: render.Rect
+		files_button_rect, layout_button_rect: render.Rect
+		top_file := -1
 		label_buffer: [64]u8
 		if pane != nil {
 			view := &pane.model.view
@@ -814,6 +952,8 @@ when AIO_CONTROL {
 				step_back_rect, step_forward_rect, range_label_rect = g.step_back, g.step_forward, g.range_label
 				if view.notice == .Recording_Off {notice_rect = g.notice_button}
 				if view.hooks_offer {hooks_rect = g.hooks}
+				files_button_rect, layout_button_rect = g.files_button, g.layout_button
+				top_file = ui.changes_top_file(&pane.state, view)
 				for i in 0 ..< len(view.turns) {
 					rect := ui.changes_strip_bar_rect(g, &pane.state, view, i)
 					if rect.width <= 0 || rect.height <= 0 {continue}
@@ -839,6 +979,15 @@ when AIO_CONTROL {
 				folded := i < len(view.collapsed) && view.collapsed[i]
 				state_value(r, changes_report_key("file", i, "collapsed"), folded)
 				state_value(r, changes_report_key("file", i, "highlighted"), changes_highlighted(view, i))
+			}
+			if pane.files_open {
+				choices := changes_dropdown_choices(pane)
+				for match, i in pane.dropdown.matches {
+					if i >= 20 {break}
+					if match < len(choices.choices) {
+						state_text(r, changes_report_key("file_list", i, "label"), choices.choices[match])
+					}
+				}
 			}
 		}
 		state_value(r, "changes.count", len(app.changes_panes))
@@ -867,6 +1016,10 @@ when AIO_CONTROL {
 		state_value(r, "changes.omitted", pane != nil ? pane.model.view.omitted : 0)
 		state_value(r, "changes.dropdown_open", pane != nil && changes_list_open(pane))
 		state_value(r, "changes.turn_list_open", pane != nil && pane.state.turn_list_open)
+		state_value(r, "changes.files_open", pane != nil && pane.files_open)
+		state_value(r, "changes.side_by_side", pane != nil && pane.side_by_side)
+		state_value(r, "changes.diff_scroll", pane != nil ? pane.state.diff_scroll : 0)
+		state_value(r, "changes.top_file", top_file)
 		state_text(r, "changes.range_label", range_label)
 		state_rect(r, "changes.scope_rect", scope_rect)
 		state_rect(r, "changes.worktree_rect", worktree_rect)
@@ -875,6 +1028,8 @@ when AIO_CONTROL {
 		state_rect(r, "changes.step_back_rect", step_back_rect)
 		state_rect(r, "changes.step_forward_rect", step_forward_rect)
 		state_rect(r, "changes.range_label_rect", range_label_rect)
+		state_rect(r, "changes.files_button_rect", files_button_rect)
+		state_rect(r, "changes.layout_button_rect", layout_button_rect)
 		changes_comments_state_report(r, app, w, pane)
 	}
 }

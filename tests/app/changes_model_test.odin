@@ -21,7 +21,7 @@ now_time :: proc() -> time.Time {
 // A pane in a state that never starts the turn worker: a turn scope with recording off.
 @(private = "file")
 pane_start :: proc(state: ^app.App, scope: ui.Changes_Scope) -> ^app.Changes_Pane {
-	return app.changes_pane_create(state, {}, "C:/work/odin", scope)
+	return app.changes_pane_create(state, {}, "C:/work/odin", scope, false)
 }
 
 @(private = "file")
@@ -396,6 +396,36 @@ a_turn_query_result_marks_ambiguous_files :: proc(t: ^testing.T) {
 	testing.expect_value(t, view.marked[1], false)
 	testing.expect_value(t, view.following, false)
 	testing.expect_value(t, view.worktree, "")
+}
+
+@(test)
+the_file_list_names_each_file_with_its_mark_and_counts :: proc(t: ^testing.T) {
+	state: app.App
+	defer app.changes_app_destroy(&state.changes_state)
+	pane := pane_start(&state, .Repository)
+	if !testing.expect(t, pane != nil) {return}
+	files := []turns.Diff_File {
+		{old_path = "src/a.odin", new_path = "src/a.odin", status = .Modified, added = 3, removed = 1},
+		{old_path = "gone.txt", new_path = "gone.txt", status = .Deleted, removed = 4},
+		{old_path = "old.md", new_path = "new.md", status = .Renamed},
+		{new_path = "fresh.py", status = .Added, added = 9},
+	}
+	q := app.Result_Query {
+		pane = pane.id,
+		diff = {files = files},
+	}
+	app.changes_fill_query(&state, pane, &q, now_time(), true)
+	labels := pane.model.file_labels
+	if !testing.expect_value(t, len(labels), 4) {return}
+	testing.expect_value(t, labels[0], "M src/a.odin  +3 \u22121")
+	testing.expect_value(t, labels[1], "D gone.txt  +0 \u22124")
+	testing.expect_value(t, labels[2], "R new.md  +0 \u22120")
+	testing.expect_value(t, labels[3], "A fresh.py  +9 \u22120")
+	empty := app.Result_Query {
+		pane = pane.id,
+	}
+	app.changes_fill_query(&state, pane, &empty, now_time(), true)
+	testing.expect_value(t, len(pane.model.file_labels), 0)
 }
 
 @(test)

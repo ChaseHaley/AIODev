@@ -3,6 +3,7 @@ package main
 import "aio:layout"
 import "aio:platform"
 import "aio:procinfo"
+import "aio:settings"
 import "aio:turns"
 import "core:encoding/json"
 import "core:log"
@@ -67,12 +68,13 @@ Saved_Node :: struct {
 	name:      string `json:"name,omitempty"`,
 	// The file a Markdown pane shows.
 	path:      string `json:"path,omitempty"`,
-	// A Changes pane's agent (the key of the pane it ran in, its harness and session) and scope name; its
-	// directory is `directory`.
+	// A Changes pane's agent (the key of the pane it ran in, its harness and session), scope name and diff
+	// view ("unified" or "side_by_side"; missing is the setting's default); its directory is `directory`.
 	changes_agent_pane:    string `json:"changes_agent_pane,omitempty"`,
 	changes_agent_harness: string `json:"changes_agent_harness,omitempty"`,
 	changes_agent_session: string `json:"changes_agent_session,omitempty"`,
 	changes_scope:         string `json:"changes_scope,omitempty"`,
+	changes_view:          string `json:"changes_view,omitempty"`,
 	keep_open: bool,
 	// What the pane was running, shown above the fresh shell's prompt when it comes back.
 	command:   string `json:"command,omitempty"`,
@@ -333,6 +335,9 @@ layout_pane_encode :: proc(
 			saved.directory, saved.changes_scope = pane.directory, changes_scope_name(pane.scope)
 			saved.changes_agent_pane, saved.changes_agent_harness = pane.agent.pane_key, pane.agent.harness
 			saved.changes_agent_session = pane.agent.session
+			view := pane.side_by_side ? settings.Diff_View.Side_By_Side : settings.Diff_View.Unified
+			views := settings.DIFF_VIEW_NAME
+			saved.changes_view = views[view]
 		}
 	}
 	if !pane_owns_session(content.kind) {return saved}
@@ -589,7 +594,11 @@ layout_tab_restore :: proc(
 			if utf8.valid_string(node.changes_agent_session) {agent.session = node.changes_agent_session}
 			directory := utf8.valid_string(node.directory) ? node.directory : ""
 			scope := changes_scope_parse(node.changes_scope)
-			if created := changes_pane_create(app, agent, directory, scope); created != nil {
+			side_by_side := app.settings.turns.diff_view == .Side_By_Side
+			views := settings.DIFF_VIEW_NAME
+			if node.changes_view == views[.Unified] {side_by_side = false}
+			if node.changes_view == views[.Side_By_Side] {side_by_side = true}
+			if created := changes_pane_create(app, agent, directory, scope, side_by_side); created != nil {
 				pane.content.id, restored = created.id, true
 			}
 		}

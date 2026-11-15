@@ -369,9 +369,11 @@ changes_view_release :: proc(model: ^Changes_Model) {
 	delete(view.marked)
 	delete(view.ambiguous)
 	delete(view.collapsed)
+	for label in model.file_labels {delete(label)}
+	delete(model.file_labels)
 	view.turns, model.row_ids, model.details, view.marked, view.ambiguous, view.collapsed =
 		nil, nil, nil, nil, nil, nil
-	view.files, view.highlights = nil, nil
+	view.files, view.highlights, model.file_labels = nil, nil, nil
 }
 
 @(private = "file", require_results)
@@ -383,22 +385,31 @@ changes_view_alloc :: proc(model: ^Changes_Model, rows, files: int) -> bool {
 	marked, marked_error := make([]bool, files)
 	ambiguous, ambiguous_error := make([]bool, files)
 	collapsed, collapsed_error := make([]bool, files)
+	labels, labels_error := make([]string, files)
 	if turn_error != nil || ids_error != nil || details_error != nil || marked_error != nil ||
-	   ambiguous_error != nil || collapsed_error != nil {
+	   ambiguous_error != nil || collapsed_error != nil || labels_error != nil {
 		delete(turn_rows)
 		delete(ids)
 		delete(details)
 		delete(marked)
 		delete(ambiguous)
 		delete(collapsed)
+		delete(labels)
 		return false
 	}
 	view.turns, model.row_ids, model.details, view.marked, view.ambiguous, view.collapsed =
 		turn_rows, ids, details, marked, ambiguous, collapsed
+	model.file_labels = labels
 	return true
 }
 
-// The diff's files with their marks and folds; folds come back by path.
+// The path a file goes by: its new path, or the old one for a deleted file.
+@(require_results)
+changes_file_path :: proc(file: turns.Diff_File) -> string {
+	return file.status == .Deleted || file.new_path == "" ? file.old_path : file.new_path
+}
+
+// The diff's files with their marks, folds and file list labels; folds come back by path.
 @(private = "file")
 changes_files_fill :: proc(model: ^Changes_Model, files: []turns.Diff_File, marked, ambiguous: []bool) {
 	view := &model.view
@@ -409,6 +420,29 @@ changes_files_fill :: proc(model: ^Changes_Model, files: []turns.Diff_File, mark
 		_, folded := model.folded[file.new_path]
 		view.collapsed[i] = folded
 	}
+	for file, i in files {
+		mark := changes_status_mark(file.status)
+		label := fmt.tprintf("%s %s  +%d \u2212%d", mark, changes_file_path(file), file.added, file.removed)
+		model.file_labels[i] = changes_clone_text(label)
+	}
+}
+
+// The letter a file header shows for a file's status.
+@(private = "file", require_results)
+changes_status_mark :: proc(status: turns.File_Status) -> string {
+	switch status {
+	case .Modified:
+		return "M"
+	case .Added:
+		return "A"
+	case .Deleted:
+		return "D"
+	case .Renamed:
+		return "R"
+	case .Copied:
+		return "C"
+	}
+	return "M"
 }
 
 // Folds or unfolds a file and remembers it by path, so the next result keeps it.
@@ -582,6 +616,7 @@ changes_worktree_pick :: proc(app: ^App, pane: ^Changes_Pane, choice: int) {
 @(private = "file")
 changes_model_clear :: proc(pane: ^Changes_Pane) {
 	model, view := &pane.model, &pane.model.view
+	kept, highlighted := changes_list_highlight(pane)
 	changes_view_release(model)
 	if model.content != nil {turn_result_destroy(&model.content)}
 	model.content = nil
@@ -589,6 +624,7 @@ changes_model_clear :: proc(pane: ^Changes_Pane) {
 	pane.anchor, pane.cursor = -1, -1
 	model.loaded = false
 	model.aged = 0
+	changes_list_refilter(pane, kept, highlighted)
 }
 
 // Frees everything the model owns; the pane's own fields are the caller's.
@@ -702,6 +738,8 @@ changes_model_result :: proc(app: ^App, result: Turn_Result) {
 	}
 	model := &pane.model
 	model.answered = request
+	// The open list's highlight is found again by what it names, before the files it names are freed.
+	kept, highlighted := changes_list_highlight(pane)
 	if model.content != nil {turn_result_destroy(&model.content)}
 	model.content = result
 	switch &r in model.content {
@@ -717,6 +755,7 @@ changes_model_result :: proc(app: ^App, result: Turn_Result) {
 	case nil, Result_Dirty, Result_Saved, Result_Live, Result_Deleted, Result_Failure:
 	}
 	changes_comments_reanchor(pane)
+	changes_list_refilter(pane, kept, highlighted)
 	changes_reveal(app, pane)
 	mark_all_dirty(app)
 }
