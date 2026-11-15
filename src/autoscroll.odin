@@ -2,6 +2,7 @@ package main
 
 import "aio:input"
 import "aio:layout"
+import "aio:platform"
 import "aio:render"
 import "aio:term"
 import "aio:ui"
@@ -25,6 +26,8 @@ Autoscroll_On :: struct {
 	held:      bool,
 	// The pointer left the dead zone while the button was down, so its release ends scrolling.
 	dragged:   bool,
+	// The pointer's height the speed follows, as last sampled.
+	pointer:   f32,
 	// The display time of the last frame that scrolled; zero while the pointer rests in the dead zone.
 	last:      time.Tick,
 	// Scrolling not yet applied: terminal rows, and Markdown pixels, move in whole steps.
@@ -85,9 +88,8 @@ autoscroll_begin :: proc(app: ^App, w: ^Window, target: Pointer_Target, e: input
 		content = pane.content,
 		anchor  = {x, y},
 		held    = true,
+		pointer = y,
 	}
-	// Speed follows w.pointer, which only moves update; scrolling starts at rest.
-	w.pointer = {x, y}
 	pointer_set(app, w, .Resize_Vertical)
 	w.dirty = true
 	return true
@@ -132,9 +134,20 @@ autoscroll_release :: proc(app: ^App, w: ^Window) -> bool {
 autoscroll_move :: proc(app: ^App, w: ^Window, e: input.Mouse_Move_Event) -> bool {
 	on, ok := &w.autoscroll.(Autoscroll_On)
 	if !ok {return false}
-	if on.held && autoscroll_speed(w, on^, f32(e.y)) != 0 {on.dragged = true}
+	on.pointer = autoscroll_pointer(app, w, f32(e.y))
+	if on.held && autoscroll_speed(w, on^, on.pointer) != 0 {on.dragged = true}
 	pointer_set(app, w, .Resize_Vertical)
 	return true
+}
+
+// The pointer's height in the window, read from the system wherever the pointer is, as Windows' own
+// autoscroll does: once it leaves the window without a held button the window gets no more moves, and
+// leaving through the frame reports a move to (-1, -1). `reported` stands in where there is no system
+// pointer to read (the headless build).
+@(private = "file")
+autoscroll_pointer :: proc(app: ^App, w: ^Window, reported: f32) -> f32 {
+	if at, read := platform.pointer_client(&app.platform, w.id); read {return f32(at.y)}
+	return reported
 }
 
 // Keys end scrolling: Escape is spent on it, every other key except a lone modifier also goes on to
@@ -158,7 +171,8 @@ autoscroll_animate :: proc(app: ^App, w: ^Window, frame: ui.Frame_Time) -> bool 
 		autoscroll_end(app, w)
 		return false
 	}
-	speed := autoscroll_speed(w, on^, w.pointer.y)
+	on.pointer = autoscroll_pointer(app, w, on.pointer)
+	speed := autoscroll_speed(w, on^, on.pointer)
 	if speed == 0 {
 		on.last, on.remainder = {}, 0
 		return false
@@ -202,7 +216,7 @@ autoscroll_animate :: proc(app: ^App, w: ^Window, frame: ui.Frame_Time) -> bool 
 @(private)
 autoscroll_moving :: proc(w: ^Window) -> bool {
 	on, ok := w.autoscroll.(Autoscroll_On)
-	return ok && autoscroll_speed(w, on, w.pointer.y) != 0
+	return ok && autoscroll_speed(w, on, on.pointer) != 0
 }
 
 @(private = "file")
