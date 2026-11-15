@@ -70,6 +70,10 @@ Icon :: enum {
 	Changes,
 	// A speech bubble: comment on lines of a diff.
 	Comment,
+	// A list of rows, each led by a dot: the files of a diff.
+	Files,
+	// A frame split into two columns of lines: old and new side by side.
+	Side_By_Side,
 }
 
 ICON_STROKE :: f32(1.25)
@@ -202,6 +206,18 @@ icon_draw :: proc(
 	case .Comment:
 		pen_box(p, 1.5, 2.5, 13, 9, 2)
 		pen_path(p, {4.5, 11.5}, {4.5, 14.5}, {8, 11.5})
+	case .Files:
+		for y in ([?]f32{4, 8, 12}) {
+			pen_dot(p, 3, y)
+			pen_path(p, {6, y}, {14, y})
+		}
+	case .Side_By_Side:
+		pen_box(p, 1.5, 2.5, 13, 11, 2)
+		pen_path(p, {8, 2.5}, {8, 13.5})
+		pen_path(p, {3.5, 6}, {6, 6})
+		pen_path(p, {3.5, 9}, {6, 9})
+		pen_path(p, {10, 6}, {12.5, 6})
+		pen_path(p, {10, 9}, {12.5, 9})
 	case .Changes:
 		pen_path(p, {3, 2}, {10, 2}, {13, 5}, {13, 14}, {3, 14}, {3, 2})
 		pen_path(p, {6.5, 6}, {9.5, 6})

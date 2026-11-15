@@ -116,6 +116,58 @@ changes_geometry_puts_the_strip_in_the_toolbar_and_the_diff_across_the_pane :: p
 }
 
 @(test)
+changes_toolbar_ends_with_the_layout_toggle_and_the_file_list_button :: proc(t: ^testing.T) {
+	f: Changes_Fixture
+	view: ui.Changes_View
+	if !fixture_make(t, &f, &view) {return}
+	defer font.system_destroy(f.fonts)
+	state: ui.Changes_State
+	defer ui.changes_state_destroy(&state)
+
+	// The file list button is the far-right control, the layout toggle just before it.
+	g := ui.changes_geometry({0, 0, 900, 600}, 1, &view, &f.text)
+	testing.expect_value(t, g.files_button, render.Rect{868, 2, 24, 24})
+	testing.expect_value(t, g.layout_button, render.Rect{840, 2, 24, 24})
+	testing.expect(t, g.range_label.x + g.range_label.width <= g.layout_button.x)
+	testing.expect(t, g.repository.x + g.repository.width <= g.layout_button.x)
+	ui.changes_layout(&state, &view, &f.text, &f.mono, g.diff.width, 1)
+	files_x, files_y := centre(g.files_button)
+	layout_x, layout_y := centre(g.layout_button)
+	files := ui.changes_hit(g, &view, &state, files_x, files_y)
+	testing.expect_value(t, files, ui.Changes_Hit{.Files_Button, 0, 0})
+	layout := ui.changes_hit(g, &view, &state, layout_x, layout_y)
+	testing.expect_value(t, layout, ui.Changes_Hit{.Layout_Button, 0, 0})
+	// The view a pane shows doesn't move the buttons.
+	view.side_by_side = true
+	side := ui.changes_geometry({0, 0, 900, 600}, 1, &view, &f.text)
+	testing.expect_value(t, side.files_button, g.files_button)
+	view.side_by_side = false
+
+	// Git scopes have them in the same place.
+	view.scope, view.turns = .Staged, nil
+	git := ui.changes_geometry({0, 0, 900, 600}, 1, &view, &f.text)
+	testing.expect_value(t, git.files_button, g.files_button)
+	testing.expect_value(t, git.layout_button, g.layout_button)
+	testing.expect(t, git.repository.x + git.repository.width <= git.layout_button.x)
+
+	// Without files the file list button is disabled and answers nothing; the toggle still works.
+	view.files = nil
+	view.revision += 1
+	ui.changes_layout(&state, &view, &f.text, &f.mono, git.diff.width, 1)
+	testing.expect_value(t, ui.changes_hit(git, &view, &state, files_x, files_y), ui.Changes_Hit{})
+	layout = ui.changes_hit(git, &view, &state, layout_x, layout_y)
+	testing.expect_value(t, layout, ui.Changes_Hit{.Layout_Button, 0, 0})
+
+	double := ui.changes_geometry({0, 0, 1800, 1200}, 2, &view, &f.text)
+	testing.expect_value(t, double.files_button, render.Rect{1736, 4, 48, 48})
+	testing.expect_value(t, double.layout_button, render.Rect{1680, 4, 48, 48})
+	// A pane too narrow for both leaves them out.
+	sliver := ui.changes_geometry({0, 0, 50, 200}, 1, &view, &f.text)
+	testing.expect_value(t, sliver.files_button, render.Rect{})
+	testing.expect_value(t, sliver.layout_button, render.Rect{})
+}
+
+@(test)
 changes_geometry_keeps_the_send_bar_under_the_diff :: proc(t: ^testing.T) {
 	f: Changes_Fixture
 	view: ui.Changes_View
@@ -147,7 +199,8 @@ changes_geometry_fits_the_toolbar_controls :: proc(t: ^testing.T) {
 	view.hooks_offer = true
 	offered := ui.changes_geometry({0, 0, 900, 600}, 1, &view, &f.text)
 	testing.expect(t, offered.hooks.width > 0)
-	testing.expect(t, abs(offered.hooks.x + offered.hooks.width - 892) < 0.01)
+	// Install turn hooks sits left of the layout toggle and the file list button.
+	testing.expect(t, abs(offered.hooks.x + offered.hooks.width - (offered.layout_button.x - 8)) < 0.01)
 	testing.expect(t, offered.scope.x + offered.scope.width <= offered.hooks.x)
 	testing.expect(t, offered.range_label.x + offered.range_label.width <= offered.hooks.x)
 	testing.expect(t, offered.repository.x + offered.repository.width <= offered.hooks.x)

@@ -108,6 +108,8 @@ Changes_View :: struct {
 	send:        Changes_Send_View,
 	// Show the "Install turn hooks" toolbar button.
 	hooks_offer: bool,
+	// Old and new side by side rather than one unified stream; the pane's own choice.
+	side_by_side: bool,
 	// Bumps whenever the content changes, so the cached row layout refreshes.
 	revision:    u64,
 }
@@ -134,6 +136,8 @@ Changes_Part :: enum u8 {
 	Send,
 	Copy,
 	Discard,
+	Files_Button,
+	Layout_Button,
 }
 
 // What a point is over. `index` is the bar or list row for the strip parts, the file for File_Header,
@@ -164,6 +168,8 @@ Changes_Rows :: struct {
 	cards:                                  [dynamic]int,
 	// The "Not in this diff" group at the end of the stream.
 	detached:                               int,
+	// Each file's rows of diff lines, in either layout.
+	pairs:                                  Changes_Pairs,
 	total:                                  int,
 }
 
@@ -186,6 +192,8 @@ Changes_State :: struct {
 	scope_open:               bool,
 	// The worktree list is open.
 	worktree_open:            bool,
+	// The file list is open, so its button stays outlined.
+	files_open:               bool,
 	motion:                   Control_Motion,
 	rows:                     Changes_Rows,
 	turn_list_bar, diff_bar:  Scroll_Drag,
@@ -194,6 +202,7 @@ Changes_State :: struct {
 changes_state_destroy :: proc(state: ^Changes_State) {
 	delete(state.rows.tops)
 	delete(state.rows.cards)
+	changes_pairs_destroy(&state.rows.pairs)
 	state.rows = {}
 }
 
@@ -206,6 +215,8 @@ Changes_Geometry :: struct {
 	turn_list:                                                                     render.Rect,
 	// The comments' send bar under the diff; empty without comments.
 	send_bar:                                                                      render.Rect,
+	// The layout toggle and the file list button at the toolbar's right end, in every scope.
+	layout_button, files_button:                                                   render.Rect,
 	scale, turn_row:                                                               f32,
 	// How many bars the strip has room for.
 	strip_bars:                                                                    int,
@@ -287,6 +298,15 @@ changes_geometry :: proc(
 	control := min(HEIGHT_COMPACT * s, g.toolbar.height)
 	top := g.toolbar.y + (g.toolbar.height - control) / 2
 	room := max(0, area.width - 2 * pad)
+	end := area.x + area.width - pad
+	// The layout toggle and the file list button hold the right end; everything else fits before them.
+	buttons := 2 * control + SPACE_1 * s
+	if room >= buttons {
+		g.files_button = {end - control, top, control, control}
+		g.layout_button = {g.files_button.x - SPACE_1 * s - control, top, control, control}
+		end = g.layout_button.x - gap
+		room = max(0, room - buttons - gap)
+	}
 	body_text := text_styled(text, .Body)
 	hooks_width: f32
 	if view.hooks_offer {
@@ -294,9 +314,9 @@ changes_geometry :: proc(
 	}
 	scope_room := room - hooks_width - (hooks_width > 0 ? gap : 0)
 	g.scope = {area.x + pad, top, min(CHANGES_SCOPE_WIDTH * s, max(0, scope_room)), control}
-	if hooks_width > 0 {g.hooks = {area.x + area.width - pad - hooks_width, top, hooks_width, control}}
+	if hooks_width > 0 {g.hooks = {end - hooks_width, top, hooks_width, control}}
 	left := g.scope.x + g.scope.width + gap
-	right := hooks_width > 0 ? g.hooks.x - gap : area.x + area.width - pad
+	right := hooks_width > 0 ? g.hooks.x - gap : end
 	if changes_scope_turns(view.scope) {
 		left = strip_place(&g, view, &body_text, left, right, top, control)
 	} else {
@@ -420,7 +440,8 @@ changes_layout :: proc(state: ^Changes_State, view: ^Changes_View, text, mono: ^
 	if rows.valid && rows.revision == view.revision && rows.collapsed_key == key &&
 	   rows.notice == view.notice && rows.files == len(view.files) && rows.omitted == view.omitted &&
 	   rows.line_height == mono.line_height && rows.scale == scale && rows.width == width &&
-	   rows.body_line == text.line_height && rows.comments_key == comments {return}
+	   rows.body_line == text.line_height && rows.comments_key == comments &&
+	   rows.pairs.side_by_side == view.side_by_side {return}
 	rows.valid, rows.revision, rows.collapsed_key, rows.notice = true, view.revision, key, view.notice
 	rows.files, rows.omitted = len(view.files), view.omitted
 	rows.scale, rows.line_height = scale, mono.line_height
@@ -431,6 +452,7 @@ changes_layout :: proc(state: ^Changes_State, view: ^Changes_View, text, mono: ^
 	rows.note = int(math.round(HEIGHT_COMPACT * scale))
 	rows.gap = int(math.round(SPACE_2 * scale))
 	rows.footer = int(math.round(HEIGHT_STANDARD * scale))
+	changes_pairs_build(&rows.pairs, view)
 	changes_cards_measure(rows, view, text)
 	clear(&rows.tops)
 	y := 0
@@ -476,6 +498,8 @@ changes_hit :: proc(
 	if render.rect_contains(g.scope, x, y) {return {.Scope, 0, 0}}
 	if render.rect_contains(g.worktree, x, y) {return {.Worktree, 0, 0}}
 	if render.rect_contains(g.hooks, x, y) {return {.Hooks, 0, 0}}
+	if render.rect_contains(g.layout_button, x, y) {return {.Layout_Button, 0, 0}}
+	if render.rect_contains(g.files_button, x, y) {return len(view.files) > 0 ? {.Files_Button, 0, 0} : {}}
 	back, forward := changes_step_enabled(view)
 	if render.rect_contains(g.step_back, x, y) {return back ? {.Step_Back, 0, 0} : {}}
 	if render.rect_contains(g.step_forward, x, y) {return forward ? {.Step_Forward, 0, 0} : {}}
@@ -492,7 +516,8 @@ changes_hit :: proc(
 changes_animated :: proc(hit: Changes_Hit) -> bool {
 	#partial switch hit.part {
 	case .Scope, .Worktree, .Hooks, .Notice_Button, .File_Header, .Step_Back, .Step_Forward, .Range_Label,
-	     .Hunk_Comment, .Comment_Button, .Comment_Delete, .Send, .Copy, .Discard:
+	     .Hunk_Comment, .Comment_Button, .Comment_Delete, .Send, .Copy, .Discard, .Files_Button,
+	     .Layout_Button:
 		return true
 	}
 	return false

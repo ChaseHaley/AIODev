@@ -36,6 +36,8 @@ TURN_LIST_ROWS :: 10
 @(private = "file")
 RANGE_LABEL_BYTES :: 64
 @(private = "file")
+CHANGES_DISABLED_ALPHA :: f32(0.45)
+@(private = "file")
 WORKING_MARK :: Status_Mark{glyph = .Working, progress = -1}
 
 // The range label's text. Turns are numbered from the oldest, which is 1.
@@ -444,6 +446,51 @@ range_label_draw :: proc(
 	return .Ok, spinning
 }
 
+// The layout toggle, inked in the accent on the selected fill while side by side, and the file list
+// button: outlined while its list is open, faded without files.
+@(private = "file")
+view_buttons_draw :: proc(
+	list: ^render.Draw_List,
+	theme: Theme,
+	g: Changes_Geometry,
+	view: ^Changes_View,
+	state: ^Changes_State,
+	pointer: [2]f32,
+) -> render.Error {
+	s := g.scale
+	if g.layout_button.width > 0 {
+		hover, press := changes_lit(state, {.Layout_Button, 0, 0})
+		b := Button {
+			rect     = g.layout_button,
+			hover    = hover,
+			press    = press,
+			selected = view.side_by_side,
+		}
+		face, ink, err := button_draw(list, theme, b, s, pointer)
+		if err != .None {return err}
+		icon_draw(list, .Side_By_Side, face, view.side_by_side ? theme.accent : ink, ICON_BUTTON, s)
+	}
+	if g.files_button.width > 0 {
+		enabled := len(view.files) > 0
+		hover, press := changes_lit(state, {.Files_Button, 0, 0})
+		b := Button {
+			rect     = g.files_button,
+			hover    = hover,
+			press    = press,
+			disabled = !enabled,
+		}
+		face, ink, err := button_draw(list, theme, b, s, pointer)
+		if err != .None {return err}
+		if !enabled {
+			ink = theme.muted
+			ink.a *= CHANGES_DISABLED_ALPHA
+		}
+		icon_draw(list, .Files, face, ink, ICON_BUTTON, s)
+		if state.files_open {focus_ring_draw(list, face, theme, s)}
+	}
+	return .None
+}
+
 @(private)
 toolbar_draw :: proc(
 	list: ^render.Draw_List,
@@ -505,6 +552,7 @@ toolbar_draw :: proc(
 			theme.muted, g.repository.width,
 		); status != .Ok {return}
 	}
+	if view_buttons_draw(list, theme, g, view, state, pointer) != .None {return .Ok, spinning}
 	if g.hooks.width > 0 {
 		radius := RADIUS_CONTROL * s
 		draw_rect(list, {rect = g.hooks, color = theme.surface, radius = radius})

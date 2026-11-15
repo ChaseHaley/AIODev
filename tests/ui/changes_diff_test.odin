@@ -17,6 +17,10 @@ Diff_Fixture :: struct {
 	files:      [1]turns.Diff_File,
 	comments:   [2]ui.Changes_Comment_View,
 	editor:     ui.Text_Field,
+	side_lines: [10]turns.Diff_Line,
+	ends:       [4]turns.Diff_Line,
+	side_hunks: [2]turns.Hunk,
+	side_files: [2]turns.Diff_File,
 }
 
 // One file with one hunk: a context, a removed and an added line, in a git scope so the diff spans the
@@ -62,6 +66,44 @@ lay_out :: proc(f: ^Diff_Fixture, view: ^ui.Changes_View, state: ^ui.Changes_Sta
 	g := ui.changes_geometry({0, 0, 900, 600}, 1, view, &f.text)
 	ui.changes_layout(state, view, &f.text, &f.mono, g.diff.width, 1)
 	return g
+}
+
+// Two files for the side-by-side layout. The first: a context line, a replace run of two removed and three
+// added lines, a context line, a lone added line, a context line and a lone removed line. The second: a
+// changed last line without a newline on either side.
+@(private = "file")
+side_by_side_use :: proc(f: ^Diff_Fixture, view: ^ui.Changes_View) {
+	f.side_lines = {
+		{kind = .Context, old_line = 1, new_line = 1, text = "a"},
+		{kind = .Removed, old_line = 2, text = "r1"},
+		{kind = .Removed, old_line = 3, text = "r2"},
+		{kind = .Added, new_line = 2, text = "a1"},
+		{kind = .Added, new_line = 3, text = "a2"},
+		{kind = .Added, new_line = 4, text = "a3"},
+		{kind = .Context, old_line = 4, new_line = 5, text = "b"},
+		{kind = .Added, new_line = 6, text = "n"},
+		{kind = .Context, old_line = 5, new_line = 7, text = "c"},
+		{kind = .Removed, old_line = 6, text = "x"},
+	}
+	f.ends = {
+		{kind = .Removed, old_line = 1, text = "x"},
+		{kind = .No_Newline},
+		{kind = .Added, new_line = 1, text = "y"},
+		{kind = .No_Newline},
+	}
+	f.side_hunks = {
+		{old_start = 1, old_count = 6, new_start = 1, new_count = 7, lines = f.side_lines[:]},
+		{old_start = 1, old_count = 1, new_start = 1, new_count = 1, lines = f.ends[:]},
+	}
+	f.side_files = {
+		{old_path = "a.odin", new_path = "a.odin", status = .Modified, added = 4, removed = 3,
+			hunks = f.side_hunks[:1]},
+		{old_path = "b.odin", new_path = "b.odin", status = .Modified, added = 1, removed = 1,
+			hunks = f.side_hunks[1:]},
+	}
+	view.files = f.side_files[:]
+	view.side_by_side = true
+	view.revision += 1
 }
 
 @(private = "file")
@@ -237,7 +279,8 @@ changes_diff_hit_finds_lines_buttons_and_cards :: proc(t: ^testing.T) {
 	last := ui.changes_line_rect(g, &view, &state, 0, 2)
 	testing.expect_value(t, comment.y, last.y)
 	at := centre(comment)
-	testing.expect_value(t, ui.changes_diff_hit(g, &view, &state, at.x, at.y), ui.Changes_Hit{.Comment_Button, 0, 2})
+	pressed := ui.changes_diff_hit(g, &view, &state, at.x, at.y)
+	testing.expect_value(t, pressed, ui.Changes_Hit{.Comment_Button, 0, 2})
 
 	// The send bar's buttons.
 	send, copy, discard := ui.changes_send_rects(g, &view)
@@ -245,7 +288,8 @@ changes_diff_hit_finds_lines_buttons_and_cards :: proc(t: ^testing.T) {
 	parts := [?]ui.Changes_Part{.Send, .Copy, .Discard}
 	for rect, i in rects {
 		p := centre(rect)
-		testing.expect_value(t, ui.changes_diff_hit(g, &view, &state, p.x, p.y), ui.Changes_Hit{parts[i], 0, 0})
+		hit := ui.changes_diff_hit(g, &view, &state, p.x, p.y)
+		testing.expect_value(t, hit, ui.Changes_Hit{parts[i], 0, 0})
 	}
 	testing.expect(t, send.x + send.width < copy.x && copy.x + copy.width < discard.x)
 	testing.expect(t, discard.x + discard.width <= g.send_bar.x + g.send_bar.width)
@@ -271,4 +315,214 @@ changes_send_bar_height_follows_the_comment_count :: proc(t: ^testing.T) {
 	with := ui.changes_geometry({0, 0, 900, 600}, 1, &view, &f.text)
 	testing.expect_value(t, with.send_bar, render.Rect{0, 560, 900, 40})
 	testing.expect_value(t, with.diff.height, without.diff.height - 40)
+}
+
+@(test)
+changes_pairs_share_rows_side_by_side :: proc(t: ^testing.T) {
+	f: Diff_Fixture
+	view: ui.Changes_View
+	if !diff_fixture_make(t, &f, &view) {return}
+	defer diff_fixture_destroy(&f)
+	side_by_side_use(&f, &view)
+	state: ui.Changes_State
+	defer ui.changes_state_destroy(&state)
+
+	lay_out(&f, &view, &state)
+	pairs := &state.rows.pairs
+	testing.expect(t, pairs.side_by_side)
+	// Context fills both cells; the replace run shares rows and pads the shorter side; lone runs get blank
+	// cells; a No_Newline marker stays on the side it follows.
+	want := [?]ui.Changes_Pair {
+		{0, 0}, {1, 3}, {2, 4}, {-1, 5}, {6, 6}, {-1, 7}, {8, 8}, {9, -1},
+		{0, 2}, {1, 3},
+	}
+	if !testing.expect_value(t, len(pairs.pairs), len(want)) {return}
+	for pair, i in want {testing.expect_value(t, pairs.pairs[i], pair)}
+	if testing.expect_value(t, len(pairs.file_pairs), 3) {
+		testing.expect_value(t, pairs.file_pairs[1], 8)
+		testing.expect_value(t, pairs.file_pairs[2], 10)
+	}
+	rows := &state.rows
+	testing.expect_value(t, rows.tops[1], rows.header + rows.hunk + 8 * rows.line + rows.gap)
+
+	// Unified, every line is its own row; switching rebuilds without a new revision.
+	view.side_by_side = false
+	lay_out(&f, &view, &state)
+	testing.expect(t, !pairs.side_by_side)
+	if testing.expect_value(t, len(pairs.pairs), 14) {
+		testing.expect_value(t, pairs.pairs[3], ui.Changes_Pair{3, 3})
+		testing.expect_value(t, pairs.pairs[11], ui.Changes_Pair{1, 1})
+	}
+	testing.expect_value(t, rows.tops[1], rows.header + rows.hunk + 10 * rows.line + rows.gap)
+}
+
+@(test)
+changes_diff_side_by_side_hits_and_rects_per_half :: proc(t: ^testing.T) {
+	f: Diff_Fixture
+	view: ui.Changes_View
+	if !diff_fixture_make(t, &f, &view) {return}
+	defer diff_fixture_destroy(&f)
+	side_by_side_use(&f, &view)
+	state: ui.Changes_State
+	defer ui.changes_state_destroy(&state)
+	g := lay_out(&f, &view, &state)
+	inner := g.diff.width - 16
+
+	// The replace row: the removed line in the left cell, the added line in the right one.
+	left := ui.changes_line_rect(g, &view, &state, 0, 1)
+	right := ui.changes_line_rect(g, &view, &state, 0, 3)
+	testing.expect_value(t, left.y, right.y)
+	testing.expect_value(t, left.x, g.diff.x + 8)
+	testing.expect(t, left.x + left.width < right.x)
+	testing.expect_value(t, right.x + right.width, g.diff.x + 8 + inner)
+	at := centre(left)
+	testing.expect_value(t, ui.changes_diff_hit(g, &view, &state, at.x, at.y), ui.Changes_Hit{.Line, 0, 1})
+	at = centre(right)
+	testing.expect_value(t, ui.changes_diff_hit(g, &view, &state, at.x, at.y), ui.Changes_Hit{.Line, 0, 3})
+
+	// A context line fills the row, and both halves hit it.
+	context_row := ui.changes_line_rect(g, &view, &state, 0, 0)
+	testing.expect_value(t, context_row.width, inner)
+	testing.expect_value(t, context_row.y, left.y - f32(state.rows.line))
+	y := context_row.y + 2
+	testing.expect_value(t, ui.changes_diff_hit(g, &view, &state, left.x + 4, y), ui.Changes_Hit{.Line, 0, 0})
+	testing.expect_value(t, ui.changes_diff_hit(g, &view, &state, at.x, y), ui.Changes_Hit{.Line, 0, 0})
+
+	// Blank cells: left of the third added line, right of the lone removed line.
+	padded := ui.changes_line_rect(g, &view, &state, 0, 5)
+	testing.expect_value(t, padded.x, right.x)
+	blank := ui.changes_diff_hit(g, &view, &state, left.x + 4, padded.y + 2)
+	testing.expect_value(t, blank, ui.Changes_Hit{.Diff, 0, 0})
+	lone := ui.changes_line_rect(g, &view, &state, 0, 9)
+	testing.expect_value(t, lone.x, left.x)
+	lone_right := ui.changes_diff_hit(g, &view, &state, at.x, lone.y + 2)
+	testing.expect_value(t, lone_right, ui.Changes_Hit{.Diff, 0, 0})
+	lone_left := ui.changes_diff_hit(g, &view, &state, left.x + 4, lone.y + 2)
+	testing.expect_value(t, lone_left, ui.Changes_Hit{.Line, 0, 9})
+
+	// The No_Newline markers share the row under the changed line and are not lines to select.
+	marker := ui.changes_line_rect(g, &view, &state, 1, 1)
+	testing.expect_value(t, marker.y, ui.changes_line_rect(g, &view, &state, 1, 3).y)
+	on_marker := ui.changes_diff_hit(g, &view, &state, left.x + 4, marker.y + 2)
+	testing.expect_value(t, on_marker, ui.Changes_Hit{.Diff, 1, 0})
+
+	// A card goes under the row that holds the comment's last line, across the whole width.
+	f.comments[0] = {file = 0, first = 3, last = 3, text = "Why?"}
+	view.comments = f.comments[:1]
+	g = lay_out(&f, &view, &state)
+	slot := f32(state.rows.cards[0] + 8)
+	below := ui.changes_line_rect(g, &view, &state, 0, 2)
+	testing.expect_value(t, below.y, left.y + f32(state.rows.line) + slot)
+	testing.expect_value(t, ui.changes_line_rect(g, &view, &state, 0, 1).y, left.y)
+	card_y := left.y + f32(state.rows.line) + 4 + 2
+	card_left := ui.changes_diff_hit(g, &view, &state, left.x + 20, card_y)
+	testing.expect_value(t, card_left, ui.Changes_Hit{.Comment_Card, 0, 0})
+	card_right := ui.changes_diff_hit(g, &view, &state, at.x, card_y)
+	testing.expect_value(t, card_right, ui.Changes_Hit{.Comment_Card, 0, 0})
+}
+
+@(test)
+changes_diff_file_top_scrolls_to_a_file_in_both_layouts :: proc(t: ^testing.T) {
+	f: Diff_Fixture
+	view: ui.Changes_View
+	if !diff_fixture_make(t, &f, &view) {return}
+	defer diff_fixture_destroy(&f)
+	side_by_side_use(&f, &view)
+	state: ui.Changes_State
+	defer ui.changes_state_destroy(&state)
+
+	tops: [2]int
+	for side, i in ([2]bool{false, true}) {
+		view.side_by_side = side
+		lay_out(&f, &view, &state)
+		tops[i] = state.rows.tops[1]
+		testing.expect_value(t, ui.changes_diff_file_top(&state, &view, 1), tops[i])
+		testing.expect_value(t, ui.changes_diff_file_top(&state, &view, 0), 0)
+		state.diff_scroll = tops[i]
+		testing.expect_value(t, ui.changes_top_file(&state, &view), 1)
+		state.diff_scroll = tops[i] - 1
+		testing.expect_value(t, ui.changes_top_file(&state, &view), 0)
+		// No such file keeps the scroll.
+		testing.expect_value(t, ui.changes_diff_file_top(&state, &view, 5), tops[i] - 1)
+		state.diff_scroll = 0
+	}
+	// Side by side, the replace run takes fewer rows, so the second file starts higher.
+	testing.expect(t, tops[1] < tops[0])
+	view.notice = .No_Changes
+	view.revision += 1
+	lay_out(&f, &view, &state)
+	testing.expect_value(t, ui.changes_top_file(&state, &view), -1)
+}
+
+@(test)
+changes_side_by_side_cards_sit_under_the_lowest_selected_row :: proc(t: ^testing.T) {
+	f: Diff_Fixture
+	view: ui.Changes_View
+	if !diff_fixture_make(t, &f, &view) {return}
+	defer diff_fixture_destroy(&f)
+	side_by_side_use(&f, &view)
+	state: ui.Changes_State
+	defer ui.changes_state_destroy(&state)
+
+	// Lines 0-3 are the context line, both removed lines and the first added one. The last of them, the
+	// added line, is in row 1, but the second removed line is in row 2 below it.
+	view.selection = {file = 0, first = 0, last = 3, active = true}
+	g := lay_out(&f, &view, &state)
+	removed := ui.changes_line_rect(g, &view, &state, 0, 2)
+	button := ui.changes_comment_button_rect(g, &view, &state)
+	testing.expect_value(t, button.y, removed.y)
+	testing.expect(t, button.x > removed.x && button.x + button.width <= removed.x + removed.width)
+	padded := ui.changes_line_rect(g, &view, &state, 0, 5).y
+
+	// A comment on those lines sits under row 2: row 3 moves down, row 2 stays.
+	f.comments[0] = {file = 0, first = 0, last = 3, text = "Why?"}
+	view.comments = f.comments[:1]
+	view.selection = {}
+	g = lay_out(&f, &view, &state)
+	slot := f32(state.rows.cards[0] + 8)
+	testing.expect_value(t, ui.changes_line_rect(g, &view, &state, 0, 2).y, removed.y)
+	testing.expect_value(t, ui.changes_line_rect(g, &view, &state, 0, 5).y, padded + slot)
+	card := ui.changes_diff_hit(g, &view, &state, removed.x + 20, removed.y + f32(state.rows.line) + 6)
+	testing.expect_value(t, card, ui.Changes_Hit{.Comment_Card, 0, 0})
+
+	// With row 2's right cell selected too, the button moves to that cell.
+	view.selection = {file = 0, first = 3, last = 4, active = true}
+	g = lay_out(&f, &view, &state)
+	added := ui.changes_line_rect(g, &view, &state, 0, 4)
+	button = ui.changes_comment_button_rect(g, &view, &state)
+	testing.expect_value(t, button.y, added.y)
+	testing.expect(t, button.x > added.x && button.x + button.width <= added.x + added.width)
+}
+
+@(test)
+changes_pairs_rebuild_only_for_a_new_diff_or_layout :: proc(t: ^testing.T) {
+	f: Diff_Fixture
+	view: ui.Changes_View
+	if !diff_fixture_make(t, &f, &view) {return}
+	defer diff_fixture_destroy(&f)
+	side_by_side_use(&f, &view)
+	state: ui.Changes_State
+	defer ui.changes_state_destroy(&state)
+	lay_out(&f, &view, &state)
+	pairs := &state.rows.pairs
+	if !testing.expect(t, len(pairs.pairs) > 0) {return}
+	marked := ui.Changes_Pair{42, 42}
+
+	// A comment or a new width lays the stream out again but keeps the table.
+	pairs.pairs[0] = marked
+	f.comments[0] = {file = 0, first = 0, last = 0, text = "x"}
+	view.comments = f.comments[:1]
+	lay_out(&f, &view, &state)
+	testing.expect_value(t, pairs.pairs[0], marked)
+	ui.changes_layout(&state, &view, &f.text, &f.mono, 500, 1)
+	testing.expect_value(t, pairs.pairs[0], marked)
+
+	// A new revision or the other layout rebuilds it.
+	view.revision += 1
+	lay_out(&f, &view, &state)
+	testing.expect_value(t, pairs.pairs[0], ui.Changes_Pair{0, 0})
+	pairs.pairs[0] = marked
+	view.side_by_side = false
+	lay_out(&f, &view, &state)
+	testing.expect_value(t, pairs.pairs[0], ui.Changes_Pair{0, 0})
 }
