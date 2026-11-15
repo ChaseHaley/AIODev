@@ -31,11 +31,13 @@ changes_row_has_the_summary_at_the_left_and_its_buttons_at_the_right :: proc(t: 
 	testing.expect_value(t, g.summary.y, f32(4))
 	testing.expect_value(t, g.summary.height, f32(24))
 	testing.expect(t, g.summary.x + g.summary.width < 450)
-	// At the right end, 5 from the edge: layout, fold and filter 22 wide and 2 apart, a 4 DIP gap, a 14 tall
-	// hairline with 4 on each side, then the chevron button.
-	testing.expect_value(t, g.panel_button, render.Rect{900 - 5 - 22, 5, 22, 22})
-	testing.expect_value(t, g.buttons_divider, render.Rect{g.panel_button.x - 4 - 1, 9, 1, 14})
-	testing.expect_value(t, g.filter_button, render.Rect{g.buttons_divider.x - 4 - 22, 5, 22, 22})
+	// At the right end: the files button 4 from the edge, 24 tall, with the 16 DIP icon, a gap and the count
+	// in it; 8 before it layout, fold and filter 22 wide and 2 apart.
+	testing.expect_value(t, g.files_button.y, f32(4))
+	testing.expect_value(t, g.files_button.height, f32(24))
+	testing.expect_value(t, g.files_button.x + g.files_button.width, f32(896))
+	testing.expect(t, g.files_button.width > 2 * 8 + 16 + 4)
+	testing.expect_value(t, g.filter_button, render.Rect{g.files_button.x - 8 - 22, 5, 22, 22})
 	testing.expect_value(t, g.fold_button, render.Rect{g.filter_button.x - 2 - 22, 5, 22, 22})
 	testing.expect_value(t, g.layout_button, render.Rect{g.fold_button.x - 2 - 22, 5, 22, 22})
 	// The room between the summary and the buttons stays empty.
@@ -50,13 +52,15 @@ changes_row_has_the_summary_at_the_left_and_its_buttons_at_the_right :: proc(t: 
 	testing.expect_value(t, ui.changes_hit(g, &view, &state, x, y), ui.Changes_Hit{.Fold_Button, 0, 0})
 	x, y = middle(g.filter_button)
 	testing.expect_value(t, ui.changes_hit(g, &view, &state, x, y), ui.Changes_Hit{.Filter_Button, 0, 0})
-	x, y = middle(g.panel_button)
-	testing.expect_value(t, ui.changes_hit(g, &view, &state, x, y), ui.Changes_Hit{.Panel_Button, 0, 0})
+	x, y = middle(g.files_button)
+	testing.expect_value(t, ui.changes_hit(g, &view, &state, x, y), ui.Changes_Hit{.Files_Button, 0, 0})
 	// Folding needs files.
 	view.files = nil
 	view.revision += 1
 	ui.changes_layout(&state, &view, &f.text, &f.mono, g.diff.width, 1)
 	x, y = middle(g.fold_button)
+	testing.expect_value(t, ui.changes_hit(g, &view, &state, x, y), ui.Changes_Hit{})
+	x, y = middle(g.files_button)
 	testing.expect_value(t, ui.changes_hit(g, &view, &state, x, y), ui.Changes_Hit{})
 
 	// The icon swap and the view do not move anything; a git scope keeps the circles in the same order.
@@ -67,7 +71,7 @@ changes_row_has_the_summary_at_the_left_and_its_buttons_at_the_right :: proc(t: 
 	git := ui.changes_geometry({0, 0, 900, 600}, 1, &view, &f.text)
 	testing.expect_value(t, git.row_steps, 0)
 	testing.expect(t, git.layout_button.x < git.fold_button.x && git.fold_button.x < git.filter_button.x)
-	testing.expect(t, git.filter_button.x < git.panel_button.x)
+	testing.expect(t, git.filter_button.x < git.files_button.x)
 
 	// At twice the scale every DIP doubles.
 	view.scope, view.turns = .Agent, f.rows[:]
@@ -92,6 +96,7 @@ ladder_check :: proc(t: ^testing.T, f: ^Changes_Fixture, view: ^ui.Changes_View,
 	defer ui.changes_state_destroy(&state)
 	steps := 0
 	previous: ui.Changes_Geometry
+	wide_files := ui.changes_geometry({0, 0, 1400, 600}, 1, view, &f.text).files_button
 	reached: [6]bool
 	for width := f32(1400); width >= 100; width -= 1 {
 		g := ui.changes_geometry({0, 0, width, 600}, 1, view, &f.text)
@@ -115,7 +120,9 @@ ladder_check :: proc(t: ^testing.T, f: ^Changes_Fixture, view: ^ui.Changes_View,
 			testing.expect_value(t, g.filter_button, render.Rect{})
 			testing.expect(t, g.tools_button.width > 0)
 		}
-		testing.expect(t, g.panel_button.width > 0)
+		testing.expect(t, g.files_button.width > 0)
+		// The files button keeps its icon and number to the last, and loses the word at the second step.
+		if g.row_steps >= 2 {testing.expect(t, g.files_button.width < wide_files.width)}
 		steps, previous = g.row_steps, g
 	}
 	testing.expect(t, reached[0] && reached[1] && reached[2] && reached[3])
@@ -197,7 +204,7 @@ changes_tools_menu_hangs_under_the_collapsed_button_and_answers_first :: proc(t:
 	if !testing.expect(t, g.row_steps >= 1 && g.tools_button.width > 0) {return}
 	ui.changes_layout(&state, &view, &f.text, &f.mono, g.diff.width, 1)
 	testing.expect_value(t, g.tools_button.width, f32(22))
-	testing.expect_value(t, g.panel_button.x, g.tools_button.x + 22 + 4 + 1 + 4)
+	testing.expect_value(t, g.files_button.x, g.tools_button.x + 22 + 8)
 	// Three 32 rows under the button, right-aligned to it and inside the pane.
 	menu := g.tools_menu
 	testing.expect_value(t, menu.y, g.row.y + g.row.height + 4)
@@ -466,7 +473,7 @@ changes_draw_paints_the_row_the_panel_the_menu_and_the_overview :: proc(t: ^test
 	view.sources, view.source_current = sources[:], 0
 	expand_files(&f, &view)
 
-	// The summary's text stays inside the summary at every width, clipped when nothing else is left to give up.
+	// The row's text stays inside the summary and the files button at every width, clipped when nothing else is left to give up.
 	for width := f32(1000); width >= 100; width -= 37 {
 		g := ui.changes_geometry({0, 0, width, 600}, 1, &view, &f.text, &state)
 		ui.changes_layout(&state, &view, &f.text, &f.mono, g.diff.width, 1)
@@ -476,12 +483,14 @@ changes_draw_paints_the_row_the_panel_the_menu_and_the_overview :: proc(t: ^test
 			y := glyph.rect.y + glyph.rect.height / 2
 			if y < g.row.y || y >= g.row.y + g.row.height {continue}
 			inside += 1
-			testing.expect(t, glyph.rect.x >= g.summary.x && glyph.rect.x < g.summary.x + g.summary.width)
+			in_summary := glyph.rect.x >= g.summary.x && glyph.rect.x < g.summary.x + g.summary.width
+			in_files := glyph.rect.x >= g.files_button.x && glyph.rect.x < g.files_button.x + g.files_button.width
+			testing.expect(t, in_summary || in_files)
 		}
 		testing.expect(t, inside > 0 || g.summary.width < 60)
 	}
 
-	// Open, the panel paints its captions and chips inside itself, and the file count shows in its caption.
+	// Open, the panel paints its captions and chips inside itself, and no Files section.
 	g := ui.changes_geometry({0, 0, 900, 600}, 1, &view, &f.text, &state)
 	ui.changes_layout(&state, &view, &f.text, &f.mono, g.diff.width, 1)
 	closed := 0

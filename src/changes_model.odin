@@ -913,7 +913,6 @@ changes_model_result :: proc(app: ^App, result: Turn_Result) {
 	}
 	changes_comments_reanchor(pane)
 	changes_list_refilter(pane, kept, highlighted)
-	changes_panel_files(pane)
 	changes_reveal(app, pane)
 	mark_all_dirty(app)
 }

@@ -16,7 +16,7 @@ CHANGES_TOOLS_ROWS :: 3
 @(private = "file")
 ROW_PAD_LEFT :: f32(4)
 @(private = "file")
-ROW_PAD_RIGHT :: f32(5)
+ROW_PAD_RIGHT :: f32(4)
 @(private = "file")
 ROW_SUMMARY_GAP :: f32(4)
 @(private = "file")
@@ -24,9 +24,11 @@ ROW_BUTTON :: f32(22)
 @(private = "file")
 ROW_BUTTON_GAP :: f32(2)
 @(private = "file")
-ROW_DIVIDER_MARGIN :: f32(4)
+ROW_FILES_MARGIN :: f32(8)
 @(private = "file")
-ROW_DIVIDER_HEIGHT :: f32(14)
+ROW_FILES_PAD :: f32(8)
+@(private = "file")
+ROW_FILES_GAP :: f32(4)
 @(private = "file")
 ROW_SUMMARY_PAD_LEFT :: f32(7)
 @(private = "file")
@@ -42,33 +44,40 @@ ROW_FILTER_DOT :: f32(6)
 @(private = "file")
 TOOLS_ROW_HEIGHT :: HEIGHT_STANDARD
 
-// What the row shows at a collapse step: the three buttons, the file count, the totals and the agent
+// What the row shows at a collapse step: the three view buttons, the word "files", the totals and the agent
 // name stay until their step, and the range gets short at the last one.
 @(private = "file")
 Row_Plan :: struct {
-	buttons, count, totals, name, short: bool,
+	buttons, word, totals, name, short: bool,
 }
 
 @(private = "file")
 row_plan :: proc(steps: int, git: bool) -> Row_Plan {
 	return {
 		buttons = steps < 1,
-		count   = steps < 2,
+		word    = steps < 2,
 		totals  = steps < 3,
 		name    = steps < 4 && !git,
 		short   = steps >= 5,
 	}
 }
 
-// The texts of the summary for a plan, with the width each takes; the strings point into the caller's
-// buffers. `range` is the turn range, or in a git scope the scope's name.
+// The texts of the row for a plan, with the width each takes; the strings point into the caller's
+// buffers. `range` is the turn range, or in a git scope the scope's name; `files` is the files button's
+// label.
 @(private = "file")
 Row_Texts :: struct {
 	plan:                                   Row_Plan,
-	name, range, count:                     string,
+	name, range, files:                     string,
 	totals, live:                           bool,
 	name_width, range_width, totals_width:  f32,
-	count_width:                            f32,
+	files_width:                            f32,
+}
+
+// How many files the list holds: the files the filter hides count too.
+@(private = "file")
+files_count :: proc(view: ^Changes_View) -> int {
+	return max(len(view.files), view.total_files)
 }
 
 @(private = "file")
@@ -115,11 +124,13 @@ row_texts :: proc(
 		t.totals = true
 		t.totals_width = math.ceil(row_totals_width(&body, view, scale))
 	}
-	if plan.count {
-		count := len(view.files)
-		t.count = fmt.bprintf(count_buf, "%d %s", count, count == 1 ? "file" : "files")
-		t.count_width = math.ceil(text_width(&body, t.count))
+	count := files_count(view)
+	if plan.word {
+		t.files = fmt.bprintf(count_buf, "%d %s", count, count == 1 ? "file" : "files")
+	} else {
+		t.files = fmt.bprintf(count_buf, "%d", count)
 	}
+	t.files_width = math.ceil(text_width(&body, t.files))
 	return
 }
 
@@ -132,24 +143,25 @@ summary_width :: proc(t: Row_Texts, scale: f32) -> f32 {
 	width += 2 * gap + t.range_width
 	if t.name_width > 0 {width += 2 * gap + scale + t.name_width}
 	if t.totals {width += 2 * gap + scale + t.totals_width}
-	if t.count != "" {width += 2 * gap + scale + t.count_width}
 	return width
 }
 
-// The row's width at `steps`, and the summary's part of it: both paddings, the buttons and the divider.
+// The row's width at `steps`, the summary's part of it and the files button's: the paddings, the summary,
+// the view buttons and the files button.
 @(private = "file")
 row_width :: proc(
 	view: ^Changes_View, text: ^Text, steps: int, scale: f32, range_buf, count_buf: []u8,
 ) -> (
-	width, summary: f32,
+	width, summary, files: f32,
 ) {
 	plan := row_plan(steps, !changes_scope_turns(view.scope))
 	t := row_texts(view, text, plan, scale, range_buf, count_buf)
 	summary = math.ceil(summary_width(t, scale))
+	files = math.ceil((2 * ROW_FILES_PAD + ICON_BUTTON + ROW_FILES_GAP) * scale + t.files_width)
 	buttons := plan.buttons ? 3 : 1
 	button := math.round(ROW_BUTTON * scale)
-	width = (ROW_PAD_LEFT + ROW_SUMMARY_GAP + ROW_PAD_RIGHT + 2 * ROW_DIVIDER_MARGIN) * scale + summary
-	width += math.round(scale) + f32(buttons) * button + f32(buttons - 1) * ROW_BUTTON_GAP * scale + button
+	width = (ROW_PAD_LEFT + ROW_SUMMARY_GAP + ROW_FILES_MARGIN + ROW_PAD_RIGHT) * scale + summary + files
+	width += f32(buttons) * button + f32(buttons - 1) * ROW_BUTTON_GAP * scale
 	return
 }
 
@@ -165,26 +177,21 @@ row_place :: proc(g: ^Changes_Geometry, view: ^Changes_View, text: ^Text) {
 	range_buf, count_buf: [RANGE_LABEL_BYTES]u8
 	git := !changes_scope_turns(view.scope)
 	steps := 0
-	width, summary := row_width(view, text, steps, s, range_buf[:], count_buf[:])
+	width, summary, files := row_width(view, text, steps, s, range_buf[:], count_buf[:])
 	for steps < ROW_STEPS && width > most {
 		steps += 1
 		if steps == 4 && git {steps += 1}
-		width, summary = row_width(view, text, steps, s, range_buf[:], count_buf[:])
+		width, summary, files = row_width(view, text, steps, s, range_buf[:], count_buf[:])
 	}
 	g.row_steps = steps
 	if width > most {summary = max(0, summary - (width - most))}
 	button := math.round(ROW_BUTTON * s)
-	rule := max(1, math.round(s))
-	sum_height := min(math.round(HEIGHT_COMPACT * s), row.height)
-	sum_top := row.y + math.round((row.height - sum_height) / 2)
-	g.summary = {row.x + ROW_PAD_LEFT * s, sum_top, summary, sum_height}
-	top := row.y + math.round((row.height - button) / 2)
-	cursor := row.x + row.width - ROW_PAD_RIGHT * s - button
-	g.panel_button = {cursor, top, button, button}
-	divider := min(math.round(ROW_DIVIDER_HEIGHT * s), row.height)
-	cursor -= ROW_DIVIDER_MARGIN * s + rule
-	g.buttons_divider = {cursor, row.y + math.round((row.height - divider) / 2), rule, divider}
-	cursor -= ROW_DIVIDER_MARGIN * s + button
+	height := min(math.round(HEIGHT_COMPACT * s), row.height)
+	top := row.y + math.round((row.height - height) / 2)
+	g.summary = {row.x + ROW_PAD_LEFT * s, top, summary, height}
+	g.files_button = {row.x + row.width - ROW_PAD_RIGHT * s - files, top, files, height}
+	top = row.y + math.round((row.height - button) / 2)
+	cursor := g.files_button.x - ROW_FILES_MARGIN * s - button
 	gap := ROW_BUTTON_GAP * s
 	if steps < 1 {
 		g.filter_button = {cursor, top, button, button}
@@ -269,7 +276,7 @@ summary_separator_draw :: proc(list: ^render.Draw_List, theme: Theme, sum: rende
 }
 
 // The summary's content: the dot, then the name, the range (behind the working spinner while a turn is
-// live), the totals and the file count, each after a divider and clipped to the room the summary has.
+// live) and the totals, each after a divider and clipped to the room the summary has.
 @(private = "file")
 summary_draw :: proc(
 	list: ^render.Draw_List,
@@ -336,13 +343,6 @@ summary_draw :: proc(
 		   status != .Ok {return}
 		x += t.totals_width + gap
 	}
-	if t.count != "" && x < limit {
-		summary_separator_draw(list, theme, sum, x, s)
-		x += s + gap
-		status = draw_fading_text(
-			&body, list, t.count, x, baseline_in(sum.y, sum.height, &body), theme.muted, min(t.count_width, limit - x),
-		)
-	}
 	return
 }
 
@@ -384,14 +384,56 @@ row_button_draw :: proc(
 	return .None
 }
 
+// The files button: the file icon and the count ("N files", or just "N" once the word is given up), a
+// ghost button like the summary that stays pressed while its list is open and is disabled without files.
+@(private = "file")
+files_button_draw :: proc(
+	list: ^render.Draw_List,
+	text: ^Text,
+	theme: Theme,
+	g: Changes_Geometry,
+	view: ^Changes_View,
+	state: ^Changes_State,
+	scale: f32,
+	pointer: [2]f32,
+) -> render.Build_Status {
+	rect := g.files_button
+	if rect.width <= 0 {return .Ok}
+	enabled := changes_files_listed(view)
+	hover, press := changes_lit(state, {.Files_Button, 0, 0})
+	if state.files_open {draw_rect(list, {rect = rect, color = theme.pressed, radius = RADIUS_CONTROL * scale})}
+	b := Button {
+		rect     = rect,
+		hover    = hover,
+		press    = press,
+		radius   = RADIUS_CONTROL,
+		surface  = .Flat,
+		disabled = !enabled,
+	}
+	face, ink, err := button_draw(list, theme, b, scale, pointer)
+	if err != .None {return .Ok}
+	if state.files_open && enabled {ink = theme.text}
+	range_buf, count_buf: [RANGE_LABEL_BYTES]u8
+	plan := row_plan(g.row_steps, !changes_scope_turns(view.scope))
+	t := row_texts(view, text, plan, scale, range_buf[:], count_buf[:])
+	body := text_styled(text, .Body)
+	x := face.x + ROW_FILES_PAD * scale
+	icon_draw(list, .Files, {x, face.y, ICON_BUTTON * scale, face.height}, ink, ICON_BUTTON, scale)
+	x += (ICON_BUTTON + ROW_FILES_GAP) * scale
+	return draw_fading_text(
+		&body, list, t.files, x, baseline_in(face.y, face.height, &body), ink,
+		face.x + face.width - ROW_FILES_PAD * scale - x,
+	)
+}
+
 // Whether a filter text is set, valid or not.
 @(private)
 changes_filter_set :: proc(view: ^Changes_View) -> bool {
 	return view.filter_active || view.filter_invalid
 }
 
-// Draws the header row: the summary, and the icon buttons (or the one ⋯ button), the divider and the
-// chevron button. `spinning` reports a working spinner in the summary.
+// Draws the header row: the summary, and the icon buttons (or the one ⋯ button), then the files button.
+// `spinning` reports a working spinner in the summary.
 @(private)
 row_draw :: proc(
 	list: ^render.Draw_List,
@@ -412,6 +454,7 @@ row_draw :: proc(
 	if !opened {return .Ok, false}
 	defer clip_scope_close(list, scope)
 	hover, press := changes_lit(state, {.Summary, 0, 0})
+	if state.panel_open {draw_rect(list, {rect = g.summary, color = theme.pressed, radius = RADIUS_CONTROL * s})}
 	b := Button {
 		rect    = g.summary,
 		hover   = hover,
@@ -420,7 +463,6 @@ row_draw :: proc(
 		surface = .Flat,
 	}
 	if _, _, err := button_draw(list, theme, b, s, pointer); err != .None {return .Ok, false}
-	draw_rect(list, {rect = g.buttons_divider, color = theme.border})
 	filter_set := changes_filter_set(view)
 	filter_ink: Maybe(render.Color)
 	if view.filter_invalid {filter_ink = theme.warning}
@@ -447,13 +489,8 @@ row_draw :: proc(
 			filter_set, filter_ink, state, s, pointer,
 		)
 	}
-	if err == .None {
-		err = row_button_draw(
-			list, theme, g.panel_button, .Chevron_Down, .Panel_Button, state.panel_open, false, false, nil, state, s,
-			pointer,
-		)
-	}
 	if err != .None {return .Ok, false}
+	if status = files_button_draw(list, text, theme, g, view, state, s, pointer); status != .Ok {return}
 	return summary_draw(list, text, theme, g, view, phase)
 }
 

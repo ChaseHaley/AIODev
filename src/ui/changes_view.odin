@@ -167,9 +167,9 @@ Changes_Part :: enum u8 {
 	Sticky_Header,
 	Strip_Older,
 	Strip_Newer,
-	// The row's summary, which opens the panel, and the chevron button, which does too.
+	// The row's summary, which opens the panel, and the files button, which opens the file list.
 	Summary,
-	Panel_Button,
+	Files_Button,
 	// The one ⋯ button that holds the layout, fold and filter buttons when the row is short of room, and the
 	// rows of its menu.
 	Tools_Button,
@@ -235,8 +235,10 @@ Changes_State :: struct {
 	hover, press:             Changes_Hit,
 	// The control whose hover and press `motion` plays: it keeps fading after the pointer leaves.
 	lit:                      Changes_Hit,
-	// The panel is open, so its arrow stays lit.
+	// The panel is open, so the summary's panel stays shown.
 	panel_open:               bool,
+	// The file list is open, so the files button stays lit.
+	files_open:               bool,
 	// The ⋯ menu is open, so its button stays lit.
 	tools_open:               bool,
 	// The filter popover is open, so its button stays outlined.
@@ -265,13 +267,14 @@ changes_state_destroy :: proc(state: ^Changes_State) {
 // git scopes. The chip slices live in temporary memory, valid until the frame's temporary memory is freed.
 Changes_Geometry :: struct {
 	area, row, hooks, diff, notice, notice_button: render.Rect,
-	// The header row: its summary (one hit part), the divider before the panel button and the buttons. The three
-	// view buttons are empty while `row_steps` is 1 or more, when `tools_button` stands for them.
-	summary, buttons_divider:                       render.Rect,
+	// The header row: its summary (one hit part), the three view buttons and the files button at the right
+	// end. The three view buttons are empty while `row_steps` is 1 or more, when `tools_button` stands for
+	// them.
+	summary:                                        render.Rect,
 	layout_button, fold_button, filter_button:      render.Rect,
-	tools_button, panel_button:                     render.Rect,
-	// How far the row's collapse ladder went, 0 to 5: 1 the buttons became one, 2 the file count went, 3 the
-	// totals, 4 the agent name, 5 the range got short.
+	tools_button, files_button:                     render.Rect,
+	// How far the row's collapse ladder went, 0 to 5: 1 the buttons became one, 2 the files button lost its
+	// word, 3 the totals went, 4 the agent name, 5 the range got short.
 	row_steps:                                     int,
 	// The ⋯ menu under the tools button and its rows; empty without that button.
 	tools_menu:                                     render.Rect,
@@ -279,7 +282,7 @@ Changes_Geometry :: struct {
 	// The panel under the summary, its section captions, the chips of its Source and Worktree sections, and the
 	// line under the strip that names the selected turns.
 	panel:                                          render.Rect,
-	source_caption, worktree_caption, turns_caption, files_caption, turn_title: render.Rect,
+	source_caption, worktree_caption, turns_caption, turn_title: render.Rect,
 	source_chips, worktree_chips:                   []render.Rect,
 	strip, step_back, step_forward, range_label:    render.Rect,
 	// The strip's "+N" markers for older (left) and newer (right) turns it can't show at the offset the
@@ -574,7 +577,9 @@ changes_hit :: proc(
 	if render.rect_contains(g.filter_button, x, y) {return {.Filter_Button, 0, 0}}
 	if render.rect_contains(g.layout_button, x, y) {return {.Layout_Button, 0, 0}}
 	if render.rect_contains(g.tools_button, x, y) {return {.Tools_Button, 0, 0}}
-	if render.rect_contains(g.panel_button, x, y) {return {.Panel_Button, 0, 0}}
+	if render.rect_contains(g.files_button, x, y) {
+		return changes_files_listed(view) ? {.Files_Button, 0, 0} : {}
+	}
 	if render.rect_contains(g.filter_bar_clear, x, y) {return {.Filter_Bar_Clear, 0, 0}}
 	if render.rect_contains(g.notice_button, x, y) {return {.Notice_Button, 0, 0}}
 	if render.rect_contains(g.overview, x, y) {return {.Overview, 0, 0}}
@@ -587,7 +592,7 @@ changes_animated :: proc(hit: Changes_Hit) -> bool {
 	case .Hooks, .Notice_Button, .File_Header, .Step_Back, .Step_Forward, .Range_Label, .Hunk_Comment,
 	     .Comment_Button, .Comment_Delete, .Send, .Copy, .Discard, .Layout_Button, .Filter_Button, .Filter_Clear,
 	     .Filter_Bar_Clear, .Fold_Button, .Sticky_Header, .Strip_Older, .Strip_Newer, .Summary,
-	     .Panel_Button, .Tools_Button, .Source_Chip, .Worktree_Chip:
+	     .Files_Button, .Tools_Button, .Source_Chip, .Worktree_Chip:
 		return true
 	}
 	return false

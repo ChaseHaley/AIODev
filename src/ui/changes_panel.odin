@@ -1,14 +1,12 @@
 package ui
 
 import "aio:render"
-import "core:fmt"
 import "core:math"
 
-// The panel under the row's summary: the source as chips, the worktree as chips in git scopes, the turn
-// strip with the title of the selected turns in turn scopes, and a caption for the file list that hangs
-// under it. It opens from the row's summary or chevron button and from Ctrl+K. It is laid out whether or
-// not it is open, so the strip's
-// keys and offsets never depend on it; only drawing and hit testing do.
+// The panel under the row's summary: the source as chips, the worktree as chips in git scopes, the hooks
+// button when offered, and the turn strip with the title of the selected turns in turn scopes. It opens
+// from the row's summary and from Ctrl+K. It is laid out whether or not it is open, so the strip's keys
+// and offsets never depend on it; only drawing and hit testing do. The file list is the files button's.
 
 @(private = "file")
 CHANGES_PANEL_WIDTH :: f32(560)
@@ -26,8 +24,6 @@ SOURCE_CAPTION :: "Source"
 WORKTREE_CAPTION :: "Worktree"
 @(private = "file")
 TURNS_CAPTION :: "Turns"
-@(private = "file")
-FILES_CAPTION :: "Files"
 @(private = "file")
 FOLLOWING_LABEL :: "Following the agent"
 
@@ -115,11 +111,6 @@ panel_place :: proc(
 		y += caption + SPACE_1 * s
 		g.worktree_chips, bottom = chips_place(view.worktree_labels, body, left, y, inner, s)
 		y = bottom
-	}
-	if changes_files_listed(view) {
-		y += SPACE_3 * s
-		g.files_caption = {left, y, inner, caption}
-		y += caption
 	}
 	y += SPACE_2 * s
 	g.panel = {x, top, width, min(y - top, limit - top)}
@@ -308,12 +299,6 @@ changes_panel_draw :: proc(
 			)
 			if status != .Ok {return}
 		}
-	}
-	if g.files_caption.width > 0 {
-		buf: [32]u8
-		count := max(len(view.files), view.total_files)
-		note := fmt.bprintf(buf[:], "%d %s", count, count == 1 ? "file" : "files")
-		status = caption_draw(list, &small, theme, g.files_caption, FILES_CAPTION, note, s)
 	}
 	return
 }
