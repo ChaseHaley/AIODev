@@ -6,11 +6,10 @@ import "aio:ui"
 import "core:testing"
 import "core:time"
 
+// The close button of the front card, a one-line notice without an action at the bottom right.
 @(private)
 notice_close_point :: proc(w: ^app.Window) -> [2]f32 {
-	strong := ui.text_styled(&w.ui_text, .Strong)
-	height := max(strong.line_height, 24*w.scale) + 28*w.scale + w.ui_text.line_height
-	return {f32(w.width) - 40*w.scale, f32(w.height) - 16*w.scale - height + 24*w.scale}
+	return {f32(w.width) - 36*w.scale, f32(w.height) - 42*w.scale}
 }
 
 @(test)
@@ -48,8 +47,13 @@ notice_pointer_owns_clicks_and_requires_the_same_live_notice_on_release :: proc(
 	testing.expect_value(t, len(s.notices.items), 1)
 	testing.expect_value(t, s.notices.items[0].text, "First")
 
+	// Losing focus cancelled the pointer, which let the deck run again; coming back over it pauses it, so
+	// nothing expires and the notice the press holds leaves another way.
+	pointer_expect_move(t, s, w, close.x, close.y, .Hand)
+	testing.expect(t, s.notices.over)
 	gesture_button(s, w, .Left, true, close.x, close.y)
-	ui.notices_expire(&s.notices, false, time.tick_add(time.tick_now(), 2*time.Hour))
+	testing.expect(t, !ui.notices_expire(&s.notices, false, time.tick_add(time.tick_now(), 2*time.Hour)))
+	ui.notices_dismiss(&s.notices, s.notices.items[0].id, false)
 	ui.notices_put(&s.notices, 0, .Warning, "Replacement", 0, false, time.tick_now())
 	gesture_button(s, w, .Left, false, close.x, close.y)
 	testing.expect_value(t, len(s.notices.items), 1)
@@ -64,6 +68,7 @@ notice_pointer_owns_clicks_and_requires_the_same_live_notice_on_release :: proc(
 	testing.expect(t, !app.selection_active(w) && gesture_captured(w) == {})
 }
 
+// A pointer over the deck pauses it, so a pressed notice can only leave by being replaced.
 @(test)
 notice_press_held_while_its_notice_fades_disarms_without_dismissing :: proc(t: ^testing.T) {
 	f: Palette_Fixture
@@ -72,20 +77,23 @@ notice_press_held_while_its_notice_fades_disarms_without_dismissing :: proc(t: ^
 	s, w := &f.state, f.state.windows[0]
 	now := time.tick_now()
 	for len(s.notices.items) > 0 {ui.notices_dismiss(&s.notices, s.notices.items[0].id, false)}
-	ui.notices_put(&s.notices, 0, .Info, "Timed", time.Millisecond, false, now)
+	ui.notices_put(&s.notices, 7, .Info, "Timed", time.Hour, false, now)
 	s.animations = true
 	id := s.notices.items[0].id
 	close := notice_close_point(w)
 	pointer_expect_move(t, s, w, close.x, close.y, .Hand)
+	testing.expect(t, s.notices.over)
 	gesture_button(s, w, .Left, true, close.x, close.y)
 	testing.expect(t, ui.armed_is(s.notices.armed, ui.Notice_Button{id, false}))
-	testing.expect(t, ui.notices_expire(&s.notices, true, time.tick_add(time.tick_now(), time.Second)))
-	if !testing.expect_value(t, len(s.notices.items), 1) {return}
-	testing.expect(t, ui.notice_fading(s.notices.items[0]))
-	testing.expect(t, !ui.armed_is(s.notices.armed, ui.Notice_Button{id, false}), "the press must let go of a fading notice")
-	testing.expect_value(t, s.notices.hover, ui.Notice_Button{})
+	ui.notices_put(&s.notices, 7, .Info, "Replacement", time.Hour, true, time.tick_now())
+	if !testing.expect_value(t, len(s.notices.items), 2) {return}
+	testing.expect(t, ui.notice_fading(s.notices.items[1]))
+	testing.expect(t, !ui.armed_is(s.notices.armed, ui.Notice_Button{id, false}),
+		"the press must let go of a fading notice")
 	gesture_button(s, w, .Left, false, close.x, close.y)
+	testing.expect_value(t, len(ui.notices_live(&s.notices)), 1)
 	testing.expect(t, !app.selection_active(w) && gesture_captured(w) == {})
 	ui.notices_animate(&s.notices, false, frame_at(time.tick_now()))
-	testing.expect_value(t, len(s.notices.items), 0)
+	testing.expect_value(t, len(s.notices.items), 1)
+	testing.expect_value(t, s.notices.items[0].text, "Replacement")
 }

@@ -1,11 +1,12 @@
 # The app's instance command line and data layout for PowerShell launchers. src/instance/instance.odin
-# owns them (FLAG_INSTANCE, FLAG_DATA_DIR, SETTINGS_FILE, APP_NAME); dot-source this file instead of
-# retyping them. These launchers start release builds, including older refs, so they use the public
-# flags rather than tools/aioctl, which drives only control-enabled verification builds.
+# owns them (FLAG_INSTANCE, FLAG_DATA_DIR, SETTINGS_FILE, TURNS_DIRECTORY, APP_NAME); dot-source this file
+# instead of retyping them. These launchers start release builds, including older refs, so they use the
+# public flags rather than tools/aioctl, which drives only control-enabled verification builds.
 
 $AIODevInstanceFlag = '--instance'
 $AIODevDataDirFlag = '--data-dir'
 $AIODevSettingsFile = 'settings.ini'
+$AIODevTurnsDirectory = 'agent-turns'
 
 # Arguments for Start-Process that run an instance with its own data folder. The folder is quoted
 # because Start-Process joins the arguments into one command line.
@@ -22,4 +23,14 @@ function Test-AIODevInstanceRunning([string] $Name) {
 # The settings file of the default instance, which keeps its data in the roaming profile.
 function Get-AIODevUserSettingsPath {
     return Join-Path $env:APPDATA "AIODev/$AIODevSettingsFile"
+}
+
+# The agent turns the default instance records, which it keeps in the local profile.
+function Get-AIODevUserTurnsPath {
+    return Join-Path $env:LOCALAPPDATA "AIODev/$AIODevTurnsDirectory"
+}
+
+# Where a named instance with its own data folder keeps its agent turns: "agent-turns.<name>".
+function Get-AIODevTurnsPath([string] $DataDir, [string] $Name) {
+    return Join-Path $DataDir "$AIODevTurnsDirectory.$Name"
 }

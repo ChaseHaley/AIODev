@@ -17,6 +17,10 @@ Settings: by default both start from defaults with no saved layout. -Settings co
 both; -MySettings copies your own settings.ini. Either way both sides read identical settings, so any
 difference you see comes from the code.
 
+Agent turns: each side records into its own data folder, so it starts with none. -MyTurns copies a
+snapshot of the turns your own AIODev has recorded into each side, so Agent changes shows them; turns
+recorded after the launch stay in your own AIODev only.
+
 .EXAMPLE
 .\tools\compare.ps1 -Candidate build\work285-design-system
 Main on the left, the design-system worktree on the right.
@@ -26,8 +30,8 @@ Main on the left, the design-system worktree on the right.
 The last release against main, both with your settings.
 
 .EXAMPLE
-.\tools\compare.ps1 -CandidateOnly -MySettings
-Only the current checkout, with your settings.
+.\tools\compare.ps1 -CandidateOnly -MySettings -MyTurns
+Only the current checkout, with your settings and your recorded agent turns.
 
 .EXAMPLE
 .\tools\compare.ps1 -Stop
@@ -47,6 +51,10 @@ param(
 
     [Parameter(ParameterSetName = 'Run')]
     [switch] $MySettings,
+
+    # Copy a snapshot of the agent turns your own AIODev recorded into each side.
+    [Parameter(ParameterSetName = 'Run')]
+    [switch] $MyTurns,
 
     # Keep each side's data folder (settings edits, layout) from the previous compare.
     [Parameter(ParameterSetName = 'Run')]
@@ -278,6 +286,11 @@ if ($MySettings) {
     $settingsSource = Get-AIODevUserSettingsPath
     if (-not (Test-Path $settingsSource)) { throw "No settings at $settingsSource." }
 }
+$turnsSource = $null
+if ($MyTurns) {
+    $turnsSource = Get-AIODevUserTurnsPath
+    if (-not (Test-Path $turnsSource)) { throw "No recorded agent turns at $turnsSource." }
+}
 
 $screens = [System.Windows.Forms.Screen]::AllScreens
 $screen = if ($Monitor -ge 0) {
@@ -296,6 +309,11 @@ for ($i = 0; $i -lt $sides.Count; $i++) {
     $data = Join-Path $session "$($side.Name.ToLower())/data"
     Reset-Data $data $settingsSource
     $instance = "cmp-$key-$($side.Name.ToLower())"
+    if ($turnsSource) {
+        $turns = Get-AIODevTurnsPath $data $instance
+        if (Test-Path $turns) { Remove-Item -LiteralPath $turns -Recurse -Force }
+        Copy-Item -LiteralPath $turnsSource -Destination $turns -Recurse
+    }
     $process = Start-Process -FilePath $exe -ArgumentList (Get-AIODevInstanceArguments $instance $data) `
         -WorkingDirectory $here -PassThru
     $window = Wait-Window $process.Id

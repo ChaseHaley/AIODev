@@ -47,7 +47,7 @@ try {
     Check ((State)['session.id'] -eq $initial['session.id']) 'build info preserves terminal session'
     Shot 'terminal-dark96'
     Aio command app.build_info | Out-Null
-    Check (@((State).Keys | Where-Object{$_ -eq 'notice.build_info'}).Count -eq 1) 'repeated dispatch has one build-info state entry'
+    Check (!(State).ContainsKey('notice.build_info.2')) 'repeated dispatch refreshes one build-info notice'
     Aio command settings.open | Out-Null
     Aio expect state settings.active=true
     Show-Info

@@ -772,7 +772,11 @@ build_frame :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 	if result := status_inbox_draw(app, w); result != .Ok {return result}
 	if result := tooltip_draw(app, w); result != .Ok {return result}
 	if app.notice_window != w.id {return .Ok}
-	return ui.notices_draw(
+	// The spinner and sweep move one refresh per frame when read at the frame's display time, as status
+	// marks are; the countdown reads the same instant.
+	shown_at := w.frame.display
+	if shown_at == {} {shown_at = clock_now(&app.clock)}
+	result := ui.notices_draw(
 		&app.notices,
 		&w.list,
 		&w.ui_text,
@@ -780,8 +784,13 @@ build_frame :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 		size.x,
 		size.y,
 		w.scale,
+		shown_at,
+		app.animations,
 		w.pointer,
 	)
+	// A notice without a deadline spins like a working status mark, and keeps frames coming the same way.
+	w.status_spinning ||= app.notices.spinning
+	return result
 }
 
 // The title bar (gone in Fullscreen), the docked rail and the Activity panel, then the chrome going away,

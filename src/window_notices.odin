@@ -16,7 +16,7 @@ window_notices_sync :: proc(app: ^App) {
 	id := target != nil ? target.id : input.Window_Id(0)
 	if app.notice_window == id {return}
 	app.notice_window = id
-	ui.notices_pointer_cancel(&app.notices)
+	ui.notices_pointer_cancel(&app.notices, clock_now(&app.clock), app.animations)
 	for w in app.windows {w.dirty = true}
 }
 
@@ -33,11 +33,14 @@ notice_claims :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {
 
 @(private)
 notice_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: input.Mouse_Move_Event) {
-	// Only the window holding the notices has their hover to change.
+	// Only the window holding the notices has their hover to change. The pointer over the deck opens it
+	// and pauses every countdown.
 	if app.notice_window != w.id {return}
 	hit := owner == .Notice ? notice_hit(app, w, f32(e.x), f32(e.y)) : ui.Notice_Hit{}
 	button := ui.notice_hit_button(hit)
 	if ui.notices_hover(&app.notices, button) {w.dirty = true}
+	now := clock_now(&app.clock)
+	if ui.notices_pointer_over(&app.notices, hit.contains, now, app.animations) {w.dirty = true}
 	if owner == .Notice {pointer_set(app, w, button.id != 0 ? .Hand : .Arrow)}
 }
 
@@ -72,10 +75,12 @@ notice_release :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) -> bo
 
 @(private)
 notice_cancel :: proc(app: ^App, w: ^Window) {
-	if app.notice_window == w.id {ui.notices_pointer_cancel(&app.notices)}
+	if app.notice_window == w.id {ui.notices_pointer_cancel(&app.notices, clock_now(&app.clock), app.animations)}
 }
 
 @(private)
 notice_leave :: proc(app: ^App, w: ^Window) {
-	if app.notice_window == w.id {_ = ui.notices_hover(&app.notices, {})}
+	if app.notice_window != w.id {return}
+	_ = ui.notices_hover(&app.notices, {})
+	if ui.notices_pointer_over(&app.notices, false, clock_now(&app.clock), app.animations) {w.dirty = true}
 }
