@@ -790,6 +790,203 @@ plain_untracked :: proc(
 	return omitted, .None
 }
 
+// One entry of `git worktree list`: `path` is absolute with '/' separators, `head` the commit checked out
+// ("" for an unborn branch or a bare repository). A prunable worktree's directory is gone.
+Worktree :: struct {
+	path:     string,
+	head:     Oid,
+	bare:     bool,
+	prunable: bool,
+}
+
+// Every worktree of the repository `directory` belongs to, the main one first. Read-only.
+@(require_results)
+worktrees_list :: proc(
+	directory: string,
+	allocator := context.allocator,
+	cancel: ^Git_Cancel = nil,
+) -> (
+	list: []Worktree,
+	err: Error,
+) {
+	args := [?]string{"worktree", "list", "--porcelain", "-z"}
+	output := git_run(args[:], {cwd = directory, cancel = cancel}, context.allocator) or_return
+	defer git_output_destroy(&output, context.allocator)
+	if output.code != 0 {return nil, git_failure(args[:], output)}
+	found := make([dynamic]Worktree, 0, 4, allocator)
+	current: Worktree
+	defer if err != .None {
+		delete(current.path, allocator)
+		delete(current.head, allocator)
+		worktrees_destroy(found[:], allocator)
+	}
+	// A block is its attribute records and an empty record after them.
+	rest := string(output.stdout)
+	for len(rest) > 0 {
+		record := git_take_record(&rest)
+		if record == "" {
+			worktree_flush(&found, &current) or_return
+			continue
+		}
+		key, _, value := strings.partition(record, " ")
+		switch key {
+		case "worktree":
+			worktree_flush(&found, &current) or_return
+			current.path = repository_path(value, allocator) or_return
+		case "HEAD":
+			if strings.trim_left(value, "0") != "" {current.head = git_clone(value, allocator) or_return}
+		case "bare":
+			current.bare = true
+		case "prunable":
+			current.prunable = true
+		}
+	}
+	worktree_flush(&found, &current) or_return
+	return found[:], .None
+}
+
+// Moves a finished entry into the list; one without a path is nothing.
+@(private = "file", require_results)
+worktree_flush :: proc(found: ^[dynamic]Worktree, current: ^Worktree) -> Error {
+	if current.path == "" {return .None}
+	if _, append_error := append(found, current^); append_error != nil {return .Out_Of_Memory}
+	current^ = {}
+	return .None
+}
+
+// Frees the strings and the slice; `allocator` is the one worktrees_list got.
+worktrees_destroy :: proc(list: []Worktree, allocator := context.allocator) {
+	for entry in list {
+		delete(entry.path, allocator)
+		delete(entry.head, allocator)
+	}
+	delete(list, allocator)
+}
+
+// The commit the worktree's HEAD started at: where its oldest HEAD reflog entry came from (the entry's
+// new commit when it created HEAD), else its current HEAD; "" when unborn.
+@(require_results)
+worktree_origin :: proc(
+	worktree: string,
+	allocator := context.allocator,
+	cancel: ^Git_Cancel = nil,
+) -> (
+	oid: Oid,
+	err: Error,
+) {
+	path_args := [?]string{"rev-parse", "--path-format=absolute", "--git-path", "logs/HEAD"}
+	located := git_run(path_args[:], {cwd = worktree, cancel = cancel}, context.allocator) or_return
+	defer git_output_destroy(&located, context.allocator)
+	if located.code == 0 {
+		log_path := strings.trim_space(string(located.stdout))
+		if first, found := reflog_first_oid(log_path); found {return git_clone(first, allocator)}
+	}
+	head_args := [?]string{"rev-parse", "--verify", "--quiet", "HEAD^{commit}"}
+	head := git_run(head_args[:], {cwd = worktree, cancel = cancel}, context.allocator) or_return
+	defer git_output_destroy(&head, context.allocator)
+	if head.code == 1 {return "", .None}
+	if head.code != 0 {return "", git_failure(head_args[:], head)}
+	text := strings.trim_space(string(head.stdout))
+	if !oid_valid(text) {return "", .Failed}
+	return git_clone(text, allocator)
+}
+
+// The first line of a reflog is `<old> <new> <identity>`: the commit the log started from. Only the
+// head of the file is read. The result lives in the temp allocator.
+@(private = "file")
+reflog_first_oid :: proc(path: string) -> (oid: string, found: bool) {
+	file, open_error := os.open(path)
+	if open_error != nil {return "", false}
+	defer os.close(file)
+	buffer: [512]u8
+	count, read_error := os.read(file, buffer[:])
+	if read_error != nil || count <= 0 {return "", false}
+	line := string(buffer[:count])
+	if end := strings.index_byte(line, '\n'); end >= 0 {line = line[:end]}
+	old, _, tail := strings.partition(line, " ")
+	next, _, _ := strings.partition(tail, " ")
+	if oid_valid(old) && strings.trim_left(old, "0") != "" {
+		cloned, _ := strings.clone(old, context.temp_allocator)
+		return cloned, cloned != ""
+	}
+	if oid_valid(next) && strings.trim_left(next, "0") != "" {
+		cloned, _ := strings.clone(next, context.temp_allocator)
+		return cloned, cloned != ""
+	}
+	return "", false
+}
+
+// Worktree-relative paths whose content differs from `base`, committed or not, plus untracked files
+// that are not ignored. An empty `base` lists every tracked and untracked file.
+@(require_results)
+changed_since :: proc(
+	worktree: string,
+	base: Oid,
+	allocator := context.allocator,
+	cancel: ^Git_Cancel = nil,
+) -> (
+	paths: []string,
+	err: Error,
+) {
+	seen := make(map[string]struct{}, 64, context.allocator)
+	defer delete(seen)
+	found := make([dynamic]string, 0, 64, allocator)
+	defer if err != .None {
+		for path in found {delete(path, allocator)}
+		delete(found)
+	}
+	if base != "" {
+		diff_args := [?]string {
+			"-c",
+			"diff.autoRefreshIndex=false",
+			"diff",
+			"--name-only",
+			"-z",
+			"--no-renames",
+			"--ignore-submodules=all",
+			base,
+			"--",
+		}
+		changed_collect(worktree, diff_args[:], &found, &seen, allocator, cancel) or_return
+	}
+	list_args := [?]string{"ls-files", "-z", "-o", "--exclude-standard"}
+	changed_collect(worktree, list_args[:], &found, &seen, allocator, cancel) or_return
+	if base == "" {
+		tracked_args := [?]string{"ls-files", "-z", "-c"}
+		changed_collect(worktree, tracked_args[:], &found, &seen, allocator, cancel) or_return
+	}
+	return found[:], .None
+}
+
+// Runs git and appends each NUL-separated path it prints that is not in `seen` yet.
+@(private = "file", require_results)
+changed_collect :: proc(
+	worktree: string,
+	args: []string,
+	found: ^[dynamic]string,
+	seen: ^map[string]struct{},
+	allocator: runtime.Allocator,
+	cancel: ^Git_Cancel,
+) -> Error {
+	output := git_run(args, {cwd = worktree, cancel = cancel}, context.allocator) or_return
+	defer git_output_destroy(&output, context.allocator)
+	if output.code != 0 {return git_failure(args, output)}
+	rest := string(output.stdout)
+	for len(rest) > 0 {
+		path := git_take_record(&rest)
+		// A nested repository is listed as a directory.
+		if path == "" || path[len(path) - 1] == '/' || path in seen^ {continue}
+		cloned := git_clone(path, allocator) or_return
+		if _, append_error := append(found, cloned); append_error != nil {
+			delete(cloned, allocator)
+			return .Out_Of_Memory
+		}
+		// The key is the caller's clone, which stays alive as long as the map is used.
+		seen^[cloned] = {}
+	}
+	return .None
+}
+
 // Removes the turns directory with everything in it, recorded turns, inbox and marker alike; a
 // directory that is not there is already removed. A store's packs are read-only files, which
 // os.remove clears before deleting.

@@ -35,8 +35,8 @@ one_segment_composes_to_its_own_changes :: proc(t: ^testing.T) {
 	defer delete(files)
 	testing.expect_value(t, err, mem.Allocator_Error.None)
 	testing.expect_value(t, len(files), 2)
-	testing.expect_value(t, files[0], turns.Composed{"/r", "a.txt", "", "a1", false})
-	testing.expect_value(t, files[1], turns.Composed{"/r", "b.txt", "b0", "b1", false})
+	testing.expect_value(t, files[0], turns.Composed{worktree = "/r", path = "a.txt", after = "a1"})
+	testing.expect_value(t, files[1], turns.Composed{worktree = "/r", path = "b.txt", before = "b0", after = "b1"})
 }
 
 @(test)
@@ -85,15 +85,42 @@ a_file_restored_to_its_original_content_is_dropped :: proc(t: ^testing.T) {
 }
 
 @(test)
-a_shared_change_marks_the_file :: proc(t: ^testing.T) {
+a_shared_change_makes_the_file_ambiguous_not_marked :: proc(t: ^testing.T) {
 	c1 := [?]turns.Change{{"/r", "f", "f0", "f1", true}, {"/r", "g", "g0", "g1", false}}
 	segments := [?]turns.Segment{turn(1, 0, 10, c1[:])}
 	files, _ := compose(segments[:], 1)
 	defer delete(files)
 	f, _ := find_composed(files, "f")
 	g, _ := find_composed(files, "g")
-	testing.expect(t, f.marked)
+	testing.expect(t, f.ambiguous)
+	testing.expect(t, !f.marked)
+	testing.expect(t, !g.ambiguous)
 	testing.expect(t, !g.marked)
+}
+
+@(test)
+a_shared_change_copied_into_another_turn_is_not_an_outside_change :: proc(t: ^testing.T) {
+	ca := [?]turns.Change{{"/r", "f", "f0", "f1", true}}
+	cb := [?]turns.Change{{"/r", "f", "f0", "f1", true}}
+	segments := [?]turns.Segment{turn(1, 0, 10, ca[:]), turn(2, 2, 12, cb[:])}
+	files, _ := compose(segments[:], 1)
+	defer delete(files)
+	testing.expect_value(t, len(files), 1)
+	testing.expect(t, files[0].ambiguous)
+	testing.expect(t, !files[0].marked)
+}
+
+@(test)
+a_different_change_by_the_sharing_turn_still_marks_the_file :: proc(t: ^testing.T) {
+	ca := [?]turns.Change{{"/r", "f", "f0", "f1", true}}
+	cb := [?]turns.Change{{"/r", "f", "f0", "f1", true}}
+	cc := [?]turns.Change{{"/r", "f", "f1", "f2", false}}
+	segments := [?]turns.Segment{turn(1, 0, 10, ca[:]), turn(2, 2, 12, cb[:]), turn(3, 5, 12, cc[:])}
+	files, _ := compose(segments[:], 1)
+	defer delete(files)
+	testing.expect_value(t, len(files), 1)
+	testing.expect(t, files[0].ambiguous)
+	testing.expect(t, files[0].marked)
 }
 
 @(test)

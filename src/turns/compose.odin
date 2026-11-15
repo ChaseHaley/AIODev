@@ -6,12 +6,14 @@ import "core:strings"
 
 // One file's net change over a run of segments. The strings borrow from the segments.
 Composed :: struct {
-	worktree: string,
-	path:     string,
-	before:   Oid,
-	after:    Oid,
+	worktree:  string,
+	path:      string,
+	before:    Oid,
+	after:     Oid,
 	// Something else also changed the file while the run was going on.
-	marked:   bool,
+	marked:    bool,
+	// A selected change is shared with another agent's turn.
+	ambiguous: bool,
 }
 
 // A file's change inside one segment, found by its place in the segment list.
@@ -26,15 +28,28 @@ Touch :: struct {
 // A file touched by the run, with the time span in which an outside change would not be in the run.
 @(private)
 Span :: struct {
-	file: Composed,
-	from: i64,
-	to:   i64,
+	file:  Composed,
+	from:  i64,
+	to:    i64,
+	// The run of this file's touches in the sorted touch list.
+	first: int,
+	end:   int,
+}
+
+@(private)
+has_shared_copy :: proc(touches: []Touch, segments: []Segment, c: Change) -> bool {
+	for t in touches {
+		own := segments[t.segment].changes[t.change]
+		if own.shared && own.before == c.before && own.after == c.after {return true}
+	}
+	return false
 }
 
 // The net change per file over the selected segments (ids, any order). For each (worktree, path) touched
 // by a selected segment: before = its before in the earliest selected segment touching it, after = its
-// after in the latest one. Marked when any of its selected changes is shared, or when an unselected
-// segment changed the same (worktree, path) after that earliest selected change began and before the
+// latest one. Ambiguous when any of its selected changes is shared (another agent may have made it).
+// Marked when an unselected segment changed the same (worktree, path) after that earliest selected
+// change began and before the
 // latest selected one ended. Those times are compared strictly, so a Between segment that starts the
 // moment a turn ends is not an outside change to it. Entries with before == after are dropped. Sorted
 // by worktree then path.
@@ -86,8 +101,9 @@ compose :: proc(
 			from = segments[first.segment].started,
 			to = segments[last.segment].ended,
 		}
+		span.first, span.end = lo, hi
 		for t in touches[lo:hi] {
-			if segments[t.segment].changes[t.change].shared {span.file.marked = true}
+			if segments[t.segment].changes[t.change].shared {span.file.ambiguous = true}
 		}
 		append(&spans, span)
 		lo = hi
@@ -98,7 +114,10 @@ compose :: proc(
 		for c in s.changes {
 			at := span_find(spans[:], c.worktree, c.path)
 			if at < 0 {continue}
-			if s.ended > spans[at].from && s.started < spans[at].to {spans[at].file.marked = true}
+			if s.ended <= spans[at].from || s.started >= spans[at].to {continue}
+			// A shared change is copied into every sharing turn; its copy is not an outside change.
+			if c.shared && has_shared_copy(touches[spans[at].first:spans[at].end], segments, c) {continue}
+			spans[at].file.marked = true
 		}
 	}
 

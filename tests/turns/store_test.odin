@@ -985,3 +985,151 @@ cancelling_during_a_slow_diff_stops_it_within_a_moment :: proc(t: ^testing.T) {
 	testing.expect_value(t, err, turns.Error.Failed)
 	testing.expect(t, elapsed < time.Second, "the diff did not stop soon after the flag rose")
 }
+
+@(test)
+worktrees_list_names_the_main_worktree_first_and_flags_a_deleted_one_prunable :: proc(t: ^testing.T) {
+	if !store_git_installed() {return}
+	root, root_ok := store_root(t)
+	if !root_ok {return}
+	defer store_remove(root)
+	repo, repo_ok := store_repo(t, root, "repo")
+	if !repo_ok {return}
+	store_write(t, repo, "a.txt", "a\n")
+	if !store_commit(t, repo) {return}
+	head, head_ok := store_git(t, repo, "rev-parse", "HEAD")
+	if !head_ok {return}
+	locked_path := fmt.tprintf("%s/locked", root)
+	gone_path := fmt.tprintf("%s/gone", root)
+	if _, ok := store_git(t, repo, "worktree", "add", "-q", locked_path, "-b", "locked"); !ok {return}
+	if _, ok := store_git(t, repo, "worktree", "lock", locked_path); !ok {return}
+	if _, ok := store_git(t, repo, "worktree", "add", "-q", gone_path, "-b", "gone"); !ok {return}
+	if !testing.expect_value(t, turns.store_delete_all(gone_path), turns.Error.None) {return}
+
+	// Listing from a linked worktree gives the same list.
+	list, err := turns.worktrees_list(locked_path)
+	if !testing.expect_value(t, err, turns.Error.None) {return}
+	defer turns.worktrees_destroy(list)
+	if !testing.expect_value(t, len(list), 3) {return}
+	testing.expect(t, strings.equal_fold(list[0].path, repo), list[0].path)
+	testing.expect_value(t, list[0].head, head)
+	testing.expect(t, !list[0].prunable && !list[0].bare, "main worktree flags")
+	found_locked, found_gone := false, false
+	for entry in list[1:] {
+		testing.expect(t, !strings.contains_rune(entry.path, '\\'), entry.path)
+		testing.expect_value(t, entry.head, head)
+		testing.expect(t, !entry.bare, entry.path)
+		if strings.equal_fold(entry.path, locked_path) {
+			found_locked = true
+			testing.expect(t, !entry.prunable, "a locked worktree is not prunable")
+		} else if strings.equal_fold(entry.path, gone_path) {
+			found_gone = true
+			testing.expect(t, entry.prunable, "a deleted worktree is prunable")
+		}
+	}
+	testing.expect(t, found_locked, "the locked worktree is listed")
+	testing.expect(t, found_gone, "the deleted worktree is listed")
+}
+
+@(test)
+worktrees_list_of_a_repository_without_commits_has_an_empty_head :: proc(t: ^testing.T) {
+	if !store_git_installed() {return}
+	root, root_ok := store_root(t)
+	if !root_ok {return}
+	defer store_remove(root)
+	repo, repo_ok := store_repo(t, root, "repo")
+	if !repo_ok {return}
+	list, err := turns.worktrees_list(repo)
+	if !testing.expect_value(t, err, turns.Error.None) {return}
+	defer turns.worktrees_destroy(list)
+	if !testing.expect_value(t, len(list), 1) {return}
+	testing.expect_value(t, list[0].head, "")
+	origin, origin_error := turns.worktree_origin(repo)
+	testing.expect_value(t, origin_error, turns.Error.None)
+	testing.expect_value(t, origin, "")
+}
+
+@(test)
+worktree_origin_is_the_commit_the_worktree_was_created_from :: proc(t: ^testing.T) {
+	if !store_git_installed() {return}
+	root, root_ok := store_root(t)
+	if !root_ok {return}
+	defer store_remove(root)
+	repo, repo_ok := store_repo(t, root, "repo")
+	if !repo_ok {return}
+	store_write(t, repo, "a.txt", "a\n")
+	if !store_commit(t, repo) {return}
+	start, start_ok := store_git(t, repo, "rev-parse", "HEAD")
+	if !start_ok {return}
+	store_write(t, repo, "a.txt", "main moved on\n")
+	if !store_commit(t, repo) {return}
+	linked := fmt.tprintf("%s/linked", root)
+	if _, ok := store_git(t, repo, "worktree", "add", "-q", linked, "-b", "side", start); !ok {return}
+	store_write(t, linked, "b.txt", "one\n")
+	if !store_commit(t, linked) {return}
+	store_write(t, linked, "b.txt", "two\n")
+	if !store_commit(t, linked) {return}
+
+	origin, err := turns.worktree_origin(linked)
+	testing.expect_value(t, err, turns.Error.None)
+	testing.expect_value(t, origin, start)
+	testing.expect_value(t, store_git_code(linked, "diff", "--quiet", start, "HEAD"), 1)
+	delete(origin)
+}
+
+@(private = "file")
+store_expect_paths :: proc(t: ^testing.T, got: []string, want: ..string) {
+	testing.expect_value(t, len(got), len(want))
+	for path in want {
+		testing.expectf(t, slice.contains(got, path), "%q is missing from %v", path, got)
+	}
+}
+
+@(test)
+changed_since_lists_committed_uncommitted_and_untracked_paths_but_not_ignored_ones :: proc(t: ^testing.T) {
+	if !store_git_installed() {return}
+	root, root_ok := store_root(t)
+	if !root_ok {return}
+	defer store_remove(root)
+	repo, repo_ok := store_repo(t, root, "repo")
+	if !repo_ok {return}
+	store_write(t, repo, ".gitignore", "*.log\n")
+	store_write(t, repo, "base.txt", "base\n")
+	store_write(t, repo, "keep.txt", "keep\n")
+	store_write(t, repo, "gone.txt", "gone\n")
+	if !store_commit(t, repo) {return}
+	base, base_ok := store_git(t, repo, "rev-parse", "HEAD")
+	if !base_ok {return}
+
+	clean, clean_error := turns.changed_since(repo, base)
+	testing.expect_value(t, clean_error, turns.Error.None)
+	store_expect_paths(t, clean)
+	delete(clean)
+
+	store_write(t, repo, "sub/committed.txt", "c\n")
+	if !store_commit(t, repo) {return}
+	store_write(t, repo, "base.txt", "changed\n")
+	if !testing.expect(t, os.remove(fmt.tprintf("%s/gone.txt", repo)) == nil) {return}
+	store_write(t, repo, "new dir/untracked.txt", "u\n")
+	store_write(t, repo, "noise.log", "ignored\n")
+
+	paths, err := turns.changed_since(repo, base)
+	testing.expect_value(t, err, turns.Error.None)
+	store_expect_paths(t, paths, "sub/committed.txt", "base.txt", "gone.txt", "new dir/untracked.txt")
+	for path in paths {delete(path)}
+	delete(paths)
+
+	everything, all_error := turns.changed_since(repo, "")
+	testing.expect_value(t, all_error, turns.Error.None)
+	store_expect_paths(
+		t,
+		everything,
+		".gitignore",
+		"base.txt",
+		"keep.txt",
+		"gone.txt",
+		"sub/committed.txt",
+		"new dir/untracked.txt",
+	)
+	for path in everything {delete(path)}
+	delete(everything)
+}
