@@ -586,11 +586,13 @@ try {
     Await-Like 'changes.range_label' 'Working*' 'the range label says the live turn is working' | Out-Null
     Set-Content -LiteralPath $reviewGo -Value 'x'
     # Paths sort, so live.py comes first, then long.txt, notes.txt and zz.md.
+    # The files must show within 3 s of the writes. A later live refresh may still be in flight then, so the
+    # view settling is waited for separately.
     $s = Await-State @{
         'changes.turn.0.live' = 'true'; 'changes.files' = 4; 'changes.file.0.path' = 'live.py'
         'changes.file.1.path' = 'long.txt'; 'changes.file.2.path' = 'notes.txt'; 'changes.file.3.path' = 'zz.md'
-        'changes.settled' = 'true'
     } 'the live turn lists the files the agent wrote within 3 s' 3
+    $s = Await-State @{ 'changes.settled' = 'true'; 'changes.files' = 4 } 'the live view settles'
     Set-Content -LiteralPath $reviewEnd -Value 'x'
     Await-AtLeast 'turns.saved' ($saved + 1) 'the live turn is saved at its end' | Out-Null
     $s = Await-State @{
@@ -831,6 +833,66 @@ try {
     } 'Send is refused once the reviewer exits to its shell' 20
     Click-Rect $s 'changes.discard_rect'
     Await-State @{ 'changes.comments' = 0 } 'Discard clears the comments' | Out-Null
+
+    # (e) An agent with twelve quick turns: the strip shows the newest ten and marks the two older ones.
+    # After each turn the agent waits for the journey's go flag, written once that turn is saved, so every
+    # turn ends before the next begins and a lost turn shows at the turn that lost it.
+    $strip = "$data/strip.ps1"
+    Set-Content -LiteralPath $strip -Value (@("`$work = '$work'", "`$data = '$data'") + $report + @(
+        '$Host.UI.RawUI.WindowTitle = ''Strip agent'''
+        'for ($i = 1; $i -le 12; $i++) {'
+        '    Report ''working'' '''''
+        '    Start-Sleep -Milliseconds 400'
+        '    Set-Content -LiteralPath (Join-Path $work (''strip-'' + $i + ''.txt'')) -Value "turn $i"'
+        '    Start-Sleep -Milliseconds 700'
+        '    Report ''done'' (''Strip '' + $i)'
+        '    $go = Join-Path $data (''strip-go-'' + $i + ''.flag'')'
+        '    while (-not (Test-Path -LiteralPath $go)) { Start-Sleep -Milliseconds 50 }'
+        '}'
+        'Start-Sleep -Seconds 900'
+    ))
+    # The recorder's and the focused pane's turn keys, for a failure in this section.
+    function Turn-Dump {
+        $s = State
+        $keys = @($s.Keys | Where-Object { $_ -like 'turns.*' -or $_ -like 'changes.turn.*' -or $_ -like 'changes.strip*' } |
+            Sort-Object)
+        return ($keys | ForEach-Object { "$_=$($s[$_])" }) -join '; '
+    }
+    try {
+        Aio command tab.new | Out-Null
+        Await-State @{ 'tabs.count' = 5; 'tabs.selected' = 5 } 'tab 5 opens' | Out-Null
+        Aio wait text 'PS ' | Out-Null
+        $stripPane = (State)['panes.focused']
+        Aio run "cd '$work'; Write-Output ('READY_' + 'strip')" | Out-Null
+        Aio wait text 'READY_strip' | Out-Null
+        $saved = [int](State)['turns.saved']
+        Aio run "pwsh -NoProfile -File '$strip'" | Out-Null
+        for ($i = 1; $i -le 12; $i++) {
+            Await-AtLeast 'turns.saved' ($saved + $i) "strip turn $i is saved" 10 | Out-Null
+            Set-Content -LiteralPath "$data/strip-go-$i.flag" -Value 'x'
+        }
+        Write-Output 'PASS the strip agent saved its twelve turns'
+        $s = Open-Changes $stripPane 'the strip agent opens the agent scope'
+        $s = Await-State @{
+            'changes.turns' = 12; 'changes.first' = 0; 'changes.last' = 0; 'changes.settled' = 'true'
+            'changes.strip_bars' = 10; 'changes.strip_older' = 2; 'changes.strip_newer' = 0
+        } 'the strip shows ten bars and marks two older turns'
+        Aio capture --out "$data/agent-strip-cap.png" | Out-Null
+        Click-Rect $s 'changes.strip_older_rect'
+        Await-AtLeast 'changes.strip_newer' 1 'the older marker shows older bars and marks newer ones' | Out-Null
+    } catch {
+        throw "$($_.Exception.Message)`nturn state: $(Turn-Dump)"
+    }
+
+    # Tooltips name each control and, where it has one, its key.
+    $s = State
+    Aio mouse move (Middle (Rect $s 'changes.step_back_rect')) --px | Out-Null
+    $s = Await-State @{ 'changes.tooltip' = 'Older turn' } 'the back step has its tooltip'
+    Like $s['changes.tooltip_key'] '*Left*' 'the back step tooltip names its key'
+    Aio mouse move (Middle (Rect $s 'changes.range_label_rect')) --px | Out-Null
+    $s = Await-State @{ 'changes.tooltip' = 'Choose turns' } 'the range label has its tooltip'
+    Aio mouse move (Middle (Rect $s 'changes.filter_button_rect')) --px | Out-Null
+    Await-State @{ 'changes.tooltip' = 'Filter files' } 'the filter button has its tooltip' | Out-Null
 
     # Recording off asks to delete what was recorded.
     if ((Turn-Directories).Count -eq 0) { throw "no agent-turns directory under $data while recording" }
