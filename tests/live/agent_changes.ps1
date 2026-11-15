@@ -72,6 +72,18 @@ function Await-Like($key, $pattern, $label, $seconds = 15) {
         Start-Sleep -Milliseconds 100
     }
 }
+# Waits until no notice shows. Notices sit at the window's bottom right, over the send bar of an Agent changes
+# pane on that side, so a press meant for Copy or Send would land on a notice.
+function Await-NoNotices($label, $seconds = 30) {
+    $deadline = (Get-Date).AddSeconds($seconds)
+    while ($true) {
+        $s = State
+        $shown = @($s.Keys -match '^notice\.[a-z_0-9]+(\.\d+)?$')
+        if ($shown.Count -eq 0) { [Console]::Out.WriteLine("PASS $label"); return $s }
+        if ((Get-Date) -ge $deadline) { throw "$label timed out: $($shown -join ', ')" }
+        Start-Sleep -Milliseconds 200
+    }
+}
 function Await-AtLeast($key, $count, $label, $seconds = 20) {
     $deadline = (Get-Date).AddSeconds($seconds)
     while ((Get-Date) -lt $deadline) {
@@ -975,6 +987,8 @@ try {
 
     # Comments: select two lines, write a comment, copy it, then send it to the reviewer's pane.
     Await-File $reviewReady 'the reviewer accepts pasted text' | Out-Null
+    # The theme step's settings reload left a notice over the send bar's Copy button.
+    $s = Await-NoNotices 'no notice covers the send bar'
     $comment = 'Please rename greet to welcome'
     Click-Rect $s 'changes.line.0.1.rect'
     $s = Await-State @{ 'changes.selection' = '0:1-1' } 'a click on a diff line selects it'
@@ -1035,6 +1049,8 @@ try {
     $s = Await-State @{
         'changes.send.can_send' = 'false'; 'changes.send.reason' = "The agent isn't running in its pane."
     } 'Send is refused once the reviewer exits to its shell' 20
+    # Copy and Send leave notices over the send bar too.
+    $s = Await-NoNotices 'no notice covers Discard'
     Click-Rect $s 'changes.discard_rect'
     Await-State @{ 'changes.comments' = 0 } 'Discard clears the comments' | Out-Null
 
