@@ -3,6 +3,7 @@ package main
 import "aio:layout"
 import "aio:platform"
 import "aio:procinfo"
+import "aio:turns"
 import "core:encoding/json"
 import "core:log"
 import "core:os"
@@ -66,9 +67,12 @@ Saved_Node :: struct {
 	name:      string `json:"name,omitempty"`,
 	// The file a Markdown pane shows.
 	path:      string `json:"path,omitempty"`,
-	// A Changes pane's bound pane key and scope name; its directory is `directory`.
-	changes_source: string `json:"changes_source,omitempty"`,
-	changes_scope:  string `json:"changes_scope,omitempty"`,
+	// A Changes pane's agent (the key of the pane it ran in, its harness and session) and scope name; its
+	// directory is `directory`.
+	changes_agent_pane:    string `json:"changes_agent_pane,omitempty"`,
+	changes_agent_harness: string `json:"changes_agent_harness,omitempty"`,
+	changes_agent_session: string `json:"changes_agent_session,omitempty"`,
+	changes_scope:         string `json:"changes_scope,omitempty"`,
 	keep_open: bool,
 	// What the pane was running, shown above the fresh shell's prompt when it comes back.
 	command:   string `json:"command,omitempty"`,
@@ -326,8 +330,9 @@ layout_pane_encode :: proc(
 	}
 	if content.kind == .Changes {
 		if pane := changes_find(app, content.id); pane != nil {
-			saved.directory, saved.changes_source = pane.directory, pane.source
-			saved.changes_scope = changes_scope_name(pane.scope)
+			saved.directory, saved.changes_scope = pane.directory, changes_scope_name(pane.scope)
+			saved.changes_agent_pane, saved.changes_agent_harness = pane.agent.pane_key, pane.agent.harness
+			saved.changes_agent_session = pane.agent.session
 		}
 	}
 	if !pane_owns_session(content.kind) {return saved}
@@ -578,10 +583,13 @@ layout_tab_restore :: proc(
 		case .Changes:
 			// A repository that is gone only empties the pane; the tab still comes back.
 			node := &saved.nodes[i]
-			source := utf8.valid_string(node.changes_source) ? node.changes_source : ""
+			agent: turns.Session
+			if utf8.valid_string(node.changes_agent_pane) {agent.pane_key = node.changes_agent_pane}
+			if utf8.valid_string(node.changes_agent_harness) {agent.harness = node.changes_agent_harness}
+			if utf8.valid_string(node.changes_agent_session) {agent.session = node.changes_agent_session}
 			directory := utf8.valid_string(node.directory) ? node.directory : ""
 			scope := changes_scope_parse(node.changes_scope)
-			if created := changes_pane_create(app, source, directory, scope); created != nil {
+			if created := changes_pane_create(app, agent, directory, scope); created != nil {
 				pane.content.id, restored = created.id, true
 			}
 		}

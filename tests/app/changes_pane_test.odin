@@ -43,32 +43,49 @@ changes_pane_of :: proc(state: ^app.App, w: ^app.Window) -> (layout.Pane_Rect, b
 }
 
 @(test)
-agent_changes_opens_beside_a_plain_shell_and_closes_again :: proc(t: ^testing.T) {
+agent_changes_opens_another_pane_on_every_run :: proc(t: ^testing.T) {
 	f: Fixture
 	defer {
 		app.app_destroy(&f.state)
 		testing.expect_value(t, os.remove_all(f.directory), nil)
 		delete(f.directory)
 	}
-	if !fixture_start(t, &f, "Toggle") {return}
+	if !fixture_start(t, &f, "Open") {return}
 	w := f.state.windows[0]
 	terminal := app.window_tree(w).focus
 	app.run_action(&f.state, w, .Agent_Changes)
 	if !testing.expect_value(t, len(f.state.changes_panes), 1) {return}
 	pane := f.state.changes_panes[0]
 	testing.expect_value(t, pane.scope, ui.Changes_Scope.Uncommitted)
-	testing.expect_value(t, pane.source, f.state.sessions[0].key)
+	testing.expect_value(t, pane.agent.pane_key, f.state.sessions[0].key)
 	testing.expect(t, app.workspace_has_content(w.workspace, {.Changes, pane.id}))
 	testing.expect_value(t, app.window_tree(w).focus != terminal, true)
 	tree := app.window_tree(w)
 	testing.expect_value(t, layout.find_content(tree, {.Changes, pane.id}) != layout.INVALID_NODE, true)
 
+	// A run from an Agent changes pane opens another with its agent and scope.
+	agent, cloned := app.changes_session_clone(
+		{pane_key = pane.agent.pane_key, harness = "claude", session = "s1"},
+	)
+	if !testing.expect(t, cloned) {return}
+	app.changes_session_delete(&pane.agent)
+	pane.agent, pane.scope = agent, .Staged
 	app.run_action(&f.state, w, .Agent_Changes)
-	testing.expect(t, !app.workspace_has_content(w.workspace, {.Changes, pane.id}))
+	if !testing.expect_value(t, len(f.state.changes_panes), 2) {return}
+	opened := f.state.changes_panes[1]
+	testing.expect(t, app.workspace_has_content(w.workspace, {.Changes, pane.id}))
+	testing.expect(t, app.workspace_has_content(w.workspace, {.Changes, opened.id}))
+	testing.expect_value(t, opened.scope, ui.Changes_Scope.Staged)
+	testing.expect_value(t, opened.agent.pane_key, pane.agent.pane_key)
+	testing.expect_value(t, opened.agent.harness, "claude")
+	testing.expect_value(t, opened.agent.session, "s1")
+	testing.expect_value(t, opened.directory, pane.directory)
+	focused, _ := app.window_focused_content(w)
+	testing.expect_value(t, focused, layout.Content{.Changes, opened.id})
 }
 
 @(test)
-layout_restore_keeps_a_changes_pane_with_its_scope_and_directory :: proc(t: ^testing.T) {
+layout_restore_keeps_a_changes_pane_with_its_agent_scope_and_directory :: proc(t: ^testing.T) {
 	first: Fixture
 	if !fixture_start(t, &first, "RestoreA") {return}
 	defer delete(first.directory)
@@ -80,10 +97,19 @@ layout_restore_keeps_a_changes_pane_with_its_scope_and_directory :: proc(t: ^tes
 	}
 	saved := first.state.changes_panes[0]
 	saved.scope = .Staged
+	agent, cloned := app.changes_session_clone(
+		{pane_key = saved.agent.pane_key, harness = "codex", session = "s9"},
+	)
+	if !testing.expect(t, cloned) {
+		app.app_destroy(&first.state)
+		return
+	}
+	app.changes_session_delete(&saved.agent)
+	saved.agent = agent
 	directory := strings.clone(saved.directory)
-	source := strings.clone(saved.source)
+	pane_key := strings.clone(saved.agent.pane_key)
 	defer delete(directory)
-	defer delete(source)
+	defer delete(pane_key)
 	app.layout_state_save(&first.state)
 	app.app_destroy(&first.state)
 
@@ -94,7 +120,9 @@ layout_restore_keeps_a_changes_pane_with_its_scope_and_directory :: proc(t: ^tes
 	restored := second.state.changes_panes[0]
 	testing.expect_value(t, restored.scope, ui.Changes_Scope.Staged)
 	testing.expect_value(t, restored.directory, directory)
-	testing.expect_value(t, restored.source, source)
+	testing.expect_value(t, restored.agent.pane_key, pane_key)
+	testing.expect_value(t, restored.agent.harness, "codex")
+	testing.expect_value(t, restored.agent.session, "s9")
 }
 
 @(test)

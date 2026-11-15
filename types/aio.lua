@@ -1444,9 +1444,9 @@ aio.pane = {}
 ---@class aio.fields.pane.agent_changes
 ---@field pane? string|integer the pane to act on: a pane id, a pane name, here or focused; default: here (the pane aio runs in), or the focused pane outside AIODev
 
----Show or hide agent changes
+---Open agent changes
 ---
----Opens Agent changes beside the focused pane, or closes it.
+---Opens Agent changes beside the focused pane, for that pane's agent. Each run opens another pane.
 ---@param fields? aio.fields.pane.agent_changes
 ---@return aio.Reply? reply
 ---@return string? message

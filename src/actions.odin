@@ -464,7 +464,7 @@ ACTIONS :: [Action]Command_Descriptor {
 	.Open_Markdown_Default_App = {
 		"pane.open_markdown_default_app", "Open Markdown in default app", nil, .Local, {},
 	},
-	.Agent_Changes = {"pane.agent_changes", "Show or hide agent changes", nil, .Local, {}},
+	.Agent_Changes = {"pane.agent_changes", "Open agent changes", nil, .Local, {}},
 	.Duplicate_Tab = {"tab.duplicate", "Duplicate tab", nil, .Host, {}},
 	.Move_Tab_Left = {"tab.move_left", "Move tab left", nil, .Host, {}},
 	.Move_Tab_Right = {"tab.move_right", "Move tab right", nil, .Host, {}},
@@ -935,7 +935,7 @@ COMMAND_HELP :: #partial [Action]Command_Help {
 		nil,
 	},
 	.Agent_Changes = {
-		"Opens Agent changes beside the focused pane, or closes it.",
+		"Opens Agent changes beside the focused pane, for that pane's agent. Each run opens another pane.",
 		nil,
 	},
 	.Install_Turn_Hooks = {
@@ -1351,7 +1351,7 @@ command_execute :: proc(app: ^App, ctx: Command_Context, invocation: commands.In
 	case .Open_Markdown_Default_App:
 		markdown_open_external(app, w)
 	case .Agent_Changes:
-		changes_toggle(app, w)
+		changes_open(app, w)
 	case .New_Floating:
 		if t, named := target.?; named {
 			return control_floating_new(app, window_for_workspace(app, t.workspace), t, invocation)

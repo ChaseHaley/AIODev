@@ -16,6 +16,19 @@ import "core:time"
 @(private = "file")
 WORKTREE_FOLLOW_LABEL :: "Follow the agent"
 
+@(private = "file")
+LIVE_DETAIL :: "Working\u2026"
+
+// The scopes the source dropdown lists after the agents, in its order.
+@(private = "file")
+SOURCE_SCOPES :: [?]ui.Changes_Scope{.Repository, .Uncommitted, .Staged, .Unstaged}
+
+// An agent the source dropdown lists: its session and its newest turn's title, both owned.
+Changes_Agent :: struct {
+	session: turns.Session,
+	title:   string,
+}
+
 // Whether the turn hooks are installed in the harness settings that exist.
 Changes_Hooks :: enum u8 {
 	Unknown,
@@ -173,6 +186,178 @@ changes_notice_set :: proc(model: ^Changes_Model, notice: ui.Changes_Notice, det
 	changes_text_set(&model.view.detail, detail)
 }
 
+// Copies a session's strings; on failure nothing is kept.
+@(require_results)
+changes_session_clone :: proc(session: turns.Session) -> (cloned: turns.Session, ok: bool) {
+	pane_key, pane_error := strings.clone(session.pane_key)
+	harness, harness_error := strings.clone(session.harness)
+	id, id_error := strings.clone(session.session)
+	cloned = {pane_key = pane_key, harness = harness, session = id}
+	if pane_error != nil || harness_error != nil || id_error != nil {
+		changes_session_delete(&cloned)
+		return {}, false
+	}
+	return cloned, true
+}
+
+changes_session_delete :: proc(session: ^turns.Session) {
+	delete(session.pane_key)
+	delete(session.harness)
+	delete(session.session)
+	session^ = {}
+}
+
+// Whether two sessions are one agent: by session id when both know it, else by the pane that ran it.
+@(require_results)
+changes_session_same :: proc(a, b: turns.Session) -> bool {
+	if a.session != "" && b.session != "" {return a.session == b.session}
+	return a.pane_key != "" && a.pane_key == b.pane_key
+}
+
+// "<program> · <title>": the harness, then the title of the pane the agent runs in, or its newest turn's
+// title once that pane is gone. In temporary memory.
+@(private = "file", require_results)
+changes_agent_label :: proc(app: ^App, session: turns.Session, title: string) -> string {
+	name := title
+	if session.pane_key != "" {
+		if entry := turn_entry_find(app, session.pane_key); entry != nil {name = session_display_title(entry)}
+	}
+	name = changes_title_line(name)
+	if session.harness == "" {return name != "" ? name : "Agent"}
+	if name == "" {return session.harness}
+	return fmt.tprintf("%s \u00b7 %s", session.harness, name)
+}
+
+@(private = "file")
+changes_agents_release :: proc(model: ^Changes_Model) {
+	for &agent in model.agents {
+		changes_session_delete(&agent.session)
+		delete(agent.title)
+	}
+	delete(model.agents)
+	model.agents = nil
+}
+
+// Keeps a copy of a result's agents, so the source dropdown lists them while the next read runs.
+@(private = "file")
+changes_agents_set :: proc(model: ^Changes_Model, agents: []Turn_Agent) {
+	kept, err := make([]Changes_Agent, len(agents))
+	if err != nil {return}
+	for agent, i in agents {
+		session, _ := changes_session_clone(agent.session)
+		kept[i] = {session = session, title = changes_clone_text(agent.title)}
+	}
+	changes_agents_release(model)
+	model.agents = kept
+}
+
+// The source labels before the fixed scope labels are owned.
+@(private = "file")
+changes_sources_release :: proc(model: ^Changes_Model) {
+	for i in 0 ..< len(model.sources) - len(SOURCE_SCOPES) {delete(model.sources[i])}
+	delete(model.sources)
+	model.sources = nil
+}
+
+@(private = "file")
+changes_source_label_set :: proc(pane: ^Changes_Pane) {
+	labels := ui.CHANGES_SCOPE_LABELS
+	pane.model.view.source_label = pane.scope == .Agent ? pane.model.agent_label : labels[pane.scope]
+}
+
+// Rebuilds the source dropdown's labels and the pane's agent label when a name changed, such as the title
+// of the pane an agent runs in; labels two agents share get " (2)" and on. True when anything changed.
+changes_sources_refresh :: proc(app: ^App, pane: ^Changes_Pane) -> bool {
+	model := &pane.model
+	agents := len(model.agents)
+	bases := make([]string, agents, context.temp_allocator)
+	labels := make([]string, agents, context.temp_allocator)
+	own := -1
+	for agent, i in model.agents {
+		bases[i] = changes_agent_label(app, agent.session, agent.title)
+		repeats := 0
+		for j in 0 ..< i {if bases[j] == bases[i] {repeats += 1}}
+		labels[i] = repeats > 0 ? fmt.tprintf("%s (%d)", bases[i], repeats + 1) : bases[i]
+		if own < 0 && changes_session_same(agent.session, pane.agent) {own = i}
+	}
+	agent_label := own >= 0 ? labels[own] : changes_agent_label(app, pane.agent, "")
+	changed := len(model.sources) != agents + len(SOURCE_SCOPES) || model.agent_label != agent_label
+	for label, i in labels {
+		if changed {break}
+		changed = model.sources[i] != label
+	}
+	if changed {
+		changes_text_set(&model.agent_label, agent_label)
+		changes_sources_release(model)
+		if sources, err := make([]string, agents + len(SOURCE_SCOPES)); err == nil {
+			for label, i in labels {sources[i] = changes_clone_text(label)}
+			scope_labels := ui.CHANGES_SCOPE_LABELS
+			for scope, i in SOURCE_SCOPES {sources[agents + i] = scope_labels[scope]}
+			model.sources = sources
+		}
+	}
+	changes_source_label_set(pane)
+	return changed
+}
+
+@(private = "file")
+changes_selection_reset :: proc(pane: ^Changes_Pane) {
+	pane.anchor, pane.cursor = -1, -1
+	pane.model.view.first, pane.model.view.last = -1, -1
+}
+
+changes_scope_set :: proc(app: ^App, pane: ^Changes_Pane, scope: ui.Changes_Scope) {
+	if scope == pane.scope {return}
+	pane.scope = scope
+	changes_selection_reset(pane)
+	changes_model_changed(app, pane)
+}
+
+// Follows another agent and shows its turns.
+changes_agent_set :: proc(app: ^App, pane: ^Changes_Pane, agent: turns.Session) {
+	current := pane.agent
+	unchanged := agent.pane_key == current.pane_key && agent.harness == current.harness &&
+		agent.session == current.session
+	if pane.scope == .Agent && unchanged {return}
+	cloned, ok := changes_session_clone(agent)
+	if !ok {return}
+	changes_session_delete(&pane.agent)
+	pane.agent = cloned
+	pane.scope = .Agent
+	// The rows shown are another agent's.
+	if pane.model.loaded {changes_model_clear(pane)}
+	changes_selection_reset(pane)
+	_ = changes_sources_refresh(app, pane)
+	changes_model_changed(app, pane)
+}
+
+// Picks a source dropdown choice: an agent shows its turns, the others name a scope.
+changes_source_pick :: proc(app: ^App, pane: ^Changes_Pane, index: int) {
+	model := &pane.model
+	if index < 0 || index >= len(model.sources) {return}
+	agents := len(model.sources) - len(SOURCE_SCOPES)
+	if index >= agents {
+		scopes := SOURCE_SCOPES
+		changes_scope_set(app, pane, scopes[index - agents])
+	} else if index < len(model.agents) {
+		changes_agent_set(app, pane, model.agents[index].session)
+	}
+}
+
+// A pane opened before its agent's first turn knows only the pane; the recorder learns the session when
+// a turn begins, and the pane takes it then.
+@(private = "file")
+changes_agent_learn :: proc(app: ^App, pane: ^Changes_Pane) {
+	if pane.agent.session != "" || pane.agent.pane_key == "" {return}
+	known := turn_recorder_session(app, pane.agent.pane_key)
+	if known.session == "" {return}
+	cloned, ok := changes_session_clone(known)
+	if !ok {return}
+	changes_session_delete(&pane.agent)
+	pane.agent = cloned
+	_ = changes_sources_refresh(app, pane)
+}
+
 // Frees what the view owns beside the result: the row arrays and the per-file flags.
 @(private = "file")
 changes_view_release :: proc(model: ^Changes_Model) {
@@ -186,7 +371,7 @@ changes_view_release :: proc(model: ^Changes_Model) {
 	delete(view.collapsed)
 	view.turns, model.row_ids, model.details, view.marked, view.ambiguous, view.collapsed =
 		nil, nil, nil, nil, nil, nil
-	view.files = nil
+	view.files, view.highlights = nil, nil
 }
 
 @(private = "file", require_results)
@@ -241,13 +426,22 @@ changes_model_fold :: proc(model: ^Changes_Model, index: int) {
 	}
 }
 
-// Replaces the view's turns and diff with a turn query's. Nothing here takes the result: the view
-// borrows its diff and titles until the next fill, and whoever owns the result keeps it alive.
-changes_fill_query :: proc(pane: ^Changes_Pane, q: ^Result_Query, now: time.Time, recording: bool) {
+// Replaces the view's turns and diff with a turn query's, and the agents the source dropdown lists. Nothing
+// here takes the result: the view borrows its diff and titles until the next fill, and whoever owns the
+// result keeps it alive.
+changes_fill_query :: proc(
+	app: ^App,
+	pane: ^Changes_Pane,
+	q: ^Result_Query,
+	now: time.Time,
+	recording: bool,
+) {
 	model, view := &pane.model, &pane.model.view
 	anchor_id, anchored := changes_row_id(model, pane.anchor)
 	cursor_id, cursored := changes_row_id(model, pane.cursor)
 	changes_view_release(model)
+	if q.error == .None {changes_agents_set(model, q.agents)}
+	_ = changes_sources_refresh(app, pane)
 	changes_text_set(&model.repository_key, q.repository)
 	label := q.error == .None ? changes_folder_name(q.worktree) : ""
 	changes_text_set(&view.repository, label)
@@ -262,9 +456,11 @@ changes_fill_query :: proc(pane: ^Changes_Pane, q: ^Result_Query, now: time.Time
 		return
 	}
 	model.aged = changes_minute(now)
+	all_agents := pane.scope == .Repository
 	for row, i in q.rows {
 		model.row_ids[i] = row.id
-		model.details[i] = changes_clone_text(changes_age_text(row.ended > 0 ? row.ended : row.started, now))
+		detail := row.live ? LIVE_DETAIL : changes_age_text(row.ended > 0 ? row.ended : row.started, now)
+		model.details[i] = changes_clone_text(detail)
 		view.turns[i] = {
 			title   = changes_title_line(row.title),
 			detail  = model.details[i],
@@ -272,9 +468,12 @@ changes_fill_query :: proc(pane: ^Changes_Pane, q: ^Result_Query, now: time.Time
 			added   = row.added,
 			removed = row.removed,
 			between = row.kind == .Between,
+			live    = row.live,
+			agent   = all_agents ? row.agent : -1,
 		}
 	}
 	changes_files_fill(model, q.diff.files, q.marked, q.ambiguous)
+	view.highlights = q.highlights
 	view.first, view.last = changes_ids_range(model.row_ids, q.selected)
 	// An end of the selection the result no longer holds is forgotten, so the keys start over.
 	if anchored {pane.anchor = changes_index_of(model.row_ids, anchor_id)}
@@ -285,10 +484,13 @@ changes_fill_query :: proc(pane: ^Changes_Pane, q: ^Result_Query, now: time.Time
 	changes_notice_set(model, notice, detail)
 }
 
-// Replaces the view's diff with a git scope's; git scopes list no turns.
-changes_fill_plain :: proc(pane: ^Changes_Pane, r: ^Result_Plain) {
+// Replaces the view's diff with a git scope's, and the agents the source dropdown lists; git scopes list
+// no turns.
+changes_fill_plain :: proc(app: ^App, pane: ^Changes_Pane, r: ^Result_Plain) {
 	model, view := &pane.model, &pane.model.view
 	changes_view_release(model)
+	if r.error == .None {changes_agents_set(model, r.agents)}
+	_ = changes_sources_refresh(app, pane)
 	label := r.error == .None ? changes_folder_name(r.worktree) : ""
 	changes_text_set(&view.repository, label)
 	changes_text_set(&view.worktree, label)
@@ -304,6 +506,7 @@ changes_fill_plain :: proc(pane: ^Changes_Pane, r: ^Result_Plain) {
 		return
 	}
 	changes_files_fill(model, r.diff.files, nil, nil)
+	view.highlights = r.highlights
 	notice, detail := changes_notice_of(r.error, false, false, 0, len(r.diff.files))
 	changes_notice_set(model, notice, detail)
 }
@@ -393,6 +596,9 @@ changes_model_destroy :: proc(pane: ^Changes_Pane) {
 	model := &pane.model
 	changes_model_clear(pane)
 	changes_worktrees_release(model)
+	changes_agents_release(model)
+	changes_sources_release(model)
+	delete(model.agent_label)
 	delete(model.watched)
 	delete(model.repository_key)
 	delete(model.view.worktree)
@@ -427,6 +633,8 @@ changes_plain_mode :: proc(scope: ui.Changes_Scope) -> turns.Plain_Mode {
 changes_model_changed :: proc(app: ^App, pane: ^Changes_Pane) {
 	model, view := &pane.model, &pane.model.view
 	view.scope = pane.scope
+	changes_agent_learn(app, pane)
+	changes_source_label_set(pane)
 	if model.recording != app.settings.turns.record {app.turn_hooks = .Unknown}
 	model.recording = app.settings.turns.record
 	changes_hooks_sync(app, model)
@@ -437,12 +645,13 @@ changes_model_changed :: proc(app: ^App, pane: ^Changes_Pane) {
 		if !model.recording && len(model.row_ids) == 0 {
 			changes_model_clear(pane)
 			changes_notice_set(model, .Recording_Off)
+			model.answered = model.request
 			view.revision += 1
 			mark_all_dirty(app)
 			return
 		}
 		session: turns.Session
-		if pane.scope == .Agent {session = turn_recorder_session(app, pane.source)}
+		if pane.scope == .Agent {session = pane.agent}
 		// The newest turn alone is asked for by asking for none, so a turn that ends meanwhile is followed.
 		selected: []u64
 		first, last := view.first, view.last
@@ -460,7 +669,7 @@ changes_model_changed :: proc(app: ^App, pane: ^Changes_Pane) {
 		}
 		turn_worker_plain(
 			app, pane.id, model.request, pane.directory, changes_plain_mode(pane.scope),
-			turn_recorder_session(app, pane.source), pane.worktree_pick,
+			pane.agent, pane.worktree_pick,
 		)
 	}
 	view.revision += 1
@@ -483,7 +692,7 @@ changes_model_result :: proc(app: ^App, result: Turn_Result) {
 		pane_id, request = r.pane, r.request
 	case Result_Plain:
 		pane_id, request = r.pane, r.request
-	case nil, Result_Saved, Result_Deleted, Result_Failure:
+	case nil, Result_Saved, Result_Live, Result_Deleted, Result_Failure:
 		return
 	}
 	pane := changes_find(app, pane_id)
@@ -492,20 +701,23 @@ changes_model_result :: proc(app: ^App, result: Turn_Result) {
 		return
 	}
 	model := &pane.model
+	model.answered = request
 	if model.content != nil {turn_result_destroy(&model.content)}
 	model.content = result
 	switch &r in model.content {
 	case Result_Query:
-		changes_fill_query(pane, &r, clock_wall(&app.clock), model.recording)
+		changes_fill_query(app, pane, &r, clock_wall(&app.clock), model.recording)
 	case Result_Plain:
-		changes_fill_plain(pane, &r)
+		changes_fill_plain(app, pane, &r)
 		// The view watch follows the worktree the result shows.
 		if model.watching && r.error == .None && r.worktree != "" && r.worktree != model.watched {
 			turn_worker_view_watch(app, pane.id, r.worktree)
 			changes_text_set(&model.watched, r.worktree)
 		}
-	case nil, Result_Dirty, Result_Saved, Result_Deleted, Result_Failure:
+	case nil, Result_Dirty, Result_Saved, Result_Live, Result_Deleted, Result_Failure:
 	}
+	changes_comments_reanchor(pane)
+	changes_reveal(app, pane)
 	mark_all_dirty(app)
 }
 
@@ -524,6 +736,17 @@ changes_turns_saved :: proc(app: ^App, repositories: []string) {
 	}
 }
 
+// An open turn's changes may have changed: every turn-scope pane on one of `repositories` reads again,
+// keeping its selection.
+changes_turns_live :: proc(app: ^App, repositories: []string) {
+	for pane in app.changes_panes {
+		if !ui.changes_scope_turns(pane.scope) || !slice.contains(repositories, pane.model.repository_key) {
+			continue
+		}
+		changes_model_changed(app, pane)
+	}
+}
+
 // Recording was turned on or off, or recorded turns were deleted.
 changes_recording_changed :: proc(app: ^App) {
 	app.turn_hooks = .Unknown
@@ -532,8 +755,8 @@ changes_recording_changed :: proc(app: ^App) {
 	}
 }
 
-// What a pane keeps up on each poll: the setting it last saw and the ages in its rows.
-// True when the view changed and the windows need a frame.
+// What a pane keeps up on each poll: the setting it last saw, the ages in its rows and the names its
+// source field and dropdown show. True when the view changed and the windows need a frame.
 @(require_results)
 changes_model_poll :: proc(app: ^App, pane: ^Changes_Pane) -> bool {
 	model, view := &pane.model, &pane.model.view
@@ -541,7 +764,7 @@ changes_model_poll :: proc(app: ^App, pane: ^Changes_Pane) -> bool {
 		changes_model_changed(app, pane)
 		return false
 	}
-	changed := false
+	changed := changes_sources_refresh(app, pane)
 	wall := clock_wall(&app.clock)
 	minute := changes_minute(wall)
 	if minute != model.aged && len(model.details) > 0 {
@@ -549,6 +772,7 @@ changes_model_poll :: proc(app: ^App, pane: ^Changes_Pane) -> bool {
 		case Result_Query:
 			if len(content.rows) == len(model.details) {
 				for row, i in content.rows {
+					if row.live {continue}
 					delete(model.details[i])
 					model.details[i] = changes_clone_text(
 						changes_age_text(row.ended > 0 ? row.ended : row.started, wall),

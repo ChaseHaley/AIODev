@@ -198,6 +198,13 @@ mouse_tracking :: proc(s: ^Session) -> bool {
 	return ghostty.terminal_get(s.terminal, .Mouse_Tracking, &tracking) == .Success && tracking
 }
 
+// Whether the program has bracketed paste on (mode 2004), so a paste arrives as one piece of input.
+bracketed_paste :: proc(s: ^Session) -> bool {
+	sync.mutex_lock(&s.mutex)
+	defer sync.mutex_unlock(&s.mutex)
+	return mode_enabled(s, ghostty.MODE_BRACKETED_PASTE)
+}
+
 @(private)
 ghostty_button :: proc(button: input.Mouse_Button) -> ghostty.Mouse_Button {
 	switch button {

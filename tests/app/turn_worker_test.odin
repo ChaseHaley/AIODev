@@ -1,5 +1,6 @@
 package app_test
 
+import "aio:syntax"
 import "aio:turns"
 import "core:fmt"
 import "core:log"
@@ -1197,8 +1198,144 @@ turn_worker_gives_a_turn_what_was_written_after_it_started_but_before_it_could_b
 	testing.expect_value(t, betweens_seen, 1)
 
 	// Watching a root again, or a directory outside git, is harmless.
+	app.turn_worker_take(f.worker, &f.held)
+	for &result in f.held {app.turn_result_destroy(&result)}
+	clear(&f.held)
 	if !worker_post(t, &f, app.Job_Watch_Root{directory = f.repo}) {return}
 	if !worker_post(t, &f, app.Job_Watch_Root{directory = f.root}) || !worker_idle(t, &f) {return}
 	app.turn_worker_take(f.worker, &f.held)
 	testing.expect_value(t, len(f.held), 0)
+}
+
+// The diff lines of a file in hunk order, as highlights index them.
+@(private = "file")
+worker_line_count :: proc(file: turns.Diff_File) -> int {
+	count := 0
+	for hunk in file.hunks {count += len(hunk.lines)}
+	return count
+}
+
+// Whether the file is highlighted line for line and some line has a span.
+@(private = "file")
+worker_highlighted :: proc(t: ^testing.T, highlights: []syntax.File_Lines, diff: turns.Diff, path: string) {
+	if !testing.expect_value(t, len(highlights), len(diff.files)) {return}
+	i, found := worker_file(t, diff, path)
+	if !found {return}
+	lines := highlights[i].lines
+	counted := worker_line_count(diff.files[i])
+	if !testing.expectf(t, len(lines) == counted, "%s has %d lines, not %d", path, len(lines), counted) {
+		return
+	}
+	spans := 0
+	for line in lines {spans += len(line)}
+	testing.expectf(t, spans > 0, "%s has no spans", path)
+}
+
+@(test)
+turn_worker_shows_an_open_turn_live_and_saves_it_under_the_same_id :: proc(t: ^testing.T) {
+	f: Worker_Fixture
+	defer worker_stop(&f)
+	if !worker_start(t, &f) {return}
+	base := worker_now()
+	begin := app.Job_Begin {
+		pane_key  = KEY_A,
+		session   = worker_session(KEY_A),
+		directory = f.repo,
+		started   = base,
+		title     = "Working",
+	}
+	if !worker_post(t, &f, begin) {return}
+	// A Begin says at once that the repository has an open turn.
+	begun, begun_ok := worker_await(t, &f, app.Result_Live)
+	if !begun_ok {return}
+	defer worker_release(begun)
+	if !testing.expect_value(t, len(begun.repositories), 1) {return}
+	// Only a pane that reads turns is told of what the turn changes.
+	first, first_ok := worker_query(t, &f, f.repo, KEY_A, true, nil)
+	if !first_ok {return}
+	defer worker_release(first)
+	if testing.expect_value(t, len(first.rows), 1) {testing.expect(t, first.rows[0].live)}
+
+	if !worker_write(t, &f, "a.txt", "one\ntwo\nthree\nfour\n") {return}
+	if !worker_write(t, &f, "c.odin", "package c\n\nmain :: proc() {}\n") {return}
+	// The watch saw the agent write, and once the work tree is quiet the panes are told.
+	changed, changed_ok := worker_await(t, &f, app.Result_Live)
+	if !changed_ok {return}
+	defer worker_release(changed)
+	if testing.expect_value(t, len(changed.repositories), 1) {
+		testing.expect_value(t, changed.repositories[0], begun.repositories[0])
+	}
+	// A prompt reported later names the turn better.
+	if !worker_post(t, &f, app.Job_Edit{pane_key = KEY_A, title = "Add c"}) || !worker_idle(t, &f) {return}
+
+	open, open_ok := worker_query(t, &f, f.repo, KEY_A, true, nil)
+	if !open_ok {return}
+	defer worker_release(open)
+	testing.expect_value(t, open.error, turns.Error.None)
+	if !testing.expect_value(t, len(open.rows), 1) {return}
+	live := open.rows[0]
+	testing.expect(t, live.live, "the open turn is a live row")
+	testing.expect_value(t, live.title, "Add c")
+	testing.expect_value(t, live.started, base)
+	testing.expect_value(t, live.ended, 0)
+	testing.expect_value(t, live.end_state, turns.End_State.Unknown)
+	testing.expect_value(t, live.files, 2)
+	testing.expect_value(t, live.added, 4)
+	testing.expect_value(t, live.removed, 0)
+	testing.expect_value(t, live.agent, 0)
+	if testing.expect_value(t, len(open.selected), 1) {testing.expect_value(t, open.selected[0], live.id)}
+	if testing.expect_value(t, len(open.agents), 1) {
+		testing.expect(t, open.agents[0].live)
+		testing.expect_value(t, open.agents[0].turns, 1)
+		testing.expect_value(t, open.agents[0].title, "Add c")
+		testing.expect_value(t, open.agents[0].session.session, worker_session(KEY_A).session)
+	}
+	if !testing.expect_value(t, len(open.diff.files), 2) {return}
+	worker_highlighted(t, open.highlights, open.diff, "c.odin")
+	if i, found := worker_file(t, open.diff, "a.txt"); found && len(open.highlights) > i {
+		testing.expect(t, open.highlights[i].lines == nil, "a .txt file has no language")
+	}
+	// The full ids of both sides come with each file.
+	if i, found := worker_file(t, open.diff, "a.txt"); found {
+		testing.expect_value(t, len(open.diff.files[i].old_oid), 40)
+		testing.expect_value(t, len(open.diff.files[i].new_oid), 40)
+	}
+
+	// A git diff of the work tree is highlighted from the files on disk, and the index's blobs. A file
+	// over the highlight limit is left plain.
+	if !worker_write(t, &f, "big.odin", strings.repeat("x := 1\n", 150_000, context.temp_allocator)) {return}
+	plain, plain_ok := worker_plain(t, &f, f.repo, .Uncommitted)
+	if !plain_ok {return}
+	defer worker_release(plain)
+	worker_highlighted(t, plain.highlights, plain.diff, "c.odin")
+	if i, found := worker_file(t, plain.diff, "big.odin"); found && len(plain.highlights) > i {
+		testing.expect(t, plain.highlights[i].lines == nil, "a file over the limit is plain")
+	}
+	if testing.expect_value(t, len(plain.agents), 1) {testing.expect(t, plain.agents[0].live)}
+	if !worker_git(t, f.repo, "add", "c.odin") {return}
+	staged, staged_ok := worker_plain(t, &f, f.repo, .Staged)
+	if !staged_ok {return}
+	defer worker_release(staged)
+	worker_highlighted(t, staged.highlights, staged.diff, "c.odin")
+
+	// The saved turn keeps the id the pane selected while it was open.
+	saved, saved_ok := worker_end(t, &f, KEY_A, base, base + 1000, "Add c")
+	if !saved_ok {return}
+	defer worker_release(saved)
+	picked := [?]u64{live.id}
+	ended, ended_ok := worker_query(t, &f, f.repo, KEY_A, false, picked[:])
+	if !ended_ok {return}
+	defer worker_release(ended)
+	if !testing.expect_value(t, len(ended.rows), 1) {return}
+	testing.expect(t, !ended.rows[0].live)
+	testing.expect_value(t, ended.rows[0].id, live.id)
+	if testing.expect_value(t, len(ended.selected), 1) {testing.expect_value(t, ended.selected[0], live.id)}
+	if testing.expect_value(t, len(ended.agents), 1) {
+		testing.expect(t, !ended.agents[0].live)
+		testing.expect_value(t, ended.agents[0].latest, base + 1000)
+	}
+	testing.expect_value(t, len(ended.diff.files), 3)
+	if i, found := worker_file(t, ended.diff, "big.odin"); found && len(ended.highlights) > i {
+		testing.expect(t, ended.highlights[i].lines == nil, "a blob over the limit is not read")
+	}
 }

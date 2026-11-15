@@ -437,11 +437,13 @@ turn_begin :: proc(app: ^App, pane: ^Turn_Pane, entry: ^Session_Entry, status_ti
 	directory := turn_directory(app, entry, processes)
 	if directory == "" {directory = fallback}
 	transcript := turn_transcript(pane.session, directory)
+	title := pane.title if pane.title != "" else status_title
 	job := Job_Begin {
 		pane_key   = pane.key,
 		session    = pane.session,
 		directory  = directory,
 		started    = pane.turn.started,
+		title      = title,
 		ack        = ack,
 		transcript = transcript,
 	}
@@ -613,7 +615,11 @@ turn_inbox_handle :: proc(app: ^App, path: string, size: i64) {
 		boundary := turn_signal(app, pane, entry, .Prompt, "", path, event.cwd)
 		if boundary != .Begin {
 			// The worker may still hold a queued Begin of this turn; acking through it keeps the order.
-			job := Job_Edit{pane_key = pane.key, ack = path}
+			job := Job_Edit {
+				pane_key = pane.key,
+				ack      = path,
+				title    = pane.title,
+			}
 			if turn_post(app, job) {turn_inbox_claim(rec, path)} else {turn_inbox_remove(path)}
 		}
 	case .Edit:
@@ -814,6 +820,9 @@ turn_results :: proc(app: ^App) {
 		case Result_Saved:
 			rec.saved += value.segments
 			changes_turns_saved(app, value.repositories)
+			turn_result_destroy(&result)
+		case Result_Live:
+			changes_turns_live(app, value.repositories)
 			turn_result_destroy(&result)
 		case Result_Query, Result_Plain:
 			// The model owns both from here.

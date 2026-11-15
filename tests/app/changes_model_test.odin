@@ -21,7 +21,7 @@ now_time :: proc() -> time.Time {
 // A pane in a state that never starts the turn worker: a turn scope with recording off.
 @(private = "file")
 pane_start :: proc(state: ^app.App, scope: ui.Changes_Scope) -> ^app.Changes_Pane {
-	return app.changes_pane_create(state, "", "C:/work/odin", scope)
+	return app.changes_pane_create(state, {}, "C:/work/odin", scope)
 }
 
 @(private = "file")
@@ -108,12 +108,12 @@ an_empty_query_says_why_there_is_nothing :: proc(t: ^testing.T) {
 		repository = "0123456789abcdef",
 		worktree   = "C:/work/odin",
 	}
-	app.changes_fill_query(pane, &empty, now_time(), true)
+	app.changes_fill_query(&state, pane, &empty, now_time(), true)
 	testing.expect_value(t, pane.model.view.notice, ui.Changes_Notice.No_Turns)
 	testing.expect_value(t, pane.model.repository_key, "0123456789abcdef")
 	testing.expect_value(t, pane.model.view.repository, "odin")
 	testing.expect_value(t, pane.model.loaded, true)
-	app.changes_fill_query(pane, &empty, now_time(), false)
+	app.changes_fill_query(&state, pane, &empty, now_time(), false)
 	testing.expect_value(t, pane.model.view.notice, ui.Changes_Notice.Recording_Off)
 
 	Case :: struct {
@@ -126,7 +126,7 @@ an_empty_query_says_why_there_is_nothing :: proc(t: ^testing.T) {
 			pane  = pane.id,
 			error = c.err,
 		}
-		app.changes_fill_query(pane, &failed, now_time(), true)
+		app.changes_fill_query(&state, pane, &failed, now_time(), true)
 		testing.expect_value(t, pane.model.view.notice, c.notice)
 		testing.expect_value(t, len(pane.model.view.turns), 0)
 		testing.expect_value(t, pane.model.view.repository, "")
@@ -164,7 +164,7 @@ rows_become_turns_with_titles_ages_and_the_selection :: proc(t: ^testing.T) {
 		diff       = {files = files},
 		marked     = {false, true},
 	}
-	app.changes_fill_query(pane, &q, now_time(), true)
+	app.changes_fill_query(&state, pane, &q, now_time(), true)
 	view := &pane.model.view
 	if !testing.expect_value(t, len(view.turns), 3) {return}
 	testing.expect_value(t, view.turns[0].title, "Fix the parser")
@@ -202,7 +202,7 @@ a_refresh_keeps_the_selection_by_id :: proc(t: ^testing.T) {
 		selected = {2},
 		diff     = {files = files},
 	}
-	app.changes_fill_query(pane, &first, now_time(), true)
+	app.changes_fill_query(&state, pane, &first, now_time(), true)
 	view := &pane.model.view
 	testing.expect_value(t, view.first, 1)
 	testing.expect_value(t, view.last, 1)
@@ -220,7 +220,7 @@ a_refresh_keeps_the_selection_by_id :: proc(t: ^testing.T) {
 		selected = {2},
 		diff     = {files = files},
 	}
-	app.changes_fill_query(pane, &second, now_time(), true)
+	app.changes_fill_query(&state, pane, &second, now_time(), true)
 	testing.expect_value(t, view.first, 2)
 	testing.expect_value(t, view.last, 2)
 	testing.expect_value(t, pane.anchor, 2)
@@ -240,7 +240,7 @@ a_refresh_keeps_the_selection_by_id :: proc(t: ^testing.T) {
 		selected = {5},
 		diff     = {files = files},
 	}
-	app.changes_fill_query(pane, &third, now_time(), true)
+	app.changes_fill_query(&state, pane, &third, now_time(), true)
 	testing.expect_value(t, view.first, 0)
 	testing.expect_value(t, view.last, 0)
 	testing.expect_value(t, pane.anchor, -1)
@@ -253,7 +253,7 @@ a_refresh_keeps_the_selection_by_id :: proc(t: ^testing.T) {
 		selected = {99},
 		diff     = {files = files},
 	}
-	app.changes_fill_query(pane, &gone, now_time(), true)
+	app.changes_fill_query(&state, pane, &gone, now_time(), true)
 	testing.expect_value(t, view.first, -1)
 	testing.expect_value(t, view.last, -1)
 }
@@ -272,7 +272,7 @@ folds_come_back_by_path :: proc(t: ^testing.T) {
 		pane = pane.id,
 		diff = {files = files},
 	}
-	app.changes_fill_plain(pane, &plain)
+	app.changes_fill_plain(&state, pane, &plain)
 	if !testing.expect_value(t, len(view.collapsed), 2) {return}
 	testing.expect_value(t, view.notice, ui.Changes_Notice.None)
 	app.changes_model_fold(&pane.model, 1)
@@ -284,7 +284,7 @@ folds_come_back_by_path :: proc(t: ^testing.T) {
 		pane = pane.id,
 		diff = {files = reordered},
 	}
-	app.changes_fill_plain(pane, &again)
+	app.changes_fill_plain(&state, pane, &again)
 	if !testing.expect_value(t, len(view.collapsed), 3) {return}
 	testing.expect_value(t, view.collapsed[0], true)
 	testing.expect_value(t, view.collapsed[1], false)
@@ -295,11 +295,11 @@ folds_come_back_by_path :: proc(t: ^testing.T) {
 		pane = pane.id,
 		diff = {files = files},
 	}
-	app.changes_fill_query(pane, &q, now_time(), true)
+	app.changes_fill_query(&state, pane, &q, now_time(), true)
 	testing.expect_value(t, view.collapsed[0], false)
 	testing.expect_value(t, view.collapsed[1], true)
 	app.changes_model_fold(&pane.model, 1)
-	app.changes_fill_query(pane, &q, now_time(), true)
+	app.changes_fill_query(&state, pane, &q, now_time(), true)
 	testing.expect_value(t, view.collapsed[1], false)
 	app.changes_model_fold(&pane.model, 7)
 }
@@ -319,7 +319,7 @@ a_git_scope_result_lists_no_turns_and_counts_what_was_left_out :: proc(t: ^testi
 		omitted  = 51,
 		worktree = "C:/work/odin",
 	}
-	app.changes_fill_plain(pane, &plain)
+	app.changes_fill_plain(&state, pane, &plain)
 	testing.expect_value(t, len(view.turns), 0)
 	testing.expect_value(t, view.first, -1)
 	testing.expect_value(t, view.omitted, 51)
@@ -329,7 +329,7 @@ a_git_scope_result_lists_no_turns_and_counts_what_was_left_out :: proc(t: ^testi
 	nothing := app.Result_Plain {
 		pane = pane.id,
 	}
-	app.changes_fill_plain(pane, &nothing)
+	app.changes_fill_plain(&state, pane, &nothing)
 	testing.expect_value(t, view.notice, ui.Changes_Notice.No_Changes)
 	testing.expect_value(t, view.omitted, 0)
 
@@ -337,7 +337,7 @@ a_git_scope_result_lists_no_turns_and_counts_what_was_left_out :: proc(t: ^testi
 		pane  = pane.id,
 		error = .Not_Repository,
 	}
-	app.changes_fill_plain(pane, &broken)
+	app.changes_fill_plain(&state, pane, &broken)
 	testing.expect_value(t, view.notice, ui.Changes_Notice.Not_Repository)
 	testing.expect_value(t, view.repository, "")
 }
@@ -358,7 +358,7 @@ a_git_scope_result_names_its_worktree_and_lists_every_worktree :: proc(t: ^testi
 		worktrees = paths,
 		following = true,
 	}
-	app.changes_fill_plain(pane, &plain)
+	app.changes_fill_plain(&state, pane, &plain)
 	testing.expect_value(t, view.worktree, "odin-wt-a")
 	testing.expect_value(t, view.following, true)
 	if !testing.expect_value(t, len(pane.model.worktree_labels), 4) {return}
@@ -370,7 +370,7 @@ a_git_scope_result_names_its_worktree_and_lists_every_worktree :: proc(t: ^testi
 	testing.expect_value(t, len(view.ambiguous), 1)
 
 	plain.following = false
-	app.changes_fill_plain(pane, &plain)
+	app.changes_fill_plain(&state, pane, &plain)
 	testing.expect_value(t, view.following, false)
 }
 
@@ -387,7 +387,7 @@ a_turn_query_result_marks_ambiguous_files :: proc(t: ^testing.T) {
 		marked    = []bool{true, false},
 		ambiguous = []bool{true, true},
 	}
-	app.changes_fill_query(pane, &q, now_time(), true)
+	app.changes_fill_query(&state, pane, &q, now_time(), true)
 	view := &pane.model.view
 	if !testing.expect_value(t, len(view.ambiguous), 2) {return}
 	testing.expect_value(t, view.ambiguous[0], true)
@@ -396,6 +396,131 @@ a_turn_query_result_marks_ambiguous_files :: proc(t: ^testing.T) {
 	testing.expect_value(t, view.marked[1], false)
 	testing.expect_value(t, view.following, false)
 	testing.expect_value(t, view.worktree, "")
+}
+
+@(test)
+live_rows_say_working_and_name_their_agent_in_all_agents :: proc(t: ^testing.T) {
+	state: app.App
+	defer app.changes_app_destroy(&state.changes_state)
+	pane := pane_start(&state, .Repository)
+	if !testing.expect(t, pane != nil) {return}
+	agents := []app.Turn_Agent {
+		{session = {pane_key = "p1", harness = "claude", session = "s1"}, turns = 1, title = "One"},
+		{session = {pane_key = "p2", harness = "codex", session = "s2"}, turns = 2, live = true, title = "Two"},
+	}
+	rows := []app.Turn_Row {
+		{id = 9, kind = .Turn, live = true, agent = 1, started = NOW_MS - 10_000, files = 1, added = 2},
+		{id = 7, kind = .Turn, agent = 0, started = NOW_MS - 400_000, ended = NOW_MS - 5 * 60_000},
+		{id = 5, kind = .Between, agent = -1, ended = NOW_MS - 3 * 3_600_000},
+	}
+	q := app.Result_Query {
+		pane     = pane.id,
+		rows     = rows,
+		selected = {9},
+		agents   = agents,
+	}
+	app.changes_fill_query(&state, pane, &q, now_time(), true)
+	view := &pane.model.view
+	if !testing.expect_value(t, len(view.turns), 3) {return}
+	testing.expect_value(t, view.turns[0].live, true)
+	testing.expect_value(t, view.turns[0].detail, "Working\u2026")
+	testing.expect_value(t, view.turns[0].agent, 1)
+	testing.expect_value(t, view.turns[1].live, false)
+	testing.expect_value(t, view.turns[1].detail, "5m ago")
+	testing.expect_value(t, view.turns[1].agent, 0)
+	testing.expect_value(t, view.turns[2].agent, -1)
+	testing.expect_value(t, view.first, 0)
+	testing.expect_value(t, view.last, 0)
+
+	// One agent's turns are not coloured by agent.
+	pane.scope = .Agent
+	app.changes_fill_query(&state, pane, &q, now_time(), true)
+	testing.expect_value(t, view.turns[0].agent, -1)
+	testing.expect_value(t, view.turns[1].agent, -1)
+	testing.expect_value(t, view.turns[0].live, true)
+}
+
+@(test)
+the_source_dropdown_lists_the_agents_then_the_scopes :: proc(t: ^testing.T) {
+	state: app.App
+	defer app.changes_app_destroy(&state.changes_state)
+	pane := pane_start(&state, .Repository)
+	if !testing.expect(t, pane != nil) {return}
+	model, view := &pane.model, &pane.model.view
+	testing.expect_value(t, len(model.sources), 4)
+	testing.expect_value(t, view.source_label, "All agents")
+	testing.expect_value(t, model.agent_label, "Agent")
+
+	agents := []app.Turn_Agent {
+		{session = {pane_key = "p1", harness = "claude", session = "s1"}, title = "Fix the parser\nmore"},
+		{session = {pane_key = "p2", harness = "claude", session = "s2"}, title = "Fix the parser"},
+		{session = {session = "s3"}},
+		{session = {pane_key = "p4", harness = "codex"}},
+	}
+	q := app.Result_Query {
+		pane       = pane.id,
+		repository = "k",
+		agents     = agents,
+	}
+	app.changes_fill_query(&state, pane, &q, now_time(), false)
+	if !testing.expect_value(t, len(model.sources), 8) {return}
+	testing.expect_value(t, model.sources[0], "claude \u00b7 Fix the parser")
+	testing.expect_value(t, model.sources[1], "claude \u00b7 Fix the parser (2)")
+	testing.expect_value(t, model.sources[2], "Agent")
+	testing.expect_value(t, model.sources[3], "codex")
+	testing.expect_value(t, model.sources[4], "All agents")
+	testing.expect_value(t, model.sources[5], "Uncommitted changes")
+	testing.expect_value(t, model.sources[6], "Staged changes")
+	testing.expect_value(t, model.sources[7], "Unstaged changes")
+	testing.expect_value(t, view.source_label, "All agents")
+
+	request := model.request
+	app.changes_source_pick(&state, pane, 1)
+	testing.expect_value(t, pane.scope, ui.Changes_Scope.Agent)
+	testing.expect_value(t, pane.agent.pane_key, "p2")
+	testing.expect_value(t, pane.agent.harness, "claude")
+	testing.expect_value(t, pane.agent.session, "s2")
+	testing.expect_value(t, model.agent_label, "claude \u00b7 Fix the parser (2)")
+	testing.expect_value(t, view.source_label, model.agent_label)
+	testing.expect(t, model.request > request, "picking an agent reads its turns")
+	// The agents stay listed while the next read runs.
+	testing.expect_value(t, len(model.sources), 8)
+
+	request = model.request
+	app.changes_source_pick(&state, pane, 1)
+	testing.expect_value(t, model.request, request)
+	app.changes_source_pick(&state, pane, 4)
+	testing.expect_value(t, pane.scope, ui.Changes_Scope.Repository)
+	testing.expect_value(t, view.source_label, "All agents")
+	testing.expect_value(t, pane.agent.session, "s2")
+	app.changes_source_pick(&state, pane, 8)
+	testing.expect_value(t, pane.scope, ui.Changes_Scope.Repository)
+}
+
+@(test)
+live_news_reads_again_only_the_panes_on_that_repository :: proc(t: ^testing.T) {
+	state: app.App
+	defer app.changes_app_destroy(&state.changes_state)
+	first := pane_start(&state, .Repository)
+	second := pane_start(&state, .Agent)
+	if !testing.expect(t, first != nil && second != nil) {return}
+	a := app.Result_Query {
+		pane       = first.id,
+		repository = "a",
+	}
+	b := app.Result_Query {
+		pane       = second.id,
+		repository = "b",
+	}
+	app.changes_fill_query(&state, first, &a, now_time(), false)
+	app.changes_fill_query(&state, second, &b, now_time(), false)
+	first_request, second_request := first.model.request, second.model.request
+	app.changes_turns_live(&state, {"a"})
+	testing.expect_value(t, first.model.request, first_request + 1)
+	testing.expect_value(t, second.model.request, second_request)
+	app.changes_turns_live(&state, {"c"})
+	testing.expect_value(t, first.model.request, first_request + 1)
+	testing.expect_value(t, second.model.request, second_request)
 }
 
 @(test)
