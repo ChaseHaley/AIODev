@@ -370,3 +370,67 @@ changes_text_helpers_never_walk_a_whole_long_line :: proc(t: ^testing.T) {
 	testing.expect_value(t, ui.clip_bytes("abc", 512), "abc")
 	testing.expect_value(t, ui.clip_bytes("ééé", 3), "é")
 }
+
+@(test)
+changes_worktree_field_belongs_to_git_scopes_and_is_hit :: proc(t: ^testing.T) {
+	f: Changes_Fixture
+	view: ui.Changes_View
+	if !fixture_make(t, &f, &view) {return}
+	defer font.system_destroy(f.fonts)
+	state: ui.Changes_State
+	defer ui.changes_state_destroy(&state)
+
+	turns_g := ui.changes_geometry({0, 0, 900, 600}, 1, &view, &f.text)
+	testing.expect_value(t, turns_g.worktree.width, f32(0))
+
+	view.scope, view.turns, view.worktree, view.following = .Uncommitted, nil, "wt-a", true
+	view.hooks_offer = true
+	g := ui.changes_geometry({0, 0, 900, 600}, 1, &view, &f.text)
+	testing.expect(t, g.worktree.width > 0 && g.worktree.height == g.scope.height)
+	testing.expect(t, g.worktree.x >= g.scope.x + g.scope.width)
+	testing.expect(t, g.repository.x >= g.worktree.x + g.worktree.width)
+	testing.expect(t, g.worktree.x + g.worktree.width <= g.hooks.x)
+	ui.changes_layout(&state, &view, &f.mono, 1)
+	hit := ui.changes_hit(g, &view, &state, g.worktree.x + 4, g.worktree.y + 4)
+	testing.expect_value(t, hit, ui.Changes_Hit{.Worktree, 0})
+	scope := ui.changes_hit(g, &view, &state, g.scope.x + 4, g.scope.y + 4)
+	testing.expect_value(t, scope, ui.Changes_Hit{.Scope, 0})
+
+	tiny := ui.changes_geometry({0, 0, 120, 200}, 1, &view, &f.text)
+	testing.expect(t, tiny.worktree.x + tiny.worktree.width <= tiny.hooks.x || tiny.worktree.width == 0)
+}
+
+@(test)
+changes_badges_fall_back_to_icons_when_the_path_has_no_room :: proc(t: ^testing.T) {
+	f: Changes_Fixture
+	view: ui.Changes_View
+	if !fixture_make(t, &f, &view) {return}
+	defer font.system_destroy(f.fonts)
+	small := ui.text_styled(&f.text, .Detail)
+	marked := [2]bool{true, true}
+	ambiguous := [2]bool{false, true}
+	view.marked, view.ambiguous = marked[:], ambiguous[:]
+
+	roomy := ui.changes_badge_forms(&view, 0, &small, 2000, 1)
+	testing.expect_value(t, roomy[.Marked], ui.Changes_Badge_Form.Text)
+	testing.expect_value(t, roomy[.Ambiguous], ui.Changes_Badge_Form.Hidden)
+	both := ui.changes_badge_forms(&view, 1, &small, 2000, 1)
+	testing.expect_value(t, both[.Marked], ui.Changes_Badge_Form.Text)
+	testing.expect_value(t, both[.Ambiguous], ui.Changes_Badge_Form.Text)
+
+	labels := ui.CHANGES_BADGE_LABELS
+	first := ui.text_width(&small, labels[.Marked])
+	second := ui.text_width(&small, labels[.Ambiguous])
+	// Room for the path and the first text only: the second falls back to its icon alone.
+	partial := ui.changes_badge_forms(&view, 1, &small, first + 96 + 1, 1)
+	testing.expect_value(t, partial[.Marked], ui.Changes_Badge_Form.Text)
+	testing.expect_value(t, partial[.Ambiguous], ui.Changes_Badge_Form.Icon)
+	_ = second
+	narrow := ui.changes_badge_forms(&view, 1, &small, 50, 1)
+	testing.expect_value(t, narrow[.Marked], ui.Changes_Badge_Form.Icon)
+	testing.expect_value(t, narrow[.Ambiguous], ui.Changes_Badge_Form.Icon)
+
+	view.marked, view.ambiguous = nil, nil
+	none := ui.changes_badge_forms(&view, 0, &small, 2000, 1)
+	testing.expect_value(t, none[.Marked], ui.Changes_Badge_Form.Hidden)
+}

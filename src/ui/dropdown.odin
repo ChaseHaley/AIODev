@@ -43,6 +43,8 @@ Dropdown_Choices :: struct {
 	multiple, searchable:                     bool,
 	font_filter, show_all_fonts:              bool,
 	min_width:                                f32,
+	// The search field's hint; "" is "Search fonts".
+	placeholder:                              string,
 }
 
 // Where a dropdown opens: under `field`, flipped above `row` when `bounds` has no room below, and
@@ -455,7 +457,8 @@ dropdown_draw :: proc(
 	if c.searchable {
 		box := dropdown_search_box(d, r, text, s)
 		box_draw(list, box.rect, theme, !d.toggle_focus, s)
-		if result := field_box_draw(box, list, theme, field_box_baseline(box), !d.toggle_focus, "Search fonts");
+		if result := field_box_draw(box, list, theme, field_box_baseline(box), !d.toggle_focus,
+			c.placeholder != "" ? c.placeholder : "Search fonts");
 		   result != .Ok {return result}
 		if render.push_layer(list, a.bounds) != .None {return .Ok}
 		if c.font_filter {

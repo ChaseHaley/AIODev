@@ -58,6 +58,9 @@ Changes_View :: struct {
 	detail:      string,
 	// The label in the toolbar.
 	repository:  string,
+	// The folder name of the worktree a git scope shows, and whether it was chosen by following the agent.
+	worktree:    string,
+	following:   bool,
 	// Newest first; empty in git scopes.
 	turns:       []Changes_Turn,
 	// The selected inclusive row range of `turns`, -1 when none.
@@ -66,6 +69,8 @@ Changes_View :: struct {
 	files:       []tr.Diff_File,
 	// Parallel to `files`.
 	marked:      []bool,
+	// Parallel to `files`: a selected change may belong to another agent.
+	ambiguous:   []bool,
 	collapsed:   []bool,
 	// Untracked files left out of an Uncommitted diff.
 	omitted:     int,
@@ -78,6 +83,7 @@ Changes_View :: struct {
 Changes_Part :: enum u8 {
 	None,
 	Scope,
+	Worktree,
 	Hooks,
 	Notice_Button,
 	Turn,
@@ -116,6 +122,8 @@ Changes_State :: struct {
 	lit:                      Changes_Hit,
 	// The scope's list is open, so its field stays outlined.
 	scope_open:               bool,
+	// The worktree list is open.
+	worktree_open:            bool,
 	motion:                   Control_Motion,
 	rows:                     Changes_Rows,
 	turn_bar, diff_bar:       Scroll_Drag,
@@ -129,7 +137,7 @@ changes_state_destroy :: proc(state: ^Changes_State) {
 // Where everything goes, in window pixels. `diff` holds the diff stream or the notice and is the area
 // the pane scrollbar belongs to; `turns` is empty without a turn list.
 Changes_Geometry :: struct {
-	area, toolbar, scope, hooks, repository, turns, diff, notice, notice_button: render.Rect,
+	area, toolbar, scope, worktree, hooks, repository, turns, diff, notice, notice_button: render.Rect,
 	scale, turn_row:                                                             f32,
 	// The turn list sits above the diff rather than beside it.
 	narrow:                                                                      bool,
@@ -146,6 +154,8 @@ CHANGES_NARROW_SHARE :: f32(0.3)
 @(private = "file")
 CHANGES_SCOPE_WIDTH :: f32(216)
 @(private = "file")
+CHANGES_WORKTREE_WIDTH :: f32(180)
+@(private = "file")
 CHANGES_NOTICE_WIDTH :: f32(360)
 @(private = "file")
 CHANGES_TAB_COLUMNS :: 4
@@ -155,6 +165,10 @@ CHANGES_HOOKS_LABEL :: "Install turn hooks"
 CHANGES_RECORD_LABEL :: "Record agent turns"
 @(private = "file")
 CHANGES_MARKED_LABEL :: "Also changed outside these turns"
+@(private = "file")
+CHANGES_AMBIGUOUS_LABEL :: "May include another agent's changes"
+@(private = "file")
+CHANGES_FOLLOWING_LABEL :: "Following the agent"
 @(private = "file")
 CHANGES_STATUS_WIDTH :: f32(16)
 @(private = "file")
@@ -227,6 +241,10 @@ changes_geometry :: proc(
 	if hooks_width > 0 {g.hooks = {area.x + area.width - pad - hooks_width, top, hooks_width, control}}
 	left := g.scope.x + g.scope.width + gap
 	right := hooks_width > 0 ? g.hooks.x - gap : area.x + area.width - pad
+	if !changes_scope_turns(view.scope) {
+		g.worktree = {left, top, min(CHANGES_WORKTREE_WIDTH * s, max(0, right - left)), control}
+		if g.worktree.width > 0 {left += g.worktree.width + gap}
+	}
 	g.repository = {left, g.toolbar.y, max(0, right - left), g.toolbar.height}
 
 	bottom := max(0, area.height - g.toolbar.height)
@@ -289,6 +307,50 @@ changes_collapsed :: proc(view: ^Changes_View, i: int) -> bool {
 @(private = "file")
 changes_marked :: proc(view: ^Changes_View, i: int) -> bool {
 	return i < len(view.marked) && view.marked[i]
+}
+
+@(private = "file")
+changes_ambiguous :: proc(view: ^Changes_View, i: int) -> bool {
+	return i < len(view.ambiguous) && view.ambiguous[i]
+}
+
+Changes_Badge :: enum u8 {
+	Marked,
+	Ambiguous,
+}
+
+// How a file header shows a badge: its text, its icon when the path would get too little room, or not at all.
+Changes_Badge_Form :: enum u8 {
+	Hidden,
+	Text,
+	Icon,
+}
+
+CHANGES_BADGE_LABELS :: [Changes_Badge]string {
+	.Marked    = CHANGES_MARKED_LABEL,
+	.Ambiguous = CHANGES_AMBIGUOUS_LABEL,
+}
+
+// The form of each badge of file `i`, given `room`, the width from the start of the path to the right edge
+// of the badges. The marked badge is placed first (rightmost); each falls back to its icon on its own.
+changes_badge_forms :: proc(
+	view: ^Changes_View, i: int, small: ^Text, room, scale: f32,
+) -> (forms: [Changes_Badge]Changes_Badge_Form) {
+	labels := CHANGES_BADGE_LABELS
+	left := room
+	for badge in Changes_Badge {
+		present := badge == .Marked ? changes_marked(view, i) : changes_ambiguous(view, i)
+		if !present {continue}
+		width := text_width(small, labels[badge])
+		if left - width >= CHANGES_BADGE_MINIMUM_PATH * scale {
+			forms[badge] = .Text
+			left -= width + SPACE_2 * scale
+		} else {
+			forms[badge] = .Icon
+			left -= ICON_INDICATOR * scale + SPACE_2 * scale
+		}
+	}
+	return
 }
 
 @(private = "file")
@@ -417,6 +479,7 @@ changes_hit :: proc(
 	g: Changes_Geometry, view: ^Changes_View, state: ^Changes_State, x, y: f32,
 ) -> Changes_Hit {
 	if render.rect_contains(g.scope, x, y) {return {.Scope, 0}}
+	if render.rect_contains(g.worktree, x, y) {return {.Worktree, 0}}
 	if render.rect_contains(g.hooks, x, y) {return {.Hooks, 0}}
 	if render.rect_contains(g.notice_button, x, y) {return {.Notice_Button, 0}}
 	if render.rect_contains(g.turns, x, y) && g.turn_row > 0 {
@@ -438,7 +501,7 @@ changes_hit :: proc(
 @(private = "file")
 changes_animated :: proc(hit: Changes_Hit) -> bool {
 	#partial switch hit.part {
-	case .Scope, .Hooks, .Notice_Button, .File_Header:
+	case .Scope, .Worktree, .Hooks, .Notice_Button, .File_Header:
 		return true
 	}
 	return false
@@ -721,15 +784,24 @@ paint_file :: proc(
 		if r != .Ok {return r}
 		right = left - SPACE_2 * s
 	}
-	if changes_marked(view, i) {
-		badge := text_width(p.small, CHANGES_MARKED_LABEL)
-		if right - badge - x >= CHANGES_BADGE_MINIMUM_PATH * s {
-			if r := draw_text(p.small, p.list, CHANGES_MARKED_LABEL, right - badge, small_baseline, t.warning);
-			   r != .Ok {return r}
-			right -= badge + SPACE_2 * s
-		} else {
+	forms := changes_badge_forms(view, i, p.small, right - x, s)
+	labels := CHANGES_BADGE_LABELS
+	icons := [Changes_Badge]Icon {
+		.Marked    = .Warning,
+		.Ambiguous = .Info,
+	}
+	for badge in Changes_Badge {
+		switch forms[badge] {
+		case .Hidden:
+		case .Text:
+			width := text_width(p.small, labels[badge])
+			if r := draw_text(p.small, p.list, labels[badge], right - width, small_baseline, t.warning); r != .Ok {
+				return r
+			}
+			right -= width + SPACE_2 * s
+		case .Icon:
 			size := ICON_INDICATOR * s
-			icon_draw(p.list, .Warning, {right - size, face.y, size, face.height}, t.warning, ICON_INDICATOR, s)
+			icon_draw(p.list, icons[badge], {right - size, face.y, size, face.height}, t.warning, ICON_INDICATOR, s)
 			right -= size + SPACE_2 * s
 		}
 	}
@@ -932,10 +1004,23 @@ toolbar_draw :: proc(
 		b := Button{rect = g.scope, hover = hover, press = press, radius = RADIUS_CONTROL, surface = .Flat_Unfilled}
 		if _, _, err := button_draw(list, theme, b, s, pointer); err != .None {return .Ok}
 	}
+	if g.worktree.width > 0 {
+		if r := dropdown_field_draw(
+			list, text, theme, g.worktree, clip_bytes(view.worktree, CHANGES_CLIP_BYTES), state.worktree_open, s,
+		); r != .Ok {
+			return r
+		}
+		hover, press := changes_lit(state, {.Worktree, 0})
+		b := Button {
+			rect = g.worktree, hover = hover, press = press, radius = RADIUS_CONTROL, surface = .Flat_Unfilled,
+		}
+		if _, _, err := button_draw(list, theme, b, s, pointer); err != .None {return .Ok}
+	}
 	small := text_styled(text, .Detail)
-	if view.repository != "" && g.repository.width > 0 {
+	note := changes_scope_turns(view.scope) ? view.repository : (view.following ? CHANGES_FOLLOWING_LABEL : "")
+	if note != "" && g.repository.width > 0 {
 		if r := draw_fading_text(
-			&small, list, clip_bytes(view.repository, CHANGES_CLIP_BYTES), g.repository.x,
+			&small, list, clip_bytes(note, CHANGES_CLIP_BYTES), g.repository.x,
 			baseline_in(g.repository.y, g.repository.height, &small),
 			theme.muted, g.repository.width,
 		); r != .Ok {return r}
