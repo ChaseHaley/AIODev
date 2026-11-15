@@ -241,8 +241,8 @@ pointer_surfaces := [Pointer_Target]Pointer_Surface {
 	},
 	.Changes_Page     = {
 		claims = changes_claims, hover = changes_hover, press = changes_press, release = changes_release,
-		cancel = changes_cancel, leave = changes_leave, tooltip = changes_tooltip, holds = true,
-		blurs_find = true,
+		cancel = changes_cancel, leave = changes_leave, tooltip = changes_tooltip, shortcut = changes_shortcut,
+		holds = true, blurs_find = true,
 	},
 	.Content          = {
 		claims = content_claims, hover = content_hover, press = content_press, release = content_release,

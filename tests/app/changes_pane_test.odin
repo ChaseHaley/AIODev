@@ -1,5 +1,6 @@
 package app_test
 
+import "aio:commands"
 import "aio:input"
 import "aio:layout"
 import "aio:platform"
@@ -11,6 +12,7 @@ import "core:fmt"
 import "core:os"
 import "core:strings"
 import "core:testing"
+import "core:time"
 import app "../../src"
 
 @(private = "file")
@@ -626,6 +628,198 @@ the_diff_carries_the_minimum_contrast_setting_into_the_next_frame :: proc(t: ^te
 	testing.expect(t, saved)
 	_ = app.changes_geometry_of(&f.state, w, pane, shown)
 	testing.expect_value(t, pane.model.view.minimum_contrast, 7)
+}
+
+@(private = "file")
+tooltip_at :: proc(f: ^Fixture, w: ^app.Window, rect: render.Rect) -> string {
+	return app.changes_tooltip(&f.state, w, rect.x + rect.width / 2, rect.y + rect.height / 2)
+}
+
+@(private = "file")
+key_at :: proc(f: ^Fixture, w: ^app.Window, rect: render.Rect) -> commands.Shortcut {
+	shortcut := app.changes_shortcut(&f.state, w, rect.x + rect.width / 2, rect.y + rect.height / 2)
+	key, _ := shortcut.(commands.Shortcut)
+	return key
+}
+
+@(test)
+every_control_says_what_it_does :: proc(t: ^testing.T) {
+	f: Fixture
+	defer {
+		app.app_destroy(&f.state)
+		testing.expect_value(t, os.remove_all(f.directory), nil)
+		delete(f.directory)
+	}
+	if !fixture_start(t, &f, "Tooltips") {return}
+	w := f.state.windows[0]
+	app.run_action(&f.state, w, .Agent_Changes)
+	if !testing.expect_value(t, len(f.state.changes_panes), 1) {return}
+	pane := f.state.changes_panes[0]
+	shown, found := changes_pane_of(&f.state, w)
+	if !testing.expect(t, found) {return}
+	view := &pane.model.view
+	pane.scope, view.scope = .Repository, .Repository
+	// With no files the fold and files buttons are off; they still say what they do.
+	empty := app.changes_geometry_of(&f.state, w, pane, shown)
+	testing.expect_value(t, len(view.files), 0)
+	testing.expect_value(t, tooltip_at(&f, w, empty.fold_button), "Expand all files")
+	testing.expect_value(t, tooltip_at(&f, w, empty.files_button), "Files in this diff")
+	lines := make([]turns.Diff_Line, 4)
+	defer delete(lines)
+	for &line, i in lines {line = {kind = .Context, old_line = i32(i + 1), new_line = i32(i + 1), text = "line"}}
+	hunks := []turns.Hunk{{old_start = 1, old_count = 4, new_start = 1, new_count = 4, lines = lines}}
+	files := files_named({"a.odin", "b.odin"}, hunks)
+	defer delete(files)
+	rows := []app.Turn_Row{{id = 3, kind = .Turn, ended = 3}, {id = 2, kind = .Turn, ended = 2}, {id = 1, ended = 1}}
+	q := app.Result_Query {
+		pane     = pane.id,
+		rows     = rows,
+		selected = {3},
+		diff     = {files = files},
+	}
+	app.changes_fill_query(&f.state, pane, &q, time.now(), true)
+
+	g := app.changes_geometry_of(&f.state, w, pane, shown)
+	testing.expect_value(t, tooltip_at(&f, w, g.step_back), "Older turn")
+	testing.expect_value(t, key_at(&f, w, g.step_back), commands.Shortcut{.Arrow_Left, {}})
+	// The newest turn is selected, so the newer step is off; it still says what it does.
+	testing.expect_value(t, tooltip_at(&f, w, g.step_forward), "Newer turn")
+	testing.expect_value(t, key_at(&f, w, g.step_forward), commands.Shortcut{.Arrow_Right, {}})
+	testing.expect_value(t, tooltip_at(&f, w, g.range_label), "Choose turns")
+	testing.expect_value(t, tooltip_at(&f, w, g.scope), "Show changes from")
+	header := render.Rect{g.diff.x + 40, g.diff.y + 2, 4, 4}
+	testing.expect_value(t, tooltip_at(&f, w, header), "Collapse file")
+	app.changes_model_fold(&pane.model, 0)
+	_ = app.changes_geometry_of(&f.state, w, pane, shown)
+	testing.expect_value(t, tooltip_at(&f, w, header), "Expand file")
+	app.changes_model_fold(&pane.model, 0)
+
+	// The send bar of a written comment.
+	_ = app.changes_comments_press(&f.state, w, pane, {.Line, 0, 0}, {button = .Left})
+	_ = app.changes_comments_press(&f.state, w, pane, {.Comment_Button, 0, 0}, {button = .Left})
+	app.handle_event(&f.state, input.Text_Event{window = w.id, text = "note"})
+	tap(&f.state, w, .Enter)
+	if !testing.expect_value(t, len(pane.comments.items), 1) {return}
+	g = app.changes_geometry_of(&f.state, w, pane, shown)
+	send, copy_rect, discard := ui.changes_send_rects(g, view)
+	testing.expect(t, !view.send.can_send, "a shell is not an agent")
+	testing.expect_value(t, tooltip_at(&f, w, send), view.send.reason)
+	testing.expect(t, view.send.reason != "")
+	testing.expect_value(t, tooltip_at(&f, w, copy_rect), "Copy the comments")
+	testing.expect_value(t, tooltip_at(&f, w, discard), "Discard the comments")
+
+	// The filter's clear buttons, in its field and in the bar.
+	_ = ui.field_set(&pane.filter_editor, "zzz")
+	app.changes_filter_changed(pane)
+	pane.state.filter_open = true
+	g = app.changes_geometry_of(&f.state, w, pane, shown)
+	testing.expect_value(t, tooltip_at(&f, w, g.filter_clear), "Clear the filter")
+	// A press outside the open popover only closes it, so nothing out there has a tooltip.
+	testing.expect_value(t, tooltip_at(&f, w, g.step_back), "")
+	testing.expect_value(t, tooltip_at(&f, w, g.filter_button), "")
+	pane.state.filter_open = false
+	g = app.changes_geometry_of(&f.state, w, pane, shown)
+	testing.expect_value(t, tooltip_at(&f, w, g.filter_bar_clear), "Clear the filter")
+	testing.expect_value(t, tooltip_at(&f, w, g.filter_button), "Filter files")
+	// Nor outside the open turn list, except on the range label that closes it.
+	pane.state.turn_list_open = true
+	g = app.changes_geometry_of(&f.state, w, pane, shown)
+	testing.expect_value(t, tooltip_at(&f, w, g.scope), "")
+	testing.expect_value(t, tooltip_at(&f, w, g.range_label), "Choose turns")
+	pane.state.turn_list_open = false
+}
+
+@(test)
+the_strip_markers_page_through_turns_it_cannot_show :: proc(t: ^testing.T) {
+	f: Fixture
+	defer {
+		app.app_destroy(&f.state)
+		testing.expect_value(t, os.remove_all(f.directory), nil)
+		delete(f.directory)
+	}
+	if !fixture_start(t, &f, "StripPage") {return}
+	w := f.state.windows[0]
+	app.run_action(&f.state, w, .Agent_Changes)
+	if !testing.expect_value(t, len(f.state.changes_panes), 1) {return}
+	pane := f.state.changes_panes[0]
+	// Wide enough for the strip's ten bars beside the toolbar's other controls.
+	app.window_resize(&f.state, w, 2400, 900)
+	shown, found := changes_pane_of(&f.state, w)
+	if !testing.expect(t, found) {return}
+	view := &pane.model.view
+	pane.scope, view.scope = .Repository, .Repository
+	rows: [25]app.Turn_Row
+	for &row, i in rows {row = {id = u64(25 - i), kind = .Turn, ended = i64(25 - i)}}
+	files := files_named({"a.odin"}, nil)
+	defer delete(files)
+	// Delivered as the worker would, so the strip shows the newest turn the result selects.
+	q := app.Result_Query {
+		pane     = pane.id,
+		request  = pane.model.request,
+		rows     = rows[:],
+		selected = {25},
+		diff     = {files = files},
+	}
+	app.changes_model_result(&f.state, q)
+	if !testing.expect_value(t, len(view.turns), 25) {return}
+
+	g := app.changes_geometry_of(&f.state, w, pane, shown)
+	marker :: proc(g: ui.Changes_Geometry, pane: ^app.Changes_Pane, newer: bool) -> render.Rect {
+		return ui.changes_strip_marker_rect(g, &pane.state, &pane.model.view, newer)
+	}
+	testing.expect_value(t, g.strip_bars, 10)
+	older, newer := ui.changes_strip_hidden(g, &pane.state, view)
+	testing.expect_value(t, older, 15)
+	testing.expect_value(t, newer, 0)
+	testing.expect(t, marker(g, pane, true) == (render.Rect{}), "no newer marker while the newest bar shows")
+	testing.expect_value(t, tooltip_at(&f, w, marker(g, pane, false)), "15 older turns")
+
+	// A press pages to the older bars, ending next to the page it came from, and leaves the selection.
+	from := older
+	click(&f.state, w, marker(g, pane, false))
+	g = app.changes_geometry_of(&f.state, w, pane, shown)
+	older, newer = ui.changes_strip_hidden(g, &pane.state, view)
+	testing.expect_value(t, older + g.strip_bars, from)
+	testing.expect_value(t, newer, 25 - older - g.strip_bars)
+	testing.expect(t, marker(g, pane, true) != (render.Rect{}), "the newer marker appears")
+	testing.expect_value(t, tooltip_at(&f, w, marker(g, pane, true)), fmt.tprintf("%d newer turns", newer))
+	testing.expect_value(t, view.first, 0)
+	testing.expect_value(t, view.last, 0)
+	click(&f.state, w, marker(g, pane, false))
+	g = app.changes_geometry_of(&f.state, w, pane, shown)
+	older, newer = ui.changes_strip_hidden(g, &pane.state, view)
+	testing.expect_value(t, older, 0)
+	testing.expect_value(t, newer, 25 - g.strip_bars)
+	testing.expect(t, marker(g, pane, false) == (render.Rect{}), "no older marker at the oldest bar")
+	// A newer page starts right after the page it came from.
+	shown_bars := g.strip_bars
+	click(&f.state, w, marker(g, pane, true))
+	g = app.changes_geometry_of(&f.state, w, pane, shown)
+	older, newer = ui.changes_strip_hidden(g, &pane.state, view)
+	testing.expect_value(t, older, shown_bars)
+	testing.expect_value(t, tooltip_at(&f, w, marker(g, pane, true)), fmt.tprintf("%d newer turns", newer))
+
+	// The arrow keys the step tooltips name move the selection.
+	tap(&f.state, w, .Arrow_Left)
+	testing.expect_value(t, view.first, 1)
+	tap(&f.state, w, .Arrow_Right)
+	testing.expect_value(t, view.first, 0)
+
+	// At any width, an older page ends next to the page it came from.
+	for width in ([?]i32{900, 1100, 1300, 1500, 1800, 2100}) {
+		app.window_resize(&f.state, w, width, 900)
+		shown, found = changes_pane_of(&f.state, w)
+		if !found {continue}
+		pane.state.strip_offset = 25
+		g = app.changes_geometry_of(&f.state, w, pane, shown)
+		before, _ := ui.changes_strip_hidden(g, &pane.state, view)
+		older_marker := marker(g, pane, false)
+		if older_marker == (render.Rect{}) {continue}
+		click(&f.state, w, older_marker)
+		g = app.changes_geometry_of(&f.state, w, pane, shown)
+		after, _ := ui.changes_strip_hidden(g, &pane.state, view)
+		testing.expectf(t, after == max(0, before - g.strip_bars), "width %d: %d then %d", width, before, after)
+	}
 }
 
 @(test)

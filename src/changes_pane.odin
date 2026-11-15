@@ -1,5 +1,6 @@
 package main
 
+import "aio:commands"
 import "aio:input"
 import "aio:layout"
 import "aio:platform"
@@ -7,6 +8,7 @@ import "aio:render"
 import "aio:syntax"
 import "aio:turns"
 import "aio:ui"
+import "core:fmt"
 import "core:reflect"
 import "core:strings"
 import "core:time"
@@ -317,7 +319,7 @@ changes_geometry_of :: proc(
 	changes_comments_view(app, pane)
 	pane.model.view.minimum_contrast = f32(app.settings.turns.diff_minimum_contrast)
 	mono := ui.text_mono(&w.ui_text, app.family)
-	g := ui.changes_geometry(pane_body_rect(w, shown), w.scale, &pane.model.view, &w.ui_text)
+	g := ui.changes_geometry(pane_body_rect(w, shown), w.scale, &pane.model.view, &w.ui_text, &pane.state)
 	ui.changes_layout(&pane.state, &pane.model.view, &w.ui_text, &mono, g.diff.width, w.scale)
 	return g
 }
@@ -671,6 +673,31 @@ changes_diff_scroll :: proc(app: ^App, w: ^Window, pane: ^Changes_Pane, shown: l
 	if ui.changes_scroll_diff(&pane.state, g, delta) {w.dirty = true}
 }
 
+// Pages the strip by as many bars as it shows, toward older turns (`step` -1) or newer ones (+1), as
+// the wheel moves it; the selection stays. The new page's edge bar sits next to the old page's edge: a
+// newer page starts right after it, and an older page, which may show fewer bars once a newer marker
+// takes room, is moved to end right before it.
+@(private = "file")
+changes_strip_page :: proc(
+	app: ^App,
+	w: ^Window,
+	pane: ^Changes_Pane,
+	shown: layout.Pane_Rect,
+	step: int,
+) {
+	view := &pane.model.view
+	g := changes_geometry_of(app, w, pane, shown)
+	from, _ := ui.changes_strip_hidden(g, &pane.state, view)
+	if !ui.changes_scroll_strip(&pane.state, g, view, step * max(1, g.strip_bars)) {return}
+	w.dirty = true
+	if step > 0 {return}
+	g = changes_geometry_of(app, w, pane, shown)
+	at, _ := ui.changes_strip_hidden(g, &pane.state, view)
+	if target := max(0, from - g.strip_bars); target != at {
+		_ = ui.changes_scroll_strip(&pane.state, g, view, target - at)
+	}
+}
+
 @(private = "file")
 changes_turn_list_set :: proc(w: ^Window, pane: ^Changes_Pane, g: ui.Changes_Geometry, open: bool) {
 	if pane.state.turn_list_open == open {return}
@@ -795,12 +822,13 @@ changes_key :: proc(app: ^App, w: ^Window, e: input.Key_Event) {
 	turn_scope := ui.changes_scope_turns(pane.scope)
 	// A page leaves out the row a pinned header covers, so nothing slides under it unseen.
 	page := max(1, int(g.diff.height) - pane.state.rows.header)
+	for shortcut, i in CHANGES_STEP_KEYS {
+		if key.logical.key != shortcut.key || !turn_scope {continue}
+		// Older turns sit to the left in the strip; the table lists the older key first.
+		changes_move(app, pane, g, i == 0 ? 1 : -1, extend)
+		return
+	}
 	#partial switch key.logical.key {
-	case .Arrow_Left:
-		// Older turns sit to the left in the strip.
-		if turn_scope {changes_move(app, pane, g, 1, extend)}
-	case .Arrow_Right:
-		if turn_scope {changes_move(app, pane, g, -1, extend)}
 	case .Page_Up:
 		if !extend {changes_diff_scroll(app, w, pane, shown, -page)}
 	case .Page_Down:
@@ -876,7 +904,7 @@ changes_cursor :: proc(hit: ui.Changes_Hit) -> platform.Cursor_Shape {
 	case .Scope, .Worktree, .Hooks, .Notice_Button, .File_Header, .Strip_Bar, .Step_Back, .Step_Forward,
 	     .Range_Label, .Hunk_Comment, .Comment_Button, .Comment_Card, .Comment_Delete, .Send, .Copy, .Discard,
 	     .Files_Button, .Layout_Button, .Filter_Button, .Filter_Clear, .Filter_Bar_Clear, .Fold_Button,
-	     .Sticky_Header:
+	     .Sticky_Header, .Strip_Older, .Strip_Newer:
 		return .Hand
 	case .Turn_List_Row:
 		if hit.index >= 0 {return .Hand}
@@ -1032,6 +1060,10 @@ changes_press :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) {
 		changes_move(app, pane, g, 1, extend)
 	case .Step_Forward:
 		changes_move(app, pane, g, -1, extend)
+	case .Strip_Older:
+		changes_strip_page(app, w, pane, shown, -1)
+	case .Strip_Newer:
+		changes_strip_page(app, w, pane, shown, 1)
 	case .Range_Label:
 		changes_turn_list_set(w, pane, g, !pane.state.turn_list_open)
 	case .Turn_List_Row:
@@ -1097,39 +1129,136 @@ changes_cancel :: proc(app: ^App, w: ^Window) {
 	_ = changes_release(app, w, {button = .Left})
 }
 
-// The strip bar's turn, why Send is off, what the toolbar and hunk buttons do, and the file list's regular
-// expression toggle.
-@(private)
-changes_tooltip :: proc(app: ^App, w: ^Window, x, y: f32) -> string {
-	pane, shown := changes_under_pointer(app, w, x, y)
-	if pane == nil {return ""}
-	g := changes_geometry_of(app, w, pane, shown)
-	if changes_list_open(pane) {
-		if !pane.files_open {return ""}
-		toggle := ui.dropdown_regex_rect(
-			&pane.dropdown, changes_dropdown_choices(pane), changes_dropdown_anchor(pane, g), w.scale,
-		)
-		return render.rect_contains(toggle, x, y) ? "Use regular expression" : ""
+// The control a tooltip describes: what a press would reach, as changes_press finds it, or a disabled
+// button, whose tooltip still says what it does. `listed` while a list is open over the pane, which then
+// takes every point; while the filter popover or the turn list is open, a point outside it only closes it,
+// so it names nothing.
+@(private = "file")
+changes_tooltip_hit :: proc(
+	app: ^App,
+	w: ^Window,
+	x, y: f32,
+) -> (
+	pane: ^Changes_Pane,
+	hit: ui.Changes_Hit,
+	g: ui.Changes_Geometry,
+	listed: bool,
+) {
+	shown: layout.Pane_Rect
+	pane, shown = changes_under_pointer(app, w, x, y)
+	if pane == nil {return}
+	g = changes_geometry_of(app, w, pane, shown)
+	if changes_list_open(pane) {return pane, {}, g, true}
+	if pane.state.filter_open && !render.rect_contains(g.filter_popover, x, y) {return}
+	if pane.state.turn_list_open && !render.rect_contains(g.turn_list, x, y) &&
+	   !render.rect_contains(g.range_label, x, y) {
+		return
 	}
+	hit = ui.changes_hit(g, &pane.model.view, &pane.state, x, y)
+	if hit.part != .None {return}
+	switch {
+	case render.rect_contains(g.step_back, x, y):
+		hit.part = .Step_Back
+	case render.rect_contains(g.step_forward, x, y):
+		hit.part = .Step_Forward
+	case render.rect_contains(g.fold_button, x, y):
+		hit.part = .Fold_Button
+	case render.rect_contains(g.files_button, x, y):
+		hit.part = .Files_Button
+	}
+	return
+}
+
+// Whether the point is on the open file list's regular expression toggle.
+@(private = "file", require_results)
+changes_on_regex_toggle :: proc(w: ^Window, pane: ^Changes_Pane, g: ui.Changes_Geometry, x, y: f32) -> bool {
+	if !pane.files_open {return false}
+	choices, anchor := changes_dropdown_choices(pane), changes_dropdown_anchor(pane, g)
+	return render.rect_contains(ui.dropdown_regex_rect(&pane.dropdown, choices, anchor, w.scale), x, y)
+}
+
+// What the control under the point does; the turns name themselves.
+changes_tooltip :: proc(app: ^App, w: ^Window, x, y: f32) -> string {
+	pane, hit, g, listed := changes_tooltip_hit(app, w, x, y)
+	if pane == nil {return ""}
+	if listed {return changes_on_regex_toggle(w, pane, g, x, y) ? "Use regular expression" : ""}
 	view := &pane.model.view
-	hit := ui.changes_hit(g, view, &pane.state, x, y)
 	#partial switch hit.part {
+	case .Scope:
+		return "Show changes from"
+	case .Worktree:
+		return "Worktree the git view shows"
+	case .Hooks:
+		return "Install hooks so turns begin before the first edit"
+	case .Step_Back:
+		return "Older turn"
+	case .Step_Forward:
+		return "Newer turn"
+	case .Strip_Older, .Strip_Newer:
+		older, newer := ui.changes_strip_hidden(g, &pane.state, view)
+		count, side := older, "older"
+		if hit.part == .Strip_Newer {count, side = newer, "newer"}
+		return fmt.tprintf("%d %s turn%s", count, side, count == 1 ? "" : "s")
+	case .Range_Label:
+		return "Choose turns"
 	case .Strip_Bar:
 		return ui.changes_turn_tooltip(view, hit.index, context.temp_allocator)
-	case .Send:
-		if !view.send.can_send {return view.send.reason}
-	case .Hunk_Comment:
-		return "Comment on this hunk"
+	case .Turn_List_Row:
+		if hit.index >= 0 {return ui.changes_turn_tooltip(view, hit.index, context.temp_allocator)}
+	case .Fold_Button:
+		return view.any_expanded ? "Collapse all files" : "Expand all files"
+	case .Filter_Button:
+		return "Filter files"
+	case .Filter_Clear, .Filter_Bar_Clear:
+		return "Clear the filter"
 	case .Layout_Button:
 		return pane.side_by_side ? "Unified view" : "Side-by-side view"
 	case .Files_Button:
 		return "Files in this diff"
-	case .Filter_Button:
-		return "Filter files"
-	case .Fold_Button:
-		return view.any_expanded ? "Collapse all files" : "Expand all files"
+	case .File_Header, .Sticky_Header:
+		folded := hit.index >= 0 && hit.index < len(view.collapsed) && view.collapsed[hit.index]
+		return folded ? "Expand file" : "Collapse file"
+	case .Hunk_Comment:
+		return "Comment on this hunk"
+	case .Comment_Button:
+		return "Comment on the selected lines"
+	case .Comment_Card:
+		return "Edit comment"
+	case .Comment_Delete:
+		return "Delete comment"
+	case .Send:
+		if !view.send.can_send {return view.send.reason}
+		if view.send.target == "" {return "Send the comments and submit"}
+		parts := []string{"Send the comments to ", view.send.target, " and submit"}
+		return strings.concatenate(parts, context.temp_allocator)
+	case .Copy:
+		return "Copy the comments"
+	case .Discard:
+		return "Discard the comments"
 	}
 	return ""
+}
+
+// The keys the step buttons answer to, older then newer; changes_key reads them and so do the tooltips.
+@(private = "file", rodata)
+CHANGES_STEP_KEYS := [2]commands.Shortcut{{.Arrow_Left, {}}, {.Arrow_Right, {}}}
+
+// The fixed keys the step buttons and the file list's regular expression toggle answer to; the toggle's is
+// the find bar's, which the list shares.
+changes_shortcut :: proc(app: ^App, w: ^Window, x, y: f32) -> Tooltip_Shortcut {
+	pane, hit, g, listed := changes_tooltip_hit(app, w, x, y)
+	if pane == nil {return nil}
+	if listed {
+		if !changes_on_regex_toggle(w, pane, g, x, y) {return nil}
+		return ui.FIND_KEYS[.Regex_Toggle]
+	}
+	#partial switch hit.part {
+	case .Step_Back:
+		return CHANGES_STEP_KEYS[0]
+	case .Step_Forward:
+		return CHANGES_STEP_KEYS[1]
+	}
+	return nil
 }
 
 when AIO_CONTROL {
@@ -1163,8 +1292,9 @@ when AIO_CONTROL {
 		step_back_rect, step_forward_rect, range_label_rect: render.Rect
 		files_button_rect, layout_button_rect: render.Rect
 		filter_button_rect, filter_field_rect, filter_clear_rect, filter_bar_clear_rect: render.Rect
-		regex_rect, fold_button_rect, sticky_rect: render.Rect
+		regex_rect, fold_button_rect, sticky_rect, strip_older_rect, strip_newer_rect: render.Rect
 		top_file, sticky_file := -1, -1
+		strip_older, strip_newer, strip_bars := 0, 0, 0
 		list_empty := ""
 		label_buffer: [64]u8
 		if pane != nil {
@@ -1191,6 +1321,12 @@ when AIO_CONTROL {
 				top_file = ui.changes_top_file(&pane.state, view)
 				fold_button_rect = g.fold_button
 				sticky_file, sticky_rect = ui.changes_sticky_header(&pane.state, view, g)
+				if ui.changes_scope_turns(pane.scope) {
+					strip_older, strip_newer = ui.changes_strip_hidden(g, &pane.state, view)
+					strip_bars = g.strip_bars
+					strip_older_rect = ui.changes_strip_marker_rect(g, &pane.state, view, false)
+					strip_newer_rect = ui.changes_strip_marker_rect(g, &pane.state, view, true)
+				}
 				for i in 0 ..< len(view.turns) {
 					rect := ui.changes_strip_bar_rect(g, &pane.state, view, i)
 					if rect.width <= 0 || rect.height <= 0 {continue}
@@ -1261,6 +1397,9 @@ when AIO_CONTROL {
 		state_value(r, "changes.top_file", top_file)
 		state_value(r, "changes.any_expanded", pane != nil && pane.model.view.any_expanded)
 		state_value(r, "changes.sticky_file", sticky_file)
+		state_value(r, "changes.strip_bars", strip_bars)
+		state_value(r, "changes.strip_older", strip_older)
+		state_value(r, "changes.strip_newer", strip_newer)
 		state_text(r, "changes.filter", pane != nil ? changes_filter_text(pane) : "")
 		state_value(r, "changes.filter_open", pane != nil && pane.state.filter_open)
 		state_value(r, "changes.filter_active", pane != nil && pane.model.view.filter_active)
@@ -1273,6 +1412,13 @@ when AIO_CONTROL {
 		state_value(r, "changes.total_added", pane != nil ? pane.model.view.total_added : 0)
 		state_value(r, "changes.total_removed", pane != nil ? pane.model.view.total_removed : 0)
 		state_value(r, "changes.minimum_contrast", pane != nil ? pane.model.view.minimum_contrast : 0)
+		// What the tooltip says for the control under the pointer, and the key it names, whether or not it
+		// is showing yet.
+		tooltip := strings.clone(changes_tooltip(app, w, w.pointer.x, w.pointer.y), context.temp_allocator)
+		key_buffer: [commands.SHORTCUT_TEXT_CAP]u8
+		key := tooltip_shortcut(app, w, .Changes_Page, w.pointer.x, w.pointer.y, key_buffer[:])
+		state_text(r, "changes.tooltip", tooltip)
+		state_text(r, "changes.tooltip_key", strings.clone(key, context.temp_allocator))
 		state_value(r, "changes.file_list_regex", pane != nil && pane.dropdown.regex)
 		state_text(r, "changes.file_list_empty", list_empty)
 		state_text(r, "changes.range_label", range_label)
@@ -1292,6 +1438,8 @@ when AIO_CONTROL {
 		state_rect(r, "changes.file_list_regex_rect", regex_rect)
 		state_rect(r, "changes.fold_button_rect", fold_button_rect)
 		state_rect(r, "changes.sticky_rect", sticky_rect)
+		state_rect(r, "changes.strip_older_rect", strip_older_rect)
+		state_rect(r, "changes.strip_newer_rect", strip_newer_rect)
 		changes_comments_state_report(r, app, w, pane)
 	}
 }
