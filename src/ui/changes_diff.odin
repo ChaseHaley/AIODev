@@ -18,8 +18,6 @@ CHANGES_SEND_BAR_HEIGHT :: f32(40)
 @(private = "file")
 CHANGES_ACTION_WIDTH :: f32(72)
 @(private = "file")
-CHANGES_SEND_DISABLED_ALPHA :: f32(0.45)
-@(private = "file")
 CHANGES_COMMENT_HINT :: "Enter to save · Esc to cancel"
 @(private = "file")
 CHANGES_DETACHED_LABEL :: "Not in this diff"
@@ -1250,8 +1248,8 @@ changes_send_bar_draw :: proc(
 	} else {
 		radius := RADIUS_CONTROL * s
 		fill, ink := theme.accent, theme.accent_text
-		fill.a *= CHANGES_SEND_DISABLED_ALPHA
-		ink.a *= CHANGES_SEND_DISABLED_ALPHA
+		fill.a *= DISABLED_ALPHA
+		ink.a *= DISABLED_ALPHA
 		draw_rect(list, {rect = send, color = fill, radius = radius})
 		strong := text_styled(text, .Strong)
 		width := min(text_width(&strong, "Send"), send.width)
