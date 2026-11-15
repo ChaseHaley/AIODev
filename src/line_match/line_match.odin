@@ -3,6 +3,7 @@ package line_match
 import "aio:search"
 import "base:runtime"
 import "core:strings"
+import "core:slice"
 import "core:text/regex"
 import "core:unicode/utf8"
 
@@ -94,6 +95,10 @@ next :: proc(m: ^Matcher) -> (first, end: int, ok: bool) {
 next_expression :: proc(m: ^Matcher) -> (first, end: int, ok: bool) {
 	it := &m.iterator
 	for {
+		// core:text/regex adds a run's first thread before it clears the map of busy program counters,
+		// and reset leaves the map as the last run left it, so a run that found nothing would block every
+		// run after it.
+		slice.zero(it.vm.busy_map)
 		capture, _, matched := regex.match_iterator(it)
 		if !matched {
 			m.finished = true
