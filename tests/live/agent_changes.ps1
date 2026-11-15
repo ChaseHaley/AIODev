@@ -755,6 +755,18 @@ try {
     Aio key Enter | Out-Null
     $s = Await-State @{ 'changes.files_open' = 'false'; 'changes.top_file' = 0 } 'picking live.py scrolls back to the top'
 
+    # Tokyo Night Moon draws comments faintly on added rows; the diff raises code text to the minimum contrast.
+    $ini = Get-Content -LiteralPath "$data/settings.ini" -Raw
+    $theme = (State)['theme.name']
+    Add-Content -LiteralPath "$data/settings.ini" -Value "`ntheme.name = tokyonight-moon"
+    Aio command settings.reload | Out-Null
+    Await-State @{ 'theme.name' = 'tokyonight-moon'; 'changes.minimum_contrast' = '4.5'; 'changes.top_file' = 0 } `
+        'Tokyo Night Moon draws the diff at the default minimum contrast' | Out-Null
+    Aio capture --out "$data/agent-contrast.png" | Out-Null
+    Set-Content -LiteralPath "$data/settings.ini" -Value $ini -NoNewline
+    Aio command settings.reload | Out-Null
+    Await-State @{ 'theme.name' = $theme } 'the original theme returns' | Out-Null
+
     # Comments: select two lines, write a comment, copy it, then send it to the reviewer's pane.
     Await-File $reviewReady 'the reviewer accepts pasted text' | Out-Null
     $comment = 'Please rename greet to welcome'
