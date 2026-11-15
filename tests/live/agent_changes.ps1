@@ -43,7 +43,9 @@ function Await-State($want, $label, $seconds = 15) {
         if ($miss.Count -eq 0) { [Console]::Out.WriteLine("PASS $label"); return $s }
         if ((Get-Date) -ge $deadline) {
             $seen = ($miss | ForEach-Object { "$_=$($s[$_]) (want $($want[$_]))" }) -join ', '
-            throw "$label timed out: $seen"
+            $files = @($s.Keys | Where-Object { $_ -like 'changes.file.*.path' } | Sort-Object |
+                ForEach-Object { "$_=$($s[$_])" }) -join ', '
+            throw "$label timed out: $seen; turns=$($s['changes.turns']) first=$($s['changes.first']) last=$($s['changes.last']) $files"
         }
         Start-Sleep -Milliseconds 100
     }
@@ -75,8 +77,59 @@ function File-Row($s, $path) {
     }
     throw "changes.file has no $path; saw $(@(0..9 | ForEach-Object { $s["changes.file.$_.path"] }) -join ',')"
 }
+# Worktrees the journey adds beside the repository; the picker reports them with '/' separators.
+$wtA = "$work-wt-a"
+$wtB = "$work-wt-b"
+$workPath = $work -replace '\\', '/'
+$wtAPath = $wtA -replace '\\', '/'
+function Remove-Worktree($path) {
+    if (-not (Test-Path -LiteralPath $path)) { return }
+    $previous = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    & git.exe -C $work worktree remove --force $path 2>&1 | Out-Null
+    $ErrorActionPreference = $previous
+    if (Test-Path -LiteralPath $path) { Remove-Item -LiteralPath $path -Recurse -Force -ErrorAction SilentlyContinue }
+}
+function Focus-Pane($node) {
+    $s = State
+    Aio mouse click (Middle (Rect $s "pane.$node.rect")) --px | Out-Null
+    Await-State @{ 'panes.focused' = $node } "pane $node takes focus" | Out-Null
+}
+# Toggles Agent changes beside the pane; its scope is Agent because the pane reported agent status.
+function Open-Changes($node, $label) {
+    Focus-Pane $node
+    Aio command pane.agent_changes | Out-Null
+    return Await-State @{ 'changes.active' = 'true'; 'changes.scope' = 'agent'; 'changes.loaded' = 'true' } $label
+}
+function Close-Changes($panes) {
+    Aio command pane.agent_changes | Out-Null
+    Await-State @{ 'panes.count' = $panes; 'changes.active' = 'false' } 'Agent changes closes' | Out-Null
+}
+# Types into the focused shell, so a marker the command prints tells that the folder changed.
+function Start-Worker($directory, $marker, $target, $file, $mine, $other) {
+    Aio run "cd '$directory'; Write-Output ('READY_' + '$marker')" | Out-Null
+    Aio wait text "READY_$marker" | Out-Null
+    Aio run "pwsh -NoProfile -File '$worker' -Target '$target' -Name '$file' -Mine '$mine' -Other '$other'" | Out-Null
+}
+# A new tab with two shells side by side, each running the worker; returns the two pane nodes.
+function Start-Pair($tab, $tag, $directoryA, $directoryB, $targetA, $targetB, $fileA, $fileB) {
+    Aio command tab.new | Out-Null
+    Await-State @{ 'tabs.count' = $tab; 'tabs.selected' = $tab } "tab $tab opens" | Out-Null
+    Aio wait text 'PS ' | Out-Null
+    $nodeA = (State)['panes.focused']
+    $flagA = "$data/$tag-a.flag"
+    $flagB = "$data/$tag-b.flag"
+    Start-Worker $directoryA "${tag}A" $targetA $fileA $flagA $flagB
+    Aio command pane.split_right | Out-Null
+    Await-State @{ 'panes.count' = 2 } "tab $tab splits" | Out-Null
+    Aio wait text 'PS ' | Out-Null
+    $nodeB = (State)['panes.focused']
+    Start-Worker $directoryB "${tag}B" $targetB $fileB $flagB $flagA
+    return @($nodeA, $nodeB)
+}
 
 if (Test-Path -LiteralPath $work) { Remove-Item -LiteralPath $work -Recurse -Force }
+foreach ($path in @($wtA, $wtB)) { if (Test-Path -LiteralPath $path) { Remove-Item -LiteralPath $path -Recurse -Force } }
 New-Item -ItemType Directory -Path $work | Out-Null
 Git init -q
 Set-Content -LiteralPath (Join-Path $work 'a.txt') -Value @('one', 'two', 'three')
@@ -101,9 +154,15 @@ try {
     $go = "$data/go.flag"
     $finished = "$data/finished.flag"
     $agent = "$data/agent.ps1"
+    $go3 = "$data/go3.flag"
+    $finished3 = "$data/finished3.flag"
+    $worker = "$data/worker.ps1"
     Set-Content -LiteralPath $agent -Value @(
         "`$work = '$work'"
         "`$go = '$go'"
+        "`$go3 = '$go3'"
+        "`$finished3 = '$finished3'"
+        "`$wtA = '$wtA'"
         "`$finished = '$finished'"
         'function Report($state, $message) {'
         '    $text = "]7501;state=$state" + ":app=claude"'
@@ -127,10 +186,23 @@ try {
         "Report 'done' 'Second'"
         'Start-Sleep -Seconds 2'
         "Set-Content -LiteralPath `$finished -Value 'x'"
+        'Start-Sleep -Seconds 1'
+        'while (-not (Test-Path -LiteralPath $go3)) { Start-Sleep -Milliseconds 100 }'
+        'Start-Sleep -Seconds 1'
+        "Report 'working' ''"
+        'Start-Sleep -Milliseconds 500'
+        '& git.exe -C $work worktree add $wtA -b agent-a *> $null'
+        'Start-Sleep -Milliseconds 500'
+        "Add-Content -LiteralPath (Join-Path `$wtA 'a.txt') -Value 'agent line in worktree'"
+        'Start-Sleep -Seconds 1'
+        "Report 'done' 'Third'"
+        'Start-Sleep -Seconds 2'
+        "Set-Content -LiteralPath `$finished3 -Value 'x'"
         'Start-Sleep -Seconds 900'
     )
     Aio run "cd '$work'" | Out-Null
     Aio wait text 'agent-changes-repo' | Out-Null
+    $agentPane = (State)['panes.focused']
     Aio run "pwsh -NoProfile -File '$agent'" | Out-Null
 
     Await-AtLeast 'turns.saved' 1 'the first turn is saved' | Out-Null
@@ -182,6 +254,110 @@ try {
 
     Aio capture --out "$data/agent-changes.png" | Out-Null
 
+    # (a) A third turn in the first pane: the agent started in the main folder adds a worktree beside the
+    # repository and edits a file there. The turn lists that file, and the git scopes follow the agent.
+    $s = State
+    Set-Content -LiteralPath $go3 -Value 'x'
+    Await-File $finished3 'the agent finished its third turn' | Out-Null
+    Await-AtLeast 'turns.saved' 3 'the third turn is saved'
+    Equal (State)['turns.last_error'] '' 'the worktree turn records no error'
+    # Closing and reopening the pane shows the agent scope on its newest turn, as the first open did.
+    Aio command pane.agent_changes | Out-Null
+    Await-State @{ 'panes.count' = 1; 'changes.active' = 'false' } 'Agent changes closes' | Out-Null
+    $s = Open-Changes $agentPane 'the pane reopens on the agent scope'
+    $s = Await-State @{
+        'changes.turns' = 3; 'changes.first' = 0; 'changes.last' = 0; 'changes.files' = 1
+        'changes.file.0.path' = 'a.txt'
+    } 'the worktree turn lists the file the agent edited in the linked worktree'
+    Equal $s['changes.file.0.added'] 1 'the worktree edit shows its own line'
+    Equal $s['changes.file.0.ambiguous'] false 'the only open turn owns the worktree edit'
+    Aio mouse click (Middle (Rect $s 'changes.scope_rect')) --px | Out-Null
+    Await-State @{ 'changes.dropdown_open' = 'true' } 'the scope dropdown opens again' | Out-Null
+    Aio key Down Down Enter | Out-Null
+    $s = Await-State @{
+        'changes.scope' = 'uncommitted'; 'changes.following' = 'true'; 'changes.worktree' = $wtAPath
+        'changes.dropdown_open' = 'false'; 'changes.files' = 1
+    } 'Uncommitted follows the agent to the worktree it changed'
+    Equal $s['changes.worktrees'] 2 'the picker lists the main worktree and the new one'
+    Equal $s['changes.file.0.path'] 'a.txt' 'the followed worktree lists its modified file'
+    Aio capture --out "$data/agent-worktree.png" | Out-Null
+    # The picker lists Follow the agent, the followed worktree, then the folder's own.
+    Aio mouse click (Middle (Rect $s 'changes.worktree_rect')) --px | Out-Null
+    Await-State @{ 'changes.dropdown_open' = 'true' } 'the worktree picker opens' | Out-Null
+    Aio key Down Down Enter | Out-Null
+    $s = Await-State @{
+        'changes.following' = 'false'; 'changes.worktree' = $workPath; 'changes.dropdown_open' = 'false'
+        'changes.files' = 3
+    } 'the picker switches back to the main worktree'
+    Equal $s['changes.file.0.path'] 'a.txt' 'the main worktree lists a.txt'
+    Equal $s['changes.file.2.path'] 'c.txt' 'the main worktree lists c.txt'
+
+    # (b) Two agents in parallel, each started from its own worktree, with overlapping turns.
+    Set-Content -LiteralPath $worker -Value @(
+        'param($Target, $Name, $Mine, $Other)'
+        'function Report($state, $message) {'
+        '    $text = "]7501;state=$state" + ":app=claude"'
+        '    if ($message) { $text += ":msg=" + [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($message)) }'
+        '    [Console]::Write([char]27 + $text + [char]7)'
+        '}'
+        "Report 'working' ''"
+        # Both turns are open before either edits, so the edits overlap both turns.
+        "Set-Content -LiteralPath (`$Mine + '.started') -Value 'x'"
+        "while (-not (Test-Path -LiteralPath (`$Other + '.started'))) { Start-Sleep -Milliseconds 100 }"
+        'Start-Sleep -Milliseconds 500'
+        'Set-Content -LiteralPath (Join-Path $Target $Name) -Value @("from", $Name)'
+        "Set-Content -LiteralPath `$Mine -Value 'x'"
+        'while (-not (Test-Path -LiteralPath $Other)) { Start-Sleep -Milliseconds 100 }'
+        'Start-Sleep -Seconds 1'
+        "Report 'done' 'Parallel'"
+        'Start-Sleep -Seconds 900'
+    )
+    Git worktree add $wtB -b agent-b
+    $saved = [int](State)['turns.saved']
+    $panes = Start-Pair 2 'b' $wtA $wtB $wtA $wtB 'pa.txt' 'pb.txt'
+    Await-AtLeast 'turns.saved' ($saved + 2) 'both worktree agents saved their turns' 40
+    Equal (State)['turns.last_error'] '' 'the parallel turns record no error'
+    $s = Open-Changes $panes[0] 'the first worktree agent opens the agent scope'
+    $s = Await-State @{
+        'changes.turns' = 1; 'changes.first' = 0; 'changes.last' = 0; 'changes.files' = 1
+        'changes.file.0.path' = 'pa.txt'
+    } 'the first agent lists only its own worktree file'
+    Equal $s['changes.file.0.ambiguous'] false 'the first agent file is not ambiguous'
+    Equal $s['changes.file.0.marked'] false 'the first agent file is not marked'
+    Aio capture --out "$data/agent-parallel-worktrees.png" | Out-Null
+    Close-Changes 2
+    $s = Open-Changes $panes[1] 'the second worktree agent opens the agent scope'
+    $s = Await-State @{
+        'changes.turns' = 1; 'changes.first' = 0; 'changes.last' = 0; 'changes.files' = 1
+        'changes.file.0.path' = 'pb.txt'
+    } 'the second agent lists only its own worktree file'
+    Equal $s['changes.file.0.ambiguous'] false 'the second agent file is not ambiguous'
+    Equal $s['changes.file.0.marked'] false 'the second agent file is not marked'
+    Close-Changes 2
+
+    # (c) Two agents in parallel, both started in the main folder, edit the two worktrees. Neither is
+    # linked to either worktree, so each turn takes both files and marks them as possibly the other's.
+    $saved = [int](State)['turns.saved']
+    $panes = Start-Pair 3 'c' $work $work $wtA $wtB 'ca.txt' 'cb.txt'
+    Await-AtLeast 'turns.saved' ($saved + 2) 'both shared-worktree agents saved their turns' 40
+    Equal (State)['turns.last_error'] '' 'the shared turns record no error'
+    foreach ($node in $panes) {
+        $s = Open-Changes $node "the agent started in the main folder opens the agent scope ($node)"
+        # A diff spanning two worktrees labels each path with its worktree's folder.
+        $s = Await-State @{
+            'changes.turns' = 1; 'changes.first' = 0; 'changes.last' = 0; 'changes.files' = 2
+            'changes.file.0.path' = "$(Split-Path -Leaf $wtA)/ca.txt"
+            'changes.file.1.path' = "$(Split-Path -Leaf $wtB)/cb.txt"
+        } "the newest turn lists both worktree files ($node)"
+        Equal $s['changes.file.0.ambiguous'] true "ca.txt may include another agent's changes ($node)"
+        Equal $s['changes.file.1.ambiguous'] true "cb.txt may include another agent's changes ($node)"
+        # The other agent's copy of the same shared change is not an outside change.
+        Equal $s['changes.file.0.marked'] false "ca.txt is not also marked as changed outside ($node)"
+        Equal $s['changes.file.1.marked'] false "cb.txt is not also marked as changed outside ($node)"
+        if ($node -eq $panes[0]) { Aio capture --out "$data/agent-shared-worktrees.png" | Out-Null }
+        Close-Changes 2
+    }
+
     # Recording off asks to delete what was recorded.
     if ((Turn-Directories).Count -eq 0) { throw "no agent-turns directory under $data while recording" }
     Write-Output 'PASS the recorded turns exist on disk'
@@ -202,5 +378,6 @@ try {
     Write-Output 'PASS Delete removes every recorded copy'
 } finally {
     & $ctl --name $name stop | Out-Null
+    foreach ($path in @($wtA, $wtB)) { Remove-Worktree $path }
     if (Test-Path -LiteralPath $work) { Remove-Item -LiteralPath $work -Recurse -Force -ErrorAction SilentlyContinue }
 }
