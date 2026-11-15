@@ -5,6 +5,7 @@ import "core:mem"
 import w "core:sys/windows"
 import "core:sync"
 import "core:thread"
+import "core:time"
 import "core:unicode/utf16"
 
 // The kernel fills one buffer per read. A burst that outruns it is discarded whole and the read
@@ -62,6 +63,17 @@ Watch_Read :: enum u8 {
 	Failed,
 }
 
+// A marker sent through the completion port. The waiter and the set's thread each hold it, and
+// whichever lets go last frees it, so a waiter that timed out leaves nothing for the thread to write
+// into.
+@(private)
+Watch_Marker :: struct {
+	// The port wants an OVERLAPPED; this one is only an address the thread recognises.
+	entry:   w.OVERLAPPED,
+	handled: sync.Sema,
+	holders: i32,
+}
+
 // Starts the thread that collects the changes of every directory added to the set. The wake runs
 // on that thread once paths have arrived, changes were lost or a watch died. Returns false, logging
 // why, when the thread cannot start. The allocator must tolerate use from that thread.
@@ -114,6 +126,16 @@ watch_set_destroy :: proc(set: ^Watch_Set) {
 		}
 		thread.join(native.worker)
 		thread.destroy(native.worker)
+		// A marker whose waiter gave up may still be queued, and only the thread's hold on it is left.
+		queued: [WATCH_BATCH]w.OVERLAPPED_ENTRY
+		removed: w.c_ulong
+		for bool(w.GetQueuedCompletionStatusEx(native.port, &queued[0], WATCH_BATCH, &removed, 0, false)) {
+			for entry in queued[:removed] {
+				if entry.lpOverlapped != nil && entry.lpCompletionKey == 0 {
+					watch_marker_release(set, (^Watch_Marker)(entry.lpOverlapped))
+				}
+			}
+		}
 	}
 	for watch in set.watches {
 		// Only a set whose thread failed has a read left, which the OS may still write into.
@@ -196,6 +218,49 @@ watch_set_remove :: proc(set: ^Watch_Set, id: Watch_Id) {
 		}
 	}
 	watch_discard(set, watch)
+}
+
+// Returns once the set's thread has taken in every directory change the OS reported before the call,
+// so a take that follows sees them: completions leave the port in the order they arrived. A change
+// the OS kept while no read was in flight completes only when the thread starts the next read, behind
+// the first marker, so a second marker follows it. False, after logging, when the thread did not get
+// there within `timeout` or cannot any more; the caller goes on with what has arrived.
+@(require_results)
+watch_set_sync :: proc(set: ^Watch_Set, timeout: time.Duration) -> bool {
+	if set == nil {return false}
+	started := time.tick_now()
+	for _ in 0 ..< 2 {
+		left := timeout - time.tick_since(started)
+		if left <= 0 || !watch_set_marker(set, left) {
+			log.warn("the directory watch thread did not catch up")
+			return false
+		}
+	}
+	return true
+}
+
+@(private, require_results)
+watch_set_marker :: proc(set: ^Watch_Set, timeout: time.Duration) -> bool {
+	sync.mutex_lock(&set.mutex)
+	gone := set.failed || set.closing
+	sync.mutex_unlock(&set.mutex)
+	if gone {return false}
+	marker, allocation_error := new(Watch_Marker, set.allocator)
+	if allocation_error != nil {return false}
+	marker.holders = 2
+	if !bool(w.PostQueuedCompletionStatus(set.native.port, 0, 0, &marker.entry)) {
+		log.errorf("PostQueuedCompletionStatus failed: %d", w.GetLastError())
+		free(marker, set.allocator)
+		return false
+	}
+	handled := sync.sema_wait_with_timeout(&marker.handled, timeout)
+	watch_marker_release(set, marker)
+	return handled
+}
+
+@(private)
+watch_marker_release :: proc(set: ^Watch_Set, marker: ^Watch_Marker) {
+	if sync.atomic_sub(&marker.holders, 1) == 1 {free(marker, set.allocator)}
 }
 
 // Closes the directory and frees the watch with what it holds. Nothing may be reading into it.
@@ -330,8 +395,15 @@ watch_set_main :: proc(t: ^thread.Thread) {
 		arrived := false
 		sync.mutex_lock(&set.mutex)
 		for entry in entries[:removed] {
-			// The stop request is the only entry that carries no read.
+			// The stop request is the only entry that carries no read, and a marker the only one with
+			// no watch.
 			if entry.lpOverlapped == nil {continue}
+			if entry.lpCompletionKey == 0 {
+				marker := (^Watch_Marker)(entry.lpOverlapped)
+				sync.sema_post(&marker.handled)
+				watch_marker_release(set, marker)
+				continue
+			}
 			watch := (^Watch_Directory)(rawptr(uintptr(entry.lpCompletionKey)))
 			if watch_complete(set, watch) {arrived = true}
 		}

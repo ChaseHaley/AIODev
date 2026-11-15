@@ -716,3 +716,49 @@ watch_set_destroy_cancels_every_read_promptly :: proc(t: ^testing.T) {
 	f.set = nil
 	testing.expect(t, time.tick_since(began) < time.Second, "the set stops promptly")
 }
+
+// A take right after a sync holds every change made before it, with no waiting in between: once
+// for each of many single writes, a write made while the thread is busy with an earlier one, and a
+// burst.
+@(test)
+watch_set_sync_makes_every_earlier_change_takeable :: proc(t: ^testing.T) {
+	testing.set_fail_timeout(t, 30 * time.Second)
+	f: Watched
+	defer watch_destroy(t, &f)
+	if !watch_prepare(t, &f) {return}
+	if !watch_begin(t, &f, true) {return}
+	testing.expect(t, !turns.watch_set_sync(nil, time.Second), "a missing set cannot be synced")
+
+	batch := make([dynamic]string, context.temp_allocator)
+	for index in 0 ..< 50 {
+		name := fmt.tprintf("single-%02d.txt", index)
+		watch_write(t, &f, name, "x")
+		if index % 2 == 1 {watch_write(t, &f, "again.txt", name)}
+		if !testing.expect(t, turns.watch_set_sync(f.set, time.Second), "the sync completes") {return}
+		clear(&batch)
+		_, _ = turns.watch_set_take(f.set, f.id, &batch, context.temp_allocator)
+		found, again := false, false
+		for path in batch {
+			found ||= path == name
+			again ||= path == "again.txt"
+		}
+		testing.expectf(t, found, "%s is takeable once synced: %v", name, batch)
+		if index % 2 == 1 {testing.expectf(t, again, "again.txt is takeable once synced: %v", batch)}
+	}
+
+	names := make([dynamic]string, context.temp_allocator)
+	for index in 0 ..< 100 {
+		name := fmt.tprintf("burst-%03d.txt", index)
+		append(&names, name)
+		watch_write(t, &f, name, "x")
+	}
+	if !testing.expect(t, turns.watch_set_sync(f.set, time.Second), "the sync completes") {return}
+	clear(&batch)
+	overflowed, _ := turns.watch_set_take(f.set, f.id, &batch, context.temp_allocator)
+	if overflowed {return}
+	for name in names {
+		found := false
+		for path in batch {found ||= path == name}
+		testing.expectf(t, found, "%s is takeable once synced", name)
+	}
+}

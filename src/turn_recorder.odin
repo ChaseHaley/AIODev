@@ -296,22 +296,39 @@ turn_records :: proc(statuses: []term.Program_Status) -> []turns.Record_Status {
 // empty id, else the most recently updated top-level record.
 @(private, require_results)
 turn_main_title :: proc(statuses: []term.Program_Status) -> string {
+	main := turn_main_index(statuses)
+	if main < 0 {return ""}
+	status := statuses[main]
+	return status.title != "" ? status.title : status.message
+}
+
+// The record turns.main_status follows, -1 when none.
+@(private, require_results)
+turn_main_index :: proc(statuses: []term.Program_Status) -> int {
 	best := -1
 	for status, i in statuses {
-		if status.id == "" {best = i; break}
+		if status.id == "" {return i}
 	}
-	if best < 0 {
-		latest: i64
-		for status, i in statuses {
-			if strings.index_byte(status.id, '/') >= 0 {continue}
-			updated := turn_unix_ms(status.updated_at)
-			if best >= 0 && updated <= latest {continue}
-			best, latest = i, updated
-		}
+	latest: i64
+	for status, i in statuses {
+		if strings.index_byte(status.id, '/') >= 0 {continue}
+		updated := turn_unix_ms(status.updated_at)
+		if best >= 0 && updated <= latest {continue}
+		best, latest = i, updated
 	}
-	if best < 0 {return ""}
-	status := statuses[best]
-	return status.title != "" ? status.title : status.message
+	return best
+}
+
+// Whether the main record left Working and came back to it between the two snapshots, which only compare
+// states: an agent that finishes a turn and starts the next one at once, as a queued prompt makes it,
+// reports done and working within one refresh. The record then entered Working again.
+@(private, require_results)
+turn_rebegun :: proc(previous, next: []term.Program_Status) -> bool {
+	before, after := turn_main_index(previous), turn_main_index(next)
+	if before < 0 || after < 0 {return false}
+	was, now := previous[before], next[after]
+	if was.id != now.id || was.ended || was.state != .Working || now.state != .Working {return false}
+	return time.diff(was.since, now.since) > 0
 }
 
 // Called by status_refresh with the snapshot being replaced and its replacement.
@@ -325,9 +342,14 @@ turn_recorder_status :: proc(app: ^App, entry: ^Session_Entry, previous, next: [
 	pane := turn_pane_ensure(rec, entry.key)
 	if pane == nil {return}
 	if has_after {turn_warm(app, pane, entry)}
-	if !found {return}
 	title := turn_main_title(next)
 	if title == "" {title = turn_main_title(previous)}
+	if !found {
+		if !turn_rebegun(previous, next) {return}
+		// The turn ended unseen: the next one began as soon as it did.
+		_ = turn_signal(app, pane, entry, .Done, turn_main_title(previous), "", "")
+		signal = .Working
+	}
 	_ = turn_signal(app, pane, entry, signal, title, "", "")
 }
 
@@ -486,8 +508,9 @@ turn_end :: proc(app: ^App, pane: ^Turn_Pane, status_title: string) {
 	}
 }
 
+// `settle_until` is when the turn's last writes have surely reached the watches, in real ticks.
 @(private)
-turn_end_post :: proc(app: ^App, end: ^Turn_End) {
+turn_end_post :: proc(app: ^App, end: ^Turn_End, settle_until: time.Tick = {}) {
 	_ = turn_post(
 		app,
 		Job_End {
@@ -498,17 +521,23 @@ turn_end_post :: proc(app: ^App, end: ^Turn_End) {
 			end_state = end.end_state,
 			title = end.title,
 			sources = end.sources,
+			settle_until = settle_until,
 		},
 	)
 }
 
-// Posts and forgets a pane's waiting End at once.
+// Posts and forgets a pane's waiting End at once. The next turn's Begin follows it at once, so the
+// worker waits out the rest of the End's settle: the turn's last write must reach its End, not the next
+// turn. The app's clock may be a test's, so the time left becomes a deadline on the real one.
 @(private)
 turn_end_flush :: proc(app: ^App, key: string) {
 	rec := &app.turn_recorder
+	now := clock_now(&app.clock)
 	for i := len(rec.ends) - 1; i >= 0; i -= 1 {
 		if rec.ends[i].key != key {continue}
-		turn_end_post(app, &rec.ends[i])
+		left := time.tick_diff(now, rec.ends[i].due)
+		deadline := time.tick_add(time.tick_now(), left) if left > 0 else time.Tick{}
+		turn_end_post(app, &rec.ends[i], deadline)
 		turn_end_destroy(&rec.ends[i])
 		ordered_remove(&rec.ends, i)
 	}

@@ -1,9 +1,11 @@
 package app_test
 
 import "aio:platform"
+import "aio:term"
 import "aio:turns"
 import "core:fmt"
 import "core:os"
+import "core:slice"
 import "core:strings"
 import "core:testing"
 import "core:time"
@@ -19,11 +21,18 @@ Fixture :: struct {
 }
 
 @(private = "file")
-fixture_start :: proc(t: ^testing.T, f: ^Fixture, name: string, record: bool) -> bool {
+fixture_start :: proc(
+	t: ^testing.T,
+	f: ^Fixture,
+	name: string,
+	record: bool,
+	settings_extra := "",
+) -> bool {
 	directory, err := os.make_directory_temp("", "aio-turns-*", context.allocator)
 	if !testing.expect_value(t, err, nil) {return false}
 	f.directory = directory
-	extra := record ? "cursor.blink = false\nturns.record = true\n" : "cursor.blink = false\n"
+	recorded := record ? "cursor.blink = false\nturns.record = true\n" : "cursor.blink = false\n"
+	extra := strings.concatenate({recorded, settings_extra}, context.temp_allocator)
 	settings_path := strings.concatenate({directory, "/settings.ini"}, context.temp_allocator)
 	if !testing.expect_value(t, os.write_entire_file(settings_path, idle_shell_settings(t, extra)), nil) {
 		return false
@@ -176,4 +185,140 @@ a_hook_event_for_an_unknown_pane_is_deleted :: proc(t: ^testing.T) {
 	if !testing.expect_value(t, os.write_entire_file(path, text), nil) {return}
 	testing.expect(t, tick_until_missing(&f.state, path), "the app answers a hook by deleting its file")
 	testing.expect_value(t, f.state.turn_recorder.handled, 1)
+}
+
+// How long after reporting done the fake agent reports working again.
+@(private = "file")
+Strip_Gap :: enum u8 {
+	// Both reports arrive within one status refresh.
+	Coalesced,
+	// The next refresh, with no frame between.
+	Next_Refresh,
+	Ms_50,
+	Ms_300,
+}
+
+// Replaces the pane's status snapshot with one main record, as status_refresh does.
+@(private = "file")
+strip_report :: proc(
+	state: ^app.App,
+	entry: ^app.Session_Entry,
+	shown: ^[]term.Program_Status,
+	report: term.Program_Status_State,
+	title: string,
+) {
+	next := make([]term.Program_Status, 1)
+	now := time.now()
+	next[0] = {
+		state      = report,
+		title      = title,
+		updated_at = now,
+		since      = now,
+	}
+	app.turn_recorder_status(state, entry, shown^, next)
+	delete(shown^)
+	shown^ = next
+}
+
+@(private = "file")
+strip_ticks :: proc(state: ^app.App, duration: time.Duration) {
+	for start := time.tick_now(); time.tick_since(start) < duration; {
+		app.tick(state)
+		time.sleep(5 * time.Millisecond)
+	}
+}
+
+// A fake agent runs turns back to back, each writing one new file, as a queued prompt makes it: the next
+// turn starts within the same status refresh as the last one finished, the next refresh, 50 ms or 300 ms
+// later. Every turn is saved alone with its own file.
+@(test)
+back_to_back_turns_are_each_saved_with_their_own_file :: proc(t: ^testing.T) {
+	output, git_error := turns.git_run({"--version"}, {})
+	if git_error != .None {return}
+	turns.git_output_destroy(&output)
+	work, work_error := os.make_directory_temp("", "aio-strip-*", context.allocator)
+	if !testing.expect_value(t, work_error, nil) {return}
+	defer delete(work)
+	defer _ = turns.store_delete_all(work)
+	bytes := transmute([]u8)work
+	for &b in bytes {
+		if b == '\\' {b = '/'}
+	}
+	identity := [?]string{"-c", "user.name=T", "-c", "user.email=t@example.com"}
+	setup := [?][]string{{"init", "-q"}, {"commit", "-q", "--allow-empty", "-m", "base"}}
+	for args in setup {
+		full := slice.concatenate([][]string{identity[:], args}, context.temp_allocator)
+		run, run_error := turns.git_run(full, {cwd = work}, context.temp_allocator)
+		if !testing.expect(t, run_error == .None && run.code == 0, "git setup") {return}
+	}
+
+	f: Fixture
+	defer fixture_stop(t, &f)
+	shell := fmt.tprintf("shell.directory = \"%s\"\n", work)
+	if !fixture_start(t, &f, "Strip", true, shell) {return}
+	state := &f.state
+	entry := app.focused_session(state, state.windows[0])
+	if !testing.expect(t, entry != nil && entry.key != "", "the pane has a session") {return}
+	shown: []term.Program_Status
+	defer delete(shown)
+	count :: 8
+	// A tick frees temporary memory, and the snapshot keeps borrowing its title.
+	titles: [count]string
+	defer for title in titles {delete(title)}
+	// The agent starts idle, which has the worker follow its repository before the first turn.
+	strip_report(state, entry, &shown, .Idle, "")
+	rec := &state.turn_recorder
+	for start := time.tick_now(); time.tick_since(start) < TIMEOUT; {
+		strip_ticks(state, 20 * time.Millisecond)
+		if rec.worker != nil && app.turn_worker_pending(rec.worker) == 0 {break}
+	}
+	for i in 0 ..< count {
+		titles[i] = fmt.aprintf("strip %d", i)
+		strip_report(state, entry, &shown, .Working, titles[i])
+		// The agent writes a moment after it reports working, well inside the last turn's settle.
+		strip_ticks(state, 20 * time.Millisecond)
+		path := fmt.tprintf("%s/strip-%02d.txt", work, i)
+		if !testing.expect_value(t, os.write_entire_file(path, titles[i]), nil) {return}
+		strip_ticks(state, 80 * time.Millisecond)
+		// A coalesced done leaves the record working, though it entered that state anew.
+		gap := Strip_Gap(i % len(Strip_Gap))
+		if gap != .Coalesced || i == count - 1 {strip_report(state, entry, &shown, .Done, titles[i])}
+		#partial switch gap {
+		case .Ms_50:
+			strip_ticks(state, 50 * time.Millisecond)
+		case .Ms_300:
+			strip_ticks(state, 300 * time.Millisecond)
+		}
+	}
+	// Each turn costs the worker a dozen git runs, so it may well fall behind the agent; that must not
+	// move a file into another turn.
+	for start := time.tick_now(); time.tick_since(start) < 6 * TIMEOUT; {
+		strip_ticks(state, 20 * time.Millisecond)
+		if len(rec.ends) == 0 && app.turn_worker_pending(rec.worker) == 0 && rec.saved >= count {break}
+	}
+	strip_ticks(state, 100 * time.Millisecond)
+	testing.expect_value(t, rec.saved, count)
+
+	// Each saved segment is a turn with one file, and no file is in two of them.
+	seen := make(map[string]bool, count, context.temp_allocator)
+	stores, list_error := os.read_all_directory_by_path(state.paths.turns, context.temp_allocator)
+	if !testing.expect_value(t, list_error, nil) {return}
+	for store in stores {
+		if store.type != .Directory {continue}
+		segments := fmt.tprintf("%s/%s", store.fullpath, turns.SEGMENTS_NAME)
+		files, _ := os.read_all_directory_by_path(segments, context.temp_allocator)
+		for file in files {
+			data, read_error := os.read_entire_file(file.fullpath, context.temp_allocator)
+			if !testing.expect_value(t, read_error, nil) {continue}
+			segment, decoded := turns.segment_decode(data, context.temp_allocator)
+			if !testing.expectf(t, decoded, "%s does not decode", file.name) {continue}
+			testing.expect_value(t, segment.kind, turns.Segment_Kind.Turn)
+			for change in segment.changes {
+				testing.expectf(t, !seen[change.path], "%s is in two turns", change.path)
+				seen[change.path] = true
+			}
+			testing.expectf(t, len(segment.changes) == 1, "%q has %v", segment.title, segment.changes)
+		}
+	}
+	testing.expect_value(t, len(seen), count)
 }

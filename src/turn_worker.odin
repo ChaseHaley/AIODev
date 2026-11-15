@@ -46,13 +46,16 @@ Job_Edit :: struct {
 }
 
 Job_End :: struct {
-	pane_key:  string,
-	session:   turns.Session,
-	started:   i64,
-	ended:     i64,
-	end_state: turns.End_State,
-	title:     string,
-	sources:   bit_set[turns.Signal_Source],
+	pane_key:     string,
+	session:      turns.Session,
+	started:      i64,
+	ended:        i64,
+	end_state:    turns.End_State,
+	title:        string,
+	sources:      bit_set[turns.Signal_Source],
+	// When the turn's last writes have surely reached the watches; the worker waits until then, at most
+	// TURN_SETTLE, before it takes the turn's changes in. Zero for no wait.
+	settle_until: time.Tick,
 }
 
 Job_Query :: struct {
@@ -251,6 +254,10 @@ TW_LIVE_QUIET :: 500 * time.Millisecond
 @(private = "file")
 TW_LIVE_EVERY :: time.Second
 
+// The longest a turn's boundary waits for the watch thread to catch up with what the OS reported.
+@(private = "file")
+TW_WATCH_SYNC :: time.Second
+
 // Source a result may highlight, over all its files; more is left plain, since lexing is not free.
 @(private = "file")
 TW_HIGHLIGHT_BUDGET :: 16 * mem.Megabyte
@@ -274,6 +281,8 @@ Tw_Net :: struct {
 	shared: bool,
 	// Orders changes in time: the value of Tw_State.stamp when the latest change was taken in.
 	stamp:  u64,
+	// Unix milliseconds when a drain first took the change in.
+	taken:  i64,
 }
 
 // A turn that has begun and not ended.
@@ -428,6 +437,11 @@ Tw_State :: struct {
 	stamp:     u64,
 	// Unix milliseconds when the turn a Begin job is running started, else 0.
 	claim_since: i64,
+	// Unix milliseconds when the turn an End job is closing ended, else 0. The worker may run the End
+	// well after the turn ended, once the agent has gone on to its next turn: what was written since is
+	// not the ending turn's, and is left for the drain that follows. A file stamped later than the moment
+	// it is looked at has a time that cannot be trusted, and stays.
+	drain_until: i64,
 	// The listings made by the job being run: a job lists a repository once.
 	listings:  [dynamic]Tw_Listing,
 	transcripts: [dynamic]Tw_Transcript,
@@ -767,10 +781,11 @@ tw_job_dup :: proc(job: Turn_Job, allocator: mem.Allocator) -> (dup: Turn_Job, o
 		return c, true
 	case Job_End:
 		c := Job_End {
-			started   = j.started,
-			ended     = j.ended,
-			end_state = j.end_state,
-			sources   = j.sources,
+			started      = j.started,
+			ended        = j.ended,
+			end_state    = j.end_state,
+			sources      = j.sources,
+			settle_until = j.settle_until,
 		}
 		defer if !ok {tw_job_free_end(&c, allocator)}
 		c.pane_key = tw_dup(j.pane_key, allocator) or_return
@@ -1009,7 +1024,7 @@ tw_note :: proc(failure: ^turns.Error, err: turns.Error) {
 @(private = "file")
 tw_run :: proc(state: ^Tw_State, job: Turn_Job) {
 	clear(&state.listings)
-	state.claim_since = 0
+	state.claim_since, state.drain_until = 0, 0
 	switch j in job {
 	case Job_Begin:
 		tw_begin(state, j)
@@ -1602,7 +1617,7 @@ tw_net_merge :: proc(
 	if first_ok && latest_ok {
 		_, value, _, insert_error := map_entry(nets, key)
 		if insert_error == nil {
-			value^ = Tw_Net{first, latest, shared, stamp}
+			value^ = Tw_Net{first, latest, shared, stamp, tw_now_ms()}
 			return true
 		}
 	}
@@ -1897,11 +1912,33 @@ tw_written_after :: proc(worktree, path: string, since: i64) -> bool {
 	return stat_error == nil && time.to_unix_nanoseconds(info.modification_time) >= since
 }
 
+// Whether the file was last written after `from` and no later than `to` (Unix milliseconds); false when
+// it cannot be read.
+@(private = "file")
+tw_written_between :: proc(worktree, path: string, from, to: i64) -> bool {
+	full := strings.join({worktree, path}, "/", context.temp_allocator)
+	info, stat_error := os.stat(full, context.temp_allocator)
+	if stat_error != nil {return false}
+	written := time.to_unix_nanoseconds(info.modification_time)
+	return written >= (from + 1) * i64(time.Millisecond) && written < (to + 1) * i64(time.Millisecond)
+}
+
 // Whether a dirty path that a lazy root's rescan found, and the watch never reported, was changed since the
 // root was followed: a file counts when written then or later; a deletion has no time to tell.
 @(private = "file")
 tw_written_since :: proc(worktree: string, item: turns.Path_State, since: i64) -> bool {
 	return !item.deleted && tw_written_after(worktree, item.path, since)
+}
+
+// Has the next drain of the root look at the path.
+@(private = "file")
+tw_seed_add :: proc(state: ^Tw_State, root: ^Tw_Root, path: string) -> bool {
+	copied := tw_dup(path, state.allocator) or_return
+	if _, append_error := append(&root.seed, copied); append_error != nil {
+		delete(copied, state.allocator)
+		return false
+	}
+	return true
 }
 
 // Gives the changes no turn took, because it began elsewhere, to Between.
@@ -2257,8 +2294,15 @@ tw_drain :: proc(state: ^Tw_State, root: ^Tw_Root, carried: bool) -> turns.Error
 	tree_of := make(map[string]turns.Oid, len(unknown), temp)
 	for path, i in unknown {tree_of[path] = tree[i]}
 	after := turns.hash_paths(root.store.store, worktree, kept, temp, state.cancel) or_return
+	// Looked at once hashed: a write after the look shows up in the next drain, and one between the hash
+	// and the look makes the file late, so the content hashed is never newer than the time judged.
+	looked := tw_now_ms()
 	changed := false
 	for path, i in kept {
+		if state.drain_until != 0 && tw_written_between(worktree, path, state.drain_until, looked) {
+			if !tw_seed_add(state, root, path) {return .Out_Of_Memory}
+			continue
+		}
 		before, seen := root.known[path]
 		if !seen {before = tree_of[path]}
 		if !tw_known_set(&root.known, path, after[i], state.allocator) {return .Out_Of_Memory}
@@ -2618,6 +2662,8 @@ tw_root_enter :: proc(
 	for path, net in root.claimed {
 		if !tw_net_merge(&fresh.changes, path, net.before, net.after, net.shared, net.stamp, allocator) {
 			err = .Out_Of_Memory
+		} else if merged, found := &fresh.changes[path]; found {
+			merged.taken = net.taken
 		}
 	}
 	tw_net_clear(&root.claimed, allocator)
@@ -2735,6 +2781,8 @@ tw_begin :: proc(state: ^Tw_State, job: Job_Begin) {
 	saved := make([dynamic]string, context.temp_allocator)
 	failure: turns.Error
 	state.claim_since = job.started
+	// What changed before the turn began must be taken in before it does, or it would count as its.
+	_ = turns.watch_set_sync(state.watches, TW_WATCH_SYNC)
 	tw_links_read(state)
 	if job.directory != "" {
 		tw_attach_directory(state, open, job.directory, job.started, &saved, &failure)
@@ -2831,18 +2879,49 @@ tw_stamped_before :: proc(a, b: Tw_Stamped) -> bool {
 tw_end :: proc(state: ^Tw_State, job: Job_End) {
 	open := tw_open_find(state, job.pane_key)
 	if open == nil {return}
+	if job.settle_until != {} {
+		left := time.tick_diff(time.tick_now(), job.settle_until)
+		if left > 0 {time.sleep(min(left, TURN_SETTLE))}
+	}
 	temp := context.temp_allocator
 	failure: turns.Error
 	// A work tree made during the turn is found now, so what was changed in it is in the turn.
 	tw_open_sync(state, open, &failure)
 	tw_links_read(state)
+	// A busy machine may not have run the watch thread since the turn's last writes; their reports must
+	// be in before the drains, or the turn looks empty and its changes go to whatever comes next.
+	_ = turns.watch_set_sync(state.watches, TW_WATCH_SYNC)
 	involved := make([dynamic]^Tw_Root, temp)
 	stores := make([dynamic]^Tw_Store, temp)
+	state.drain_until = job.ended
 	for root in state.roots {
 		if tw_presence_find(root, open) == nil {continue}
 		append(&involved, root)
 		if !slice.contains(stores[:], root.store) {append(&stores, root.store)}
 		tw_note(&failure, tw_drain(state, root, true))
+	}
+	state.drain_until = 0
+	// A drain after the turn ended may have given it a file written since: a Begin of the next turn that
+	// ran late, or a read. That change goes back, so the next drain gives it whole to whoever made it. A
+	// change taken in before the turn ended keeps its content, whatever was written over it since. An End
+	// without a time (0) keeps everything.
+	for root in involved {
+		if job.ended == 0 {break}
+		presence := tw_presence_find(root, open)
+		late := make([dynamic]string, temp)
+		for path, net in presence.changes {
+			if net.taken <= job.ended {continue}
+			worktree := root.repository.worktree
+			if tw_written_between(worktree, path, job.ended, tw_now_ms()) {append(&late, path)}
+		}
+		for path in late {
+			key, net := delete_key(&presence.changes, path)
+			restored := tw_known_set(&root.known, key, net.before, state.allocator)
+			if !restored || !tw_seed_add(state, root, key) {tw_note(&failure, .Out_Of_Memory)}
+			delete(key, state.allocator)
+			delete(net.before, state.allocator)
+			delete(net.after, state.allocator)
+		}
 	}
 	session := job.session
 	if session.pane_key == "" {session.pane_key = job.pane_key}

@@ -211,6 +211,7 @@ worker_begin :: proc(t: ^testing.T, f: ^Worker_Fixture, key: string, started: i6
 	return worker_post(t, f, job) && worker_idle(t, f)
 }
 
+// A turn ends at `ended`, or now if that is later: what was written after a turn ended is not its.
 @(private = "file")
 worker_end :: proc(
 	t: ^testing.T,
@@ -226,7 +227,7 @@ worker_end :: proc(
 		pane_key  = key,
 		session   = worker_session(key),
 		started   = started,
-		ended     = ended,
+		ended     = max(ended, worker_now()),
 		end_state = .Done,
 		title     = title,
 		sources   = {.Status},
@@ -345,7 +346,7 @@ turn_worker_records_a_turn_and_reads_it_back :: proc(t: ^testing.T) {
 	testing.expect_value(t, row.title, "Fix things\nand more")
 	testing.expect_value(t, row.end_state, turns.End_State.Done)
 	testing.expect_value(t, row.started, base)
-	testing.expect_value(t, row.ended, base + 1000)
+	testing.expect(t, row.ended >= base + 1000, "the turn ended when its End said, or later")
 	testing.expect_value(t, row.files, 2)
 	testing.expect_value(t, row.added, 3)
 	testing.expect_value(t, row.removed, 1)
@@ -457,7 +458,7 @@ turn_worker_marks_a_file_that_changed_between_two_turns :: proc(t: ^testing.T) {
 	testing.expect_value(t, all.rows[1].kind, turns.Segment_Kind.Between)
 	testing.expect_value(t, all.rows[2].kind, turns.Segment_Kind.Turn)
 	testing.expect_value(t, all.rows[1].files, 1)
-	testing.expect_value(t, all.rows[1].started, base + 1000)
+	testing.expect_value(t, all.rows[1].started, all.rows[2].ended)
 	testing.expect_value(t, all.rows[1].ended, base + 3000)
 	// The newest row alone is selected, and nothing came between its start and its end.
 	testing.expect_value(t, len(all.selected), 1)
@@ -1332,10 +1333,165 @@ turn_worker_shows_an_open_turn_live_and_saves_it_under_the_same_id :: proc(t: ^t
 	if testing.expect_value(t, len(ended.selected), 1) {testing.expect_value(t, ended.selected[0], live.id)}
 	if testing.expect_value(t, len(ended.agents), 1) {
 		testing.expect(t, !ended.agents[0].live)
-		testing.expect_value(t, ended.agents[0].latest, base + 1000)
+		testing.expect_value(t, ended.agents[0].latest, ended.rows[0].ended)
 	}
 	testing.expect_value(t, len(ended.diff.files), 3)
 	if i, found := worker_file(t, ended.diff, "big.odin"); found && len(ended.highlights) > i {
 		testing.expect(t, ended.highlights[i].lines == nil, "a blob over the limit is not read")
+	}
+}
+
+// An End that arrives after the agent has written again, as a busy worker runs it.
+@(private = "file")
+worker_end_late :: proc(
+	t: ^testing.T,
+	f: ^Worker_Fixture,
+	started, ended: i64,
+	title: string,
+) -> (
+	app.Result_Saved,
+	bool,
+) {
+	job := app.Job_End {
+		pane_key  = KEY_A,
+		session   = worker_session(KEY_A),
+		started   = started,
+		ended     = ended,
+		end_state = .Done,
+		title     = title,
+	}
+	if !worker_post(t, f, job) {return {}, false}
+	return worker_await(t, f, app.Result_Saved)
+}
+
+// The files of each saved segment by its title, Between's all under "", as "path=after" in the temp
+// allocator.
+@(private = "file")
+worker_saved_files :: proc(f: ^Worker_Fixture, key: string) -> map[string][dynamic]string {
+	temp := context.temp_allocator
+	found := make(map[string][dynamic]string, temp)
+	directory := fmt.tprintf("%s/%s/segments", f.turns_dir, key)
+	files, _ := os.read_all_directory_by_path(directory, temp)
+	for file in files {
+		data, read_error := os.read_entire_file(file.fullpath, temp)
+		if read_error != nil {continue}
+		segment, decoded := turns.segment_decode(data, temp)
+		if !decoded {continue}
+		title := segment.title if segment.kind == .Turn else ""
+		if title not_in found {found[title] = make([dynamic]string, temp)}
+		for change in segment.changes {
+			append(&found[title], fmt.tprintf("%s=%s", change.path, change.after))
+		}
+	}
+	return found
+}
+
+@(test)
+turn_worker_ends_a_turn_when_it_ended_not_when_its_end_runs :: proc(t: ^testing.T) {
+	f: Worker_Fixture
+	defer worker_stop(&f)
+	if !worker_start(t, &f) {return}
+	// The End runs after the agent wrote a file of its next turn: that file is not the ending turn's.
+	first := worker_now()
+	if !worker_begin(t, &f, KEY_A, first) || !worker_write(t, &f, "one.txt", "1\n") {return}
+	worker_settle(&f)
+	first_ended := worker_now()
+	time.sleep(20 * time.Millisecond)
+	if !worker_write(t, &f, "late-one.txt", "x\n") {return}
+	worker_settle(&f)
+	one, one_ok := worker_end_late(t, &f, first, first_ended, "one")
+	if !one_ok {return}
+	defer worker_release(one)
+	if !testing.expect_value(t, len(one.repositories), 1) {return}
+
+	// The same, when a read took the later file into the turn before its End ran.
+	second := worker_now()
+	if !worker_begin(t, &f, KEY_A, second) {return}
+	between, between_ok := worker_await(t, &f, app.Result_Saved)
+	if !between_ok {return}
+	defer worker_release(between)
+	if !worker_write(t, &f, "two.txt", "2\n") {return}
+	worker_settle(&f)
+	second_ended := worker_now()
+	time.sleep(20 * time.Millisecond)
+	if !worker_write(t, &f, "late-two.txt", "y\n") {return}
+	worker_settle(&f)
+	read, read_ok := worker_query(t, &f, f.repo, KEY_A, true, nil)
+	if !read_ok {return}
+	worker_release(read)
+	two, two_ok := worker_end_late(t, &f, second, second_ended, "two")
+	if !two_ok {return}
+	defer worker_release(two)
+
+	// A file a read took in while the turn was open keeps what the turn wrote, though it was written
+	// again after the turn ended.
+	third := worker_now()
+	if !worker_begin(t, &f, KEY_A, third) {return}
+	again, again_ok := worker_await(t, &f, app.Result_Saved)
+	if !again_ok {return}
+	defer worker_release(again)
+	if !worker_write(t, &f, "keep.txt", "one\n") {return}
+	worker_settle(&f)
+	kept, kept_ok := worker_query(t, &f, f.repo, KEY_A, true, nil)
+	if !kept_ok {return}
+	worker_release(kept)
+	third_ended := worker_now()
+	time.sleep(20 * time.Millisecond)
+	if !worker_write(t, &f, "keep.txt", "one\ntwo\n") {return}
+	worker_settle(&f)
+	three, three_ok := worker_end_late(t, &f, third, third_ended, "three")
+	if !three_ok {return}
+	defer worker_release(three)
+
+	// A file written while the End runs is judged by when the End looks at it, not by when it began.
+	fourth := worker_now()
+	if !worker_begin(t, &f, KEY_A, fourth) {return}
+	rewritten, rewritten_ok := worker_await(t, &f, app.Result_Saved)
+	if !rewritten_ok {return}
+	defer worker_release(rewritten)
+	if !worker_write(t, &f, "four.txt", "4\n") {return}
+	worker_settle(&f)
+	fourth_ended := worker_now()
+	settling := time.tick_add(time.tick_now(), 150 * time.Millisecond)
+	end := app.Job_End {
+		pane_key     = KEY_A,
+		session      = worker_session(KEY_A),
+		started      = fourth,
+		ended        = fourth_ended,
+		end_state    = .Done,
+		title        = "four",
+		settle_until = settling,
+	}
+	if !worker_post(t, &f, end) {return}
+	time.sleep(50 * time.Millisecond)
+	if !worker_write(t, &f, "late-four.txt", "z\n") {return}
+	four, four_ok := worker_await(t, &f, app.Result_Saved)
+	if !four_ok {return}
+	defer worker_release(four)
+
+	hash_run := turns.Git_Run {
+		cwd   = f.repo,
+		stdin = "one\n",
+	}
+	hashed, hash_error := turns.git_run({"hash-object", "--stdin"}, hash_run, context.temp_allocator)
+	if !testing.expect_value(t, hash_error, turns.Error.None) {return}
+	written := strings.trim_space(string(hashed.stdout))
+	saved := worker_saved_files(&f, one.repositories[0])
+	testing.expect_value(t, len(saved["one"]), 1)
+	if len(saved["one"]) == 1 {testing.expect(t, strings.has_prefix(saved["one"][0], "one.txt="))}
+	testing.expect_value(t, len(saved["two"]), 1)
+	if len(saved["two"]) == 1 {testing.expect(t, strings.has_prefix(saved["two"][0], "two.txt="))}
+	if testing.expect_value(t, len(saved["three"]), 1) {
+		testing.expect_value(t, saved["three"][0], fmt.tprintf("keep.txt=%s", written))
+	}
+	if testing.expect_value(t, len(saved["four"]), 1) {
+		testing.expect(t, strings.has_prefix(saved["four"][0], "four.txt="))
+	}
+	// The later files were written before the next turn began, so they are Between's, as is keep.txt as
+	// it was rewritten after its turn ended.
+	testing.expect_value(t, len(saved[""]), 3)
+	for entry in saved[""] {
+		later := strings.has_prefix(entry, "late-") || strings.has_prefix(entry, "keep.txt=")
+		testing.expectf(t, later, "Between has %s", entry)
 	}
 }
