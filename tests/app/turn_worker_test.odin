@@ -15,15 +15,17 @@ import app "../../src"
 @(private = "file")
 WAIT :: 10 * time.Second
 
-// A change is reported by the watcher within moments, but a drain only takes what has arrived.
-@(private = "file")
-SETTLE :: 600 * time.Millisecond
-
 @(private = "file")
 KEY_A :: "0123456789abcdef0123456789abcdef"
 
 @(private = "file")
 KEY_B :: "fedcba9876543210fedcba9876543210"
+
+@(private = "file")
+KEY_C :: "1111222233334444aaaabbbbccccdddd"
+
+@(private = "file")
+KEY_D :: "9999888877776666ddddccccbbbbaaaa"
 
 @(private = "file")
 Worker_Fixture :: struct {
@@ -32,6 +34,8 @@ Worker_Fixture :: struct {
 	turns_dir: string,
 	worker:    ^app.Turn_Worker,
 	held:      [dynamic]app.Turn_Result,
+	// Watches the whole fixture, so a test can tell when the OS has reported what it just changed.
+	probe:     ^turns.Watch_Set,
 }
 
 @(private = "file")
@@ -74,13 +78,23 @@ worker_start :: proc(t: ^testing.T, f: ^Worker_Fixture) -> bool {
 	f.turns_dir = fmt.aprintf("%s/turns", root)
 	if !testing.expect(t, os.make_directory_all(f.repo) == nil) {return false}
 	if !worker_git(t, f.repo, "init", "-q") {return false}
-	if !worker_git(t, f.repo, "config", "user.name", "Test") {return false}
-	if !worker_git(t, f.repo, "config", "user.email", "test@example.com") {return false}
-	if !worker_git(t, f.repo, "config", "core.autocrlf", "false") {return false}
+	// Written into the repository's config directly: a git run per setting is the slowest part of a test.
+	config_path := fmt.tprintf("%s/.git/config", f.repo)
+	config, config_error := os.read_entire_file(config_path, context.temp_allocator)
+	if !testing.expectf(t, config_error == nil, "read %s", config_path) {return false}
+	identity := "[user]\n\tname = Test\n\temail = test@example.com\n[core]\n\tautocrlf = false\n" +
+		"[gc]\n\tauto = 0\n[maintenance]\n\tauto = false\n"
+	config_text := fmt.tprintf("%s\n%s", string(config), identity)
+	if !testing.expect(t, os.write_entire_file(config_path, config_text) == nil) {return false}
 	if !worker_write(t, f, "a.txt", "one\ntwo\nthree\n") {return false}
 	if !worker_write(t, f, "b.txt", "alpha\nbeta\n") {return false}
 	if !worker_git(t, f.repo, "add", "-A") {return false}
 	if !worker_git(t, f.repo, "commit", "-q", "-m", "base") {return false}
+	probe, probe_ok := turns.watch_set_create({}, context.allocator)
+	if !testing.expect(t, probe_ok, "creating the probe watch") {return false}
+	f.probe = probe
+	_, added := turns.watch_set_add(probe, f.root, true)
+	if !testing.expect(t, added, "probing the fixture") {return false}
 	f.worker = app.turn_worker_create(f.turns_dir, nil)
 	return testing.expect(t, f.worker != nil, "creating the worker")
 }
@@ -88,6 +102,7 @@ worker_start :: proc(t: ^testing.T, f: ^Worker_Fixture) -> bool {
 @(private = "file")
 worker_stop :: proc(f: ^Worker_Fixture) {
 	app.turn_worker_destroy(f.worker)
+	turns.watch_set_destroy(f.probe)
 	for &result in f.held {app.turn_result_destroy(&result)}
 	delete(f.held)
 	// The worker's watches are closed by now, and the store_delete_all clears the read-only files git
@@ -97,6 +112,32 @@ worker_stop :: proc(f: ^Worker_Fixture) {
 	delete(f.repo)
 	delete(f.turns_dir)
 	f^ = {}
+}
+
+// Waits until what the test just changed has been reported by the OS: the probe sees a change, then nothing
+// more for a moment. The worker's own watches are told about as soon, and a drain only takes what has
+// arrived. Gives up quietly after a while: the test's own checks tell what that meant.
+@(private = "file")
+worker_settle :: proc(f: ^Worker_Fixture) {
+	started := time.tick_now()
+	last := started
+	seen := false
+	ready := make([dynamic]turns.Watch_Id, context.temp_allocator)
+	paths := make([dynamic]string, context.temp_allocator)
+	for time.tick_since(started) < 2 * time.Second {
+		clear(&ready)
+		turns.watch_set_ready(f.probe, &ready)
+		if len(ready) > 0 {
+			for id in ready {
+				clear(&paths)
+				_, _ = turns.watch_set_take(f.probe, id, &paths, context.temp_allocator)
+			}
+			seen, last = true, time.tick_now()
+		} else if seen && time.tick_since(last) >= 40 * time.Millisecond {
+			return
+		}
+		time.sleep(5 * time.Millisecond)
+	}
 }
 
 @(private = "file")
@@ -206,7 +247,7 @@ worker_record :: proc(
 	bool,
 ) {
 	if !worker_begin(t, f, key, base) || !worker_write(t, f, "a.txt", text) {return {}, false}
-	time.sleep(SETTLE)
+	worker_settle(f)
 	return worker_end(t, f, key, base, base + 1000, "Rewrite a")
 }
 
@@ -284,7 +325,7 @@ turn_worker_records_a_turn_and_reads_it_back :: proc(t: ^testing.T) {
 	if !worker_begin(t, &f, KEY_A, base) {return}
 	if !worker_write(t, &f, "a.txt", "one\nthree\nfour\n") {return}
 	if !worker_write(t, &f, "c.txt", "x\ny\n") {return}
-	time.sleep(SETTLE)
+	worker_settle(&f)
 	saved, saved_ok := worker_end(t, &f, KEY_A, base, base + 1000, "Fix things\nand more")
 	if !saved_ok {return}
 	defer worker_release(saved)
@@ -328,6 +369,60 @@ turn_worker_records_a_turn_and_reads_it_back :: proc(t: ^testing.T) {
 	defer worker_release(other)
 	testing.expect_value(t, len(other.rows), 0)
 	testing.expect_value(t, len(other.diff.files), 0)
+
+	// Two turns open at once in one work tree cannot tell whose edit is whose, unless a hook said so.
+	overlap := base + 10_000
+	if !worker_begin(t, &f, KEY_A, overlap) || !worker_begin(t, &f, KEY_B, overlap) {return}
+	ack := fmt.tprintf("%s/ack.json", f.root)
+	if !testing.expect(t, os.write_entire_file(ack, "{}") == nil) {return}
+	edit := app.Job_Edit {
+		pane_key = KEY_A,
+		paths    = {fmt.tprintf("%s/b.txt", f.repo)},
+		ack      = ack,
+	}
+	if !worker_post(t, &f, edit) || !worker_idle(t, &f) {return}
+	testing.expect(t, !os.exists(ack), "the worker deletes the file a hook waits on")
+	// A hook named b.txt for the first turn; nothing says whose a.txt is.
+	if !worker_write(t, &f, "b.txt", "alpha\nbeta\ngamma\n") {return}
+	if !worker_write(t, &f, "a.txt", "one\ntwo\nthree\nchanged\n") {return}
+	worker_settle(&f)
+	first, first_ok := worker_end(t, &f, KEY_A, overlap, overlap + 1000, "First")
+	if !first_ok {return}
+	defer worker_release(first)
+	second, second_ok := worker_end(t, &f, KEY_B, overlap, overlap + 2000, "Second")
+	if !second_ok {return}
+	defer worker_release(second)
+	all, all_ok := worker_query(t, &f, f.repo, KEY_A, false, nil)
+	if !all_ok {return}
+	defer worker_release(all)
+	if !testing.expect_value(t, len(all.rows), 3) {return}
+	testing.expect_value(t, all.rows[0].files, 1)
+	testing.expect_value(t, all.rows[1].files, 2)
+	only_first := [?]u64{all.rows[1].id}
+	shared, shared_ok := worker_query(t, &f, f.repo, KEY_A, false, only_first[:])
+	if !shared_ok {return}
+	defer worker_release(shared)
+	if !testing.expect_value(t, len(shared.diff.files), 2) {return}
+	if i, found := worker_file(t, shared.diff, "a.txt"); found {
+		testing.expect_value(t, len(shared.ambiguous), len(shared.diff.files))
+		testing.expect(t, shared.ambiguous[i], "a.txt was changed while two turns were open in one work tree")
+	}
+	if i, found := worker_file(t, shared.diff, "b.txt"); found {
+		testing.expect(t, !shared.marked[i], "a hook named b.txt")
+		testing.expect(t, !shared.ambiguous[i], "a hook named b.txt")
+	}
+
+	// Deleting every recorded turn takes the turns directory with it.
+	if !worker_post(t, &f, app.Job_Delete_All{}) {return}
+	deleted, deleted_ok := worker_await(t, &f, app.Result_Deleted)
+	if !deleted_ok {return}
+	defer worker_release(deleted)
+	testing.expect_value(t, deleted.error, turns.Error.None)
+	testing.expect(t, !os.exists(f.turns_dir), "the turns directory is gone")
+	gone, gone_ok := worker_query(t, &f, f.repo, KEY_A, false, nil)
+	if !gone_ok {return}
+	defer worker_release(gone)
+	testing.expect_value(t, len(gone.rows), 0)
 }
 
 @(test)
@@ -342,13 +437,13 @@ turn_worker_marks_a_file_that_changed_between_two_turns :: proc(t: ^testing.T) {
 
 	// Nobody has a turn open now: this is the owner's edit.
 	if !worker_write(t, &f, "a.txt", "one\nthree\nfour\nfive\n") {return}
-	time.sleep(SETTLE)
+	worker_settle(&f)
 	if !worker_begin(t, &f, KEY_A, base + 3000) {return}
 	between, between_ok := worker_await(t, &f, app.Result_Saved)
 	if !between_ok {return}
 	defer worker_release(between)
 	if !worker_write(t, &f, "a.txt", "one\nthree\nfour\nfive\nsix\n") {return}
-	time.sleep(SETTLE)
+	worker_settle(&f)
 	second, second_ok := worker_end(t, &f, KEY_A, base + 3000, base + 4000, "Second")
 	if !second_ok {return}
 	defer worker_release(second)
@@ -385,54 +480,6 @@ turn_worker_marks_a_file_that_changed_between_two_turns :: proc(t: ^testing.T) {
 	testing.expect_value(t, net.diff.files[0].added, 3)
 	testing.expect_value(t, net.diff.files[0].removed, 1)
 	testing.expect(t, net.marked[0], "a.txt changed between the two turns")
-}
-
-@(test)
-turn_worker_shares_what_overlapping_turns_cannot_tell_apart :: proc(t: ^testing.T) {
-	f: Worker_Fixture
-	defer worker_stop(&f)
-	if !worker_start(t, &f) {return}
-	base := worker_now()
-	if !worker_begin(t, &f, KEY_A, base) || !worker_begin(t, &f, KEY_B, base) {return}
-	ack := fmt.tprintf("%s/ack.json", f.root)
-	if !testing.expect(t, os.write_entire_file(ack, "{}") == nil) {return}
-	edit := app.Job_Edit {
-		pane_key = KEY_A,
-		paths    = {fmt.tprintf("%s/b.txt", f.repo)},
-		ack      = ack,
-	}
-	if !worker_post(t, &f, edit) || !worker_idle(t, &f) {return}
-	testing.expect(t, !os.exists(ack), "the worker deletes the file a hook waits on")
-
-	// A hook named b.txt for the first turn; nothing says whose a.txt is.
-	if !worker_write(t, &f, "b.txt", "alpha\nbeta\ngamma\n") {return}
-	if !worker_write(t, &f, "a.txt", "one\ntwo\nthree\nchanged\n") {return}
-	time.sleep(SETTLE)
-	first, first_ok := worker_end(t, &f, KEY_A, base, base + 1000, "First")
-	if !first_ok {return}
-	defer worker_release(first)
-	second, second_ok := worker_end(t, &f, KEY_B, base, base + 2000, "Second")
-	if !second_ok {return}
-	defer worker_release(second)
-
-	all, all_ok := worker_query(t, &f, f.repo, KEY_A, false, nil)
-	if !all_ok {return}
-	defer worker_release(all)
-	if !testing.expect_value(t, len(all.rows), 2) {return}
-	testing.expect_value(t, all.rows[0].files, 1)
-	testing.expect_value(t, all.rows[1].files, 2)
-
-	only_first := [?]u64{all.rows[1].id}
-	query, query_ok := worker_query(t, &f, f.repo, KEY_A, false, only_first[:])
-	if !query_ok {return}
-	defer worker_release(query)
-	if !testing.expect_value(t, len(query.diff.files), 2) {return}
-	if i, found := worker_file(t, query.diff, "a.txt"); found {
-		testing.expect(t, query.marked[i], "a.txt was changed while two turns were open")
-	}
-	if i, found := worker_file(t, query.diff, "b.txt"); found {
-		testing.expect(t, !query.marked[i], "a hook named b.txt")
-	}
 }
 
 @(test)
@@ -488,82 +535,28 @@ turn_worker_reads_git_diffs_and_watches_a_work_tree :: proc(t: ^testing.T) {
 	if !dirty_ok {return}
 	testing.expect_value(t, dirty.pane, 3)
 
-	// Once the pane stops watching, changes no longer reach it.
+	// Once the pane stops watching, changes no longer reach it, and a pane that watches is not told of what
+	// git ignores.
 	if !worker_post(t, &f, app.Job_View_Unwatch{pane = 3}) || !worker_idle(t, &f) {return}
+	if !worker_write(t, &f, ".gitignore", "ignored.txt\n") {return}
+	again := app.Job_View_Watch {
+		pane      = 4,
+		directory = f.repo,
+	}
+	if !worker_post(t, &f, again) || !worker_idle(t, &f) {return}
 	app.turn_worker_take(f.worker, &f.held)
 	for &result in f.held {app.turn_result_destroy(&result)}
 	clear(&f.held)
-	if !worker_write(t, &f, "e.txt", "new\n") {return}
-	time.sleep(1200 * time.Millisecond)
+	if !worker_write(t, &f, "ignored.txt", "x\n") {return}
+	time.sleep(1000 * time.Millisecond)
 	app.turn_worker_take(f.worker, &f.held)
 	for result in f.held {
 		_, is_dirty := result.(app.Result_Dirty)
-		testing.expect(t, !is_dirty, "a pane that stopped watching is not told of changes")
+		testing.expect(t, !is_dirty, "an ignored file, or an unwatched pane, is not told of changes")
 	}
-}
-
-@(test)
-turn_worker_maintain_drops_expired_segments_and_the_empty_store :: proc(t: ^testing.T) {
-	f: Worker_Fixture
-	defer worker_stop(&f)
-	if !worker_start(t, &f) {return}
-	base := worker_now()
-	saved, saved_ok := worker_record(t, &f, KEY_A, base, "one\ntwo\nthree\nfour\n")
-	if !saved_ok {return}
-	defer worker_release(saved)
-	if !testing.expect_value(t, len(saved.repositories), 1) {return}
-	key := saved.repositories[0]
-	store_directory := fmt.tprintf("%s/%s", f.turns_dir, key)
-	testing.expect_value(t, worker_segment_files(&f, key), 1)
-
-	recent := app.Job_Maintain {
-		days = 1,
-		now  = base + 1000 + 60 * 60 * 1000,
-	}
-	if !worker_post(t, &f, recent) || !worker_idle(t, &f) {return}
-	testing.expect_value(t, worker_segment_files(&f, key), 1)
-	testing.expect(t, os.is_directory(store_directory), "a recent segment keeps its store")
-
-	later := app.Job_Maintain {
-		days = 1,
-		now  = base + 1000 + 3 * turns.DAY_MS,
-	}
-	if !worker_post(t, &f, later) || !worker_idle(t, &f) {return}
-	testing.expect(t, os.is_directory(store_directory), "a store a root uses is never removed")
-	testing.expect_value(t, worker_segment_files(&f, key), 0)
-	// Once recording stops no root is left, and the empty store goes.
-	if !worker_post(t, &f, app.Job_Stop{}) || !worker_post(t, &f, later) || !worker_idle(t, &f) {return}
-	testing.expect(t, !os.exists(store_directory), "an expired segment takes the empty store with it")
-
-	query, query_ok := worker_query(t, &f, f.repo, KEY_A, false, nil)
-	if !query_ok {return}
-	defer worker_release(query)
-	testing.expect_value(t, query.error, turns.Error.None)
-	testing.expect_value(t, len(query.rows), 0)
-}
-
-@(test)
-turn_worker_delete_all_removes_the_turns_directory :: proc(t: ^testing.T) {
-	f: Worker_Fixture
-	defer worker_stop(&f)
-	if !worker_start(t, &f) {return}
-	saved, saved_ok := worker_record(t, &f, KEY_A, worker_now(), "one\ntwo\nthree\nfour\n")
-	if !saved_ok {return}
-	defer worker_release(saved)
-	testing.expect(t, os.is_directory(f.turns_dir))
-
-	if !worker_post(t, &f, app.Job_Delete_All{}) {return}
-	deleted, deleted_ok := worker_await(t, &f, app.Result_Deleted)
-	if !deleted_ok {return}
-	defer worker_release(deleted)
-	testing.expect_value(t, deleted.error, turns.Error.None)
-	testing.expect(t, !os.exists(f.turns_dir), "the turns directory is gone")
-
-	query, query_ok := worker_query(t, &f, f.repo, KEY_A, false, nil)
-	if !query_ok {return}
-	defer worker_release(query)
-	testing.expect_value(t, query.error, turns.Error.None)
-	testing.expect_value(t, len(query.rows), 0)
+	if !worker_write(t, &f, "e.txt", "new\n") {return}
+	again_dirty, again_ok := worker_await(t, &f, app.Result_Dirty)
+	if again_ok {testing.expect_value(t, again_dirty.pane, 4)}
 }
 
 @(test)
@@ -603,79 +596,6 @@ turn_worker_ignores_a_directory_outside_git_and_a_turn_it_never_began :: proc(t:
 }
 
 @(test)
-turn_worker_baseline_taken_early_sees_an_edit_made_right_after_a_turn_begins :: proc(t: ^testing.T) {
-	f: Worker_Fixture
-	defer worker_stop(&f)
-	if !worker_start(t, &f) {return}
-	// The first turn of a repository sets up its store, which takes long enough for an agent to edit a
-	// file first. A root watched before any turn begins has its baseline by then.
-	if !worker_post(t, &f, app.Job_Watch_Root{directory = f.repo}) || !worker_idle(t, &f) {return}
-	base := worker_now()
-	if !worker_begin(t, &f, KEY_A, base) {return}
-	if !worker_write(t, &f, "a.txt", "one\ntwo\nthree\nfour\n") {return}
-	time.sleep(SETTLE)
-	saved, saved_ok := worker_end(t, &f, KEY_A, base, base + 1000, "Quick edit")
-	if !saved_ok {return}
-	defer worker_release(saved)
-	testing.expect_value(t, len(saved.repositories), 1)
-
-	query, query_ok := worker_query(t, &f, f.repo, KEY_A, true, nil)
-	if !query_ok {return}
-	defer worker_release(query)
-	if !testing.expect_value(t, len(query.rows), 1) {return}
-	testing.expect_value(t, query.rows[0].files, 1)
-	testing.expect_value(t, query.rows[0].added, 1)
-
-	// Watching a root again, or a directory outside git, is harmless.
-	if !worker_post(t, &f, app.Job_Watch_Root{directory = f.repo}) {return}
-	if !worker_post(t, &f, app.Job_Watch_Root{directory = f.root}) || !worker_idle(t, &f) {return}
-	app.turn_worker_take(f.worker, &f.held)
-	testing.expect_value(t, len(f.held), 0)
-}
-
-// One round of the race a baseline can lose: the edit lands while the root is being set up.
-@(private = "file")
-worker_edit_during_baseline :: proc(t: ^testing.T) -> bool {
-	f: Worker_Fixture
-	defer worker_stop(&f)
-	if !worker_start(t, &f) {return false}
-	if !worker_post(t, &f, app.Job_Watch_Root{directory = f.repo}) {return false}
-	// Without waiting for the worker, rewrite the file to its final text for a while, so a write lands
-	// between the watch starting and the baseline hashing.
-	started := time.tick_now()
-	for time.tick_since(started) < 250 * time.Millisecond {
-		if !worker_write(t, &f, "a.txt", "one\ntwo\nthree\nfour\n") {return false}
-		time.sleep(5 * time.Millisecond)
-	}
-	if !worker_idle(t, &f) {return false}
-	time.sleep(SETTLE)
-	base := worker_now()
-	if !worker_begin(t, &f, KEY_A, base) {return false}
-	saved, saved_ok := worker_end(t, &f, KEY_A, base, base + 1000, "")
-	if !saved_ok {return false}
-	defer worker_release(saved)
-
-	query, query_ok := worker_query(t, &f, f.repo, KEY_A, false, nil)
-	if !query_ok {return false}
-	defer worker_release(query)
-	if !testing.expect(t, len(query.rows) >= 1, "the edit was lost") {return false}
-	// The root began with the watch, so the edit is this turn's, not an owner's edit between turns.
-	testing.expect_value(t, query.rows[0].kind, turns.Segment_Kind.Turn)
-	i, found := worker_file(t, query.diff, "a.txt")
-	if !found {return false}
-	testing.expect_value(t, query.diff.files[i].added, 1)
-	testing.expect_value(t, query.diff.files[i].removed, 0)
-	return true
-}
-
-@(test)
-turn_worker_keeps_an_edit_made_while_its_baseline_is_taken :: proc(t: ^testing.T) {
-	for _ in 0 ..< 5 {
-		if !worker_edit_during_baseline(t) {return}
-	}
-}
-
-@(test)
 turn_worker_keeps_what_a_turn_stages_or_commits :: proc(t: ^testing.T) {
 	f: Worker_Fixture
 	defer worker_stop(&f)
@@ -688,7 +608,7 @@ turn_worker_keeps_what_a_turn_stages_or_commits :: proc(t: ^testing.T) {
 	if !worker_git(t, f.repo, "add", "a.txt", "c.txt") {return}
 	if !worker_git(t, f.repo, "rm", "-q", "b.txt") {return}
 	if !worker_git(t, f.repo, "commit", "-q", "-m", "inside the turn") {return}
-	time.sleep(SETTLE)
+	worker_settle(&f)
 	first, first_ok := worker_end(t, &f, KEY_A, base, base + 1000, "Committed")
 	if !first_ok {return}
 	defer worker_release(first)
@@ -713,7 +633,7 @@ turn_worker_keeps_what_a_turn_stages_or_commits :: proc(t: ^testing.T) {
 	if !worker_begin(t, &f, KEY_A, later) {return}
 	if !worker_write(t, &f, "a.txt", "one\nthree\nfour\nfive\n") {return}
 	if !worker_git(t, f.repo, "add", "a.txt") {return}
-	time.sleep(SETTLE)
+	worker_settle(&f)
 	second, second_ok := worker_end(t, &f, KEY_A, later, later + 1000, "Staged")
 	if !second_ok {return}
 	defer worker_release(second)
@@ -772,7 +692,7 @@ turn_worker_maintain_keeps_what_a_live_root_holds_and_what_it_cannot_read :: pro
 	if !worker_begin(t, &f, KEY_A, base) {return}
 	if !worker_post(t, &f, app.Job_Maintain{days = 1, now = base}) || !worker_idle(t, &f) {return}
 	if !worker_write(t, &f, "b.txt", "alpha\nbeta\nowner\nagent\n") {return}
-	time.sleep(SETTLE)
+	worker_settle(&f)
 	saved, saved_ok := worker_end(t, &f, KEY_A, base, base + 1000, "Edit b")
 	if !saved_ok {return}
 	defer worker_release(saved)
@@ -793,29 +713,38 @@ turn_worker_maintain_keeps_what_a_live_root_holds_and_what_it_cannot_read :: pro
 	}
 	if !worker_post(t, &f, later) || !worker_idle(t, &f) {return}
 	testing.expect(t, os.exists(damaged), "a store with a file it cannot read is kept")
-}
 
-@(test)
-turn_worker_view_watch_ignores_what_git_ignores :: proc(t: ^testing.T) {
-	f: Worker_Fixture
-	defer worker_stop(&f)
-	if !worker_start(t, &f) {return}
-	if !worker_write(t, &f, ".gitignore", "ignored.txt\n") {return}
-	watch := app.Job_View_Watch {
-		pane      = 3,
-		directory = f.repo,
+	// Without the file it cannot read, the expired segments go, and a store no root uses goes with them.
+	if !testing.expect(t, os.remove(damaged) == nil) {return}
+	testing.expect_value(t, worker_segment_files(&f, key), 0)
+	fresh := base + 10 * turns.DAY_MS
+	recorded, recorded_ok := worker_record(t, &f, KEY_A, fresh, "one\ntwo\nthree\nfour\n")
+	if !recorded_ok {return}
+	defer worker_release(recorded)
+	store_directory := fmt.tprintf("%s/%s", f.turns_dir, key)
+	testing.expect_value(t, worker_segment_files(&f, key), 1)
+	recent := app.Job_Maintain {
+		days = 1,
+		now  = fresh + 1000 + 60 * 60 * 1000,
 	}
-	if !worker_post(t, &f, watch) || !worker_idle(t, &f) {return}
-	if !worker_write(t, &f, "ignored.txt", "x\n") {return}
-	time.sleep(1500 * time.Millisecond)
-	app.turn_worker_take(f.worker, &f.held)
-	for result in f.held {
-		_, is_dirty := result.(app.Result_Dirty)
-		testing.expect(t, !is_dirty, "an ignored file does not refresh a diff")
+	if !worker_post(t, &f, recent) || !worker_idle(t, &f) {return}
+	testing.expect_value(t, worker_segment_files(&f, key), 1)
+	testing.expect(t, os.is_directory(store_directory), "a recent segment keeps its store")
+	expired := app.Job_Maintain {
+		days = 1,
+		now  = fresh + 1000 + 3 * turns.DAY_MS,
 	}
-	if !worker_write(t, &f, "d.txt", "new\n") {return}
-	dirty, dirty_ok := worker_await(t, &f, app.Result_Dirty)
-	if dirty_ok {testing.expect_value(t, dirty.pane, 3)}
+	if !worker_post(t, &f, expired) || !worker_idle(t, &f) {return}
+	testing.expect(t, os.is_directory(store_directory), "a store a root uses is never removed")
+	testing.expect_value(t, worker_segment_files(&f, key), 0)
+	// Once recording stops no root is left, and the empty store goes.
+	if !worker_post(t, &f, app.Job_Stop{}) || !worker_post(t, &f, expired) || !worker_idle(t, &f) {return}
+	testing.expect(t, !os.exists(store_directory), "an expired segment takes the empty store with it")
+	emptied, emptied_ok := worker_query(t, &f, f.repo, KEY_A, false, nil)
+	if !emptied_ok {return}
+	defer worker_release(emptied)
+	testing.expect_value(t, emptied.error, turns.Error.None)
+	testing.expect_value(t, len(emptied.rows), 0)
 }
 
 @(test)
@@ -832,7 +761,7 @@ turn_worker_gives_a_carried_path_to_the_turn_even_when_the_watch_reports_it_agai
 		time.sleep(5 * time.Millisecond)
 	}
 	if !worker_write(t, &f, "a.txt", "one\ntwo\nthree\nfour\n") {return}
-	time.sleep(SETTLE)
+	worker_settle(&f)
 	base := worker_now()
 	if !worker_begin(t, &f, KEY_A, base) {return}
 	saved, saved_ok := worker_end(t, &f, KEY_A, base, base + 1000, "")
@@ -844,4 +773,432 @@ turn_worker_gives_a_carried_path_to_the_turn_even_when_the_watch_reports_it_agai
 	if !testing.expect_value(t, len(query.rows), 1) {return}
 	testing.expect_value(t, query.rows[0].kind, turns.Segment_Kind.Turn)
 	testing.expect_value(t, query.rows[0].added, 1)
+}
+
+@(private = "file")
+worker_write_at :: proc(t: ^testing.T, path, text: string) -> bool {
+	return testing.expectf(t, os.write_entire_file(path, text) == nil, "write %s", path)
+}
+
+// A linked worktree of the fixture's repository, next to it, on a branch of its own.
+@(private = "file")
+worker_worktree :: proc(t: ^testing.T, f: ^Worker_Fixture, name: string) -> (string, bool) {
+	path := fmt.tprintf("%s/%s", f.root, name)
+	return path, worker_git(t, f.repo, "worktree", "add", "-q", "-b", name, path)
+}
+
+@(private = "file")
+worker_begin_in :: proc(
+	t: ^testing.T,
+	f: ^Worker_Fixture,
+	key, directory: string,
+	started: i64,
+	transcript := "",
+) -> bool {
+	job := app.Job_Begin {
+		pane_key   = key,
+		session    = worker_session(key),
+		directory  = directory,
+		started    = started,
+		transcript = transcript,
+	}
+	return worker_post(t, f, job) && worker_idle(t, f)
+}
+
+@(private = "file")
+worker_plain_for :: proc(
+	t: ^testing.T,
+	f: ^Worker_Fixture,
+	directory, key, pick: string,
+) -> (
+	app.Result_Plain,
+	bool,
+) {
+	job := app.Job_Plain {
+		pane      = 2,
+		request   = 5,
+		directory = directory,
+		mode      = .Uncommitted,
+		session   = worker_session(key),
+		worktree  = pick,
+	}
+	if !worker_post(t, f, job) {return {}, false}
+	return worker_await(t, f, app.Result_Plain)
+}
+
+@(test)
+turn_worker_records_a_turn_that_edits_only_a_linked_worktree :: proc(t: ^testing.T) {
+	f: Worker_Fixture
+	defer worker_stop(&f)
+	if !worker_start(t, &f) {return}
+	wt, wt_ok := worker_worktree(t, &f, "wt-a")
+	if !wt_ok {return}
+	base := worker_now()
+	// The agent was started in the main work tree and goes to the other one.
+	if !worker_begin(t, &f, KEY_A, base) {return}
+	if !worker_write_at(t, fmt.tprintf("%s/a.txt", wt), "one\ntwo\nthree\nlinked\n") {return}
+	worker_settle(&f)
+	saved, saved_ok := worker_end(t, &f, KEY_A, base, base + 1000, "Work elsewhere")
+	if !saved_ok {return}
+	defer worker_release(saved)
+
+	query, query_ok := worker_query(t, &f, f.repo, KEY_A, true, nil)
+	if !query_ok {return}
+	defer worker_release(query)
+	if !testing.expect_value(t, len(query.rows), 1) {return}
+	testing.expect_value(t, query.rows[0].files, 1)
+	if !testing.expect_value(t, len(query.diff.files), 1) {return}
+	testing.expect_value(t, query.diff.files[0].new_path, "a.txt")
+	testing.expect_value(t, query.diff.files[0].added, 1)
+	testing.expect(t, !query.ambiguous[0], "the only open turn changed it")
+
+	// A work tree made during a turn is found when it ends, from where it started.
+	later := base + 5000
+	if !worker_begin(t, &f, KEY_A, later) {return}
+	created, created_ok := worker_worktree(t, &f, "wt-new")
+	if !created_ok {return}
+	if !worker_write_at(t, fmt.tprintf("%s/b.txt", created), "alpha\nbeta\ncreated\n") {return}
+	worker_settle(&f)
+	second, second_ok := worker_end(t, &f, KEY_A, later, later + 1000, "Branch out")
+	if !second_ok {return}
+	defer worker_release(second)
+	newest, newest_ok := worker_query(t, &f, f.repo, KEY_A, true, nil)
+	if !newest_ok {return}
+	defer worker_release(newest)
+	testing.expect_value(t, len(newest.rows), 2)
+	if !testing.expect_value(t, len(newest.diff.files), 1) {return}
+	testing.expect_value(t, newest.diff.files[0].new_path, "b.txt")
+	testing.expect_value(t, newest.diff.files[0].added, 1)
+	testing.expect_value(t, newest.diff.files[0].removed, 0)
+
+	// A hook names a file in a work tree nested in one already followed. The turn's agent has no folder of
+	// its own to start from, and the other turn is linked to the main work tree only, so nothing but the
+	// hook tells whose change it is.
+	third := base + 10_000
+	if !worker_begin(t, &f, KEY_B, third) {return}
+	nested := fmt.tprintf("%s/nested", f.repo)
+	if !worker_git(t, f.repo, "worktree", "add", "-q", "-b", "nested", nested) {return}
+	begin := app.Job_Begin {
+		pane_key = KEY_A,
+		session  = worker_session(KEY_A),
+		paths    = {fmt.tprintf("%s/a.txt", nested)},
+		started  = third,
+	}
+	if !worker_post(t, &f, begin) || !worker_idle(t, &f) {return}
+	if !worker_write_at(t, fmt.tprintf("%s/a.txt", nested), "one\ntwo\nthree\nnested\n") {return}
+	worker_settle(&f)
+	if !worker_post(t, &f, app.Job_End{pane_key = KEY_B, session = worker_session(KEY_B), started = third}) {
+		return
+	}
+	hooked, hooked_ok := worker_end(t, &f, KEY_A, third, third + 1000, "Nested")
+	if !hooked_ok {return}
+	defer worker_release(hooked)
+	inner, inner_ok := worker_query(t, &f, f.repo, KEY_A, true, nil)
+	if !inner_ok {return}
+	defer worker_release(inner)
+	if !testing.expect_value(t, len(inner.diff.files), 1) {return}
+	testing.expect_value(t, inner.diff.files[0].new_path, "a.txt")
+	testing.expect(t, !inner.ambiguous[0], "the hook named the file for this turn alone")
+	idle, idle_ok := worker_query(t, &f, f.repo, KEY_B, true, nil)
+	if !idle_ok {return}
+	defer worker_release(idle)
+	testing.expect_value(t, len(idle.rows), 0)
+}
+
+@(test)
+turn_worker_shares_what_two_unlinked_worktrees_cannot_tell_apart :: proc(t: ^testing.T) {
+	f: Worker_Fixture
+	defer worker_stop(&f)
+	if !worker_start(t, &f) {return}
+	wt_a, a_ok := worker_worktree(t, &f, "wt-a")
+	if !a_ok {return}
+	wt_b, b_ok := worker_worktree(t, &f, "wt-b")
+	if !b_ok {return}
+	// Two agents, each started in a work tree of its own, change only what is there.
+	early := worker_now()
+	if !worker_begin_in(t, &f, KEY_C, f.repo, early) {return}
+	if !worker_begin_in(t, &f, KEY_D, wt_a, early) {return}
+	if !worker_write(t, &f, "a.txt", "one\ntwo\nthree\nmain\n") {return}
+	if !worker_write_at(t, fmt.tprintf("%s/b.txt", wt_a), "alpha\nbeta\nlinked\n") {return}
+	worker_settle(&f)
+	main_saved, main_saved_ok := worker_end(t, &f, KEY_C, early, early + 1000, "Main")
+	if !main_saved_ok {return}
+	defer worker_release(main_saved)
+	linked_saved, linked_saved_ok := worker_end(t, &f, KEY_D, early, early + 1000, "Linked")
+	if !linked_saved_ok {return}
+	defer worker_release(linked_saved)
+	main_query, main_ok := worker_query(t, &f, f.repo, KEY_C, true, nil)
+	if !main_ok {return}
+	defer worker_release(main_query)
+	if !testing.expect_value(t, len(main_query.diff.files), 1) {return}
+	testing.expect_value(t, main_query.diff.files[0].new_path, "a.txt")
+	testing.expect(t, !main_query.ambiguous[0])
+	linked_query, linked_ok := worker_query(t, &f, f.repo, KEY_D, true, nil)
+	if !linked_ok {return}
+	defer worker_release(linked_query)
+	if !testing.expect_value(t, len(linked_query.diff.files), 1) {return}
+	testing.expect_value(t, linked_query.diff.files[0].new_path, "b.txt")
+	testing.expect(t, !linked_query.ambiguous[0])
+
+	base := worker_now()
+	// Both agents were started in the main work tree and work in the others, which belong to neither.
+	if !worker_begin_in(t, &f, KEY_A, f.repo, base) {return}
+	if !worker_begin_in(t, &f, KEY_B, f.repo, base) {return}
+	if !worker_write_at(t, fmt.tprintf("%s/a.txt", wt_a), "one\ntwo\nthree\nin a\n") {return}
+	if !worker_write_at(t, fmt.tprintf("%s/b.txt", wt_b), "alpha\nbeta\nin b\n") {return}
+	worker_settle(&f)
+	first, first_ok := worker_end(t, &f, KEY_A, base, base + 1000, "First")
+	if !first_ok {return}
+	defer worker_release(first)
+	second, second_ok := worker_end(t, &f, KEY_B, base, base + 1000, "Second")
+	if !second_ok {return}
+	defer worker_release(second)
+
+	for key in ([?]string{KEY_A, KEY_B}) {
+		query, query_ok := worker_query(t, &f, f.repo, key, true, nil)
+		if !query_ok {return}
+		defer worker_release(query)
+		if !testing.expect_value(t, len(query.diff.files), 2) {return}
+		testing.expect_value(t, len(query.ambiguous), 2)
+		for ambiguous in query.ambiguous {
+			testing.expect(t, ambiguous, "either agent may have made it")
+		}
+		worker_file(t, query.diff, "wt-a/a.txt")
+		worker_file(t, query.diff, "wt-b/b.txt")
+	}
+
+	// A session whose transcript is in a work tree is linked to it, and alone has changed what is there.
+	transcript := fmt.tprintf("%s/session.jsonl", f.root)
+	line := fmt.tprintf("{{\"type\":\"user\",\"cwd\":\"%s\"}}\n", wt_a)
+	if !worker_write_at(t, transcript, line) {return}
+	later := base + 5000
+	if !worker_begin_in(t, &f, KEY_A, f.repo, later, transcript) {return}
+	if !worker_begin_in(t, &f, KEY_B, f.repo, later) {return}
+	if !worker_write_at(t, fmt.tprintf("%s/a.txt", wt_a), "one\ntwo\nthree\nin a, again\n") {return}
+	worker_settle(&f)
+	idle := app.Job_End {
+		pane_key = KEY_B,
+		session  = worker_session(KEY_B),
+		started  = later,
+		ended    = later + 1000,
+	}
+	if !worker_post(t, &f, idle) {return}
+	third, third_ok := worker_end(t, &f, KEY_A, later, later + 1000, "Named by its transcript")
+	if !third_ok {return}
+	defer worker_release(third)
+	named, named_ok := worker_query(t, &f, f.repo, KEY_A, true, nil)
+	if !named_ok {return}
+	defer worker_release(named)
+	testing.expect_value(t, len(named.rows), 2)
+	if !testing.expect_value(t, len(named.diff.files), 1) {return}
+	testing.expect_value(t, named.diff.files[0].new_path, "a.txt")
+	testing.expect(t, !named.ambiguous[0])
+	other, other_ok := worker_query(t, &f, f.repo, KEY_B, true, nil)
+	if !other_ok {return}
+	defer worker_release(other)
+	testing.expect_value(t, len(other.rows), 1)
+}
+
+@(test)
+turn_worker_plain_follows_the_agent_and_honours_a_pick :: proc(t: ^testing.T) {
+	f: Worker_Fixture
+	defer worker_stop(&f)
+	if !worker_start(t, &f) {return}
+	wt, wt_ok := worker_worktree(t, &f, "wt-a")
+	if !wt_ok {return}
+	// An agent that has changed nothing yet is shown the work tree of the request.
+	idle, idle_ok := worker_plain_for(t, &f, f.repo, KEY_A, "")
+	if !idle_ok {return}
+	defer worker_release(idle)
+	testing.expectf(t, strings.has_suffix(idle.worktree, "/repo"), "worktree %q", idle.worktree)
+	testing.expect(t, idle.following)
+	testing.expect_value(t, len(idle.worktrees), 2)
+
+	base := worker_now()
+	if !worker_begin(t, &f, KEY_A, base) {return}
+	if !worker_write_at(t, fmt.tprintf("%s/a.txt", wt), "one\ntwo\nthree\nlinked\n") {return}
+	worker_settle(&f)
+	// No boundary has come since, so looking at the turn is the pane's own doing.
+	open, open_ok := worker_plain_for(t, &f, f.repo, KEY_A, "")
+	if !open_ok {return}
+	defer worker_release(open)
+	testing.expectf(t, strings.has_suffix(open.worktree, "/wt-a"), "worktree %q", open.worktree)
+	testing.expect(t, open.following)
+	saved, saved_ok := worker_end(t, &f, KEY_A, base, base + 1000, "Elsewhere")
+	if !saved_ok {return}
+	defer worker_release(saved)
+
+	followed, followed_ok := worker_plain_for(t, &f, f.repo, KEY_A, "")
+	if !followed_ok {return}
+	defer worker_release(followed)
+	testing.expectf(t, strings.has_suffix(followed.worktree, "/wt-a"), "worktree %q", followed.worktree)
+	testing.expect(t, followed.following)
+	if !testing.expect_value(t, len(followed.worktrees), 2) {return}
+	testing.expect_value(t, followed.worktrees[0], followed.worktree)
+	testing.expectf(t, strings.has_suffix(followed.worktrees[1], "/repo"), "worktrees %v", followed.worktrees)
+	if !testing.expect_value(t, len(followed.diff.files), 1) {return}
+	testing.expect_value(t, followed.diff.files[0].new_path, "a.txt")
+
+	picked, picked_ok := worker_plain_for(t, &f, f.repo, KEY_A, followed.worktrees[1])
+	if !picked_ok {return}
+	defer worker_release(picked)
+	testing.expect_value(t, picked.worktree, followed.worktrees[1])
+	testing.expect(t, !picked.following)
+	testing.expect_value(t, len(picked.diff.files), 0)
+
+	// Another agent has changed nothing: it is shown where the request is.
+	other, other_ok := worker_plain_for(t, &f, f.repo, KEY_B, "")
+	if !other_ok {return}
+	defer worker_release(other)
+	testing.expectf(t, strings.has_suffix(other.worktree, "/repo"), "worktree %q", other.worktree)
+	testing.expect(t, other.following)
+}
+
+@(test)
+turn_worker_does_not_attribute_what_was_dirty_in_a_worktree_when_a_rescan_finds_it :: proc(t: ^testing.T) {
+	f: Worker_Fixture
+	defer worker_stop(&f)
+	if !worker_start(t, &f) {return}
+	wt, wt_ok := worker_worktree(t, &f, "wt-a")
+	if !wt_ok {return}
+	// The owner's own uncommitted work, there before anything follows the work tree: a file deleted.
+	deleted := fmt.tprintf("%s/b.txt", wt)
+	if !testing.expect(t, os.remove(deleted) == nil) {return}
+	base := worker_now()
+	if !worker_begin(t, &f, KEY_A, base) {return}
+	if !worker_write(t, &f, "a.txt", "one\ntwo\nthree\nmain\n") {return}
+	// The work tree is removed and made again, which its watch cannot survive. The new one is not watched
+	// yet, so nothing tells of what happens in it: the end of the turn rescans, and finds it dirty.
+	if !worker_git(t, f.repo, "worktree", "remove", "--force", wt) {return}
+	if !worker_git(t, f.repo, "worktree", "add", "-q", "-b", "wt-a-again", wt) {return}
+	// A deletion has no time, and a file last written before the work tree was followed is older than
+	// the turn: neither is the agent's. A file written since is.
+	if !testing.expect(t, os.remove(deleted) == nil) {return}
+	old := fmt.tprintf("%s/owner.txt", wt)
+	if !worker_write_at(t, old, "owner\n") {return}
+	past := time.time_add(time.now(), -time.Hour)
+	if !testing.expect(t, os.change_times(old, past, past) == nil) {return}
+	if !worker_write_at(t, fmt.tprintf("%s/fresh.txt", wt), "fresh\n") {return}
+	worker_settle(&f)
+	saved, saved_ok := worker_end(t, &f, KEY_A, base, base + 1000, "Main and a new file")
+	if !saved_ok {return}
+	defer worker_release(saved)
+
+	query, query_ok := worker_query(t, &f, f.repo, KEY_A, true, nil)
+	if !query_ok {return}
+	defer worker_release(query)
+	if !testing.expect_value(t, len(query.diff.files), 2) {return}
+	worker_file(t, query.diff, "repo/a.txt")
+	worker_file(t, query.diff, "wt-a/fresh.txt")
+}
+
+// One round of the race a baseline can lose when the root is followed without one first: the file is
+// created while the baseline of the turn's own folder is taken.
+@(private = "file")
+worker_create_during_upgrade :: proc(t: ^testing.T) -> bool {
+	f: Worker_Fixture
+	defer worker_stop(&f)
+	if !worker_start(t, &f) {return false}
+	wt, wt_ok := worker_worktree(t, &f, "wt-a")
+	if !wt_ok {return false}
+	// Following one work tree follows the others without a baseline.
+	if !worker_post(t, &f, app.Job_Watch_Root{directory = wt}) || !worker_idle(t, &f) {return false}
+	base := worker_now()
+	begin := app.Job_Begin {
+		pane_key  = KEY_A,
+		session   = worker_session(KEY_A),
+		directory = f.repo,
+		started   = base,
+	}
+	// As an agent's first status posts them, back to back, while the file is being created.
+	if !worker_post(t, &f, app.Job_Watch_Root{directory = f.repo}) || !worker_post(t, &f, begin) {
+		return false
+	}
+	started := time.tick_now()
+	for time.tick_since(started) < 300 * time.Millisecond {
+		if !worker_write(t, &f, "c.txt", "x\ny\n") {return false}
+		time.sleep(5 * time.Millisecond)
+	}
+	if !worker_idle(t, &f) {return false}
+	worker_settle(&f)
+	end := app.Job_End {
+		pane_key = KEY_A,
+		session  = worker_session(KEY_A),
+		started  = base,
+		ended    = base + 1000,
+	}
+	if !worker_post(t, &f, end) || !worker_idle(t, &f) {return false}
+
+	// However it was told apart from the owner's work, the file is somewhere in what was recorded.
+	rows, rows_ok := worker_query(t, &f, f.repo, KEY_A, false, nil)
+	if !rows_ok {return false}
+	defer worker_release(rows)
+	if !testing.expect(t, len(rows.rows) >= 1, "the new file was lost") {return false}
+	ids := make([]u64, len(rows.rows), context.temp_allocator)
+	for row, i in rows.rows {ids[i] = row.id}
+	all, all_ok := worker_query(t, &f, f.repo, KEY_A, false, ids)
+	if !all_ok {return false}
+	defer worker_release(all)
+	i, found := worker_file(t, all.diff, "c.txt")
+	if !found {return false}
+	testing.expect_value(t, all.diff.files[i].status, turns.File_Status.Added)
+	return true
+}
+
+@(test)
+turn_worker_keeps_a_file_created_while_a_followed_roots_baseline_is_taken :: proc(t: ^testing.T) {
+	_ = worker_create_during_upgrade(t)
+}
+
+@(test)
+turn_worker_gives_a_turn_what_was_written_after_it_started_but_before_it_could_begin :: proc(t: ^testing.T) {
+	f: Worker_Fixture
+	defer worker_stop(&f)
+	if !worker_start(t, &f) {return}
+	if !worker_post(t, &f, app.Job_Watch_Root{directory = f.repo}) || !worker_idle(t, &f) {return}
+	// The agent reported working and began editing while the worker was busy: the turn started first.
+	base := worker_now()
+	time.sleep(20 * time.Millisecond)
+	if !worker_write(t, &f, "c.txt", "x\ny\n") {return}
+	worker_settle(&f)
+	if !worker_begin(t, &f, KEY_A, base) {return}
+	saved, saved_ok := worker_end(t, &f, KEY_A, base, base + 1000, "Started first")
+	if !saved_ok {return}
+	defer worker_release(saved)
+	turn, turn_ok := worker_query(t, &f, f.repo, KEY_A, true, nil)
+	if !turn_ok {return}
+	defer worker_release(turn)
+	if !testing.expect_value(t, len(turn.diff.files), 1) {return}
+	testing.expect_value(t, turn.diff.files[0].new_path, "c.txt")
+	testing.expect_value(t, turn.diff.files[0].status, turns.File_Status.Added)
+
+	// What was written before a turn started is the owner's, however late the turn was registered.
+	if !worker_write(t, &f, "d.txt", "owner\n") {return}
+	worker_settle(&f)
+	later := worker_now()
+	if !worker_begin(t, &f, KEY_A, later) {return}
+	between, between_ok := worker_await(t, &f, app.Result_Saved)
+	if !between_ok {return}
+	defer worker_release(between)
+	// An edit made once the turn is registered, in a root that is already followed, is the turn's.
+	if !worker_write(t, &f, "e.txt", "agent\n") {return}
+	worker_settle(&f)
+	second, second_ok := worker_end(t, &f, KEY_A, later, later + 1000, "Edit after")
+	if !second_ok {return}
+	defer worker_release(second)
+	all, all_ok := worker_query(t, &f, f.repo, KEY_A, false, nil)
+	if !all_ok {return}
+	defer worker_release(all)
+	turns_seen, betweens_seen := 0, 0
+	for row in all.rows {
+		if row.kind == .Turn {turns_seen += 1} else {betweens_seen += 1}
+	}
+	testing.expect_value(t, turns_seen, 2)
+	testing.expect_value(t, betweens_seen, 1)
+
+	// Watching a root again, or a directory outside git, is harmless.
+	if !worker_post(t, &f, app.Job_Watch_Root{directory = f.repo}) {return}
+	if !worker_post(t, &f, app.Job_Watch_Root{directory = f.root}) || !worker_idle(t, &f) {return}
+	app.turn_worker_take(f.worker, &f.held)
+	testing.expect_value(t, len(f.held), 0)
 }

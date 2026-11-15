@@ -343,6 +343,62 @@ a_git_scope_result_lists_no_turns_and_counts_what_was_left_out :: proc(t: ^testi
 }
 
 @(test)
+a_git_scope_result_names_its_worktree_and_lists_every_worktree :: proc(t: ^testing.T) {
+	state: app.App
+	defer app.changes_app_destroy(&state.changes_state)
+	pane := pane_start(&state, .Repository)
+	if pane == nil {return}
+	pane.scope = .Unstaged
+	view := &pane.model.view
+	paths := []string{"C:/work/odin", "C:/other/odin", "C:/work/odin-wt-a"}
+	plain := app.Result_Plain {
+		pane      = pane.id,
+		diff      = {files = []turns.Diff_File{file_of("a.txt")}},
+		worktree  = "C:/work/odin-wt-a",
+		worktrees = paths,
+		following = true,
+	}
+	app.changes_fill_plain(pane, &plain)
+	testing.expect_value(t, view.worktree, "odin-wt-a")
+	testing.expect_value(t, view.following, true)
+	if !testing.expect_value(t, len(pane.model.worktree_labels), 4) {return}
+	testing.expect_value(t, pane.model.worktree_labels[0], "Follow the agent")
+	testing.expect_value(t, pane.model.worktree_labels[1], "odin \u00b7 work")
+	testing.expect_value(t, pane.model.worktree_labels[2], "odin \u00b7 other")
+	testing.expect_value(t, pane.model.worktree_labels[3], "odin-wt-a")
+	testing.expect_value(t, pane.model.worktree_paths[1], "C:/other/odin")
+	testing.expect_value(t, len(view.ambiguous), 1)
+
+	plain.following = false
+	app.changes_fill_plain(pane, &plain)
+	testing.expect_value(t, view.following, false)
+}
+
+@(test)
+a_turn_query_result_marks_ambiguous_files :: proc(t: ^testing.T) {
+	state: app.App
+	defer app.changes_app_destroy(&state.changes_state)
+	pane := pane_start(&state, .Repository)
+	if pane == nil {return}
+	files := []turns.Diff_File{file_of("a.txt"), file_of("b.txt")}
+	q := app.Result_Query {
+		pane      = pane.id,
+		diff      = {files = files},
+		marked    = []bool{true, false},
+		ambiguous = []bool{true, true},
+	}
+	app.changes_fill_query(pane, &q, now_time(), true)
+	view := &pane.model.view
+	if !testing.expect_value(t, len(view.ambiguous), 2) {return}
+	testing.expect_value(t, view.ambiguous[0], true)
+	testing.expect_value(t, view.ambiguous[1], true)
+	testing.expect_value(t, view.marked[0], true)
+	testing.expect_value(t, view.marked[1], false)
+	testing.expect_value(t, view.following, false)
+	testing.expect_value(t, view.worktree, "")
+}
+
+@(test)
 turn_hooks_are_offered_only_where_a_harness_is_missing_them :: proc(t: ^testing.T) {
 	directory, err := os.make_directory_temp("", "aio-hooks-*", context.allocator)
 	if !testing.expect_value(t, err, nil) {return}

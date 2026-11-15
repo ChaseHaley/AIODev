@@ -13,6 +13,9 @@ import "core:time"
 // thread, and this file turns its results into the pane's ui.Changes_View. The model owns the current
 // result; the view borrows the diff from it, and owns the arrays that sit beside it.
 
+@(private = "file")
+WORKTREE_FOLLOW_LABEL :: "Follow the agent"
+
 // Whether the turn hooks are installed in the harness settings that exist.
 Changes_Hooks :: enum u8 {
 	Unknown,
@@ -179,8 +182,10 @@ changes_view_release :: proc(model: ^Changes_Model) {
 	for detail in model.details {delete(detail)}
 	delete(model.details)
 	delete(view.marked)
+	delete(view.ambiguous)
 	delete(view.collapsed)
-	view.turns, model.row_ids, model.details, view.marked, view.collapsed = nil, nil, nil, nil, nil
+	view.turns, model.row_ids, model.details, view.marked, view.ambiguous, view.collapsed =
+		nil, nil, nil, nil, nil, nil
 	view.files = nil
 }
 
@@ -191,28 +196,31 @@ changes_view_alloc :: proc(model: ^Changes_Model, rows, files: int) -> bool {
 	ids, ids_error := make([]u64, rows)
 	details, details_error := make([]string, rows)
 	marked, marked_error := make([]bool, files)
+	ambiguous, ambiguous_error := make([]bool, files)
 	collapsed, collapsed_error := make([]bool, files)
 	if turn_error != nil || ids_error != nil || details_error != nil || marked_error != nil ||
-	   collapsed_error != nil {
+	   ambiguous_error != nil || collapsed_error != nil {
 		delete(turn_rows)
 		delete(ids)
 		delete(details)
 		delete(marked)
+		delete(ambiguous)
 		delete(collapsed)
 		return false
 	}
-	view.turns, model.row_ids, model.details, view.marked, view.collapsed =
-		turn_rows, ids, details, marked, collapsed
+	view.turns, model.row_ids, model.details, view.marked, view.ambiguous, view.collapsed =
+		turn_rows, ids, details, marked, ambiguous, collapsed
 	return true
 }
 
 // The diff's files with their marks and folds; folds come back by path.
 @(private = "file")
-changes_files_fill :: proc(model: ^Changes_Model, files: []turns.Diff_File, marked: []bool) {
+changes_files_fill :: proc(model: ^Changes_Model, files: []turns.Diff_File, marked, ambiguous: []bool) {
 	view := &model.view
 	view.files = files
 	for file, i in files {
 		view.marked[i] = i < len(marked) && marked[i]
+		view.ambiguous[i] = i < len(ambiguous) && ambiguous[i]
 		_, folded := model.folded[file.new_path]
 		view.collapsed[i] = folded
 	}
@@ -243,6 +251,8 @@ changes_fill_query :: proc(pane: ^Changes_Pane, q: ^Result_Query, now: time.Time
 	changes_text_set(&model.repository_key, q.repository)
 	label := q.error == .None ? changes_folder_name(q.worktree) : ""
 	changes_text_set(&view.repository, label)
+	changes_text_set(&view.worktree, "")
+	view.following = false
 	view.first, view.last, view.omitted = -1, -1, 0
 	pane.anchor, pane.cursor = -1, -1
 	model.loaded, model.shown = true, pane.scope
@@ -264,7 +274,7 @@ changes_fill_query :: proc(pane: ^Changes_Pane, q: ^Result_Query, now: time.Time
 			between = row.kind == .Between,
 		}
 	}
-	changes_files_fill(model, q.diff.files, q.marked)
+	changes_files_fill(model, q.diff.files, q.marked, q.ambiguous)
 	view.first, view.last = changes_ids_range(model.row_ids, q.selected)
 	// An end of the selection the result no longer holds is forgotten, so the keys start over.
 	if anchored {pane.anchor = changes_index_of(model.row_ids, anchor_id)}
@@ -281,6 +291,9 @@ changes_fill_plain :: proc(pane: ^Changes_Pane, r: ^Result_Plain) {
 	changes_view_release(model)
 	label := r.error == .None ? changes_folder_name(r.worktree) : ""
 	changes_text_set(&view.repository, label)
+	changes_text_set(&view.worktree, label)
+	view.following = r.error == .None && r.following
+	changes_worktrees_set(model, r.worktrees)
 	view.first, view.last, view.omitted = -1, -1, r.omitted
 	pane.anchor, pane.cursor = -1, -1
 	model.loaded, model.shown = true, pane.scope
@@ -290,9 +303,76 @@ changes_fill_plain :: proc(pane: ^Changes_Pane, r: ^Result_Plain) {
 		changes_notice_set(model, .Failed, "Out of memory.")
 		return
 	}
-	changes_files_fill(model, r.diff.files, nil)
+	changes_files_fill(model, r.diff.files, nil, nil)
 	notice, detail := changes_notice_of(r.error, false, false, 0, len(r.diff.files))
 	changes_notice_set(model, notice, detail)
+}
+
+@(private = "file")
+changes_worktrees_release :: proc(model: ^Changes_Model) {
+	for label in model.worktree_labels {delete(label)}
+	delete(model.worktree_labels)
+	for path in model.worktree_paths {delete(path)}
+	delete(model.worktree_paths)
+	model.worktree_labels, model.worktree_paths = nil, nil
+}
+
+// The choices the worktree dropdown lists: "Follow the agent", then each worktree by its folder name,
+// with the parent folder added where two share a name. Kept in the model because the dropdown borrows them.
+@(private = "file")
+changes_worktrees_set :: proc(model: ^Changes_Model, paths: []string) {
+	changes_worktrees_release(model)
+	if len(paths) == 0 {return}
+	labels, labels_error := make([]string, len(paths) + 1)
+	kept, kept_error := make([]string, len(paths))
+	if labels_error != nil || kept_error != nil {
+		delete(labels)
+		delete(kept)
+		return
+	}
+	labels[0] = changes_clone_text(WORKTREE_FOLLOW_LABEL)
+	for path, i in paths {
+		kept[i] = changes_clone_text(path)
+		name := changes_folder_name(path)
+		shared := false
+		for other, j in paths {
+			if j != i && changes_folder_name(other) == name {shared = true}
+		}
+		if shared {
+			trimmed := strings.trim_right(path, "/\\")
+			parent := changes_folder_name(trimmed[:len(trimmed) - len(name)])
+			labels[i + 1] = changes_clone_text(fmt.tprintf("%s \u00b7 %s", name, parent))
+		} else {
+			labels[i + 1] = changes_clone_text(name)
+		}
+	}
+	model.worktree_labels, model.worktree_paths = labels, kept
+}
+
+// The label of the picked worktree in the dropdown's choices; the follow label for no pick or one the
+// result no longer lists.
+@(require_results)
+changes_worktree_value :: proc(pane: ^Changes_Pane) -> string {
+	model := &pane.model
+	if len(model.worktree_labels) == 0 {return ""}
+	if pane.worktree_pick != "" {
+		for path, i in model.worktree_paths {
+			if path == pane.worktree_pick {return model.worktree_labels[i + 1]}
+		}
+	}
+	return model.worktree_labels[0]
+}
+
+// Picks a dropdown choice: 0 follows the agent, the others a worktree. Asks again when it changed.
+changes_worktree_pick :: proc(app: ^App, pane: ^Changes_Pane, choice: int) {
+	model := &pane.model
+	pick := ""
+	if choice > 0 && choice <= len(model.worktree_paths) {pick = model.worktree_paths[choice - 1]}
+	if pick == pane.worktree_pick {return}
+	cloned := changes_clone_text(pick)
+	delete(pane.worktree_pick)
+	pane.worktree_pick = cloned
+	changes_model_changed(app, pane)
 }
 
 // Drops the content the pane shows, so the next result starts from an empty view.
@@ -312,7 +392,10 @@ changes_model_clear :: proc(pane: ^Changes_Pane) {
 changes_model_destroy :: proc(pane: ^Changes_Pane) {
 	model := &pane.model
 	changes_model_clear(pane)
+	changes_worktrees_release(model)
+	delete(model.watched)
 	delete(model.repository_key)
+	delete(model.view.worktree)
 	delete(model.view.detail)
 	delete(model.view.repository)
 	for key in model.folded {delete(key)}
@@ -325,6 +408,7 @@ changes_model_unwatch :: proc(app: ^App, pane: ^Changes_Pane) {
 	if !pane.model.watching {return}
 	turn_worker_view_unwatch(app, pane.id)
 	pane.model.watching = false
+	changes_text_set(&pane.model.watched, "")
 }
 
 @(private = "file", require_results)
@@ -371,9 +455,13 @@ changes_model_changed :: proc(app: ^App, pane: ^Changes_Pane) {
 		if !model.loaded {changes_notice_set(model, .Loading)}
 		if !model.watching {
 			turn_worker_view_watch(app, pane.id, pane.directory)
+			changes_text_set(&model.watched, pane.directory)
 			model.watching = true
 		}
-		turn_worker_plain(app, pane.id, model.request, pane.directory, changes_plain_mode(pane.scope))
+		turn_worker_plain(
+			app, pane.id, model.request, pane.directory, changes_plain_mode(pane.scope),
+			turn_recorder_session(app, pane.source), pane.worktree_pick,
+		)
 	}
 	view.revision += 1
 	mark_all_dirty(app)
@@ -411,6 +499,11 @@ changes_model_result :: proc(app: ^App, result: Turn_Result) {
 		changes_fill_query(pane, &r, clock_wall(&app.clock), model.recording)
 	case Result_Plain:
 		changes_fill_plain(pane, &r)
+		// The view watch follows the worktree the result shows.
+		if model.watching && r.error == .None && r.worktree != "" && r.worktree != model.watched {
+			turn_worker_view_watch(app, pane.id, r.worktree)
+			changes_text_set(&model.watched, r.worktree)
+		}
 	case nil, Result_Dirty, Result_Saved, Result_Deleted, Result_Failure:
 	}
 	mark_all_dirty(app)
@@ -420,7 +513,11 @@ changes_model_result :: proc(app: ^App, result: Turn_Result) {
 // reads again; a selection on the newest turn follows the new one.
 changes_turns_saved :: proc(app: ^App, repositories: []string) {
 	for pane in app.changes_panes {
-		if !ui.changes_scope_turns(pane.scope) {continue}
+		if !ui.changes_scope_turns(pane.scope) {
+			// A pane following the agent may have a new worktree to show; its result carries no repository.
+			if pane.worktree_pick == "" {changes_model_changed(app, pane)}
+			continue
+		}
 		key := pane.model.repository_key
 		if key != "" && !slice.contains(repositories, key) {continue}
 		changes_model_changed(app, pane)

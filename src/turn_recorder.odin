@@ -8,6 +8,7 @@ import "aio:turns"
 import "aio:ui"
 import "base:runtime"
 import "core:fmt"
+import "core:io"
 import "core:log"
 import "core:os"
 import "core:slice"
@@ -29,6 +30,12 @@ TURN_MAINTAIN :: 6 * time.Hour
 TURN_ASK_POLL :: 250 * time.Millisecond
 @(private)
 TURN_RETENTION_DEFAULT :: 14
+// A virus scanner or indexer can hold the marker a moment after it is written, and Windows then refuses
+// to replace or delete it; publishing and removing wait that out, as saving settings does.
+@(private)
+TURN_LOCK_ATTEMPTS :: 10
+@(private)
+TURN_LOCK_WAIT :: 20 * time.Millisecond
 
 // The question asked after recording is turned off while copies exist.
 Turns_Delete :: struct {}
@@ -67,7 +74,9 @@ Turn_Recorder :: struct {
 	worker:       ^Turn_Worker,
 	panes:        [dynamic]Turn_Pane,
 	ends:         [dynamic]Turn_End,
-	inbox:        ^turns.Watch,
+	inbox:        ^turns.Watch_Set,
+	// The one directory of `inbox`; 0 while not watched.
+	inbox_watch:  turns.Watch_Id,
 	// Set by the inbox watch's thread (atomic), cleared when the main thread lists the inbox.
 	inbox_woken:  bool,
 	// Inbox files a posted job will delete, so later drains skip them. Keys are owned.
@@ -215,8 +224,24 @@ turn_worker_query :: proc(
 	_ = turn_post(app, job)
 }
 
-turn_worker_plain :: proc(app: ^App, pane: u32, request: u64, directory: string, mode: turns.Plain_Mode) {
-	_ = turn_post(app, Job_Plain{pane = pane, request = request, directory = directory, mode = mode})
+turn_worker_plain :: proc(
+	app: ^App,
+	pane: u32,
+	request: u64,
+	directory: string,
+	mode: turns.Plain_Mode,
+	session: turns.Session,
+	worktree: string,
+) {
+	job := Job_Plain {
+		pane      = pane,
+		request   = request,
+		directory = directory,
+		mode      = mode,
+		session   = session,
+		worktree  = worktree,
+	}
+	_ = turn_post(app, job)
 }
 
 turn_worker_view_watch :: proc(app: ^App, pane: u32, directory: string) {
@@ -317,6 +342,29 @@ turn_warm :: proc(app: ^App, pane: ^Turn_Pane, entry: ^Session_Entry) {
 	_ = turn_post(app, Job_Watch_Root{directory = directory})
 }
 
+// The Claude transcript of a pane's session: where its own folder maps to, else any project folder
+// holding the session (Claude files a session under the folder it started in). "" when none exists.
+@(private, require_results)
+turn_transcript :: proc(session: turns.Session, directory: string) -> string {
+	if session.harness != "claude" || session.session == "" {return ""}
+	config := harness_directory("CLAUDE_CONFIG_DIR", ".claude")
+	if config == "" {return ""}
+	if directory != "" {
+		path := agent.claude_transcript_path(config, directory, session.session, context.temp_allocator)
+		if os.exists(path) {return path}
+	}
+	projects := fmt.tprintf("%s/projects", config)
+	folders, err := os.read_all_directory_by_path(projects, context.temp_allocator)
+	if err != nil {return ""}
+	name := fmt.tprintf("%s.jsonl", session.session)
+	for folder in folders {
+		if folder.type != .Directory {continue}
+		path := fmt.tprintf("%s/%s", folder.fullpath, name)
+		if os.exists(path) {return path}
+	}
+	return ""
+}
+
 // Where the pane's agent works: its program's own directory, which a shell's `cd` leaves behind (a
 // shell process keeps the folder it started in unless the shell reports its directory). The program is
 // chosen from `processes` read now, not from polling, which may not have seen it yet.
@@ -388,12 +436,14 @@ turn_begin :: proc(app: ^App, pane: ^Turn_Pane, entry: ^Session_Entry, status_ti
 	}
 	directory := turn_directory(app, entry, processes)
 	if directory == "" {directory = fallback}
+	transcript := turn_transcript(pane.session, directory)
 	job := Job_Begin {
-		pane_key  = pane.key,
-		session   = pane.session,
-		directory = directory,
-		started   = pane.turn.started,
-		ack       = ack,
+		pane_key   = pane.key,
+		session    = pane.session,
+		directory  = directory,
+		started    = pane.turn.started,
+		ack        = ack,
+		transcript = transcript,
 	}
 	if !turn_post(app, job) {
 		if ack != "" {turn_inbox_remove(ack)}
@@ -490,7 +540,7 @@ turn_inbox_drain :: proc(app: ^App) {
 	rec := &app.turn_recorder
 	if rec.inbox == nil {return}
 	changed := make([dynamic]string, context.temp_allocator)
-	_ = turns.watch_take(rec.inbox, &changed, context.temp_allocator)
+	_, _ = turns.watch_set_take(rec.inbox, rec.inbox_watch, &changed, context.temp_allocator)
 	entries, err := os.read_all_directory_by_path(turn_inbox_path(app), context.temp_allocator)
 	if err != nil {
 		if err != .Not_Exist {log.errorf("listing the hook inbox failed: %v", err)}
@@ -597,20 +647,31 @@ turn_marker_write :: proc(app: ^App) -> bool {
 		return false
 	}
 	_ = os.remove(marker)
-	if err := os.rename(pending, marker); err != nil {
-		log.errorf("publishing the recording marker failed: %v", err)
-		_ = os.remove(pending)
-		return false
+	for attempt in 1 ..= TURN_LOCK_ATTEMPTS {
+		err := os.rename(pending, marker)
+		if err == nil {return true}
+		if err != io.Error.Permission_Denied || attempt == TURN_LOCK_ATTEMPTS {
+			log.errorf("publishing the recording marker failed: %v", err)
+			break
+		}
+		time.sleep(TURN_LOCK_WAIT)
 	}
-	return true
+	_ = os.remove(pending)
+	return false
 }
 
 @(private)
 turn_marker_remove :: proc(app: ^App) {
 	if app.paths.turns == "" {return}
 	marker := fmt.tprintf("%s/%s", app.paths.turns, turns.RECORDING_MARKER)
-	if err := os.remove(marker); err != nil && err != .Not_Exist {
-		log.errorf("removing the recording marker failed: %v", err)
+	for attempt in 1 ..= TURN_LOCK_ATTEMPTS {
+		err := os.remove(marker)
+		if err == nil || err == .Not_Exist {return}
+		if err != io.Error.Permission_Denied || attempt == TURN_LOCK_ATTEMPTS {
+			log.errorf("removing the recording marker failed: %v", err)
+			return
+		}
+		time.sleep(TURN_LOCK_WAIT)
 	}
 }
 
@@ -618,17 +679,24 @@ turn_marker_remove :: proc(app: ^App) {
 @(private)
 turn_inbox_start :: proc(app: ^App) {
 	rec := &app.turn_recorder
-	turns.watch_stop(rec.inbox)
-	rec.inbox = nil
+	turns.watch_set_destroy(rec.inbox)
+	rec.inbox, rec.inbox_watch = nil, 0
 	if !turn_marker_write(app) {return}
 	wake := turns.Watch_Wake{app, turn_inbox_wake}
-	watch, started := turns.watch_start(turn_inbox_path(app), false, wake, runtime.heap_allocator())
-	if !started {
+	set, created := turns.watch_set_create(wake, runtime.heap_allocator())
+	if !created {
 		log.error("watching the hook inbox failed")
 		turn_marker_remove(app)
 		return
 	}
-	rec.inbox = watch
+	id, added := turns.watch_set_add(set, turn_inbox_path(app), false)
+	if !added {
+		log.error("watching the hook inbox failed")
+		turns.watch_set_destroy(set)
+		turn_marker_remove(app)
+		return
+	}
+	rec.inbox, rec.inbox_watch = set, id
 	turn_inbox_drain(app)
 }
 
@@ -664,8 +732,8 @@ turn_recording_stop :: proc(app: ^App) {
 	rec.recording = false
 	if rec.worker != nil {_ = turn_worker_post(rec.worker, Job_Stop{})}
 	turn_marker_remove(app)
-	turns.watch_stop(rec.inbox)
-	rec.inbox = nil
+	turns.watch_set_destroy(rec.inbox)
+	rec.inbox, rec.inbox_watch = nil, 0
 	turn_panes_reset(rec)
 	rec.ask_delete = true
 }
@@ -802,7 +870,7 @@ turns_deadline :: proc(app: ^App) -> (next: time.Tick, pending: bool) {
 turn_recorder_destroy :: proc(app: ^App) {
 	rec := &app.turn_recorder
 	if rec.recording {turn_marker_remove(app)}
-	turns.watch_stop(rec.inbox)
+	turns.watch_set_destroy(rec.inbox)
 	// Turns that just ended are saved before the worker goes; it runs queued jobs on destroy.
 	if rec.worker != nil {
 		for &end in rec.ends {turn_end_post(app, &end)}

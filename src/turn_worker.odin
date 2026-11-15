@@ -1,5 +1,6 @@
 package main
 
+import "aio:agent"
 import platform_api "aio:platform"
 import "aio:turns"
 import "base:runtime"
@@ -21,14 +22,16 @@ import "core:unicode/utf8"
 // It wakes the main loop when a result is ready.
 
 Job_Begin :: struct {
-	pane_key:  string,
-	session:   turns.Session,
-	directory: string,
+	pane_key:   string,
+	session:    turns.Session,
+	directory:  string,
 	// Files a hook already named as edited, absolute or relative to `directory`.
-	paths:     []string,
-	started:   i64,
+	paths:      []string,
+	started:    i64,
 	// An inbox file to delete once the roots are baselined: the hook waits for it to go.
-	ack:       string,
+	ack:        string,
+	// The agent's transcript file, "" when there is none to read.
+	transcript: string,
 }
 
 Job_Edit :: struct {
@@ -62,6 +65,10 @@ Job_Plain :: struct {
 	request:   u64,
 	directory: string,
 	mode:      turns.Plain_Mode,
+	// The agent of the pane: the work tree shown follows its latest change.
+	session:   turns.Session,
+	// The work tree picked to be shown, "" to follow the agent.
+	worktree:  string,
 }
 
 Job_View_Watch :: struct {
@@ -140,18 +147,26 @@ Result_Query :: struct {
 	patch:      string,
 	// Parallel to diff.files.
 	marked:     []bool,
+	// Parallel to diff.files: a selected change may be another agent's.
+	ambiguous:  []bool,
 	memory:     ^Turn_Memory,
 }
 
 Result_Plain :: struct {
-	pane:     u32,
-	request:  u64,
-	error:    turns.Error,
-	worktree: string,
-	diff:     turns.Diff,
-	patch:    string,
-	omitted:  int,
-	memory:   ^Turn_Memory,
+	pane:      u32,
+	request:   u64,
+	error:     turns.Error,
+	// The work tree shown, with '/' separators.
+	worktree:  string,
+	// Every work tree of the repository that can be shown: the one the agent is followed to first, then
+	// the request directory's own, then the rest by path.
+	worktrees: []string,
+	// The shown work tree was chosen by following the agent, not picked.
+	following: bool,
+	diff:      turns.Diff,
+	patch:     string,
+	omitted:   int,
+	memory:    ^Turn_Memory,
 }
 
 // A watched work tree changed and has been quiet since.
@@ -207,13 +222,43 @@ Tw_Net :: struct {
 	before: turns.Oid,
 	after:  turns.Oid,
 	shared: bool,
+	// Orders changes in time: the value of Tw_State.stamp when the latest change was taken in.
+	stamp:  u64,
 }
 
 // A turn that has begun and not ended.
 @(private)
 Tw_Open :: struct {
-	pane_key: string,
-	session:  turns.Session,
+	pane_key:   string,
+	session:    turns.Session,
+	// The agent's transcript file, "" when there is none to read.
+	transcript: string,
+}
+
+// How much of a transcript file was read: only whole lines are. Kept for the length of the recording, so a
+// later turn of the same session does not read it again.
+@(private)
+Tw_Transcript :: struct {
+	path:    string,
+	offset:  i64,
+	// False until the first read, which starts near the end of a long file.
+	scanned: bool,
+}
+
+// The work trees `git worktree list` gave for a repository during the job being run, in the temp allocator.
+@(private)
+Tw_Listing :: struct {
+	key:  string,
+	list: []turns.Worktree,
+}
+
+// A session known to work in a work tree. The key is the session id, else the pane key.
+@(private)
+Tw_Link :: struct {
+	key:      string,
+	worktree: string,
+	// When the link was last seen, to tell the most recent.
+	stamp:    u64,
 }
 
 // An open turn's presence in one root: what it changed there and what hooks named as theirs.
@@ -241,8 +286,8 @@ Tw_Store :: struct {
 Tw_Root :: struct {
 	repository: turns.Repository,
 	store:      ^Tw_Store,
-	// nil when the directory could not be watched; every drain then rescans.
-	watch:      ^turns.Watch,
+	// 0 when the directory could not be watched; every drain then rescans.
+	watch:      turns.Watch_Id,
 	known:      map[string]turns.Oid,
 	pending:    map[string]Tw_Net,
 	presences:  [dynamic]^Tw_Presence,
@@ -259,13 +304,22 @@ Tw_Root :: struct {
 	fresh:      bool,
 	// The directory vanished and the watch with it.
 	lost:       bool,
+	// No baseline was taken: nothing was hashed, and a file not seen changing had its content in `base`.
+	lazy:       bool,
+	// Paths that changed before the root was followed, which the next drain looks at.
+	seed:       [dynamic]string,
+	// Unix nanoseconds when a lazy root's work tree was first followed alongside its family, else 0. A
+	// rescan of the root only takes a file that was written since: what an older one held is unknown.
+	followed_at: i64,
+	// Changes drained while a turn was beginning, written since it started: the turn takes them.
+	claimed:    map[string]Tw_Net,
 }
 
 // A recursive watch of a work tree for the panes that show its git diffs.
 @(private)
 Tw_View :: struct {
 	worktree: string,
-	watch:    ^turns.Watch,
+	watch:    turns.Watch_Id,
 	panes:    [dynamic]u32,
 	// Set while changes wait for their quiet period; `changed` is when the last one arrived.
 	waiting:  bool,
@@ -282,6 +336,17 @@ Tw_State :: struct {
 	stores:    [dynamic]^Tw_Store,
 	opens:     [dynamic]^Tw_Open,
 	views:     [dynamic]^Tw_View,
+	// Every directory the worker watches, roots and views alike.
+	watches:   ^turns.Watch_Set,
+	// The repository keys whose work trees are followed.
+	families:  [dynamic]string,
+	links:     [dynamic]Tw_Link,
+	stamp:     u64,
+	// Unix milliseconds when the turn a Begin job is running started, else 0.
+	claim_since: i64,
+	// The listings made by the job being run: a job lists a repository once.
+	listings:  [dynamic]Tw_Listing,
+	transcripts: [dynamic]Tw_Transcript,
 	// Results of the job being run, handed to the main thread once it is done.
 	outbox:    [dynamic]Turn_Result,
 	last_id:   u64,
@@ -351,9 +416,22 @@ turn_worker_create :: proc(
 	state.opens.allocator = allocator
 	state.views.allocator = allocator
 	state.outbox.allocator = allocator
+	state.families.allocator = allocator
+	state.links.allocator = allocator
+	state.listings.allocator = allocator
+	state.transcripts.allocator = allocator
+	watches, watches_ok := turns.watch_set_create(state.wake, allocator)
+	if !watches_ok {
+		log.error("starting the turn worker failed: no watches")
+		delete(directory, allocator)
+		free(worker, allocator)
+		return nil
+	}
+	state.watches = watches
 	worker.thread = thread.create(tw_main)
 	if worker.thread == nil {
 		log.error("starting the turn worker failed")
+		turns.watch_set_destroy(state.watches)
 		delete(directory, allocator)
 		free(worker, allocator)
 		return nil
@@ -586,6 +664,7 @@ tw_job_dup :: proc(job: Turn_Job, allocator: mem.Allocator) -> (dup: Turn_Job, o
 		c.directory = tw_dup(j.directory, allocator) or_return
 		c.paths = tw_dup_all(j.paths, allocator) or_return
 		c.ack = tw_dup(j.ack, allocator) or_return
+		c.transcript = tw_dup(j.transcript, allocator) or_return
 		return c, true
 	case Job_Edit:
 		c: Job_Edit
@@ -627,7 +706,10 @@ tw_job_dup :: proc(job: Turn_Job, allocator: mem.Allocator) -> (dup: Turn_Job, o
 			request = j.request,
 			mode    = j.mode,
 		}
+		defer if !ok {tw_job_free_plain(&c, allocator)}
 		c.directory = tw_dup(j.directory, allocator) or_return
+		c.session = tw_session_dup(j.session, allocator) or_return
+		c.worktree = tw_dup(j.worktree, allocator) or_return
 		return c, true
 	case Job_View_Watch:
 		c := Job_View_Watch {
@@ -652,6 +734,7 @@ tw_job_free_begin :: proc(job: ^Job_Begin, allocator: mem.Allocator) {
 	delete(job.directory, allocator)
 	tw_free_all(job.paths, allocator)
 	delete(job.ack, allocator)
+	delete(job.transcript, allocator)
 }
 
 @(private = "file")
@@ -676,6 +759,13 @@ tw_job_free_query :: proc(job: ^Job_Query, allocator: mem.Allocator) {
 }
 
 @(private = "file")
+tw_job_free_plain :: proc(job: ^Job_Plain, allocator: mem.Allocator) {
+	delete(job.directory, allocator)
+	tw_session_free(&job.session, allocator)
+	delete(job.worktree, allocator)
+}
+
+@(private = "file")
 tw_job_free :: proc(job: ^Turn_Job, allocator: mem.Allocator) {
 	switch &j in job^ {
 	case Job_Begin:
@@ -687,7 +777,7 @@ tw_job_free :: proc(job: ^Turn_Job, allocator: mem.Allocator) {
 	case Job_Query:
 		tw_job_free_query(&j, allocator)
 	case Job_Plain:
-		delete(j.directory, allocator)
+		tw_job_free_plain(&j, allocator)
 	case Job_View_Watch:
 		delete(j.directory, allocator)
 	case Job_Watch_Root:
@@ -725,13 +815,15 @@ tw_main :: proc(t: ^thread.Thread) {
 	defer if context.temp_allocator.procedure == runtime.default_temp_allocator_proc {
 		runtime.default_temp_allocator_destroy((^runtime.Default_Temp_Allocator)(context.temp_allocator.data))
 	}
+	ticked := time.tick_now()
 	for {
 		sync.mutex_lock(&worker.mutex)
 		for len(worker.jobs) == 0 && !worker.stop {
 			// Only the worker changes its views, so it may read them here.
 			if len(state.views) == 0 {
 				sync.cond_wait(&worker.cond, &worker.mutex)
-			} else if !sync.cond_wait_with_timeout(&worker.cond, &worker.mutex, TW_TICK) {
+			} else if !sync.cond_wait_with_timeout(&worker.cond, &worker.mutex, TW_TICK) ||
+			   time.tick_since(ticked) >= TW_TICK {
 				break
 			}
 		}
@@ -767,6 +859,7 @@ tw_main :: proc(t: ^thread.Thread) {
 			tw_prune(state)
 		}
 		tw_views_tick(state)
+		ticked = time.tick_now()
 		free_all(context.temp_allocator)
 		tw_flush(worker)
 		sync.mutex_lock(&worker.mutex)
@@ -820,6 +913,8 @@ tw_note :: proc(failure: ^turns.Error, err: turns.Error) {
 
 @(private = "file")
 tw_run :: proc(state: ^Tw_State, job: Turn_Job) {
+	clear(&state.listings)
+	state.claim_since = 0
 	switch j in job {
 	case Job_Begin:
 		tw_begin(state, j)
@@ -863,10 +958,15 @@ tw_state_destroy :: proc(state: ^Tw_State) {
 	tw_stop(state)
 	delete(state.roots)
 	delete(state.opens)
+	delete(state.links)
+	delete(state.listings)
+	delete(state.transcripts)
+	delete(state.families)
 	for store in state.stores {tw_store_free(state, store)}
 	delete(state.stores)
 	for view in state.views {tw_view_free(state, view)}
 	delete(state.views)
+	turns.watch_set_destroy(state.watches)
 	for &result in state.outbox {turn_result_destroy(&result)}
 	delete(state.outbox)
 }
@@ -877,6 +977,15 @@ tw_stop :: proc(state: ^Tw_State) {
 	clear(&state.roots)
 	for open in state.opens {tw_open_free(state, open)}
 	clear(&state.opens)
+	for link in state.links {
+		delete(link.key, state.allocator)
+		delete(link.worktree, state.allocator)
+	}
+	clear(&state.links)
+	for key in state.families {delete(key, state.allocator)}
+	clear(&state.families)
+	for transcript in state.transcripts {delete(transcript.path, state.allocator)}
+	clear(&state.transcripts)
 }
 
 @(private = "file")
@@ -1314,9 +1423,29 @@ tw_root_find :: proc(state: ^Tw_State, worktree: string) -> ^Tw_Root {
 }
 
 @(private = "file")
-tw_watch_start :: proc(state: ^Tw_State, worktree: string, wake: turns.Watch_Wake) -> ^turns.Watch {
-	watch, started := turns.watch_start(worktree, true, wake, state.allocator)
-	return watch if started else nil
+tw_watch_add :: proc(state: ^Tw_State, worktree: string) -> turns.Watch_Id {
+	id, added := turns.watch_set_add(state.watches, worktree, true)
+	return id if added else 0
+}
+
+@(private = "file")
+tw_watch_remove :: proc(state: ^Tw_State, id: turns.Watch_Id) {
+	if id != 0 {turns.watch_set_remove(state.watches, id)}
+}
+
+// Takes what the root's watch has collected into `out`. True when changes may have been lost: the watch
+// overflowed or stopped. A watch that stopped is dropped and the root is lost until a drain finds its
+// directory again.
+@(private = "file")
+tw_root_take :: proc(state: ^Tw_State, root: ^Tw_Root, out: ^[dynamic]string) -> bool {
+	if root.watch == 0 {return true}
+	overflowed, dead := turns.watch_set_take(state.watches, root.watch, out, context.temp_allocator)
+	if dead {
+		tw_watch_remove(state, root.watch)
+		root.watch = 0
+		root.lost = true
+	}
+	return overflowed || dead
 }
 
 @(private = "file")
@@ -1325,6 +1454,7 @@ tw_net_merge :: proc(
 	path: string,
 	before, after: turns.Oid,
 	shared: bool,
+	stamp: u64,
 	allocator: mem.Allocator,
 ) -> bool {
 	if net, found := &nets^[path]; found {
@@ -1332,6 +1462,7 @@ tw_net_merge :: proc(
 		delete(net.after, allocator)
 		net.after = latest
 		net.shared = net.shared || shared
+		net.stamp = stamp
 		return true
 	}
 	key := tw_dup(path, allocator) or_return
@@ -1340,7 +1471,7 @@ tw_net_merge :: proc(
 	if first_ok && latest_ok {
 		_, value, _, insert_error := map_entry(nets, key)
 		if insert_error == nil {
-			value^ = Tw_Net{first, latest, shared}
+			value^ = Tw_Net{first, latest, shared, stamp}
 			return true
 		}
 	}
@@ -1414,9 +1545,13 @@ tw_presence_name :: proc(presence: ^Tw_Presence, path: string, allocator: mem.Al
 @(private = "file")
 tw_root_destroy :: proc(state: ^Tw_State, root: ^Tw_Root) {
 	allocator := state.allocator
-	turns.watch_stop(root.watch)
+	tw_watch_remove(state, root.watch)
 	for path in root.carry {delete(path, allocator)}
 	delete(root.carry)
+	for path in root.seed {delete(path, allocator)}
+	delete(root.seed)
+	tw_net_clear(&root.claimed, allocator)
+	delete(root.claimed)
 	delete(root.base, allocator)
 	for presence in root.presences {tw_presence_free(state, presence)}
 	delete(root.presences)
@@ -1540,8 +1675,8 @@ tw_root_suspect :: proc(state: ^Tw_State, root: ^Tw_Root) -> turns.Error {
 	temp := context.temp_allocator
 	worktree := root.repository.worktree
 	candidates := make([dynamic]string, temp)
-	if turns.watch_take(root.watch, &candidates, temp) {root.rescan = true}
-	paths := tw_drain_paths(worktree, candidates[:])
+	if root.watch != 0 && tw_root_take(state, root, &candidates) {root.rescan = true}
+	paths := tw_drain_paths(state, root, candidates[:])
 	kept := turns.keep_unignored(worktree, paths, temp, state.cancel) or_return
 	indexed := tw_tree_oids(worktree, root.base, kept, temp, state.cancel) or_return
 	for path, i in kept {
@@ -1556,9 +1691,9 @@ tw_root_suspect :: proc(state: ^Tw_State, root: ^Tw_Root) -> turns.Error {
 	return .None
 }
 
-// Takes ownership of `repository`.
+// A root with nothing followed yet. Takes ownership of `repository`.
 @(private = "file")
-tw_root_create :: proc(state: ^Tw_State, repository: turns.Repository) -> (root: ^Tw_Root, err: turns.Error) {
+tw_root_new :: proc(state: ^Tw_State, repository: turns.Repository) -> (root: ^Tw_Root, err: turns.Error) {
 	allocator := state.allocator
 	fresh, new_error := new(Tw_Root, allocator)
 	if new_error != nil {
@@ -1571,11 +1706,20 @@ tw_root_create :: proc(state: ^Tw_State, repository: turns.Repository) -> (root:
 	fresh.pending = make(map[string]Tw_Net, allocator)
 	fresh.presences.allocator = allocator
 	fresh.carry.allocator = allocator
+	fresh.seed.allocator = allocator
+	fresh.claimed = make(map[string]Tw_Net, allocator)
 	fresh.fresh = true
+	return fresh, .None
+}
+
+// Takes ownership of `repository`.
+@(private = "file")
+tw_root_create :: proc(state: ^Tw_State, repository: turns.Repository) -> (root: ^Tw_Root, err: turns.Error) {
+	fresh := tw_root_new(state, repository) or_return
 	defer if err != .None {tw_root_destroy(state, fresh)}
 	// The watch comes first: a change from here on is seen by it, and one made earlier is in the baseline.
 	// Opening the store takes long enough for an agent to have edited a file meanwhile.
-	fresh.watch = tw_watch_start(state, repository.worktree, {})
+	fresh.watch = tw_watch_add(state, repository.worktree)
 	fresh.since = tw_now_ms()
 	fresh.store, err = tw_store_open(state, repository)
 	if err != .None {return nil, err}
@@ -1585,15 +1729,274 @@ tw_root_create :: proc(state: ^Tw_State, repository: turns.Repository) -> (root:
 	return fresh, .None
 }
 
-// The root of the work tree `directory` is in, created when it is new.
+// A root for a work tree no turn began in: nothing is hashed, and a file not seen changing had its content
+// in `base`. `listed`: the work tree was already there when its family was first followed, so a rescan
+// does not take what was dirty in it then. Takes ownership of `repository`.
 @(private = "file")
-tw_root_for_directory :: proc(state: ^Tw_State, directory: string) -> (root: ^Tw_Root, err: turns.Error) {
-	repository := turns.repository_find(directory, state.allocator, state.cancel) or_return
-	if existing := tw_root_find(state, repository.worktree); existing != nil {
-		turns.repository_destroy(&repository, state.allocator)
-		return existing, .None
+tw_root_create_lazy :: proc(
+	state: ^Tw_State,
+	repository: turns.Repository,
+	base: turns.Oid,
+	listed: bool,
+) -> (
+	root: ^Tw_Root,
+	err: turns.Error,
+) {
+	fresh := tw_root_new(state, repository) or_return
+	defer if err != .None {tw_root_destroy(state, fresh)}
+	fresh.lazy = true
+	if listed {fresh.followed_at = time.to_unix_nanoseconds(time.now())}
+	fresh.base = tw_copy(base, state.allocator) or_return
+	fresh.watch = tw_watch_add(state, repository.worktree)
+	fresh.since = tw_now_ms()
+	fresh.store, err = tw_store_open(state, repository)
+	if err != .None {return nil, err}
+	if _, append_error := append(&state.roots, fresh); append_error != nil {return nil, .Out_Of_Memory}
+	return fresh, .None
+}
+
+// Whether the file was last written at or after `since` (Unix nanoseconds); false when it cannot be read.
+@(private = "file")
+tw_written_after :: proc(worktree, path: string, since: i64) -> bool {
+	full := strings.join({worktree, path}, "/", context.temp_allocator)
+	info, stat_error := os.stat(full, context.temp_allocator)
+	return stat_error == nil && time.to_unix_nanoseconds(info.modification_time) >= since
+}
+
+// Whether a dirty path that a lazy root's rescan found, and the watch never reported, was changed since the
+// root was followed: a file counts when written then or later; a deletion has no time to tell.
+@(private = "file")
+tw_written_since :: proc(worktree: string, item: turns.Path_State, since: i64) -> bool {
+	return !item.deleted && tw_written_after(worktree, item.path, since)
+}
+
+// Gives the changes no turn took, because it began elsewhere, to Between.
+@(private = "file")
+tw_claims_release :: proc(state: ^Tw_State) {
+	state.claim_since = 0
+	for root in state.roots {
+		for path, net in root.claimed {
+			if !tw_net_merge(&root.pending, path, net.before, net.after, net.shared, net.stamp, state.allocator) {
+				log.error("keeping a change failed: out of memory")
+			}
+		}
+		tw_net_clear(&root.claimed, state.allocator)
 	}
-	return tw_root_create(state, repository)
+}
+
+// A root that was followed without a baseline gets one when a turn begins in its own folder: what is
+// dirty now is what that turn starts from. Changes seen so far are drained first, and keep their before.
+@(private = "file")
+tw_root_upgrade :: proc(state: ^Tw_State, root: ^Tw_Root) -> turns.Error {
+	if !root.lazy {return .None}
+	temp := context.temp_allocator
+	worktree := root.repository.worktree
+	tw_drain(state, root, false) or_return
+	states := turns.dirty_paths(worktree, temp, state.cancel) or_return
+	paths := make([dynamic]string, 0, len(states), temp)
+	for item in states {
+		if tw_text_valid(item.path) && !tw_git_internal(item.path) && item.path not_in root.known {
+			append(&paths, item.path)
+		}
+	}
+	kept := turns.keep_unignored(worktree, paths[:], temp, state.cancel) or_return
+	oids := turns.hash_paths(root.store.store, worktree, kept, temp, state.cancel) or_return
+	for path, i in kept {
+		if !tw_known_set(&root.known, path, oids[i], state.allocator) {return .Out_Of_Memory}
+	}
+	root.lazy = false
+	// What the watch reported while the baseline was taken may have been hashed as it is now, so it is known
+	// by its content in the base commit and carried to the turn that begins, as at a root's creation.
+	return tw_root_suspect(state, root)
+}
+
+@(private = "file")
+tw_repository_clone :: proc(
+	repository: turns.Repository,
+	worktree: string,
+	allocator: mem.Allocator,
+) -> (
+	clone: turns.Repository,
+	ok: bool,
+) {
+	worktree_copy, worktree_ok := tw_dup(worktree, allocator)
+	common_copy, common_ok := tw_dup(repository.common_dir, allocator)
+	key_copy, key_ok := tw_dup(repository.key, allocator)
+	clone = {worktree_copy, common_copy, key_copy}
+	if worktree_ok && common_ok && key_ok {return clone, true}
+	turns.repository_destroy(&clone, allocator)
+	return {}, false
+}
+
+@(private = "file")
+tw_family_known :: proc(state: ^Tw_State, key: string) -> bool {
+	return slice.contains(state.families[:], key)
+}
+
+// The open turns that are in a root of the repository, in the temp allocator.
+@(private = "file")
+tw_family_opens :: proc(state: ^Tw_State, key: string) -> []^Tw_Open {
+	opens := make([dynamic]^Tw_Open, context.temp_allocator)
+	for root in state.roots {
+		if root.repository.key != key {continue}
+		for presence in root.presences {
+			if !slice.contains(opens[:], presence.open) {append(&opens, presence.open)}
+		}
+	}
+	return opens[:]
+}
+
+// Makes the turn open in the root, with nothing drained or saved.
+@(private = "file")
+tw_presence_new :: proc(state: ^Tw_State, root: ^Tw_Root, open: ^Tw_Open) -> (^Tw_Presence, bool) {
+	allocator := state.allocator
+	presence, new_error := new(Tw_Presence, allocator)
+	if new_error != nil {return nil, false}
+	presence.open = open
+	presence.named = make(map[string]struct{}, allocator)
+	presence.changes = make(map[string]Tw_Net, allocator)
+	if _, append_error := append(&root.presences, presence); append_error != nil {
+		tw_presence_free(state, presence)
+		return nil, false
+	}
+	return presence, true
+}
+
+// Follows a work tree of the repository the family has no root for. One listed when the family was first
+// followed has been on its commit since; a new one started where its HEAD log begins, and the files that
+// changed there since are left for the next drain, which comes once the sessions' links are known. Every
+// open turn of the family enters it first.
+@(private = "file")
+tw_family_follow :: proc(
+	state: ^Tw_State,
+	repository: turns.Repository,
+	item: turns.Worktree,
+	first: bool,
+) -> turns.Error {
+	temp := context.temp_allocator
+	allocator := state.allocator
+	base := item.head
+	if !first {base = turns.worktree_origin(item.path, temp, state.cancel) or_return}
+	cloned, cloned_ok := tw_repository_clone(repository, item.path, allocator)
+	if !cloned_ok {return .Out_Of_Memory}
+	opens := tw_family_opens(state, repository.key)
+	root := tw_root_create_lazy(state, cloned, base, first) or_return
+	for open in opens {
+		if _, added := tw_presence_new(state, root, open); !added {return .Out_Of_Memory}
+		root.fresh = false
+	}
+	if first {return .None}
+	// The watch is already on, so no change falls between it and this look.
+	paths, paths_error := turns.changed_since(item.path, base, temp, state.cancel)
+	if paths_error != .None {
+		root.rescan = true
+		return paths_error
+	}
+	for path in paths {
+		copied, copied_ok := tw_dup(path, allocator)
+		if !copied_ok {return .Out_Of_Memory}
+		if _, append_error := append(&root.seed, copied); append_error != nil {
+			delete(copied, allocator)
+			return .Out_Of_Memory
+		}
+	}
+	return .None
+}
+
+@(private = "file")
+tw_listing_find :: proc(state: ^Tw_State, key: string) -> (list: []turns.Worktree, found: bool) {
+	for listing in state.listings {
+		if listing.key == key {return listing.list, true}
+	}
+	return nil, false
+}
+
+// Where the root's work tree is now, as the job's listing says; false when it has none or lacks the tree.
+@(private = "file")
+tw_listed_head :: proc(state: ^Tw_State, root: ^Tw_Root) -> (head: turns.Oid, found: bool) {
+	list, listed := tw_listing_find(state, root.repository.key)
+	if !listed {return "", false}
+	for item in list {
+		if !item.bare && !item.prunable && strings.equal_fold(item.path, root.repository.worktree) {
+			return item.head, true
+		}
+	}
+	return "", false
+}
+
+// Points the root's base at the commit its work tree is on. The job's listing says so; only a root the
+// listing lacks costs a git run.
+@(private = "file")
+tw_root_settle :: proc(state: ^Tw_State, root: ^Tw_Root) -> turns.Error {
+	head, found := tw_listed_head(state, root)
+	if !found {return tw_root_set_base(state, root)}
+	base := tw_copy(head, state.allocator) or_return
+	delete(root.base, state.allocator)
+	root.base = base
+	return .None
+}
+
+// Lists the work trees of the repository and follows each one that can be: a root per work tree. Only a
+// family already followed is listed unless `create`. A job lists a repository once. The list is in the
+// temp allocator; a failure to follow one work tree is the error, and the list is still good.
+@(private = "file")
+tw_family_sync :: proc(
+	state: ^Tw_State,
+	repository: turns.Repository,
+	create: bool,
+) -> (
+	list: []turns.Worktree,
+	err: turns.Error,
+) {
+	if cached, found := tw_listing_find(state, repository.key); found {return cached, .None}
+	listed, list_error := turns.worktrees_list(repository.worktree, context.temp_allocator, state.cancel)
+	if list_error != .None {return nil, list_error}
+	known := tw_family_known(state, repository.key)
+	if !known {
+		if !create {return listed, .None}
+		key, key_error := tw_copy(repository.key, state.allocator)
+		if key_error != .None {return listed, key_error}
+		if _, append_error := append(&state.families, key); append_error != nil {
+			delete(key, state.allocator)
+			return listed, .Out_Of_Memory
+		}
+	}
+	for item in listed {
+		if item.bare || item.prunable || tw_root_find(state, item.path) != nil {continue}
+		tw_note(&err, tw_family_follow(state, repository, item, !known))
+	}
+	if key, key_error := strings.clone(repository.key, context.temp_allocator); key_error == nil {
+		append(&state.listings, Tw_Listing{key, listed})
+	}
+	return listed, err
+}
+
+// The root of the work tree `directory` is in, created when it is new. `own`: a turn begins in this folder,
+// so a root followed without a baseline gets one. A root is returned with an error only when that failed.
+@(private = "file")
+tw_root_for_directory :: proc(
+	state: ^Tw_State,
+	directory: string,
+	own: bool,
+) -> (
+	root: ^Tw_Root,
+	err: turns.Error,
+) {
+	repository := turns.repository_find(directory, state.allocator, state.cancel) or_return
+	root = tw_root_find(state, repository.worktree)
+	if root == nil && tw_family_known(state, repository.key) {
+		// A work tree the family has not seen yet is found by listing the family again.
+		_, sync_error := tw_family_sync(state, repository, false)
+		root = tw_root_find(state, repository.worktree)
+		if root == nil && sync_error != .None {
+			turns.repository_destroy(&repository, state.allocator)
+			return nil, sync_error
+		}
+	}
+	if root == nil {return tw_root_create(state, repository)}
+	turns.repository_destroy(&repository, state.allocator)
+	if own {err = tw_root_upgrade(state, root)}
+	return root, err
 }
 
 // The root of the work tree holding `path`, which is absolute with '/' separators, and the path
@@ -1623,7 +2026,7 @@ tw_root_for_path :: proc(
 		directory = directory[:cut]
 		if os.is_directory(directory) {break}
 	}
-	root = tw_root_for_directory(state, directory) or_return
+	root = tw_root_for_directory(state, directory, false) or_return
 	inside, ok := tw_path_under(root.repository.worktree, path)
 	if !ok {return nil, "", .Not_Repository}
 	return root, inside, .None
@@ -1647,17 +2050,24 @@ tw_drain :: proc(state: ^Tw_State, root: ^Tw_Root, carried: bool) -> turns.Error
 		}
 		clear(&root.carry)
 	}
-	overflowed := root.watch == nil || root.rescan
-	if root.watch != nil && turns.watch_take(root.watch, &candidates, temp) {overflowed = true}
+	for path in root.seed {
+		copied, copy_error := strings.clone(path, temp)
+		if copy_error == nil {append(&candidates, copied)}
+		delete(path, state.allocator)
+	}
+	clear(&root.seed)
+	overflowed := root.watch == 0 || root.rescan
+	if root.watch != 0 && tw_root_take(state, root, &candidates) {overflowed = true}
+	if len(candidates) == 0 && !overflowed && !root.lost {return .None}
 	if !os.is_directory(worktree) {
-		turns.watch_stop(root.watch)
-		root.watch, root.lost, root.rescan = nil, true, true
+		tw_watch_remove(state, root.watch)
+		root.watch, root.lost, root.rescan = 0, true, true
 		return .None
 	}
-	if root.lost || (overflowed && root.watch != nil) {
-		// A watch that overflowed may also have stopped, as one does when its directory is deleted.
-		turns.watch_stop(root.watch)
-		root.watch = tw_watch_start(state, worktree, {})
+	if root.lost {
+		// The watch stopped or the directory is back: watch it again, and look at everything.
+		tw_watch_remove(state, root.watch)
+		root.watch = tw_watch_add(state, worktree)
 		root.lost = false
 		overflowed = true
 	}
@@ -1665,18 +2075,23 @@ tw_drain :: proc(state: ^Tw_State, root: ^Tw_Root, carried: bool) -> turns.Error
 	if overflowed {
 		// With no turn open the root is settled, so what it was based on may have moved: a checkout, a
 		// commit. With one open the base stays, or the turn's own commit would take its change away.
-		if len(root.presences) == 0 {tw_root_set_base(state, root) or_return}
+		if len(root.presences) == 0 {tw_root_settle(state, root) or_return}
 		states := turns.dirty_paths(worktree, temp, state.cancel) or_return
 		dirty := make(map[string]struct{}, len(states), temp)
 		for item in states {
-			append(&candidates, item.path)
 			dirty[item.path] = {}
+			// A lazy root never saw what a file held before it was followed: only the watch can say who
+			// changed one that is older than that.
+			if root.followed_at != 0 && root.lazy && item.path not_in root.known {
+				if !tw_written_since(worktree, item, root.followed_at) {continue}
+			}
+			append(&candidates, item.path)
 		}
 		for path in root.known {
 			if path not_in dirty {append(&candidates, path)}
 		}
 	}
-	paths := tw_drain_paths(worktree, candidates[:])
+	paths := tw_drain_paths(state, root, candidates[:])
 	if !carried && len(root.carry) > 0 {
 		// A turn about to begin takes those, so they are neither Between's nor this drain's.
 		held := make(map[string]struct{}, len(root.carry), temp)
@@ -1713,17 +2128,31 @@ tw_drain :: proc(state: ^Tw_State, root: ^Tw_Root, carried: bool) -> turns.Error
 	return .None
 }
 
-// The candidates without repeats, git's own files, names that cannot be stored, and directories: the
-// OS reports a directory as changed whenever an entry in it is, and its files are reported themselves.
+// The candidates without repeats, git's own files, names that cannot be stored, directories, and what lies in
+// another work tree of the family: the OS reports a directory as changed whenever an entry in it is, a
+// work tree nested in this one is watched by its own root, and a file is reported by every watch over it.
 @(private = "file")
-tw_drain_paths :: proc(worktree: string, candidates: []string) -> []string {
+tw_drain_paths :: proc(state: ^Tw_State, root: ^Tw_Root, candidates: []string) -> []string {
 	temp := context.temp_allocator
+	worktree := root.repository.worktree
+	inner := make([dynamic]string, temp)
+	for other in state.roots {
+		if other == root || other.repository.key != root.repository.key {continue}
+		if _, inside := tw_path_under(worktree, other.repository.worktree); inside {
+			append(&inner, other.repository.worktree)
+		}
+	}
 	seen := make(map[string]struct{}, len(candidates), temp)
 	paths := make([dynamic]string, 0, len(candidates), temp)
 	for path in candidates {
 		if path == "" || path in seen || tw_git_internal(path) || !tw_text_valid(path) {continue}
 		seen[path] = {}
 		full := strings.join({worktree, path}, "/", temp)
+		nested := false
+		for tree in inner {
+			if _, under := tw_path_under(tree, full); under || strings.equal_fold(tree, full) {nested = true}
+		}
+		if nested {continue}
 		info, stat_error := os.stat(full, temp)
 		if stat_error == nil && info.type == .Directory {continue}
 		append(&paths, path)
@@ -1731,29 +2160,49 @@ tw_drain_paths :: proc(worktree: string, candidates: []string) -> []string {
 	return paths[:]
 }
 
-// Gives one change to whoever made it: the open turns a hook named the path for, else the one turn
-// open in the root, else every open turn, each marked shared since the change may be another's, else
-// Between.
+// Gives one change to whoever made it, in this order: the open turns a hook named the path for; the open
+// turns whose sessions work in this work tree (several: each, shared, since the change may be another's);
+// the only open turn of the repository, or every one of them, shared; else Between.
 @(private = "file")
 tw_attribute :: proc(state: ^Tw_State, root: ^Tw_Root, path: string, before, after: turns.Oid) -> bool {
 	allocator := state.allocator
+	state.stamp += 1
+	stamp := state.stamp
 	named := 0
 	for presence in root.presences {
 		if path in presence.named {named += 1}
 	}
-	switch {
-	case named > 0:
+	if named > 0 {
 		for presence in root.presences {
 			if path not_in presence.named {continue}
-			tw_net_merge(&presence.changes, path, before, after, named > 1, allocator) or_return
+			tw_net_merge(&presence.changes, path, before, after, named > 1, stamp, allocator) or_return
 		}
-	case len(root.presences) > 0:
-		shared := len(root.presences) > 1
+		return true
+	}
+	worktree := root.repository.worktree
+	linked := 0
+	for presence in root.presences {
+		if tw_linked(state, presence.open, worktree) {linked += 1}
+	}
+	if linked > 0 {
 		for presence in root.presences {
-			tw_net_merge(&presence.changes, path, before, after, shared, allocator) or_return
+			if !tw_linked(state, presence.open, worktree) {continue}
+			tw_net_merge(&presence.changes, path, before, after, linked > 1, stamp, allocator) or_return
 		}
-	case:
-		tw_net_merge(&root.pending, path, before, after, false, allocator) or_return
+		return true
+	}
+	if len(root.presences) == 0 {
+		// A turn that is beginning started before its job could run: what was written since is its, not
+		// Between's. It takes the changes once it is in the root.
+		claim := state.claim_since * i64(time.Millisecond)
+		if state.claim_since != 0 && tw_written_after(worktree, path, claim) {
+			return tw_net_merge(&root.claimed, path, before, after, false, stamp, allocator)
+		}
+		return tw_net_merge(&root.pending, path, before, after, false, stamp, allocator)
+	}
+	shared := len(root.presences) > 1
+	for presence in root.presences {
+		tw_net_merge(&presence.changes, path, before, after, shared, stamp, allocator) or_return
 	}
 	return true
 }
@@ -1808,18 +2257,38 @@ tw_open_free :: proc(state: ^Tw_State, open: ^Tw_Open) {
 	allocator := state.allocator
 	delete(open.pane_key, allocator)
 	tw_session_free(&open.session, allocator)
+	delete(open.transcript, allocator)
 	free(open, allocator)
 }
 
-// Registers a turn, or refreshes the session of one that is already open.
+// The agent's transcript, once it is known.
 @(private = "file")
-tw_open_set :: proc(state: ^Tw_State, pane_key: string, session: turns.Session) -> ^Tw_Open {
+tw_open_transcript :: proc(state: ^Tw_State, open: ^Tw_Open, path: string) {
+	if path == "" || path == open.transcript {return}
+	copied, copied_ok := tw_dup(path, state.allocator)
+	if !copied_ok {
+		log.error("remembering a transcript failed: out of memory")
+		return
+	}
+	delete(open.transcript, state.allocator)
+	open.transcript = copied
+}
+
+// Registers a turn, or refreshes the session and transcript of one that is already open.
+@(private = "file")
+tw_open_set :: proc(
+	state: ^Tw_State,
+	pane_key: string,
+	session: turns.Session,
+	transcript: string,
+) -> ^Tw_Open {
 	allocator := state.allocator
 	copied, copied_ok := tw_session_dup(session, allocator)
 	if !copied_ok {return nil}
 	if open := tw_open_find(state, pane_key); open != nil {
 		tw_session_free(&open.session, allocator)
 		open.session = copied
+		tw_open_transcript(state, open, transcript)
 		return open
 	}
 	open, new_error := new(Tw_Open, allocator)
@@ -1839,7 +2308,132 @@ tw_open_set :: proc(state: ^Tw_State, pane_key: string, session: turns.Session) 
 		tw_open_free(state, open)
 		return nil
 	}
+	tw_open_transcript(state, open, transcript)
 	return open
+}
+
+// The session id names an agent session for as long as it lives; before it is known the pane does.
+@(private = "file")
+tw_session_key :: proc(session: turns.Session) -> string {
+	return session.session if session.session != "" else session.pane_key
+}
+
+@(private = "file")
+tw_linked :: proc(state: ^Tw_State, open: ^Tw_Open, worktree: string) -> bool {
+	key := tw_session_key(open.session)
+	if key == "" {key = open.pane_key}
+	for link in state.links {
+		if link.key == key && strings.equal_fold(link.worktree, worktree) {return true}
+	}
+	return false
+}
+
+// Notes that the turn's session works in the work tree. Links last until recording stops.
+@(private = "file")
+tw_link :: proc(state: ^Tw_State, open: ^Tw_Open, worktree: string) -> bool {
+	key := tw_session_key(open.session)
+	if key == "" {key = open.pane_key}
+	state.stamp += 1
+	for &link in state.links {
+		if link.key == key && strings.equal_fold(link.worktree, worktree) {
+			link.stamp = state.stamp
+			return true
+		}
+	}
+	allocator := state.allocator
+	key_copy, key_ok := tw_dup(key, allocator)
+	worktree_copy, worktree_ok := tw_dup(worktree, allocator)
+	if key_ok && worktree_ok {
+		link := Tw_Link{key_copy, worktree_copy, state.stamp}
+		if _, append_error := append(&state.links, link); append_error == nil {
+			return true
+		}
+	}
+	delete(key_copy, allocator)
+	delete(worktree_copy, allocator)
+	return false
+}
+
+@(private = "file")
+tw_open_in_roots :: proc(state: ^Tw_State, open: ^Tw_Open) -> bool {
+	for root in state.roots {
+		if tw_presence_find(root, open) != nil {return true}
+	}
+	return false
+}
+
+// The most of a transcript read in one go, and how far from its end a first read starts.
+@(private = "file")
+TW_TRANSCRIPT_CHUNK :: 8 * mem.Megabyte
+
+// Appends the places the transcript names since the last read, cut at the last whole line.
+@(private = "file")
+tw_transcript_places :: proc(state: ^Tw_State, open: ^Tw_Open, places: ^[dynamic]string) {
+	file, open_error := os.open(open.transcript)
+	if open_error != nil {return}
+	defer os.close(file)
+	size, size_error := os.file_size(file)
+	if size_error != nil {return}
+	at := -1
+	for transcript, i in state.transcripts {
+		if transcript.path == open.transcript {at = i}
+	}
+	if at < 0 {
+		path, path_ok := tw_dup(open.transcript, state.allocator)
+		if !path_ok {return}
+		if _, append_error := append(&state.transcripts, Tw_Transcript{path = path}); append_error != nil {
+			delete(path, state.allocator)
+			return
+		}
+		at = len(state.transcripts) - 1
+	}
+	position := &state.transcripts[at]
+	if !position.scanned {
+		position.scanned = true
+		position.offset = max(i64(0), size - TW_TRANSCRIPT_CHUNK)
+	}
+	if size < position.offset {position.offset = 0}
+	if size == position.offset {return}
+	count := int(min(size - position.offset, TW_TRANSCRIPT_CHUNK))
+	buffer, make_error := make([]u8, count, state.allocator)
+	if make_error != nil {return}
+	defer delete(buffer, state.allocator)
+	read, read_error := os.read_at(file, buffer, position.offset)
+	if read_error != nil && read <= 0 {return}
+	chunk := buffer[:max(read, 0)]
+	end := strings.last_index_byte(string(chunk), '\n')
+	if end < 0 {
+		// A line still being written waits for its end; one longer than any read is given up.
+		if len(chunk) == TW_TRANSCRIPT_CHUNK {position.offset += i64(len(chunk))}
+		return
+	}
+	position.offset += i64(end + 1)
+	agent.claude_transcript_places(chunk[:end + 1], places, context.temp_allocator)
+}
+
+// Reads what every open turn's transcript has added, and links each session to the work tree (of the
+// repositories its turn is in) that holds each place it names: the innermost, as work trees nest.
+@(private = "file")
+tw_links_read :: proc(state: ^Tw_State) {
+	for open in state.opens {
+		if open.transcript == "" || !tw_open_in_roots(state, open) {continue}
+		places := make([dynamic]string, context.temp_allocator)
+		tw_transcript_places(state, open, &places)
+		for place in places {
+			inside := strings.trim_right(place, "/")
+			target: ^Tw_Root
+			for root in state.roots {
+				worktree := root.repository.worktree
+				if tw_presence_find(root, open) == nil {continue}
+				_, under := tw_path_under(worktree, inside)
+				if !under && !strings.equal_fold(worktree, inside) {continue}
+				if target == nil || len(worktree) > len(target.repository.worktree) {target = root}
+			}
+			if target != nil && !tw_link(state, open, target.repository.worktree) {
+				log.error("linking a session to a work tree failed: out of memory")
+			}
+		}
+	}
 }
 
 // Makes the turn open in the root. Changes made before that belong to whoever else is open there, or
@@ -1864,18 +2458,17 @@ tw_root_enter :: proc(
 	if root.fresh {
 		root.fresh = false
 	} else if len(root.presences) == 0 {
-		if base_error := tw_root_set_base(state, root); err == .None {err = base_error}
+		if base_error := tw_root_settle(state, root); err == .None {err = base_error}
 	}
+	fresh, added := tw_presence_new(state, root, open)
+	if !added {return nil, .Out_Of_Memory}
 	allocator := state.allocator
-	fresh, new_error := new(Tw_Presence, allocator)
-	if new_error != nil {return nil, .Out_Of_Memory}
-	fresh.open = open
-	fresh.named = make(map[string]struct{}, allocator)
-	fresh.changes = make(map[string]Tw_Net, allocator)
-	if _, append_error := append(&root.presences, fresh); append_error != nil {
-		tw_presence_free(state, fresh)
-		return nil, .Out_Of_Memory
+	for path, net in root.claimed {
+		if !tw_net_merge(&fresh.changes, path, net.before, net.after, net.shared, net.stamp, allocator) {
+			err = .Out_Of_Memory
+		}
 	}
+	tw_net_clear(&root.claimed, allocator)
 	// What the watch saw while the root's baseline was taken happened after the root's watch began, so
 	// it is this turn's, not Between's.
 	if len(root.carry) > 0 {
@@ -1884,6 +2477,27 @@ tw_root_enter :: proc(
 	return fresh, err
 }
 
+// Makes the turn open in every work tree of the root's repository: any of them may be where the agent
+// goes, and the turn must be there to be given what changes.
+@(private = "file")
+tw_attach_family :: proc(
+	state: ^Tw_State,
+	open: ^Tw_Open,
+	root: ^Tw_Root,
+	now: i64,
+	saved: ^[dynamic]string,
+	failure: ^turns.Error,
+) {
+	_, sync_error := tw_family_sync(state, root.repository, true)
+	tw_note(failure, sync_error)
+	for candidate in state.roots {
+		if candidate.repository.key != root.repository.key {continue}
+		_, enter_error := tw_root_enter(state, candidate, open, now, saved)
+		tw_note(failure, enter_error)
+	}
+}
+
+// The turn's agent was started in this folder, so it works in this work tree.
 @(private = "file")
 tw_attach_directory :: proc(
 	state: ^Tw_State,
@@ -1893,16 +2507,15 @@ tw_attach_directory :: proc(
 	saved: ^[dynamic]string,
 	failure: ^turns.Error,
 ) {
-	root, find_error := tw_root_for_directory(state, directory)
-	if find_error != .None {
-		tw_note(failure, find_error)
-		return
-	}
-	_, enter_error := tw_root_enter(state, root, open, now, saved)
-	tw_note(failure, enter_error)
+	root, find_error := tw_root_for_directory(state, directory, true)
+	tw_note(failure, find_error)
+	if root == nil {return}
+	tw_attach_family(state, open, root, now, saved, failure)
+	if !tw_link(state, open, root.repository.worktree) {tw_note(failure, .Out_Of_Memory)}
 }
 
-// Makes the turn open in the root of a file a hook named, and notes the file as the turn's.
+// Makes the turn open in the repository of a file a hook named, notes the file as the turn's, and links
+// the turn's session to the file's work tree.
 @(private = "file")
 tw_attach_path :: proc(
 	state: ^Tw_State,
@@ -1922,37 +2535,74 @@ tw_attach_path :: proc(
 		tw_note(failure, find_error)
 		return
 	}
-	presence, enter_error := tw_root_enter(state, root, open, now, saved)
-	tw_note(failure, enter_error)
+	tw_attach_family(state, open, root, now, saved, failure)
+	// A work tree nested in another may only have been found just now.
+	if inner, inside, inner_error := tw_root_for_path(state, absolute); inner_error == .None {
+		root, relative = inner, inside
+	}
+	presence := tw_presence_find(root, open)
 	if presence != nil && !tw_presence_name(presence, relative, state.allocator) {
 		tw_note(failure, .Out_Of_Memory)
 	}
+	if !tw_link(state, open, root.repository.worktree) {tw_note(failure, .Out_Of_Memory)}
 }
 
 @(private = "file")
 tw_begin :: proc(state: ^Tw_State, job: Job_Begin) {
 	defer tw_ack(job.ack)
-	open := tw_open_set(state, job.pane_key, job.session)
+	open := tw_open_set(state, job.pane_key, job.session, job.transcript)
 	if open == nil {
 		tw_failed(state, .Out_Of_Memory, "begin")
 		return
 	}
 	saved := make([dynamic]string, context.temp_allocator)
 	failure: turns.Error
+	state.claim_since = job.started
+	tw_links_read(state)
 	if job.directory != "" {
 		tw_attach_directory(state, open, job.directory, job.started, &saved, &failure)
 	}
 	for path in job.paths {
 		tw_attach_path(state, open, job.directory, path, job.started, &saved, &failure)
 	}
+	tw_links_read(state)
+	tw_claims_release(state)
 	tw_saved_post(state, saved[:])
 	tw_failed(state, failure, "begin")
 }
 
 @(private = "file")
 tw_watch_root :: proc(state: ^Tw_State, job: Job_Watch_Root) {
-	_, err := tw_root_for_directory(state, job.directory)
-	tw_failed(state, .None if err == .Not_Repository else err, "watch")
+	failure: turns.Error
+	root, find_error := tw_root_for_directory(state, job.directory, true)
+	tw_note(&failure, find_error)
+	if root != nil {
+		_, sync_error := tw_family_sync(state, root.repository, true)
+		tw_note(&failure, sync_error)
+	}
+	tw_failed(state, failure, "watch")
+}
+
+// Lists the work trees of every repository the turn is in, so one made since is followed before the turn's
+// files are looked at. One root per repository stands for it: a root whose directory is gone cannot be
+// listed from.
+@(private = "file")
+tw_open_sync :: proc(state: ^Tw_State, open: ^Tw_Open, failure: ^turns.Error) {
+	families := make([dynamic]^Tw_Root, context.temp_allocator)
+	for root in state.roots {
+		if tw_presence_find(root, open) == nil {continue}
+		listed := false
+		for &known in families {
+			if known.repository.key != root.repository.key {continue}
+			listed = true
+			if !os.is_directory(known.repository.worktree) {known = root}
+		}
+		if !listed {append(&families, root)}
+	}
+	for root in families {
+		_, sync_error := tw_family_sync(state, root.repository, true)
+		tw_note(failure, sync_error)
+	}
 }
 
 @(private = "file")
@@ -1963,11 +2613,27 @@ tw_edit :: proc(state: ^Tw_State, job: Job_Edit) {
 	saved := make([dynamic]string, context.temp_allocator)
 	failure: turns.Error
 	now := tw_now_ms()
+	tw_open_sync(state, open, &failure)
+	tw_links_read(state)
 	for path in job.paths {
 		tw_attach_path(state, open, "", path, now, &saved, &failure)
 	}
 	tw_saved_post(state, saved[:])
 	tw_failed(state, failure, "edit")
+}
+
+// A change with when it was taken in, so a segment can end with the latest.
+@(private = "file")
+Tw_Stamped :: struct {
+	change: turns.Change,
+	stamp:  u64,
+}
+
+@(private = "file")
+tw_stamped_before :: proc(a, b: Tw_Stamped) -> bool {
+	if a.stamp != b.stamp {return a.stamp < b.stamp}
+	if a.change.worktree != b.change.worktree {return a.change.worktree < b.change.worktree}
+	return a.change.path < b.change.path
 }
 
 @(private = "file")
@@ -1976,6 +2642,9 @@ tw_end :: proc(state: ^Tw_State, job: Job_End) {
 	if open == nil {return}
 	temp := context.temp_allocator
 	failure: turns.Error
+	// A work tree made during the turn is found now, so what was changed in it is in the turn.
+	tw_open_sync(state, open, &failure)
+	tw_links_read(state)
 	involved := make([dynamic]^Tw_Root, temp)
 	stores := make([dynamic]^Tw_Store, temp)
 	for root in state.roots {
@@ -1992,26 +2661,32 @@ tw_end :: proc(state: ^Tw_State, job: Job_End) {
 	id := tw_next_id(state, stores[:])
 	saved := make([dynamic]string, temp)
 	for store in stores {
-		changes := make([dynamic]turns.Change, temp)
+		stamped := make([dynamic]Tw_Stamped, temp)
 		for root in involved {
 			if root.store != store {continue}
 			presence := tw_presence_find(root, open)
 			for path, net in presence.changes {
 				if net.before == net.after {continue}
 				append(
-					&changes,
-					turns.Change {
-						worktree = root.repository.worktree,
-						path = path,
-						before = net.before,
-						after = net.after,
-						shared = net.shared,
+					&stamped,
+					Tw_Stamped {
+						change = {
+							worktree = root.repository.worktree,
+							path = path,
+							before = net.before,
+							after = net.after,
+							shared = net.shared,
+						},
+						stamp = net.stamp,
 					},
 				)
 			}
 		}
-		if len(changes) == 0 {continue}
-		tw_changes_sort(changes[:])
+		if len(stamped) == 0 {continue}
+		// The latest change comes last: it is where the agent was working when the turn ended.
+		slice.sort_by(stamped[:], tw_stamped_before)
+		changes := make([]turns.Change, len(stamped), temp)
+		for item, i in stamped {changes[i] = item.change}
 		segment := turns.Segment {
 			id        = id,
 			kind      = .Turn,
@@ -2021,7 +2696,7 @@ tw_end :: proc(state: ^Tw_State, job: Job_End) {
 			end_state = job.end_state,
 			title     = job.title,
 			sources   = job.sources,
-			changes   = changes[:],
+			changes   = changes,
 		}
 		save_error := tw_segment_save(state, store, &segment)
 		tw_note(&failure, save_error)
@@ -2142,13 +2817,20 @@ tw_query_fill :: proc(
 	result.diff = diff
 	// A file is marked when the entry of either of its paths is, which a rename pairs up.
 	marks := make(map[string]bool, len(entries), temp)
-	for entry, i in entries {marks[entry.path] = composed[i].marked}
+	uncertain := make(map[string]bool, len(entries), temp)
+	for entry, i in entries {
+		marks[entry.path] = composed[i].marked
+		uncertain[entry.path] = composed[i].ambiguous
+	}
 	marked, marked_error := make([]bool, len(diff.files), arena)
-	if marked_error != nil {return .Out_Of_Memory}
+	ambiguous, ambiguous_error := make([]bool, len(diff.files), arena)
+	if marked_error != nil || ambiguous_error != nil {return .Out_Of_Memory}
 	for file, i in diff.files {
 		marked[i] = marks[file.new_path] || marks[file.old_path]
+		ambiguous[i] = uncertain[file.new_path] || uncertain[file.old_path]
 	}
 	result.marked = marked
+	result.ambiguous = ambiguous
 	return .None
 }
 
@@ -2169,15 +2851,140 @@ tw_plain :: proc(state: ^Tw_State, job: Job_Plain) {
 }
 
 @(private = "file")
+tw_tree_index :: proc(trees: []string, worktree: string) -> int {
+	for tree, i in trees {
+		if strings.equal_fold(tree, worktree) {return i}
+	}
+	return -1
+}
+
+@(private = "file")
+tw_open_for_session :: proc(state: ^Tw_State, session: turns.Session) -> ^Tw_Open {
+	for open in state.opens {
+		if session.pane_key != "" && open.pane_key == session.pane_key {return open}
+		if session.session != "" && open.session.session == session.session {return open}
+	}
+	return nil
+}
+
+// The work tree of the latest change the open turn has taken in.
+@(private = "file")
+tw_open_latest :: proc(state: ^Tw_State, open: ^Tw_Open) -> (worktree: string, found: bool) {
+	latest: u64
+	for root in state.roots {
+		presence := tw_presence_find(root, open)
+		if presence == nil {continue}
+		for _, net in presence.changes {
+			if net.before != net.after && net.stamp > latest {
+				latest = net.stamp
+				worktree, found = root.repository.worktree, true
+			}
+		}
+	}
+	return
+}
+
+// The work tree the agent of `session` last changed: in the turn it has open, else in its newest saved
+// turn of the repository, else the one it was last seen working in, else `fallback`. Only `trees` qualify.
+@(private = "file")
+tw_follow :: proc(
+	state: ^Tw_State,
+	repository: turns.Repository,
+	session: turns.Session,
+	trees: []string,
+	fallback: string,
+) -> string {
+	if open := tw_open_for_session(state, session); open != nil {
+		if worktree, found := tw_open_latest(state, open); found {
+			if at := tw_tree_index(trees, worktree); at >= 0 {return trees[at]}
+		}
+	}
+	if store := tw_store_existing(state, repository.key); store != nil {
+		tw_store_load(state, store)
+		matching := Job_Query {
+			agent   = true,
+			session = session,
+		}
+		order := make([dynamic]int, 0, len(store.segments), context.temp_allocator)
+		for segment, i in store.segments {
+			if len(segment.changes) > 0 && tw_query_matches(matching, segment) {append(&order, i)}
+		}
+		slice.sort_by_with_data(order[:], tw_segment_newer, store)
+		for index in order {
+			changes := store.segments[index].changes
+			if at := tw_tree_index(trees, changes[len(changes) - 1].worktree); at >= 0 {return trees[at]}
+		}
+	}
+	if key := tw_session_key(session); key != "" {
+		newest: u64
+		found := ""
+		for link in state.links {
+			at := tw_tree_index(trees, link.worktree)
+			if link.key == key && at >= 0 && link.stamp > newest {
+				newest = link.stamp
+				found = trees[at]
+			}
+		}
+		if found != "" {return found}
+	}
+	return fallback
+}
+
+@(private = "file")
 tw_plain_fill :: proc(
 	state: ^Tw_State,
 	job: Job_Plain,
 	result: ^Result_Plain,
 	arena: mem.Allocator,
 ) -> turns.Error {
-	repository := turns.repository_find(job.directory, context.temp_allocator, state.cancel) or_return
-	result.worktree = tw_copy(repository.worktree, arena) or_return
-	patch, omitted, patch_error := turns.diff_plain(repository.worktree, job.mode, arena, state.cancel)
+	temp := context.temp_allocator
+	repository := turns.repository_find(job.directory, temp, state.cancel) or_return
+	// A listing that fails leaves the request's own work tree to show.
+	list, list_error := tw_family_sync(state, repository, false)
+	if list_error != .None {log.warnf("turn recording: listing the work trees failed: %v", list_error)}
+	trees := make([dynamic]string, temp)
+	for item in list {
+		if !item.bare && !item.prunable {append(&trees, item.path)}
+	}
+	own := tw_tree_index(trees[:], repository.worktree)
+	if own < 0 {
+		append(&trees, repository.worktree)
+		own = len(trees) - 1
+	}
+	// What the agent's open turn changed since the last boundary decides where to follow it.
+	if open := tw_open_for_session(state, job.session); open != nil {
+		tw_links_read(state)
+		for root in state.roots {
+			if tw_presence_find(root, open) == nil {continue}
+			if drain_error := tw_drain(state, root, false); drain_error != .None {
+				log.warnf("turn recording: looking at %q failed: %v", root.repository.worktree, drain_error)
+			}
+		}
+	}
+	followed := tw_follow(state, repository, job.session, trees[:], trees[own])
+	shown := followed
+	result.following = true
+	if job.worktree != "" {
+		if at := tw_tree_index(trees[:], job.worktree); at >= 0 {
+			shown = trees[at]
+			result.following = false
+		}
+	}
+	ordered := make([dynamic]string, 0, len(trees), temp)
+	append(&ordered, followed)
+	if !strings.equal_fold(trees[own], followed) {append(&ordered, trees[own])}
+	rest := make([dynamic]string, temp)
+	for tree in trees {
+		if !slice.contains(ordered[:], tree) {append(&rest, tree)}
+	}
+	slice.sort(rest[:])
+	append(&ordered, ..rest[:])
+	worktrees, worktrees_error := make([]string, len(ordered), arena)
+	if worktrees_error != nil {return .Out_Of_Memory}
+	for tree, i in ordered {worktrees[i] = tw_copy(tree, arena) or_return}
+	result.worktrees = worktrees
+	result.worktree = tw_copy(shown, arena) or_return
+	patch, omitted, patch_error := turns.diff_plain(shown, job.mode, arena, state.cancel)
 	if patch_error != .None {return patch_error}
 	result.patch = patch
 	result.omitted = omitted
@@ -2189,7 +2996,7 @@ tw_plain_fill :: proc(
 
 @(private = "file")
 tw_view_free :: proc(state: ^Tw_State, view: ^Tw_View) {
-	turns.watch_stop(view.watch)
+	tw_watch_remove(state, view.watch)
 	delete(view.worktree, state.allocator)
 	delete(view.panes)
 	free(view, state.allocator)
@@ -2226,13 +3033,13 @@ tw_view_watch :: proc(state: ^Tw_State, job: Job_View_Watch) {
 		return
 	}
 	tw_view_leave(state, job.pane)
-	watch := tw_watch_start(state, repository.worktree, state.wake)
-	if watch == nil {return}
+	watch := tw_watch_add(state, repository.worktree)
+	if watch == 0 {return}
 	view, new_error := new(Tw_View, allocator)
 	worktree, worktree_ok := tw_dup(repository.worktree, allocator)
 	if new_error != nil || !worktree_ok {
 		log.error("watching a work tree failed: out of memory")
-		turns.watch_stop(watch)
+		tw_watch_remove(state, watch)
 		if new_error == nil {free(view, allocator)}
 		if worktree_ok {delete(worktree, allocator)}
 		return
@@ -2256,13 +3063,29 @@ tw_views_tick :: proc(state: ^Tw_State) {
 	if len(state.views) == 0 {return}
 	now := time.tick_now()
 	temp := context.temp_allocator
+	ready := make([dynamic]turns.Watch_Id, temp)
+	turns.watch_set_ready(state.watches, &ready)
 	paths := make([dynamic]string, temp)
 	for view in state.views {
-		clear(&paths)
-		changed := turns.watch_take(view.watch, &paths, temp)
+		changed := false
 		relevant := make([dynamic]string, temp)
-		for path in paths {
-			if !tw_git_internal(path) {append(&relevant, path)}
+		if view.watch == 0 {
+			// A watch that stopped is set again once its directory is back.
+			if os.is_directory(view.worktree) {
+				view.watch = tw_watch_add(state, view.worktree)
+				changed = view.watch != 0
+			}
+		} else if slice.contains(ready[:], view.watch) {
+			clear(&paths)
+			overflowed, dead := turns.watch_set_take(state.watches, view.watch, &paths, temp)
+			changed = overflowed || dead
+			if dead {
+				tw_watch_remove(state, view.watch)
+				view.watch = 0
+			}
+			for path in paths {
+				if !tw_git_internal(path) {append(&relevant, path)}
+			}
 		}
 		if !changed && len(relevant) > 0 {
 			// One git run for the whole batch. When it cannot tell, the change counts.

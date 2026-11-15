@@ -35,6 +35,12 @@ Changes_Model :: struct {
 	shown:          ui.Changes_Scope,
 	// The worker is watching the pane's worktree for a git scope.
 	watching:       bool,
+	// The folder the view watch is on; it follows the worktree the result shows.
+	watched:        string,
+	// The worktree dropdown's choices: "Follow the agent", then one per worktree, and the worktrees'
+	// absolute paths, parallel to the choices after the first. Kept here because the dropdown borrows them.
+	worktree_labels: []string,
+	worktree_paths: []string,
 	// turns.record when the pane last asked, so a change is noticed.
 	recording:      bool,
 	// The wall-clock minute the row ages were written for.
@@ -51,6 +57,10 @@ Changes_Pane :: struct {
 	model:      Changes_Model,
 	dropdown:   ui.Dropdown,
 	scope_open: bool,
+	// The worktree dropdown is open; it shares `dropdown` with the scope's, and only one opens.
+	worktree_open: bool,
+	// The worktree the git scopes show; "" follows the agent. Not persisted.
+	worktree_pick: string,
 	// The scope labels the dropdown lists, kept here because the dropdown borrows its choices.
 	labels:     [len(ui.Changes_Scope)]string,
 	// The turn a selection extends from, and the turn the keys move; -1 for none.
@@ -83,6 +93,7 @@ changes_pane_free :: proc(pane: ^Changes_Pane) {
 	ui.changes_state_destroy(&pane.state)
 	delete(pane.source)
 	delete(pane.directory)
+	delete(pane.worktree_pick)
 	free(pane)
 }
 
@@ -245,22 +256,48 @@ changes_geometry_of :: proc(
 	return g
 }
 
+@(private = "file", require_results)
+changes_list_open :: proc(pane: ^Changes_Pane) -> bool {
+	return pane.scope_open || pane.worktree_open
+}
+
 @(private = "file")
 changes_dropdown_choices :: proc(pane: ^Changes_Pane) -> ui.Dropdown_Choices {
+	if pane.worktree_open {
+		return {
+			choices = pane.model.worktree_labels,
+			value = changes_worktree_value(pane),
+			searchable = true,
+			placeholder = "Search worktrees",
+		}
+	}
 	return {choices = pane.labels[:], value = pane.labels[int(pane.scope)]}
 }
 
 @(private = "file")
-changes_dropdown_anchor :: proc(g: ui.Changes_Geometry) -> ui.Dropdown_Anchor {
-	return {field = g.scope, row = g.scope, bounds = g.area}
+changes_dropdown_anchor :: proc(pane: ^Changes_Pane, g: ui.Changes_Geometry) -> ui.Dropdown_Anchor {
+	field := pane.worktree_open ? g.worktree : g.scope
+	return {field = field, row = field, bounds = g.area}
 }
 
 @(private = "file")
-changes_scope_close :: proc(w: ^Window, pane: ^Changes_Pane) {
-	if !pane.scope_open {return}
+changes_list_close :: proc(w: ^Window, pane: ^Changes_Pane) {
+	if !changes_list_open(pane) {return}
 	pane.scope_open, pane.state.scope_open = false, false
+	pane.worktree_open, pane.state.worktree_open = false, false
 	ui.dropdown_close(&pane.dropdown)
 	w.dirty = true
+}
+
+// Applies the highlighted choice of the open list.
+@(private = "file")
+changes_list_choose :: proc(app: ^App, pane: ^Changes_Pane, index: int) {
+	if index < 0 {return}
+	if pane.worktree_open {
+		changes_worktree_pick(app, pane, index)
+	} else {
+		changes_scope_set(app, pane, ui.Changes_Scope(index))
+	}
 }
 
 @(private = "file")
@@ -270,6 +307,14 @@ changes_scope_set :: proc(app: ^App, pane: ^Changes_Pane, scope: ui.Changes_Scop
 	pane.anchor, pane.cursor = -1, -1
 	pane.model.view.first, pane.model.view.last = -1, -1
 	changes_model_changed(app, pane)
+}
+
+// Typed or pasted text goes to the open worktree picker's search.
+changes_text :: proc(app: ^App, w: ^Window, text: string) -> bool {
+	pane := changes_focused(app, w)
+	if pane == nil || !changes_list_open(pane) {return false}
+	if ui.dropdown_text(&pane.dropdown, changes_dropdown_choices(pane), text) {w.dirty = true}
+	return true
 }
 
 // Selects turn `index`, or with `extend` the run from the anchor to it.
@@ -345,9 +390,9 @@ changes_pane_draw :: proc(
 		&w.list, &w.ui_text, &mono, &app.theme, g, &pane.model.view, &pane.state, w.scale, w.pointer,
 	)
 	if result != .Ok {return true, result}
-	if pane.scope_open {
+	if changes_list_open(pane) {
 		result = ui.dropdown_draw(
-			&pane.dropdown, changes_dropdown_choices(pane), changes_dropdown_anchor(g), &w.list, &w.ui_text,
+			&pane.dropdown, changes_dropdown_choices(pane), changes_dropdown_anchor(pane, g), &w.list, &w.ui_text,
 			app.theme, w.pointer, w.scale,
 		)
 	}
@@ -364,18 +409,17 @@ changes_key :: proc(app: ^App, w: ^Window, e: input.Key_Event) {
 	shown: layout.Pane_Rect
 	found := false
 	if pane != nil {shown, found = changes_pane_rect(w, pane.id)}
-	if pane != nil && pane.scope_open && found {
+	if pane != nil && changes_list_open(pane) && found {
 		g := changes_geometry_of(app, w, pane, shown)
 		outcome, taken := ui.dropdown_key(
-			&pane.dropdown, changes_dropdown_choices(pane), changes_dropdown_anchor(g), e, w.scale,
+			&pane.dropdown, changes_dropdown_choices(pane), changes_dropdown_anchor(pane, g), e, w.scale,
 		)
 		#partial switch outcome {
 		case .Chosen:
-			index := ui.dropdown_highlighted(&pane.dropdown, changes_dropdown_choices(pane))
-			if index >= 0 {changes_scope_set(app, pane, ui.Changes_Scope(index))}
-			changes_scope_close(w, pane)
+			changes_list_choose(app, pane, ui.dropdown_highlighted(&pane.dropdown, changes_dropdown_choices(pane)))
+			changes_list_close(w, pane)
 		case .Closed:
-			changes_scope_close(w, pane)
+			changes_list_close(w, pane)
 		case:
 			w.dirty = true
 		}
@@ -417,9 +461,9 @@ changes_wheel :: proc(app: ^App, w: ^Window, x, y: f32, rows: int) -> bool {
 	if shown.content.kind != .Changes {return false}
 	if pane == nil {return true}
 	g := changes_geometry_of(app, w, pane, shown)
-	if pane.scope_open {
+	if changes_list_open(pane) {
 		_ = ui.dropdown_wheel(
-			&pane.dropdown, changes_dropdown_choices(pane), changes_dropdown_anchor(g), rows, w.scale,
+			&pane.dropdown, changes_dropdown_choices(pane), changes_dropdown_anchor(pane, g), rows, w.scale,
 		)
 		w.dirty = true
 		return true
@@ -480,12 +524,12 @@ changes_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: input.Mou
 			return
 		}
 	}
-	if pane.scope_open {
+	if changes_list_open(pane) {
 		if ui.dropdown_hover(
-			&pane.dropdown, changes_dropdown_choices(pane), changes_dropdown_anchor(g), x, y, w.scale,
+			&pane.dropdown, changes_dropdown_choices(pane), changes_dropdown_anchor(pane, g), x, y, w.scale,
 		) {w.dirty = true}
 		shape := ui.dropdown_pointer(
-			&pane.dropdown, changes_dropdown_choices(pane), changes_dropdown_anchor(g), x, y, w.scale,
+			&pane.dropdown, changes_dropdown_choices(pane), changes_dropdown_anchor(pane, g), x, y, w.scale,
 		)
 		pointer_set(app, w, shape)
 		return
@@ -499,7 +543,7 @@ changes_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: input.Mou
 		pane_scrollbar_hover_leave(w, .Changes)
 		hit = ui.changes_hit(g, &pane.model.view, &pane.state, x, y)
 		#partial switch hit.part {
-		case .Scope, .Hooks, .Notice_Button, .Turn, .File_Header:
+		case .Scope, .Worktree, .Hooks, .Notice_Button, .Turn, .File_Header:
 			shape = .Hand
 		}
 	}
@@ -515,14 +559,14 @@ changes_press :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) {
 	if pane == nil || e.button != .Left {return}
 	w.dirty = true
 	g := changes_geometry_of(app, w, pane, shown)
-	if pane.scope_open {
-		choices, anchor := changes_dropdown_choices(pane), changes_dropdown_anchor(g)
+	if changes_list_open(pane) {
+		choices, anchor := changes_dropdown_choices(pane), changes_dropdown_anchor(pane, g)
 		switch ui.dropdown_press(&pane.dropdown, choices, anchor, &w.ui_text, x, y, false, w.scale) {
 		case .Chosen:
-			changes_scope_set(app, pane, ui.Changes_Scope(ui.dropdown_highlighted(&pane.dropdown, choices)))
-			changes_scope_close(w, pane)
+			changes_list_choose(app, pane, ui.dropdown_highlighted(&pane.dropdown, choices))
+			changes_list_close(w, pane)
 		case .None:
-			changes_scope_close(w, pane)
+			changes_list_close(w, pane)
 		case .Changed, .Closed, .Font_Filter:
 		}
 		return
@@ -540,6 +584,11 @@ changes_press :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) {
 	case .Scope:
 		pane.scope_open, pane.state.scope_open = true, true
 		ui.dropdown_open(&pane.dropdown, changes_dropdown_choices(pane))
+	case .Worktree:
+		if len(pane.model.worktree_labels) > 0 {
+			pane.worktree_open, pane.state.worktree_open = true, true
+			ui.dropdown_open(&pane.dropdown, changes_dropdown_choices(pane))
+		}
 	case .Hooks:
 		run_action(app, w, .Install_Turn_Hooks, .Button)
 	case .Notice_Button:
@@ -595,7 +644,7 @@ when AIO_CONTROL {
 		pane := changes_focused(app, w)
 		scope, notice := "none", "none"
 		turn_count, first, last, files := 0, -1, -1, 0
-		scope_rect, notice_rect, hooks_rect: render.Rect
+		scope_rect, worktree_rect, notice_rect, hooks_rect: render.Rect
 		if pane != nil {
 			view := &pane.model.view
 			scope = strings.to_lower(changes_scope_name(pane.scope), context.temp_allocator)
@@ -603,7 +652,7 @@ when AIO_CONTROL {
 			turn_count, first, last, files = len(view.turns), view.first, view.last, len(view.files)
 			if shown, found := changes_pane_rect(w, pane.id); found {
 				g := changes_geometry_of(app, w, pane, shown)
-				scope_rect = g.scope
+				scope_rect, worktree_rect = g.scope, g.worktree
 				if view.notice == .Recording_Off {notice_rect = g.notice_button}
 				if view.hooks_offer {hooks_rect = g.hooks}
 				for i in 0 ..< len(view.turns) {
@@ -618,13 +667,22 @@ when AIO_CONTROL {
 				state_value(r, changes_report_key("file", i, "removed"), file.removed)
 				marked := i < len(view.marked) && view.marked[i]
 				state_value(r, changes_report_key("file", i, "marked"), marked)
+				ambiguous := i < len(view.ambiguous) && view.ambiguous[i]
+				state_value(r, changes_report_key("file", i, "ambiguous"), ambiguous)
 				folded := i < len(view.collapsed) && view.collapsed[i]
 				state_value(r, changes_report_key("file", i, "collapsed"), folded)
 			}
 		}
 		state_value(r, "changes.count", len(app.changes_panes))
 		state_value(r, "changes.active", changes_active(w))
+		worktree := ""
+		if pane != nil {
+			if plain, ok := pane.model.content.(Result_Plain); ok {worktree = plain.worktree}
+		}
 		state_text(r, "changes.scope", scope)
+		state_text(r, "changes.worktree", worktree)
+		state_value(r, "changes.following", pane != nil && pane.model.view.following)
+		state_value(r, "changes.worktrees", pane != nil ? len(pane.model.worktree_paths) : 0)
 		state_text(r, "changes.notice", notice)
 		state_value(r, "changes.turns", turn_count)
 		state_value(r, "changes.first", first)
@@ -636,8 +694,9 @@ when AIO_CONTROL {
 		state_text(r, "changes.repository", pane != nil ? pane.model.view.repository : "")
 		state_text(r, "changes.detail", pane != nil ? pane.model.view.detail : "")
 		state_value(r, "changes.omitted", pane != nil ? pane.model.view.omitted : 0)
-		state_value(r, "changes.dropdown_open", pane != nil && pane.scope_open)
+		state_value(r, "changes.dropdown_open", pane != nil && changes_list_open(pane))
 		state_rect(r, "changes.scope_rect", scope_rect)
+		state_rect(r, "changes.worktree_rect", worktree_rect)
 		state_rect(r, "changes.notice_button_rect", notice_rect)
 		state_rect(r, "changes.hooks_rect", hooks_rect)
 	}

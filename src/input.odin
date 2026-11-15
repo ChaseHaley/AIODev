@@ -321,6 +321,7 @@ on_text :: proc(app: ^App, w: ^Window, text: string) {
 		markdown_text(app, w, text)
 		return
 	}
+	if changes_active(w) && changes_text(app, w, text) {return}
 	if entry := focused_session(app, w); entry != nil && entry.status == .Running {
 		term.send_text(entry.session, text)
 		cursor_blink_reset(w, clock_now(&app.clock))
