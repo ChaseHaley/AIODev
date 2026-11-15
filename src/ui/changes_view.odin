@@ -157,6 +157,8 @@ Changes_Part :: enum u8 {
 	Filter_Bar_Clear,
 	Fold_Button,
 	Sticky_Header,
+	Strip_Older,
+	Strip_Newer,
 }
 
 // What a point is over. `index` is the bar or list row for the strip parts; the file for File_Header,
@@ -198,9 +200,10 @@ Changes_State :: struct {
 	diff_scroll:              int,
 	// Strip bars hidden at the left, and the turn list's scroll in pixels.
 	strip_offset:             int,
-	// The strip's bar room, turn count and selection at the last draw: when any changes, the draw
-	// reveals the selection again, so a resize or a pane drawn after a tab switch keeps it in view.
-	strip_seen_bars:          int,
+	// The strip's room, turn count and selection at the last draw: when any changes, the draw reveals the
+	// selection again, so a resize or a pane drawn after a tab switch keeps it in view. The room, not the
+	// bar count, because the bars change with the offset as markers come and go.
+	strip_seen_room:          f32,
 	strip_seen_turns:         int,
 	strip_seen_first:         int,
 	turn_list_scroll:         int,
@@ -235,6 +238,9 @@ changes_state_destroy :: proc(state: ^Changes_State) {
 Changes_Geometry :: struct {
 	area, toolbar, scope, worktree, hooks, repository, diff, notice, notice_button: render.Rect,
 	strip, step_back, step_forward, range_label:                                   render.Rect,
+	// The strip's "+N" markers for older (left) and newer (right) turns it can't show at the offset the
+	// layout was given; empty for a side that hides none.
+	strip_older, strip_newer:                                                      render.Rect,
 	// Where the turn list goes under the range label while state.turn_list_open; empty without turns.
 	turn_list:                                                                     render.Rect,
 	// The comments' send bar under the diff; empty without comments.
@@ -247,6 +253,8 @@ Changes_Geometry :: struct {
 	// The row under the toolbar while the filter hides files, and its Clear button.
 	filter_bar, filter_bar_clear:                                                 render.Rect,
 	scale, turn_row:                                                               f32,
+	// The strip's room before any marker takes some: it changes only with the pane and the toolbar.
+	strip_room:                                                                    f32,
 	// How many bars the strip has room for.
 	strip_bars:                                                                    int,
 }
@@ -313,8 +321,10 @@ wrap_count :: proc(t: ^Text, s: string, width: f32) -> int {
 	return count
 }
 
+// Lays the pane out. `state` gives the strip's offset, which decides which of its "+N" markers take room;
+// without it the strip is laid out scrolled to the oldest turn.
 changes_geometry :: proc(
-	area: render.Rect, scale: f32, view: ^Changes_View, text: ^Text,
+	area: render.Rect, scale: f32, view: ^Changes_View, text: ^Text, state: ^Changes_State = nil,
 ) -> Changes_Geometry {
 	s := scale
 	g := Changes_Geometry {
@@ -350,7 +360,8 @@ changes_geometry :: proc(
 	left := g.scope.x + g.scope.width + gap
 	right := hooks_width > 0 ? g.hooks.x - gap : end
 	if changes_scope_turns(view.scope) {
-		left = strip_place(&g, view, &body_text, left, right, top, control)
+		offset := state != nil ? state.strip_offset : 0
+		left = strip_place(&g, view, &body_text, left, right, top, control, offset)
 	} else {
 		g.worktree = {left, top, min(CHANGES_WORKTREE_WIDTH * s, max(0, right - left)), control}
 		if g.worktree.width > 0 {left += g.worktree.width + gap}
@@ -549,6 +560,10 @@ changes_hit :: proc(
 	back, forward := changes_step_enabled(view)
 	if render.rect_contains(g.step_back, x, y) {return back ? {.Step_Back, 0, 0} : {}}
 	if render.rect_contains(g.step_forward, x, y) {return forward ? {.Step_Forward, 0, 0} : {}}
+	older := changes_strip_marker_rect(g, state, view, false)
+	newer := changes_strip_marker_rect(g, state, view, true)
+	if render.rect_contains(older, x, y) {return {.Strip_Older, 0, 0}}
+	if render.rect_contains(newer, x, y) {return {.Strip_Newer, 0, 0}}
 	if render.rect_contains(g.strip, x, y) {
 		if bar := strip_bar_at(g, state, view, x); bar >= 0 {return {.Strip_Bar, bar, 0}}
 		return {}
@@ -564,7 +579,8 @@ changes_animated :: proc(hit: Changes_Hit) -> bool {
 	#partial switch hit.part {
 	case .Scope, .Worktree, .Hooks, .Notice_Button, .File_Header, .Step_Back, .Step_Forward, .Range_Label,
 	     .Hunk_Comment, .Comment_Button, .Comment_Delete, .Send, .Copy, .Discard, .Files_Button,
-	     .Layout_Button, .Filter_Button, .Filter_Clear, .Filter_Bar_Clear, .Fold_Button, .Sticky_Header:
+	     .Layout_Button, .Filter_Button, .Filter_Clear, .Filter_Bar_Clear, .Fold_Button, .Sticky_Header,
+	     .Strip_Older, .Strip_Newer:
 		return true
 	}
 	return false
@@ -657,7 +673,16 @@ changes_draw :: proc(
 	spinning: bool,
 ) {
 	t := theme^
-	strip_follow(state, g, view)
+	// Revealing the selection moves the strip, which can add or drop a marker's slot and so change how
+	// many bars fit: lay the pane out again and keep the selection in view until the strip holds still.
+	// Scrolling the strip moves nothing here, so a paged or wheeled strip stays where it was put.
+	g := g
+	if strip_follow(state, g, view) {
+		for _ in 0 ..< 3 {
+			g = changes_geometry(g.area, g.scale, view, text, state)
+			if !changes_strip_reveal(state, g, view) {break}
+		}
+	}
 	state.turn_list_scroll = clamp(state.turn_list_scroll, 0, turn_list_limit(g, view))
 	state.diff_scroll = clamp(state.diff_scroll, 0, max(0, state.rows.total - int(g.diff.height)))
 	status, spinning = toolbar_draw(list, text, t, g, view, state, pointer, spin_phase)

@@ -703,11 +703,11 @@ changes_strip_bars_grow_with_the_lines_and_follow_the_selection :: proc(t: ^test
 	testing.expect_value(t, ui.changes_strip_bar_rect(g, &state, &view, 5), render.Rect{})
 	testing.expect_value(t, ui.changes_strip_bar_rect(g, &state, &view, -1), render.Rect{})
 
-	// A pane with room for two bars.
+	// A pane with room for two bars and the newer marker's slot.
 	view.first, view.last = 0, 0
 	narrow: ui.Changes_Geometry
 	for width := f32(700); width > 250; width -= 1 {
-		narrow = ui.changes_geometry({0, 0, width, 600}, 1, &view, &f.text)
+		narrow = ui.changes_geometry({0, 0, width, 600}, 1, &view, &f.text, &state)
 		if narrow.strip_bars == 2 {break}
 	}
 	if !testing.expect_value(t, narrow.strip_bars, 2) {return}
@@ -741,6 +741,225 @@ changes_strip_bars_grow_with_the_lines_and_follow_the_selection :: proc(t: ^test
 	testing.expect_value(t, state.strip_offset, 1)
 	testing.expect(t, ui.changes_scroll_strip(&state, narrow, &view, -10))
 	testing.expect_value(t, state.strip_offset, 0)
+}
+
+@(test)
+changes_strip_stays_where_paged_and_keeps_a_bar :: proc(t: ^testing.T) {
+	device, device_error := render.device_create(.Warp)
+	if !testing.expect_value(t, device_error, render.Error.None) {return}
+	defer render.device_destroy(device)
+	f: Changes_Fixture
+	view: ui.Changes_View
+	if !fixture_make(t, &f, &view) {return}
+	defer font.system_destroy(f.fonts)
+	cache: glyphs.Cache
+	glyphs.init(&cache, f.fonts, device)
+	defer glyphs.destroy(&cache)
+	if !testing.expect(t, ui.text_init(&f.text, f.fonts, &cache, 13)) {return}
+	f.mono = ui.text_mono(&f.text, f.text.family)
+	state: ui.Changes_State
+	defer ui.changes_state_destroy(&state)
+	list := render.draw_list_init()
+	defer render.draw_list_destroy(&list)
+	more: [12]ui.Changes_Turn
+	for &row, i in more {row = {title = "turn", files = 1, added = i, removed = 1, agent = -1}}
+	view.turns = more[:]
+	view.first, view.last = 0, 0
+
+	// A narrow pane with four bars beside the older marker while on the newest turn.
+	state.strip_offset = 1000
+	area: render.Rect
+	g: ui.Changes_Geometry
+	for width := f32(900); width > 250; width -= 1 {
+		area = {0, 0, width, 600}
+		g = ui.changes_geometry(area, 1, &view, &f.text, &state)
+		if g.strip_bars == 4 {break}
+	}
+	if !testing.expect_value(t, g.strip_bars, 4) {return}
+	ui.changes_layout(&state, &view, &f.text, &f.mono, g.diff.width, 1)
+	if !draw_into(t, &f, &list, &view, &state, g) {return}
+	testing.expect_value(t, state.strip_offset, 8)
+
+	// Paging older lands in the middle: both markers take room, so fewer bars fit, and the strip stays.
+	testing.expect(t, ui.changes_scroll_strip(&state, g, &view, -g.strip_bars))
+	testing.expect_value(t, state.strip_offset, 4)
+	middle := ui.changes_geometry(area, 1, &view, &f.text, &state)
+	testing.expect(t, middle.strip_bars >= 1 && middle.strip_bars < g.strip_bars)
+	testing.expect(t, middle.strip_older.width > 0 && middle.strip_newer.width > 0)
+	if !draw_into(t, &f, &list, &view, &state, middle) {return}
+	testing.expect_value(t, state.strip_offset, 4)
+	again := ui.changes_geometry(area, 1, &view, &f.text, &state)
+	if !draw_into(t, &f, &list, &view, &state, again) {return}
+	testing.expect_value(t, state.strip_offset, 4)
+	// So does the wheel.
+	testing.expect(t, ui.changes_scroll_strip(&state, again, &view, -1))
+	wheeled := ui.changes_geometry(area, 1, &view, &f.text, &state)
+	if !draw_into(t, &f, &list, &view, &state, wheeled) {return}
+	testing.expect_value(t, state.strip_offset, 3)
+
+	// Five turns in a pane with room for one bar beside a marker: selecting the middle turn keeps a bar,
+	// and it is the selection's, with both markers beside it.
+	view.turns = f.rows[:]
+	state.strip_offset = 1000
+	for width := f32(900); width > 250; width -= 1 {
+		area = {0, 0, width, 600}
+		g = ui.changes_geometry(area, 1, &view, &f.text, &state)
+		if g.strip_bars == 1 {break}
+	}
+	if !testing.expect_value(t, g.strip_bars, 1) {return}
+	if !draw_into(t, &f, &list, &view, &state, g) {return}
+	view.first, view.last = 2, 2
+	if !draw_into(t, &f, &list, &view, &state, ui.changes_geometry(area, 1, &view, &f.text, &state)) {return}
+	fresh := ui.changes_geometry(area, 1, &view, &f.text, &state)
+	testing.expect_value(t, fresh.strip_bars, 1)
+	testing.expect(t, ui.changes_strip_bar_rect(fresh, &state, &view, 2).width > 0)
+	older, newer := ui.changes_strip_hidden(fresh, &state, &view)
+	testing.expect_value(t, older, 2)
+	testing.expect_value(t, newer, 2)
+	testing.expect(t, fresh.strip_older.width > 0 && fresh.strip_newer.width > 0)
+}
+
+@(test)
+changes_strip_caps_at_ten_bars_and_counts_the_rest :: proc(t: ^testing.T) {
+	device, device_error := render.device_create(.Warp)
+	if !testing.expect_value(t, device_error, render.Error.None) {return}
+	defer render.device_destroy(device)
+	f: Changes_Fixture
+	view: ui.Changes_View
+	if !fixture_make(t, &f, &view) {return}
+	defer font.system_destroy(f.fonts)
+	cache: glyphs.Cache
+	glyphs.init(&cache, f.fonts, device)
+	defer glyphs.destroy(&cache)
+	if !testing.expect(t, ui.text_init(&f.text, f.fonts, &cache, 13)) {return}
+	f.mono = ui.text_mono(&f.text, f.text.family)
+	state: ui.Changes_State
+	defer ui.changes_state_destroy(&state)
+	list := render.draw_list_init()
+	defer render.draw_list_destroy(&list)
+	many: [100]ui.Changes_Turn
+	for &row, i in many {row = {title = "turn", files = 1, added = i, removed = 1, agent = -1}}
+	view.turns = many[:]
+	view.first, view.last = 0, 0
+
+	// A wide pane shows ten bars of 8 with gaps of 3. Scrolled to the oldest, only newer turns are hidden,
+	// so only the newer marker takes room.
+	g := ui.changes_geometry({0, 0, 1400, 600}, 1, &view, &f.text, &state)
+	ui.changes_layout(&state, &view, &f.text, &f.mono, g.diff.width, 1)
+	testing.expect_value(t, g.strip_bars, ui.CHANGES_STRIP_MAX_BARS)
+	testing.expect_value(t, g.strip.width, f32(10 * 11 - 3))
+	testing.expect_value(t, g.strip_older, render.Rect{})
+	testing.expect(t, g.strip_newer.width > 0)
+	testing.expect_value(t, g.strip.x, g.step_back.x + g.step_back.width + 4)
+	testing.expect_value(t, g.strip_newer.x, g.strip.x + g.strip.width + 4)
+	testing.expect_value(t, g.step_forward.x, g.strip_newer.x + g.strip_newer.width + 4)
+	older, newer := ui.changes_strip_hidden(g, &state, &view)
+	testing.expect_value(t, older, 0)
+	testing.expect_value(t, newer, 90)
+	newer_x, newer_y := centre(g.strip_newer)
+	on_newer := ui.changes_hit(g, &view, &state, newer_x, newer_y)
+	testing.expect_value(t, on_newer, ui.Changes_Hit{.Strip_Newer, 0, 0})
+	testing.expect_value(t, ui.changes_strip_bar_rect(g, &state, &view, 99).x, g.strip.x)
+
+	// On the newest turn: 90 older turns hidden, none newer, and the older marker leads the strip.
+	testing.expect(t, ui.changes_strip_reveal(&state, g, &view))
+	g = ui.changes_geometry({0, 0, 1400, 600}, 1, &view, &f.text, &state)
+	older, newer = ui.changes_strip_hidden(g, &state, &view)
+	testing.expect_value(t, older, 90)
+	testing.expect_value(t, newer, 0)
+	testing.expect_value(t, g.strip_bars, 10)
+	testing.expect_value(t, g.strip_newer, render.Rect{})
+	testing.expect_value(t, g.strip_older.x, g.step_back.x + g.step_back.width + 4)
+	testing.expect_value(t, g.strip.x, g.strip_older.x + g.strip_older.width + 4)
+	testing.expect_value(t, g.step_forward.x, g.strip.x + g.strip.width + 4)
+	testing.expect_value(t, ui.changes_strip_marker_rect(g, &state, &view, false), g.strip_older)
+	testing.expect_value(t, ui.changes_strip_marker_rect(g, &state, &view, true), render.Rect{})
+	older_x, older_y := centre(g.strip_older)
+	on_older := ui.changes_hit(g, &view, &state, older_x, older_y)
+	testing.expect_value(t, on_older, ui.Changes_Hit{.Strip_Older, 0, 0})
+	if !draw_into(t, &f, &list, &view, &state, g) {return}
+	marked := 0
+	for glyph in list.glyphs {
+		x := glyph.rect.x + glyph.rect.width / 2
+		in_slot := x >= g.strip_older.x && x < g.strip_older.x + g.strip_older.width
+		if in_slot && glyph.rect.y < g.toolbar.y + g.toolbar.height {marked += 1}
+	}
+	// "+90"
+	testing.expect(t, marked >= 2)
+
+	// In the middle both sides hide turns and both markers take room.
+	state.strip_offset = 40
+	middle := ui.changes_geometry({0, 0, 1400, 600}, 1, &view, &f.text, &state)
+	older, newer = ui.changes_strip_hidden(middle, &state, &view)
+	testing.expect_value(t, older, 40)
+	testing.expect_value(t, newer, 50)
+	testing.expect(t, middle.strip_older.width > 0 && middle.strip_newer.width > 0)
+	testing.expect_value(t, middle.strip_bars, 10)
+
+	// A narrow pane fits fewer bars; the older count takes the shortfall too.
+	state.strip_offset = 1000
+	narrow: ui.Changes_Geometry
+	for width := f32(900); width > 250; width -= 1 {
+		narrow = ui.changes_geometry({0, 0, width, 600}, 1, &view, &f.text, &state)
+		if narrow.strip_bars == 4 {break}
+	}
+	if !testing.expect_value(t, narrow.strip_bars, 4) {return}
+	older, newer = ui.changes_strip_hidden(narrow, &state, &view)
+	testing.expect_value(t, older, 96)
+	testing.expect_value(t, newer, 0)
+	testing.expect_value(t, narrow.strip.width, f32(4 * 11 - 3))
+	testing.expect_value(t, narrow.strip_newer, render.Rect{})
+
+	// Twelve turns with room for three bars and the older marker: three bars and nine older turns.
+	view.turns = many[:12]
+	twelve: ui.Changes_Geometry
+	for width := f32(900); width > 250; width -= 1 {
+		twelve = ui.changes_geometry({0, 0, width, 600}, 1, &view, &f.text, &state)
+		if twelve.strip_bars == 3 {break}
+	}
+	if !testing.expect_value(t, twelve.strip_bars, 3) {return}
+	older, newer = ui.changes_strip_hidden(twelve, &state, &view)
+	testing.expect_value(t, older, 9)
+	testing.expect_value(t, newer, 0)
+	testing.expect(t, twelve.strip_older.width > 0)
+	testing.expect_value(t, twelve.strip_newer, render.Rect{})
+
+	// Five turns: all five bars need less room than three bars and a marker, so a pane short of five
+	// shows as many bars as fit beside the marker, never fewer than one while it and the marker fit.
+	view.turns = f.rows[:]
+	five: ui.Changes_Geometry
+	for width := f32(900); width > 250; width -= 1 {
+		five = ui.changes_geometry({0, 0, width, 600}, 1, &view, &f.text, &state)
+		if five.strip_bars < 5 {break}
+	}
+	testing.expect(t, five.strip_bars >= 1 && five.strip_bars < 5)
+	older, newer = ui.changes_strip_hidden(five, &state, &view)
+	testing.expect_value(t, older, 5 - five.strip_bars)
+	testing.expect_value(t, newer, 0)
+	testing.expect(t, five.strip_older.width > 0)
+	for width := five.area.width; width > 250; width -= 1 {
+		five = ui.changes_geometry({0, 0, width, 600}, 1, &view, &f.text, &state)
+		if five.strip_bars <= 1 {break}
+	}
+	testing.expect_value(t, five.strip_bars, 1)
+	testing.expect(t, five.strip_older.width > 0)
+	testing.expect(t, five.strip_older.x + five.strip_older.width + 4 == five.strip.x)
+
+	// Ten turns or fewer that fit have no markers.
+	view.turns = many[:10]
+	ten := ui.changes_geometry({0, 0, 1400, 600}, 1, &view, &f.text, &state)
+	testing.expect_value(t, ten.strip_bars, 10)
+	testing.expect_value(t, ten.strip_older, render.Rect{})
+	testing.expect_value(t, ten.strip_newer, render.Rect{})
+	older, newer = ui.changes_strip_hidden(ten, &state, &view)
+	testing.expect_value(t, older + newer, 0)
+	// One more than the cap shows ten and counts one.
+	view.turns = many[:11]
+	eleven := ui.changes_geometry({0, 0, 1400, 600}, 1, &view, &f.text, &state)
+	testing.expect_value(t, eleven.strip_bars, 10)
+	older, newer = ui.changes_strip_hidden(eleven, &state, &view)
+	testing.expect_value(t, older, 1)
+	testing.expect_value(t, newer, 0)
 }
 
 @(test)
@@ -814,6 +1033,9 @@ changes_draw_keeps_the_selected_bar_in_view_after_a_resize :: proc(t: ^testing.T
 	defer ui.changes_state_destroy(&state)
 	list := render.draw_list_init()
 	defer render.draw_list_destroy(&list)
+	more: [12]ui.Changes_Turn
+	for &row, i in more {row = {title = "turn", files = 1, added = i, removed = 1, agent = -1}}
+	view.turns = more[:]
 	view.first, view.last = 0, 0
 
 	narrow: ui.Changes_Geometry
@@ -827,25 +1049,31 @@ changes_draw_keeps_the_selected_bar_in_view_after_a_resize :: proc(t: ^testing.T
 
 	// Nothing revealed the selection before the first draw, as for a pane drawn after a tab switch.
 	if !draw_into(t, &f, &list, &view, &state, narrow) {return}
-	testing.expect_value(t, state.strip_offset, 3)
+	testing.expect_value(t, state.strip_offset, 10)
 	testing.expect(t, ui.changes_strip_bar_rect(narrow, &state, &view, 0).width > 0)
+	// Wide, ten of the twelve show, newest at the right.
 	if !draw_into(t, &f, &list, &view, &state, wide) {return}
-	testing.expect_value(t, state.strip_offset, 0)
+	testing.expect_value(t, state.strip_offset, 2)
 	// Narrowing again keeps the newest bar, which is selected, in view.
 	if !draw_into(t, &f, &list, &view, &state, narrow) {return}
-	testing.expect_value(t, state.strip_offset, 3)
+	testing.expect_value(t, state.strip_offset, 10)
 	testing.expect(t, ui.changes_strip_bar_rect(narrow, &state, &view, 0).width > 0)
 
 	// The wheel's offset stays while nothing changes.
 	testing.expect(t, ui.changes_scroll_strip(&state, narrow, &view, -2))
 	if !draw_into(t, &f, &list, &view, &state, narrow) {return}
-	testing.expect_value(t, state.strip_offset, 1)
+	testing.expect_value(t, state.strip_offset, 8)
 
-	// A turn that arrived while the pane was hidden is revealed when it is drawn.
-	view.turns = f.rows[1:]
+	// A turn that arrived while the pane was hidden is revealed when it is drawn. The draw lays the strip
+	// out again for the new offset, so check against a fresh layout.
+	view.turns = more[1:]
 	if !draw_into(t, &f, &list, &view, &state, narrow) {return}
-	testing.expect_value(t, state.strip_offset, 2)
-	testing.expect(t, ui.changes_strip_bar_rect(narrow, &state, &view, 0).width > 0)
+	fresh := ui.changes_geometry(narrow.area, 1, &view, &f.text, &state)
+	testing.expect_value(t, state.strip_offset, 11 - fresh.strip_bars)
+	testing.expect(t, ui.changes_strip_bar_rect(fresh, &state, &view, 0).width > 0)
+	older, newer := ui.changes_strip_hidden(fresh, &state, &view)
+	testing.expect_value(t, older, 11 - fresh.strip_bars)
+	testing.expect_value(t, newer, 0)
 }
 
 @(test)

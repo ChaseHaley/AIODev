@@ -14,6 +14,9 @@ CHANGES_FOLLOWING_LABEL :: "Following the agent"
 // Terminal palette entries the All agents scope tints each agent's bars with, in agent order.
 CHANGES_AGENT_PALETTE :: [6]int{4, 5, 6, 2, 3, 1}
 
+// The most bars the strip shows; older and newer turns past them are counted in its "+N" markers.
+CHANGES_STRIP_MAX_BARS :: 10
+
 @(private = "file")
 CHANGES_AGENT_ALPHA :: f32(0.7)
 @(private = "file")
@@ -139,26 +142,80 @@ range_label_width :: proc(view: ^Changes_View, body: ^Text, scale: f32) -> f32 {
 	return math.ceil(width)
 }
 
-// Lays out a turn scope's toolbar from `left` to `right`: ‹, the strip with as many bars as fit, ›, and
-// the range label. Returns where the repository label may start.
+// Lays out a turn scope's toolbar from `left` to `right`: ‹, the strip with as many bars as fit (at most
+// CHANGES_STRIP_MAX_BARS; bars never shrink), ›, and the range label. A side that hides turns at the
+// strip's `offset` gets a slot for its "+N" marker, and the bars are fitted again in what is left; fewer
+// bars can only hide more, so a side never loses its slot and the fit settles within a few passes.
+// Returns where the repository label may start.
 @(private)
 strip_place :: proc(
-	g: ^Changes_Geometry, view: ^Changes_View, body: ^Text, left, right, top, control: f32,
+	g: ^Changes_Geometry, view: ^Changes_View, body: ^Text, left, right, top, control: f32, offset: int,
 ) -> f32 {
 	s := g.scale
 	near := SPACE_1 * s
+	count := len(view.turns)
 	label := range_label_width(view, body, s)
 	bar, pitch := strip_metrics(s)
 	room := right - left - 2 * control - label - 3 * near
-	g.strip_bars = clamp(int((room + pitch - bar) / pitch), 0, len(view.turns))
+	g.strip_room = room
+	first := strip_fit(room, bar, pitch, count)
+	g.strip_bars = first
+	marker: f32
+	if g.strip_bars < count {
+		small := text_styled(body, .Detail)
+		buf: [24]u8
+		marker = math.ceil(text_width(&small, fmt.bprintf(buf[:], "+%d", count)) + 2 * SPACE_1 * s)
+	}
+	older, newer: bool
+	for _ in 0 ..< 3 {
+		if g.strip_bars >= count {break}
+		shift := clamp(offset, 0, count - g.strip_bars)
+		now_older, now_newer := older || shift > 0, newer || count - g.strip_bars - shift > 0
+		if now_older == older && now_newer == newer {break}
+		older, newer = now_older, now_newer
+		slots := f32(int(older) + int(newer)) * (marker + near)
+		// A strip that had room for a bar keeps one beside its markers: an empty strip could not show the
+		// selection. What it takes past `right` comes off the range label.
+		g.strip_bars = max(min(1, first), strip_fit(room - slots, bar, pitch, count))
+	}
 	x := left
 	g.step_back = toolbar_take(&x, right, control, top, control, near)
+	// A kept bar and its markers may run past `right`; without a bar nothing does.
+	reach := g.strip_bars > 0 ? max(right, x + 2 * (marker + near) + f32(g.strip_bars) * pitch) : right
+	if older {g.strip_older = toolbar_take(&x, reach, marker, top, control, near)}
 	if g.strip_bars > 0 {
-		g.strip = toolbar_take(&x, right, f32(g.strip_bars) * pitch - (pitch - bar), top, control, near)
+		width := f32(g.strip_bars) * pitch - (pitch - bar)
+		g.strip = toolbar_take(&x, reach, width, top, control, near)
 	}
+	if newer {g.strip_newer = toolbar_take(&x, reach, marker, top, control, near)}
 	g.step_forward = toolbar_take(&x, right, control, top, control, near)
 	g.range_label = toolbar_take(&x, right, label, top, control, SPACE_2 * s)
 	return x
+}
+
+// How many bars fit in `room`, at most CHANGES_STRIP_MAX_BARS and the turn count.
+@(private = "file")
+strip_fit :: proc(room, bar, pitch: f32, count: int) -> int {
+	return clamp(int((room + pitch - bar) / pitch), 0, min(CHANGES_STRIP_MAX_BARS, count))
+}
+
+// The turns the strip can't show: older ones scrolled off its left, newer ones off its right.
+changes_strip_hidden :: proc(
+	g: Changes_Geometry, state: ^Changes_State, view: ^Changes_View,
+) -> (
+	older, newer: int,
+) {
+	offset := strip_offset(g, state, view)
+	return offset, max(0, len(view.turns) - g.strip_bars - offset)
+}
+
+// The "+N" marker of the older (left) or newer (right) side as drawn; empty when that side hides no turn.
+changes_strip_marker_rect :: proc(
+	g: Changes_Geometry, state: ^Changes_State, view: ^Changes_View, newer: bool,
+) -> render.Rect {
+	older_count, newer_count := changes_strip_hidden(g, state, view)
+	if newer {return newer_count > 0 ? g.strip_newer : {}}
+	return older_count > 0 ? g.strip_older : {}
 }
 
 // Places the turn list under the range label, inside the pane.
@@ -310,17 +367,19 @@ changes_strip_reveal :: proc(state: ^Changes_State, g: Changes_Geometry, view: ^
 }
 
 // Reveals the selection when the strip's room, the turn count or the selection changed since the last
-// draw; otherwise only clamps, so a wheel-scrolled strip stays where it was put.
+// draw, and reports whether that moved the strip; otherwise only clamps, so a paged or wheel-scrolled
+// strip stays where it was put.
 @(private)
-strip_follow :: proc(state: ^Changes_State, g: Changes_Geometry, view: ^Changes_View) {
+strip_follow :: proc(state: ^Changes_State, g: Changes_Geometry, view: ^Changes_View) -> (moved: bool) {
 	count := len(view.turns)
-	if g.strip_bars == state.strip_seen_bars && count == state.strip_seen_turns &&
+	if g.strip_room == state.strip_seen_room && count == state.strip_seen_turns &&
 	   view.first == state.strip_seen_first {
 		state.strip_offset = strip_offset(g, state, view)
-		return
+		return false
 	}
-	_ = changes_strip_reveal(state, g, view)
-	state.strip_seen_bars, state.strip_seen_turns, state.strip_seen_first = g.strip_bars, count, view.first
+	moved = changes_strip_reveal(state, g, view)
+	state.strip_seen_room, state.strip_seen_turns, state.strip_seen_first = g.strip_room, count, view.first
+	return
 }
 
 // Moves the strip by `delta` bars, positive toward newer turns; true when it moved.
@@ -701,6 +760,40 @@ view_buttons_draw :: proc(
 	return .None
 }
 
+// A "+N" marker beside the strip for the `hidden` turns it can't show on that side; nothing when none.
+@(private = "file")
+strip_marker_draw :: proc(
+	list: ^render.Draw_List,
+	text: ^Text,
+	theme: Theme,
+	rect: render.Rect,
+	part: Changes_Part,
+	hidden: int,
+	state: ^Changes_State,
+	scale: f32,
+	pointer: [2]f32,
+) -> render.Build_Status {
+	if hidden <= 0 || rect.width <= 0 {return .Ok}
+	hover, press := changes_lit(state, {part, 0, 0})
+	b := Button {
+		rect    = rect,
+		hover   = hover,
+		press   = press,
+		radius  = RADIUS_CONTROL,
+		surface = .Flat,
+	}
+	face, ink, err := button_draw(list, theme, b, scale, pointer)
+	if err != .None {return .Ok}
+	small := text_styled(text, .Detail)
+	buf: [24]u8
+	label := fmt.bprintf(buf[:], "+%d", hidden)
+	width := min(text_width(&small, label), face.width)
+	return draw_text(
+		&small, list, label, face.x + (face.width - width) / 2, baseline_in(face.y, face.height, &small), ink,
+		face.width,
+	)
+}
+
 @(private)
 toolbar_draw :: proc(
 	list: ^render.Draw_List,
@@ -746,6 +839,11 @@ toolbar_draw :: proc(
 		return .Ok, false
 	}
 	strip_draw(list, theme, g, view, state)
+	older, newer := changes_strip_hidden(g, state, view)
+	if status = strip_marker_draw(list, text, theme, g.strip_older, .Strip_Older, older, state, s, pointer);
+	   status != .Ok {return}
+	if status = strip_marker_draw(list, text, theme, g.strip_newer, .Strip_Newer, newer, state, s, pointer);
+	   status != .Ok {return}
 	ahead := step_draw(list, theme, g.step_forward, .Chevron_Right, .Step_Forward, forward, state, s, pointer)
 	if ahead != .None {
 		return .Ok, false

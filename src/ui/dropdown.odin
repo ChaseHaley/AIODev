@@ -454,7 +454,8 @@ dropdown_key :: proc(
 	taken: bool,
 ) {
 	if c.searchable {
-		if c.regex_toggle && e.key == .R && .Alt in e.modifiers && .Control not_in e.modifiers {
+		// The find bar's own shortcut, so the key and its tooltip chip stay one.
+		if c.regex_toggle && find_key_button(e) == .Regex_Toggle {
 			dropdown_regex_flip(d, c)
 			return .Changed, true
 		}
