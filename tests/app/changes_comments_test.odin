@@ -782,25 +782,77 @@ comments_follow_a_refresh_with_their_offsets_held_inside_the_new_text :: proc(t:
 	c.selection.partial, c.selection.first_offset, c.selection.last_offset = true, 11, 18
 	c.held.partial, c.held.first_offset, c.held.last_offset = true, 11, 18
 
-	// The line is shorter now and one flat index further down: the offsets stay inside it.
+	// The line is shorter now and one flat index further down: the view holds the offsets inside it, while
+	// the note keeps the ones its quote is cut by.
 	pane.model.view.files = comments_text_files("  value := comp", lead = true)
 	app.changes_comments_reanchor(pane)
 	testing.expect_value(t, c.items[0].first_line, 1)
 	testing.expect(t, c.items[0].partial)
 	testing.expect_value(t, c.items[0].first_offset, 11)
-	testing.expect_value(t, c.items[0].last_offset, 15)
+	testing.expect_value(t, c.items[0].last_offset, 18)
+	testing.expect(t, pane.model.view.comments[0].partial)
 	testing.expect_value(t, pane.model.view.comments[0].last_offset, 15)
 	testing.expect_value(
 		t, c.selection,
 		ui.Changes_Selection{file = 0, first = 1, last = 1, active = true, partial = true, first_offset = 11, last_offset = 15},
 	)
+	message := app.changes_comments_message(c.items[:], context.temp_allocator)
+	testing.expect(t, strings.contains(message, "line 4, at \"compute\":"), message)
 
-	// A line emptied since the note was made leaves nothing to select but the line itself.
+	// A line emptied since the note was made leaves nothing to select in the view but the line itself.
 	pane.model.view.files = comments_text_files("", lead = true)
 	app.changes_comments_reanchor(pane)
-	testing.expect(t, !c.items[0].partial)
-	testing.expect_value(t, c.items[0].last_offset, 0)
+	testing.expect(t, c.items[0].partial)
+	testing.expect_value(t, c.items[0].last_offset, 18)
+	testing.expect(t, !pane.model.view.comments[0].partial)
 	testing.expect(t, !c.selection.partial)
+	message = app.changes_comments_message(c.items[:], context.temp_allocator)
+	testing.expect(t, strings.contains(message, "line 4, at \"compute\":"), message)
+
+	// The line coming back brings the part back with it.
+	pane.model.view.files = comments_text_files("  value := compute(a)", lead = true)
+	app.changes_comments_reanchor(pane)
+	testing.expect(t, pane.model.view.comments[0].partial)
+	testing.expect_value(t, pane.model.view.comments[0].last_offset, 18)
+}
+
+// One hunk: a removed line, then an added line, each with `text`'s two versions.
+@(private = "file")
+comments_changed_files :: proc(removed, added: string) -> []turns.Diff_File {
+	lines := make([]turns.Diff_Line, 2, context.temp_allocator)
+	lines[0] = {kind = .Removed, old_line = 4, text = removed}
+	lines[1] = {kind = .Added, new_line = 4, text = added}
+	hunks := make([]turns.Hunk, 1, context.temp_allocator)
+	hunks[0] = {lines = lines}
+	files := make([]turns.Diff_File, 1, context.temp_allocator)
+	files[0] = {old_path = "src/foo.odin", new_path = "src/foo.odin", hunks = hunks}
+	return files
+}
+
+@(test)
+a_partial_note_from_a_removed_line_into_an_added_one_keeps_its_text_through_a_refresh :: proc(t: ^testing.T) {
+	state: app.App
+	defer app.changes_app_destroy(&state.changes_state)
+	w: app.Window
+	pane := app.changes_pane_create(&state, {}, "C:/work/odin", .Repository)
+	if !testing.expect(t, pane != nil) {return}
+	pane.model.view.files = comments_changed_files("  value := compute(a)", "  value := compute(b)")
+	c := &pane.comments
+	comments_save_selected(
+		&state, &w, pane, {file = 0, first = 0, last = 1, active = true, partial = true, first_offset = 11, last_offset = 18},
+		"Both.",
+	)
+	if !testing.expect_value(t, len(c.items), 1) {return}
+	testing.expect(t, pane.model.view.comments[0].partial)
+
+	// The same diff again: the ends resolve to the added line alone, so offsets of the removed line's text
+	// must not be applied to it; the note's own offsets and message stay.
+	app.changes_comments_reanchor(pane)
+	testing.expect(t, !pane.model.view.comments[0].partial)
+	testing.expect_value(t, c.items[0].first_offset, 11)
+	testing.expect_value(t, c.items[0].last_offset, 18)
+	message := app.changes_comments_message(c.items[:], context.temp_allocator)
+	testing.expect(t, strings.contains(message, "at \"compute(a) value := compute\""), message)
 }
 
 @(test)

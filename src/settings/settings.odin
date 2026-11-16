@@ -1973,7 +1973,7 @@ value_parse :: proc(
 			}
 		case .Quick_Labels:
 			if !quick_labels_valid(value) {
-				buffer: [320]u8
+				buffer: [384]u8
 				issue, err := problem(.Invalid_Value, allocator, quick_labels_rules(buffer[:]))
 				return nil, issue, err
 			}

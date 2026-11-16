@@ -354,6 +354,37 @@ a_text_drag_in_side_by_side_stays_in_the_cell_it_started_in :: proc(t: ^testing.
 	// The right half's byte 2 would be 2; held to the left cell, the pointer is at its end, less the spaces
 	// trimmed from it.
 	testing.expect_value(t, c.selection.last_offset, 20)
+
+	// The added line between them is the right cell's: the note takes the left cell's lines only.
+	testing.expect(t, app.changes_comment_add(pane, {kind = .Delete}))
+	if !testing.expect_value(t, len(c.items), 1) {return}
+	testing.expect_value(t, c.items[0].quote, "-removed text\n   delta epsilon zeta  ")
+	message := app.changes_comments_message(c.items[:], context.temp_allocator)
+	testing.expect(t, strings.contains(message, "at \"moved text delta epsilon zeta\""), message)
+	testing.expect(t, !strings.contains(message, "added text"), message)
+}
+
+@(test)
+the_wheel_over_the_note_editor_scrolls_its_text_not_the_diff :: proc(t: ^testing.T) {
+	f: Selecting
+	defer selecting_stop(t, &f)
+	if !selecting_start(t, &f, "Wheel") {return}
+	w, pane, ok := selecting_pane(t, &f)
+	if !ok {return}
+	c := &pane.comments
+	c.selection = {file = 0, first = 2, last = 2, active = true}
+	testing.expect(t, app.changes_comments_key(&f.state, w, pane, {key = .Enter, pressed = true}))
+	testing.expect(t, markdown.edit_buffer_reset(&c.buffer, strings.repeat("line\n", 30, context.temp_allocator)))
+	g := selecting_geometry(&f, w, pane)
+	box, visible := ui.changes_editor_box(g, &pane.model.view, &pane.state, &w.ui_text)
+	if !testing.expect(t, visible) {return}
+	x, y := box.rect.x + box.rect.width / 2, box.rect.y + box.rect.height / 2
+
+	// Past the twelve lines the box shows, the wheel moves the text and leaves the diff where it was.
+	diff := pane.state.diff_scroll
+	testing.expect(t, app.changes_wheel(&f.state, w, x, y, -2))
+	testing.expect(t, c.area.scroll > 0, "the editor's text scrolls")
+	testing.expect_value(t, pane.state.diff_scroll, diff)
 }
 
 // A comment pane with no window, to drive its keys: the quick labels are set and a selection of lines made.
@@ -442,6 +473,14 @@ toolbar_keys_label_delete_comment_and_close :: proc(t: ^testing.T) {
 	testing.expect_value(t, markdown.edit_string(&c.buffer), "X")
 	testing.expect(t, keys_press(&k, .Escape))
 	testing.expect(t, c.selection.active)
+
+	// AltGr (Ctrl+Alt) types a character, so it starts a comment too; Alt alone is not typing.
+	testing.expect(t, keys_press(&k, .Digit_2, {.Control, .Alt}, "@"))
+	testing.expect_value(t, c.editing, 3)
+	testing.expect_value(t, markdown.edit_string(&c.buffer), "@")
+	testing.expect(t, keys_press(&k, .Escape))
+	testing.expect(t, !keys_press(&k, .Y, {.Alt}, "y"))
+	testing.expect_value(t, c.editing, -1)
 
 	// Chords with Ctrl are not typing.
 	testing.expect(t, !keys_press(&k, .C, {.Control}, ""))

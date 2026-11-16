@@ -1,5 +1,6 @@
 package main
 
+import "aio:input"
 import "aio:markdown"
 import "aio:platform"
 import "core:unicode/utf8"
@@ -41,15 +42,20 @@ text_edit_type :: proc(b: ^markdown.Edit_Buffer, text: string) -> Text_Edit_Kind
 	return markdown.edit_insert(b, text, true) ? .Edited : .Handled
 }
 
+// Whether a character key held with `modifiers` types its text: with none or Shift, and with Ctrl+Alt, which
+// is AltGr. Ctrl or Alt alone make chords, and Super never types.
+text_key_types :: proc(modifiers: input.Modifiers) -> bool {
+	chord := modifiers & {.Control, .Alt}
+	return (chord == {} || chord == {.Control, .Alt}) && .Super not_in modifiers
+}
+
 // Applies a key to the buffer. The caller decides what Escape and an Enter that saves mean before
 // asking, and follows the result: a `.Vertical` key is left for it to move as it lays its lines out.
 @(require_results)
 text_edit_key :: proc(app: ^App, b: ^markdown.Edit_Buffer, key: Content_Key) -> Text_Edit {
 	logical := key.logical
 	modifiers := logical.modifiers & {.Control, .Shift, .Alt, .Super}
-	// A character key types its text; Ctrl+Alt is AltGr, which types too. Ctrl and Alt alone make chords.
-	typing := modifiers & {.Control, .Alt} == {} || modifiers & {.Control, .Alt} == {.Control, .Alt}
-	if typing && .Super not_in modifiers {
+	if text_key_types(modifiers) {
 		if kind := text_edit_type(b, logical.text); kind != .Ignored {return {kind = kind}}
 	}
 	if .Alt in modifiers || .Super in modifiers {return {}}

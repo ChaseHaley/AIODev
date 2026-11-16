@@ -849,6 +849,26 @@ changes_code_offsets_follow_the_painters_rules :: proc(t: ^testing.T) {
 	testing.expect_value(t, ui.code_x_of(&f.mono, text, narrow, 4), advance + tab)
 }
 
+@(test)
+a_press_never_lands_between_a_letter_and_its_combining_mark :: proc(t: ^testing.T) {
+	f: Diff_Fixture
+	view: ui.Changes_View
+	if !diff_fixture_make(t, &f, &view) {return}
+	defer diff_fixture_destroy(&f)
+	// "é" as an e (byte 0) and U+0301 (bytes 1-2), then "x" at byte 3.
+	text := "e\u0301x"
+	advance := ui.text_width(&f.mono, "e")
+	room := f32(1000)
+	testing.expect_value(t, ui.code_offset_at(&f.mono, text, room, advance * 0.4), 0)
+	// The right half of the letter is the boundary after its mark, not the one between them.
+	testing.expect_value(t, ui.code_offset_at(&f.mono, text, room, advance * 0.6), 3)
+	testing.expect_value(t, ui.code_offset_at(&f.mono, text, room, advance + 0.1), 3)
+	testing.expect_value(t, ui.code_offset_at(&f.mono, text, room, 10000), len(text))
+	// A multi-byte letter is one boundary too, so the offsets stay on rune starts.
+	wide := "éx"
+	testing.expect_value(t, ui.code_offset_at(&f.mono, wide, room, ui.text_width(&f.mono, "é") * 0.6), 2)
+}
+
 // The code column is one geometry for both layouts: two number columns in a unified row, one in a cell,
 // the sign after them and the text out to the cell's edge.
 @(test)
@@ -997,6 +1017,44 @@ changes_rows_refresh_when_a_note_changes_kind_label_or_range :: proc(t: ^testing
 
 	view.selection = {file = 0, first = 2, last = 2, active = true}
 	testing.expect(t, changed(&f, &view, &state, &key), "selection")
+	// Where in its line a text selection ends moves nothing in the layout.
 	view.selection.partial, view.selection.last_offset = true, 1
-	testing.expect(t, changed(&f, &view, &state, &key), "selection text")
+	testing.expect(t, !changed(&f, &view, &state, &key), "selection text")
+}
+
+@(test)
+a_text_drag_step_and_a_keystroke_leave_the_rows_as_they_are :: proc(t: ^testing.T) {
+	f: Diff_Fixture
+	view: ui.Changes_View
+	if !diff_fixture_make(t, &f, &view) {return}
+	defer diff_fixture_destroy(&f)
+	state: ui.Changes_State
+	defer ui.changes_state_destroy(&state)
+	f.comments[0] = {file = 0, first = 0, last = 1, text = "Rename this"}
+	view.comments = f.comments[:1]
+	view.selection = {file = 0, first = 2, last = 2, active = true, partial = true}
+	_ = lay_out(&f, &view, &state)
+	built := state.rows.built
+
+	// Each step of a text drag moves the end of the selection within its line, and every hover lays the
+	// diff out: none of them builds the rows again.
+	for offset in 1 ..= 8 {
+		view.selection.last_offset = offset
+		_ = lay_out(&f, &view, &state)
+	}
+	testing.expect_value(t, state.rows.built, built)
+
+	// Typing into the editor on that selection builds them only when the card changes height.
+	view.editing = 1
+	testing.expect(t, markdown.edit_buffer_reset(&f.buffer, "a"))
+	_ = lay_out(&f, &view, &state)
+	built = state.rows.built
+	for text in ([?]string{"ab", "abc", "abcd", "abcde"}) {
+		testing.expect(t, markdown.edit_buffer_reset(&f.buffer, text))
+		_ = lay_out(&f, &view, &state)
+	}
+	testing.expect_value(t, state.rows.built, built)
+	testing.expect(t, markdown.edit_buffer_reset(&f.buffer, "one\ntwo\nthree\nfour\nfive\nsix"))
+	_ = lay_out(&f, &view, &state)
+	testing.expect_value(t, state.rows.built, built + 1)
 }

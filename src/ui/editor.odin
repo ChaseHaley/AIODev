@@ -243,7 +243,8 @@ Order_Kind :: enum {
 }
 
 // A reorder drag, then its blocks easing into place once it ends. Nil while nothing reorders;
-// profile_positions has entries only while Dragging or Settling. Only the order_ procs write it.
+// profile_positions has entries only while Dragging or Settling. The order_ procs write it, and a label move
+// renames its label entries (label_positions_follow).
 Editor_Order :: union {
 	Order_Dragging,
 	Order_Settling,

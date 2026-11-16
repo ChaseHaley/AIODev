@@ -4,8 +4,11 @@ import "aio:colour"
 import "aio:markdown"
 import "aio:render"
 import "aio:syntax"
+import tr "aio:turns"
 import "core:fmt"
 import "core:math"
+import "core:mem"
+import "core:mem/virtual"
 import "core:strings"
 
 // The cards a note takes in the diff stream: the saved note card, and the editor card that replaces it
@@ -113,13 +116,16 @@ tag_width :: proc(detail: ^Text, c: Changes_Comment_View, removable: bool, s: f3
 }
 
 // The new-side lines of flat lines `first` through `last` of `file`, which a suggestion replaces, in
-// temporary memory.
-@(private = "file")
-note_original :: proc(view: ^Changes_View, file, first, last: int) -> []string {
-	if file < 0 || file >= len(view.files) {return nil}
-	out := make([dynamic]string, context.temp_allocator)
+// `allocator`. Removed lines and "no newline" markers are not on the new side.
+@(require_results)
+changes_new_side :: proc(
+	file: tr.Diff_File,
+	first, last: int,
+	allocator := context.temp_allocator,
+) -> []string {
+	out := make([dynamic]string, allocator)
 	flat := 0
-	for &hunk in view.files[file].hunks {
+	for &hunk in file.hunks {
 		for &line, k in hunk.lines {
 			at := flat + k
 			if at < first || at > last || line.kind == .Removed || line.kind == .No_Newline {continue}
@@ -131,48 +137,91 @@ note_original :: proc(view: ^Changes_View, file, first, last: int) -> []string {
 	return out[:]
 }
 
-// The text a partial note covers, whitespace squeezed to single spaces and cut to `limit` characters with an
-// ellipsis, in temporary memory. Empty for whole lines.
-@(private = "file")
-note_excerpt :: proc(view: ^Changes_View, file, first, last, from, to, limit: int) -> string {
-	b := strings.builder_make(context.temp_allocator)
-	count := 0
+// Flat line `flat` of `file`; false when there is no such line.
+@(require_results)
+changes_line_at :: proc(file: tr.Diff_File, flat: int) -> (line: tr.Diff_Line, found: bool) {
+	if flat < 0 {return}
+	at := flat
+	for hunk in file.hunks {
+		if at < len(hunk.lines) {return hunk.lines[at], true}
+		at -= len(hunk.lines)
+	}
+	return
+}
+
+// The text of flat line `flat` of `file`; false when there is no such line.
+@(require_results)
+changes_line_text :: proc(file: tr.Diff_File, flat: int) -> (text: string, found: bool) {
+	line := changes_line_at(file, flat) or_return
+	return line.text, true
+}
+
+// The text a partial note covers, from `lines` (its lines' text, without any signs): from byte `from` of the
+// first to byte `to` of the last. Whitespace runs become one space and none stays at either end. Text of
+// more than `limit` characters is cut to one fewer and an ellipsis. The card, the editor's header and the
+// message all show it this way. In `allocator`.
+@(require_results)
+changes_excerpt :: proc(
+	lines: []string,
+	from, to, limit: int,
+	allocator := context.temp_allocator,
+) -> string {
+	b := strings.builder_make(allocator)
+	count, cut := 0, 0
 	gap := false
-	for line in first ..= last {
-		text, found := line_text(view, file, line)
-		if !found {continue}
-		low := line == first ? clamp(from, 0, len(text)) : 0
-		high := line == last ? clamp(to, low, len(text)) : len(text)
+	for text, i in lines {
+		low := i == 0 ? clamp(from, 0, len(text)) : 0
+		high := i == len(lines) - 1 ? clamp(to, low, len(text)) : len(text)
 		for r in text[low:high] {
 			if r == ' ' || r == '\t' || r == '\r' || r == '\n' {
 				gap = count > 0
 				continue
 			}
-			if count >= limit {
-				strings.write_rune(&b, '…')
-				return strings.to_string(b)
+			if count == limit {
+				return strings.concatenate({strings.to_string(b)[:cut], "…"}, allocator)
 			}
 			if gap {strings.write_byte(&b, ' ')}
 			gap = false
 			strings.write_rune(&b, r)
 			count += 1
+			if count == limit - 1 {cut = strings.builder_len(b)}
 		}
 		gap = count > 0
 	}
 	return strings.to_string(b)
 }
 
+// The excerpt of the lines of `file` from flat line `first` through `last` that belong to `half`, between the
+// offsets, in temporary memory.
+@(private = "file")
+selection_excerpt :: proc(
+	view: ^Changes_View,
+	file, first, last, from, to, limit: int,
+	half: Changes_Half,
+) -> string {
+	if file < 0 || file >= len(view.files) || last < first {return ""}
+	lines := make([dynamic]string, context.temp_allocator)
+	for at in first ..= last {
+		line, found := changes_line_at(view.files[file], at)
+		if found && changes_half_has(half, line.kind) {append(&lines, line.text)}
+	}
+	return changes_excerpt(lines[:], from, to, limit)
+}
+
 // The excerpt a saved card shows, empty unless the note is partial.
 @(private = "file")
 card_excerpt :: proc(view: ^Changes_View, c: Changes_Comment_View, limit: int) -> string {
 	if !c.partial || c.file < 0 {return ""}
-	return note_excerpt(view, c.file, c.first, c.last, c.first_offset, c.last_offset, limit)
+	return selection_excerpt(view, c.file, c.first, c.last, c.first_offset, c.last_offset, limit, c.half)
 }
 
-// A saved card's parts below the header, measured once at the width the card has.
-@(private = "file")
+// A saved card's parts below the header, laid out once at the width the card has and kept in the rows'
+// notes (Changes_Rows) until the next measure, so that the card is painted from the layout it was measured
+// by. `layout` and `excerpt` live in the same arena as the cache.
+@(private)
 Note_Plan :: struct {
 	layout:                 Note_Layout,
+	excerpt:                string,
 	tagged, body:           bool,
 	body_top, body_width:   f32,
 	height:                 f32,
@@ -185,10 +234,11 @@ card_reserve :: proc(s: f32) -> f32 {
 }
 
 // How a saved note lays out in a card `width` wide: a first line when it has a tag or an excerpt, then its
-// text through the note-body renderer. Without a first line the text leaves room for the buttons itself.
+// text through the note-body renderer, with its code coloured. Without a first line the text leaves room for
+// the buttons itself. Everything it keeps is in `allocator`, which the caller frees as one.
 @(private = "file")
 note_plan :: proc(
-	view: ^Changes_View, c: Changes_Comment_View, text, mono: ^Text, width, s: f32,
+	view: ^Changes_View, c: Changes_Comment_View, text, mono: ^Text, width, s: f32, allocator: mem.Allocator,
 ) -> Note_Plan {
 	pad := card_pad(s)
 	inner := max(1, width - 2 * pad)
@@ -200,12 +250,23 @@ note_plan :: proc(
 	if p.tagged {
 		top += math.round(CHANGES_CARD_TAG * s)
 		if p.body {top += math.round(SPACE_1 * s)}
+		p.excerpt, _ = strings.clone(card_excerpt(view, c, CHANGES_EXCERPT_NOTE), allocator)
 	}
 	p.body_top = top
 	height := top
 	if p.body {
-		original := note_original(view, c.file, c.first, c.last)
-		p.layout = note_body_layout(text, mono, c.text, original, p.body_width, s)
+		// The layout points into the text and the replaced lines, which the note and the diff may free.
+		source, _ := strings.clone(c.text, allocator)
+		original: []string
+		language: syntax.Language
+		if c.file >= 0 && c.file < len(view.files) {
+			file := view.files[c.file]
+			language = syntax.language_for_path(file.new_path)
+			original = changes_new_side(file, c.first, c.last, allocator)
+			for &line in original {line, _ = strings.clone(line, allocator)}
+		}
+		p.layout = note_body_layout(text, mono, source, original, p.body_width, s, allocator)
+		note_body_highlight(&p.layout, language, allocator)
 		height += math.round(p.layout.height)
 	}
 	p.height = max(height + pad, math.round((CHANGES_CARD_ACTION + 2 * CHANGES_CARD_ACTION_INSET) * s))
@@ -258,13 +319,14 @@ editor_height :: proc(rows: ^Changes_Rows, view: ^Changes_View, text: ^Text, fil
 	return int(m.header + m.tools + 2 * m.gap + math.round(area) + m.footer)
 }
 
-// The height of the card of a saved note.
+// Measures the card of a saved note at the width it has and keeps what it laid out in the rows' arena, from
+// which the card is painted. The caller resets the arena before measuring every card again.
 @(private)
-note_height :: proc(
+note_measure :: proc(
 	rows: ^Changes_Rows, view: ^Changes_View, c: Changes_Comment_View, text, mono: ^Text,
-) -> int {
+) -> Note_Plan {
 	span := card_span(rows, view, c.file)
-	return int(math.round(note_plan(view, c, text, mono, span.width, rows.scale).height))
+	return note_plan(view, c, text, mono, span.width, rows.scale, virtual.arena_allocator(&rows.notes_arena))
 }
 
 // The width the editor's tag takes in `text`, for the × at its end; zero when the editor has no tag.
@@ -492,7 +554,9 @@ paint_note_card :: proc(p: ^Diff_Paint, rect: render.Rect, card: int) -> render.
 	draw_rect(p.list, {rect = rect, color = border, radius = radius, stroke = s})
 	if comment_attached(view, card) {notch_draw(p.list, rect, t.surface, border, s)}
 	pad := card_pad(s)
-	plan := note_plan(view, c, p.body, p.mono, rect.width, s)
+	// The plan measured with the rows, not one made again each frame: its layout and colours are kept.
+	if card >= len(state.rows.notes) {return .Ok}
+	plan := &state.rows.notes[card]
 	first := math.round(CHANGES_CARD_TAG * s)
 	if plan.tagged {
 		x, y := rect.x + pad, rect.y + pad
@@ -503,18 +567,12 @@ paint_note_card :: proc(p: ^Diff_Paint, rect: render.Rect, card: int) -> render.
 			x += tag.width + SPACE_2 * s
 			room -= tag.width + SPACE_2 * s
 		}
-		excerpt := card_excerpt(view, c, CHANGES_EXCERPT_NOTE)
-		if _, r := excerpt_draw(p, excerpt, x, y, room); r != .Ok {return r}
+		if _, r := excerpt_draw(p, plan.excerpt, x, y, room); r != .Ok {return r}
 	}
 	if plan.body {
-		language: syntax.Language
-		if c.file >= 0 && c.file < len(view.files) {
-			language = syntax.language_for_path(view.files[c.file].new_path)
-		}
 		origin := [2]f32{rect.x + pad, rect.y + plan.body_top}
-		layout := plan.layout
 		if r := note_body_draw(
-			p.list, p.body, p.mono, t, &state.inks, &layout, origin, language, s, p.top, p.bottom,
+			p.list, p.body, p.mono, t, &state.inks, &plan.layout, origin, s, p.top, p.bottom,
 		); r != .Ok {
 			return r
 		}
@@ -549,7 +607,9 @@ editor_excerpt :: proc(view: ^Changes_View) -> string {
 	}
 	s := view.selection
 	if !s.active || !s.partial {return ""}
-	return note_excerpt(view, s.file, s.first, s.last, s.first_offset, s.last_offset, CHANGES_EXCERPT_EDITOR)
+	return selection_excerpt(
+		view, s.file, s.first, s.last, s.first_offset, s.last_offset, CHANGES_EXCERPT_EDITOR, s.half,
+	)
 }
 
 // What the empty text area says: what the note will be.

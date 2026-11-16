@@ -147,6 +147,10 @@ quick_labels_description_and_error_text_show_the_grammar :: proc(t: ^testing.T) 
 	testing.expect_value(t, err, nil)
 	if testing.expect_value(t, len(issues), 1) {
 		testing.expect(t, strings.contains(issues[0].message, settings.QUICK_LABELS_EXAMPLE))
+		testing.expect(t, strings.contains(issues[0].message, "color"))
+		for preset in settings.QUICK_LABEL_PRESETS {
+			testing.expect(t, strings.contains(issues[0].message, preset), preset)
+		}
 	}
 }
 

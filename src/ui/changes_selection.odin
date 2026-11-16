@@ -77,13 +77,8 @@ changes_label_at :: proc(value: string, index: int) -> (label: settings.Quick_La
 // The text of flat line `line` of `file`; false when there is no such line.
 @(private, require_results)
 line_text :: proc(view: ^Changes_View, file, line: int) -> (text: string, ok: bool) {
-	if file < 0 || file >= len(view.files) || line < 0 {return}
-	at := line
-	for &hunk in view.files[file].hunks {
-		if at < len(hunk.lines) {return hunk.lines[at].text, true}
-		at -= len(hunk.lines)
-	}
-	return
+	if file < 0 || file >= len(view.files) {return}
+	return changes_line_text(view.files[file], line)
 }
 
 // What a press at `x` lands on in flat line `line` of `file`: the byte of the line's text whose boundary is

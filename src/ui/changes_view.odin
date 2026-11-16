@@ -5,6 +5,7 @@ import "aio:render"
 import "aio:syntax"
 import tr "aio:turns"
 import "core:math"
+import "core:mem/virtual"
 
 // The Agent changes pane: a header row at the top (a summary of what the pane shows on the left; the layout,
 // fold, filter and select lines buttons and a chevron button on the right), a panel under the summary for
@@ -269,6 +270,8 @@ Changes_Rows :: struct {
 	// tag, which the × after it sits at the end of.
 	width, body_line, tag_width:            f32,
 	comments_key:                           u64,
+	// How many times the rows were laid out, for tests that show a drag step or a keystroke does not.
+	built:                                  int,
 	header, hunk, line, note, gap, footer:  int,
 	// How far a digit of the diff's text advances, so a hit test can tell the gutter from the code.
 	digit:                                  f32,
@@ -276,6 +279,11 @@ Changes_Rows :: struct {
 	tops:                                   [dynamic]int,
 	// The height of each comment card, measured by changes_cards_measure.
 	cards:                                  [dynamic]int,
+	// What each saved note's card was laid out as when it was measured, by card number (the editor's and
+	// absent cards' are empty). Its text layout, excerpt and syntax colours live in `notes_arena`, which
+	// is emptied whenever the cards are measured again and freed with changes_state_destroy.
+	notes:                                  [dynamic]Note_Plan,
+	notes_arena:                            virtual.Arena,
 	// What the overview strip draws: runs of added and removed lines and the comment cards, by their place in
 	// the stream, rebuilt with the rows.
 	ticks:                                  [dynamic]Changes_Tick,
@@ -324,6 +332,8 @@ changes_state_destroy :: proc(state: ^Changes_State) {
 	delete(state.rows.tops)
 	delete(state.rows.cards)
 	delete(state.rows.ticks)
+	delete(state.rows.notes)
+	virtual.arena_destroy(&state.rows.notes_arena)
 	changes_pairs_destroy(&state.rows.pairs)
 	state.rows = {}
 }
@@ -583,7 +593,8 @@ changes_layout :: proc(state: ^Changes_State, view: ^Changes_View, text, mono: ^
 	   rows.notice == view.notice && rows.files == len(view.files) && rows.omitted == view.omitted &&
 	   rows.line_height == mono.line_height && rows.digit == digit && rows.scale == scale &&
 	   rows.width == width && rows.body_line == text.line_height && rows.comments_key == comments &&
-	   rows.pairs.side_by_side == view.side_by_side {return}
+	   rows.pairs.side_by_side == view.side_by_side && !editor_stale(rows, view, text) {return}
+	rows.built += 1
 	rows.valid, rows.revision, rows.collapsed_key, rows.notice = true, view.revision, key, view.notice
 	rows.files, rows.omitted = len(view.files), view.omitted
 	rows.scale, rows.line_height, rows.digit = scale, mono.line_height, digit

@@ -132,6 +132,15 @@ note_paragraphs_wrap_by_the_width_and_keep_their_styles :: proc(t: ^testing.T) {
 	// Markers with no partner are text.
 	plain := ui.note_body_layout(&f.text, &f.mono, "a ` b ** c", nil, 400, 1)
 	for piece in plain.pieces {testing.expect_value(t, piece.style, ui.Note_Style.Plain)}
+	// Code inside bold is a chip too, not backticks drawn in bold.
+	inside := ui.note_body_layout(&f.text, &f.mono, "**use `x` now**", nil, 400, 1)
+	if !testing.expect_value(t, len(inside.pieces), 3) {return}
+	styles_inside := [?]ui.Note_Style{.Bold, .Code, .Bold}
+	texts_inside := [?]string{"use", "x", "now"}
+	for piece, i in inside.pieces {
+		testing.expect_value(t, piece.style, styles_inside[i])
+		testing.expect_value(t, piece.text, texts_inside[i])
+	}
 
 	// A word wider than the room is cut where it runs out, so no piece passes the edge.
 	long := ui.note_body_layout(&f.text, &f.mono, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", nil, 60, 1)
@@ -219,10 +228,11 @@ note_body_draws_chips_fills_signs_and_syntax_colours :: proc(t: ^testing.T) {
 	source := "Use `old` here:\n```suggestion\nnew\n```\nand\n```text\nraw\n```"
 	original := []string{"old"}
 	layout := ui.note_body_layout(&f.text, &f.mono, source, original, 300, 1)
+	ui.note_body_highlight(&layout, .None)
 	list := render.draw_list_init()
 	defer render.draw_list_destroy(&list)
 	testing.expect_value(t, render.push_layer(&list, {0, 0, 800, 600}), render.Error.None)
-	status := ui.note_body_draw(&list, &f.text, &f.mono, theme, &inks, &layout, {20, 10}, .None, 1, 0, 600)
+	status := ui.note_body_draw(&list, &f.text, &f.mono, theme, &inks, &layout, {20, 10}, 1, 0, 600)
 	testing.expect_value(t, status, render.Build_Status.Ok)
 
 	count :: proc(list: ^render.Draw_List, color: render.Color) -> (n: int) {
@@ -255,7 +265,7 @@ note_body_draws_chips_fills_signs_and_syntax_colours :: proc(t: ^testing.T) {
 	// Rows outside the visible range are not drawn.
 	render.draw_list_reset(&list)
 	testing.expect_value(t, render.push_layer(&list, {0, 0, 800, 600}), render.Error.None)
-	status = ui.note_body_draw(&list, &f.text, &f.mono, theme, &inks, &layout, {20, 10}, .None, 1, 1000, 1200)
+	status = ui.note_body_draw(&list, &f.text, &f.mono, theme, &inks, &layout, {20, 10}, 1, 1000, 1200)
 	testing.expect_value(t, status, render.Build_Status.Ok)
 	testing.expect_value(t, len(list.rects), 0)
 	testing.expect_value(t, len(list.glyphs), 0)

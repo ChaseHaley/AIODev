@@ -593,7 +593,7 @@ row_draw :: proc(
 	return summary_draw(list, text, theme, g, view, phase)
 }
 
-// The open ⋯ menu: Side-by-side (checked while on), the fold row and Filter files….
+// The open ⋯ menu: Side-by-side and Select lines (each checked while on), the fold row and Filter files….
 @(private)
 tools_menu_draw :: proc(
 	list: ^render.Draw_List,

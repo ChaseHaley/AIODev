@@ -41,9 +41,13 @@ Changes_Comment :: struct {
 	label_name, label_colour, label_instruction: string,
 	// A note on part of its lines starts at byte `first_offset` of its first line's text and ends at
 	// `last_offset` of its last line's. Whole lines are not partial, and neither is a range that spans its
-	// lines' trimmed text.
+	// lines' trimmed text. These index `quote`, the text as it was when the note was made, so a refreshed
+	// diff never rewrites them; the view clamps a copy to the lines as they are now.
 	partial:                                    bool,
 	first_offset, last_offset:                  int,
+	// How many diff lines it covers (a "no newline" marker is not one), so a refresh that changes the
+	// lines in between is noticed.
+	lines:                                      int,
 	// The cell side by side it was made in.
 	half:                                       ui.Changes_Half,
 	// Where it shows in the current view; file = -1 when its lines are not in this diff.
@@ -157,40 +161,45 @@ changes_line_count :: proc(file: turns.Diff_File) -> (count: int) {
 	return
 }
 
-// The text of flat line `flat` of `file`; found = false when there is no such line.
-@(private = "file", require_results)
-changes_line_text :: proc(file: turns.Diff_File, flat: int) -> (text: string, found: bool) {
-	if flat < 0 {return "", false}
-	at := flat
-	for hunk in file.hunks {
-		if at < len(hunk.lines) {return hunk.lines[at].text, true}
-		at -= len(hunk.lines)
-	}
-	return "", false
-}
-
 // A note on flat lines `first..last` of `file` as it stands there: its offsets held inside those lines'
 // text and in order, and not partial when they span the trimmed text of the lines, which is the whole of
-// them. Offsets of a note that is not partial are zero.
+// them, or when the range no longer covers `lines` diff lines (so the offsets cannot be told apart
+// between its ends). Offsets of a note that is not partial are zero. `lines` = 0 checks nothing.
 @(private = "file", require_results)
 changes_range_fit :: proc(
 	file: turns.Diff_File,
 	first, last: int,
 	partial: bool,
 	first_offset, last_offset: int,
+	lines := 0,
 ) -> (
 	fit: bool,
 	low, high: int,
 ) {
 	if !partial {return false, 0, 0}
-	first_text, found_first := changes_line_text(file, first)
-	last_text, found_last := changes_line_text(file, last)
+	if lines > 0 && changes_span_lines(file, first, last) != lines {return false, 0, 0}
+	first_text, found_first := ui.changes_line_text(file, first)
+	last_text, found_last := ui.changes_line_text(file, last)
 	if !found_first || !found_last {return false, 0, 0}
 	low, high = clamp(first_offset, 0, len(first_text)), clamp(last_offset, 0, len(last_text))
 	if first == last && high < low {low, high = high, low}
 	indent := len(first_text) - len(strings.trim_left_space(first_text))
 	if low <= indent && high >= len(strings.trim_right_space(last_text)) {return false, 0, 0}
 	return true, low, high
+}
+
+// How many diff lines flat lines `first..last` of `file` are, not counting "no newline" markers.
+@(private = "file", require_results)
+changes_span_lines :: proc(file: turns.Diff_File, first, last: int) -> (count: int) {
+	flat := 0
+	for hunk in file.hunks {
+		if flat > last {break}
+		for line in hunk.lines {
+			if flat >= first && flat <= last && line.kind != .No_Newline {count += 1}
+			flat += 1
+		}
+	}
+	return
 }
 
 @(private = "file", require_results)
@@ -200,12 +209,27 @@ changes_clone :: proc(s: string, failed: ^bool) -> string {
 	return cloned
 }
 
-// The side and its line numbers that flat lines `first..last` of `file` cover; found = false when none
-// of them is a line of either side.
+// The text of flat line `flat` of `file` when it belongs to a selection or note made in `half`.
+@(private = "file", require_results)
+changes_half_text :: proc(
+	file: turns.Diff_File,
+	flat: int,
+	half: ui.Changes_Half,
+) -> (
+	text: string,
+	ok: bool,
+) {
+	line := ui.changes_line_at(file, flat) or_return
+	return line.text, ui.changes_half_has(half, line.kind)
+}
+
+// The side and its line numbers that flat lines `first..last` of `file` cover, counting only the lines that
+// belong to `half`; found = false when none of them is a line of either side.
 @(private = "file", require_results)
 changes_range_of :: proc(
 	file: turns.Diff_File,
 	first, last: int,
+	half := ui.Changes_Half.Both,
 ) -> (
 	side: Comment_Side,
 	low, high: i32,
@@ -222,7 +246,7 @@ changes_range_of :: proc(
 		for line in hunk.lines {
 			at := flat
 			flat += 1
-			if at < first || at > last {continue}
+			if at < first || at > last || !ui.changes_half_has(half, line.kind) {continue}
 			#partial switch line.kind {
 			case .Context, .Added:
 				if new_low == 0 {new_low = line.new_line}
@@ -238,16 +262,17 @@ changes_range_of :: proc(
 	return .New, 0, 0, false
 }
 
-// Flat lines `first..last` of `file` with their signs, joined by '\n', in temporary memory.
+// Flat lines `first..last` of `file` that belong to `half`, with their signs, joined by '\n', in temporary
+// memory.
 @(private = "file", require_results)
-changes_quote :: proc(file: turns.Diff_File, first, last: int) -> string {
+changes_quote :: proc(file: turns.Diff_File, first, last: int, half := ui.Changes_Half.Both) -> string {
 	b := strings.builder_make(context.temp_allocator)
 	flat := 0
 	for hunk in file.hunks {
 		for line in hunk.lines {
 			at := flat
 			flat += 1
-			if at < first || at > last {continue}
+			if at < first || at > last || !ui.changes_half_has(half, line.kind) {continue}
 			sign: string
 			switch line.kind {
 			case .Context:
@@ -311,7 +336,7 @@ changes_editor_span :: proc(pane: ^Changes_Pane) -> ui.Changes_Span {
 	}
 	s := c.selection
 	if !s.active || s.file < 0 || s.file >= len(files) {return {}}
-	side, low, high, found := changes_range_of(files[s.file], s.first, s.last)
+	side, low, high, found := changes_range_of(files[s.file], s.first, s.last, s.half)
 	if !found {return {}}
 	return {int(low), int(high), side == .Old}
 }
@@ -326,6 +351,13 @@ changes_comments_sync :: proc(pane: ^Changes_Pane) {
 	if reserve(&c.views, len(c.items)) == nil {
 		for item in c.items {
 			detached := item.file < 0
+			partial, first_offset, last_offset := false, 0, 0
+			if !detached && item.file < len(view.files) {
+				partial, first_offset, last_offset = changes_range_fit(
+					view.files[item.file], item.first_line, item.last_line, item.partial, item.first_offset,
+					item.last_offset, item.lines,
+				)
+			}
 			append(
 				&c.views,
 				ui.Changes_Comment_View {
@@ -335,9 +367,9 @@ changes_comments_sync :: proc(pane: ^Changes_Pane) {
 					text = item.text,
 					detached = detached,
 					kind = item.kind,
-					partial = item.partial,
-					first_offset = item.first_offset,
-					last_offset = item.last_offset,
+					partial = partial,
+					first_offset = first_offset,
+					last_offset = last_offset,
 					half = item.half,
 					label_name = item.label_name,
 					label_colour = item.label_colour,
@@ -370,7 +402,7 @@ changes_selection_hold :: proc(pane: ^Changes_Pane) {
 	s := c.selection
 	if !s.active || s.file < 0 || s.file >= len(files) {return}
 	file := files[s.file]
-	side, low, high, found := changes_range_of(file, s.first, s.last)
+	side, low, high, found := changes_range_of(file, s.first, s.last, s.half)
 	if !found {return}
 	path, worktree := changes_comment_path(file), changes_comments_worktree(pane)
 	if held.path != path {
@@ -391,6 +423,7 @@ changes_selection_hold :: proc(pane: ^Changes_Pane) {
 		file, s.first, s.last, s.partial, s.first_offset, s.last_offset,
 	)
 	held.half = s.half
+	held.lines = changes_span_lines(file, s.first, s.last)
 }
 
 @(private = "file")
@@ -465,7 +498,7 @@ changes_comment_add :: proc(pane: ^Changes_Pane, note: Changes_Note) -> bool {
 	s := c.selection
 	if !s.active || s.file < 0 || s.file >= len(files) {return false}
 	file := files[s.file]
-	side, low, high, found := changes_range_of(file, s.first, s.last)
+	side, low, high, found := changes_range_of(file, s.first, s.last, s.half)
 	if !found {return false}
 	item := Changes_Comment {
 		side       = side,
@@ -480,10 +513,11 @@ changes_comment_add :: proc(pane: ^Changes_Pane, note: Changes_Note) -> bool {
 	item.partial, item.first_offset, item.last_offset = changes_range_fit(
 		file, s.first, s.last, s.partial, s.first_offset, s.last_offset,
 	)
+	item.lines = changes_span_lines(file, s.first, s.last)
 	failed := false
 	item.worktree = changes_clone(changes_comments_worktree(pane), &failed)
 	item.path = changes_clone(changes_comment_path(file), &failed)
-	item.quote = changes_clone(changes_quote(file, s.first, s.last), &failed)
+	item.quote = changes_clone(changes_quote(file, s.first, s.last, s.half), &failed)
 	item.text = changes_clone(note.text, &failed)
 	item.label_name = changes_clone(note.label_name, &failed)
 	item.label_colour = changes_clone(note.label_colour, &failed)
@@ -672,7 +706,8 @@ changes_text_extend :: proc(pane: ^Changes_Pane, file, line, offset: int) {
 @(private = "file")
 changes_press_text :: proc(pane: ^Changes_Pane, file, line: int, at: Changes_Text_Point, extend: bool) {
 	c := &pane.comments
-	extending := extend && c.selection.active && c.selection.partial && c.selection.file == file
+	extending := extend && c.selection.active && c.selection.partial && c.selection.file == file &&
+		c.selection.half == at.half
 	if !extending {
 		c.anchor, c.anchor_offset, c.anchor_half = line, at.offset, at.half
 		c.selection, c.held.file = {}, -1
@@ -698,7 +733,7 @@ changes_text_settle :: proc(pane: ^Changes_Pane) {
 	file := files[s.file]
 	first, first_offset, last, last_offset := -1, 0, -1, 0
 	for line in s.first ..= s.last {
-		text, found := changes_line_text(file, line)
+		text, found := changes_half_text(file, line, s.half)
 		if !found {continue}
 		low := line == s.first ? clamp(s.first_offset, 0, len(text)) : 0
 		high := line == s.last ? clamp(s.last_offset, 0, len(text)) : len(text)
@@ -709,7 +744,7 @@ changes_text_settle :: proc(pane: ^Changes_Pane) {
 		}
 	}
 	for line := s.last; line >= first && first >= 0; line -= 1 {
-		text, found := changes_line_text(file, line)
+		text, found := changes_half_text(file, line, s.half)
 		if !found {continue}
 		low := line == first ? first_offset : 0
 		high := line == s.last ? clamp(s.last_offset, 0, len(text)) : len(text)
@@ -756,21 +791,7 @@ changes_editor_lines :: proc(pane: ^Changes_Pane) -> (file: turns.Diff_File, fir
 // replaces, in temporary memory.
 @(private = "file", require_results)
 changes_new_side :: proc(file: turns.Diff_File, first, last: int) -> string {
-	b := strings.builder_make(context.temp_allocator)
-	flat := 0
-	written := false
-	for hunk in file.hunks {
-		for line, k in hunk.lines {
-			at := flat + k
-			if at < first || at > last || line.kind == .Removed || line.kind == .No_Newline {continue}
-			if written {strings.write_byte(&b, '\n')}
-			strings.write_string(&b, line.text)
-			written = true
-		}
-		flat += len(hunk.lines)
-		if flat > last {break}
-	}
-	return strings.to_string(b)
+	return strings.join(ui.changes_new_side(file, first, last), "\n", context.temp_allocator)
 }
 
 // The word that opens a code block of `file`'s lines: its extension, which names its language.
@@ -1060,8 +1081,8 @@ changes_selection_key :: proc(
 			return true
 		}
 	}
-	// Typing starts a comment with what was typed; a control character is not typing.
-	if modifiers - {.Shift} == {} && e.text != "" && e.text[0] >= ' ' && e.text[0] != 0x7f {
+	// Typing starts a comment with what was typed (AltGr types too); a control character is not typing.
+	if text_key_types(modifiers) && e.text != "" && e.text[0] >= ' ' && e.text[0] != 0x7f {
 		c.menu = false
 		changes_comment_start(pane, e.text)
 		return true
@@ -1159,12 +1180,6 @@ changes_comments_reanchor :: proc(pane: ^Changes_Pane) {
 	worktree := changes_comments_worktree(pane)
 	for &item in c.items {
 		item.file, item.first_line, item.last_line = changes_anchor_find(files, worktree, item)
-		if item.file >= 0 {
-			item.partial, item.first_offset, item.last_offset = changes_range_fit(
-				files[item.file], item.first_line, item.last_line, item.partial, item.first_offset,
-				item.last_offset,
-			)
-		}
 	}
 	if c.selection.active {
 		file, first, last := -1, 0, 0
@@ -1180,6 +1195,7 @@ changes_comments_reanchor :: proc(pane: ^Changes_Pane) {
 			c.anchor = c.anchor == c.selection.first ? first : last
 			partial, first_offset, last_offset := changes_range_fit(
 				files[file], first, last, c.held.partial, c.held.first_offset, c.held.last_offset,
+				c.held.lines,
 			)
 			c.selection = {
 				file         = file,
@@ -1192,7 +1208,6 @@ changes_comments_reanchor :: proc(pane: ^Changes_Pane) {
 				half         = c.held.half,
 			}
 			c.held.file, c.held.first_line, c.held.last_line = file, first, last
-			c.held.partial, c.held.first_offset, c.held.last_offset = partial, first_offset, last_offset
 		}
 	}
 	changes_comments_sync(pane)
@@ -1215,35 +1230,13 @@ changes_fence_write :: proc(b: ^strings.Builder, count: int) {
 	for _ in 0 ..< count {strings.write_byte(b, '`')}
 }
 
-// `s` with each run of whitespace one space and none at either end, cut to `limit` runes with an ellipsis
-// when longer. In temporary memory.
-@(private = "file", require_results)
-changes_clip :: proc(s: string, limit: int) -> string {
-	joined := strings.join(strings.fields(s, context.temp_allocator), " ", context.temp_allocator)
-	count, cut := 0, 0
-	for _, at in joined {
-		if count == limit - 1 {cut = at}
-		count += 1
-	}
-	if count <= limit {return joined}
-	return strings.concatenate({joined[:cut], "…"}, context.temp_allocator)
-}
-
 // The text a partial note covers, from the quote it kept: its lines without their signs, from the start
-// offset in the first to the end offset in the last, joined by '\n'. In temporary memory.
+// offset in the first to the end offset in the last, as the note card shows it. In temporary memory.
 @(private = "file", require_results)
-changes_note_selected :: proc(item: Changes_Comment) -> string {
+changes_note_excerpt :: proc(item: Changes_Comment) -> string {
 	lines := strings.split(item.quote, "\n", context.temp_allocator)
-	b := strings.builder_make(context.temp_allocator)
-	for line, i in lines {
-		text := len(line) > 0 ? line[1:] : ""
-		from, to := 0, len(text)
-		if i == 0 {from = clamp(item.first_offset, 0, len(text))}
-		if i == len(lines) - 1 {to = clamp(item.last_offset, 0, len(text))}
-		if i > 0 {strings.write_byte(&b, '\n')}
-		strings.write_string(&b, text[min(from, to):to])
-	}
-	return strings.to_string(b)
+	for &line in lines {line = len(line) > 0 ? line[1:] : ""}
+	return ui.changes_excerpt(lines, item.first_offset, item.last_offset, CHANGES_EXCERPT_RUNES)
 }
 
 // A note's own text as the message gives it: fenced blocks keep a fence long enough for what they hold, and
@@ -1338,7 +1331,7 @@ changes_comments_message :: proc(items: []Changes_Comment, allocator := context.
 		if item.side == .Old {strings.write_string(&b, " before the change")}
 		if item.partial {
 			strings.write_string(&b, ", at \"")
-			strings.write_string(&b, changes_clip(changes_note_selected(item), CHANGES_EXCERPT_RUNES))
+			strings.write_string(&b, changes_note_excerpt(item))
 			strings.write_byte(&b, '"')
 		}
 		strings.write_string(&b, ":\n")
@@ -1495,15 +1488,17 @@ when AIO_CONTROL {
 		files := pane.model.view.files
 		if !s.active || s.file < 0 || s.file >= len(files) {return ""}
 		b := strings.builder_make(context.temp_allocator)
+		written := false
 		for line in s.first ..= s.last {
-			text, found := changes_line_text(files[s.file], line)
+			text, found := changes_half_text(files[s.file], line, s.half)
 			if !found {continue}
 			low, high := 0, len(text)
 			if s.partial {
 				if line == s.first {low = clamp(s.first_offset, 0, len(text))}
 				if line == s.last {high = clamp(s.last_offset, low, len(text))}
 			}
-			if line > s.first {strings.write_byte(&b, '\n')}
+			if written {strings.write_byte(&b, '\n')}
+			written = true
 			strings.write_string(&b, text[low:high])
 		}
 		return strings.to_string(b)

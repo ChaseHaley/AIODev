@@ -6,6 +6,7 @@ import "aio:syntax"
 import tr "aio:turns"
 import "core:fmt"
 import "core:math"
+import "core:mem/virtual"
 import "core:strconv"
 
 @(private = "file")
@@ -304,8 +305,10 @@ cards_through :: proc(rows: ^Changes_Rows, view: ^Changes_View, file, low, high:
 	return total
 }
 
-// What the cards' layout depends on besides the diff: the notes, which one is edited, its text and tag, and
-// the selection, which a new note goes below. Part of the rows cache key.
+// What the cards' layout depends on besides the diff: the notes, which one is edited and its tag, and the
+// selection's lines, which a new note goes below. Part of the rows cache key. What the editor's text does
+// to the layout is only its card's height, which changes_layout compares apart (editor_stale), and a text
+// selection's offsets move nothing, so typing and dragging do not lay the diff out again.
 @(private)
 changes_comments_key :: proc(view: ^Changes_View) -> u64 {
 	mix :: proc(hash, value: u64) -> u64 {return (hash ~ value) * 1099511628211}
@@ -316,9 +319,7 @@ changes_comments_key :: proc(view: ^Changes_View) -> u64 {
 	}
 	hash := u64(14695981039346656037)
 	hash = mix(hash, u64(view.editing + 1))
-	if view.editing >= 0 && view.buffer != nil {
-		hash = mix(mix(mix(hash, u64(view.draft)), view.buffer.revision), u64(len(view.buffer.text)))
-	}
+	if view.editing >= 0 {hash = mix(hash, u64(view.draft))}
 	hash = mix(hash, u64(len(view.comments)))
 	for c in view.comments {
 		hash = mix(mix(mix(hash, u64(c.file + 1)), u64(c.first + 1)), u64(c.last + 1))
@@ -329,7 +330,6 @@ changes_comments_key :: proc(view: ^Changes_View) -> u64 {
 	}
 	if s := view.selection; s.active {
 		hash = mix(mix(mix(hash, u64(s.file + 1)), u64(s.first + 1)), u64(s.last + 1))
-		hash = mix(mix(mix(hash, s.partial ? 2 : 1), u64(s.first_offset)), u64(s.last_offset))
 	}
 	return hash
 }
@@ -340,6 +340,8 @@ changes_comments_key :: proc(view: ^Changes_View) -> u64 {
 @(private)
 changes_cards_measure :: proc(rows: ^Changes_Rows, view: ^Changes_View, text, mono: ^Text) {
 	clear(&rows.cards)
+	clear(&rows.notes)
+	virtual.arena_free_all(&rows.notes_arena)
 	t := &rows.pairs
 	clear(&t.card_rows)
 	selection := view.selection
@@ -350,13 +352,27 @@ changes_cards_measure :: proc(rows: ^Changes_Rows, view: ^Changes_View, text, mo
 		append(&t.card_rows, comment_attached(view, i) ? range_row(rows, c.file, c.first, c.last) : -1)
 		if view.editing == i {
 			append(&rows.cards, editor_height(rows, view, text, c.file))
+			append(&rows.notes, Note_Plan{})
 		} else {
-			append(&rows.cards, note_height(rows, view, c, text, mono))
+			plan := note_measure(rows, view, c, text, mono)
+			append(&rows.cards, int(math.round(plan.height)))
+			append(&rows.notes, plan)
 		}
 	}
 	writing := writing_new(view)
 	append(&rows.cards, writing ? editor_height(rows, view, text, view.selection.file) : 0)
+	append(&rows.notes, Note_Plan{})
 	append(&t.card_rows, writing ? t.selection_row : -1)
+}
+
+// Whether the editor card is not the height it was measured at: the text typed into it changed how many
+// lines it wraps to. Typing within a line leaves the cached rows as they are.
+@(private)
+editor_stale :: proc(rows: ^Changes_Rows, view: ^Changes_View, text: ^Text) -> bool {
+	if view.editing < 0 || view.editing >= len(rows.cards) {return false}
+	if view.editing == len(view.comments) && !writing_new(view) {return false}
+	file := view.editing < len(view.comments) ? view.comments[view.editing].file : view.selection.file
+	return rows.cards[view.editing] != editor_height(rows, view, text, file)
 }
 
 // The "Not in this diff" group at the end of the stream: a heading and the detached comments' cards.
@@ -964,26 +980,42 @@ line_spans :: proc(view: ^Changes_View, file, line: int) -> (spans: []syntax.Spa
 	return lines[line], true
 }
 
-// Whether a selection or note made in `made` shows on a line of `kind` drawn in `cell`: the whole row of the
-// unified layout (`Both`) or one cell of a side-by-side row. A context line side by side is drawn in both
-// cells, and only the one it was made in marks it.
+// Whether a selection or note made in `made` shows in `cell`: the whole row of the unified layout (`Both`) or
+// one cell of a side-by-side row. A line is drawn only in the cell it belongs to (a context line in both), so
+// a selection made in one cell marks no line of the other cell, and a context line is marked only in the cell
+// it was made in.
 @(private = "file")
-in_half :: proc(made: Changes_Half, kind: tr.Line_Kind, cell: Changes_Half) -> bool {
-	return cell == .Both || kind != .Context || made == .Both || made == cell
+in_half :: proc(made, cell: Changes_Half) -> bool {
+	return cell == .Both || made == .Both || made == cell
+}
+
+// Whether a line of `kind` belongs to a selection or note made in `half`: a cell side by side holds its own
+// side's lines, so a range dragged across a change block takes in none of the other cell's.
+@(require_results)
+changes_half_has :: proc(half: Changes_Half, kind: tr.Line_Kind) -> bool {
+	switch half {
+	case .Both:
+		return true
+	case .Left:
+		return kind != .Added
+	case .Right:
+		return kind != .Removed
+	}
+	return true
 }
 
 // Whether flat line `line` of `file`, drawn in `cell`, is in the selection.
 @(private = "file")
-line_selected :: proc(view: ^Changes_View, file, line: int, kind: tr.Line_Kind, cell: Changes_Half) -> bool {
+line_selected :: proc(view: ^Changes_View, file, line: int, cell: Changes_Half) -> bool {
 	s := view.selection
 	if !s.active || s.file != file || line < min(s.first, s.last) || line > max(s.first, s.last) {return false}
-	return in_half(s.half, kind, cell)
+	return in_half(s.half, cell)
 }
 
 // Whether flat line `line` of `file` is picked whole: in a selection of lines rather than of text.
 @(private = "file")
-line_picked :: proc(view: ^Changes_View, file, line: int, kind: tr.Line_Kind, cell: Changes_Half) -> bool {
-	return line_selected(view, file, line, kind, cell) && !view.selection.partial
+line_picked :: proc(view: ^Changes_View, file, line: int, cell: Changes_Half) -> bool {
+	return line_selected(view, file, line, cell) && !view.selection.partial
 }
 
 // Whether the pointer is on flat line `line` of `file` while a press picks whole lines.
@@ -1038,11 +1070,13 @@ colour_alpha :: proc(c: render.Color, alpha: f32) -> render.Color {
 	return {c.r, c.g, c.b, c.a * alpha}
 }
 
-// Collects the marks of flat line `line` of `file`, which is a `kind` line drawn in `cell` and whose text is
-// `length` bytes. Only attached notes whose lines reach it count, and the one being edited draws none.
+// Collects the marks of flat line `line` of `file`, which is drawn in `cell` and whose text is `length`
+// bytes. Only attached notes whose lines reach it count, and the one being edited draws none. A line draws
+// the selection and the marks of its first CHANGES_LINE_NOTES notes; any further note on it shows through
+// its card alone, which the fixed room for the runs makes safe.
 @(private = "file")
 line_marks :: proc(
-	p: ^Diff_Paint, file, line, length: int, kind: tr.Line_Kind, cell: Changes_Half,
+	p: ^Diff_Paint, file, line, length: int, cell: Changes_Half,
 ) -> (
 	marks: Line_Marks,
 ) {
@@ -1053,7 +1087,7 @@ line_marks :: proc(
 			marks.count += 1
 		}
 	}
-	if s := view.selection; line_selected(view, file, line, kind, cell) {
+	if s := view.selection; line_selected(view, file, line, cell) {
 		seg := Code_Run {
 			end      = length,
 			selected = true,
@@ -1069,7 +1103,7 @@ line_marks :: proc(
 	hot := hot_note(p.state)
 	for c, i in view.comments {
 		if c.file != file || line < c.first || line > c.last || i == view.editing {continue}
-		if !in_half(c.half, kind, cell) {continue}
+		if !in_half(c.half, cell) {continue}
 		if !comment_attached(view, i) {continue}
 		colour := changes_note_color(theme, c)
 		strong := i == hot
@@ -1215,8 +1249,8 @@ paint_line :: proc(
 		draw_rect(p.list, {rect = row, color = t.diff_removed})
 	case .Context, .No_Newline:
 	}
-	picked := line_picked(p.view, file, flat, line.kind, .Both)
-	marks := line_marks(p, file, flat, len(line.text), line.kind, .Both)
+	picked := line_picked(p.view, file, flat, .Both)
+	marks := line_marks(p, file, flat, len(line.text), .Both)
 	marks_draw(p, marks, row)
 	row_pick_draw(p, file, flat, picked, row)
 	column := code_column(row, p.number_width, p.digit, p.scale, true)
@@ -1254,8 +1288,8 @@ paint_cell :: proc(
 		draw_rect(p.list, {rect = cell, color = t.diff_removed})
 	}
 	half := old ? Changes_Half.Left : Changes_Half.Right
-	picked := line_picked(p.view, file, line, d.kind, half)
-	marks := line_marks(p, file, line, len(d.text), d.kind, half)
+	picked := line_picked(p.view, file, line, half)
+	marks := line_marks(p, file, line, len(d.text), half)
 	marks_draw(p, marks, cell)
 	row_pick_draw(p, file, line, picked, cell)
 	baseline := baseline_in(cell.y, cell.height, p.mono)
@@ -1506,7 +1540,7 @@ diff_draw :: proc(
 		}
 	}
 	if r := paint_comments(&p, g, rows); r != .Ok {return r}
-	// The pinned header covers whatever scrolled under it: lines, cards and the Comment button. A layer
+	// The pinned header covers whatever scrolled under it: lines and cards. A layer
 	// draws its rects before its text, so the header takes a layer of its own above the stream's text.
 	sticky, rect := changes_sticky_header(state, view, g)
 	if sticky >= 0 && render.push_layer(list, g.diff) == .None {

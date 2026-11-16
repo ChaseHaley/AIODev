@@ -152,12 +152,19 @@ Note_Frame :: struct {
 	y, height:  f32,
 }
 
+// The syntax colours of one frame: those of its code, and for a suggestion those of the lines it replaces.
+Note_Frame_Spans :: struct {
+	code, removed: syntax.File_Lines,
+}
+
 Note_Layout :: struct {
 	rows:     [dynamic]Note_Row,
 	pieces:   [dynamic]Note_Piece,
 	frames:   [dynamic]Note_Frame,
 	// The replaced lines a suggestion shows, which the caller keeps while it draws.
 	original: []string,
+	// The colours of each frame's code, from note_body_highlight; a frame without an entry is plain.
+	spans:    []Note_Frame_Spans,
 	width:    f32,
 	height:   f32,
 }
@@ -204,8 +211,14 @@ inline_next :: proc(s: ^Inline_Scan) -> (word: Inline_Word, ok: bool) {
 		return word, ok
 	}
 	if s.in_bold {
-		end := strings.index_byte(s.bold, ' ')
-		if end < 0 {end = len(s.bold)}
+		if inner, length, found := span_between(s.bold, "`", "`"); found {
+			s.bold = s.bold[length:]
+			if s.bold == "" {s.in_bold = false}
+			return {inner, .Code, spaces}, true
+		}
+		// A bold word ends at a space or where a code span may start.
+		end := 1
+		for end < len(s.bold) && s.bold[end] != ' ' && s.bold[end] != '`' {end += 1}
 		word = {s.bold[:end], .Bold, spaces}
 		s.bold = s.bold[end:]
 		if s.bold == "" {s.in_bold = false}
@@ -237,12 +250,10 @@ inline_next :: proc(s: ^Inline_Scan) -> (word: Inline_Word, ok: bool) {
 // The fonts and sizes a body is laid out and drawn with.
 @(private = "file")
 Note_Metrics :: struct {
-	body, strong, mono, detail:      Text,
+	body, strong, mono:              Text,
 	// The padding of an inline code chip, a code row's height, the padding inside a code frame, the gap
-	// between blocks, a suggestion's heading, a space and a digit.
+	// between blocks, a suggestion's heading and a space.
 	chip, row, pad, gap, head, space: f32,
-	digit:                           f32,
-	scale:                           f32,
 }
 
 @(private = "file")
@@ -322,9 +333,10 @@ paragraph_line :: proc(l: ^Note_Layout, m: ^Note_Metrics, line: string, y: f32) 
 	return y + height
 }
 
-// Lays `source` out in `width`, in `allocator`, which is temporary memory unless the caller keeps the
-// layout. `text` is the interface text and `mono` the diff's; `original` is the new-side lines a suggestion
-// replaces, shown as removed rows above its own lines as added ones.
+// Lays `source` out in `width`, in `allocator`: temporary memory for a layout drawn at once, or the
+// memory of a cache that keeps it. The layout points into `source` and `original`, which the caller keeps
+// as long as the layout. `text` is the interface text and `mono` the diff's; `original` is the new-side
+// lines a suggestion replaces, shown as removed rows above its own lines as added ones.
 note_body_layout :: proc(
 	text, mono: ^Text, source: string, original: []string, width, scale: f32,
 	allocator := context.temp_allocator,
@@ -332,9 +344,7 @@ note_body_layout :: proc(
 	m := Note_Metrics {
 		body   = text_styled(text, .Body),
 		strong = text_styled(text, .Strong),
-		detail = text_styled(text, .Detail),
 		mono   = mono^,
-		scale  = scale,
 	}
 	m.chip = SPACE_1 * scale
 	m.row = f32(max(1, int(mono.line_height) + int(math.round(2 * scale))))
@@ -342,7 +352,6 @@ note_body_layout :: proc(
 	m.gap = math.round(SPACE_1 * scale)
 	m.head = math.round(HEIGHT_COMPACT * scale)
 	m.space = text_width(&m.body, " ")
-	m.digit = text_width(mono, "0")
 	l := Note_Layout {
 		rows     = make([dynamic]Note_Row, allocator),
 		pieces   = make([dynamic]Note_Piece, allocator),
@@ -415,11 +424,18 @@ note_body_layout :: proc(
 	return l
 }
 
-// The syntax colours of each line of `text` in `language`; no line has any when it is not highlighted.
-@(private = "file")
-note_spans :: proc(text: string, language: syntax.Language) -> syntax.File_Lines {
-	file, _ := syntax.highlight(language, text, context.temp_allocator)
-	return file
+// Gives each frame of `l` the syntax colours of its code, and a suggestion's those of the lines it
+// replaces, in `allocator`. `language` is the note's file's, for blocks that name none. Colours are found
+// once here, not per frame drawn.
+note_body_highlight :: proc(l: ^Note_Layout, language: syntax.Language, allocator := context.temp_allocator) {
+	l.spans = make([]Note_Frame_Spans, len(l.frames), allocator)
+	for frame, i in l.frames {
+		l.spans[i].code, _ = syntax.highlight(note_language(frame.lang, language), frame.body, allocator)
+		if frame.kind == .Suggestion && len(l.original) > 0 {
+			joined := strings.join(l.original, "\n", context.temp_allocator)
+			l.spans[i].removed, _ = syntax.highlight(language, joined, allocator)
+		}
+	}
 }
 
 @(private = "file")
@@ -428,7 +444,7 @@ spans_of :: proc(file: syntax.File_Lines, line: int) -> []syntax.Span {
 }
 
 // Draws the rows of `l` from `origin`, the body's top left, in the rows between `top` and `bottom`.
-// `language` is the note's file's, for blocks that name none; `inks` is the diff's, built for the theme.
+// `inks` is the diff's, built for the theme.
 note_body_draw :: proc(
 	list: ^render.Draw_List,
 	text, mono: ^Text,
@@ -436,7 +452,6 @@ note_body_draw :: proc(
 	inks: ^Changes_Inks,
 	l: ^Note_Layout,
 	origin: [2]f32,
-	language: syntax.Language,
 	scale, top, bottom: f32,
 ) -> render.Build_Status {
 	body := text_styled(text, .Body)
@@ -456,21 +471,13 @@ note_body_draw :: proc(
 		fill := render.Rect{origin.x, y, l.width, frame.height}
 		draw_rect(list, {rect = fill, color = theme.code_background, radius = radius})
 	}
-	current := -1
-	spans, removed_spans: syntax.File_Lines
 	for row in l.rows {
 		y := origin.y + row.y
 		if y >= bottom {break}
 		if y + row.height <= top {continue}
-		if row.frame != current && row.frame >= 0 {
-			current = row.frame
-			frame := l.frames[current]
-			spans = note_spans(frame.body, note_language(frame.lang, language))
-			removed_spans = {}
-			if frame.kind == .Suggestion && len(l.original) > 0 {
-				joined := strings.join(l.original, "\n", context.temp_allocator)
-				removed_spans = note_spans(joined, language)
-			}
+		spans, removed_spans: syntax.File_Lines
+		if row.frame >= 0 && row.frame < len(l.spans) {
+			spans, removed_spans = l.spans[row.frame].code, l.spans[row.frame].removed
 		}
 		switch row.kind {
 		case .Text:

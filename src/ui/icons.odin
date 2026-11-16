@@ -252,7 +252,7 @@ icon_draw :: proc(
 		pen_path(p, {5.5, 4}, {1.5, 8}, {5.5, 12})
 		pen_path(p, {10.5, 4}, {14.5, 8}, {10.5, 12})
 	case .Code_Block:
-		pen_box(p, 1.5, 2.5, 13, 11, 1.5)
+		pen_box(p, 1.5, 2.5, 13, 11, 2)
 		pen_path(p, {6.5, 6}, {4.5, 8}, {6.5, 10})
 		pen_path(p, {9.5, 6}, {11.5, 8}, {9.5, 10})
 	case .Collapse_All:

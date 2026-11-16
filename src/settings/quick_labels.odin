@@ -183,10 +183,17 @@ quick_labels_valid :: proc(value: string) -> bool {
 // parser does not accept.
 @(private, require_results)
 quick_labels_rules :: proc(buffer: []u8) -> string {
+	names: [96]u8
+	list := strings.builder_from_bytes(names[:])
+	for preset, i in QUICK_LABEL_PRESETS {
+		if i > 0 {strings.write_string(&list, ", ")}
+		strings.write_string(&list, preset)
+	}
 	return fmt.bprintf(
 		buffer,
-		"Each label is name | colour | instruction; the colour is a preset or #rrggbb and the instruction " +
-		"is optional. Fields cannot use ; or |. A value looks like %s.",
+		"Each label is name | color | instruction; the color is a preset (%s) or #rrggbb and the " +
+		"instruction is optional. Fields cannot use ; or |. A value looks like %s.",
+		strings.to_string(list),
 		QUICK_LABELS_EXAMPLE,
 	)
 }
