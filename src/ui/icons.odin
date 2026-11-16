@@ -80,6 +80,12 @@ Icon :: enum {
 	Collapse_All,
 	// Two chevrons pointing apart: expand every section.
 	Expand_All,
+	// An S with a line through it: delete this text.
+	Strikethrough,
+	// A lightning bolt: apply a quick label.
+	Bolt,
+	// A line above and below a boxed line: pick whole lines rather than text.
+	Select_Lines,
 }
 
 ICON_STROKE :: f32(1.25)
@@ -226,6 +232,18 @@ icon_draw :: proc(
 		pen_path(p, {10, 9}, {12.5, 9})
 	case .Filter:
 		pen_path(p, {2, 3}, {14, 3}, {9.5, 8.5}, {9.5, 13.5}, {6.5, 12}, {6.5, 8.5}, {2, 3})
+	case .Strikethrough:
+		// The S is two arcs that meet on the line through it.
+		pen_arc(p, 8, 5.5, 2.5, -math.PI / 6, -4 * math.PI / 3)
+		pen_arc(p, 8, 10.5, 2.5, -math.PI / 2, 4 * math.PI / 3)
+		pen_path(p, {2, 8}, {14, 8})
+	case .Bolt:
+		pen_path(p, {9.5, 1.5}, {3.5, 9}, {8, 9}, {6.5, 14.5}, {12.5, 7}, {8, 7}, {9.5, 1.5})
+	case .Select_Lines:
+		pen_path(p, {3, 2.5}, {13, 2.5})
+		pen_box(p, 1.5, 5.5, 13, 5, 1)
+		pen_path(p, {4.5, 8}, {11.5, 8})
+		pen_path(p, {3, 13.5}, {10, 13.5})
 	case .Collapse_All:
 		pen_path(p, {4, 2.5}, {8, 6.5}, {12, 2.5})
 		pen_path(p, {4, 13.5}, {8, 9.5}, {12, 13.5})
