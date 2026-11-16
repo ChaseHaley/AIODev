@@ -1,5 +1,6 @@
 package ui
 
+import "aio:markdown"
 import "aio:render"
 import "aio:syntax"
 import tr "aio:turns"
@@ -59,17 +60,28 @@ Changes_Note_Kind :: enum u8 {
 	Delete,
 }
 
+// Which cell of a side-by-side row something is in. A context line is drawn in both, and a selection or a
+// note made in one marks only that one; `Both` is the whole row of the unified layout, and a selection or a
+// note that was not made in either cell, such as a hunk's.
+Changes_Half :: enum u8 {
+	Both,
+	Left,
+	Right,
+}
+
 // Flat line indices within one file: the file's diff lines in hunk order, as syntax.File_Lines and
 // comments count them. A `partial` selection is of text rather than whole lines: it starts at byte
-// `first_offset` of the first line's text and ends at `last_offset` of the last line's.
+// `first_offset` of the first line's text and ends at `last_offset` of the last line's. `half` is the cell
+// side by side it was made in.
 Changes_Selection :: struct {
 	file, first, last:         int,
 	active:                    bool,
 	partial:                   bool,
 	first_offset, last_offset: int,
+	half:                      Changes_Half,
 }
 
-// A note as the diff shows it. `detached`: its lines are not in this diff. The offsets are a partial
+// A note as the diff shows it. `detached`: its lines are not in this diff. The offsets and `half` are a
 // selection's, as above. A label note names its label and gives its colour, a preset name or #rrggbb.
 Changes_Comment_View :: struct {
 	file, first, last:         int,
@@ -78,10 +90,11 @@ Changes_Comment_View :: struct {
 	kind:                      Changes_Note_Kind,
 	partial:                   bool,
 	first_offset, last_offset: int,
+	half:                      Changes_Half,
 	label_name, label_colour:  string,
 }
 
-// The send bar: how many comments, which agent they go to, and why Send is off when it is.
+// The send bar: how many notes, which agent they go to, and why Send is off when it is.
 Changes_Send_View :: struct {
 	count:    int,
 	target:   string,
@@ -127,10 +140,15 @@ Changes_View :: struct {
 	highlights:  []syntax.File_Lines,
 	selection:   Changes_Selection,
 	comments:    []Changes_Comment_View,
-	// -1 when no comment is being written; an index into `comments` edits that one; len(comments) writes a
-	// new one below the selection.
+	// -1 when no note is being written; an index into `comments` edits that one; len(comments) writes a
+	// new one below the selection. The editor is a text area over `buffer`, and `draft` is the kind the
+	// note will have when saved: a label or deletion tag the editor's × removes makes it a comment.
 	editing:     int,
-	editor:      ^Text_Field,
+	editor:      ^Text_Area,
+	buffer:      ^markdown.Edit_Buffer,
+	draft:       Changes_Note_Kind,
+	// The line numbers and side of the note being written or edited, which the editor's header names.
+	span:        Changes_Span,
 	send:        Changes_Send_View,
 	// The Select lines toggle is on, and Alt is down: either makes a press pick whole lines, and the rows
 	// under the pointer show it.
@@ -178,9 +196,18 @@ Changes_Part :: enum u8 {
 	// A press that picks a line from its number or sign; one on the code text starts a text selection.
 	Gutter,
 	Hunk_Select,
-	Comment_Button,
+	// The note editor's tools and buttons.
+	Editor_Untag,
+	Editor_Bold,
+	Editor_Code,
+	Editor_Block,
+	Editor_Suggest,
+	Editor_Cancel,
+	Editor_Save,
+	// A note card, and the Edit and Remove buttons on it; and the text area of the editor card.
 	Comment_Card,
-	Comment_Delete,
+	Comment_Edit,
+	Comment_Remove,
 	Comment_Editor,
 	Send,
 	Copy,
@@ -238,8 +265,9 @@ Changes_Rows :: struct {
 	notice:                                 Changes_Notice,
 	files, omitted:                         int,
 	scale, line_height:                     f32,
-	// The diff width and Body line height the comment cards were wrapped at.
-	width, body_line:                       f32,
+	// The diff width and Body line height the comment cards were wrapped at, and the width of the editor's
+	// tag, which the × after it sits at the end of.
+	width, body_line, tag_width:            f32,
 	comments_key:                           u64,
 	header, hunk, line, note, gap, footer:  int,
 	// How far a digit of the diff's text advances, so a hit test can tell the gutter from the code.
@@ -567,7 +595,7 @@ changes_layout :: proc(state: ^Changes_State, view: ^Changes_View, text, mono: ^
 	rows.gap = int(math.round(SPACE_2 * scale))
 	rows.footer = int(math.round(HEIGHT_STANDARD * scale))
 	changes_pairs_build(&rows.pairs, view)
-	changes_cards_measure(rows, view, text)
+	changes_cards_measure(rows, view, text, mono)
 	clear(&rows.tops)
 	y := 0
 	if view.notice == .None {
@@ -636,9 +664,11 @@ changes_animated :: proc(hit: Changes_Hit) -> bool {
 	if _, button := changes_row_button_of(hit.part); button {return true}
 	#partial switch hit.part {
 	case .Hooks, .Notice_Button, .File_Header, .Step_Back, .Step_Forward, .Range_Label, .Hunk_Select,
-	     .Comment_Button, .Comment_Delete, .Send, .Copy, .Discard, .Filter_Clear, .Filter_Bar_Clear,
-	     .Sticky_Header, .Strip_Older, .Strip_Newer, .Summary, .Files_Button, .Tools_Button, .Source_Chip,
-	     .Worktree_Chip, .Toolbar_Delete, .Toolbar_Comment, .Toolbar_Label, .Label_Row, .Label_Edit:
+	     .Comment_Edit, .Comment_Remove, .Editor_Untag, .Editor_Bold, .Editor_Code, .Editor_Block,
+	     .Editor_Suggest, .Editor_Cancel, .Editor_Save, .Send, .Copy, .Discard, .Filter_Clear,
+	     .Filter_Bar_Clear, .Sticky_Header, .Strip_Older, .Strip_Newer, .Summary, .Files_Button, .Tools_Button,
+	     .Source_Chip, .Worktree_Chip, .Toolbar_Delete, .Toolbar_Comment, .Toolbar_Label, .Label_Row,
+	     .Label_Edit:
 		return true
 	}
 	return false

@@ -3,6 +3,7 @@ package app_test
 import "aio:commands"
 import "aio:input"
 import "aio:layout"
+import "aio:markdown"
 import "aio:platform"
 import "aio:render"
 import "aio:settings"
@@ -266,10 +267,10 @@ an_open_file_list_takes_typed_text_and_the_comment_draft_is_kept :: proc(t: ^tes
 
 	// A comment is being written when the file list opens.
 	_ = app.changes_comments_press(&f.state, w, pane, {.Gutter, 0, 0}, {button = .Left})
-	_ = app.changes_comments_press(&f.state, w, pane, {.Comment_Button, 0, 0}, {button = .Left})
+	_ = app.changes_comments_press(&f.state, w, pane, {.Toolbar_Comment, 0, 0}, {button = .Left})
 	if !testing.expect_value(t, pane.comments.editing, 0) {return}
 	app.handle_event(&f.state, input.Text_Event{window = w.id, text = "draft"})
-	testing.expect_value(t, ui.field_string(&pane.comments.editor), "draft")
+	testing.expect_value(t, markdown.edit_string(&pane.comments.buffer), "draft")
 	g := app.changes_geometry_of(&f.state, w, pane, shown)
 	click(&f.state, w, g.files_button)
 	if !testing.expect(t, pane.state.files_open, "the files button opens the file list") {return}
@@ -708,17 +709,17 @@ every_control_says_what_it_does :: proc(t: ^testing.T) {
 
 	// The send bar of a written comment.
 	_ = app.changes_comments_press(&f.state, w, pane, {.Gutter, 0, 0}, {button = .Left})
-	_ = app.changes_comments_press(&f.state, w, pane, {.Comment_Button, 0, 0}, {button = .Left})
+	_ = app.changes_comments_press(&f.state, w, pane, {.Toolbar_Comment, 0, 0}, {button = .Left})
 	app.handle_event(&f.state, input.Text_Event{window = w.id, text = "note"})
-	tap(&f.state, w, .Enter)
+	app.handle_event(&f.state, input.Key_Event{window = w.id, key = .Enter, modifiers = {.Control}, pressed = true})
 	if !testing.expect_value(t, len(pane.comments.items), 1) {return}
 	g = app.changes_geometry_of(&f.state, w, pane, shown)
 	send, copy_rect, discard := ui.changes_send_rects(g, view)
 	testing.expect(t, !view.send.can_send, "a shell is not an agent")
 	testing.expect_value(t, tooltip_at(&f, w, send), view.send.reason)
 	testing.expect(t, view.send.reason != "")
-	testing.expect_value(t, tooltip_at(&f, w, copy_rect), "Copy the comments")
-	testing.expect_value(t, tooltip_at(&f, w, discard), "Discard the comments")
+	testing.expect_value(t, tooltip_at(&f, w, copy_rect), "Copy the notes")
+	testing.expect_value(t, tooltip_at(&f, w, discard), "Discard the notes")
 
 	// The filter's clear buttons, in its field and in the bar.
 	_ = ui.field_set(&pane.filter_editor, "zzz")

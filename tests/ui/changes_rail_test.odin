@@ -443,8 +443,8 @@ changes_layout_builds_the_overview_ticks_once_per_layout :: proc(t: ^testing.T) 
 	card := rows.ticks[2]
 	testing.expect_value(t, card.kind, ui.Changes_Tick_Kind.Comment)
 	testing.expect_value(t, int(card.height), rows.cards[0])
-	// Under the row of its line, after the card's margin.
-	testing.expect_value(t, int(card.y), first + 2 * rows.line + 4)
+	// Under the row of its line, after the room its notch needs.
+	testing.expect_value(t, int(card.y), first + 2 * rows.line + 6)
 	testing.expect(t, int(rows.ticks[1].y) >= int(card.y) + int(card.height))
 	view.comments = nil
 

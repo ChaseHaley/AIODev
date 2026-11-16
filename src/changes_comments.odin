@@ -3,6 +3,7 @@ package main
 import "aio:agent"
 import "aio:commands"
 import "aio:input"
+import "aio:markdown"
 import "aio:procinfo"
 import "aio:render"
 import "aio:settings"
@@ -43,6 +44,8 @@ Changes_Comment :: struct {
 	// lines' trimmed text.
 	partial:                                    bool,
 	first_offset, last_offset:                  int,
+	// The cell side by side it was made in.
+	half:                                       ui.Changes_Half,
 	// Where it shows in the current view; file = -1 when its lines are not in this diff.
 	file, first_line, last_line:                int,
 }
@@ -53,6 +56,8 @@ Changes_Comments :: struct {
 	// The flat line a selection extends from.
 	anchor:    int,
 	dragging:  bool,
+	// The cell side by side the selection's press was in, which the selection and a note made on it carry.
+	anchor_half: ui.Changes_Half,
 	// What the press that started a drag picks: characters, from byte `anchor_offset` of flat line `anchor`
 	// of file `drag_file`, within the cell `drag_cell` side by side; else whole lines.
 	by_text:       bool,
@@ -64,8 +69,12 @@ Changes_Comments :: struct {
 	// The label menu under the toolbar is open, and the row its keys are on.
 	menu:          bool,
 	menu_row:      int,
-	editor:    ui.Text_Field,
-	// -1 none; an index into `items` edits that comment; len(items) writes a new one at the selection.
+	// The note editor: its text, the area that wraps and draws it, and the kind the note will be saved as,
+	// which the tag's × turns into a plain comment.
+	buffer:    markdown.Edit_Buffer,
+	area:      ui.Text_Area,
+	draft:     ui.Changes_Note_Kind,
+	// -1 none; an index into `items` edits that note; len(items) writes a new one at the selection.
 	editing:   int,
 	// The selection by path, side and line numbers, so a refreshed diff finds it again; file = -1 when
 	// it holds nothing. Its quote and text are unused.
@@ -81,11 +90,12 @@ Changes_Comments :: struct {
 	reason:    string,
 }
 
-// Where a press on the code text landed: the byte of the line's text and the cell it is drawn in, which a
-// text selection side by side stays within.
+// Where a press on the code text landed: the byte of the line's text, the cell it is drawn in, which a text
+// selection side by side stays within, and which half of a side-by-side row that is.
 Changes_Text_Point :: struct {
 	offset: int,
 	cell:   render.Rect,
+	half:   ui.Changes_Half,
 }
 
 @(private = "file")
@@ -111,7 +121,8 @@ changes_comments_destroy :: proc(c: ^Changes_Comments) {
 	for &item in c.items {changes_comment_release(&item)}
 	delete(c.items)
 	changes_comment_release(&c.held)
-	delete(c.editor.bytes)
+	markdown.edit_buffer_destroy(&c.buffer)
+	ui.text_area_destroy(&c.area)
 	delete(c.views)
 	strings.builder_destroy(&c.target)
 	c^ = {}
@@ -287,6 +298,24 @@ changes_anchor_find :: proc(
 	return -1, 0, 0
 }
 
+// The lines the editor's note is on, as its header names them: those of the note being edited, or of the
+// selection a new note goes on.
+@(private = "file", require_results)
+changes_editor_span :: proc(pane: ^Changes_Pane) -> ui.Changes_Span {
+	c := &pane.comments
+	files := pane.model.view.files
+	if c.editing < 0 {return {}}
+	if c.editing < len(c.items) {
+		item := c.items[c.editing]
+		return {int(item.first), int(item.last), item.side == .Old}
+	}
+	s := c.selection
+	if !s.active || s.file < 0 || s.file >= len(files) {return {}}
+	side, low, high, found := changes_range_of(files[s.file], s.first, s.last)
+	if !found {return {}}
+	return {int(low), int(high), side == .Old}
+}
+
 // Points the view at the comments, the selection and the editor. Every change calls it, so a hit test
 // before the next frame sees what that frame draws.
 @(private = "file")
@@ -309,6 +338,7 @@ changes_comments_sync :: proc(pane: ^Changes_Pane) {
 					partial = item.partial,
 					first_offset = item.first_offset,
 					last_offset = item.last_offset,
+					half = item.half,
 					label_name = item.label_name,
 					label_colour = item.label_colour,
 				},
@@ -318,7 +348,8 @@ changes_comments_sync :: proc(pane: ^Changes_Pane) {
 	view.comments = c.views[:]
 	view.selection = c.selection
 	view.editing = c.editing <= len(view.comments) ? c.editing : -1
-	view.editor = &c.editor
+	view.editor, view.buffer, view.draft = &c.area, &c.buffer, c.draft
+	view.span = changes_editor_span(pane)
 	view.select_lines, view.alt, view.selecting = c.select_lines, c.alt, c.dragging
 	if !c.selection.active {c.menu = false}
 	view.label_menu, view.label_row = c.menu, c.menu_row
@@ -359,6 +390,7 @@ changes_selection_hold :: proc(pane: ^Changes_Pane) {
 	held.partial, held.first_offset, held.last_offset = changes_range_fit(
 		file, s.first, s.last, s.partial, s.first_offset, s.last_offset,
 	)
+	held.half = s.half
 }
 
 @(private = "file")
@@ -372,6 +404,7 @@ changes_select_line :: proc(pane: ^Changes_Pane, file, line: int, extend: bool) 
 		first  = min(c.anchor, line),
 		last   = max(c.anchor, line),
 		active = true,
+		half   = c.anchor_half,
 	}
 	changes_selection_hold(pane)
 }
@@ -385,7 +418,7 @@ changes_select_hunk :: proc(pane: ^Changes_Pane, file, first: int) -> bool {
 	flat := 0
 	for hunk in files[file].hunks {
 		if flat == first && len(hunk.lines) > 0 {
-			c.anchor = first
+			c.anchor, c.anchor_half = first, .Both
 			c.selection = {
 				file   = file,
 				first  = first,
@@ -400,14 +433,18 @@ changes_select_hunk :: proc(pane: ^Changes_Pane, file, first: int) -> bool {
 	return false
 }
 
-// Opens the editor on comment `index`, or on a new comment at the selection when it is len(items).
+// Opens the editor on note `index`, or on a new comment at the selection when it is len(items), with the
+// caret at the end of its text. A note keeps its tag until the editor's × takes it off.
 @(private = "file")
 changes_editor_open :: proc(pane: ^Changes_Pane, index: int) {
 	c := &pane.comments
 	if index < 0 || index > len(c.items) {return}
 	if index == len(c.items) && !c.selection.active {return}
 	text := index < len(c.items) ? c.items[index].text : ""
-	if ui.field_set(&c.editor, text) != nil {return}
+	if !markdown.edit_buffer_reset(&c.buffer, text) {return}
+	c.buffer.caret, c.buffer.anchor = len(c.buffer.text), len(c.buffer.text)
+	ui.text_area_reset(&c.area)
+	c.draft = index < len(c.items) ? c.items[index].kind : .Comment
 	c.editing = index
 }
 
@@ -438,6 +475,7 @@ changes_comment_add :: proc(pane: ^Changes_Pane, note: Changes_Note) -> bool {
 		file       = s.file,
 		first_line = s.first,
 		last_line  = s.last,
+		half       = s.half,
 	}
 	item.partial, item.first_offset, item.last_offset = changes_range_fit(
 		file, s.first, s.last, s.partial, s.first_offset, s.last_offset,
@@ -463,28 +501,41 @@ changes_comment_add :: proc(pane: ^Changes_Pane, note: Changes_Note) -> bool {
 	return true
 }
 
-// Ends editing; with `save`, the text replaces the comment's or becomes a new one. Empty text saves
-// nothing.
+// Puts `text` in a note and, when the editor's × took its tag off, makes it a plain comment that forgets its
+// label.
+@(private = "file")
+changes_note_rewrite :: proc(app: ^App, item: ^Changes_Comment, text: string, kind: ui.Changes_Note_Kind) {
+	cloned, err := strings.clone(text)
+	if err != nil {
+		notify(app, .Error, "Could not save the note.")
+		return
+	}
+	delete(item.text)
+	item.text = cloned
+	if kind == item.kind {return}
+	delete(item.label_name)
+	delete(item.label_colour)
+	delete(item.label_instruction)
+	item.label_name, item.label_colour, item.label_instruction = "", "", ""
+	item.kind = kind
+}
+
+// Ends editing; with `save`, the text and the kind replace the note's or become a new comment. An empty
+// plain comment saves nothing, so it never empties an existing note.
 @(private)
 changes_editor_close :: proc(app: ^App, pane: ^Changes_Pane, save: bool) {
 	c := &pane.comments
 	if c.editing < 0 {return}
-	editing := c.editing
+	editing, draft := c.editing, c.draft
 	c.editing = -1
-	_ = ui.field_release(&c.editor)
-	text := strings.trim_space(ui.field_string(&c.editor))
-	if !save || text == "" {return}
+	_ = ui.text_area_release(&c.area)
+	text := strings.trim_space(markdown.edit_string(&c.buffer))
+	if !save || (text == "" && draft == .Comment) {return}
 	if editing < len(c.items) {
-		cloned, err := strings.clone(text)
-		if err != nil {
-			notify(app, .Error, "Could not save the comment.")
-			return
-		}
-		delete(c.items[editing].text)
-		c.items[editing].text = cloned
+		changes_note_rewrite(app, &c.items[editing], text, draft)
 		return
 	}
-	if !changes_comment_add(pane, {text = text}) {notify(app, .Error, "Could not save the comment.")}
+	if !changes_comment_add(pane, {text = text}) {notify(app, .Error, "Could not save the note.")}
 }
 
 @(private = "file")
@@ -495,7 +546,7 @@ changes_comment_delete :: proc(pane: ^Changes_Pane, index: int) {
 	ordered_remove(&c.items, index)
 	if c.editing == index {
 		c.editing = -1
-		_ = ui.field_release(&c.editor)
+		_ = ui.text_area_release(&c.area)
 	} else if c.editing > index {
 		c.editing -= 1
 	}
@@ -507,12 +558,12 @@ changes_comments_clear :: proc(pane: ^Changes_Pane) {
 	for &item in c.items {changes_comment_release(&item)}
 	clear(&c.items)
 	c.editing = -1
-	_ = ui.field_release(&c.editor)
+	_ = ui.text_area_release(&c.area)
 }
 
 @(private = "file", require_results)
 changes_comment_noun :: proc(count: int) -> string {
-	return count == 1 ? "comment" : "comments"
+	return count == 1 ? "note" : "notes"
 }
 
 // "<harness> · <pane title>", as the source chips name the agent.
@@ -566,22 +617,24 @@ changes_comments_copy :: proc(app: ^App, pane: ^Changes_Pane) {
 	}
 }
 
-// Places the editor's caret where the pointer pressed.
+// Places the editor's caret where the pointer pressed, or extends its selection there with Shift.
 @(private = "file")
-changes_editor_point :: proc(app: ^App, w: ^Window, pane: ^Changes_Pane, x: f32, extend: bool) {
+changes_editor_point :: proc(app: ^App, w: ^Window, pane: ^Changes_Pane, x, y: f32, extend: bool) {
 	shown, found := changes_pane_rect(w, pane.id)
 	if !found {return}
 	g := changes_geometry_of(app, w, pane, shown)
 	box, visible := ui.changes_editor_box(g, &pane.model.view, &pane.state, &w.ui_text)
 	if !visible {return}
-	_ = ui.field_pointer(&pane.comments.editor, ui.field_box_offset(box, x), true, extend)
+	_ = ui.text_area_pointer(box, x, y, true, extend)
 }
 
-// Starts picking whole lines at flat line `line` of `file`; Shift extends the selection of the same file.
+// Starts picking whole lines at flat line `line` of `file`, pressed in `half` of a side-by-side row; Shift
+// extends the selection of the same file, which keeps the half it began in.
 @(private = "file")
-changes_press_lines :: proc(pane: ^Changes_Pane, file, line: int, extend: bool) {
+changes_press_lines :: proc(pane: ^Changes_Pane, file, line: int, extend: bool, half: ui.Changes_Half) {
 	c := &pane.comments
 	same_file := c.selection.active && c.selection.file == file
+	if !(extend && same_file) {c.anchor_half = half}
 	changes_select_line(pane, file, line, extend && same_file)
 	c.by_text, c.dragging = false, c.selection.active
 }
@@ -609,6 +662,7 @@ changes_text_extend :: proc(pane: ^Changes_Pane, file, line, offset: int) {
 		partial      = true,
 		first_offset = first_offset,
 		last_offset  = last_offset,
+		half         = c.anchor_half,
 	}
 	changes_selection_hold(pane)
 }
@@ -620,7 +674,7 @@ changes_press_text :: proc(pane: ^Changes_Pane, file, line: int, at: Changes_Tex
 	c := &pane.comments
 	extending := extend && c.selection.active && c.selection.partial && c.selection.file == file
 	if !extending {
-		c.anchor, c.anchor_offset = line, at.offset
+		c.anchor, c.anchor_offset, c.anchor_half = line, at.offset, at.half
 		c.selection, c.held.file = {}, -1
 	}
 	c.by_text, c.dragging = true, true
@@ -679,7 +733,75 @@ changes_text_settle :: proc(pane: ^Changes_Pane) {
 changes_comment_start :: proc(pane: ^Changes_Pane, text: string) {
 	c := &pane.comments
 	changes_editor_open(pane, len(c.items))
-	if c.editing == len(c.items) && text != "" {_ = ui.field_text(&c.editor, text)}
+	if c.editing == len(c.items) && text != "" {_ = text_edit_type(&c.buffer, text)}
+}
+
+// The file and flat lines the editor's note is on; false when they are not in the diff.
+@(private = "file", require_results)
+changes_editor_lines :: proc(pane: ^Changes_Pane) -> (file: turns.Diff_File, first, last: int, found: bool) {
+	c := &pane.comments
+	files := pane.model.view.files
+	at := -1
+	if c.editing >= 0 && c.editing < len(c.items) {
+		item := c.items[c.editing]
+		at, first, last = item.file, item.first_line, item.last_line
+	} else if c.editing == len(c.items) && c.selection.active {
+		at, first, last = c.selection.file, c.selection.first, c.selection.last
+	}
+	if at < 0 || at >= len(files) {return}
+	return files[at], first, last, true
+}
+
+// The new-side lines of flat lines `first` through `last` of `file` joined by line breaks, which a suggestion
+// replaces, in temporary memory.
+@(private = "file", require_results)
+changes_new_side :: proc(file: turns.Diff_File, first, last: int) -> string {
+	b := strings.builder_make(context.temp_allocator)
+	flat := 0
+	written := false
+	for hunk in file.hunks {
+		for line, k in hunk.lines {
+			at := flat + k
+			if at < first || at > last || line.kind == .Removed || line.kind == .No_Newline {continue}
+			if written {strings.write_byte(&b, '\n')}
+			strings.write_string(&b, line.text)
+			written = true
+		}
+		flat += len(hunk.lines)
+		if flat > last {break}
+	}
+	return strings.to_string(b)
+}
+
+// The word that opens a code block of `file`'s lines: its extension, which names its language.
+@(private = "file", require_results)
+changes_fence_language :: proc(file: turns.Diff_File) -> string {
+	path := changes_comment_path(file)
+	name := path[strings.last_index_any(path, "/\\") + 1:]
+	dot := strings.last_index_byte(name, '.')
+	return dot > 0 ? name[dot + 1:] : ""
+}
+
+// Applies one of the editor's tools to its text: bold or inline code around the selection, a code block, or
+// the selected lines as an editable replacement.
+@(private = "file")
+changes_editor_tool :: proc(pane: ^Changes_Pane, part: ui.Changes_Part) {
+	c := &pane.comments
+	file, first, last, found := changes_editor_lines(pane)
+	#partial switch part {
+	case .Editor_Bold:
+		_ = ui.text_area_wrap_selection(&c.buffer, "**", "**", "bold")
+	case .Editor_Code:
+		_ = ui.text_area_wrap_selection(&c.buffer, "`", "`", "code")
+	case .Editor_Block:
+		from, to := markdown.edit_selection(&c.buffer)
+		lang := found ? changes_fence_language(file) : ""
+		_ = ui.text_area_insert_block(&c.buffer, lang, string(c.buffer.text[from:to]))
+	case .Editor_Suggest:
+		if found && !changes_editor_span(pane).old {
+			_ = ui.text_area_insert_block(&c.buffer, "suggestion", changes_new_side(file, first, last))
+		}
+	}
 }
 
 // Adds a label or a deletion on the selection at once, with no editor: the selection ends and the toolbar
@@ -764,8 +886,26 @@ changes_toolbar_shown :: proc(app: ^App, w: ^Window, pane: ^Changes_Pane) -> boo
 	return changes_geometry_of(app, w, pane, shown).selection_bar.bar.width > 0
 }
 
-// Takes presses on diff lines, the selection toolbar and its menu, comment controls and the send bar.
-// `at` says where a press on the code text landed.
+// Scrolls the diff so the editor card shows: its bottom in view, and its top too when the card fits.
+@(private = "file")
+changes_editor_reveal :: proc(app: ^App, w: ^Window, pane: ^Changes_Pane) {
+	shown, found := changes_pane_rect(w, pane.id)
+	if !found {return}
+	g := changes_geometry_of(app, w, pane, shown)
+	card, visible := ui.changes_card_rect(g, &pane.model.view, &pane.state, pane.comments.editing)
+	if !visible {return}
+	over := card.y + card.height + ui.SPACE_3 * w.scale - (g.diff.y + g.diff.height)
+	if over > 0 {_ = ui.changes_scroll_diff(&pane.state, g, int(min(over, card.y - g.diff.y)))}
+}
+
+// Saves the note being written, unless it is an empty plain comment, which has nothing to save.
+@(private = "file")
+changes_editor_save :: proc(app: ^App, pane: ^Changes_Pane) {
+	if ui.changes_editor_can_save(&pane.model.view) {changes_editor_close(app, pane, true)}
+}
+
+// Takes presses on diff lines, the selection toolbar and its menu, the note cards and the editor, and the
+// send bar. `at` says where a press on the code text or the numbers landed.
 changes_comments_press :: proc(
 	app: ^App,
 	w: ^Window,
@@ -777,18 +917,19 @@ changes_comments_press :: proc(
 	c := &pane.comments
 	extend := .Shift in e.modifiers
 	c.alt = .Alt in e.modifiers
+	editing := c.editing
 	#partial switch hit.part {
 	case .Line:
 		// Pressing away from the editor keeps what it holds.
 		changes_editor_close(app, pane, true)
 		if c.alt || c.select_lines {
-			changes_press_lines(pane, hit.index, hit.line, extend)
+			changes_press_lines(pane, hit.index, hit.line, extend, at.half)
 		} else {
 			changes_press_text(pane, hit.index, hit.line, at, extend)
 		}
 	case .Gutter:
 		changes_editor_close(app, pane, true)
-		changes_press_lines(pane, hit.index, hit.line, extend)
+		changes_press_lines(pane, hit.index, hit.line, extend, at.half)
 	case .Hunk_Select:
 		changes_editor_close(app, pane, true)
 		_ = changes_select_hunk(pane, hit.index, hit.line)
@@ -804,18 +945,23 @@ changes_comments_press :: proc(
 	case .Label_Edit:
 		changes_labels_edit(app, w, pane)
 	case .Toolbar, .Label_Menu:
-	case .Comment_Button:
-		changes_editor_close(app, pane, true)
-		changes_editor_open(pane, len(c.items))
 	case .Comment_Card:
-		if hit.index != c.editing {
-			changes_editor_close(app, pane, true)
-			changes_editor_open(pane, hit.index)
-		}
-	case .Comment_Delete:
+		if hit.index != c.editing {changes_editor_close(app, pane, true)}
+	case .Comment_Edit:
+		changes_editor_close(app, pane, true)
+		changes_editor_open(pane, hit.index)
+	case .Comment_Remove:
 		changes_comment_delete(pane, hit.index)
 	case .Comment_Editor:
-		changes_editor_point(app, w, pane, f32(e.x), extend)
+		changes_editor_point(app, w, pane, f32(e.x), f32(e.y), extend)
+	case .Editor_Untag:
+		c.draft = .Comment
+	case .Editor_Bold, .Editor_Code, .Editor_Block, .Editor_Suggest:
+		changes_editor_tool(pane, hit.part)
+	case .Editor_Cancel:
+		changes_editor_close(app, pane, false)
+	case .Editor_Save:
+		changes_editor_save(app, pane)
 	case .Send:
 		changes_comments_send(app, pane)
 	case .Copy:
@@ -826,6 +972,7 @@ changes_comments_press :: proc(
 		return false
 	}
 	changes_comments_sync(pane)
+	if c.editing >= 0 && c.editing != editing {changes_editor_reveal(app, w, pane)}
 	w.dirty = true
 	return true
 }
@@ -859,7 +1006,7 @@ changes_comments_release :: proc(app: ^App, w: ^Window, pane: ^Changes_Pane) {
 	c.dragging = false
 	if dragged && c.by_text {changes_text_settle(pane)}
 	changes_comments_sync(pane)
-	if ui.field_release(&c.editor) || dragged {w.dirty = true}
+	if ui.text_area_release(&c.area) || dragged {w.dirty = true}
 }
 
 // The digit a key types, 0 to 9; -1 for any other key.
@@ -922,8 +1069,29 @@ changes_selection_key :: proc(
 	return false
 }
 
-// The editor's keys while a comment is being written; else the toolbar's keys over a selection. Chords the
-// editor has no use for go on to the shortcuts.
+// Applies a key to the open editor's text, moving down and up a line through the text area, which knows its
+// lines. False for the chords the editor has no use for, which go on to the shortcuts.
+@(private = "file", require_results)
+changes_editor_edit :: proc(app: ^App, w: ^Window, pane: ^Changes_Pane, key: Content_Key) -> bool {
+	result := text_edit_key(app, &pane.comments.buffer, key)
+	switch result.kind {
+	case .Ignored:
+		return key.logical.modifiers & {.Control, .Alt, .Super} == {}
+	case .Handled, .Moved, .Edited:
+	case .Vertical:
+		shown, found := changes_pane_rect(w, pane.id)
+		if !found {break}
+		g := changes_geometry_of(app, w, pane, shown)
+		if box, visible := ui.changes_editor_box(g, &pane.model.view, &pane.state, &w.ui_text); visible {
+			ui.text_area_vertical(box, result.lines, result.pages, result.extend)
+		}
+	}
+	return true
+}
+
+// The editor's keys while a note is being written: Escape cancels, Ctrl+Enter saves, Ctrl+B bolds, and the
+// rest edit the text (Enter breaks the line); else the toolbar's keys over a selection. Chords the editor has
+// no use for go on to the shortcuts.
 changes_comments_key :: proc(app: ^App, w: ^Window, pane: ^Changes_Pane, e: input.Key_Event) -> bool {
 	if !e.pressed {return false}
 	c := &pane.comments
@@ -931,19 +1099,24 @@ changes_comments_key :: proc(app: ^App, w: ^Window, pane: ^Changes_Pane, e: inpu
 	logical.key = commands.logical_key(e.key, e.unshifted)
 	modifiers := e.modifiers & {.Control, .Shift, .Alt, .Super}
 	enter := logical.key == .Enter || logical.key == .Numpad_Enter
-	if c.editing < 0 {
+	editing := c.editing
+	switch {
+	case c.editing < 0:
 		if !changes_selection_key(app, w, pane, e, logical, modifiers) {return false}
-	} else if logical.key == .Escape && modifiers == {} {
+	case logical.key == .Escape && modifiers == {}:
 		changes_editor_close(app, pane, false)
-	} else if enter && modifiers == {} {
-		changes_editor_close(app, pane, true)
-	} else {
-		edit := field_edit_key(app, &c.editor, logical)
-		chord := clipboard_chord(logical) != .None
-		if edit.change == .None && !chord && modifiers - {.Shift} != {} && e.text == "" {return false}
+	case enter && modifiers == {.Control}:
+		changes_editor_save(app, pane)
+	case logical.key == .B && modifiers == {.Control}:
+		_ = ui.text_area_wrap_selection(&c.buffer, "**", "**", "bold")
+	case:
+		if !changes_editor_edit(app, w, pane, {logical = logical, clipboard = clipboard_chord(logical)}) {
+			return false
+		}
 	}
 	key_suppress(w, e)
 	changes_comments_sync(pane)
+	if c.editing >= 0 && c.editing != editing {changes_editor_reveal(app, w, pane)}
 	w.dirty = true
 	return true
 }
@@ -952,7 +1125,7 @@ changes_comments_key :: proc(app: ^App, w: ^Window, pane: ^Changes_Pane, e: inpu
 changes_comments_text :: proc(app: ^App, w: ^Window, pane: ^Changes_Pane, text: string) -> bool {
 	c := &pane.comments
 	if c.editing < 0 {return false}
-	if ui.field_text(&c.editor, text) != .None {w.dirty = true}
+	if text_edit_type(&c.buffer, text) == .Edited {w.dirty = true}
 	return true
 }
 
@@ -1001,7 +1174,7 @@ changes_comments_reanchor :: proc(pane: ^Changes_Pane) {
 			c.held.file = -1
 			if c.editing == len(c.items) {
 				c.editing = -1
-				_ = ui.field_release(&c.editor)
+				_ = ui.text_area_release(&c.area)
 			}
 		} else {
 			c.anchor = c.anchor == c.selection.first ? first : last
@@ -1016,6 +1189,7 @@ changes_comments_reanchor :: proc(pane: ^Changes_Pane) {
 				partial      = partial,
 				first_offset = first_offset,
 				last_offset  = last_offset,
+				half         = c.held.half,
 			}
 			c.held.file, c.held.first_line, c.held.last_line = file, first, last
 			c.held.partial, c.held.first_offset, c.held.last_offset = partial, first_offset, last_offset
@@ -1341,7 +1515,8 @@ when AIO_CONTROL {
 		count, editing := 0, -1
 		can_send, select_lines, label_menu := false, false, false
 		advance: f32
-		send_rect, copy_rect, discard_rect, button_rect, select_lines_rect: render.Rect
+		send_rect, copy_rect, discard_rect, select_lines_rect: render.Rect
+		editor: ui.Changes_Editor
 		bar: ui.Changes_Selection_Bar
 		if pane != nil {
 			changes_comments_view(app, pane)
@@ -1374,7 +1549,15 @@ when AIO_CONTROL {
 				mono := ui.text_mono(&w.ui_text, app.family)
 				advance = ui.text_width(&mono, "0")
 				send_rect, copy_rect, discard_rect = ui.changes_send_rects(g, view)
-				button_rect = ui.changes_comment_button_rect(g, view, &pane.state)
+				editor, _ = ui.changes_editor_of(g, view, &pane.state)
+				for i in 0 ..< len(c.items) {
+					card, shown := ui.changes_card_rect(g, view, &pane.state, i)
+					if !shown || i == c.editing {continue}
+					edit, remove := ui.changes_note_actions(card, w.scale)
+					state_rect(r, fmt.tprintf("changes.comment.%d.rect", i), card)
+					state_rect(r, fmt.tprintf("changes.comment.%d.edit_rect", i), edit)
+					state_rect(r, fmt.tprintf("changes.comment.%d.remove_rect", i), remove)
+				}
 				select_lines_rect = g.select_lines_button
 				bar = g.selection_bar
 				for file, n in view.files[:min(3, len(view.files))] {
@@ -1415,6 +1598,16 @@ when AIO_CONTROL {
 		state_rect(r, "changes.send_rect", send_rect)
 		state_rect(r, "changes.copy_rect", copy_rect)
 		state_rect(r, "changes.discard_rect", discard_rect)
-		state_rect(r, "changes.comment_button_rect", button_rect)
+		state_text(r, "changes.editor_text", pane != nil ? markdown.edit_string(&pane.comments.buffer) : "")
+		state_text(r, "changes.editor_kind", pane != nil && editing >= 0 ? fmt.tprint(pane.comments.draft) : "")
+		state_rect(r, "changes.editor_rect", editor.card)
+		state_rect(r, "changes.editor.area_rect", editor.area)
+		state_rect(r, "changes.editor.bold_rect", editor.bold)
+		state_rect(r, "changes.editor.code_rect", editor.code)
+		state_rect(r, "changes.editor.block_rect", editor.block)
+		state_rect(r, "changes.editor.suggest_rect", editor.suggest)
+		state_rect(r, "changes.editor.untag_rect", editor.untag)
+		state_rect(r, "changes.editor.cancel_rect", editor.cancel)
+		state_rect(r, "changes.editor.save_rect", editor.save)
 	}
 }

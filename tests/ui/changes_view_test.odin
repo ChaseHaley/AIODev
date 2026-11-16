@@ -1056,14 +1056,18 @@ changes_comments_stay_reachable_under_a_notice :: proc(t: ^testing.T) {
 	if !testing.expect(t, rows.detached > 0 && len(rows.cards) > 0 && rows.cards[0] > 0) {return}
 	testing.expect_value(t, rows.total, rows.detached)
 
-	// The card sits under the group's heading, 16 in from the stream's edges.
+	// The card sits under the group's heading, 16 in from the stream's left edge and 12 from its right, a
+	// notch's room under the heading.
 	card := render.Rect {
-		g.diff.x + 16, g.diff.y + f32(rows.header) + 4, g.diff.width - 32, f32(rows.cards[0]),
+		g.diff.x + 16, g.diff.y + f32(rows.header) + 6, g.diff.width - 28, f32(rows.cards[0]),
 	}
 	on_card := ui.changes_hit(g, &view, &state, card.x + 20, card.y + card.height / 2)
 	testing.expect_value(t, on_card, ui.Changes_Hit{.Comment_Card, 0, 0})
-	on_delete := ui.changes_hit(g, &view, &state, card.x + card.width - 4 - 12, card.y + 4 + 12)
-	testing.expect_value(t, on_delete, ui.Changes_Hit{.Comment_Delete, 0, 0})
+	edit, remove := ui.changes_note_actions(card, 1)
+	on_remove := ui.changes_hit(g, &view, &state, remove.x + 11, remove.y + 11)
+	testing.expect_value(t, on_remove, ui.Changes_Hit{.Comment_Remove, 0, 0})
+	on_edit := ui.changes_hit(g, &view, &state, edit.x + 11, edit.y + 11)
+	testing.expect_value(t, on_edit, ui.Changes_Hit{.Comment_Edit, 0, 0})
 	beside := ui.changes_hit(g, &view, &state, card.x + 20, card.y + card.height + 40)
 	testing.expect_value(t, beside, ui.Changes_Hit{})
 

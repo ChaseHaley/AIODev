@@ -86,6 +86,10 @@ Icon :: enum {
 	Bolt,
 	// A line above and below a boxed line: pick whole lines rather than text.
 	Select_Lines,
+	// Two angle brackets: a span of code inside a line of text.
+	Code,
+	// Two angle brackets in a box: a block of code.
+	Code_Block,
 }
 
 ICON_STROKE :: f32(1.25)
@@ -244,6 +248,13 @@ icon_draw :: proc(
 		pen_box(p, 1.5, 5.5, 13, 5, 1)
 		pen_path(p, {4.5, 8}, {11.5, 8})
 		pen_path(p, {3, 13.5}, {10, 13.5})
+	case .Code:
+		pen_path(p, {5.5, 4}, {1.5, 8}, {5.5, 12})
+		pen_path(p, {10.5, 4}, {14.5, 8}, {10.5, 12})
+	case .Code_Block:
+		pen_box(p, 1.5, 2.5, 13, 11, 1.5)
+		pen_path(p, {6.5, 6}, {4.5, 8}, {6.5, 10})
+		pen_path(p, {9.5, 6}, {11.5, 8}, {9.5, 10})
 	case .Collapse_All:
 		pen_path(p, {4, 2.5}, {8, 6.5}, {12, 2.5})
 		pen_path(p, {4, 13.5}, {8, 9.5}, {12, 13.5})

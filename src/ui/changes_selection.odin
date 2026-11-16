@@ -13,6 +13,9 @@ import "core:math"
 // The diff width from which the toolbar's buttons carry words beside their icons.
 @(private = "file")
 CHANGES_BAR_WORDS :: f32(440)
+// How far the toolbar sits from the selection's first line, or its last when it goes below.
+@(private = "file")
+CHANGES_BAR_LIFT :: f32(6)
 // How much of the selection's first line the toolbar centres over.
 @(private = "file")
 CHANGES_BAR_SPAN :: f32(200)
@@ -120,7 +123,13 @@ changes_selection_place :: proc(
 	if first_row < 0 || last_row < 0 {return}
 	top, top_ok := row_top(rows, view, s.file, first_row)
 	bottom, bottom_ok := row_top(rows, view, s.file, last_row)
-	_, column, found := changes_line_code(g, view, state, mono, s.file, s.first)
+	// A context line side by side is in both halves; the toolbar centres over the one the selection is in.
+	half := f32(-1)
+	if rows.pairs.side_by_side {
+		left, right, _ := row_halves(diff_band(g))
+		half = s.half == .Right ? right.x : left.x
+	}
+	_, column, found := changes_line_code(g, view, state, mono, s.file, s.first, half)
 	if !top_ok || !bottom_ok || !found {return}
 	scale := g.scale
 	origin := g.diff.y - f32(state.diff_scroll)
@@ -157,8 +166,9 @@ changes_selection_place :: proc(
 	margin := SPACE_2 * scale
 	low := g.diff.x + margin
 	x := clamp(math.round(centre - width / 2), low, max(low, g.diff.x + g.diff.width - margin - width))
-	y := first_y - gap - (height + 2 * pad)
-	if y < visible {y = last_y + gap}
+	lift := CHANGES_BAR_LIFT * scale
+	y := first_y - lift - (height + 2 * pad)
+	if y < visible {y = last_y + lift}
 	y = math.round(clamp(y, visible, max(visible, limit - (height + 2 * pad))))
 	bar.bar = {x, y, width, height + 2 * pad}
 	cursor := x + pad

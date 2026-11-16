@@ -1016,7 +1016,8 @@ changes_cursor :: proc(hit: ui.Changes_Hit, line_mode: bool) -> platform.Cursor_
 	if _, button := ui.changes_row_button_of(hit.part); button {return .Hand}
 	#partial switch hit.part {
 	case .Hooks, .Notice_Button, .File_Header, .Strip_Bar, .Step_Back, .Step_Forward, .Range_Label,
-	     .Hunk_Select, .Comment_Button, .Comment_Card, .Comment_Delete, .Send, .Copy, .Discard, .Filter_Clear,
+	     .Hunk_Select, .Comment_Edit, .Comment_Remove, .Editor_Untag, .Editor_Bold, .Editor_Code, .Editor_Block,
+	     .Editor_Suggest, .Editor_Cancel, .Editor_Save, .Send, .Copy, .Discard, .Filter_Clear,
 	     .Filter_Bar_Clear, .Sticky_Header, .Strip_Older, .Strip_Newer, .Summary, .Files_Button, .Tools_Button,
 	     .Source_Chip, .Worktree_Chip, .Gutter, .Toolbar_Delete, .Toolbar_Comment, .Toolbar_Label, .Label_Row,
 	     .Label_Edit:
@@ -1042,15 +1043,18 @@ changes_drag_turns :: proc(app: ^App, pane: ^Changes_Pane, g: ui.Changes_Geometr
 	changes_select(app, pane, g, hit.index, true)
 }
 
-// Where a press or a drag at `x` lands on the code text of `hit`'s line; nothing for any other hit.
+// Where a press or a drag at `x` lands on the code of `hit`'s line, and which half of a side-by-side row that
+// is; nothing for any other hit. The numbers' byte is the start of the line's text.
 @(private = "file", require_results)
 changes_text_at :: proc(
 	app: ^App, w: ^Window, pane: ^Changes_Pane, g: ui.Changes_Geometry, hit: ui.Changes_Hit, x: f32,
 ) -> Changes_Text_Point {
-	if hit.part != .Line {return {}}
+	if hit.part != .Line && hit.part != .Gutter {return {}}
 	mono := ui.text_mono(&w.ui_text, app.family)
 	offset, cell, _ := ui.changes_text_point(g, &pane.model.view, &pane.state, &mono, hit.index, hit.line, x)
-	return {offset, cell}
+	half := ui.Changes_Half.Both
+	if pane.state.rows.pairs.side_by_side {half = cell.x < g.diff.x + g.diff.width / 2 ? .Left : .Right}
+	return {hit.part == .Line ? offset : 0, cell, half}
 }
 
 changes_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: input.Mouse_Move_Event) {
@@ -1105,6 +1109,19 @@ changes_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: input.Mou
 			changes_filter_point(w, pane, g, x, false, false)
 		} else {
 			_ = ui.field_release(&pane.filter_editor)
+		}
+		pointer_set(app, w, .Text)
+		return
+	}
+	// A held press in the note editor's text extends its selection, wherever the pointer is.
+	if pane.comments.area.dragging {
+		if .Left in e.buttons {
+			if box, visible := ui.changes_editor_box(g, view, &pane.state, &w.ui_text); visible {
+				_ = ui.text_area_pointer(box, x, y, false, false)
+				w.dirty = true
+			}
+		} else {
+			_ = ui.text_area_release(&pane.comments.area)
 		}
 		pointer_set(app, w, .Text)
 		return
@@ -1247,9 +1264,10 @@ changes_press :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) {
 		}
 	case .Filter_Bar_Clear:
 		changes_filter_clear(app, w, pane)
-	case .Line, .Gutter, .Hunk_Select, .Comment_Button, .Comment_Card, .Comment_Delete, .Comment_Editor, .Send,
-	     .Copy, .Discard, .Toolbar, .Toolbar_Delete, .Toolbar_Comment, .Toolbar_Label, .Label_Menu, .Label_Row,
-	     .Label_Edit:
+	case .Line, .Gutter, .Hunk_Select, .Comment_Card, .Comment_Edit, .Comment_Remove, .Comment_Editor,
+	     .Editor_Untag, .Editor_Bold, .Editor_Code, .Editor_Block, .Editor_Suggest, .Editor_Cancel,
+	     .Editor_Save, .Send, .Copy, .Discard, .Toolbar, .Toolbar_Delete, .Toolbar_Comment, .Toolbar_Label,
+	     .Label_Menu, .Label_Row, .Label_Edit:
 		_ = changes_comments_press(app, w, pane, hit, e, changes_text_at(app, w, pane, g, hit, x))
 	case:
 		if button, ok := ui.changes_row_button_of(hit.part); ok {changes_row_button_run(app, w, pane, button)}
@@ -1394,21 +1412,30 @@ changes_tooltip :: proc(app: ^App, w: ^Window, x, y: f32) -> string {
 	case .Label_Row:
 		label, _ := ui.changes_label_at(view.quick_labels, hit.index)
 		return label.instruction
-	case .Comment_Button:
-		return "Comment on the selected lines"
-	case .Comment_Card:
-		return "Edit comment"
-	case .Comment_Delete:
-		return "Delete comment"
+	case .Comment_Edit:
+		return "Edit"
+	case .Comment_Remove:
+		return "Remove"
+	case .Editor_Untag:
+		return "Make it a plain comment"
+	case .Editor_Bold:
+		return "Bold"
+	case .Editor_Code:
+		return "Inline code"
+	case .Editor_Block:
+		return "Code block"
+	case .Editor_Suggest:
+		if view.span.old {return "Only removed lines are selected"}
+		return "Insert the selected lines as an editable replacement"
 	case .Send:
 		if !view.send.can_send {return view.send.reason}
-		if view.send.target == "" {return "Send the comments and submit"}
-		parts := []string{"Send the comments to ", view.send.target, " and submit"}
+		if view.send.target == "" {return "Send the notes and submit"}
+		parts := []string{"Send the notes to ", view.send.target, " and submit"}
 		return strings.concatenate(parts, context.temp_allocator)
 	case .Copy:
-		return "Copy the comments"
+		return "Copy the notes"
 	case .Discard:
-		return "Discard the comments"
+		return "Discard the notes"
 	}
 	return ""
 }
@@ -1443,6 +1470,8 @@ changes_shortcut :: proc(app: ^App, w: ^Window, x, y: f32) -> Tooltip_Shortcut {
 		return "type to start"
 	case .Toolbar_Label:
 		return "Alt+1–9"
+	case .Editor_Bold:
+		return commands.Shortcut{.B, {.Control}}
 	}
 	return nil
 }

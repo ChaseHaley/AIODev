@@ -1,6 +1,7 @@
 package app_test
 
 import "aio:input"
+import "aio:markdown"
 import "aio:platform"
 import "aio:term"
 import "aio:turns"
@@ -82,14 +83,27 @@ comments_key :: proc(state: ^app.App, w: ^app.Window, pane: ^app.Changes_Pane, k
 	return app.changes_comments_key(state, w, pane, {key = key, pressed = true})
 }
 
-// Selects flat lines 2 and 3 (+c, +d) by a press and a Shift press, then writes `text` and saves it.
+// Ctrl+Enter, which saves the note being written.
+@(private = "file")
+comments_save :: proc(state: ^app.App, w: ^app.Window, pane: ^app.Changes_Pane) -> bool {
+	return app.changes_comments_key(state, w, pane, {key = .Enter, modifiers = {.Control}, pressed = true})
+}
+
+// What the editor holds.
+@(private = "file")
+comments_held :: proc(pane: ^app.Changes_Pane) -> string {
+	return markdown.edit_string(&pane.comments.buffer)
+}
+
+// Selects flat lines 2 and 3 (+c, +d) by a press and a Shift press, opens the editor with Enter, then writes
+// `text` and saves it with Ctrl+Enter.
 @(private = "file")
 comments_write :: proc(state: ^app.App, w: ^app.Window, pane: ^app.Changes_Pane, text: string) {
 	comments_press(state, w, pane, {part = .Gutter, index = 0, line = 2})
 	comments_press(state, w, pane, {part = .Gutter, index = 0, line = 3}, shift = true)
-	comments_press(state, w, pane, {part = .Comment_Button})
-	_ = app.changes_comments_text(state, w, pane, text)
 	_ = comments_key(state, w, pane, .Enter)
+	_ = app.changes_comments_text(state, w, pane, text)
+	_ = comments_save(state, w, pane)
 }
 
 @(test)
@@ -112,8 +126,16 @@ comments_message_names_each_comment_lines_and_side_and_fences_its_quote :: proc(
 	testing.expect_value(t, empty, "Review comments on your changes:")
 }
 
+// Selects flat lines `first` through `last` by presses on the numbers, then opens the editor with Enter.
+@(private = "file")
+comments_open :: proc(state: ^app.App, w: ^app.Window, pane: ^app.Changes_Pane, first, last: int) {
+	comments_press(state, w, pane, {part = .Gutter, index = 0, line = first})
+	if last != first {comments_press(state, w, pane, {part = .Gutter, index = 0, line = last}, shift = true)}
+	_ = comments_key(state, w, pane, .Enter)
+}
+
 @(test)
-comments_editor_saves_on_enter_and_cancels_on_escape :: proc(t: ^testing.T) {
+comments_editor_saves_on_ctrl_enter_and_cancels_on_escape :: proc(t: ^testing.T) {
 	state: app.App
 	defer app.changes_app_destroy(&state.changes_state)
 	w: app.Window
@@ -128,18 +150,26 @@ comments_editor_saves_on_enter_and_cancels_on_escape :: proc(t: ^testing.T) {
 	testing.expect_value(t, c.selection, ui.Changes_Selection{file = 0, first = 2, last = 3, active = true})
 	testing.expect_value(t, pane.model.view.selection, c.selection)
 
-	// Enter opens the editor on the selection; empty text saves nothing.
+	// Enter opens the editor on the selection. Ctrl+Enter has nothing to save in an empty plain comment, so
+	// the editor stays; Escape cancels it and leaves the selection.
 	testing.expect(t, comments_key(&state, &w, pane, .Enter))
 	testing.expect_value(t, c.editing, 0)
 	testing.expect_value(t, pane.model.view.editing, 0)
-	testing.expect(t, comments_key(&state, &w, pane, .Enter))
-	testing.expect_value(t, c.editing, -1)
-	testing.expect_value(t, len(c.items), 0)
-
-	comments_press(&state, &w, pane, {part = .Comment_Button})
+	testing.expect(t, comments_save(&state, &w, pane))
 	testing.expect_value(t, c.editing, 0)
-	testing.expect(t, app.changes_comments_text(&state, &w, pane, "Looks off."))
+	testing.expect_value(t, len(c.items), 0)
+	testing.expect(t, comments_key(&state, &w, pane, .Escape))
+	testing.expect_value(t, c.editing, -1)
+	testing.expect(t, c.selection.active)
+
+	// Enter in the editor breaks the line; Ctrl+Enter saves what was written.
 	testing.expect(t, comments_key(&state, &w, pane, .Enter))
+	testing.expect(t, app.changes_comments_text(&state, &w, pane, "Looks"))
+	testing.expect(t, comments_key(&state, &w, pane, .Enter))
+	testing.expect_value(t, c.editing, 0)
+	testing.expect(t, app.changes_comments_text(&state, &w, pane, "off."))
+	testing.expect_value(t, comments_held(pane), "Looks\noff.")
+	testing.expect(t, comments_save(&state, &w, pane))
 	if !testing.expect_value(t, len(c.items), 1) {return}
 	item := c.items[0]
 	testing.expect_value(t, item.path, "src/foo.odin")
@@ -147,7 +177,7 @@ comments_editor_saves_on_enter_and_cancels_on_escape :: proc(t: ^testing.T) {
 	testing.expect_value(t, item.first, 11)
 	testing.expect_value(t, item.last, 12)
 	testing.expect_value(t, item.quote, "+c\n+d")
-	testing.expect_value(t, item.text, "Looks off.")
+	testing.expect_value(t, item.text, "Looks\noff.")
 	testing.expect_value(t, c.editing, -1)
 	testing.expect(t, !c.selection.active, "saving ends the selection")
 	testing.expect_value(t, len(pane.model.view.comments), 1)
@@ -155,13 +185,21 @@ comments_editor_saves_on_enter_and_cancels_on_escape :: proc(t: ^testing.T) {
 	testing.expect_value(t, pane.model.view.comments[0].last, 3)
 	testing.expect_value(t, pane.model.view.send.count, 1)
 
-	// Escape leaves the comment as it was.
-	comments_press(&state, &w, pane, {part = .Comment_Card, index = 0})
+	// Edit opens the note with its text, the caret at its end; Escape leaves it as it was.
+	comments_press(&state, &w, pane, {part = .Comment_Edit, index = 0})
 	testing.expect_value(t, c.editing, 0)
+	testing.expect_value(t, comments_held(pane), "Looks\noff.")
+	testing.expect_value(t, c.buffer.caret, len("Looks\noff."))
 	testing.expect(t, app.changes_comments_text(&state, &w, pane, " Really."))
 	testing.expect(t, comments_key(&state, &w, pane, .Escape))
 	testing.expect_value(t, c.editing, -1)
-	testing.expect_value(t, c.items[0].text, "Looks off.")
+	testing.expect_value(t, c.items[0].text, "Looks\noff.")
+
+	// Edit then Ctrl+Enter replaces the text.
+	comments_press(&state, &w, pane, {part = .Comment_Edit, index = 0})
+	testing.expect(t, app.changes_comments_text(&state, &w, pane, " Really."))
+	testing.expect(t, comments_save(&state, &w, pane))
+	testing.expect_value(t, c.items[0].text, "Looks\noff. Really.")
 
 	// Removed lines alone comment on the old side; Escape without an editor ends the selection.
 	comments_press(&state, &w, pane, {part = .Hunk_Select, index = 0, line = 5})
@@ -170,7 +208,7 @@ comments_editor_saves_on_enter_and_cancels_on_escape :: proc(t: ^testing.T) {
 	testing.expect(t, comments_key(&state, &w, pane, .Enter))
 	testing.expect_value(t, c.editing, 1)
 	testing.expect(t, app.changes_comments_text(&state, &w, pane, "Gone?"))
-	testing.expect(t, comments_key(&state, &w, pane, .Enter))
+	testing.expect(t, comments_save(&state, &w, pane))
 	if !testing.expect_value(t, len(c.items), 2) {return}
 	testing.expect_value(t, c.items[1].side, app.Comment_Side.Old)
 	testing.expect_value(t, c.items[1].first, 20)
@@ -180,12 +218,174 @@ comments_editor_saves_on_enter_and_cancels_on_escape :: proc(t: ^testing.T) {
 	testing.expect(t, !c.selection.active)
 	testing.expect(t, !comments_key(&state, &w, pane, .Escape), "Escape passes on with nothing selected")
 
-	comments_press(&state, &w, pane, {part = .Comment_Delete, index = 0})
+	// Remove takes a note away, and Discard every note.
+	comments_press(&state, &w, pane, {part = .Comment_Remove, index = 0})
 	testing.expect_value(t, len(c.items), 1)
 	testing.expect_value(t, c.items[0].text, "Gone?")
 	comments_press(&state, &w, pane, {part = .Discard})
 	testing.expect_value(t, len(c.items), 0)
 	testing.expect_value(t, pane.model.view.send.count, 0)
+}
+
+@(test)
+comments_editor_tools_wrap_the_selection_and_insert_blocks_and_suggestions :: proc(t: ^testing.T) {
+	state: app.App
+	defer app.changes_app_destroy(&state.changes_state)
+	w: app.Window
+	pane := app.changes_pane_create(&state, {}, "C:/work/odin", .Repository)
+	if !testing.expect(t, pane != nil) {return}
+	pane.model.view.files = comments_files("src/foo.odin")
+	c := &pane.comments
+	ctrl_b := input.Key_Event{key = .B, modifiers = {.Control}, pressed = true}
+
+	// Bold with nothing selected wraps a word that stays selected, so typing replaces it.
+	comments_open(&state, &w, pane, 2, 3)
+	comments_press(&state, &w, pane, {part = .Editor_Bold, index = 0})
+	testing.expect_value(t, comments_held(pane), "**bold**")
+	testing.expect(t, app.changes_comments_text(&state, &w, pane, "word"))
+	testing.expect_value(t, comments_held(pane), "**word**")
+	// Inline code wraps a selection.
+	markdown.edit_select_all(&c.buffer)
+	comments_press(&state, &w, pane, {part = .Editor_Code, index = 0})
+	testing.expect_value(t, comments_held(pane), "`**word**`")
+
+	// Ctrl+B bolds from the keyboard.
+	testing.expect(t, comments_key(&state, &w, pane, .Escape))
+	testing.expect(t, comments_key(&state, &w, pane, .Enter))
+	testing.expect(t, app.changes_comments_key(&state, &w, pane, ctrl_b))
+	testing.expect_value(t, comments_held(pane), "**bold**")
+
+	// A code block takes the file's language and leaves the body selected.
+	testing.expect(t, comments_key(&state, &w, pane, .Escape))
+	testing.expect(t, comments_key(&state, &w, pane, .Enter))
+	comments_press(&state, &w, pane, {part = .Editor_Block, index = 0})
+	testing.expect_value(t, comments_held(pane), "```odin\n\n```\n")
+
+	// Suggest change inserts the selected lines as they are now, to edit.
+	testing.expect(t, comments_key(&state, &w, pane, .Escape))
+	testing.expect(t, comments_key(&state, &w, pane, .Enter))
+	comments_press(&state, &w, pane, {part = .Editor_Suggest, index = 0})
+	testing.expect_value(t, comments_held(pane), "```suggestion\nc\nd\n```\n")
+
+	// Only removed lines have no new side to suggest from.
+	testing.expect(t, comments_key(&state, &w, pane, .Escape))
+	comments_open(&state, &w, pane, 1, 1)
+	testing.expect_value(t, pane.model.view.span.old, true)
+	comments_press(&state, &w, pane, {part = .Editor_Suggest, index = 0})
+	testing.expect_value(t, comments_held(pane), "")
+}
+
+@(test)
+comments_editor_untags_and_adds_text_to_a_label_or_a_deletion :: proc(t: ^testing.T) {
+	state: app.App
+	defer app.changes_app_destroy(&state.changes_state)
+	w: app.Window
+	pane := app.changes_pane_create(&state, {}, "C:/work/odin", .Repository)
+	if !testing.expect(t, pane != nil) {return}
+	pane.model.view.files = comments_files("src/foo.odin")
+	c := &pane.comments
+	comments_press(&state, &w, pane, {part = .Gutter, index = 0, line = 2})
+	label := app.Changes_Note {
+		kind              = .Label,
+		label_name        = "Verify",
+		label_colour      = "#ff8800",
+		label_instruction = "Check it",
+	}
+	testing.expect(t, app.changes_comment_add(pane, label))
+
+	// A label note opens with its tag, and its text is optional: Ctrl+Enter saves it empty.
+	comments_press(&state, &w, pane, {part = .Comment_Edit, index = 0})
+	testing.expect_value(t, c.draft, ui.Changes_Note_Kind.Label)
+	testing.expect_value(t, pane.model.view.draft, ui.Changes_Note_Kind.Label)
+	testing.expect_value(t, ui.changes_editor_placeholder(.Label), "Add to the label (optional)")
+	testing.expect(t, comments_save(&state, &w, pane))
+	testing.expect_value(t, c.editing, -1)
+	testing.expect_value(t, c.items[0].kind, ui.Changes_Note_Kind.Label)
+	testing.expect_value(t, c.items[0].text, "")
+	// Words added to it are part of the note, which stays a label.
+	comments_press(&state, &w, pane, {part = .Comment_Edit, index = 0})
+	testing.expect(t, app.changes_comments_text(&state, &w, pane, "Because."))
+	testing.expect(t, comments_save(&state, &w, pane))
+	testing.expect_value(t, c.items[0].text, "Because.")
+	testing.expect_value(t, c.items[0].kind, ui.Changes_Note_Kind.Label)
+	testing.expect_value(t, c.items[0].label_instruction, "Check it")
+
+	// The × makes it a plain comment, which needs words: with none, Save does nothing.
+	comments_press(&state, &w, pane, {part = .Comment_Edit, index = 0})
+	comments_press(&state, &w, pane, {part = .Editor_Untag, index = 0})
+	testing.expect_value(t, c.draft, ui.Changes_Note_Kind.Comment)
+	testing.expect_value(t, pane.model.view.draft, ui.Changes_Note_Kind.Comment)
+	markdown.edit_select_all(&c.buffer)
+	testing.expect(t, comments_key(&state, &w, pane, .Delete))
+	testing.expect_value(t, comments_held(pane), "")
+	testing.expect_value(t, ui.changes_editor_can_save(&pane.model.view), false)
+	testing.expect(t, comments_save(&state, &w, pane))
+	testing.expect_value(t, c.editing, 0)
+	testing.expect(t, app.changes_comments_text(&state, &w, pane, "Plain."))
+	testing.expect(t, comments_save(&state, &w, pane))
+	testing.expect_value(t, c.items[0].kind, ui.Changes_Note_Kind.Comment)
+	testing.expect_value(t, c.items[0].text, "Plain.")
+	testing.expect_value(t, c.items[0].label_name, "")
+	testing.expect_value(t, c.items[0].label_colour, "")
+	testing.expect_value(t, c.items[0].label_instruction, "")
+	message := app.changes_comments_message(c.items[:], context.temp_allocator)
+	testing.expect(t, strings.has_suffix(message, "Plain."))
+	testing.expect(t, !strings.contains(message, "Verify"))
+
+	// A deletion is the same: it opens with its tag and its own prompt, and Escape keeps it a deletion even
+	// after the ×.
+	comments_press(&state, &w, pane, {part = .Gutter, index = 0, line = 4})
+	testing.expect(t, app.changes_comment_add(pane, {kind = .Delete}))
+	comments_press(&state, &w, pane, {part = .Comment_Edit, index = 1})
+	testing.expect_value(t, ui.changes_editor_placeholder(c.draft), "Why delete it? (optional)")
+	comments_press(&state, &w, pane, {part = .Editor_Untag, index = 1})
+	testing.expect(t, comments_key(&state, &w, pane, .Escape))
+	testing.expect_value(t, c.items[1].kind, ui.Changes_Note_Kind.Delete)
+}
+
+@(test)
+comments_editor_buttons_and_pressing_away :: proc(t: ^testing.T) {
+	state: app.App
+	defer app.changes_app_destroy(&state.changes_state)
+	w: app.Window
+	pane := app.changes_pane_create(&state, {}, "C:/work/odin", .Repository)
+	if !testing.expect(t, pane != nil) {return}
+	pane.model.view.files = comments_files("src/foo.odin")
+	c := &pane.comments
+
+	// Cancel drops the text and keeps the selection; Add note on a new comment saves it.
+	comments_open(&state, &w, pane, 2, 3)
+	testing.expect(t, app.changes_comments_text(&state, &w, pane, "First."))
+	comments_press(&state, &w, pane, {part = .Editor_Cancel, index = 0})
+	testing.expect_value(t, c.editing, -1)
+	testing.expect_value(t, len(c.items), 0)
+	testing.expect(t, c.selection.active)
+	testing.expect(t, comments_key(&state, &w, pane, .Enter))
+	testing.expect(t, app.changes_comments_text(&state, &w, pane, "Second."))
+	comments_press(&state, &w, pane, {part = .Editor_Save, index = 0})
+	if !testing.expect_value(t, len(c.items), 1) {return}
+	testing.expect_value(t, c.items[0].text, "Second.")
+
+	// Save does nothing for an empty plain comment.
+	comments_open(&state, &w, pane, 0, 0)
+	comments_press(&state, &w, pane, {part = .Editor_Save, index = 1})
+	testing.expect_value(t, c.editing, 1)
+	testing.expect_value(t, len(c.items), 1)
+
+	// Pressing on another line keeps what the editor holds, and starts the next selection.
+	testing.expect(t, app.changes_comments_text(&state, &w, pane, "Away."))
+	comments_press(&state, &w, pane, {part = .Gutter, index = 0, line = 4})
+	testing.expect_value(t, c.editing, -1)
+	if !testing.expect_value(t, len(c.items), 2) {return}
+	testing.expect_value(t, c.items[1].text, "Away.")
+	testing.expect_value(t, c.items[1].first_line, 0)
+	testing.expect_value(t, c.selection, ui.Changes_Selection{file = 0, first = 4, last = 4, active = true})
+
+	// The editor card reports the lines it is for.
+	testing.expect(t, comments_key(&state, &w, pane, .Enter))
+	testing.expect_value(t, pane.model.view.span, ui.Changes_Span{first = 13, last = 13, old = false})
+	comments_press(&state, &w, pane, {part = .Comment_Edit, index = 0})
+	testing.expect_value(t, pane.model.view.span, ui.Changes_Span{first = 11, last = 12, old = false})
 }
 
 @(test)
@@ -499,9 +699,9 @@ comments_save_selected :: proc(
 	state: ^app.App, w: ^app.Window, pane: ^app.Changes_Pane, select: ui.Changes_Selection, text: string,
 ) {
 	pane.comments.selection = select
-	comments_press(state, w, pane, {part = .Comment_Button})
-	_ = app.changes_comments_text(state, w, pane, text)
 	_ = comments_key(state, w, pane, .Enter)
+	_ = app.changes_comments_text(state, w, pane, text)
+	_ = comments_save(state, w, pane)
 }
 
 @(test)
@@ -651,4 +851,41 @@ comments_keep_a_copy_of_the_label_they_were_made_with :: proc(t: ^testing.T) {
 	message := app.changes_comments_message(c.items[:], context.temp_allocator)
 	testing.expect(t, strings.has_suffix(message, "Delete this line."))
 	testing.expect(t, strings.contains(message, "Verify this. Check the claim."))
+}
+
+// What the editor and the toolbar write, end to end: a text selection with a suggestion from the tool, a label
+// from its key and a deletion from its key, in the message Send and Copy give.
+@(test)
+comments_message_follows_the_editor_the_label_key_and_the_delete_key :: proc(t: ^testing.T) {
+	state: app.App
+	defer app.changes_app_destroy(&state.changes_state)
+	w: app.Window
+	state.settings.turns.quick_labels = "Clarify | blue | Explain why"
+	pane := app.changes_pane_create(&state, {}, "C:/work/odin", .Repository)
+	if !testing.expect(t, pane != nil) {return}
+	pane.model.view.files = comments_text_files("  value := compute(a)")
+	c := &pane.comments
+
+	// "compute" with a comment and the suggestion tool, saved with Ctrl+Enter.
+	c.selection = {file = 0, first = 0, last = 0, active = true, partial = true, first_offset = 11, last_offset = 18}
+	testing.expect(t, comments_key(&state, &w, pane, .Enter))
+	testing.expect(t, app.changes_comments_text(&state, &w, pane, "Rename it:"))
+	comments_press(&state, &w, pane, {part = .Editor_Suggest, index = 0})
+	testing.expect(t, comments_save(&state, &w, pane))
+	// The added line takes a label with Alt+1, and the context line a deletion with Delete.
+	comments_press(&state, &w, pane, {part = .Gutter, index = 0, line = 1})
+	testing.expect(t, app.changes_comments_key(&state, &w, pane, {key = .Digit_1, modifiers = {.Alt}, pressed = true}))
+	comments_press(&state, &w, pane, {part = .Gutter, index = 0, line = 0})
+	testing.expect(t, comments_key(&state, &w, pane, .Delete))
+	if !testing.expect_value(t, len(c.items), 3) {return}
+	testing.expect_value(t, c.items[0].text, "Rename it:\n```suggestion\n  value := compute(a)\n```")
+
+	message := app.changes_comments_message(c.items[:], context.temp_allocator)
+	testing.expect(t, strings.contains(message, "1. src/foo.odin, line 4, at \"compute\":\n"), message)
+	testing.expect(
+		t, strings.contains(message, "Rename it:\nSuggested replacement for line 4:\n```\n  value := compute(a)\n```"),
+		message,
+	)
+	testing.expect(t, strings.contains(message, "2. src/foo.odin, line 5:\n```\n+tail\n```\nClarify. Explain why"), message)
+	testing.expect(t, strings.has_suffix(message, "3. src/foo.odin, line 4:\n```\n   value := compute(a)\n```\nDelete this line."), message)
 }

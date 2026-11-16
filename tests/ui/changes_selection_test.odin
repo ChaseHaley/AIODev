@@ -2,6 +2,7 @@ package ui_test
 
 import "aio:font"
 import "aio:glyphs"
+import "aio:markdown"
 import "aio:render"
 import "aio:turns"
 import "aio:ui"
@@ -15,7 +16,8 @@ Selection_Fixture :: struct {
 	lines:      [40]turns.Diff_Line,
 	hunks:      [1]turns.Hunk,
 	files:      [1]turns.Diff_File,
-	editor:     ui.Text_Field,
+	area:       ui.Text_Area,
+	buffer:     markdown.Edit_Buffer,
 	notes:      [2]ui.Changes_Comment_View,
 }
 
@@ -55,7 +57,8 @@ select_make :: proc(t: ^testing.T, f: ^Selection_Fixture, view: ^ui.Changes_View
 		last          = -1,
 		files         = f.files[:],
 		editing       = -1,
-		editor        = &f.editor,
+		editor        = &f.area,
+		buffer        = &f.buffer,
 		revision      = 1,
 		quick_labels  = SELECTION_LABELS,
 	}
@@ -64,7 +67,8 @@ select_make :: proc(t: ^testing.T, f: ^Selection_Fixture, view: ^ui.Changes_View
 
 @(private = "file")
 select_destroy :: proc(f: ^Selection_Fixture) {
-	delete(f.editor.bytes)
+	markdown.edit_buffer_destroy(&f.buffer)
+	ui.text_area_destroy(&f.area)
 	font.system_destroy(f.fonts)
 }
 
@@ -107,10 +111,12 @@ selection_bar_sits_above_the_first_line_and_below_the_last_when_there_is_no_room
 	bar := g.selection_bar
 	if !testing.expect(t, bar.bar.width > 0) {return}
 
-	// Four padding around 24 tall buttons, four above the first line: Delete, Comment, a divider, Label.
+	// Four padding around 24 tall buttons, and 6 between the bar and the first selected line: Delete, Comment,
+	// a divider, Label. The bar's bottom edge is that far above the first line's top, not a row higher.
 	first := ui.changes_line_rect(g, &view, &state, 0, 10)
 	testing.expect_value(t, bar.bar.height, f32(32))
-	testing.expect_value(t, bar.bar.y, first.y - 4 - 32)
+	testing.expect_value(t, bar.bar.y, first.y - 6 - 32)
+	testing.expect_value(t, bar.bar.y + bar.bar.height + 6, first.y)
 	for rect in ([?]render.Rect{bar.delete, bar.comment, bar.label}) {
 		testing.expect_value(t, rect.height, f32(24))
 		testing.expect_value(t, rect.y, bar.bar.y + 4)
@@ -155,7 +161,7 @@ selection_bar_sits_above_the_first_line_and_below_the_last_when_there_is_no_room
 	state.diff_scroll += int(first.y - g.diff.y)
 	g = select_place(&f, &view, &state)
 	last := ui.changes_line_rect(g, &view, &state, 0, 11)
-	testing.expect_value(t, g.selection_bar.bar.y, last.y + last.height + 4)
+	testing.expect_value(t, g.selection_bar.bar.y, last.y + last.height + 6)
 
 	// Out of view, there is no bar.
 	view.selection = {file = 0, first = 0, last = 1, active = true}
@@ -506,4 +512,133 @@ quick_labels_are_read_from_the_setting_text_in_order :: proc(t: ^testing.T) {
 	testing.expect(t, !ok)
 	_, ok = ui.changes_label_at(SELECTION_LABELS, -1)
 	testing.expect(t, !ok)
+}
+
+// Side by side a context line is drawn in both halves; the tint, a note's marks and the toolbar belong to the
+// half the selection was made in.
+@(test)
+a_selection_marks_and_anchors_only_the_half_it_was_made_in :: proc(t: ^testing.T) {
+	device, device_error := render.device_create(.Warp)
+	if !testing.expect_value(t, device_error, render.Error.None) {return}
+	defer render.device_destroy(device)
+	f: Selection_Fixture
+	view: ui.Changes_View
+	if !select_make(t, &f, &view) {return}
+	defer select_destroy(&f)
+	cache: glyphs.Cache
+	glyphs.init(&cache, f.fonts, device)
+	defer glyphs.destroy(&cache)
+	if !testing.expect(t, ui.text_init(&f.text, f.fonts, &cache, 13)) {return}
+	f.mono = ui.text_mono(&f.text, f.text.family)
+	state: ui.Changes_State
+	defer ui.changes_state_destroy(&state)
+	list := render.draw_list_init()
+	defer render.draw_list_destroy(&list)
+	theme: ui.Theme
+	theme.text, theme.muted = {1, 1, 1, 1}, {1, 1, 1, 1}
+	theme.selection = {0, 0.5, 1, 0.5}
+	theme.accent = {0.5, 0, 1, 1}
+	view.side_by_side = true
+
+	// A line selection of context line 0, made in each half, tints that half's cell and the toolbar centres over
+	// it.
+	for half in ([?]ui.Changes_Half{.Left, .Right}) {
+		view.selection = {file = 0, first = 0, last = 0, active = true, half = half}
+		g, ok := draw_selection(t, &f, &list, &theme, &view, &state)
+		if !ok {return}
+		middle := g.diff.x + g.diff.width / 2
+		tints := rects_of(&list, theme.selection)
+		defer delete(tints)
+		if !testing.expect_value(t, len(tints), 1) {return}
+		bar := g.selection_bar.bar
+		if half == .Left {
+			testing.expect(t, tints[0].x + tints[0].width <= middle + 1)
+			testing.expect(t, bar.x + bar.width / 2 < middle)
+		} else {
+			testing.expect(t, tints[0].x >= middle)
+			testing.expect(t, bar.x + bar.width / 2 > middle)
+		}
+	}
+	// A selection that was made in neither, such as a hunk's, tints both cells.
+	view.selection = {file = 0, first = 0, last = 0, active = true}
+	_, ok := draw_selection(t, &f, &list, &theme, &view, &state)
+	if !ok {return}
+	testing.expect_value(t, rect_count(&list, theme.selection), 2)
+
+	// A text selection in the right half tints its bytes there only.
+	view.selection = text_selection(0, 0, 2, 5)
+	view.selection.half = .Right
+	g, drawn := draw_selection(t, &f, &list, &theme, &view, &state)
+	if !drawn {return}
+	text_tints := rects_of(&list, theme.selection)
+	defer delete(text_tints)
+	if !testing.expect_value(t, len(text_tints), 1) {return}
+	testing.expect(t, text_tints[0].x >= g.diff.x + g.diff.width / 2)
+
+	// A note keeps the half it was made in.
+	f.notes[0] = {file = 0, first = 0, last = 0, partial = true, first_offset = 1, last_offset = 4, kind = .Label,
+		label_name = "Good", label_colour = "#00ff00", half = .Left}
+	view.comments = f.notes[:1]
+	view.selection = {}
+	g, drawn = draw_selection(t, &f, &list, &theme, &view, &state)
+	if !drawn {return}
+	marks := rects_of(&list, {0, 1, 0, 0.16})
+	defer delete(marks)
+	if !testing.expect_value(t, len(marks), 1) {return}
+	testing.expect(t, marks[0].x + marks[0].width <= g.diff.x + g.diff.width / 2 + 1)
+}
+
+// The index of the layer that holds a rect of `rect`'s place drawn in `color`; -1 for none.
+@(private = "file")
+layer_of :: proc(list: ^render.Draw_List, rect: render.Rect, color: render.Color) -> int {
+	for layer, i in list.layers {
+		for r in list.rects[layer.rect_start:layer.rect_start + layer.rect_count] {
+			if r.rect == rect && colour_near(r.color, color) {return i}
+		}
+	}
+	return -1
+}
+
+// The pinned file header takes a layer of its own so the lines scrolled under it do not show through; the
+// toolbar, which floats over the same lines, has to come after it, or the header would cover it.
+@(test)
+the_toolbar_draws_in_a_layer_above_the_pinned_file_header :: proc(t: ^testing.T) {
+	device, device_error := render.device_create(.Warp)
+	if !testing.expect_value(t, device_error, render.Error.None) {return}
+	defer render.device_destroy(device)
+	f: Selection_Fixture
+	view: ui.Changes_View
+	if !select_make(t, &f, &view) {return}
+	defer select_destroy(&f)
+	cache: glyphs.Cache
+	glyphs.init(&cache, f.fonts, device)
+	defer glyphs.destroy(&cache)
+	if !testing.expect(t, ui.text_init(&f.text, f.fonts, &cache, 13)) {return}
+	f.mono = ui.text_mono(&f.text, f.text.family)
+	state: ui.Changes_State
+	defer ui.changes_state_destroy(&state)
+	list := render.draw_list_init()
+	defer render.draw_list_destroy(&list)
+	theme: ui.Theme
+	theme.text, theme.muted = {1, 1, 1, 1}, {1, 1, 1, 1}
+	theme.pane = {0.1, 0.2, 0.3, 1}
+	theme.surface = {0.4, 0.3, 0.2, 1}
+
+	// Scrolled past the file's header, which pins itself, with a selection lower down.
+	state.diff_scroll = 40
+	view.selection = {file = 0, first = 20, last = 21, active = true}
+	g, ok := draw_selection(t, &f, &list, &theme, &view, &state)
+	if !ok {return}
+	sticky, header := ui.changes_sticky_header(&state, &view, g)
+	if !testing.expect_value(t, sticky, 0) {return}
+	bar := g.selection_bar.bar
+	if !testing.expect(t, bar.width > 0) {return}
+	pinned := layer_of(&list, header, theme.pane)
+	floating := layer_of(&list, bar, theme.surface)
+	testing.expect(t, pinned >= 0 && floating >= 0)
+	testing.expect(t, floating > pinned, "the toolbar is drawn after the pinned header's layer")
+	// The toolbar's own words are in its layer or a later one, never before the header's.
+	for glyph in list.glyphs[list.layers[floating].glyph_start:][:list.layers[floating].glyph_count] {
+		testing.expect(t, glyph.rect.y >= bar.y - 1)
+	}
 }

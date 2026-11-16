@@ -3,10 +3,13 @@ package ui_test
 import "aio:colour"
 import "aio:font"
 import "aio:glyphs"
+import "aio:markdown"
 import "aio:render"
 import "aio:syntax"
 import "aio:turns"
 import "aio:ui"
+import "core:math"
+import "core:strings"
 import "core:testing"
 
 @(private = "file")
@@ -17,7 +20,8 @@ Diff_Fixture :: struct {
 	hunks:      [1]turns.Hunk,
 	files:      [1]turns.Diff_File,
 	comments:   [2]ui.Changes_Comment_View,
-	editor:     ui.Text_Field,
+	area:       ui.Text_Area,
+	buffer:     markdown.Edit_Buffer,
 	side_lines: [10]turns.Diff_Line,
 	ends:       [4]turns.Diff_Line,
 	side_hunks: [2]turns.Hunk,
@@ -50,7 +54,8 @@ diff_fixture_make :: proc(t: ^testing.T, f: ^Diff_Fixture, view: ^ui.Changes_Vie
 		last     = -1,
 		files    = f.files[:],
 		editing  = -1,
-		editor   = &f.editor,
+		editor   = &f.area,
+		buffer   = &f.buffer,
 		revision = 1,
 	}
 	return true
@@ -58,7 +63,8 @@ diff_fixture_make :: proc(t: ^testing.T, f: ^Diff_Fixture, view: ^ui.Changes_Vie
 
 @(private = "file")
 diff_fixture_destroy :: proc(f: ^Diff_Fixture) {
-	delete(f.editor.bytes)
+	markdown.edit_buffer_destroy(&f.buffer)
+	ui.text_area_destroy(&f.area)
 	font.system_destroy(f.fonts)
 }
 
@@ -192,11 +198,12 @@ changes_rows_include_comment_cards :: proc(t: ^testing.T) {
 	g = lay_out(&f, &view, &state)
 	if !testing.expect_value(t, len(state.rows.cards), 2) {return}
 	card := state.rows.cards[0]
-	testing.expect(t, card >= 32)
+	testing.expect(t, card >= 28)
 	testing.expect_value(t, state.rows.cards[1], 0)
-	testing.expect_value(t, state.rows.total, plain + card + 8)
+	// A card keeps 6 above it for its notch and 8 below it.
+	testing.expect_value(t, state.rows.total, plain + card + 14)
 	moved := ui.changes_line_rect(g, &view, &state, 0, 2)
-	testing.expect_value(t, moved.y, added.y + f32(card + 8))
+	testing.expect_value(t, moved.y, added.y + f32(card + 14))
 	testing.expect_value(t, ui.changes_line_rect(g, &view, &state, 0, 1).y,
 		ui.changes_line_rect(g, &view, &state, 0, 0).y + f32(state.rows.line))
 
@@ -206,20 +213,37 @@ changes_rows_include_comment_cards :: proc(t: ^testing.T) {
 	ui.changes_layout(&state, &view, &f.text, &f.mono, 300, 1)
 	testing.expect(t, state.rows.cards[0] > card)
 
-	// Writing a new comment under the selection adds the editor's card.
+	// Writing a new comment under the selection adds the editor's card: a header, the tools, a text area at
+	// least three lines tall and a footer.
 	f.comments[0].text = "Rename this"
 	view.selection = {file = 0, first = 2, last = 2, active = true}
 	view.editing = 1
 	g = lay_out(&f, &view, &state)
-	editor := 8 + 32 + 4 + 8 + int(ui.text_styled(&f.text, .Detail).line_height)
+	rect, shown := ui.changes_card_rect(g, &view, &state, 1)
+	testing.expect(t, shown)
+	area := int(math.round(ui.text_area_height(&f.area, &f.buffer, &f.text, rect.width - 16, 1, 3, 12)))
+	editor := 32 + 28 + 8 + 32 + area
 	testing.expect_value(t, state.rows.cards[1], editor)
-	testing.expect_value(t, state.rows.total, plain + card + 8 + editor + 8)
+	testing.expect_value(t, state.rows.total, plain + card + 14 + editor + 14)
+
+	// The card's height follows the text: more lines grow it, until the text area stops at twelve.
+	before := state.rows.cards[1]
+	testing.expect(t, markdown.edit_buffer_reset(&f.buffer, "one\ntwo\nthree\nfour\nfive\nsix"))
+	g = lay_out(&f, &view, &state)
+	grown := state.rows.cards[1]
+	testing.expect(t, grown > before)
+	testing.expect(t, markdown.edit_buffer_reset(&f.buffer, strings.repeat("line\n", 40, context.temp_allocator)))
+	g = lay_out(&f, &view, &state)
+	testing.expect(t, state.rows.cards[1] > grown)
+	rect, _ = ui.changes_card_rect(g, &view, &state, 1)
+	capped := int(math.round(ui.text_area_height(&f.area, &f.buffer, &f.text, rect.width - 16, 1, 12, 12)))
+	testing.expect_value(t, state.rows.cards[1], 32 + 28 + 8 + 32 + capped)
 
 	// A detached comment moves to the "Not in this diff" group at the end.
 	view.editing = -1
 	f.comments[0].detached = true
 	g = lay_out(&f, &view, &state)
-	testing.expect_value(t, state.rows.detached, state.rows.header + card + 8 + state.rows.gap)
+	testing.expect_value(t, state.rows.detached, state.rows.header + card + 14 + state.rows.gap)
 	testing.expect_value(t, state.rows.total, plain + state.rows.detached)
 	testing.expect_value(t, ui.changes_line_rect(g, &view, &state, 0, 2).y, added.y)
 }
@@ -261,41 +285,71 @@ changes_diff_hit_finds_lines_buttons_and_cards :: proc(t: ^testing.T) {
 	rest := ui.changes_diff_hit(g, &view, &state, g.diff.x + 50, hunk_y)
 	testing.expect_value(t, rest, ui.Changes_Hit{.Diff, 0, 0})
 
-	// The card under the first line: the delete button at its top right, the rest edits it.
+	// The saved card starts at the code column, a notch's room under the line, and ends 12 from the right.
+	// Edit and Remove sit at its top right; the rest of it is the card.
 	first := ui.changes_line_rect(g, &view, &state, 0, 0)
-	card := render.Rect{g.diff.x + 16, first.y + first.height + 4, g.diff.width - 32, f32(rows.cards[0])}
+	card, on_stream := ui.changes_card_rect(g, &view, &state, 0)
+	testing.expect(t, on_stream)
+	testing.expect_value(t, card.y, first.y + first.height + 6)
+	_, first_column, _ := ui.changes_line_code(g, &view, &state, &f.mono, 0, 0)
+	testing.expect(t, abs(card.x - first_column.text_x) <= 0.5)
+	testing.expect(t, abs(card.x + card.width - (g.diff.x + g.diff.width - 12)) < 0.01)
 	on_card := ui.changes_diff_hit(g, &view, &state, card.x + 20, card.y + card.height / 2)
 	testing.expect_value(t, on_card, ui.Changes_Hit{.Comment_Card, 0, 0})
-	delete := ui.changes_diff_hit(g, &view, &state, card.x + card.width - 4 - 12, card.y + 4 + 12)
-	testing.expect_value(t, delete, ui.Changes_Hit{.Comment_Delete, 0, 0})
+	edit, remove := ui.changes_note_actions(card, 1)
+	testing.expect_value(t, remove, render.Rect{card.x + card.width - 3 - 22, card.y + 3, 22, 22})
+	testing.expect_value(t, edit.x + edit.width + 1, remove.x)
+	at := centre(edit)
+	testing.expect_value(t, ui.changes_diff_hit(g, &view, &state, at.x, at.y), ui.Changes_Hit{.Comment_Edit, 0, 0})
+	at = centre(remove)
+	testing.expect_value(t, ui.changes_diff_hit(g, &view, &state, at.x, at.y), ui.Changes_Hit{.Comment_Remove, 0, 0})
+
+	// Editing swaps the card for the editor: its tools, text area and buttons answer to the pointer, the rest
+	// of it is the card, and a plain comment has no tag to take off.
 	view.editing = 0
 	g = lay_out(&f, &view, &state)
-	editing := ui.changes_diff_hit(g, &view, &state, card.x + 20, card.y + 20)
-	testing.expect_value(t, editing, ui.Changes_Hit{.Comment_Editor, 0, 0})
+	parts, editing := ui.changes_editor_of(g, &view, &state)
+	testing.expect(t, editing)
+	testing.expect_value(t, parts.card.x, card.x)
+	testing.expect_value(t, parts.untag, render.Rect{})
+	buttons := [?]struct {
+		rect: render.Rect,
+		part: ui.Changes_Part,
+	}{{parts.bold, .Editor_Bold}, {parts.code, .Editor_Code}, {parts.block, .Editor_Block},
+		{parts.suggest, .Editor_Suggest}, {parts.cancel, .Editor_Cancel}, {parts.save, .Editor_Save},
+		{parts.area, .Comment_Editor}}
+	for button in buttons {
+		at = centre(button.rect)
+		testing.expect_value(t, ui.changes_diff_hit(g, &view, &state, at.x, at.y), ui.Changes_Hit{button.part, 0, 0})
+	}
+	at = centre(parts.header)
+	testing.expect_value(t, ui.changes_diff_hit(g, &view, &state, at.x, at.y), ui.Changes_Hit{.Comment_Card, 0, 0})
 	box, shown := ui.changes_editor_box(g, &view, &state, &f.text)
 	testing.expect(t, shown)
-	testing.expect_value(t, box.rect, render.Rect{card.x + 8, card.y + 8, card.width - 16, 32})
+	testing.expect_value(t, box.rect, parts.area)
+	testing.expect_value(t, parts.area.height, parts.card.height - 100)
 
-	// With a selection and no editor, the Comment button covers the right end of its last row.
-	view.editing = -1
-	view.selection = {file = 0, first = 1, last = 2, active = true}
+	// A label's tag comes with its ×, which turns the note into a comment.
+	f.comments[0].kind, f.comments[0].label_name, f.comments[0].label_colour = .Label, "Clarify", "blue"
+	view.draft = .Label
 	g = lay_out(&f, &view, &state)
-	comment := ui.changes_comment_button_rect(g, &view, &state)
-	testing.expect(t, comment.width > 0)
-	last := ui.changes_line_rect(g, &view, &state, 0, 2)
-	testing.expect_value(t, comment.y, last.y)
-	at := centre(comment)
-	pressed := ui.changes_diff_hit(g, &view, &state, at.x, at.y)
-	testing.expect_value(t, pressed, ui.Changes_Hit{.Comment_Button, 0, 2})
+	parts, _ = ui.changes_editor_of(g, &view, &state)
+	testing.expect(t, parts.tag.width > 0 && parts.untag.width > 0)
+	testing.expect(t, parts.untag.x + parts.untag.width <= parts.tag.x + parts.tag.width)
+	at = centre(parts.untag)
+	testing.expect_value(t, ui.changes_diff_hit(g, &view, &state, at.x, at.y), ui.Changes_Hit{.Editor_Untag, 0, 0})
+	view.editing = -1
+	view.draft = .Comment
+	g = lay_out(&f, &view, &state)
 
 	// The send bar's buttons.
 	send, copy, discard := ui.changes_send_rects(g, &view)
 	rects := [?]render.Rect{send, copy, discard}
-	parts := [?]ui.Changes_Part{.Send, .Copy, .Discard}
+	bar_parts := [?]ui.Changes_Part{.Send, .Copy, .Discard}
 	for rect, i in rects {
 		p := centre(rect)
 		hit := ui.changes_diff_hit(g, &view, &state, p.x, p.y)
-		testing.expect_value(t, hit, ui.Changes_Hit{parts[i], 0, 0})
+		testing.expect_value(t, hit, ui.Changes_Hit{bar_parts[i], 0, 0})
 	}
 	testing.expect(t, send.x + send.width < copy.x && copy.x + copy.width < discard.x)
 	testing.expect(t, discard.x + discard.width <= g.send_bar.x + g.send_bar.width)
@@ -414,17 +468,20 @@ changes_diff_side_by_side_hits_and_rects_per_half :: proc(t: ^testing.T) {
 	on_marker := ui.changes_diff_hit(g, &view, &state, left.x + 4, marker.y + 2)
 	testing.expect_value(t, on_marker, ui.Changes_Hit{.Diff, 1, 0})
 
-	// A card goes under the row that holds the comment's last line, across the whole width.
+	// A card goes under the row that holds the comment's last line, from the left cell's code column across
+	// both halves.
 	f.comments[0] = {file = 0, first = 3, last = 3, text = "Why?"}
 	view.comments = f.comments[:1]
 	g = lay_out(&f, &view, &state)
-	slot := f32(state.rows.cards[0] + 8)
+	slot := f32(state.rows.cards[0] + 14)
 	below := ui.changes_line_rect(g, &view, &state, 0, 2)
 	testing.expect_value(t, below.y, left.y + f32(state.rows.line) + slot)
 	testing.expect_value(t, ui.changes_line_rect(g, &view, &state, 0, 1).y, left.y)
-	card_y := left.y + f32(state.rows.line) + 4 + 2
-	card_left := ui.changes_diff_hit(g, &view, &state, left.x + 20, card_y)
+	card_y := left.y + f32(state.rows.line) + 6 + 2
+	card_rect, _ := ui.changes_card_rect(g, &view, &state, 0)
+	card_left := ui.changes_diff_hit(g, &view, &state, card_rect.x + 20, card_y)
 	testing.expect_value(t, card_left, ui.Changes_Hit{.Comment_Card, 0, 0})
+	testing.expect(t, card_rect.x > left.x && card_rect.x < at.x)
 	card_right := ui.changes_diff_hit(g, &view, &state, at.x, card_y)
 	testing.expect_value(t, card_right, ui.Changes_Hit{.Comment_Card, 0, 0})
 }
@@ -473,13 +530,11 @@ changes_side_by_side_cards_sit_under_the_lowest_selected_row :: proc(t: ^testing
 	defer ui.changes_state_destroy(&state)
 
 	// Lines 0-3 are the context line, both removed lines and the first added one. The last of them, the
-	// added line, is in row 1, but the second removed line is in row 2 below it.
+	// added line, is in row 1, but the second removed line is in row 2 below it, which a new note goes under.
 	view.selection = {file = 0, first = 0, last = 3, active = true}
 	g := lay_out(&f, &view, &state)
 	removed := ui.changes_line_rect(g, &view, &state, 0, 2)
-	button := ui.changes_comment_button_rect(g, &view, &state)
-	testing.expect_value(t, button.y, removed.y)
-	testing.expect(t, button.x > removed.x && button.x + button.width <= removed.x + removed.width)
+	testing.expect_value(t, state.rows.pairs.selection_row, 2)
 	padded := ui.changes_line_rect(g, &view, &state, 0, 5).y
 
 	// A comment on those lines sits under row 2: row 3 moves down, row 2 stays.
@@ -487,19 +542,17 @@ changes_side_by_side_cards_sit_under_the_lowest_selected_row :: proc(t: ^testing
 	view.comments = f.comments[:1]
 	view.selection = {}
 	g = lay_out(&f, &view, &state)
-	slot := f32(state.rows.cards[0] + 8)
+	slot := f32(state.rows.cards[0] + 14)
 	testing.expect_value(t, ui.changes_line_rect(g, &view, &state, 0, 2).y, removed.y)
 	testing.expect_value(t, ui.changes_line_rect(g, &view, &state, 0, 5).y, padded + slot)
-	card := ui.changes_diff_hit(g, &view, &state, removed.x + 20, removed.y + f32(state.rows.line) + 6)
+	card_rect, _ := ui.changes_card_rect(g, &view, &state, 0)
+	card := ui.changes_diff_hit(g, &view, &state, card_rect.x + 20, removed.y + f32(state.rows.line) + 6 + 2)
 	testing.expect_value(t, card, ui.Changes_Hit{.Comment_Card, 0, 0})
 
-	// With row 2's right cell selected too, the button moves to that cell.
+	// Lines 3 and 4 are in rows 1 and 2, and the lower one is where a new note goes.
 	view.selection = {file = 0, first = 3, last = 4, active = true}
 	g = lay_out(&f, &view, &state)
-	added := ui.changes_line_rect(g, &view, &state, 0, 4)
-	button = ui.changes_comment_button_rect(g, &view, &state)
-	testing.expect_value(t, button.y, added.y)
-	testing.expect(t, button.x > added.x && button.x + button.width <= added.x + added.width)
+	testing.expect_value(t, state.rows.pairs.selection_row, 2)
 }
 
 @(test)

@@ -2,6 +2,7 @@ package app_test
 
 import "aio:commands"
 import "aio:input"
+import "aio:markdown"
 import "aio:platform"
 import "aio:render"
 import "aio:turns"
@@ -433,12 +434,12 @@ toolbar_keys_label_delete_comment_and_close :: proc(t: ^testing.T) {
 	keys_select(&k, 3, 3)
 	testing.expect(t, keys_press(&k, .Enter))
 	testing.expect_value(t, c.editing, 3)
-	testing.expect_value(t, ui.field_string(&c.editor), "")
+	testing.expect_value(t, markdown.edit_string(&c.buffer), "")
 	testing.expect(t, keys_press(&k, .Escape))
 	testing.expect_value(t, c.editing, -1)
 	testing.expect(t, keys_press(&k, .X, {.Shift}, "X"))
 	testing.expect_value(t, c.editing, 3)
-	testing.expect_value(t, ui.field_string(&c.editor), "X")
+	testing.expect_value(t, markdown.edit_string(&c.buffer), "X")
 	testing.expect(t, keys_press(&k, .Escape))
 	testing.expect(t, c.selection.active)
 
@@ -493,7 +494,7 @@ the_label_menu_takes_arrows_enter_and_plain_digits :: proc(t: ^testing.T) {
 	keys_select(&k, 0, 0)
 	testing.expect(t, keys_press(&k, .Digit_3, {}, "3"))
 	testing.expect_value(t, c.editing, 2)
-	testing.expect_value(t, ui.field_string(&c.editor), "3")
+	testing.expect_value(t, markdown.edit_string(&c.buffer), "3")
 
 	testing.expect(t, keys_press(&k, .Escape))
 	testing.expect_value(t, c.editing, -1)
@@ -574,4 +575,181 @@ text_selections_become_partial_notes_only_when_they_leave_something_out :: proc(
 	testing.expect_value(t, c.selection, ui.Changes_Selection{
 		file = 0, first = 0, last = 3, active = true, partial = true, first_offset = 2, last_offset = 4,
 	})
+}
+
+@(test)
+a_selection_side_by_side_remembers_the_half_it_was_made_in :: proc(t: ^testing.T) {
+	f: Selecting
+	defer selecting_stop(t, &f)
+	if !selecting_start(t, &f, "Half") {return}
+	w, pane, ok := selecting_pane(t, &f)
+	if !ok {return}
+	app.changes_layout_toggle(&f.state, w, pane)
+	testing.expect(t, pane.side_by_side)
+	c := &pane.comments
+
+	// Context line 0 is drawn in both halves: a drag in each picks the half it began in, and the note made
+	// on it keeps that half.
+	for right in ([2]bool{false, true}) {
+		want := right ? ui.Changes_Half.Right : ui.Changes_Half.Left
+		start, stop := selecting_at(&f, w, pane, 0, 2, right), selecting_at(&f, w, pane, 0, 8, right)
+		mouse_move(&f, w, start)
+		mouse_button(&f, w, start, true)
+		mouse_move(&f, w, stop)
+		mouse_button(&f, w, stop, false)
+		testing.expect_value(t, c.selection.half, want)
+		g := selecting_geometry(&f, w, pane)
+		selecting_click(&f, w, g.selection_bar.delete)
+		if !testing.expect(t, len(c.items) > 0) {return}
+		testing.expect_value(t, c.items[len(c.items) - 1].half, want)
+		testing.expect_value(t, pane.model.view.comments[len(c.items) - 1].half, want)
+	}
+
+	// Alt and a press on the numbers pick whole lines in the half they are pressed in too, and Shift keeps it.
+	g := selecting_geometry(&f, w, pane)
+	view := &pane.model.view
+	mono := ui.text_mono(&w.ui_text, f.state.family)
+	for right in ([2]bool{false, true}) {
+		want := right ? ui.Changes_Half.Right : ui.Changes_Half.Left
+		row := ui.changes_line_rect(g, view, &pane.state, 0, 3)
+		x := right ? row.x + row.width * 3 / 4 : row.x + row.width / 4
+		cell, column, _ := ui.changes_line_code(g, view, &pane.state, &mono, 0, 3, x)
+		gutter := [2]f32{cell.x + 3, cell.y + cell.height / 2}
+		mouse_move(&f, w, gutter)
+		mouse_button(&f, w, gutter, true)
+		mouse_button(&f, w, gutter, false)
+		testing.expect_value(t, c.selection.half, want)
+		testing.expect_value(t, c.selection.partial, false)
+		text := [2]f32{column.text_x + 20, gutter.y}
+		mouse_move(&f, w, text, {.Alt})
+		mouse_button(&f, w, text, true, {.Alt})
+		mouse_button(&f, w, text, false, {.Alt})
+		testing.expect_value(t, c.selection.half, want)
+		testing.expect_value(t, c.selection.partial, false)
+	}
+}
+
+@(test)
+the_label_menus_edit_row_opens_settings_on_the_quick_labels :: proc(t: ^testing.T) {
+	f: Selecting
+	defer selecting_stop(t, &f)
+	if !selecting_start(t, &f, "EditLabels") {return}
+	w, pane, ok := selecting_pane(t, &f)
+	if !ok {return}
+	c := &pane.comments
+	selecting_drag(&f, w, pane, 0, 6, 0, 10)
+	g := selecting_geometry(&f, w, pane)
+	selecting_click(&f, w, g.selection_bar.label)
+	g = selecting_geometry(&f, w, pane)
+	if !testing.expect(t, c.menu && g.selection_bar.edit.width > 0) {return}
+	testing.expect_value(t, ui.changes_hit(g, &pane.model.view, &pane.state, g.selection_bar.edit.x + 4,
+		g.selection_bar.edit.y + 4), ui.Changes_Hit{.Label_Edit, 0, 0})
+
+	// The row ends the selection and shows the setting.
+	selecting_click(&f, w, g.selection_bar.edit)
+	testing.expect_value(t, c.menu, false)
+	testing.expect_value(t, c.selection.active, false)
+	testing.expect_value(t, len(c.items), 0)
+	row := ui.editor_row(&w.editor)
+	if !testing.expect(t, row != nil, "Settings has a row selected") {return}
+	// The quick labels rows are the rows named label.N; the reveal lands on the first.
+	testing.expect(t, strings.has_prefix(row.key, "label."), row.key)
+}
+
+@(test)
+the_note_editor_and_the_saved_card_answer_the_pointer_and_the_keyboard :: proc(t: ^testing.T) {
+	f: Selecting
+	defer selecting_stop(t, &f)
+	if !selecting_start(t, &f, "Cards") {return}
+	w, pane, ok := selecting_pane(t, &f)
+	if !ok {return}
+	c := &pane.comments
+	view := &pane.model.view
+
+	// Enter opens the editor under the selection's last line, at the code column, and the toolbar steps aside.
+	selecting_drag(&f, w, pane, 2, 0, 2, 5)
+	app.handle_event(&f.state, input.Key_Event{window = w.id, key = .Enter, pressed = true})
+	app.handle_event(&f.state, input.Key_Event{window = w.id, key = .Enter})
+	if !testing.expect_value(t, c.editing, 0) {return}
+	app.handle_event(&f.state, input.Text_Event{window = w.id, text = "Why"})
+	g := selecting_geometry(&f, w, pane)
+	testing.expect_value(t, g.selection_bar.bar, render.Rect{})
+	parts, shown := ui.changes_editor_of(g, view, &pane.state)
+	if !testing.expect(t, shown) {return}
+	line := ui.changes_line_rect(g, view, &pane.state, 0, 2)
+	testing.expect(t, parts.card.y > line.y + line.height)
+	testing.expect_value(t, markdown.edit_string(&c.buffer), "Why")
+	testing.expect_value(t, app.changes_tooltip(&f.state, w, parts.bold.x + 2, parts.bold.y + 2), "Bold")
+	testing.expect_value(t, app.changes_tooltip(&f.state, w, parts.suggest.x + 2, parts.suggest.y + 2),
+		"Insert the selected lines as an editable replacement")
+
+	// Bold wraps a word at the caret; Add note saves with the pointer.
+	selecting_click(&f, w, parts.bold)
+	testing.expect_value(t, markdown.edit_string(&c.buffer), "Why**bold**")
+	g = selecting_geometry(&f, w, pane)
+	parts, _ = ui.changes_editor_of(g, view, &pane.state)
+	selecting_click(&f, w, parts.save)
+	if !testing.expect_value(t, len(c.items), 1) {return}
+	testing.expect_value(t, c.items[0].text, "Why**bold**")
+	testing.expect_value(t, c.editing, -1)
+
+	// The saved card under the line has Edit and Remove, with their tooltips; Edit reopens the editor, and
+	// Cancel leaves the note alone.
+	g = selecting_geometry(&f, w, pane)
+	card, found := ui.changes_card_rect(g, view, &pane.state, 0)
+	if !testing.expect(t, found) {return}
+	edit, remove := ui.changes_note_actions(card, w.scale)
+	testing.expect_value(t, app.changes_tooltip(&f.state, w, edit.x + 2, edit.y + 2), "Edit")
+	testing.expect_value(t, app.changes_tooltip(&f.state, w, remove.x + 2, remove.y + 2), "Remove")
+	selecting_click(&f, w, edit)
+	testing.expect_value(t, c.editing, 0)
+	testing.expect_value(t, markdown.edit_string(&c.buffer), "Why**bold**")
+	g = selecting_geometry(&f, w, pane)
+	parts, _ = ui.changes_editor_of(g, view, &pane.state)
+	selecting_click(&f, w, parts.cancel)
+	testing.expect_value(t, c.editing, -1)
+	testing.expect_value(t, len(c.items), 1)
+
+	// Remove takes the note away.
+	g = selecting_geometry(&f, w, pane)
+	card, _ = ui.changes_card_rect(g, view, &pane.state, 0)
+	_, remove = ui.changes_note_actions(card, w.scale)
+	selecting_click(&f, w, remove)
+	testing.expect_value(t, len(c.items), 0)
+}
+
+@(test)
+ctrl_enter_saves_and_escape_cancels_the_editor_through_the_window :: proc(t: ^testing.T) {
+	f: Selecting
+	defer selecting_stop(t, &f)
+	if !selecting_start(t, &f, "Keys") {return}
+	w, pane, ok := selecting_pane(t, &f)
+	if !ok {return}
+	c := &pane.comments
+	selecting_drag(&f, w, pane, 2, 0, 2, 5)
+	// A typed character opens the editor with it.
+	app.handle_event(&f.state, input.Key_Event{window = w.id, key = .Q, text = "q", pressed = true})
+	app.handle_event(&f.state, input.Key_Event{window = w.id, key = .Q})
+	testing.expect_value(t, c.editing, 0)
+	testing.expect_value(t, markdown.edit_string(&c.buffer), "q")
+	ctrl_enter := input.Key_Event {
+		window    = w.id,
+		key       = .Enter,
+		modifiers = {.Control},
+		pressed   = true,
+	}
+	app.handle_event(&f.state, ctrl_enter)
+	app.handle_event(&f.state, input.Key_Event{window = w.id, key = .Enter, modifiers = {.Control}})
+	testing.expect_value(t, c.editing, -1)
+	if !testing.expect_value(t, len(c.items), 1) {return}
+	testing.expect_value(t, c.items[0].text, "q")
+	// Escape drops a new note's text.
+	selecting_drag(&f, w, pane, 2, 0, 2, 5)
+	app.handle_event(&f.state, input.Key_Event{window = w.id, key = .Enter, pressed = true})
+	app.handle_event(&f.state, input.Key_Event{window = w.id, key = .Enter})
+	app.handle_event(&f.state, input.Text_Event{window = w.id, text = "gone"})
+	app.handle_event(&f.state, input.Key_Event{window = w.id, key = .Escape, pressed = true})
+	app.handle_event(&f.state, input.Key_Event{window = w.id, key = .Escape})
+	testing.expect_value(t, c.editing, -1)
+	testing.expect_value(t, len(c.items), 1)
 }

@@ -12,11 +12,9 @@ import "core:strconv"
 CHANGES_STATUS_WIDTH :: f32(16)
 @(private = "file")
 CHANGES_SEND_BAR_HEIGHT :: f32(40)
-// The Send, Copy, Discard and Comment buttons share one width, so hit tests need no text metrics.
+// The Send, Copy and Discard buttons share one width, so hit tests need no text metrics.
 @(private = "file")
 CHANGES_ACTION_WIDTH :: f32(72)
-@(private = "file")
-CHANGES_COMMENT_HINT :: "Enter to save · Esc to cancel"
 @(private = "file")
 CHANGES_DETACHED_LABEL :: "Not in this diff"
 
@@ -215,7 +213,7 @@ line_row :: proc(rows: ^Changes_Rows, file, line: int) -> int {
 }
 
 // The cells of a side-by-side row, either side of a one-pixel divider.
-@(private = "file")
+@(private)
 row_halves :: proc(row: render.Rect) -> (left, right, divider: render.Rect) {
 	mid := math.round(row.x + row.width / 2)
 	left = {row.x, row.y, max(0, mid - row.x), row.height}
@@ -241,7 +239,7 @@ changes_file_at :: proc(rows: ^Changes_Rows, y: int) -> int {
 
 // Whether comment `i` shows below its lines rather than in the "Not in this diff" group. Under a notice
 // no lines show, so every comment is in the group.
-@(private = "file")
+@(private)
 comment_attached :: proc(view: ^Changes_View, i: int) -> bool {
 	c := view.comments[i]
 	return view.notice == .None && !c.detached && c.file >= 0 && c.file < len(view.files)
@@ -276,14 +274,22 @@ range_row :: proc(rows: ^Changes_Rows, file, first, last: int) -> int {
 	return row
 }
 
-@(private = "file")
-card_margin :: proc(rows: ^Changes_Rows) -> int {return int(math.round(SPACE_1 * rows.scale))}
-
-// A card's height with the gap above and below it; zero for a card that is not shown.
+// A card's height with the gap above it, where its notch points at its lines, and below it; zero for a card
+// that is not shown.
 @(private = "file")
 card_slot :: proc(rows: ^Changes_Rows, card: int) -> int {
 	if card >= len(rows.cards) || rows.cards[card] <= 0 {return 0}
-	return rows.cards[card] + 2 * card_margin(rows)
+	return rows.cards[card] + card_gap_above(rows) + card_gap_below(rows)
+}
+
+@(private = "file")
+card_gap_above :: proc(rows: ^Changes_Rows) -> int {
+	return int(math.round(CHANGES_CARD_GAP_ABOVE * rows.scale))
+}
+
+@(private = "file")
+card_gap_below :: proc(rows: ^Changes_Rows) -> int {
+	return int(math.round(CHANGES_CARD_GAP_BELOW * rows.scale))
 }
 
 // The height of the cards below rows `low` through `high` of `file`.
@@ -298,8 +304,8 @@ cards_through :: proc(rows: ^Changes_Rows, view: ^Changes_View, file, low, high:
 	return total
 }
 
-// What the cards' layout depends on besides the diff: the notes, which one is edited and the selection,
-// which the Comment button and a new comment go below. Part of the rows cache key.
+// What the cards' layout depends on besides the diff: the notes, which one is edited, its text and tag, and
+// the selection, which a new note goes below. Part of the rows cache key.
 @(private)
 changes_comments_key :: proc(view: ^Changes_View) -> u64 {
 	mix :: proc(hash, value: u64) -> u64 {return (hash ~ value) * 1099511628211}
@@ -310,6 +316,9 @@ changes_comments_key :: proc(view: ^Changes_View) -> u64 {
 	}
 	hash := u64(14695981039346656037)
 	hash = mix(hash, u64(view.editing + 1))
+	if view.editing >= 0 && view.buffer != nil {
+		hash = mix(mix(mix(hash, u64(view.draft)), view.buffer.revision), u64(len(view.buffer.text)))
+	}
 	hash = mix(hash, u64(len(view.comments)))
 	for c in view.comments {
 		hash = mix(mix(mix(hash, u64(c.file + 1)), u64(c.first + 1)), u64(c.last + 1))
@@ -325,100 +334,28 @@ changes_comments_key :: proc(view: ^Changes_View) -> u64 {
 	return hash
 }
 
-@(private = "file")
-card_delete_size :: proc(scale: f32) -> f32 {return HEIGHT_COMPACT * scale}
-
-// The width a comment's text wraps at in a card `card_width` wide: the inset, then the text, then the
-// delete button.
-@(private = "file")
-card_text_width :: proc(card_width, scale: f32) -> f32 {
-	return max(1, card_width - SPACE_2 * scale - 2 * SPACE_1 * scale - card_delete_size(scale))
-}
-
-@(private = "file")
-card_delete_rect :: proc(card: render.Rect, scale: f32) -> render.Rect {
-	size := card_delete_size(scale)
-	return {card.x + card.width - SPACE_1 * scale - size, card.y + SPACE_1 * scale, size, size}
-}
-
-// How far a card sits in from the band's edges, and the padding inside it that its text and its editor
-// start after.
-@(private = "file")
-card_inset :: proc(scale: f32) -> f32 {return 2 * SPACE_2 * scale}
-
-@(private = "file")
-card_pad :: proc(scale: f32) -> f32 {return SPACE_2 * scale}
-
-// A card's width in a diff area `diff_width` wide.
-@(private = "file")
-card_width :: proc(diff_width, scale: f32) -> f32 {return max(0, diff_width - 2 * card_inset(scale))}
-
-// The geometry a card's measuring and painting share, so a card is painted at the height it was measured:
-// the padding inside a card `width` wide and the width its text wraps at.
-@(private = "file")
-Card_Layout :: struct {
-	pad, text_width: f32,
-}
-
-@(private = "file")
-card_layout :: proc(width, scale: f32) -> Card_Layout {
-	return {pad = card_pad(scale), text_width = card_text_width(width, scale)}
-}
-
-// The lines a comment's text wraps into at `width`.
-@(private = "file")
-card_wrap :: proc(body: ^Text, s: string, width: f32) -> Wrap_Lines {
-	return {text = body, s = s, width = width, last_space = -1}
-}
-
-@(private = "file")
-editor_field_rect :: proc(card: render.Rect, scale: f32) -> render.Rect {
-	pad := card_pad(scale)
-	return {card.x + pad, card.y + pad, max(0, card.width - 2 * pad), HEIGHT_STANDARD * scale}
-}
-
-// The height of a card in `layout`: the editor's, or the comment's text wrapped, at least as tall as its
-// delete button.
-@(private = "file")
-card_height :: proc(
-	layout: Card_Layout, body, detail: ^Text, text: string, editing: bool, scale: f32,
-) -> int {
-	if editing {
-		return int(math.round(2 * layout.pad + HEIGHT_STANDARD * scale + SPACE_1 * scale + detail.line_height))
-	}
-	lines := card_wrap(body, text, layout.text_width)
-	count := 0
-	for {
-		_, _, ok := wrap_next(&lines)
-		if !ok {break}
-		count += 1
-	}
-	least := card_delete_size(scale) + 2 * SPACE_1 * scale
-	return int(math.round(max(least, 2 * layout.pad + f32(count) * body.line_height)))
-}
-
 // Measures each card at the cached width, for changes_layout: comment i's card, then the new-comment
 // editor's (zero when it is closed). The edited comment's card is the editor. Also finds the row each
 // card and the selection end on.
 @(private)
-changes_cards_measure :: proc(rows: ^Changes_Rows, view: ^Changes_View, text: ^Text) {
+changes_cards_measure :: proc(rows: ^Changes_Rows, view: ^Changes_View, text, mono: ^Text) {
 	clear(&rows.cards)
 	t := &rows.pairs
 	clear(&t.card_rows)
-	s := rows.scale
-	body := text_styled(text, .Body)
-	detail := text_styled(text, .Detail)
-	layout := card_layout(card_width(rows.width, s), s)
 	selection := view.selection
 	t.selection_row = -1
 	if selection.active {t.selection_row = range_row(rows, selection.file, selection.first, selection.last)}
+	rows.tag_width = view.editing >= 0 ? editor_tag_width(view, text, rows.scale) : 0
 	for c, i in view.comments {
 		append(&t.card_rows, comment_attached(view, i) ? range_row(rows, c.file, c.first, c.last) : -1)
-		editing := view.editing == i
-		append(&rows.cards, card_height(layout, &body, &detail, c.text, editing, s))
+		if view.editing == i {
+			append(&rows.cards, editor_height(rows, view, text, c.file))
+		} else {
+			append(&rows.cards, note_height(rows, view, c, text, mono))
+		}
 	}
 	writing := writing_new(view)
-	append(&rows.cards, writing ? card_height(layout, &body, &detail, "", true, s) : 0)
+	append(&rows.cards, writing ? editor_height(rows, view, text, view.selection.file) : 0)
 	append(&t.card_rows, writing ? t.selection_row : -1)
 }
 
@@ -552,7 +489,7 @@ card_top :: proc(rows: ^Changes_Rows, view: ^Changes_View, card: int) -> (y: int
 		for i in 0 ..< card {
 			if !comment_attached(view, i) {y += card_slot(rows, i)}
 		}
-		return y + card_margin(rows), true
+		return y + card_gap_above(rows), true
 	}
 	row := card_row(rows, card)
 	y = row_top(rows, view, file, row) or_return
@@ -560,11 +497,11 @@ card_top :: proc(rows: ^Changes_Rows, view: ^Changes_View, card: int) -> (y: int
 	for i in 0 ..< card {
 		if card_file(view, i) == file && card_row(rows, i) == row {y += card_slot(rows, i)}
 	}
-	return y + card_margin(rows), true
+	return y + card_gap_above(rows), true
 }
 
-@(private = "file")
-card_rect :: proc(
+// Where card `card` is in the window, whatever the diff area shows of it; false when it is not in the stream.
+changes_card_rect :: proc(
 	g: Changes_Geometry, view: ^Changes_View, state: ^Changes_State, card: int,
 ) -> (
 	rect: render.Rect,
@@ -574,8 +511,8 @@ card_rect :: proc(
 	if !rows.valid {return}
 	top := card_top(rows, view, card) or_return
 	y := g.diff.y - f32(state.diff_scroll) + f32(top)
-	inset := card_inset(g.scale)
-	return {g.diff.x + inset, y, card_width(g.diff.width, g.scale), f32(rows.cards[card])}, true
+	span := card_span(rows, view, card_file(view, card))
+	return {g.diff.x + span.x, y, span.width, f32(rows.cards[card])}, true
 }
 
 // `r` when any of it is in the diff area's height, else zero.
@@ -586,7 +523,7 @@ diff_visible :: proc(g: Changes_Geometry, r: render.Rect) -> render.Rect {
 }
 
 // The band every row of the stream fills: the diff area less its padding. The caller sets its y and height.
-@(private = "file")
+@(private)
 diff_band :: proc(g: Changes_Geometry) -> render.Rect {
 	pad := SPACE_2 * g.scale
 	return {g.diff.x + pad, 0, max(0, g.diff.width - 2 * pad), 0}
@@ -696,28 +633,6 @@ changes_sticky_header :: proc(
 	return at, {g.diff.x, y, g.diff.width, f32(rows.header)}
 }
 
-// The Comment button at the right end of the lowest row holding a selected line, while nothing is being
-// written; side by side, at the right end of that row's selected cell, the right one when both are. Zero
-// when it is not on screen.
-changes_comment_button_rect :: proc(
-	g: Changes_Geometry, view: ^Changes_View, state: ^Changes_State,
-) -> render.Rect {
-	s := view.selection
-	rows := &state.rows
-	if !s.active || view.editing >= 0 || !rows.valid || view.notice != .None {return {}}
-	row := rows.pairs.selection_row
-	top, ok := row_top(rows, view, s.file, row)
-	if !ok {return {}}
-	cell := row_rect(g, state, top)
-	if rows.pairs.side_by_side {
-		left, right, _ := row_halves(cell)
-		cell = line_selected(view, s.file, int(row_pair(rows, s.file, row).right)) ? right : left
-	}
-	if diff_visible(g, cell).width <= 0 {return {}}
-	width := min(CHANGES_ACTION_WIDTH * g.scale, cell.width)
-	return {cell.x + cell.width - SPACE_1 * g.scale - width, cell.y, width, cell.height}
-}
-
 // The select button of a hunk header row, at its right end.
 @(private = "file")
 hunk_select_rect :: proc(header: render.Rect, scale: f32) -> render.Rect {
@@ -743,30 +658,15 @@ changes_send_rects :: proc(g: Changes_Geometry, view: ^Changes_View) -> (send, c
 	return
 }
 
-// The editor of the comment being written, inside its card; false when none is open or it is off the
-// stream.
-changes_editor_box :: proc(
-	g: Changes_Geometry, view: ^Changes_View, state: ^Changes_State, text: ^Text,
-) -> (
-	box: Field_Box,
-	shown: bool,
-) {
-	if view.editing < 0 || view.editor == nil {return}
-	card := card_rect(g, view, state, view.editing) or_return
-	return field_box_standard(view.editor, text, editor_field_rect(card, g.scale), g.scale), true
-}
-
-// The comment card at the point: its delete button, the editor it holds, or the card itself.
+// The comment card at the point: the editor's parts, a saved card's buttons, or the card itself.
 @(private = "file")
 comment_hit :: proc(
 	g: Changes_Geometry, view: ^Changes_View, state: ^Changes_State, x, y: f32,
 ) -> Changes_Hit {
 	for card in 0 ..= len(view.comments) {
-		rect, shown := card_rect(g, view, state, card)
+		rect, shown := changes_card_rect(g, view, state, card)
 		if !shown || !render.rect_contains(rect, x, y) {continue}
-		if card == view.editing {return {.Comment_Editor, card, 0}}
-		if render.rect_contains(card_delete_rect(rect, g.scale), x, y) {return {.Comment_Delete, card, 0}}
-		return {.Comment_Card, card, 0}
+		return card_hit(g, view, state, card, rect, x, y)
 	}
 	return {}
 }
@@ -788,12 +688,8 @@ changes_diff_hit :: proc(
 	if view.notice != .None {return comment_hit(g, view, state, x, y)}
 	rows := &state.rows
 	if !rows.valid {return {.Diff, -1, 0}}
-	s := view.selection
 	if sticky, rect := changes_sticky_header(state, view, g); sticky >= 0 {
 		if render.rect_contains(rect, x, y) {return {.Sticky_Header, sticky, 0}}
-	}
-	if render.rect_contains(changes_comment_button_rect(g, view, state), x, y) {
-		return {.Comment_Button, s.file, max(s.first, s.last)}
 	}
 	if hit := comment_hit(g, view, state, x, y); hit.part != .None {return hit}
 	at := int(y - g.diff.y) + state.diff_scroll
@@ -938,7 +834,7 @@ status_mark :: proc(status: tr.File_Status, theme: Theme) -> (mark: string, colo
 	return "M", color
 }
 
-@(private = "file")
+@(private)
 Diff_Paint :: struct {
 	list:                 ^render.Draw_List,
 	mono, small, strong, body: ^Text,
@@ -999,7 +895,7 @@ Changes_Inks :: struct {
 }
 
 // `top` composited over `bottom` by its alpha, opaque.
-@(private = "file")
+@(private)
 colour_over :: proc(top, bottom: render.Color) -> render.Color {
 	a := top.a
 	return {top.r * a + bottom.r * (1 - a), top.g * a + bottom.g * (1 - a), top.b * a + bottom.b * (1 - a), 1}
@@ -1068,17 +964,26 @@ line_spans :: proc(view: ^Changes_View, file, line: int) -> (spans: []syntax.Spa
 	return lines[line], true
 }
 
-// Whether flat line `line` of `file` is in the selection.
+// Whether a selection or note made in `made` shows on a line of `kind` drawn in `cell`: the whole row of the
+// unified layout (`Both`) or one cell of a side-by-side row. A context line side by side is drawn in both
+// cells, and only the one it was made in marks it.
 @(private = "file")
-line_selected :: proc(view: ^Changes_View, file, line: int) -> bool {
+in_half :: proc(made: Changes_Half, kind: tr.Line_Kind, cell: Changes_Half) -> bool {
+	return cell == .Both || kind != .Context || made == .Both || made == cell
+}
+
+// Whether flat line `line` of `file`, drawn in `cell`, is in the selection.
+@(private = "file")
+line_selected :: proc(view: ^Changes_View, file, line: int, kind: tr.Line_Kind, cell: Changes_Half) -> bool {
 	s := view.selection
-	return s.active && s.file == file && line >= min(s.first, s.last) && line <= max(s.first, s.last)
+	if !s.active || s.file != file || line < min(s.first, s.last) || line > max(s.first, s.last) {return false}
+	return in_half(s.half, kind, cell)
 }
 
 // Whether flat line `line` of `file` is picked whole: in a selection of lines rather than of text.
 @(private = "file")
-line_picked :: proc(view: ^Changes_View, file, line: int) -> bool {
-	return line_selected(view, file, line) && !view.selection.partial
+line_picked :: proc(view: ^Changes_View, file, line: int, kind: tr.Line_Kind, cell: Changes_Half) -> bool {
+	return line_selected(view, file, line, kind, cell) && !view.selection.partial
 }
 
 // Whether the pointer is on flat line `line` of `file` while a press picks whole lines.
@@ -1090,10 +995,11 @@ line_hovered :: proc(p: ^Diff_Paint, file, line: int) -> bool {
 }
 
 // The note whose card the pointer is on, -1 for none: its marks in the code draw stronger.
-@(private = "file")
+@(private)
 hot_note :: proc(state: ^Changes_State) -> int {
 	#partial switch state.hover.part {
-	case .Comment_Card, .Comment_Delete:
+	case .Comment_Card, .Comment_Edit, .Comment_Remove, .Comment_Editor, .Editor_Untag, .Editor_Bold,
+	     .Editor_Code, .Editor_Block, .Editor_Suggest, .Editor_Cancel, .Editor_Save:
 		return state.hover.index
 	}
 	return -1
@@ -1127,15 +1033,19 @@ Line_Marks :: struct {
 	segs:      [CHANGES_LINE_NOTES + 1]Code_Run,
 }
 
-@(private = "file")
+@(private)
 colour_alpha :: proc(c: render.Color, alpha: f32) -> render.Color {
 	return {c.r, c.g, c.b, c.a * alpha}
 }
 
-// Collects the marks of flat line `line` of `file`, whose text is `length` bytes. Only attached notes whose
-// lines reach it count, and the one being edited draws none.
+// Collects the marks of flat line `line` of `file`, which is a `kind` line drawn in `cell` and whose text is
+// `length` bytes. Only attached notes whose lines reach it count, and the one being edited draws none.
 @(private = "file")
-line_marks :: proc(p: ^Diff_Paint, file, line, length: int) -> (marks: Line_Marks) {
+line_marks :: proc(
+	p: ^Diff_Paint, file, line, length: int, kind: tr.Line_Kind, cell: Changes_Half,
+) -> (
+	marks: Line_Marks,
+) {
 	view, theme := p.view, p.theme
 	add :: proc(marks: ^Line_Marks, seg: Code_Run) {
 		if marks.count < len(marks.segs) {
@@ -1143,7 +1053,7 @@ line_marks :: proc(p: ^Diff_Paint, file, line, length: int) -> (marks: Line_Mark
 			marks.count += 1
 		}
 	}
-	if s := view.selection; line_selected(view, file, line) {
+	if s := view.selection; line_selected(view, file, line, kind, cell) {
 		seg := Code_Run {
 			end      = length,
 			selected = true,
@@ -1159,6 +1069,7 @@ line_marks :: proc(p: ^Diff_Paint, file, line, length: int) -> (marks: Line_Mark
 	hot := hot_note(p.state)
 	for c, i in view.comments {
 		if c.file != file || line < c.first || line > c.last || i == view.editing {continue}
+		if !in_half(c.half, kind, cell) {continue}
 		if !comment_attached(view, i) {continue}
 		colour := changes_note_color(theme, c)
 		strong := i == hot
@@ -1304,8 +1215,8 @@ paint_line :: proc(
 		draw_rect(p.list, {rect = row, color = t.diff_removed})
 	case .Context, .No_Newline:
 	}
-	picked := line_picked(p.view, file, flat)
-	marks := line_marks(p, file, flat, len(line.text))
+	picked := line_picked(p.view, file, flat, line.kind, .Both)
+	marks := line_marks(p, file, flat, len(line.text), line.kind, .Both)
 	marks_draw(p, marks, row)
 	row_pick_draw(p, file, flat, picked, row)
 	column := code_column(row, p.number_width, p.digit, p.scale, true)
@@ -1342,8 +1253,9 @@ paint_cell :: proc(
 	case .Removed:
 		draw_rect(p.list, {rect = cell, color = t.diff_removed})
 	}
-	picked := line_picked(p.view, file, line)
-	marks := line_marks(p, file, line, len(d.text))
+	half := old ? Changes_Half.Left : Changes_Half.Right
+	picked := line_picked(p.view, file, line, d.kind, half)
+	marks := line_marks(p, file, line, len(d.text), d.kind, half)
 	marks_draw(p, marks, cell)
 	row_pick_draw(p, file, line, picked, cell)
 	baseline := baseline_in(cell.y, cell.height, p.mono)
@@ -1504,55 +1416,15 @@ paint_file :: proc(p: ^Diff_Paint, rows: ^Changes_Rows, i: int, y: f32) -> rende
 	return .Ok
 }
 
-// A comment's card: its text with a delete button, or the editor while it is being written.
+// A comment's card: its note, or the editor while it is being written.
 @(private = "file")
 paint_card :: proc(p: ^Diff_Paint, rect: render.Rect, card: int) -> render.Build_Status {
-	t, s := p.theme, p.scale
-	view := p.view
-	radius := RADIUS_CONTROL * s
-	draw_rect(p.list, {rect = rect, color = t.surface, radius = radius})
-	draw_rect(p.list, {rect = rect, color = t.border, radius = radius, stroke = s})
-	if card == view.editing {
-		if view.editor == nil {return .Ok}
-		field := editor_field_rect(rect, s)
-		box := field_box_standard(view.editor, p.body, field, s)
-		box_draw(p.list, field, t, true, s)
-		if r := field_box_draw(box, p.list, t, field_box_baseline(box), true, "Write a comment"); r != .Ok {
-			return r
-		}
-		baseline := field.y + field.height + SPACE_1 * s + p.small.ascent
-		hint := CHANGES_COMMENT_HINT
-		return draw_fading_text(p.small, p.list, hint, field.x, baseline, t.muted, field.width)
-	}
-	if card >= len(view.comments) {return .Ok}
-	hover, press := changes_lit(p.state, {.Comment_Delete, card, 0})
-	delete := card_delete_rect(rect, s)
-	if icon_button_draw(
-		p.list, t, delete, .Close, hover, press, s, p.pointer, ICON_INDICATOR, RADIUS_CONTROL,
-	) != .None {return .Ok}
-	note := view.comments[card]
-	// A label or a deletion with nothing written shows what it is.
-	text, ink := note.text, t.text
-	if text == "" {
-		text, ink = note.kind == .Label ? note.label_name : "Delete", changes_note_color(t, note)
-	}
-	layout := card_layout(rect.width, s)
-	lines := card_wrap(p.body, text, layout.text_width)
-	x := rect.x + layout.pad
-	y := rect.y + layout.pad
-	for {
-		start, end, ok := wrap_next(&lines)
-		if !ok || y >= p.bottom {break}
-		if y + p.body.line_height > p.top {
-			line := text[start:end]
-			if r := draw_text(p.body, p.list, line, x, y + p.body.ascent, ink); r != .Ok {return r}
-		}
-		y += p.body.line_height
-	}
-	return .Ok
+	if card == p.view.editing {return paint_editor_card(p, rect, card)}
+	if card >= len(p.view.comments) {return .Ok}
+	return paint_note_card(p, rect, card)
 }
 
-// The cards, the "Not in this diff" heading and the Comment button, over the rows they belong to.
+// The cards and the "Not in this diff" heading, over the rows they belong to.
 @(private = "file")
 paint_comments :: proc(p: ^Diff_Paint, g: Changes_Geometry, rows: ^Changes_Rows) -> render.Build_Status {
 	view, state := p.view, p.state
@@ -1566,12 +1438,9 @@ paint_comments :: proc(p: ^Diff_Paint, g: Changes_Geometry, rows: ^Changes_Rows)
 		}
 	}
 	for card in 0 ..= len(view.comments) {
-		rect, shown := card_rect(g, view, state, card)
+		rect, shown := changes_card_rect(g, view, state, card)
 		if !shown || rect.y >= p.bottom || rect.y + rect.height <= p.top {continue}
 		if r := paint_card(p, rect, card); r != .Ok {return r}
-	}
-	if button := changes_comment_button_rect(g, view, state); button.width > 0 {
-		return text_button_draw(p.list, p.small, p.theme, button, "Comment", false, p.scale, p.pointer)
 	}
 	return .Ok
 }
@@ -1670,7 +1539,7 @@ changes_send_bar_draw :: proc(
 	send, copy, discard := changes_send_rects(g, view)
 	body := text_styled(text, .Body)
 	buf: [256]u8
-	noun := view.send.count == 1 ? "comment" : "comments"
+	noun := view.send.count == 1 ? "note" : "notes"
 	target := clip_bytes(view.send.target, 160)
 	count := view.send.count
 	label := fmt.bprintf(buf[:], "%d %s", count, noun)

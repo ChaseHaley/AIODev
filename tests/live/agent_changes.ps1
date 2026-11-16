@@ -848,8 +848,8 @@ try {
         throw "side by side expected beta left of BETA on one row, observed $($old -join ',') and $($new -join ',')"
     }
     Write-Output 'PASS the removed and added lines share a row, old on the left'
-    Click-Rect $s 'changes.line.2.2.rect'
-    Await-State @{ 'changes.selection' = '2:2-2' } 'a click on a right-half line selects the new line' | Out-Null
+    Click-Rect $s 'changes.line.2.2.rect' --mods Alt
+    Await-State @{ 'changes.selection' = '2:2-2'; 'changes.selection_mode' = 'lines' } 'an Alt+click on a right-half line selects the new line' | Out-Null
     # Back to unified, with live.py at the top again for the comments below.
     $s = State
     Open-Files | Out-Null
@@ -985,34 +985,79 @@ try {
     Aio command settings.reload | Out-Null
     Await-State @{ 'theme.name' = $theme } 'the original theme returns' | Out-Null
 
-    # Comments: select two lines, write a comment, copy it, then send it to the reviewer's pane.
+    # Notes: drag over text and label it with Alt+2, pick lines with Alt and delete them with Del, type to write
+    # a comment with a suggestion from the tool and save it with Ctrl+Enter, edit one note, remove one, copy
+    # the message, then send it to the reviewer's pane.
     Await-File $reviewReady 'the reviewer accepts pasted text' | Out-Null
     # The theme step's settings reload left a notice over the send bar's Copy button.
     $s = Await-NoNotices 'no notice covers the send bar'
-    $comment = 'Please rename greet to welcome'
-    Click-Rect $s 'changes.line.0.1.rect'
-    $s = Await-State @{ 'changes.selection' = '0:1-1' } 'a click on a diff line selects it'
-    Click-Rect $s 'changes.line.0.2.rect' --mods Shift
-    $s = Await-State @{ 'changes.selection' = '0:1-2' } 'Shift+click extends the selection to the next line'
-    Click-Rect $s 'changes.comment_button_rect'
-    Await-State @{ 'changes.editing' = 0; 'changes.comments' = 0 } 'the Comment button opens the editor' | Out-Null
-    Aio type $comment | Out-Null
+    # The pixel of byte `$col` of flat line `$line` of file 0, a pixel past the boundary, and the row's middle.
+    function Point($s, $line, $col) {
+        $r = Rect $s "changes.line.0.$line.rect"
+        $x = [double]$s["changes.line.0.$line.text_x"] + $col * [double]$s['changes.mono_advance'] + 1
+        return "$([int]$x),$([int]($r[1]+$r[3]/2))"
+    }
+    # Text: "greet" of `def greet(name):`, then Alt+2 applies the second quick label.
+    Aio mouse drag (Point $s 1 4) (Point $s 1 9) --px | Out-Null
+    $s = Await-State @{ 'changes.selection_mode' = 'text'; 'changes.toolbar_open' = 'true' } 'a drag over text selects it'
+    Equal $s['changes.selection_text'] 'greet' 'the selected text'
+    # The toolbar sits just above the first selected line: its bottom edge is 6 DIP over the line's top.
+    $bar = Rect $s 'changes.toolbar_rect'
+    $line = Rect $s 'changes.line.0.1.rect'
+    $gap = $line[1] - ($bar[1] + $bar[3])
+    $want = 6 * [double]$s['window.scale']
+    if ([math]::Abs($gap - $want) -gt 1.5) { throw "the toolbar sits $gap px over the line, expected $want" }
+    Write-Output 'PASS the toolbar sits 6 DIP above the first selected line'
+    Aio capture --out "$data/agent-toolbar.png" | Out-Null
+    Aio key Alt+2 | Out-Null
+    $s = Await-State @{ 'changes.comments' = 1; 'changes.toolbar_open' = 'false' } 'Alt+2 adds the second label'
+    Equal $s['changes.comment.0.kind'] 'Label' 'the note is a label'
+    Equal $s['changes.comment.0.partial'] 'true' 'on part of its line'
+    # Lines: Alt picks whole lines, and Del asks for their deletion.
+    Aio mouse drag (Point $s 3 0) (Point $s 3 4) --px --mods Alt | Out-Null
+    $s = Await-State @{ 'changes.selection_mode' = 'lines'; 'changes.toolbar_open' = 'true' } 'Alt picks whole lines'
+    Aio key Delete | Out-Null
+    $s = Await-State @{ 'changes.comments' = 2 } 'Delete adds a deletion'
+    Equal $s['changes.comment.1.kind'] 'Delete' 'the note is a deletion'
+    Equal $s['changes.comment.1.partial'] 'false' 'of whole lines'
+    # A comment: select "hello", type a letter to start it, add a suggestion with the tool, save with Ctrl+Enter.
+    $comment = 'please rename greet to welcome'
+    Aio mouse drag (Point $s 2 12) (Point $s 2 17) --px | Out-Null
+    $s = Await-State @{ 'changes.selection_text' = 'hello'; 'changes.toolbar_open' = 'true' } 'a drag selects "hello"'
+    Aio key p | Out-Null
+    $s = Await-State @{ 'changes.editing' = 2 } 'a typed letter starts a comment'
+    Aio type 'lease rename greet to welcome' | Out-Null
+    $s = Await-State @{ 'changes.editor_text' = $comment } 'the text goes into the editor'
+    Click-Rect $s 'changes.editor.suggest_rect'
+    $s = Await-Like 'changes.editor_text' '*suggestion*return*hello*name*' 'Suggest change inserts the selected lines'
+    Aio capture --out "$data/agent-editor.png" | Out-Null
+    Aio key Ctrl+Enter | Out-Null
+    $s = Await-State @{ 'changes.comments' = 3; 'changes.editing' = -1; 'changes.comment.2.kind' = 'Comment' } 'Ctrl+Enter saves the comment'
+    Like $s['changes.comment.2.text'] "$comment*suggestion*" 'with its suggestion'
+    Aio capture --out "$data/agent-notes.png" | Out-Null
+    # Edit the comment, then remove the deletion.
+    Click-Rect $s 'changes.comment.2.edit_rect'
+    Await-State @{ 'changes.editing' = 2 } 'Edit opens the note' | Out-Null
+    Aio key Ctrl+End | Out-Null
     Aio key Enter | Out-Null
-    $s = Await-State @{
-        'changes.comments' = 1; 'changes.editing' = -1; 'changes.comment.0.path' = 'live.py'
-        'changes.comment.0.first' = 2; 'changes.comment.0.last' = 3; 'changes.comment.0.text' = $comment
-        'changes.comment.0.detached' = 'false'
-    } 'Enter saves the comment on lines 2-3'
-    Aio capture --out "$data/agent-comment.png" | Out-Null
+    Aio type 'Thanks.' | Out-Null
+    Aio key Ctrl+Enter | Out-Null
+    $s = Await-State @{ 'changes.comments' = 3; 'changes.editing' = -1 } 'Ctrl+Enter saves the edit'
+    Like $s['changes.comment.2.text'] '*Thanks.' 'the edited text is saved'
+    Click-Rect $s 'changes.comment.1.remove_rect'
+    $s = Await-State @{ 'changes.comments' = 2 } 'Remove takes the deletion away' | Out-Null
+    $s = State
     Click-Rect $s 'changes.copy_rect'
-    $s = Await-Like 'os.clipboard' "*live.py, lines 2-3*$comment*" 'Copy puts the comments on the clipboard'
-    Equal $s['changes.comments'] 1 'Copy keeps the comments'
+    $s = Await-Like 'os.clipboard' '*live.py, line 2, at*greet*Verify this*' 'Copy puts the notes on the clipboard'
+    Like $s['os.clipboard'] '*Suggested replacement for line 3*' 'the message carries the suggestion'
+    Like $s['os.clipboard'] '*Thanks.*' 'and the edited comment'
+    Equal $s['changes.comments'] 2 'Copy keeps the notes'
     $s = Await-State @{ 'changes.send.can_send' = 'true' } 'Send is offered while the reviewer takes pasted text'
     Click-Rect $s 'changes.send_rect'
-    Await-State @{ 'changes.comments' = 0 } 'Send clears the comments' | Out-Null
+    Await-State @{ 'changes.comments' = 0 } 'Send clears the notes' | Out-Null
     Focus-Pane $reviewPane
-    Aio wait text "ECHO:$comment" | Out-Null
-    Write-Output "PASS the comment reaches the reviewer's prompt"
+    Aio wait text 'ECHO:Review comments on your changes:' | Out-Null
+    Write-Output "PASS the notes reach the reviewer's prompt"
 
     # The default view and filter settings: a pane opened from an agent pane takes them.
     $ini = Get-Content -LiteralPath "$data/settings.ini" -Raw
@@ -1035,14 +1080,12 @@ try {
     Aio wait text 'REVIEWER_DONE' | Out-Null
     Focus-Pane $reviewChanges
     $s = State
-    Click-Rect $s 'changes.line.0.0.rect'
-    $s = Await-State @{ 'changes.selection' = '0:0-0' } 'a click selects the first line again'
-    Click-Rect $s 'changes.line.0.3.rect' --mods Shift
-    Await-State @{ 'changes.selection' = '0:0-3' } 'Shift+click extends the selection to the last line' | Out-Null
+    Aio mouse drag (Point $s 0 0) (Point $s 3 0) --px --mods Alt | Out-Null
+    Await-State @{ 'changes.selection' = '0:0-3'; 'changes.selection_mode' = 'lines' } 'Alt picks the first to the last line' | Out-Null
     Aio key Enter | Out-Null
-    Await-State @{ 'changes.editing' = 0 } 'Enter with a selection opens the editor' | Out-Null
+    Await-State @{ 'changes.editing' = 0 } 'Enter with the toolbar shown opens the editor' | Out-Null
     Aio type 'Second look' | Out-Null
-    Aio key Enter | Out-Null
+    Aio key Ctrl+Enter | Out-Null
     Await-State @{ 'changes.comments' = 1; 'changes.editing' = -1 } 'a second comment is saved' | Out-Null
     # The bracketed paste mode goes off as the reviewer exits, before the process poll sees it gone, so the
     # reason is awaited too.
@@ -1051,6 +1094,7 @@ try {
     } 'Send is refused once the reviewer exits to its shell' 20
     # Copy and Send leave notices over the send bar too.
     $s = Await-NoNotices 'no notice covers Discard'
+    Aio mouse move (Middle (Rect $s 'changes.discard_rect')) --px | Out-Null
     Click-Rect $s 'changes.discard_rect'
     Await-State @{ 'changes.comments' = 0 } 'Discard clears the comments' | Out-Null
 
