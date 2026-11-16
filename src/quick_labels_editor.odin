@@ -48,6 +48,23 @@ editor_labels_edit :: proc(
 	return result.status == .Applied
 }
 
+// A label action (Remove, Move, Add or Reset) with the field the user just left, which `kept` holds. Only
+// a label field's text goes into the action, and only when it is a value the labels can hold: any other
+// kept field, and an invalid one, stay in `kept` for editor_kept_save, so they cannot block the action or
+// be lost by it.
+@(private)
+editor_labels_action :: proc(app: ^App, w: ^Window, edit: ui.Label_Edit, kept: ^ui.Editor_Kept) {
+	p := &w.editor
+	pending: ui.Editor_Kept
+	if ui.editor_kept_is_label(p, kept^) {
+		_, _, problem := ui.editor_quick_labels_value(p, {kind = .Field, key = kept.key, value = kept.value})
+		if problem == "" {pending = kept^}
+	}
+	if editor_labels_edit(app, w, edit, pending = pending) && pending.key != "" {
+		ui.editor_kept_destroy(kept)
+	}
+}
+
 // Says why a label change was refused: on the field's row when one field caused it, as for the
 // profile fields, and in the status line.
 @(private)

@@ -263,6 +263,16 @@ editor_quick_labels_value :: proc(
 	return text, select_key, ""
 }
 
+// Whether `kept` is the text of one of the label page's fields.
+@(require_results)
+editor_kept_is_label :: proc(p: ^Editor, kept: Editor_Kept) -> bool {
+	if kept.key == "" {return false}
+	for row in p.rows {
+		if row.key == kept.key {return row.label_field != .None}
+	}
+	return false
+}
+
 // Puts the page state `editor_quick_labels_value` changed for `edit` back, after the setting it
 // built was not saved: the open label as it was (`expanded`) and the blocks' drawn positions.
 editor_quick_labels_undo :: proc(p: ^Editor, edit: Label_Edit, expanded: int) {

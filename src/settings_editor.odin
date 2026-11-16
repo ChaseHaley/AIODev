@@ -493,7 +493,7 @@ editor_outcome :: proc(app: ^App, w: ^Window, outcome: ui.Editor_Outcome) {
 		// A field left a moment ago is applied by the action itself: its key names a position the
 		// action may renumber.
 		if edit, ok := request.(ui.Label_Edit); ok {
-			if editor_labels_edit(app, w, edit, pending = kept) {ui.editor_kept_destroy(&kept)}
+			editor_labels_action(app, w, edit, &kept)
 		}
 		return
 	case .Profile_Action:
@@ -574,9 +574,9 @@ editor_outcome :: proc(app: ^App, w: ^Window, outcome: ui.Editor_Outcome) {
 	case .Opener_Add:
 		editor_opener_mutate(app, w, {kind = .Add})
 	case .Label_Add:
-		if editor_labels_edit(app, w, {kind = .Add}, pending = kept) {ui.editor_kept_destroy(&kept)}
+		editor_labels_action(app, w, {kind = .Add}, &kept)
 	case .Label_Reset:
-		if editor_labels_edit(app, w, {kind = .Reset}, pending = kept) {ui.editor_kept_destroy(&kept)}
+		editor_labels_action(app, w, {kind = .Reset}, &kept)
 	}
 }
 
