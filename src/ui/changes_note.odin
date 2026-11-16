@@ -483,7 +483,7 @@ tag_draw :: proc(
 	x := rect.x + CHANGES_TAG_PAD * s
 	if c.kind == .Delete {
 		icon_draw(
-			p.list, .Strikethrough, {x, rect.y, ICON_INDICATOR * s, rect.height}, ink, ICON_INDICATOR, s,
+			p.list, .Delete_Key, {x, rect.y, ICON_INDICATOR * s, rect.height}, ink, ICON_INDICATOR, s,
 		)
 		x += (ICON_INDICATOR + SPACE_1) * s
 	}

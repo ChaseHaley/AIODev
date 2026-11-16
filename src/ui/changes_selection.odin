@@ -348,7 +348,7 @@ selection_bar_draw :: proc(
 	if panel_draw(list, popover_panel(bar.bar, s), theme) != .None {return .Ok}
 	body := text_styled(text, .Body)
 	if r := bar_button_draw(
-		list, &body, theme, state, pointer, bar.delete, .Toolbar_Delete, .Strikethrough, theme.error, "Delete",
+		list, &body, theme, state, pointer, bar.delete, .Toolbar_Delete, .Delete_Key, theme.error, "Delete",
 		bar.words, false, false, s,
 	); r != .Ok {return r}
 	if r := bar_button_draw(
