@@ -1,5 +1,6 @@
 package app_test
 
+import "core:strings"
 import "core:testing"
 import app "../../src"
 import "aio:ui"
@@ -21,5 +22,9 @@ a_label_action_leaves_another_kept_field_to_its_own_save :: proc(t: ^testing.T) 
 	if !testing.expect(t, ui.editor_select_key(e, "label.1.name")) {return}
 	ui.editor_request_set(e, ui.Label_Edit{kind = .Remove, id = 1})
 	app.editor_outcome(&f.state, w, .Label_Action)
+	// Both saves land: the kept font size, and the label action without label 1.
 	testing.expect(t, profile_file_has(f.path, "interface.font_size = 13"))
+	text := profile_file_text(f.path)
+	testing.expect(t, strings.contains(text, "turns.quick_labels = \"Verify this |"))
+	testing.expect(t, !strings.contains(text, "Clarify this"))
 }
