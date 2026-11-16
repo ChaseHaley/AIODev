@@ -48,6 +48,10 @@ Changes_Comment :: struct {
 	// How many diff lines it covers (a "no newline" marker is not one), so a refresh that changes the
 	// lines in between is noticed.
 	lines:                                      int,
+	// What the view shows of a partial note: its offsets clamped to the lines as they are now, found when
+	// the note is made and after each refresh, not on every layout.
+	fit_partial:                                bool,
+	fit_first, fit_last:                        int,
 	// The cell side by side it was made in.
 	half:                                       ui.Changes_Half,
 	// Where it shows in the current view; file = -1 when its lines are not in this diff.
@@ -223,6 +227,17 @@ changes_half_text :: proc(
 	return line.text, ui.changes_half_has(half, line.kind)
 }
 
+// Works out what the view shows of `item`'s partial range in `files`, once per diff.
+@(private = "file")
+changes_item_fit :: proc(files: []turns.Diff_File, item: ^Changes_Comment) {
+	item.fit_partial, item.fit_first, item.fit_last = false, 0, 0
+	if item.file < 0 || item.file >= len(files) {return}
+	item.fit_partial, item.fit_first, item.fit_last = changes_range_fit(
+		files[item.file], item.first_line, item.last_line, item.partial, item.first_offset, item.last_offset,
+		item.lines,
+	)
+}
+
 // The side and its line numbers that flat lines `first..last` of `file` cover, counting only the lines that
 // belong to `half`; found = false when none of them is a line of either side.
 @(private = "file", require_results)
@@ -248,7 +263,16 @@ changes_range_of :: proc(
 			flat += 1
 			if at < first || at > last || !ui.changes_half_has(half, line.kind) {continue}
 			#partial switch line.kind {
-			case .Context, .Added:
+			case .Context:
+				// A cell holds one side: the left's lines are numbered by the old file.
+				if half == .Left {
+					if old_low == 0 {old_low = line.old_line}
+					old_high = line.old_line
+				} else {
+					if new_low == 0 {new_low = line.new_line}
+					new_high = line.new_line
+				}
+			case .Added:
 				if new_low == 0 {new_low = line.new_line}
 				new_high = line.new_line
 			case .Removed:
@@ -257,6 +281,7 @@ changes_range_of :: proc(
 			}
 		}
 	}
+	if half == .Left && old_low > 0 {return .Old, old_low, old_high, true}
 	if new_low > 0 {return .New, new_low, new_high, true}
 	if old_low > 0 {return .Old, old_low, old_high, true}
 	return .New, 0, 0, false
@@ -351,13 +376,7 @@ changes_comments_sync :: proc(pane: ^Changes_Pane) {
 	if reserve(&c.views, len(c.items)) == nil {
 		for item in c.items {
 			detached := item.file < 0
-			partial, first_offset, last_offset := false, 0, 0
-			if !detached && item.file < len(view.files) {
-				partial, first_offset, last_offset = changes_range_fit(
-					view.files[item.file], item.first_line, item.last_line, item.partial, item.first_offset,
-					item.last_offset, item.lines,
-				)
-			}
+			partial, first_offset, last_offset := item.fit_partial, item.fit_first, item.fit_last
 			append(
 				&c.views,
 				ui.Changes_Comment_View {
@@ -514,6 +533,7 @@ changes_comment_add :: proc(pane: ^Changes_Pane, note: Changes_Note) -> bool {
 		file, s.first, s.last, s.partial, s.first_offset, s.last_offset,
 	)
 	item.lines = changes_span_lines(file, s.first, s.last)
+	changes_item_fit(files, &item)
 	failed := false
 	item.worktree = changes_clone(changes_comments_worktree(pane), &failed)
 	item.path = changes_clone(changes_comment_path(file), &failed)
@@ -1180,6 +1200,7 @@ changes_comments_reanchor :: proc(pane: ^Changes_Pane) {
 	worktree := changes_comments_worktree(pane)
 	for &item in c.items {
 		item.file, item.first_line, item.last_line = changes_anchor_find(files, worktree, item)
+		changes_item_fit(files, &item)
 	}
 	if c.selection.active {
 		file, first, last := -1, 0, 0

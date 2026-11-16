@@ -941,3 +941,33 @@ comments_message_follows_the_editor_the_label_key_and_the_delete_key :: proc(t: 
 	testing.expect(t, strings.contains(message, "2. src/foo.odin, line 5:\n```\n+tail\n```\nClarify. Explain why"), message)
 	testing.expect(t, strings.has_suffix(message, "3. src/foo.odin, line 4:\n```\n   value := compute(a)\n```\nDelete this line."), message)
 }
+
+@(test)
+a_left_cell_note_over_removed_and_context_lines_reanchors_whole :: proc(t: ^testing.T) {
+	state: app.App
+	defer app.changes_app_destroy(&state.changes_state)
+	w: app.Window
+	pane := app.changes_pane_create(&state, {}, "C:/work/odin", .Repository)
+	if !testing.expect(t, pane != nil) {return}
+	lines := make([]turns.Diff_Line, 3, context.temp_allocator)
+	lines[0] = {kind = .Removed, old_line = 3, text = "old"}
+	lines[1] = {kind = .Added, new_line = 3, text = "new"}
+	lines[2] = {kind = .Context, old_line = 4, new_line = 4, text = "same"}
+	hunks := make([]turns.Hunk, 1, context.temp_allocator)
+	hunks[0] = {lines = lines}
+	files := make([]turns.Diff_File, 1, context.temp_allocator)
+	files[0] = {old_path = "src/foo.odin", new_path = "src/foo.odin", hunks = hunks}
+	pane.model.view.files = files
+	c := &pane.comments
+	comments_save_selected(
+		&state, &w, pane, {file = 0, first = 0, last = 2, active = true, half = .Left}, "Left.",
+	)
+	if !testing.expect_value(t, len(c.items), 1) {return}
+	// The left cell is the old file: the context line counts by its old number, so both ends are found again.
+	testing.expect_value(t, c.items[0].side, app.Comment_Side.Old)
+	testing.expect_value(t, c.items[0].first, i32(3))
+	testing.expect_value(t, c.items[0].last, i32(4))
+	app.changes_comments_reanchor(pane)
+	testing.expect_value(t, c.items[0].first_line, 0)
+	testing.expect_value(t, c.items[0].last_line, 2)
+}

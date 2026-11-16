@@ -116,11 +116,11 @@ area_row_draw :: proc(
 // Spaces hang past the width instead of breaking a line, so they stay at their line's end.
 @(private = "file")
 area_wrap :: proc(a: ^Text_Area, b: ^markdown.Edit_Buffer, t: ^Text, width: f32) {
-	space := code_space(t)
 	if a.wrapped && a.wrapped_revision == b.revision && a.wrapped_width == width &&
 	   a.wrapped_size == t.size_px && a.wrapped_family == t.family {
 		return
 	}
+	space := code_space(t)
 	a.wrapped, a.wrapped_revision, a.wrapped_width = true, b.revision, width
 	a.wrapped_size, a.wrapped_family = t.size_px, t.family
 	clear(&a.lines)

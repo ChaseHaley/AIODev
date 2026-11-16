@@ -1006,16 +1006,16 @@ changes_half_has :: proc(half: Changes_Half, kind: tr.Line_Kind) -> bool {
 
 // Whether flat line `line` of `file`, drawn in `cell`, is in the selection.
 @(private = "file")
-line_selected :: proc(view: ^Changes_View, file, line: int, cell: Changes_Half) -> bool {
+line_selected :: proc(view: ^Changes_View, file, line: int, kind: tr.Line_Kind, cell: Changes_Half) -> bool {
 	s := view.selection
 	if !s.active || s.file != file || line < min(s.first, s.last) || line > max(s.first, s.last) {return false}
-	return in_half(s.half, cell)
+	return changes_half_has(s.half, kind) && in_half(s.half, cell)
 }
 
 // Whether flat line `line` of `file` is picked whole: in a selection of lines rather than of text.
 @(private = "file")
-line_picked :: proc(view: ^Changes_View, file, line: int, cell: Changes_Half) -> bool {
-	return line_selected(view, file, line, cell) && !view.selection.partial
+line_picked :: proc(view: ^Changes_View, file, line: int, kind: tr.Line_Kind, cell: Changes_Half) -> bool {
+	return line_selected(view, file, line, kind, cell) && !view.selection.partial
 }
 
 // Whether the pointer is on flat line `line` of `file` while a press picks whole lines.
@@ -1076,7 +1076,7 @@ colour_alpha :: proc(c: render.Color, alpha: f32) -> render.Color {
 // its card alone, which the fixed room for the runs makes safe.
 @(private = "file")
 line_marks :: proc(
-	p: ^Diff_Paint, file, line, length: int, cell: Changes_Half,
+	p: ^Diff_Paint, file, line, length: int, kind: tr.Line_Kind, cell: Changes_Half,
 ) -> (
 	marks: Line_Marks,
 ) {
@@ -1087,7 +1087,7 @@ line_marks :: proc(
 			marks.count += 1
 		}
 	}
-	if s := view.selection; line_selected(view, file, line, cell) {
+	if s := view.selection; line_selected(view, file, line, kind, cell) {
 		seg := Code_Run {
 			end      = length,
 			selected = true,
@@ -1103,7 +1103,7 @@ line_marks :: proc(
 	hot := hot_note(p.state)
 	for c, i in view.comments {
 		if c.file != file || line < c.first || line > c.last || i == view.editing {continue}
-		if !in_half(c.half, cell) {continue}
+		if !in_half(c.half, cell) || !changes_half_has(c.half, kind) {continue}
 		if !comment_attached(view, i) {continue}
 		colour := changes_note_color(theme, c)
 		strong := i == hot
@@ -1249,8 +1249,8 @@ paint_line :: proc(
 		draw_rect(p.list, {rect = row, color = t.diff_removed})
 	case .Context, .No_Newline:
 	}
-	picked := line_picked(p.view, file, flat, .Both)
-	marks := line_marks(p, file, flat, len(line.text), .Both)
+	picked := line_picked(p.view, file, flat, line.kind, .Both)
+	marks := line_marks(p, file, flat, len(line.text), line.kind, .Both)
 	marks_draw(p, marks, row)
 	row_pick_draw(p, file, flat, picked, row)
 	column := code_column(row, p.number_width, p.digit, p.scale, true)
@@ -1288,8 +1288,8 @@ paint_cell :: proc(
 		draw_rect(p.list, {rect = cell, color = t.diff_removed})
 	}
 	half := old ? Changes_Half.Left : Changes_Half.Right
-	picked := line_picked(p.view, file, line, half)
-	marks := line_marks(p, file, line, len(d.text), half)
+	picked := line_picked(p.view, file, line, d.kind, half)
+	marks := line_marks(p, file, line, len(d.text), d.kind, half)
 	marks_draw(p, marks, cell)
 	row_pick_draw(p, file, line, picked, cell)
 	baseline := baseline_in(cell.y, cell.height, p.mono)

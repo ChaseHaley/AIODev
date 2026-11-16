@@ -1,5 +1,6 @@
 package ui
 
+import "aio:font"
 import "aio:markdown"
 import "aio:render"
 import "aio:syntax"
@@ -269,6 +270,9 @@ Changes_Rows :: struct {
 	// The diff width and Body line height the comment cards were wrapped at, and the width of the editor's
 	// tag, which the × after it sits at the end of.
 	width, body_line, tag_width:            f32,
+	// The body font the cards were wrapped in: its size and family move word widths whatever the line height.
+	body_size:                              f32,
+	body_family:                            font.Family,
 	comments_key:                           u64,
 	// How many times the rows were laid out, for tests that show a drag step or a keystroke does not.
 	built:                                  int,
@@ -593,12 +597,14 @@ changes_layout :: proc(state: ^Changes_State, view: ^Changes_View, text, mono: ^
 	   rows.notice == view.notice && rows.files == len(view.files) && rows.omitted == view.omitted &&
 	   rows.line_height == mono.line_height && rows.digit == digit && rows.scale == scale &&
 	   rows.width == width && rows.body_line == text.line_height && rows.comments_key == comments &&
+	   rows.body_size == text.size_px && rows.body_family == text.family &&
 	   rows.pairs.side_by_side == view.side_by_side && !editor_stale(rows, view, text) {return}
 	rows.built += 1
 	rows.valid, rows.revision, rows.collapsed_key, rows.notice = true, view.revision, key, view.notice
 	rows.files, rows.omitted = len(view.files), view.omitted
 	rows.scale, rows.line_height, rows.digit = scale, mono.line_height, digit
 	rows.width, rows.body_line, rows.comments_key = width, text.line_height, comments
+	rows.body_size, rows.body_family = text.size_px, text.family
 	rows.header = int(math.round(HEIGHT_STANDARD * scale))
 	rows.line = max(1, int(mono.line_height) + int(math.round(2 * scale)))
 	rows.hunk = rows.line + int(math.round(SPACE_1 * scale))
