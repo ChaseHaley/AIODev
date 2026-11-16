@@ -742,3 +742,160 @@ changes_code_text_keeps_the_minimum_contrast :: proc(t: ^testing.T) {
 	testing.expect_value(t, state.inks.builds, builds + 1)
 	testing.expect_value(t, count_colour(&list, added_row, theme.palette[8]), 2)
 }
+
+// The offset and x mappings follow what paint_text draws: a tab is four spaces from the pen, a rune with no
+// glyph takes no room, and only the runes that start inside the room count.
+@(test)
+changes_code_offsets_follow_the_painters_rules :: proc(t: ^testing.T) {
+	f: Diff_Fixture
+	view: ui.Changes_View
+	if !diff_fixture_make(t, &f, &view) {return}
+	defer diff_fixture_destroy(&f)
+	_, found := font.glyph_lookup(f.fonts, f.mono.family, .Regular, '\x01')
+	if !testing.expect(t, !found) {return}
+	advance := ui.text_width(&f.mono, "a")
+	after := ui.text_width(&f.mono, "b")
+	space := ui.text_width(&f.mono, " ")
+	tab := 4 * space
+	room := f32(1000)
+	text := "a\t\x01b"
+
+	testing.expect_value(t, ui.code_x_of(&f.mono, text, room, 0), 0)
+	testing.expect_value(t, ui.code_x_of(&f.mono, text, room, 1), advance)
+	testing.expect_value(t, ui.code_x_of(&f.mono, text, room, 2), advance + tab)
+	testing.expect_value(t, ui.code_x_of(&f.mono, text, room, 3), advance + tab)
+	testing.expect_value(t, ui.code_x_of(&f.mono, text, room, 4), advance + tab + after)
+
+	testing.expect_value(t, ui.code_offset_at(&f.mono, text, room, -5), 0)
+	testing.expect_value(t, ui.code_offset_at(&f.mono, text, room, advance * 0.4), 0)
+	testing.expect_value(t, ui.code_offset_at(&f.mono, text, room, advance * 0.6), 1)
+	// Either half of the tab snaps to the boundary on its side.
+	testing.expect_value(t, ui.code_offset_at(&f.mono, text, room, advance + space), 1)
+	testing.expect_value(t, ui.code_offset_at(&f.mono, text, room, advance + 3 * space), 2)
+	testing.expect_value(t, ui.code_offset_at(&f.mono, text, room, advance + tab + 1), 3)
+	testing.expect_value(t, ui.code_offset_at(&f.mono, text, room, 10000), 4)
+
+	// Offsets map to x and back. The rune without a glyph shares its x with the "b" after it, so that x
+	// reads as the later offset.
+	for offset in ([?]int{0, 1, 3, 4}) {
+		x := ui.code_x_of(&f.mono, text, room, offset)
+		testing.expect_value(t, ui.code_offset_at(&f.mono, text, room, x), offset)
+	}
+	testing.expect_value(t, ui.code_offset_at(&f.mono, text, room, advance + tab), 3)
+
+	// The room ends the visible text: the tab starts inside it, the "b" after it does not.
+	narrow := advance + space
+	testing.expect_value(t, ui.code_offset_at(&f.mono, text, narrow, 10000), 2)
+	testing.expect_value(t, ui.code_x_of(&f.mono, text, narrow, 4), advance + tab)
+}
+
+// The code column is one geometry for both layouts: two number columns in a unified row, one in a cell,
+// the sign after them and the text out to the cell's edge.
+@(test)
+changes_line_code_places_numbers_sign_and_text :: proc(t: ^testing.T) {
+	f: Diff_Fixture
+	view: ui.Changes_View
+	if !diff_fixture_make(t, &f, &view) {return}
+	defer diff_fixture_destroy(&f)
+	state: ui.Changes_State
+	defer ui.changes_state_destroy(&state)
+	g := lay_out(&f, &view, &state)
+	digit := ui.text_width(&f.mono, "0")
+
+	row := ui.changes_line_rect(g, &view, &state, 0, 2)
+	cell, column, ok := ui.changes_line_code(g, &view, &state, &f.mono, 0, 2)
+	if !testing.expect(t, ok) {return}
+	testing.expect_value(t, cell, row)
+	testing.expect_value(t, column.old_x, row.x + 8)
+	testing.expect_value(t, column.new_x, column.old_x + digit + 8)
+	testing.expect_value(t, column.sign_x, column.new_x + digit + 8)
+	testing.expect_value(t, column.text_x, column.sign_x + digit + 4)
+	testing.expect_value(t, column.text_x + column.width, row.x + row.width)
+	testing.expect_value(t, ui.code_column(row, digit, digit, 1, true), column)
+
+	// Side by side a cell has one number column, and each half of the row has its own column.
+	side_by_side_use(&f, &view)
+	g = lay_out(&f, &view, &state)
+	_, left, left_ok := ui.changes_line_code(g, &view, &state, &f.mono, 0, 1)
+	right_cell, right, right_ok := ui.changes_line_code(g, &view, &state, &f.mono, 0, 3)
+	if !testing.expect(t, left_ok && right_ok) {return}
+	testing.expect_value(t, left.new_x, left.old_x)
+	testing.expect_value(t, right.new_x, right.old_x)
+	testing.expect_value(t, right.old_x, right_cell.x + 8)
+	testing.expect_value(t, right.sign_x, right.old_x + digit + 8)
+	testing.expect(t, right.old_x > left.text_x + left.width)
+	testing.expect_value(t, right.text_x + right.width, right_cell.x + right_cell.width)
+
+	// A line that is not in the diff has no column.
+	_, _, missing := ui.changes_line_code(g, &view, &state, &f.mono, 0, 99)
+	testing.expect(t, !missing)
+}
+
+// A run tints and marks part of a line and takes the selected inks; text outside it keeps the line's.
+@(test)
+changes_code_runs_mark_part_of_a_line :: proc(t: ^testing.T) {
+	device, device_error := render.device_create(.Warp)
+	if !testing.expect_value(t, device_error, render.Error.None) {return}
+	defer render.device_destroy(device)
+	f: Diff_Fixture
+	view: ui.Changes_View
+	if !diff_fixture_make(t, &f, &view) {return}
+	defer diff_fixture_destroy(&f)
+	cache: glyphs.Cache
+	glyphs.init(&cache, f.fonts, device)
+	defer glyphs.destroy(&cache)
+	if !testing.expect(t, ui.text_init(&f.text, f.fonts, &cache, 13)) {return}
+	f.mono = ui.text_mono(&f.text, f.text.family)
+
+	plain, selected: [ui.CHANGES_INKS]render.Color
+	plain[ui.CHANGES_INK_TEXT] = {1, 0, 0, 1}
+	selected[ui.CHANGES_INK_TEXT] = {0, 1, 0, 1}
+	tint := render.Color{0, 0, 1, 0.5}
+	line := ui.Code_Line {
+		text          = "abc",
+		runs          = []ui.Code_Run{{start = 1, end = 2, tint = tint, underline = {1, 1, 0, 1}, strike = {1, 0, 1, 1},
+			selected = true}},
+		x             = 100,
+		width         = 500,
+		top           = 20,
+		height        = 16,
+		baseline      = 32,
+		scale         = 1,
+		inks          = &plain,
+		selected_inks = &selected,
+		plain         = ui.CHANGES_INK_TEXT,
+	}
+	list := render.draw_list_init()
+	defer render.draw_list_destroy(&list)
+	testing.expect_value(t, render.push_layer(&list, {0, 0, 800, 600}), render.Error.None)
+	testing.expect_value(t, ui.code_line_draw(&list, &f.mono, line), render.Build_Status.Ok)
+
+	if !testing.expect_value(t, len(list.glyphs), 3) {return}
+	testing.expect_value(t, list.glyphs[0].color, plain[ui.CHANGES_INK_TEXT])
+	testing.expect_value(t, list.glyphs[1].color, selected[ui.CHANGES_INK_TEXT])
+	testing.expect_value(t, list.glyphs[2].color, plain[ui.CHANGES_INK_TEXT])
+
+	// The run spans exactly the second glyph's cell: a tint over the row, a line under it and one through it.
+	advance := ui.text_width(&f.mono, "a")
+	second := ui.text_width(&f.mono, "b")
+	if !testing.expect_value(t, len(list.rects), 3) {return}
+	tops := [?]f32{20, 20 + 16 - 2, 20 + 7}
+	heights := [?]f32{16, 2, 2}
+	for rect, i in list.rects {
+		testing.expect_value(t, rect.rect.x, 100 + advance)
+		testing.expect_value(t, rect.rect.y, tops[i])
+		testing.expect_value(t, rect.rect.height, heights[i])
+		testing.expect(t, abs(rect.rect.width - second) < 0.01)
+	}
+	testing.expect_value(t, list.rects[0].color, tint)
+
+	// A run that reaches the end of the line closes there, and a run past the room is cut at it.
+	render.draw_list_reset(&list)
+	testing.expect_value(t, render.push_layer(&list, {0, 0, 800, 600}), render.Error.None)
+	line.runs = []ui.Code_Run{{start = 2, end = 99, tint = tint}}
+	line.width = advance + second + 3
+	testing.expect_value(t, ui.code_line_draw(&list, &f.mono, line), render.Build_Status.Ok)
+	if !testing.expect_value(t, len(list.rects), 1) {return}
+	testing.expect_value(t, list.rects[0].rect.x, 100 + advance + second)
+	testing.expect_value(t, list.rects[0].rect.width, f32(3))
+}

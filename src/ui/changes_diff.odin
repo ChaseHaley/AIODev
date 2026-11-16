@@ -1,7 +1,6 @@
 package ui
 
 import "aio:colour"
-import "aio:font"
 import "aio:render"
 import "aio:syntax"
 import tr "aio:turns"
@@ -9,8 +8,6 @@ import "core:fmt"
 import "core:math"
 import "core:strconv"
 
-@(private = "file")
-CHANGES_TAB_COLUMNS :: 4
 @(private = "file")
 CHANGES_STATUS_WIDTH :: f32(16)
 @(private = "file")
@@ -547,9 +544,24 @@ diff_visible :: proc(g: Changes_Geometry, r: render.Rect) -> render.Rect {
 	return r
 }
 
-// The row of flat line `line` of `file` across the file's card; side by side, the cell that holds it, or
-// the whole row for a context line, which fills both. Zero when it is not on screen.
-changes_line_rect :: proc(
+// The band every row of the stream fills: the diff area less its padding. The caller sets its y and height.
+@(private = "file")
+diff_band :: proc(g: Changes_Geometry) -> render.Rect {
+	pad := SPACE_2 * g.scale
+	return {g.diff.x + pad, 0, max(0, g.diff.width - 2 * pad), 0}
+}
+
+// The row of the stream that starts at `top`, across the band.
+@(private = "file")
+row_rect :: proc(g: Changes_Geometry, state: ^Changes_State, top: int) -> render.Rect {
+	band := diff_band(g)
+	return {band.x, g.diff.y - f32(state.diff_scroll) + f32(top), band.width, f32(state.rows.line)}
+}
+
+// The row of flat line `line` of `file` across the band; side by side, the cell that holds it, or the whole
+// row for a context line, which fills both. Zero when the line has no row; not clipped to the diff area.
+@(private = "file")
+line_cell :: proc(
 	g: Changes_Geometry, view: ^Changes_View, state: ^Changes_State, file, line: int,
 ) -> render.Rect {
 	rows := &state.rows
@@ -557,9 +569,7 @@ changes_line_rect :: proc(
 	row := line_row(rows, file, line)
 	top, ok := row_top(rows, view, file, row)
 	if !ok {return {}}
-	pad := SPACE_2 * g.scale
-	y := g.diff.y - f32(state.diff_scroll) + f32(top)
-	rect := render.Rect{g.diff.x + pad, y, max(0, g.diff.width - 2 * pad), f32(rows.line)}
+	rect := row_rect(g, state, top)
 	if rows.pairs.side_by_side {
 		pair := row_pair(rows, file, row)
 		left, right, _ := row_halves(rect)
@@ -569,7 +579,33 @@ changes_line_rect :: proc(
 			rect = right
 		}
 	}
-	return diff_visible(g, rect)
+	return rect
+}
+
+// The row of flat line `line` of `file` across the file's card; side by side, the cell that holds it, or
+// the whole row for a context line, which fills both. Zero when it is not on screen.
+changes_line_rect :: proc(
+	g: Changes_Geometry, view: ^Changes_View, state: ^Changes_State, file, line: int,
+) -> render.Rect {
+	return diff_visible(g, line_cell(g, view, state, file, line))
+}
+
+// Where flat line `line` of `file` draws its text: the cell it sits in, as changes_line_rect gives it but
+// wherever on the stream it is, and the column of numbers, sign and text inside. The painter and a character
+// hit test both read it, so a point maps to the character drawn there with code_offset_at. `mono` is the
+// diff's text; false when the line has no row.
+changes_line_code :: proc(
+	g: Changes_Geometry, view: ^Changes_View, state: ^Changes_State, mono: ^Text, file, line: int,
+) -> (
+	cell: render.Rect,
+	column: Code_Column,
+	ok: bool,
+) {
+	cell = line_cell(g, view, state, file, line)
+	if cell.width <= 0 {return}
+	digit := text_width(mono, "0")
+	number := code_number_width(&view.files[file], digit)
+	return cell, code_column(cell, number, digit, g.scale, !state.rows.pairs.side_by_side), true
 }
 
 // The diff_scroll that puts `file`'s header at the top of the diff, in either layout, or the current one
@@ -626,9 +662,7 @@ changes_comment_button_rect :: proc(
 	row := rows.pairs.selection_row
 	top, ok := row_top(rows, view, s.file, row)
 	if !ok {return {}}
-	pad := SPACE_2 * g.scale
-	y := g.diff.y - f32(state.diff_scroll) + f32(top)
-	cell := render.Rect{g.diff.x + pad, y, max(0, g.diff.width - 2 * pad), f32(rows.line)}
+	cell := row_rect(g, state, top)
 	if rows.pairs.side_by_side {
 		left, right, _ := row_halves(cell)
 		cell = line_selected(view, s.file, int(row_pair(rows, s.file, row).right)) ? right : left
@@ -721,9 +755,9 @@ changes_diff_hit :: proc(
 	if at < rows.tops[file] + rows.header {return {.File_Header, file, 0}}
 	f := &view.files[file]
 	if changes_collapsed(view, file) || f.binary {return {.Diff, file, 0}}
-	pad := SPACE_2 * g.scale
 	origin := g.diff.y - f32(state.diff_scroll)
-	band := render.Rect{g.diff.x + pad, 0, max(0, g.diff.width - 2 * pad), f32(rows.line)}
+	band := diff_band(g)
+	band.height = f32(rows.line)
 	top, flat := rows.tops[file] + rows.header, 0
 	for &hunk, h in f.hunks {
 		base, count := hunk_rows(rows, file, h)
@@ -866,30 +900,8 @@ Diff_Paint :: struct {
 	// The visible part of the diff area, to skip rows outside it.
 	top, bottom:          f32,
 	digit:                f32,
-	// Where the line numbers, the sign and the text start in the current file.
-	old_x, new_x, sign_x, text_x, column: f32,
-}
-
-@(private = "file")
-digit_count :: proc(n: int) -> int {
-	count := 1
-	for v := n; v >= 10; v /= 10 {count += 1}
-	return count
-}
-
-@(private = "file")
-paint_gutter :: proc(p: ^Diff_Paint, f: ^tr.Diff_File) {
-	biggest := 0
-	if len(f.hunks) > 0 {
-		last := f.hunks[len(f.hunks) - 1]
-		biggest = int(max(last.old_start + last.old_count, last.new_start + last.new_count))
-	}
-	s := p.scale
-	p.column = f32(digit_count(biggest)) * p.digit
-	p.old_x = p.card_x + SPACE_2 * s
-	p.new_x = p.old_x + p.column + SPACE_2 * s
-	p.sign_x = p.new_x + p.column + SPACE_2 * s
-	p.text_x = p.sign_x + p.digit + SPACE_1 * s
+	// How wide the current file's line number columns are.
+	number_width:         f32,
 }
 
 @(private = "file")
@@ -897,7 +909,8 @@ number_draw :: proc(p: ^Diff_Paint, n: i32, x, baseline: f32) -> render.Build_St
 	if n <= 0 {return .Ok}
 	buf: [16]u8
 	label := strconv.write_int(buf[:], i64(n), 10)
-	return draw_text(p.mono, p.list, label, x + p.column - f32(len(label)) * p.digit, baseline, p.theme.faint)
+	left := x + p.number_width - f32(len(label)) * p.digit
+	return draw_text(p.mono, p.list, label, left, baseline, p.theme.faint)
 }
 
 // What a diff row's code text sits on, which its inks are raised against.
@@ -994,61 +1007,6 @@ row_inks :: proc(p: ^Diff_Paint, kind: tr.Line_Kind, selected: bool) -> ^[CHANGE
 	return &p.state.inks.table[background]
 }
 
-// Draws the start of a diff line from `x`, fading out over the last fifth of `width` when it runs past
-// it. A tab advances CHANGES_TAB_COLUMNS spaces. `spans` are byte offsets into `s`, which starts where
-// the line does, so the walk colours each rune by the span it is in; text outside them takes ink `plain`
-// of the row's `inks`. Spans come from the whole file, which a clean or smudge filter can make differ from
-// the diff text, so they are only read at offsets inside `s`: one reaching past the end colours what is
-// inside, and an empty or out-of-order one is skipped.
-@(private = "file")
-paint_text :: proc(
-	p: ^Diff_Paint,
-	s: string,
-	spans: []syntax.Span,
-	x, baseline, width: f32,
-	inks: ^[CHANGES_INKS]render.Color,
-	plain: int,
-) -> render.Build_Status {
-	if width <= 0 {return .Ok}
-	t := p.mono
-	palette := CHANGES_SYNTAX_PALETTE
-	space: f32
-	if g, found := font.glyph_lookup(t.fonts, t.family, .Regular, ' '); found {
-		space = font.glyph_advance(t.fonts, g, t.size_px)
-	}
-	start := len(p.list.glyphs)
-	pen := x
-	next := 0
-	clipped := false
-	for r, offset in s {
-		if pen >= x + width {
-			clipped = true
-			break
-		}
-		for next < len(spans) && int(spans[next].end) <= offset {next += 1}
-		c := inks[plain]
-		if next < len(spans) && int(spans[next].start) <= offset {
-			index := palette[spans[next].kind]
-			c = inks[index >= 0 ? index : CHANGES_INK_TEXT]
-		}
-		if r == '\t' {
-			pen += CHANGES_TAB_COLUMNS * space
-			continue
-		}
-		g, found := font.glyph_lookup(t.fonts, t.family, .Regular, r)
-		if !found {continue}
-		if result := draw_glyph(t, p.list, g, pen, baseline, c); result != .Ok {return result}
-		pen += font.glyph_advance(t.fonts, g, t.size_px)
-	}
-	if clipped || pen > x + width {
-		for &glyph in p.list.glyphs[start:] {
-			glyph.flags |= render.GLYPH_FADE
-			glyph.fade_start, glyph.fade_end = x + width * 0.8, x + width
-		}
-	}
-	return .Ok
-}
-
 // The spans of flat line `line` of `file`, and whether the file is highlighted at all.
 @(private = "file")
 line_spans :: proc(view: ^Changes_View, file, line: int) -> (spans: []syntax.Span, highlighted: bool) {
@@ -1063,6 +1021,51 @@ line_spans :: proc(view: ^Changes_View, file, line: int) -> (spans: []syntax.Spa
 line_selected :: proc(view: ^Changes_View, file, line: int) -> bool {
 	s := view.selection
 	return s.active && s.file == file && line >= min(s.first, s.last) && line <= max(s.first, s.last)
+}
+
+// A line's sign and text in `column`, inked for its kind and whether its line is selected: the selected
+// line's text is one run, which takes the selected inks. The numbers are the caller's, for they differ by
+// layout.
+@(private = "file")
+paint_code :: proc(
+	p: ^Diff_Paint, d: ^tr.Diff_Line, file, flat: int, selected: bool, column: Code_Column, row: render.Rect,
+	baseline: f32,
+) -> render.Build_Status {
+	spans, highlighted := line_spans(p.view, file, flat)
+	inks := row_inks(p, d.kind, selected)
+	plain := highlighted ? CHANGES_INK_TEXT : CHANGES_INK_MUTED
+	#partial switch d.kind {
+	case .Added:
+		if r := draw_text(p.mono, p.list, "+", column.sign_x, baseline, inks[CHANGES_INK_ADDED_SIGN]); r != .Ok {
+			return r
+		}
+		plain = CHANGES_INK_TEXT
+	case .Removed:
+		if r := draw_text(p.mono, p.list, "-", column.sign_x, baseline, inks[CHANGES_INK_REMOVED_SIGN]); r != .Ok {
+			return r
+		}
+		plain = CHANGES_INK_TEXT
+	}
+	text := mono_prefix(d.text, column.width, p.digit)
+	whole: [1]Code_Run
+	line := Code_Line {
+		text          = text,
+		spans         = spans,
+		x             = column.text_x,
+		width         = column.width,
+		top           = row.y,
+		height        = row.height,
+		baseline      = baseline,
+		scale         = p.scale,
+		inks          = row_inks(p, d.kind, false),
+		selected_inks = inks,
+		plain         = plain,
+	}
+	if selected {
+		whole[0] = {end = len(text), selected = true}
+		line.runs = whole[:]
+	}
+	return code_line_draw(p.list, p.mono, line)
 }
 
 @(private = "file")
@@ -1084,37 +1087,19 @@ paint_line :: proc(
 		draw_rect(p.list, {rect = row, color = t.selection})
 		draw_rect(p.list, {rect = {row.x, y, max(1, math.round(2 * p.scale)), height}, color = t.accent})
 	}
+	column := code_column(row, p.number_width, p.digit, p.scale, true)
 	if line.kind == .No_Newline {
 		return draw_fading_text(
-			p.mono, p.list, "No newline at end of file", p.text_x, baseline, t.faint,
-			p.card_x + p.card_width - p.text_x,
+			p.mono, p.list, "No newline at end of file", column.text_x, baseline, t.faint, column.width,
 		)
 	}
 	if line.kind != .Added {
-		if r := number_draw(p, line.old_line, p.old_x, baseline); r != .Ok {return r}
+		if r := number_draw(p, line.old_line, column.old_x, baseline); r != .Ok {return r}
 	}
 	if line.kind != .Removed {
-		if r := number_draw(p, line.new_line, p.new_x, baseline); r != .Ok {return r}
+		if r := number_draw(p, line.new_line, column.new_x, baseline); r != .Ok {return r}
 	}
-	spans, highlighted := line_spans(p.view, file, flat)
-	inks := row_inks(p, line.kind, selected)
-	plain := highlighted ? CHANGES_INK_TEXT : CHANGES_INK_MUTED
-	switch line.kind {
-	case .Added:
-		if r := draw_text(p.mono, p.list, "+", p.sign_x, baseline, inks[CHANGES_INK_ADDED_SIGN]); r != .Ok {
-			return r
-		}
-		plain = CHANGES_INK_TEXT
-	case .Removed:
-		if r := draw_text(p.mono, p.list, "-", p.sign_x, baseline, inks[CHANGES_INK_REMOVED_SIGN]); r != .Ok {
-			return r
-		}
-		plain = CHANGES_INK_TEXT
-	case .Context, .No_Newline:
-	}
-	width := p.card_x + p.card_width - p.text_x
-	text := mono_prefix(line.text, width, p.digit)
-	return paint_text(p, text, spans, p.text_x, baseline, width, inks, plain)
+	return paint_code(p, line, file, flat, selected, column, row, baseline)
 }
 
 // One cell of a side-by-side row: flat line `line` of the hunk whose first line is flat line `flat`, with
@@ -1143,30 +1128,14 @@ paint_cell :: proc(
 		draw_rect(p.list, {rect = bar, color = t.accent})
 	}
 	baseline := baseline_in(cell.y, cell.height, p.mono)
-	number_x := cell.x + SPACE_2 * s
-	sign_x := number_x + p.column + SPACE_2 * s
-	text_x := sign_x + p.digit + SPACE_1 * s
-	width := cell.x + cell.width - text_x
+	column := code_column(cell, p.number_width, p.digit, s, false)
 	if d.kind == .No_Newline {
-		return draw_fading_text(p.mono, p.list, "No newline at end of file", text_x, baseline, t.faint, width)
+		return draw_fading_text(
+			p.mono, p.list, "No newline at end of file", column.text_x, baseline, t.faint, column.width,
+		)
 	}
-	if r := number_draw(p, old ? d.old_line : d.new_line, number_x, baseline); r != .Ok {return r}
-	spans, highlighted := line_spans(p.view, file, line)
-	inks := row_inks(p, d.kind, selected)
-	plain := highlighted ? CHANGES_INK_TEXT : CHANGES_INK_MUTED
-	#partial switch d.kind {
-	case .Added:
-		if r := draw_text(p.mono, p.list, "+", sign_x, baseline, inks[CHANGES_INK_ADDED_SIGN]); r != .Ok {
-			return r
-		}
-		plain = CHANGES_INK_TEXT
-	case .Removed:
-		if r := draw_text(p.mono, p.list, "-", sign_x, baseline, inks[CHANGES_INK_REMOVED_SIGN]); r != .Ok {
-			return r
-		}
-		plain = CHANGES_INK_TEXT
-	}
-	return paint_text(p, mono_prefix(d.text, width, p.digit), spans, text_x, baseline, width, inks, plain)
+	if r := number_draw(p, old ? d.old_line : d.new_line, column.old_x, baseline); r != .Ok {return r}
+	return paint_code(p, d, file, line, selected, column, cell, baseline)
 }
 
 // Hunk `index` of `file`, whose first line is flat line `flat`: its header row, then its rows.
@@ -1301,7 +1270,7 @@ paint_file :: proc(p: ^Diff_Paint, rows: ^Changes_Rows, i: int, y: f32) -> rende
 			t.muted,
 		)
 	}
-	paint_gutter(p, f)
+	p.number_width = code_number_width(f, p.digit)
 	flat := 0
 	for &hunk, h in f.hunks {
 		base, count := hunk_rows(rows, i, h)
@@ -1409,7 +1378,7 @@ diff_draw :: proc(
 	s := g.scale
 	small := text_styled(text, .Detail)
 	strong := text_styled(text, .Strong)
-	pad := SPACE_2 * s
+	band := diff_band(g)
 	p := Diff_Paint {
 		list       = list,
 		mono       = mono,
@@ -1421,8 +1390,8 @@ diff_draw :: proc(
 		view       = view,
 		state      = state,
 		pointer    = pointer,
-		card_x     = g.diff.x + pad,
-		card_width = max(0, g.diff.width - 2 * pad),
+		card_x     = band.x,
+		card_width = band.width,
 		top        = g.diff.y,
 		bottom     = g.diff.y + g.diff.height,
 		digit      = text_width(mono, "0"),
