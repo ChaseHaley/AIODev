@@ -75,6 +75,10 @@ Changes_Comments :: struct {
 @(private = "file")
 CHANGES_SEND_CHECK :: 500 * time.Millisecond
 
+// How many characters of a partial selection the message quotes after its line range.
+@(private = "file")
+CHANGES_EXCERPT_RUNES :: 100
+
 @(private = "file")
 changes_comment_release :: proc(item: ^Changes_Comment) {
 	delete(item.worktree)
@@ -730,8 +734,125 @@ changes_comments_reanchor :: proc(pane: ^Changes_Pane) {
 	changes_comments_sync(pane)
 }
 
-// The message Send pastes and Copy copies: a heading, then each comment numbered with its path and
-// lines, its quote fenced, and its text.
+// How many backticks fence `s` so nothing inside it can close the fence: one more than its longest run, and
+// at least three.
+@(private = "file", require_results)
+changes_fence :: proc(s: string) -> int {
+	run, longest := 0, 0
+	for at in 0 ..< len(s) {
+		run = s[at] == '`' ? run + 1 : 0
+		longest = max(longest, run)
+	}
+	return max(3, longest + 1)
+}
+
+@(private = "file")
+changes_fence_write :: proc(b: ^strings.Builder, count: int) {
+	for _ in 0 ..< count {strings.write_byte(b, '`')}
+}
+
+// `s` with each run of whitespace one space and none at either end, cut to `limit` runes with an ellipsis
+// when longer. In temporary memory.
+@(private = "file", require_results)
+changes_clip :: proc(s: string, limit: int) -> string {
+	joined := strings.join(strings.fields(s, context.temp_allocator), " ", context.temp_allocator)
+	count, cut := 0, 0
+	for _, at in joined {
+		if count == limit - 1 {cut = at}
+		count += 1
+	}
+	if count <= limit {return joined}
+	return strings.concatenate({joined[:cut], "…"}, context.temp_allocator)
+}
+
+// The text a partial note covers, from the quote it kept: its lines without their signs, from the start
+// offset in the first to the end offset in the last, joined by '\n'. In temporary memory.
+@(private = "file", require_results)
+changes_note_selected :: proc(item: Changes_Comment) -> string {
+	lines := strings.split(item.quote, "\n", context.temp_allocator)
+	b := strings.builder_make(context.temp_allocator)
+	for line, i in lines {
+		text := len(line) > 0 ? line[1:] : ""
+		from, to := 0, len(text)
+		if i == 0 {from = clamp(item.first_offset, 0, len(text))}
+		if i == len(lines) - 1 {to = clamp(item.last_offset, 0, len(text))}
+		if i > 0 {strings.write_byte(&b, '\n')}
+		strings.write_string(&b, text[min(from, to):to])
+	}
+	return strings.to_string(b)
+}
+
+// A note's own text as the message gives it: fenced blocks keep a fence long enough for what they hold, and
+// a suggestion block becomes "Suggested replacement for <span>:" and the fenced replacement. Trimmed. In
+// temporary memory. The blocks are those the note card draws.
+@(private = "file", require_results)
+changes_note_text :: proc(text, span: string) -> string {
+	out := strings.builder_make(context.temp_allocator)
+	scan := ui.Note_Scan {
+		rest = text,
+	}
+	for block in ui.note_block_next(&scan) {
+		if block.kind == .Paragraph {
+			strings.write_string(&out, block.text)
+			continue
+		}
+		fence := changes_fence(block.text)
+		if block.kind == .Suggestion {
+			strings.write_string(&out, "Suggested replacement for ")
+			strings.write_string(&out, span)
+			strings.write_string(&out, ":\n")
+			changes_fence_write(&out, fence)
+		} else {
+			changes_fence_write(&out, fence)
+			strings.write_string(&out, block.lang)
+		}
+		strings.write_byte(&out, '\n')
+		strings.write_string(&out, block.text)
+		strings.write_byte(&out, '\n')
+		changes_fence_write(&out, fence)
+	}
+	return strings.trim_space(strings.to_string(out))
+}
+
+// What a note says under its quote. A comment is its text. A label is its name and a period, then its
+// instruction, then the text on a line of its own. A deletion says what to delete, then the text.
+@(private = "file")
+changes_note_body :: proc(b: ^strings.Builder, item: Changes_Comment) {
+	one := item.first == item.last
+	span := one ? fmt.tprintf("line %d", item.first) : fmt.tprintf("lines %d-%d", item.first, item.last)
+	text := changes_note_text(item.text, span)
+	switch item.kind {
+	case .Comment:
+		strings.write_string(b, text)
+	case .Delete:
+		switch {
+		case item.partial:
+			strings.write_string(b, "Delete the selected text.")
+		case one:
+			strings.write_string(b, "Delete this line.")
+		case:
+			strings.write_string(b, "Delete these lines.")
+		}
+		if text != "" {
+			strings.write_byte(b, ' ')
+			strings.write_string(b, text)
+		}
+	case .Label:
+		strings.write_string(b, item.label_name)
+		strings.write_byte(b, '.')
+		if item.label_instruction != "" {
+			strings.write_byte(b, ' ')
+			strings.write_string(b, item.label_instruction)
+		}
+		if text != "" {
+			strings.write_byte(b, '\n')
+			strings.write_string(b, text)
+		}
+	}
+}
+
+// The message Send pastes and Copy copies: a heading, then each note numbered with its path and lines (and
+// for a partial selection the text it covers), its quote fenced, and what it says.
 @(require_results)
 changes_comments_message :: proc(items: []Changes_Comment, allocator := context.allocator) -> string {
 	b := strings.builder_make(allocator)
@@ -751,21 +872,20 @@ changes_comments_message :: proc(items: []Changes_Comment, allocator := context.
 			strings.write_int(&b, int(item.last))
 		}
 		if item.side == .Old {strings.write_string(&b, " before the change")}
-		strings.write_string(&b, ":\n")
-		// A fence longer than any backtick run in the quote, so the quote cannot close it.
-		run, longest := 0, 0
-		for at in 0 ..< len(item.quote) {
-			run = item.quote[at] == '`' ? run + 1 : 0
-			longest = max(longest, run)
+		if item.partial {
+			strings.write_string(&b, ", at \"")
+			strings.write_string(&b, changes_clip(changes_note_selected(item), CHANGES_EXCERPT_RUNES))
+			strings.write_byte(&b, '"')
 		}
-		fence := max(3, longest + 1)
-		for _ in 0 ..< fence {strings.write_byte(&b, '`')}
+		strings.write_string(&b, ":\n")
+		fence := changes_fence(item.quote)
+		changes_fence_write(&b, fence)
 		strings.write_byte(&b, '\n')
 		strings.write_string(&b, item.quote)
 		strings.write_byte(&b, '\n')
-		for _ in 0 ..< fence {strings.write_byte(&b, '`')}
+		changes_fence_write(&b, fence)
 		strings.write_byte(&b, '\n')
-		strings.write_string(&b, item.text)
+		changes_note_body(&b, item)
 	}
 	return strings.to_string(b)
 }

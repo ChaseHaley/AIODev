@@ -365,6 +365,114 @@ comments_send_verdict_trusts_only_the_reporting_agent_and_never_answers_a_prompt
 	testing.expect(t, can_send)
 }
 
+// A partial selection names the text it covers after its line range, whitespace collapsed and clipped to
+// 100 characters.
+@(test)
+comments_message_quotes_the_text_of_a_partial_selection :: proc(t: ^testing.T) {
+	long := strings.repeat("a", 150, context.temp_allocator)
+	exact := strings.repeat("é", 100, context.temp_allocator)
+	items := []app.Changes_Comment {
+		{
+			path = "a.odin", side = .New, first = 5, last = 5, quote = "+x := compute(a,   b)", text = "Why?",
+			partial = true, first_offset = 5, last_offset = 20,
+		},
+		{
+			path = "b.odin", side = .New, first = 3, last = 5, quote = " if ok {\n+\treturn  a\n+}",
+			text = "Hm.", partial = true, first_offset = 3, last_offset = 1,
+		},
+		{
+			path = "c.odin", side = .Old, first = 9, last = 9, quote = strings.concatenate({"-", long}, context.temp_allocator),
+			text = "Long.", partial = true, first_offset = 0, last_offset = 150,
+		},
+		{
+			path = "d.odin", side = .New, first = 2, last = 2, quote = strings.concatenate({"+", exact}, context.temp_allocator),
+			text = "Exact.", partial = true, first_offset = 0, last_offset = len(exact),
+		},
+	}
+	message := app.changes_comments_message(items, context.temp_allocator)
+	clipped := strings.concatenate({strings.repeat("a", 99, context.temp_allocator), "…"}, context.temp_allocator)
+	expected := strings.concatenate(
+		{
+			"Review comments on your changes:\n\n",
+			"1. a.odin, line 5, at \"compute(a, b)\":\n```\n+x := compute(a,   b)\n```\nWhy?\n\n",
+			"2. b.odin, lines 3-5, at \"ok { return a }\":\n```\n if ok {\n+\treturn  a\n+}\n```\nHm.\n\n",
+			"3. c.odin, line 9 before the change, at \"", clipped, "\":\n```\n-", long, "\n```\nLong.\n\n",
+			"4. d.odin, line 2, at \"", exact, "\":\n```\n+", exact, "\n```\nExact.",
+		},
+		context.temp_allocator,
+	)
+	testing.expect_value(t, message, expected)
+}
+
+// A label sends its name, then its instruction, then the note on its own line; a deletion says what to
+// delete, then the note.
+@(test)
+comments_message_words_labels_and_deletions :: proc(t: ^testing.T) {
+	items := []app.Changes_Comment {
+		{path = "a.odin", side = .New, first = 1, last = 1, quote = "+a", kind = .Label, label_name = "Looks good"},
+		{
+			path = "a.odin", side = .New, first = 2, last = 3, quote = "+b\n+c", kind = .Label,
+			label_name = "Verify this", label_instruction = "Check the claim before relying on it.",
+		},
+		{
+			path = "a.odin", side = .New, first = 4, last = 4, quote = "+d", kind = .Label, label_name = "Out of scope",
+			text = "Leave it for the next change.",
+		},
+		{
+			path = "a.odin", side = .New, first = 5, last = 5, quote = "+e", kind = .Label, label_name = "Clarify this",
+			label_instruction = "Explain why.", text = "The name hides it.",
+		},
+		{path = "a.odin", side = .Old, first = 6, last = 6, quote = "-f", kind = .Delete},
+		{path = "a.odin", side = .Old, first = 7, last = 8, quote = "-g\n-h", kind = .Delete, text = "Dead code."},
+		{
+			path = "a.odin", side = .New, first = 9, last = 9, quote = "+i := 1", kind = .Delete, partial = true,
+			first_offset = 0, last_offset = 1, text = "Unused.",
+		},
+	}
+	message := app.changes_comments_message(items, context.temp_allocator)
+	expected :=
+		"Review comments on your changes:\n\n" +
+		"1. a.odin, line 1:\n```\n+a\n```\nLooks good.\n\n" +
+		"2. a.odin, lines 2-3:\n```\n+b\n+c\n```\nVerify this. Check the claim before relying on it.\n\n" +
+		"3. a.odin, line 4:\n```\n+d\n```\nOut of scope.\nLeave it for the next change.\n\n" +
+		"4. a.odin, line 5:\n```\n+e\n```\nClarify this. Explain why.\nThe name hides it.\n\n" +
+		"5. a.odin, line 6 before the change:\n```\n-f\n```\nDelete this line.\n\n" +
+		"6. a.odin, lines 7-8 before the change:\n```\n-g\n-h\n```\nDelete these lines. Dead code.\n\n" +
+		"7. a.odin, line 9, at \"i\":\n```\n+i := 1\n```\nDelete the selected text. Unused."
+	testing.expect_value(t, message, expected)
+}
+
+// A suggestion block becomes a replacement for the note's lines; other fenced blocks keep their language,
+// and text around them stays.
+@(test)
+comments_message_turns_a_suggestion_into_a_replacement :: proc(t: ^testing.T) {
+	items := []app.Changes_Comment {
+		{
+			path = "a.odin", side = .New, first = 12, last = 15, quote = "+a\n+b", text = "Use this:\n```suggestion\nreturn x\n```\nThen test.",
+		},
+		{
+			path = "a.odin", side = .New, first = 7, last = 7, quote = "+c", kind = .Label, label_name = "Consider alternatives",
+			text = "```suggestion\n\tx := 1\n\ty := 2\n```",
+		},
+		{
+			path = "a.odin", side = .New, first = 8, last = 8, quote = "+d",
+			text = "Like so ```odin\nfoo()\n``` and:\n```suggestion\n```",
+		},
+		{path = "a.odin", side = .New, first = 9, last = 9, quote = "+e", text = "Unclosed ```odin\nfoo()"},
+	}
+	message := app.changes_comments_message(items, context.temp_allocator)
+	expected :=
+		"Review comments on your changes:\n\n" +
+		"1. a.odin, lines 12-15:\n```\n+a\n+b\n```\n" +
+		"Use this:\nSuggested replacement for lines 12-15:\n```\nreturn x\n```\nThen test.\n\n" +
+		"2. a.odin, line 7:\n```\n+c\n```\n" +
+		"Consider alternatives.\nSuggested replacement for line 7:\n```\n\tx := 1\n\ty := 2\n```\n\n" +
+		"3. a.odin, line 8:\n```\n+d\n```\n" +
+		"Like so ```odin\nfoo()\n``` and:\nSuggested replacement for line 8:\n```\n\n```\n\n" +
+		"4. a.odin, line 9:\n```\n+e\n```\nUnclosed ```odin\nfoo()"
+	testing.expect_value(t, message, expected)
+}
+
 // One hunk: a context line of `text`, then an added line. With `lead`, a hunk adding a line comes first.
 @(private = "file")
 comments_text_files :: proc(text: string, lead := false) -> []turns.Diff_File {
@@ -534,8 +642,11 @@ comments_keep_a_copy_of_the_label_they_were_made_with :: proc(t: ^testing.T) {
 	testing.expect_value(t, view.label_name, "Verify this")
 	testing.expect_value(t, view.label_colour, "#ff8800")
 
-	// A deletion with no text is a note too.
+	// A deletion with no text is a note too, and the message tells the agent to delete the line.
 	comments_press(&state, &w, pane, {part = .Line, index = 0, line = 1})
 	testing.expect(t, app.changes_comment_add(pane, {kind = .Delete}))
 	if !testing.expect_value(t, len(c.items), 2) {return}
+	message := app.changes_comments_message(c.items[:], context.temp_allocator)
+	testing.expect(t, strings.has_suffix(message, "Delete this line."))
+	testing.expect(t, strings.contains(message, "Verify this. Check the claim."))
 }
