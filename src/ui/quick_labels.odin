@@ -381,7 +381,7 @@ editor_label_draw :: proc(
 	}
 	size := LABEL_SWATCH * s
 	dot := render.Rect{cells.expand.x, r.y + (r.height - size) / 2, size, size}
-	draw_rect(list, {rect = dot, color = quick_label_color(theme, row.value), radius = pill_radius(dot)})
+	draw_rect(list, {rect = dot, color = quick_label_color(theme, row.value), radius = RADIUS_CONTROL * s})
 	x := dot.x + size + SPACE_3 * s
 	baseline := r.y + (r.height - text.line_height) / 2 + text.ascent
 	return draw_text(text, list, row.title, x, baseline, theme.text, max(1, right - x))
@@ -450,9 +450,9 @@ label_presets_draw :: proc(list: ^render.Draw_List, theme: Theme, strip: render.
 	for preset, i in presets {
 		slot := label_preset_rect(strip, i)
 		chip := render.Rect{slot.x + 2 * s, slot.y + 2 * s, slot.width - 4 * s, slot.height - 4 * s}
-		draw_rect(list, {rect = chip, color = quick_label_color(theme, preset), radius = pill_radius(chip)})
+		draw_rect(list, {rect = chip, color = quick_label_color(theme, preset), radius = RADIUS_CONTROL * s})
 		if preset == chosen {
-			draw_rect(list, {rect = slot, color = theme.text, radius = pill_radius(slot), stroke = 2 * s})
+			draw_rect(list, {rect = slot, color = theme.text, radius = RADIUS_CONTROL * s, stroke = 2 * s})
 		}
 	}
 }

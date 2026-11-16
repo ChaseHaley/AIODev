@@ -4186,6 +4186,18 @@ popup_draw :: proc(
 	if panel_draw(list, frame, theme) != .None {return .Ok}
 	if editor_popup(p) == .Curve {return editor_motion_popup_draw(p, l, r, list, text, theme, pointer)}
 	c := editor_color_parts(row, r, s)
+	if row.label_field == .Color {
+		// A preset name is not a hex the markers can be read from, so they follow its resolved colour here,
+		// where the theme is known. Dragging from there stores a hex.
+		if _, is_hex, _ := colour.parse(strings.trim_space(field_string(&p.value)), .Permissive); !is_hex {
+			resolved := quick_label_color(theme, strings.trim_space(field_string(&p.value)))
+			p.hsv[0], p.hsv[1], p.hsv[2] = colour.rgb_to_hsv(colour.Value{
+				u8(clamp(resolved.r, 0, 1) * 255 + 0.5),
+				u8(clamp(resolved.g, 0, 1) * 255 + 0.5),
+				u8(clamp(resolved.b, 0, 1) * 255 + 0.5),
+			})
+		}
+	}
 	swatch := field_string(&p.value)
 	if row.label_field == .Color {swatch = quick_label_hex(theme, swatch)}
 	color_picker_draw(list, theme, c, p.hsv, swatch, s)
