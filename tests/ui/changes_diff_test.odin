@@ -899,3 +899,44 @@ changes_code_runs_mark_part_of_a_line :: proc(t: ^testing.T) {
 	testing.expect_value(t, list.rects[0].rect.x, 100 + advance + second)
 	testing.expect_value(t, list.rects[0].rect.width, f32(3))
 }
+
+// What a note looks like depends on its kind, its label and the text it covers, so each of them is part of
+// the rows' cache key: a change to one lays the stream out again.
+@(test)
+changes_rows_refresh_when_a_note_changes_kind_label_or_range :: proc(t: ^testing.T) {
+	f: Diff_Fixture
+	view: ui.Changes_View
+	if !diff_fixture_make(t, &f, &view) {return}
+	defer diff_fixture_destroy(&f)
+	state: ui.Changes_State
+	defer ui.changes_state_destroy(&state)
+	f.comments[0] = {file = 0, first = 0, last = 1, text = "Rename this"}
+	view.comments = f.comments[:1]
+	_ = lay_out(&f, &view, &state)
+	key := state.rows.comments_key
+
+	changed :: proc(f: ^Diff_Fixture, view: ^ui.Changes_View, state: ^ui.Changes_State, key: ^u64) -> bool {
+		_ = lay_out(f, view, state)
+		different := state.rows.comments_key != key^
+		key^ = state.rows.comments_key
+		return different
+	}
+	f.comments[0].kind = .Label
+	testing.expect(t, changed(&f, &view, &state, &key), "kind")
+	f.comments[0].label_name = "Verify this"
+	testing.expect(t, changed(&f, &view, &state, &key), "label name")
+	f.comments[0].label_colour = "#ff8800"
+	testing.expect(t, changed(&f, &view, &state, &key), "label colour")
+	f.comments[0].partial = true
+	testing.expect(t, changed(&f, &view, &state, &key), "partial")
+	f.comments[0].first_offset = 1
+	testing.expect(t, changed(&f, &view, &state, &key), "first offset")
+	f.comments[0].last_offset = 2
+	testing.expect(t, changed(&f, &view, &state, &key), "last offset")
+	testing.expect(t, !changed(&f, &view, &state, &key), "nothing changed")
+
+	view.selection = {file = 0, first = 2, last = 2, active = true}
+	testing.expect(t, changed(&f, &view, &state, &key), "selection")
+	view.selection.partial, view.selection.last_offset = true, 1
+	testing.expect(t, changed(&f, &view, &state, &key), "selection text")
+}

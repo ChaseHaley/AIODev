@@ -298,22 +298,29 @@ cards_through :: proc(rows: ^Changes_Rows, view: ^Changes_View, file, low, high:
 	return total
 }
 
-// What the cards' layout depends on besides the diff: the comments, which one is edited and the selection,
+// What the cards' layout depends on besides the diff: the notes, which one is edited and the selection,
 // which the Comment button and a new comment go below. Part of the rows cache key.
 @(private)
 changes_comments_key :: proc(view: ^Changes_View) -> u64 {
 	mix :: proc(hash, value: u64) -> u64 {return (hash ~ value) * 1099511628211}
+	mix_string :: proc(hash: u64, s: string) -> u64 {
+		hash := hash
+		for b in transmute([]u8)s {hash = mix(hash, u64(b))}
+		return mix(hash, 0x100)
+	}
 	hash := u64(14695981039346656037)
 	hash = mix(hash, u64(view.editing + 1))
 	hash = mix(hash, u64(len(view.comments)))
 	for c in view.comments {
 		hash = mix(mix(mix(hash, u64(c.file + 1)), u64(c.first + 1)), u64(c.last + 1))
 		hash = mix(hash, c.detached ? 2 : 1)
-		for b in transmute([]u8)c.text {hash = mix(hash, u64(b))}
-		hash = mix(hash, 0x100)
+		hash = mix(mix(hash, u64(c.kind)), c.partial ? 2 : 1)
+		hash = mix(mix(hash, u64(c.first_offset)), u64(c.last_offset))
+		hash = mix_string(mix_string(mix_string(hash, c.text), c.label_name), c.label_colour)
 	}
 	if s := view.selection; s.active {
 		hash = mix(mix(mix(hash, u64(s.file + 1)), u64(s.first + 1)), u64(s.last + 1))
+		hash = mix(mix(mix(hash, s.partial ? 2 : 1), u64(s.first_offset)), u64(s.last_offset))
 	}
 	return hash
 }

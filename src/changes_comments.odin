@@ -9,7 +9,6 @@ import "aio:term"
 import "aio:turns"
 import "aio:ui"
 import "core:fmt"
-import "core:mem"
 import "core:strings"
 import "core:time"
 
@@ -28,16 +27,26 @@ Comment_Side :: enum u8 {
 
 Changes_Comment :: struct {
 	// The path as the diff shows it: new_path, or old_path for a deleted file.
-	worktree, path:              string,
+	worktree, path:                             string,
 	// New when any commented line is Context or Added, else Old.
-	side:                        Comment_Side,
+	side:                                       Comment_Side,
 	// Line numbers on `side`.
-	first, last:                 i32,
+	first, last:                                i32,
 	// The commented diff lines with their signs (" ", "+", "-"), joined by '\n'.
-	quote:                       string,
-	text:                        string,
+	quote:                                      string,
+	text:                                       string,
+	// What the note asks. A label note keeps the quick label it was made with, copied so that renaming or
+	// removing the label later leaves the note as it was: its name, its colour (a preset name or #rrggbb)
+	// and the instruction sent with it.
+	kind:                                       ui.Changes_Note_Kind,
+	label_name, label_colour, label_instruction: string,
+	// A note on part of its lines starts at byte `first_offset` of its first line's text and ends at
+	// `last_offset` of its last line's. Whole lines are not partial, and neither is a range that spans its
+	// lines' trimmed text.
+	partial:                                    bool,
+	first_offset, last_offset:                  int,
 	// Where it shows in the current view; file = -1 when its lines are not in this diff.
-	file, first_line, last_line: int,
+	file, first_line, last_line:                int,
 }
 
 Changes_Comments :: struct {
@@ -72,6 +81,9 @@ changes_comment_release :: proc(item: ^Changes_Comment) {
 	delete(item.path)
 	delete(item.quote)
 	delete(item.text)
+	delete(item.label_name)
+	delete(item.label_colour)
+	delete(item.label_instruction)
 	item^ = {}
 }
 
@@ -112,6 +124,49 @@ changes_side_line :: proc(line: turns.Diff_Line, side: Comment_Side) -> i32 {
 changes_line_count :: proc(file: turns.Diff_File) -> (count: int) {
 	for hunk in file.hunks {count += len(hunk.lines)}
 	return
+}
+
+// The text of flat line `flat` of `file`; found = false when there is no such line.
+@(private = "file", require_results)
+changes_line_text :: proc(file: turns.Diff_File, flat: int) -> (text: string, found: bool) {
+	if flat < 0 {return "", false}
+	at := flat
+	for hunk in file.hunks {
+		if at < len(hunk.lines) {return hunk.lines[at].text, true}
+		at -= len(hunk.lines)
+	}
+	return "", false
+}
+
+// A note on flat lines `first..last` of `file` as it stands there: its offsets held inside those lines'
+// text and in order, and not partial when they span the trimmed text of the lines, which is the whole of
+// them. Offsets of a note that is not partial are zero.
+@(private = "file", require_results)
+changes_range_fit :: proc(
+	file: turns.Diff_File,
+	first, last: int,
+	partial: bool,
+	first_offset, last_offset: int,
+) -> (
+	fit: bool,
+	low, high: int,
+) {
+	if !partial {return false, 0, 0}
+	first_text, found_first := changes_line_text(file, first)
+	last_text, found_last := changes_line_text(file, last)
+	if !found_first || !found_last {return false, 0, 0}
+	low, high = clamp(first_offset, 0, len(first_text)), clamp(last_offset, 0, len(last_text))
+	if first == last && high < low {low, high = high, low}
+	indent := len(first_text) - len(strings.trim_left_space(first_text))
+	if low <= indent && high >= len(strings.trim_right_space(last_text)) {return false, 0, 0}
+	return true, low, high
+}
+
+@(private = "file", require_results)
+changes_clone :: proc(s: string, failed: ^bool) -> string {
+	cloned, err := strings.clone(s)
+	if err != nil {failed^ = true}
+	return cloned
 }
 
 // The side and its line numbers that flat lines `first..last` of `file` cover; found = false when none
@@ -230,6 +285,12 @@ changes_comments_sync :: proc(pane: ^Changes_Pane) {
 					last = item.last_line,
 					text = item.text,
 					detached = detached,
+					kind = item.kind,
+					partial = item.partial,
+					first_offset = item.first_offset,
+					last_offset = item.last_offset,
+					label_name = item.label_name,
+					label_colour = item.label_colour,
 				},
 			)
 		}
@@ -272,6 +333,9 @@ changes_selection_hold :: proc(pane: ^Changes_Pane) {
 	}
 	held.side, held.first, held.last = side, low, high
 	held.file, held.first_line, held.last_line = s.file, s.first, s.last
+	held.partial, held.first_offset, held.last_offset = changes_range_fit(
+		file, s.first, s.last, s.partial, s.first_offset, s.last_offset,
+	)
 }
 
 @(private = "file")
@@ -324,9 +388,18 @@ changes_editor_open :: proc(pane: ^Changes_Pane, index: int) {
 	c.editing = index
 }
 
-// A comment on the selection with `text`; the selection ends.
-@(private = "file", require_results)
-changes_comment_add :: proc(pane: ^Changes_Pane, text: string) -> bool {
+// What a new note carries besides its lines. A label's name, colour and instruction are copied from the
+// quick label it was made with.
+Changes_Note :: struct {
+	kind:                                       ui.Changes_Note_Kind,
+	text:                                       string,
+	label_name, label_colour, label_instruction: string,
+}
+
+// Adds a note of any kind on the selection; the selection ends. A label or a deletion needs no editor, so
+// this is how those are made.
+@(require_results)
+changes_comment_add :: proc(pane: ^Changes_Pane, note: Changes_Note) -> bool {
 	c := &pane.comments
 	files := pane.model.view.files
 	s := c.selection
@@ -338,16 +411,23 @@ changes_comment_add :: proc(pane: ^Changes_Pane, text: string) -> bool {
 		side       = side,
 		first      = low,
 		last       = high,
+		kind       = note.kind,
 		file       = s.file,
 		first_line = s.first,
 		last_line  = s.last,
 	}
-	worktree_error, path_error, quote_error, text_error: mem.Allocator_Error
-	item.worktree, worktree_error = strings.clone(changes_comments_worktree(pane))
-	item.path, path_error = strings.clone(changes_comment_path(file))
-	item.quote, quote_error = strings.clone(changes_quote(file, s.first, s.last))
-	item.text, text_error = strings.clone(text)
-	if worktree_error != nil || path_error != nil || quote_error != nil || text_error != nil {
+	item.partial, item.first_offset, item.last_offset = changes_range_fit(
+		file, s.first, s.last, s.partial, s.first_offset, s.last_offset,
+	)
+	failed := false
+	item.worktree = changes_clone(changes_comments_worktree(pane), &failed)
+	item.path = changes_clone(changes_comment_path(file), &failed)
+	item.quote = changes_clone(changes_quote(file, s.first, s.last), &failed)
+	item.text = changes_clone(note.text, &failed)
+	item.label_name = changes_clone(note.label_name, &failed)
+	item.label_colour = changes_clone(note.label_colour, &failed)
+	item.label_instruction = changes_clone(note.label_instruction, &failed)
+	if failed {
 		changes_comment_release(&item)
 		return false
 	}
@@ -381,7 +461,7 @@ changes_editor_close :: proc(app: ^App, pane: ^Changes_Pane, save: bool) {
 		c.items[editing].text = cloned
 		return
 	}
-	if !changes_comment_add(pane, text) {notify(app, .Error, "Could not save the comment.")}
+	if !changes_comment_add(pane, {text = text}) {notify(app, .Error, "Could not save the comment.")}
 }
 
 @(private = "file")
@@ -612,6 +692,12 @@ changes_comments_reanchor :: proc(pane: ^Changes_Pane) {
 	worktree := changes_comments_worktree(pane)
 	for &item in c.items {
 		item.file, item.first_line, item.last_line = changes_anchor_find(files, worktree, item)
+		if item.file >= 0 {
+			item.partial, item.first_offset, item.last_offset = changes_range_fit(
+				files[item.file], item.first_line, item.last_line, item.partial, item.first_offset,
+				item.last_offset,
+			)
+		}
 	}
 	if c.selection.active {
 		file, first, last := -1, 0, 0
@@ -625,13 +711,20 @@ changes_comments_reanchor :: proc(pane: ^Changes_Pane) {
 			}
 		} else {
 			c.anchor = c.anchor == c.selection.first ? first : last
+			partial, first_offset, last_offset := changes_range_fit(
+				files[file], first, last, c.held.partial, c.held.first_offset, c.held.last_offset,
+			)
 			c.selection = {
-				file   = file,
-				first  = first,
-				last   = last,
-				active = true,
+				file         = file,
+				first        = first,
+				last         = last,
+				active       = true,
+				partial      = partial,
+				first_offset = first_offset,
+				last_offset  = last_offset,
 			}
 			c.held.file, c.held.first_line, c.held.last_line = file, first, last
+			c.held.partial, c.held.first_offset, c.held.last_offset = partial, first_offset, last_offset
 		}
 	}
 	changes_comments_sync(pane)
@@ -831,6 +924,11 @@ when AIO_CONTROL {
 				state_value(r, fmt.tprintf("changes.comment.%d.last", i), item.last)
 				state_text(r, fmt.tprintf("changes.comment.%d.text", i), item.text)
 				state_value(r, fmt.tprintf("changes.comment.%d.detached", i), item.file < 0)
+				state_text(r, fmt.tprintf("changes.comment.%d.kind", i), fmt.tprint(item.kind))
+				state_text(r, fmt.tprintf("changes.comment.%d.label", i), item.label_name)
+				state_value(r, fmt.tprintf("changes.comment.%d.partial", i), item.partial)
+				state_value(r, fmt.tprintf("changes.comment.%d.first_offset", i), item.first_offset)
+				state_value(r, fmt.tprintf("changes.comment.%d.last_offset", i), item.last_offset)
 			}
 			if shown, found := changes_pane_rect(w, pane.id); found {
 				g := changes_geometry_of(app, w, pane, shown)

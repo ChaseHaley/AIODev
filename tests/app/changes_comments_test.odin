@@ -364,3 +364,178 @@ comments_send_verdict_trusts_only_the_reporting_agent_and_never_answers_a_prompt
 	can_send, _ = app.changes_send_verdict(true, "node", .Codex, nil, {}, false, "")
 	testing.expect(t, can_send)
 }
+
+// One hunk: a context line of `text`, then an added line. With `lead`, a hunk adding a line comes first.
+@(private = "file")
+comments_text_files :: proc(text: string, lead := false) -> []turns.Diff_File {
+	lines := make([]turns.Diff_Line, 2, context.temp_allocator)
+	lines[0] = {kind = .Context, old_line = 4, new_line = 4, text = text}
+	lines[1] = {kind = .Added, new_line = 5, text = "tail"}
+	hunks := make([dynamic]turns.Hunk, context.temp_allocator)
+	if lead {
+		added := make([]turns.Diff_Line, 1, context.temp_allocator)
+		added[0] = {kind = .Added, new_line = 1, text = "z"}
+		append(&hunks, turns.Hunk{lines = added})
+	}
+	append(&hunks, turns.Hunk{lines = lines})
+	files := make([]turns.Diff_File, 1, context.temp_allocator)
+	files[0] = {old_path = "src/foo.odin", new_path = "src/foo.odin", hunks = hunks[:]}
+	return files
+}
+
+// Saves a note on the context line with the editor, after `select` is set as the selection.
+@(private = "file")
+comments_save_selected :: proc(
+	state: ^app.App, w: ^app.Window, pane: ^app.Changes_Pane, select: ui.Changes_Selection, text: string,
+) {
+	pane.comments.selection = select
+	comments_press(state, w, pane, {part = .Comment_Button})
+	_ = app.changes_comments_text(state, w, pane, text)
+	_ = comments_key(state, w, pane, .Enter)
+}
+
+@(test)
+comments_keep_the_offsets_of_a_partial_selection_unless_they_span_the_line :: proc(t: ^testing.T) {
+	state: app.App
+	defer app.changes_app_destroy(&state.changes_state)
+	w: app.Window
+	pane := app.changes_pane_create(&state, {}, "C:/work/odin", .Repository)
+	if !testing.expect(t, pane != nil) {return}
+	text := "  value := compute(a)"
+	pane.model.view.files = comments_text_files(text)
+	c := &pane.comments
+
+	// "compute" is a part of the line: the note keeps its offsets, and the view carries them.
+	comments_save_selected(
+		&state, &w, pane, {file = 0, first = 0, last = 0, active = true, partial = true, first_offset = 11, last_offset = 18},
+		"Name it.",
+	)
+	if !testing.expect_value(t, len(c.items), 1) {return}
+	item := c.items[0]
+	testing.expect(t, item.partial)
+	testing.expect_value(t, item.first_offset, 11)
+	testing.expect_value(t, item.last_offset, 18)
+	testing.expect_value(t, item.kind, ui.Changes_Note_Kind.Comment)
+	view := pane.model.view.comments[0]
+	testing.expect(t, view.partial)
+	testing.expect_value(t, view.first_offset, 11)
+	testing.expect_value(t, view.last_offset, 18)
+
+	// Offsets that span the trimmed text, indent and trailing space aside, select the whole line.
+	comments_save_selected(
+		&state, &w, pane, {file = 0, first = 0, last = 0, active = true, partial = true, first_offset = 2, last_offset = len(text)},
+		"Whole.",
+	)
+	if !testing.expect_value(t, len(c.items), 2) {return}
+	testing.expect(t, !c.items[1].partial)
+	testing.expect_value(t, c.items[1].first_offset, 0)
+	testing.expect_value(t, c.items[1].last_offset, 0)
+
+	// A line selection has no offsets.
+	comments_save_selected(&state, &w, pane, {file = 0, first = 0, last = 0, active = true}, "Line.")
+	if !testing.expect_value(t, len(c.items), 3) {return}
+	testing.expect(t, !c.items[2].partial)
+
+	// Offsets out of order on one line are put in order, and offsets past the text held inside it.
+	comments_save_selected(
+		&state, &w, pane, {file = 0, first = 0, last = 0, active = true, partial = true, first_offset = 18, last_offset = 11},
+		"Swapped.",
+	)
+	comments_save_selected(
+		&state, &w, pane, {file = 0, first = 0, last = 0, active = true, partial = true, first_offset = 11, last_offset = 99},
+		"Past.",
+	)
+	if !testing.expect_value(t, len(c.items), 5) {return}
+	testing.expect_value(t, c.items[3].first_offset, 11)
+	testing.expect_value(t, c.items[3].last_offset, 18)
+	testing.expect_value(t, c.items[4].first_offset, 11)
+	testing.expect_value(t, c.items[4].last_offset, len(text))
+}
+
+@(test)
+comments_follow_a_refresh_with_their_offsets_held_inside_the_new_text :: proc(t: ^testing.T) {
+	state: app.App
+	defer app.changes_app_destroy(&state.changes_state)
+	w: app.Window
+	pane := app.changes_pane_create(&state, {}, "C:/work/odin", .Repository)
+	if !testing.expect(t, pane != nil) {return}
+	pane.model.view.files = comments_text_files("  value := compute(a)")
+	c := &pane.comments
+	comments_save_selected(
+		&state, &w, pane, {file = 0, first = 0, last = 0, active = true, partial = true, first_offset = 11, last_offset = 18},
+		"Name it.",
+	)
+	if !testing.expect_value(t, len(c.items), 1) {return}
+
+	// A selection by text rides along too: held by its offsets, found again with them.
+	comments_press(&state, &w, pane, {part = .Line, index = 0, line = 0})
+	c.selection.partial, c.selection.first_offset, c.selection.last_offset = true, 11, 18
+	c.held.partial, c.held.first_offset, c.held.last_offset = true, 11, 18
+
+	// The line is shorter now and one flat index further down: the offsets stay inside it.
+	pane.model.view.files = comments_text_files("  value := comp", lead = true)
+	app.changes_comments_reanchor(pane)
+	testing.expect_value(t, c.items[0].first_line, 1)
+	testing.expect(t, c.items[0].partial)
+	testing.expect_value(t, c.items[0].first_offset, 11)
+	testing.expect_value(t, c.items[0].last_offset, 15)
+	testing.expect_value(t, pane.model.view.comments[0].last_offset, 15)
+	testing.expect_value(
+		t, c.selection,
+		ui.Changes_Selection{file = 0, first = 1, last = 1, active = true, partial = true, first_offset = 11, last_offset = 15},
+	)
+
+	// A line emptied since the note was made leaves nothing to select but the line itself.
+	pane.model.view.files = comments_text_files("", lead = true)
+	app.changes_comments_reanchor(pane)
+	testing.expect(t, !c.items[0].partial)
+	testing.expect_value(t, c.items[0].last_offset, 0)
+	testing.expect(t, !c.selection.partial)
+}
+
+@(test)
+comments_keep_a_copy_of_the_label_they_were_made_with :: proc(t: ^testing.T) {
+	state: app.App
+	defer app.changes_app_destroy(&state.changes_state)
+	w: app.Window
+	pane := app.changes_pane_create(&state, {}, "C:/work/odin", .Repository)
+	if !testing.expect(t, pane != nil) {return}
+	pane.model.view.files = comments_files("src/foo.odin")
+	c := &pane.comments
+	comments_press(&state, &w, pane, {part = .Line, index = 0, line = 2})
+	name := strings.clone("Verify this")
+	colour := strings.clone("#ff8800")
+	instruction := strings.clone("Check the claim.")
+	defer delete(name)
+	defer delete(colour)
+	defer delete(instruction)
+	note := app.Changes_Note {
+		kind              = .Label,
+		label_name        = name,
+		label_colour      = colour,
+		label_instruction = instruction,
+	}
+	testing.expect(t, app.changes_comment_add(pane, note))
+	if !testing.expect_value(t, len(c.items), 1) {return}
+	item := c.items[0]
+	testing.expect_value(t, item.kind, ui.Changes_Note_Kind.Label)
+	testing.expect_value(t, item.label_name, "Verify this")
+	testing.expect_value(t, item.label_colour, "#ff8800")
+	testing.expect_value(t, item.label_instruction, "Check the claim.")
+	testing.expect_value(t, item.text, "")
+	// The note owns its strings: the label can change without touching it.
+	testing.expect(t, raw_data(item.label_name) != raw_data(name))
+	testing.expect(t, raw_data(item.label_instruction) != raw_data(instruction))
+	testing.expect(t, !c.selection.active, "adding a note ends the selection")
+
+	app.changes_comments_view(&state, pane)
+	view := pane.model.view.comments[0]
+	testing.expect_value(t, view.kind, ui.Changes_Note_Kind.Label)
+	testing.expect_value(t, view.label_name, "Verify this")
+	testing.expect_value(t, view.label_colour, "#ff8800")
+
+	// A deletion with no text is a note too.
+	comments_press(&state, &w, pane, {part = .Line, index = 0, line = 1})
+	testing.expect(t, app.changes_comment_add(pane, {kind = .Delete}))
+	if !testing.expect_value(t, len(c.items), 2) {return}
+}

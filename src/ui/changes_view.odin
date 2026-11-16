@@ -52,18 +52,33 @@ Changes_Turn :: struct {
 	agent:                 int,
 }
 
-// Flat line indices within one file: the file's diff lines in hunk order, as syntax.File_Lines and
-// comments count them.
-Changes_Selection :: struct {
-	file, first, last: int,
-	active:            bool,
+// What a note asks of the agent: a comment, a quick label's request, or the deletion of its lines.
+Changes_Note_Kind :: enum u8 {
+	Comment,
+	Label,
+	Delete,
 }
 
-// A comment as the diff shows it. `detached`: its lines are not in this diff.
+// Flat line indices within one file: the file's diff lines in hunk order, as syntax.File_Lines and
+// comments count them. A `partial` selection is of text rather than whole lines: it starts at byte
+// `first_offset` of the first line's text and ends at `last_offset` of the last line's.
+Changes_Selection :: struct {
+	file, first, last:         int,
+	active:                    bool,
+	partial:                   bool,
+	first_offset, last_offset: int,
+}
+
+// A note as the diff shows it. `detached`: its lines are not in this diff. The offsets are a partial
+// selection's, as above. A label note names its label and gives its colour, a preset name or #rrggbb.
 Changes_Comment_View :: struct {
-	file, first, last: int,
-	text:              string,
-	detached:          bool,
+	file, first, last:         int,
+	text:                      string,
+	detached:                  bool,
+	kind:                      Changes_Note_Kind,
+	partial:                   bool,
+	first_offset, last_offset: int,
+	label_name, label_colour:  string,
 }
 
 // The send bar: how many comments, which agent they go to, and why Send is off when it is.
