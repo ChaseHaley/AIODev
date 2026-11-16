@@ -5,23 +5,31 @@ import "aio:ui"
 
 // Saves one change to the quick labels. The page rows own the label text, so every change rebuilds
 // the whole `turns.quick_labels` value from them and saves it as one setting. A refusal rings the
-// field's row, or for a field the user moved off (`kept`) says why on that row.
+// field's row with the reason; for a field the user moved off (`kept`) it says why on that row. A
+// `pending` field is one the user left without Enter just before this action: it is applied to the
+// rows first so a Move, Remove or Reset cannot save it onto another label. Returns whether it
+// applied, and if it did not, the open label and the settling blocks are as they were.
 @(private)
-editor_labels_edit :: proc(app: ^App, w: ^Window, edit: ui.Label_Edit, kept := false) {
+editor_labels_edit :: proc(
+	app: ^App,
+	w: ^Window,
+	edit: ui.Label_Edit,
+	kept := false,
+	pending: ui.Editor_Kept = {},
+) -> bool {
 	p := &w.editor
-	value, select_key, problem := ui.editor_quick_labels_value(p, edit)
+	expanded := p.label_expanded
+	value, select_key, problem := ui.editor_quick_labels_value(p, edit, pending)
 	if problem != "" {
-		if kept {
-			editor_kept_refused(p, "", edit.key, problem)
-		} else {
-			ui.editor_message(p, problem, true)
-		}
-		return
+		ui.editor_quick_labels_undo(p, edit, expanded)
+		editor_labels_refused(p, edit, problem, kept)
+		return false
 	}
 	result := settings_change(app, Setting_Value{settings.QUICK_LABELS_KEY, value}, editor_field_base(p, kept))
-	if kept && result.status == .Refused {
-		editor_kept_refused(p, "", edit.key, result.message)
-		return
+	if result.status != .Applied {ui.editor_quick_labels_undo(p, edit, expanded)}
+	if result.status == .Refused {
+		editor_labels_refused(p, edit, result.message, kept)
+		return false
 	}
 	message := "Saved and applied."
 	focus := Reveal_Focus.None
@@ -37,4 +45,17 @@ editor_labels_edit :: proc(app: ^App, w: ^Window, edit: ui.Label_Edit, kept := f
 		message, focus = "Label order saved. Alt+1 to Alt+9 follow it.", .Control
 	}
 	editor_table_saved(w, result, .Setting, select_key, message, focus, edit.kind == .Field)
+	return result.status == .Applied
+}
+
+// Says why a label change was refused: on the field's row when one field caused it, as for the
+// profile fields, and in the status line.
+@(private)
+editor_labels_refused :: proc(p: ^ui.Editor, edit: ui.Label_Edit, message: string, kept: bool) {
+	if kept {
+		editor_kept_refused(p, "", edit.key, message)
+		return
+	}
+	if edit.kind == .Field {ui.editor_error_set(p, "", edit.key, message)}
+	ui.editor_message(p, message, true)
 }

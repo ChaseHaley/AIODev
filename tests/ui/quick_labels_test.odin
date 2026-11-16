@@ -223,6 +223,62 @@ quick_labels_remove_and_reset_return_the_values_a_save_needs :: proc(t: ^testing
 	testing.expect_value(t, p.label_expanded, 0)
 }
 
+@(private)
+labels_value_kept :: proc(t: ^testing.T, p: ^ui.Editor, edit: ui.Label_Edit, key, text: string) -> string {
+	value, _, problem := ui.editor_quick_labels_value(p, edit, {key, text})
+	testing.expect_value(t, problem, "")
+	return value
+}
+
+@(test)
+a_kept_label_field_follows_its_label_through_remove_move_and_reset :: proc(t: ^testing.T) {
+	p: ui.Editor
+	defer ui.editor_destroy(&p)
+	labels_fixture(t, &p)
+	// Typed into label 2 and left without Enter: removing label 1 renumbers it, but the text stays its own.
+	value := labels_value_kept(t, &p, {kind = .Remove, id = 1}, "label.2.name", "Foo")
+	testing.expect_value(t, value, "Foo | #2ea043 | second; Three | orange")
+	// Removing the label it was typed into drops it instead of renaming the label that takes its place.
+	value = labels_value_kept(t, &p, {kind = .Remove, id = 1}, "label.1.name", "Foo")
+	testing.expect_value(t, value, "Two | #2ea043 | second; Three | orange")
+	value = labels_value_kept(t, &p, {kind = .Move, id = 3, slot = 0}, "label.3.instruction", "later")
+	testing.expect_value(t, value, "Three | orange | later; One | blue | first; Two | #2ea043 | second")
+	value = labels_value_kept(t, &p, {kind = .Reset}, "label.1.name", "Foo")
+	testing.expect_value(t, value, settings.QUICK_LABELS_DEFAULT)
+	value = labels_value_kept(t, &p, {kind = .Add}, "label.1.name", "Uno")
+	testing.expect(t, strings.has_prefix(value, "Uno | blue | first; Two"))
+}
+
+@(test)
+a_refused_label_edit_leaves_the_open_label_where_it_was :: proc(t: ^testing.T) {
+	p: ui.Editor
+	defer ui.editor_destroy(&p)
+	labels_fixture(t, &p)
+	p.label_expanded = 3
+	edit := ui.Label_Edit{kind = .Move, id = 3, slot = 0}
+	_, _, problem := ui.editor_quick_labels_value(&p, edit)
+	testing.expect_value(t, problem, "")
+	testing.expect_value(t, p.label_expanded, 1)
+	ui.editor_quick_labels_undo(&p, edit, 3)
+	testing.expect_value(t, p.label_expanded, 3)
+}
+
+@(test)
+quick_label_fields_show_no_reset_button :: proc(t: ^testing.T) {
+	p: ui.Editor
+	defer ui.editor_destroy(&p)
+	labels_fixture(t, &p)
+	ui.editor_label_toggle(&p, 1)
+	l := ui.editor_layout({0, 40, 1200, 1400}, 1)
+	found := false
+	for item, index in p.items {
+		if item.row < 0 || item.part != 0 || p.rows[item.row].label_field == .None {continue}
+		found = true
+		testing.expect_value(t, ui.editor_row_parts(&p, l, index).reset.width, 0)
+	}
+	testing.expect(t, found)
+}
+
 @(test)
 quick_labels_colors_resolve_presets_against_the_theme_and_hex_as_typed :: proc(t: ^testing.T) {
 	for id in ([?]string{"studio-dark", "studio-light"}) {

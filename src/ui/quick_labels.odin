@@ -181,19 +181,37 @@ quick_label_problem_text :: proc(problem: settings.Quick_Label_Problem) -> strin
 // The setting text after `edit`, read from the page's rows, and the row to show afterwards. Moving,
 // adding and removing also move the open label with its block, since a reload numbers labels by
 // position. A problem is the message for a field the setting cannot hold; nothing is saved then.
+// A `kept` field is one the user typed into and left without Enter. Its key names a position, which
+// this edit may renumber, so it is applied to the rows here, before the edit, or dropped with its
+// label or a reset, instead of being saved afterwards under whatever label took the position.
 @(require_results)
-editor_quick_labels_value :: proc(p: ^Editor, edit: Label_Edit) -> (value, select_key, problem: string) {
+editor_quick_labels_value :: proc(
+	p: ^Editor,
+	edit: Label_Edit,
+	kept: Editor_Kept = {},
+) -> (
+	value, select_key, problem: string,
+) {
 	if edit.kind == .Reset {
 		p.label_expanded = 0
 		return settings.QUICK_LABELS_DEFAULT, QUICK_LABEL_RESET_KEY, ""
 	}
+	kept_label := 0
+	if kept.key != "" {
+		for row in p.rows {
+			if row.key == kept.key && row.label_field != .None {kept_label = row.label}
+		}
+	}
+	if edit.kind == .Remove && edit.id == kept_label {kept_label = 0}
 	drafts := make([dynamic]settings.Quick_Label_Draft, context.temp_allocator)
 	for head in p.rows {
 		if head.kind != .Quick_Label {continue}
 		draft: settings.Quick_Label_Draft
 		for row in p.rows {
 			if row.label != head.label || row.label_field == .None {continue}
-			text := edit.kind == .Field && row.key == edit.key ? edit.value : row.value
+			text := row.value
+			if kept_label != 0 && row.key == kept.key {text = kept.value}
+			if edit.kind == .Field && row.key == edit.key {text = edit.value}
 			switch row.label_field {
 			case .None:
 			case .Name:
@@ -243,6 +261,22 @@ editor_quick_labels_value :: proc(p: ^Editor, edit: Label_Edit) -> (value, selec
 	if err != nil {return "", "", "Could not keep the label edit."}
 	if refused, has_problem := refusal.?; has_problem {return "", "", quick_label_problem_text(refused)}
 	return text, select_key, ""
+}
+
+// Puts the page state `editor_quick_labels_value` changed for `edit` back, after the setting it
+// built was not saved: the open label as it was (`expanded`) and the blocks' drawn positions.
+editor_quick_labels_undo :: proc(p: ^Editor, edit: Label_Edit, expanded: int) {
+	p.label_expanded = expanded
+	if edit.kind != .Move {return}
+	count := 0
+	for row in p.rows {
+		if row.kind == .Quick_Label {count += 1}
+	}
+	from := edit.id - 1
+	slot := edit.slot > from ? edit.slot - 1 : edit.slot
+	if from >= 0 && from < count && slot >= 0 && slot < count && slot != from {
+		label_positions_follow(p, slot, from)
+	}
 }
 
 // Where the label that was at `old` is after the label at `from` moved to `slot`.
