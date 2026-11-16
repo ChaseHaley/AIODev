@@ -265,7 +265,7 @@ an_open_file_list_takes_typed_text_and_the_comment_draft_is_kept :: proc(t: ^tes
 	app.changes_fill_plain(&f.state, pane, &plain)
 
 	// A comment is being written when the file list opens.
-	_ = app.changes_comments_press(&f.state, w, pane, {.Line, 0, 0}, {button = .Left})
+	_ = app.changes_comments_press(&f.state, w, pane, {.Gutter, 0, 0}, {button = .Left})
 	_ = app.changes_comments_press(&f.state, w, pane, {.Comment_Button, 0, 0}, {button = .Left})
 	if !testing.expect_value(t, pane.comments.editing, 0) {return}
 	app.handle_event(&f.state, input.Text_Event{window = w.id, text = "draft"})
@@ -707,7 +707,7 @@ every_control_says_what_it_does :: proc(t: ^testing.T) {
 	app.changes_model_fold(&pane.model, 0)
 
 	// The send bar of a written comment.
-	_ = app.changes_comments_press(&f.state, w, pane, {.Line, 0, 0}, {button = .Left})
+	_ = app.changes_comments_press(&f.state, w, pane, {.Gutter, 0, 0}, {button = .Left})
 	_ = app.changes_comments_press(&f.state, w, pane, {.Comment_Button, 0, 0}, {button = .Left})
 	app.handle_event(&f.state, input.Text_Event{window = w.id, text = "note"})
 	tap(&f.state, w, .Enter)

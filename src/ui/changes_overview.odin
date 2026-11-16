@@ -116,6 +116,9 @@ overview_draw :: proc(
 		case .Comment:
 			inset, least = OVERVIEW_COMMENT_INSET * s, OVERVIEW_COMMENT_MINIMUM * s
 			color = theme.accent
+			if card := int(tick.card); card >= 0 && card < len(view.comments) {
+				color = changes_note_color(theme, view.comments[card])
+			}
 		}
 		y := lane.y + math.round(f32(tick.y) * k)
 		height := max(least, math.round(f32(tick.height) * k))

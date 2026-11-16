@@ -241,18 +241,23 @@ changes_diff_hit_finds_lines_buttons_and_cards :: proc(t: ^testing.T) {
 	header := ui.changes_diff_hit(g, &view, &state, g.diff.x + 50, g.diff.y + 5)
 	testing.expect_value(t, header, ui.Changes_Hit{.File_Header, 0, 0})
 
-	// The gutter and the text of a line both count as the line.
+	// The numbers and the sign pick the line; the code text starts a text selection.
 	row := ui.changes_line_rect(g, &view, &state, 0, 2)
 	gutter := ui.changes_diff_hit(g, &view, &state, row.x + 2, row.y + 2)
-	testing.expect_value(t, gutter, ui.Changes_Hit{.Line, 0, 2})
+	testing.expect_value(t, gutter, ui.Changes_Hit{.Gutter, 0, 2})
 	text := ui.changes_diff_hit(g, &view, &state, row.x + row.width / 2, row.y + row.height - 1)
 	testing.expect_value(t, text, ui.Changes_Hit{.Line, 0, 2})
+	_, column, _ := ui.changes_line_code(g, &view, &state, &f.mono, 0, 2)
+	edge := ui.changes_diff_hit(g, &view, &state, column.text_x - 1, row.y + 2)
+	testing.expect_value(t, edge, ui.Changes_Hit{.Gutter, 0, 2})
+	edge = ui.changes_diff_hit(g, &view, &state, column.text_x, row.y + 2)
+	testing.expect_value(t, edge, ui.Changes_Hit{.Line, 0, 2})
 
-	// The hunk header's comment button sits at its right end; the rest of the row is the diff.
+	// The hunk header's select button sits at its right end; the rest of the row is the diff.
 	hunk_y := g.diff.y + f32(rows.header) + f32(rows.hunk) / 2
 	right := g.diff.x + g.diff.width - 8 - 4 - f32(rows.hunk) / 2
 	button := ui.changes_diff_hit(g, &view, &state, right, hunk_y)
-	testing.expect_value(t, button, ui.Changes_Hit{.Hunk_Comment, 0, 0})
+	testing.expect_value(t, button, ui.Changes_Hit{.Hunk_Select, 0, 0})
 	rest := ui.changes_diff_hit(g, &view, &state, g.diff.x + 50, hunk_y)
 	testing.expect_value(t, rest, ui.Changes_Hit{.Diff, 0, 0})
 
@@ -381,12 +386,14 @@ changes_diff_side_by_side_hits_and_rects_per_half :: proc(t: ^testing.T) {
 	at = centre(right)
 	testing.expect_value(t, ui.changes_diff_hit(g, &view, &state, at.x, at.y), ui.Changes_Hit{.Line, 0, 3})
 
-	// A context line fills the row, and both halves hit it.
+	// A context line fills the row, and both halves hit it: the numbers by the cell's left edge, the text
+	// further right.
 	context_row := ui.changes_line_rect(g, &view, &state, 0, 0)
 	testing.expect_value(t, context_row.width, inner)
 	testing.expect_value(t, context_row.y, left.y - f32(state.rows.line))
 	y := context_row.y + 2
-	testing.expect_value(t, ui.changes_diff_hit(g, &view, &state, left.x + 4, y), ui.Changes_Hit{.Line, 0, 0})
+	testing.expect_value(t, ui.changes_diff_hit(g, &view, &state, left.x + 4, y), ui.Changes_Hit{.Gutter, 0, 0})
+	testing.expect_value(t, ui.changes_diff_hit(g, &view, &state, right.x + 4, y), ui.Changes_Hit{.Gutter, 0, 0})
 	testing.expect_value(t, ui.changes_diff_hit(g, &view, &state, at.x, y), ui.Changes_Hit{.Line, 0, 0})
 
 	// Blank cells: left of the third added line, right of the lone removed line.
@@ -399,7 +406,7 @@ changes_diff_side_by_side_hits_and_rects_per_half :: proc(t: ^testing.T) {
 	lone_right := ui.changes_diff_hit(g, &view, &state, at.x, lone.y + 2)
 	testing.expect_value(t, lone_right, ui.Changes_Hit{.Diff, 0, 0})
 	lone_left := ui.changes_diff_hit(g, &view, &state, left.x + 4, lone.y + 2)
-	testing.expect_value(t, lone_left, ui.Changes_Hit{.Line, 0, 9})
+	testing.expect_value(t, lone_left, ui.Changes_Hit{.Gutter, 0, 9})
 
 	// The No_Newline markers share the row under the changed line and are not lines to select.
 	marker := ui.changes_line_rect(g, &view, &state, 1, 1)

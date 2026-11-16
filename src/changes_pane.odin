@@ -321,6 +321,7 @@ changes_geometry_of :: proc(
 	mono := ui.text_mono(&w.ui_text, app.family)
 	g := ui.changes_geometry(pane_body_rect(w, shown), w.scale, &pane.model.view, &w.ui_text, &pane.state)
 	ui.changes_layout(&pane.state, &pane.model.view, &w.ui_text, &mono, g.diff.width, w.scale)
+	g.selection_bar = ui.changes_selection_place(g, &pane.model.view, &pane.state, &w.ui_text, &mono)
 	return g
 }
 
@@ -403,22 +404,24 @@ changes_panel_close :: proc(w: ^Window, pane: ^Changes_Pane) {
 }
 
 // The pane's popovers: each is open alone, so opening one closes the rest.
-@(private = "file")
+@(private)
 Changes_Popover :: enum {
 	Panel,
 	Files,
 	Tools,
 	Filter,
+	Labels,
 }
 
-// Closes the panel with its turn list, the file list, the ⋯ menu and the filter popover, except `keep`.
-// Opening a popover keeps itself and closes the others; a new popover is a case here.
-@(private = "file")
+// Closes the panel with its turn list, the file list, the ⋯ menu, the filter popover and the label menu,
+// except `keep`. Opening a popover keeps itself and closes the others; a new popover is a case here.
+@(private)
 changes_popovers_close :: proc(app: ^App, w: ^Window, pane: ^Changes_Pane, keep: Changes_Popover) {
 	if keep != .Panel {changes_panel_close(w, pane)}
 	if keep != .Files {changes_list_close(w, pane)}
 	if keep != .Tools {changes_tools_close(w, pane)}
 	if keep != .Filter {changes_filter_popover(app, w, pane, false)}
+	if keep != .Labels {changes_labels_close(pane)}
 }
 
 // Opens the file list under the files button when the result has files. Opening closes the other popovers,
@@ -476,6 +479,9 @@ changes_row_button_run :: proc(app: ^App, w: ^Window, pane: ^Changes_Pane, butto
 		changes_fold_all(app, w, pane)
 	case .Filter:
 		changes_filter_popover(app, w, pane, true)
+	case .Select_Lines:
+		pane.comments.select_lines = !pane.comments.select_lines
+		w.dirty = true
 	}
 }
 
@@ -857,7 +863,13 @@ changes_pane_draw :: proc(
 
 changes_key :: proc(app: ^App, w: ^Window, e: input.Key_Event) {
 	pane_header_cancel(w)
-	key_suppress(w, e)
+	// Alt alone changes how a press picks, so its press and its release redraw the rows' hover. Alt is the one
+	// key whose release the pane sees: every other key's press is suppressed, which drops its release.
+	alt_key := e.key == .Alt_Left || e.key == .Alt_Right
+	if !alt_key {key_suppress(w, e)}
+	if pane := changes_focused(app, w); pane != nil && pane.comments.alt != (.Alt in e.modifiers) {
+		pane.comments.alt, w.dirty = .Alt in e.modifiers, true
+	}
 	key, consumed := content_key_prelude(app, w, e, true)
 	if consumed {return}
 	if !e.pressed {return}
@@ -964,6 +976,9 @@ changes_wheel :: proc(app: ^App, w: ^Window, x, y: f32, rows: int) -> bool {
 		if render.rect_contains(g.strip, x, y) && ui.changes_scroll_strip(&pane.state, g, view, -rows) {
 			w.dirty = true
 		}
+	case pane.comments.menu && render.rect_contains(g.selection_bar.menu, x, y):
+		changes_label_menu_step(app, pane, -rows)
+		w.dirty = true
 	case changes_list_open(pane):
 		_ = ui.dropdown_wheel(
 			&pane.dropdown, changes_dropdown_choices(pane), changes_dropdown_anchor(pane, g), rows, w.scale,
@@ -997,13 +1012,14 @@ changes_leave :: proc(app: ^App, w: ^Window) {
 }
 
 @(private = "file", require_results)
-changes_cursor :: proc(hit: ui.Changes_Hit) -> platform.Cursor_Shape {
+changes_cursor :: proc(hit: ui.Changes_Hit, line_mode: bool) -> platform.Cursor_Shape {
 	if _, button := ui.changes_row_button_of(hit.part); button {return .Hand}
 	#partial switch hit.part {
 	case .Hooks, .Notice_Button, .File_Header, .Strip_Bar, .Step_Back, .Step_Forward, .Range_Label,
-	     .Hunk_Comment, .Comment_Button, .Comment_Card, .Comment_Delete, .Send, .Copy, .Discard, .Filter_Clear,
+	     .Hunk_Select, .Comment_Button, .Comment_Card, .Comment_Delete, .Send, .Copy, .Discard, .Filter_Clear,
 	     .Filter_Bar_Clear, .Sticky_Header, .Strip_Older, .Strip_Newer, .Summary, .Files_Button, .Tools_Button,
-	     .Source_Chip, .Worktree_Chip:
+	     .Source_Chip, .Worktree_Chip, .Gutter, .Toolbar_Delete, .Toolbar_Comment, .Toolbar_Label, .Label_Row,
+	     .Label_Edit:
 		return .Hand
 	case .Turn_List_Row, .Tools_Row:
 		if hit.index >= 0 {return .Hand}
@@ -1011,6 +1027,9 @@ changes_cursor :: proc(hit: ui.Changes_Hit) -> platform.Cursor_Shape {
 		if hit.index >= 0 {return .Text}
 	case .Comment_Editor:
 		return .Text
+	case .Line:
+		// The code text selects characters, unless a press picks whole lines.
+		return line_mode ? .Arrow : .Text
 	}
 	return .Arrow
 }
@@ -1021,6 +1040,17 @@ changes_drag_turns :: proc(app: ^App, pane: ^Changes_Pane, g: ui.Changes_Geometr
 	wanted := pane.dragging == .Strip ? ui.Changes_Part.Strip_Bar : ui.Changes_Part.Turn_List_Row
 	if hit.part != wanted || hit.index < 0 || hit.index == pane.cursor {return}
 	changes_select(app, pane, g, hit.index, true)
+}
+
+// Where a press or a drag at `x` lands on the code text of `hit`'s line; nothing for any other hit.
+@(private = "file", require_results)
+changes_text_at :: proc(
+	app: ^App, w: ^Window, pane: ^Changes_Pane, g: ui.Changes_Geometry, hit: ui.Changes_Hit, x: f32,
+) -> Changes_Text_Point {
+	if hit.part != .Line {return {}}
+	mono := ui.text_mono(&w.ui_text, app.family)
+	offset, cell, _ := ui.changes_text_point(g, &pane.model.view, &pane.state, &mono, hit.index, hit.line, x)
+	return {offset, cell}
 }
 
 changes_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: input.Mouse_Move_Event) {
@@ -1080,12 +1110,22 @@ changes_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: input.Mou
 		return
 	}
 	if .Left not_in e.buttons {pane.dragging = .None}
-	hit := ui.changes_hit(g, view, &pane.state, x, y)
-	shape := changes_cursor(hit)
+	if alt := .Alt in e.modifiers; pane.comments.alt != alt {pane.comments.alt, w.dirty = alt, true}
+	// A text selection side by side stays within the cell it started in, so its drag reads the pointer
+	// clamped to that cell.
+	c := &pane.comments
+	reach := x
+	if c.dragging && c.by_text && view.side_by_side && .Left in e.buttons && c.drag_cell.width > 0 {
+		reach = clamp(x, c.drag_cell.x, c.drag_cell.x + c.drag_cell.width - 1)
+	}
+	hit := ui.changes_hit(g, view, &pane.state, reach, y)
+	shape := changes_cursor(hit, view.select_lines || view.alt)
 	if pane.dragging != .None {
 		changes_drag_turns(app, pane, g, hit)
-	} else if pane.comments.dragging && .Left in e.buttons {
-		if changes_comments_drag(app, w, pane, hit) {w.dirty = true}
+	} else if c.dragging && .Left in e.buttons {
+		if changes_comments_drag(app, w, pane, hit, changes_text_at(app, w, pane, g, hit, reach)) {
+			w.dirty = true
+		}
 	}
 	if pane.state.hover != hit {pane.state.hover, w.dirty = hit, true}
 	pointer_set(app, w, shape)
@@ -1124,6 +1164,8 @@ changes_press :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) {
 	hit := ui.changes_hit(g, view, state, x, y)
 	state.press = hit
 	extend := .Shift in e.modifiers
+	// A press anywhere but on the toolbar and its menu closes the menu.
+	if !changes_selection_part(hit.part) {changes_labels_close(pane)}
 	// While the filter popover is open, a press outside it, its button's own included, only closes it.
 	if state.filter_open {
 		#partial switch hit.part {
@@ -1205,9 +1247,10 @@ changes_press :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) {
 		}
 	case .Filter_Bar_Clear:
 		changes_filter_clear(app, w, pane)
-	case .Line, .Hunk_Comment, .Comment_Button, .Comment_Card, .Comment_Delete, .Comment_Editor, .Send, .Copy,
-	     .Discard:
-		_ = changes_comments_press(app, w, pane, hit, e)
+	case .Line, .Gutter, .Hunk_Select, .Comment_Button, .Comment_Card, .Comment_Delete, .Comment_Editor, .Send,
+	     .Copy, .Discard, .Toolbar, .Toolbar_Delete, .Toolbar_Comment, .Toolbar_Label, .Label_Menu, .Label_Row,
+	     .Label_Edit:
+		_ = changes_comments_press(app, w, pane, hit, e, changes_text_at(app, w, pane, g, hit, x))
 	case:
 		if button, ok := ui.changes_row_button_of(hit.part); ok {changes_row_button_run(app, w, pane, button)}
 	}
@@ -1340,8 +1383,17 @@ changes_tooltip :: proc(app: ^App, w: ^Window, x, y: f32) -> string {
 	case .File_Header, .Sticky_Header:
 		folded := hit.index >= 0 && hit.index < len(view.collapsed) && view.collapsed[hit.index]
 		return folded ? "Expand file" : "Collapse file"
-	case .Hunk_Comment:
-		return "Comment on this hunk"
+	case .Hunk_Select:
+		return "Select this hunk"
+	case .Toolbar_Delete:
+		return "Ask the agent to delete this"
+	case .Toolbar_Comment:
+		return "Comment"
+	case .Toolbar_Label:
+		return "Quick label"
+	case .Label_Row:
+		label, _ := ui.changes_label_at(view.quick_labels, hit.index)
+		return label.instruction
 	case .Comment_Button:
 		return "Comment on the selected lines"
 	case .Comment_Card:
@@ -1385,6 +1437,12 @@ changes_shortcut :: proc(app: ^App, w: ^Window, x, y: f32) -> Tooltip_Shortcut {
 		return CHANGES_STEP_KEYS[1]
 	case .Summary:
 		return CHANGES_PANEL_KEY
+	case .Toolbar_Delete:
+		return commands.Shortcut{.Delete, {}}
+	case .Toolbar_Comment:
+		return "type to start"
+	case .Toolbar_Label:
+		return "Alt+1–9"
 	}
 	return nil
 }

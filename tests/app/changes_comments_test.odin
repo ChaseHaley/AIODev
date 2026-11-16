@@ -85,8 +85,8 @@ comments_key :: proc(state: ^app.App, w: ^app.Window, pane: ^app.Changes_Pane, k
 // Selects flat lines 2 and 3 (+c, +d) by a press and a Shift press, then writes `text` and saves it.
 @(private = "file")
 comments_write :: proc(state: ^app.App, w: ^app.Window, pane: ^app.Changes_Pane, text: string) {
-	comments_press(state, w, pane, {part = .Line, index = 0, line = 2})
-	comments_press(state, w, pane, {part = .Line, index = 0, line = 3}, shift = true)
+	comments_press(state, w, pane, {part = .Gutter, index = 0, line = 2})
+	comments_press(state, w, pane, {part = .Gutter, index = 0, line = 3}, shift = true)
 	comments_press(state, w, pane, {part = .Comment_Button})
 	_ = app.changes_comments_text(state, w, pane, text)
 	_ = comments_key(state, w, pane, .Enter)
@@ -123,8 +123,8 @@ comments_editor_saves_on_enter_and_cancels_on_escape :: proc(t: ^testing.T) {
 	c := &pane.comments
 	testing.expect_value(t, c.editing, -1)
 
-	comments_press(&state, &w, pane, {part = .Line, index = 0, line = 2})
-	comments_press(&state, &w, pane, {part = .Line, index = 0, line = 3}, shift = true)
+	comments_press(&state, &w, pane, {part = .Gutter, index = 0, line = 2})
+	comments_press(&state, &w, pane, {part = .Gutter, index = 0, line = 3}, shift = true)
 	testing.expect_value(t, c.selection, ui.Changes_Selection{file = 0, first = 2, last = 3, active = true})
 	testing.expect_value(t, pane.model.view.selection, c.selection)
 
@@ -164,8 +164,10 @@ comments_editor_saves_on_enter_and_cancels_on_escape :: proc(t: ^testing.T) {
 	testing.expect_value(t, c.items[0].text, "Looks off.")
 
 	// Removed lines alone comment on the old side; Escape without an editor ends the selection.
-	comments_press(&state, &w, pane, {part = .Hunk_Comment, index = 0, line = 5})
+	comments_press(&state, &w, pane, {part = .Hunk_Select, index = 0, line = 5})
 	testing.expect_value(t, c.selection, ui.Changes_Selection{file = 0, first = 5, last = 6, active = true})
+	testing.expect_value(t, c.editing, -1)
+	testing.expect(t, comments_key(&state, &w, pane, .Enter))
 	testing.expect_value(t, c.editing, 1)
 	testing.expect(t, app.changes_comments_text(&state, &w, pane, "Gone?"))
 	testing.expect(t, comments_key(&state, &w, pane, .Enter))
@@ -173,7 +175,7 @@ comments_editor_saves_on_enter_and_cancels_on_escape :: proc(t: ^testing.T) {
 	testing.expect_value(t, c.items[1].side, app.Comment_Side.Old)
 	testing.expect_value(t, c.items[1].first, 20)
 	testing.expect_value(t, c.items[1].quote, "-x")
-	comments_press(&state, &w, pane, {part = .Line, index = 0, line = 0})
+	comments_press(&state, &w, pane, {part = .Gutter, index = 0, line = 0})
 	testing.expect(t, comments_key(&state, &w, pane, .Escape))
 	testing.expect(t, !c.selection.active)
 	testing.expect(t, !comments_key(&state, &w, pane, .Escape), "Escape passes on with nothing selected")
@@ -198,7 +200,7 @@ comments_find_their_lines_after_a_refresh_and_detach_when_they_are_gone :: proc(
 	comments_write(&state, &w, pane, "Looks off.")
 	if !testing.expect_value(t, len(c.items), 1) {return}
 	// A selection of the removed line rides along with the refresh too.
-	comments_press(&state, &w, pane, {part = .Line, index = 0, line = 1})
+	comments_press(&state, &w, pane, {part = .Gutter, index = 0, line = 1})
 
 	pane.model.view.files = comments_files("src/foo.odin", lead = true)
 	app.changes_comments_reanchor(pane)
@@ -576,7 +578,7 @@ comments_follow_a_refresh_with_their_offsets_held_inside_the_new_text :: proc(t:
 	if !testing.expect_value(t, len(c.items), 1) {return}
 
 	// A selection by text rides along too: held by its offsets, found again with them.
-	comments_press(&state, &w, pane, {part = .Line, index = 0, line = 0})
+	comments_press(&state, &w, pane, {part = .Gutter, index = 0, line = 0})
 	c.selection.partial, c.selection.first_offset, c.selection.last_offset = true, 11, 18
 	c.held.partial, c.held.first_offset, c.held.last_offset = true, 11, 18
 
@@ -610,7 +612,7 @@ comments_keep_a_copy_of_the_label_they_were_made_with :: proc(t: ^testing.T) {
 	if !testing.expect(t, pane != nil) {return}
 	pane.model.view.files = comments_files("src/foo.odin")
 	c := &pane.comments
-	comments_press(&state, &w, pane, {part = .Line, index = 0, line = 2})
+	comments_press(&state, &w, pane, {part = .Gutter, index = 0, line = 2})
 	name := strings.clone("Verify this")
 	colour := strings.clone("#ff8800")
 	instruction := strings.clone("Check the claim.")
@@ -643,7 +645,7 @@ comments_keep_a_copy_of_the_label_they_were_made_with :: proc(t: ^testing.T) {
 	testing.expect_value(t, view.label_colour, "#ff8800")
 
 	// A deletion with no text is a note too, and the message tells the agent to delete the line.
-	comments_press(&state, &w, pane, {part = .Line, index = 0, line = 1})
+	comments_press(&state, &w, pane, {part = .Gutter, index = 0, line = 1})
 	testing.expect(t, app.changes_comment_add(pane, {kind = .Delete}))
 	if !testing.expect_value(t, len(c.items), 2) {return}
 	message := app.changes_comments_message(c.items[:], context.temp_allocator)

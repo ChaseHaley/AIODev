@@ -205,7 +205,7 @@ row_pair :: proc(rows: ^Changes_Rows, file, row: int) -> Changes_Pair {
 }
 
 // The row that holds flat line `line` of `file`, -1 when there is none.
-@(private = "file")
+@(private)
 line_row :: proc(rows: ^Changes_Rows, file, line: int) -> int {
 	t := &rows.pairs
 	if file < 0 || file + 1 >= len(t.file_lines) || line < 0 {return -1}
@@ -440,10 +440,12 @@ Changes_Tick_Kind :: enum u8 {
 	Comment,
 }
 
-// A run of added or removed rows or a comment card, by its place in the stream, in whole pixels.
+// A run of added or removed rows or a comment card, by its place in the stream, in whole pixels. A card's
+// tick names its card, so the strip can colour it as the note is; the others hold -1.
 Changes_Tick :: struct {
 	y, height: i32,
 	kind:      Changes_Tick_Kind,
+	card:      i32,
 }
 
 // Adds a tick, or grows the one at `last` when `y` continues it; `last` follows the newest tick of its kind.
@@ -456,7 +458,7 @@ tick_add :: proc(rows: ^Changes_Rows, last: ^int, y, height: int, kind: Changes_
 			return
 		}
 	}
-	if _, err := append(&rows.ticks, Changes_Tick{i32(y), i32(height), kind}); err == nil {
+	if _, err := append(&rows.ticks, Changes_Tick{i32(y), i32(height), kind, -1}); err == nil {
 		last^ = len(rows.ticks) - 1
 	}
 }
@@ -501,7 +503,7 @@ changes_ticks_build :: proc(rows: ^Changes_Rows, view: ^Changes_View) {
 	for card in 0 ..< len(rows.cards) {
 		top, shown := card_top(rows, view, card)
 		if !shown {continue}
-		_, _ = append(&rows.ticks, Changes_Tick{i32(top), i32(rows.cards[card]), .Comment})
+		_, _ = append(&rows.ticks, Changes_Tick{i32(top), i32(rows.cards[card]), .Comment, i32(card)})
 	}
 }
 
@@ -525,7 +527,7 @@ hunk_row_at :: proc(rows: ^Changes_Rows, view: ^Changes_View, file, base, count,
 }
 
 // The stream row where row `row` of `file` starts; false when the file is collapsed or has no such row.
-@(private = "file")
+@(private)
 row_top :: proc(rows: ^Changes_Rows, view: ^Changes_View, file, row: int) -> (y: int, ok: bool) {
 	if file < 0 || file >= len(view.files) || file >= len(rows.tops) - 1 || row < 0 {return}
 	if changes_collapsed(view, file) || view.files[file].binary {return}
@@ -598,10 +600,11 @@ row_rect :: proc(g: Changes_Geometry, state: ^Changes_State, top: int) -> render
 }
 
 // The row of flat line `line` of `file` across the band; side by side, the cell that holds it, or the whole
-// row for a context line, which fills both. Zero when the line has no row; not clipped to the diff area.
+// row for a context line, which fills both, unless `x` is given: then the half of it that `x` is in. Zero
+// when the line has no row; not clipped to the diff area.
 @(private = "file")
 line_cell :: proc(
-	g: Changes_Geometry, view: ^Changes_View, state: ^Changes_State, file, line: int,
+	g: Changes_Geometry, view: ^Changes_View, state: ^Changes_State, file, line: int, x := f32(-1),
 ) -> render.Rect {
 	rows := &state.rows
 	if !rows.valid || view.notice != .None {return {}}
@@ -616,6 +619,8 @@ line_cell :: proc(
 			rect = left
 		} else if int(pair.left) != line {
 			rect = right
+		} else if x >= 0 {
+			rect = x >= right.x ? right : left
 		}
 	}
 	return rect
@@ -630,17 +635,19 @@ changes_line_rect :: proc(
 }
 
 // Where flat line `line` of `file` draws its text: the cell it sits in, as changes_line_rect gives it but
-// wherever on the stream it is, and the column of numbers, sign and text inside. The painter and a character
-// hit test both read it, so a point maps to the character drawn there with code_offset_at. `mono` is the
-// diff's text; false when the line has no row.
+// wherever on the stream it is (a context line side by side takes the half that `x` is in, the left one
+// without `x`), and the column of numbers, sign and text inside. The painter and a character hit test both
+// read it, so a point maps to the character drawn there with code_offset_at. `mono` is the diff's text;
+// false when the line has no row.
 changes_line_code :: proc(
 	g: Changes_Geometry, view: ^Changes_View, state: ^Changes_State, mono: ^Text, file, line: int,
+	x := f32(-1),
 ) -> (
 	cell: render.Rect,
 	column: Code_Column,
 	ok: bool,
 ) {
-	cell = line_cell(g, view, state, file, line)
+	cell = line_cell(g, view, state, file, line, x)
 	if cell.width <= 0 {return}
 	digit := text_width(mono, "0")
 	number := code_number_width(&view.files[file], digit)
@@ -711,9 +718,9 @@ changes_comment_button_rect :: proc(
 	return {cell.x + cell.width - SPACE_1 * g.scale - width, cell.y, width, cell.height}
 }
 
-// The comment button of a hunk header row, at its right end.
+// The select button of a hunk header row, at its right end.
 @(private = "file")
-hunk_comment_rect :: proc(header: render.Rect, scale: f32) -> render.Rect {
+hunk_select_rect :: proc(header: render.Rect, scale: f32) -> render.Rect {
 	size := header.height
 	return {header.x + header.width - SPACE_1 * scale - size, header.y, size, size}
 }
@@ -776,6 +783,7 @@ changes_diff_hit :: proc(
 		return {}
 	}
 	if !render.rect_contains(g.diff, x, y) {return {}}
+	if hit := selection_bar_hit(g, x, y); hit.part != .None {return hit}
 	// Under a notice the stream holds only the comments.
 	if view.notice != .None {return comment_hit(g, view, state, x, y)}
 	rows := &state.rows
@@ -805,8 +813,8 @@ changes_diff_hit :: proc(
 			if at < top + rows.hunk {
 				header := band
 				header.y, header.height = origin + f32(top), f32(rows.hunk)
-				if len(hunk.lines) > 0 && render.rect_contains(hunk_comment_rect(header, g.scale), x, y) {
-					return {.Hunk_Comment, file, flat}
+				if len(hunk.lines) > 0 && render.rect_contains(hunk_select_rect(header, g.scale), x, y) {
+					return {.Hunk_Select, file, flat}
 				}
 				return {.Diff, file, 0}
 			}
@@ -816,14 +824,19 @@ changes_diff_hit :: proc(
 				return {.Diff, file, 0}
 			}
 			pair := row_pair(rows, file, base + i)
-			line := int(pair.left)
+			line, cell := int(pair.left), band
 			if rows.pairs.side_by_side {
-				if _, right, _ := row_halves(band); x >= right.x {line = int(pair.right)}
+				left, right, _ := row_halves(band)
+				cell = left
+				if x >= right.x {line, cell = int(pair.right), right}
 			}
 			at_line := line - flat
 			if line < 0 || at_line < 0 || at_line >= len(hunk.lines) {return {.Diff, file, 0}}
 			if hunk.lines[at_line].kind == .No_Newline {return {.Diff, file, 0}}
-			return {.Line, file, line}
+			// The numbers and the sign pick the line; the code text starts a text selection.
+			number := code_number_width(f, rows.digit)
+			column := code_column(cell, number, rows.digit, g.scale, !rows.pairs.side_by_side)
+			return {x < column.text_x ? .Gutter : .Line, file, line}
 		}
 		top += height
 		flat += len(hunk.lines)
@@ -1062,16 +1075,189 @@ line_selected :: proc(view: ^Changes_View, file, line: int) -> bool {
 	return s.active && s.file == file && line >= min(s.first, s.last) && line <= max(s.first, s.last)
 }
 
-// A line's sign and text in `column`, inked for its kind and whether its line is selected: the selected
-// line's text is one run, which takes the selected inks. The numbers are the caller's, for they differ by
-// layout.
+// Whether flat line `line` of `file` is picked whole: in a selection of lines rather than of text.
+@(private = "file")
+line_picked :: proc(view: ^Changes_View, file, line: int) -> bool {
+	return line_selected(view, file, line) && !view.selection.partial
+}
+
+// Whether the pointer is on flat line `line` of `file` while a press picks whole lines.
+@(private = "file")
+line_hovered :: proc(p: ^Diff_Paint, file, line: int) -> bool {
+	if !p.view.select_lines && !p.view.alt {return false}
+	h := p.state.hover
+	return (h.part == .Line || h.part == .Gutter) && h.index == file && h.line == line
+}
+
+// The note whose card the pointer is on, -1 for none: its marks in the code draw stronger.
+@(private = "file")
+hot_note :: proc(state: ^Changes_State) -> int {
+	#partial switch state.hover.part {
+	case .Comment_Card, .Comment_Delete:
+		return state.hover.index
+	}
+	return -1
+}
+
+// How much of its colour a note's marks take: its tint behind text and its row tint, each also while the
+// pointer is on its card, and the line under and through its text.
+@(private = "file")
+CHANGES_MARK_TINT :: f32(0.16)
+@(private = "file")
+CHANGES_MARK_TINT_HOT :: f32(0.30)
+@(private = "file")
+CHANGES_MARK_ROW_HOT :: f32(0.12)
+@(private = "file")
+CHANGES_MARK_LINE :: f32(0.8)
+// How strongly the line under the pointer shows in line mode.
+@(private = "file")
+CHANGES_LINE_HOVER :: f32(0.55)
+
+// What the selection and the notes draw on one line: the bar and the row tint a whole-line note gives the
+// row, and byte ranges for the rest. The selection comes first, so its tint wins where they meet.
+@(private = "file")
+CHANGES_LINE_NOTES :: 5
+@(private = "file")
+CHANGES_LINE_EDGES :: 2 * (CHANGES_LINE_NOTES + 1)
+
+@(private = "file")
+Line_Marks :: struct {
+	bar, tint: render.Color,
+	count:     int,
+	segs:      [CHANGES_LINE_NOTES + 1]Code_Run,
+}
+
+@(private = "file")
+colour_alpha :: proc(c: render.Color, alpha: f32) -> render.Color {
+	return {c.r, c.g, c.b, c.a * alpha}
+}
+
+// Collects the marks of flat line `line` of `file`, whose text is `length` bytes. Only attached notes whose
+// lines reach it count, and the one being edited draws none.
+@(private = "file")
+line_marks :: proc(p: ^Diff_Paint, file, line, length: int) -> (marks: Line_Marks) {
+	view, theme := p.view, p.theme
+	add :: proc(marks: ^Line_Marks, seg: Code_Run) {
+		if marks.count < len(marks.segs) {
+			marks.segs[marks.count] = seg
+			marks.count += 1
+		}
+	}
+	if s := view.selection; line_selected(view, file, line) {
+		seg := Code_Run {
+			end      = length,
+			selected = true,
+		}
+		if s.partial {
+			seg.start = line == min(s.first, s.last) ? s.first_offset : 0
+			seg.end = line == max(s.first, s.last) ? s.last_offset : length
+			seg.tint = theme.selection
+		}
+		add(&marks, seg)
+	}
+	if len(view.comments) == 0 {return}
+	hot := hot_note(p.state)
+	for c, i in view.comments {
+		if c.file != file || line < c.first || line > c.last || i == view.editing {continue}
+		if !comment_attached(view, i) {continue}
+		colour := changes_note_color(theme, c)
+		strong := i == hot
+		strike := c.kind == .Delete ? colour_alpha(theme.error, CHANGES_MARK_LINE) : render.Color{}
+		if !c.partial {
+			if marks.bar.a == 0 {marks.bar = colour}
+			if strong {marks.tint = colour_alpha(colour, CHANGES_MARK_ROW_HOT)}
+			add(&marks, Code_Run{end = length, strike = strike})
+			continue
+		}
+		add(
+			&marks,
+			Code_Run {
+				start     = line == c.first ? c.first_offset : 0,
+				end       = line == c.last ? c.last_offset : length,
+				tint      = colour_alpha(colour, strong ? CHANGES_MARK_TINT_HOT : CHANGES_MARK_TINT),
+				underline = colour_alpha(colour, CHANGES_MARK_LINE),
+				strike    = strike,
+			},
+		)
+	}
+	return
+}
+
+// The runs a line of `length` bytes draws: the marks' ranges cut at every edge, each piece taking the first
+// tint, underline and strike that reach it, and the selected inks when a selected range does. Ranges are
+// held inside the line, and a piece no range reaches is left out.
+@(private = "file")
+line_runs :: proc(marks: ^Line_Marks, length: int, out: ^[CHANGES_LINE_EDGES + 1]Code_Run) -> []Code_Run {
+	edges: [CHANGES_LINE_EDGES]int
+	count := 0
+	for &seg in marks.segs[:marks.count] {
+		seg.start, seg.end = clamp(seg.start, 0, length), clamp(seg.end, 0, length)
+		if seg.end <= seg.start {continue}
+		edges[count], edges[count + 1] = seg.start, seg.end
+		count += 2
+	}
+	for i in 1 ..< count {
+		for j := i; j > 0 && edges[j] < edges[j - 1]; j -= 1 {edges[j], edges[j - 1] = edges[j - 1], edges[j]}
+	}
+	runs := 0
+	for i in 1 ..< count {
+		start, end := edges[i - 1], edges[i]
+		if start == end {continue}
+		run := Code_Run {
+			start = start,
+			end   = end,
+		}
+		reached := false
+		for seg in marks.segs[:marks.count] {
+			if seg.start > start || seg.end < end || seg.end <= seg.start {continue}
+			reached = true
+			if run.tint.a == 0 {run.tint = seg.tint}
+			if run.underline.a == 0 {run.underline = seg.underline}
+			if run.strike.a == 0 {run.strike = seg.strike}
+			run.selected ||= seg.selected
+		}
+		if reached {
+			out[runs] = run
+			runs += 1
+		}
+	}
+	return out[:runs]
+}
+
+// A row's marks under its text: the tint of a whole-line note the pointer is on, and the note's bar at the
+// row's left.
+@(private = "file")
+marks_draw :: proc(p: ^Diff_Paint, marks: Line_Marks, row: render.Rect) {
+	if marks.tint.a > 0 {draw_rect(p.list, {rect = row, color = marks.tint})}
+	if marks.bar.a > 0 {
+		bar := render.Rect{row.x, row.y, max(1, math.round(2 * p.scale)), row.height}
+		draw_rect(p.list, {rect = bar, color = marks.bar})
+	}
+}
+
+// The selection over a row picked whole, its bar at the left; or, while presses pick lines, the faint bar of
+// the line under the pointer.
+@(private = "file")
+row_pick_draw :: proc(p: ^Diff_Paint, file, line: int, picked: bool, row: render.Rect) {
+	t := p.theme
+	bar := render.Rect{row.x, row.y, max(1, math.round(2 * p.scale)), row.height}
+	if picked {
+		draw_rect(p.list, {rect = row, color = t.selection})
+		draw_rect(p.list, {rect = bar, color = t.accent})
+	} else if line_hovered(p, file, line) {
+		draw_rect(p.list, {rect = bar, color = colour_alpha(t.accent, CHANGES_LINE_HOVER)})
+	}
+}
+
+// A line's sign and text in `column`: the sign inked for the row it is picked on, the text by runs of
+// `marks`. The numbers are the caller's, for they differ by layout.
 @(private = "file")
 paint_code :: proc(
-	p: ^Diff_Paint, d: ^tr.Diff_Line, file, flat: int, selected: bool, column: Code_Column, row: render.Rect,
-	baseline: f32,
+	p: ^Diff_Paint, d: ^tr.Diff_Line, file, flat: int, picked: bool, marks: ^Line_Marks, column: Code_Column,
+	row: render.Rect, baseline: f32,
 ) -> render.Build_Status {
 	spans, highlighted := line_spans(p.view, file, flat)
-	inks := row_inks(p, d.kind, selected)
+	inks := row_inks(p, d.kind, picked)
 	plain := highlighted ? CHANGES_INK_TEXT : CHANGES_INK_MUTED
 	#partial switch d.kind {
 	case .Added:
@@ -1086,10 +1272,11 @@ paint_code :: proc(
 		plain = CHANGES_INK_TEXT
 	}
 	text := mono_prefix(d.text, column.width, p.digit)
-	whole: [1]Code_Run
+	runs: [CHANGES_LINE_EDGES + 1]Code_Run
 	line := Code_Line {
 		text          = text,
 		spans         = spans,
+		runs          = line_runs(marks, len(text), &runs),
 		x             = column.text_x,
 		width         = column.width,
 		top           = row.y,
@@ -1097,12 +1284,8 @@ paint_code :: proc(
 		baseline      = baseline,
 		scale         = p.scale,
 		inks          = row_inks(p, d.kind, false),
-		selected_inks = inks,
+		selected_inks = row_inks(p, d.kind, true),
 		plain         = plain,
-	}
-	if selected {
-		whole[0] = {end = len(text), selected = true}
-		line.runs = whole[:]
 	}
 	return code_line_draw(p.list, p.mono, line)
 }
@@ -1121,11 +1304,10 @@ paint_line :: proc(
 		draw_rect(p.list, {rect = row, color = t.diff_removed})
 	case .Context, .No_Newline:
 	}
-	selected := line_selected(p.view, file, flat)
-	if selected {
-		draw_rect(p.list, {rect = row, color = t.selection})
-		draw_rect(p.list, {rect = {row.x, y, max(1, math.round(2 * p.scale)), height}, color = t.accent})
-	}
+	picked := line_picked(p.view, file, flat)
+	marks := line_marks(p, file, flat, len(line.text))
+	marks_draw(p, marks, row)
+	row_pick_draw(p, file, flat, picked, row)
 	column := code_column(row, p.number_width, p.digit, p.scale, true)
 	if line.kind == .No_Newline {
 		return draw_fading_text(
@@ -1138,7 +1320,7 @@ paint_line :: proc(
 	if line.kind != .Removed {
 		if r := number_draw(p, line.new_line, column.new_x, baseline); r != .Ok {return r}
 	}
-	return paint_code(p, line, file, flat, selected, column, row, baseline)
+	return paint_code(p, line, file, flat, picked, &marks, column, row, baseline)
 }
 
 // One cell of a side-by-side row: flat line `line` of the hunk whose first line is flat line `flat`, with
@@ -1160,12 +1342,10 @@ paint_cell :: proc(
 	case .Removed:
 		draw_rect(p.list, {rect = cell, color = t.diff_removed})
 	}
-	selected := line_selected(p.view, file, line)
-	if selected {
-		draw_rect(p.list, {rect = cell, color = t.selection})
-		bar := render.Rect{cell.x, cell.y, max(1, math.round(2 * s)), cell.height}
-		draw_rect(p.list, {rect = bar, color = t.accent})
-	}
+	picked := line_picked(p.view, file, line)
+	marks := line_marks(p, file, line, len(d.text))
+	marks_draw(p, marks, cell)
+	row_pick_draw(p, file, line, picked, cell)
 	baseline := baseline_in(cell.y, cell.height, p.mono)
 	column := code_column(cell, p.number_width, p.digit, s, false)
 	if d.kind == .No_Newline {
@@ -1174,7 +1354,7 @@ paint_cell :: proc(
 		)
 	}
 	if r := number_draw(p, old ? d.old_line : d.new_line, column.old_x, baseline); r != .Ok {return r}
-	return paint_code(p, d, file, line, selected, column, cell, baseline)
+	return paint_code(p, d, file, line, picked, &marks, column, cell, baseline)
 }
 
 // Hunk `index` of `file`, whose first line is flat line `flat`: its header row, then its rows.
@@ -1186,12 +1366,12 @@ paint_hunk :: proc(
 	header := render.Rect{p.card_x, y, p.card_width, f32(rows.hunk)}
 	draw_rect(p.list, {rect = header, color = t.code_background})
 	pointed := p.pointer.y >= p.top && p.pointer.y < p.bottom
-	commenting := len(h.lines) > 0 && pointed && render.rect_contains(header, p.pointer.x, p.pointer.y)
+	picking := len(h.lines) > 0 && pointed && render.rect_contains(header, p.pointer.x, p.pointer.y)
 	buf: [64]u8
 	label := fmt.bprintf(buf[:], "@@ -%d,%d +%d,%d @@", h.old_start, h.old_count, h.new_start, h.new_count)
 	baseline := baseline_in(y, f32(rows.hunk), p.mono)
 	room := p.card_width - 2 * SPACE_2 * s
-	if commenting {room -= header.height + SPACE_1 * s}
+	if picking {room -= header.height + SPACE_1 * s}
 	x := p.card_x + SPACE_2 * s
 	if r := draw_fading_text(p.mono, p.list, label, x, baseline, t.muted, room); r != .Ok {return r}
 	if h.section != "" {
@@ -1200,11 +1380,11 @@ paint_hunk :: proc(
 		if r := draw_fading_text(p.mono, p.list, section, x + after, baseline, t.faint, room - after);
 		   r != .Ok {return r}
 	}
-	if commenting {
-		hover, press := changes_lit(p.state, {.Hunk_Comment, file, flat})
-		button := hunk_comment_rect(header, s)
+	if picking {
+		hover, press := changes_lit(p.state, {.Hunk_Select, file, flat})
+		button := hunk_select_rect(header, s)
 		if icon_button_draw(
-			p.list, t, button, .Comment, hover, press, s, p.pointer, ICON_INDICATOR, RADIUS_CONTROL,
+			p.list, t, button, .Select_Lines, hover, press, s, p.pointer, ICON_INDICATOR, RADIUS_CONTROL,
 		) != .None {return .Ok}
 	}
 	top := y + f32(rows.hunk)
@@ -1350,7 +1530,12 @@ paint_card :: proc(p: ^Diff_Paint, rect: render.Rect, card: int) -> render.Build
 	if icon_button_draw(
 		p.list, t, delete, .Close, hover, press, s, p.pointer, ICON_INDICATOR, RADIUS_CONTROL,
 	) != .None {return .Ok}
-	text := view.comments[card].text
+	note := view.comments[card]
+	// A label or a deletion with nothing written shows what it is.
+	text, ink := note.text, t.text
+	if text == "" {
+		text, ink = note.kind == .Label ? note.label_name : "Delete", changes_note_color(t, note)
+	}
 	layout := card_layout(rect.width, s)
 	lines := card_wrap(p.body, text, layout.text_width)
 	x := rect.x + layout.pad
@@ -1360,7 +1545,7 @@ paint_card :: proc(p: ^Diff_Paint, rect: render.Rect, card: int) -> render.Build
 		if !ok || y >= p.bottom {break}
 		if y + p.body.line_height > p.top {
 			line := text[start:end]
-			if r := draw_text(p.body, p.list, line, x, y + p.body.ascent, t.text); r != .Ok {return r}
+			if r := draw_text(p.body, p.list, line, x, y + p.body.ascent, ink); r != .Ok {return r}
 		}
 		y += p.body.line_height
 	}
@@ -1455,11 +1640,14 @@ diff_draw :: proc(
 	// The pinned header covers whatever scrolled under it: lines, cards and the Comment button. A layer
 	// draws its rects before its text, so the header takes a layer of its own above the stream's text.
 	sticky, rect := changes_sticky_header(state, view, g)
-	if sticky < 0 {return .Ok}
-	if render.push_layer(list, g.diff) != .None {return .Ok}
-	draw_rect(list, {rect = rect, color = theme.pane})
-	draw_rect(list, {rect = {rect.x, rect.y + rect.height, rect.width, 1}, color = theme.border})
-	return paint_header(&p, sticky, {p.card_x, rect.y, p.card_width, rect.height}, .Sticky_Header)
+	if sticky >= 0 && render.push_layer(list, g.diff) == .None {
+		draw_rect(list, {rect = rect, color = theme.pane})
+		draw_rect(list, {rect = {rect.x, rect.y + rect.height, rect.width, 1}, color = theme.border})
+		if r := paint_header(&p, sticky, {p.card_x, rect.y, p.card_width, rect.height}, .Sticky_Header); r != .Ok {
+			return r
+		}
+	}
+	return selection_bar_draw(list, text, theme, g, view, state, pointer)
 }
 
 // The send bar under the diff: the count and the agent they go to, then Send, Copy and Discard. Send

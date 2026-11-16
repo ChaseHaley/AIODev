@@ -6,8 +6,8 @@ import tr "aio:turns"
 import "core:math"
 
 // The Agent changes pane: a header row at the top (a summary of what the pane shows on the left; the layout,
-// fold and filter buttons and a chevron button on the right), a panel under the summary for the source, the
-// worktree, the turn strip and the file list, then one diff stream across the pane with an
+// fold, filter and select lines buttons and a chevron button on the right), a panel under the summary for
+// the source, the worktree, the turn strip and the file list, then one diff stream across the pane with an
 // overview strip at its right edge. The pane keeps the model and the scroll state; this file lays the
 // view out, draws it and answers where a point lands. Heights of the diff stream are cached in whole pixels,
 // so scrolling and hit testing agree with what is drawn.
@@ -132,6 +132,16 @@ Changes_View :: struct {
 	editing:     int,
 	editor:      ^Text_Field,
 	send:        Changes_Send_View,
+	// The Select lines toggle is on, and Alt is down: either makes a press pick whole lines, and the rows
+	// under the pointer show it.
+	select_lines, alt: bool,
+	// A selection drag is in progress, which hides the selection toolbar until it ends.
+	selecting:   bool,
+	// The label menu under the toolbar is open, and the row the keys are on. `quick_labels` is the
+	// turns.quick_labels setting's value; the menu reads its labels from it as it draws and hit tests.
+	label_menu:  bool,
+	label_row:   int,
+	quick_labels: string,
 	// The least WCAG contrast code text and signs keep against the row they sit on; 1 or less keeps the
 	// theme's colours.
 	minimum_contrast: f32,
@@ -165,7 +175,9 @@ Changes_Part :: enum u8 {
 	Range_Label,
 	Turn_List_Row,
 	Line,
-	Hunk_Comment,
+	// A press that picks a line from its number or sign; one on the code text starts a text selection.
+	Gutter,
+	Hunk_Select,
 	Comment_Button,
 	Comment_Card,
 	Comment_Delete,
@@ -179,6 +191,7 @@ Changes_Part :: enum u8 {
 	Filter_Clear,
 	Filter_Bar_Clear,
 	Fold_Button,
+	Select_Lines_Button,
 	Sticky_Header,
 	Strip_Older,
 	Strip_Newer,
@@ -189,6 +202,14 @@ Changes_Part :: enum u8 {
 	// rows of its menu.
 	Tools_Button,
 	Tools_Row,
+	// The selection toolbar's buttons and its padding, and the label menu's rows and padding (index -1).
+	Toolbar,
+	Toolbar_Delete,
+	Toolbar_Comment,
+	Toolbar_Label,
+	Label_Menu,
+	Label_Row,
+	Label_Edit,
 	// A chip of the panel's Source and Worktree sections.
 	Source_Chip,
 	Worktree_Chip,
@@ -197,10 +218,11 @@ Changes_Part :: enum u8 {
 }
 
 // What a point is over. `index` is the bar or list row for the strip parts; the file for File_Header,
-// Sticky_Header, Diff, Line and Hunk_Comment (-1 below the last file); the comment for the comment parts;
-// the chip for Source_Chip and Worktree_Chip; the row for Tools_Row (-1 on the menu's padding); -1 for
-// Filter_Field on the filter popover's padding; else 0, as for the row's buttons (Fold_Button,
-// Filter_Button, Layout_Button, ...). `line` is the flat line in file `index`.
+// Sticky_Header, Diff, Line, Gutter and Hunk_Select (-1 below the last file); the comment for the comment
+// parts; the chip for Source_Chip and Worktree_Chip; the row for Tools_Row (-1 on the menu's padding); the
+// label for Label_Row (-1 on Label_Menu's padding); -1 for Filter_Field on the filter popover's padding;
+// else 0, as for the row's buttons (Fold_Button, Filter_Button, Layout_Button, ...). `line` is the flat
+// line in file `index`.
 Changes_Hit :: struct {
 	part:  Changes_Part,
 	index: int,
@@ -220,6 +242,8 @@ Changes_Rows :: struct {
 	width, body_line:                       f32,
 	comments_key:                           u64,
 	header, hunk, line, note, gap, footer:  int,
+	// How far a digit of the diff's text advances, so a hit test can tell the gutter from the code.
+	digit:                                  f32,
 	// The top of each file, then the end of the last one.
 	tops:                                   [dynamic]int,
 	// The height of each comment card, measured by changes_cards_measure.
@@ -306,6 +330,9 @@ Changes_Geometry :: struct {
 	turn_list:                                      render.Rect,
 	// The comments' send bar under the diff; empty without comments.
 	send_bar:                                       render.Rect,
+	// The selection toolbar and the label menu under it; empty while no toolbar shows. Placed by
+	// changes_selection_place, which needs the laid out rows.
+	selection_bar:                                  Changes_Selection_Bar,
 	// The filter popover under the filter button, or under ⋯ while the buttons are collapsed, with its field
 	// and the field's clear button; where it goes whenever there is such a button, and shown only while
 	// state.filter_open.
@@ -523,14 +550,15 @@ changes_layout :: proc(state: ^Changes_State, view: ^Changes_View, text, mono: ^
 	rows := &state.rows
 	key := collapsed_key(view)
 	comments := changes_comments_key(view)
+	digit := text_width(mono, "0")
 	if rows.valid && rows.revision == view.revision && rows.collapsed_key == key &&
 	   rows.notice == view.notice && rows.files == len(view.files) && rows.omitted == view.omitted &&
-	   rows.line_height == mono.line_height && rows.scale == scale && rows.width == width &&
-	   rows.body_line == text.line_height && rows.comments_key == comments &&
+	   rows.line_height == mono.line_height && rows.digit == digit && rows.scale == scale &&
+	   rows.width == width && rows.body_line == text.line_height && rows.comments_key == comments &&
 	   rows.pairs.side_by_side == view.side_by_side {return}
 	rows.valid, rows.revision, rows.collapsed_key, rows.notice = true, view.revision, key, view.notice
 	rows.files, rows.omitted = len(view.files), view.omitted
-	rows.scale, rows.line_height = scale, mono.line_height
+	rows.scale, rows.line_height, rows.digit = scale, mono.line_height, digit
 	rows.width, rows.body_line, rows.comments_key = width, text.line_height, comments
 	rows.header = int(math.round(HEIGHT_STANDARD * scale))
 	rows.line = max(1, int(mono.line_height) + int(math.round(2 * scale)))
@@ -607,10 +635,10 @@ changes_hit :: proc(
 changes_animated :: proc(hit: Changes_Hit) -> bool {
 	if _, button := changes_row_button_of(hit.part); button {return true}
 	#partial switch hit.part {
-	case .Hooks, .Notice_Button, .File_Header, .Step_Back, .Step_Forward, .Range_Label, .Hunk_Comment,
+	case .Hooks, .Notice_Button, .File_Header, .Step_Back, .Step_Forward, .Range_Label, .Hunk_Select,
 	     .Comment_Button, .Comment_Delete, .Send, .Copy, .Discard, .Filter_Clear, .Filter_Bar_Clear,
 	     .Sticky_Header, .Strip_Older, .Strip_Newer, .Summary, .Files_Button, .Tools_Button, .Source_Chip,
-	     .Worktree_Chip:
+	     .Worktree_Chip, .Toolbar_Delete, .Toolbar_Comment, .Toolbar_Label, .Label_Row, .Label_Edit:
 		return true
 	}
 	return false
@@ -715,6 +743,7 @@ changes_draw :: proc(
 	}
 	state.turn_list_scroll = clamp(state.turn_list_scroll, 0, turn_list_limit(g, view))
 	state.diff_scroll = clamp(state.diff_scroll, 0, max(0, state.rows.total - int(g.diff.height)))
+	g.selection_bar = changes_selection_place(g, view, state, text, mono)
 	rule := render.Rect{g.row.x, g.row.y + g.row.height - scale, g.row.width, scale}
 	draw_rect(list, {rect = rule, color = t.border})
 	if status = filter_bar_draw(list, text, t, g, view, state, pointer); status != .Ok {return}

@@ -7,9 +7,9 @@ import "core:math"
 // The header row: the first row of the Agent changes pane, `HEIGHT_STANDARD` tall and as wide as the pane,
 // with a hairline under it. A ghost summary button at the left names what the pane shows (source, turns,
 // totals, file count) and opens the panel, as does the chevron button at the right end; beside that sit the
-// layout, fold and filter icon buttons, as small as the pane header's. The row gives things up only when it
-// runs out of room, one step at a time, measured with the text: nothing collapses on a fixed width. The ⋯
-// menu holds the buttons' actions once they have become one button.
+// layout, fold, filter and select lines icon buttons, as small as the pane header's. The row gives things
+// up only when it runs out of room, one step at a time, measured with the text: nothing collapses on a
+// fixed width. The ⋯ menu holds the buttons' actions once they have become one button.
 
 // The view buttons of the row, left to right. Each is also the ⋯ menu row it becomes once the buttons are
 // one, in the same order, so the row's width, placement, hit testing and drawing and the menu all follow
@@ -19,6 +19,7 @@ Row_Button :: enum u8 {
 	Layout,
 	Fold,
 	Filter,
+	Select_Lines,
 }
 
 @(private)
@@ -26,15 +27,16 @@ CHANGES_TOOLS_ROWS :: len(Row_Button)
 
 // The part each button is hit as.
 CHANGES_ROW_BUTTON_PARTS :: [Row_Button]Changes_Part {
-	.Layout = .Layout_Button,
-	.Fold   = .Fold_Button,
-	.Filter = .Filter_Button,
+	.Layout       = .Layout_Button,
+	.Fold         = .Fold_Button,
+	.Filter       = .Filter_Button,
+	.Select_Lines = .Select_Lines_Button,
 }
 
 // The buttons' rects, by name and by button. Both views are the same memory, so a button added to the list
 // needs its name here, which the assert below checks.
 Row_Button_Names :: struct {
-	layout_button, fold_button, filter_button: render.Rect,
+	layout_button, fold_button, filter_button, select_lines_button: render.Rect,
 }
 
 Row_Button_Rects :: struct #raw_union {
@@ -95,6 +97,15 @@ changes_row_button_entry :: proc(view: ^Changes_View, button: Row_Button) -> Row
 			warn    = view.filter_invalid,
 			popover = true,
 		}
+	case .Select_Lines:
+		return {
+			icon    = .Select_Lines,
+			label   = "Select lines",
+			tooltip = view.select_lines ? "Select text" : "Select lines",
+			enabled = true,
+			lit     = view.select_lines,
+			checked = view.select_lines,
+		}
 	}
 	return {}
 }
@@ -138,7 +149,7 @@ ROW_FILTER_DOT :: f32(6)
 @(private = "file")
 TOOLS_ROW_HEIGHT :: HEIGHT_STANDARD
 
-// What the row shows at a collapse step: the three view buttons, the word "files", the totals and the agent
+// What the row shows at a collapse step: the view buttons, the word "files", the totals and the agent
 // name stay until their step, and the range gets short at the last one.
 @(private = "file")
 Row_Plan :: struct {

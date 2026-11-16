@@ -5,15 +5,13 @@ import "aio:commands"
 import "aio:input"
 import "aio:procinfo"
 import "aio:render"
+import "aio:settings"
 import "aio:term"
 import "aio:turns"
 import "aio:ui"
 import "core:fmt"
 import "core:strings"
 import "core:time"
-
-// Only the harness report draws on render.
-_ :: render
 
 // Review comments on an Agent changes pane's diff lines: written in the diff, then pasted into the
 // agent's pane or copied. A comment keeps its file's path, a side and that side's line numbers, so the
@@ -55,6 +53,17 @@ Changes_Comments :: struct {
 	// The flat line a selection extends from.
 	anchor:    int,
 	dragging:  bool,
+	// What the press that started a drag picks: characters, from byte `anchor_offset` of flat line `anchor`
+	// of file `drag_file`, within the cell `drag_cell` side by side; else whole lines.
+	by_text:       bool,
+	anchor_offset: int,
+	drag_file:     int,
+	drag_cell:     render.Rect,
+	// The Select lines toggle, and Alt being down: either makes a press pick whole lines.
+	select_lines, alt: bool,
+	// The label menu under the toolbar is open, and the row its keys are on.
+	menu:          bool,
+	menu_row:      int,
 	editor:    ui.Text_Field,
 	// -1 none; an index into `items` edits that comment; len(items) writes a new one at the selection.
 	editing:   int,
@@ -70,6 +79,13 @@ Changes_Comments :: struct {
 	checked:   time.Tick,
 	can_send:  bool,
 	reason:    string,
+}
+
+// Where a press on the code text landed: the byte of the line's text and the cell it is drawn in, which a
+// text selection side by side stays within.
+Changes_Text_Point :: struct {
+	offset: int,
+	cell:   render.Rect,
 }
 
 @(private = "file")
@@ -303,6 +319,9 @@ changes_comments_sync :: proc(pane: ^Changes_Pane) {
 	view.selection = c.selection
 	view.editing = c.editing <= len(view.comments) ? c.editing : -1
 	view.editor = &c.editor
+	view.select_lines, view.alt, view.selecting = c.select_lines, c.alt, c.dragging
+	if !c.selection.active {c.menu = false}
+	view.label_menu, view.label_row = c.menu, c.menu_row
 	if len(c.items) == 0 {
 		view.send = {}
 	} else {
@@ -558,26 +577,233 @@ changes_editor_point :: proc(app: ^App, w: ^Window, pane: ^Changes_Pane, x: f32,
 	_ = ui.field_pointer(&pane.comments.editor, ui.field_box_offset(box, x), true, extend)
 }
 
-// Takes presses on diff lines, comment controls and the send bar.
+// Starts picking whole lines at flat line `line` of `file`; Shift extends the selection of the same file.
+@(private = "file")
+changes_press_lines :: proc(pane: ^Changes_Pane, file, line: int, extend: bool) {
+	c := &pane.comments
+	same_file := c.selection.active && c.selection.file == file
+	changes_select_line(pane, file, line, extend && same_file)
+	c.by_text, c.dragging = false, c.selection.active
+}
+
+// Selects the text between the anchor and byte `offset` of flat line `line` of `file`; no text is no
+// selection.
+@(private = "file")
+changes_text_extend :: proc(pane: ^Changes_Pane, file, line, offset: int) {
+	c := &pane.comments
+	files := pane.model.view.files
+	if file < 0 || file >= len(files) || line < 0 || line >= changes_line_count(files[file]) {return}
+	first, first_offset, last, last_offset := c.anchor, c.anchor_offset, line, offset
+	if last < first || (last == first && last_offset < first_offset) {
+		first, first_offset, last, last_offset = last, last_offset, first, first_offset
+	}
+	if first == last && first_offset == last_offset {
+		c.selection, c.held.file = {}, -1
+		return
+	}
+	c.selection = {
+		file         = file,
+		first        = first,
+		last         = last,
+		active       = true,
+		partial      = true,
+		first_offset = first_offset,
+		last_offset  = last_offset,
+	}
+	changes_selection_hold(pane)
+}
+
+// Starts a character selection at byte `at.offset` of flat line `line` of `file`; Shift extends the text
+// selection of the same file from its anchor. A press that no drag follows selects nothing.
+@(private = "file")
+changes_press_text :: proc(pane: ^Changes_Pane, file, line: int, at: Changes_Text_Point, extend: bool) {
+	c := &pane.comments
+	extending := extend && c.selection.active && c.selection.partial && c.selection.file == file
+	if !extending {
+		c.anchor, c.anchor_offset = line, at.offset
+		c.selection, c.held.file = {}, -1
+	}
+	c.by_text, c.dragging = true, true
+	c.drag_file, c.drag_cell = file, at.cell
+	if extending {changes_text_extend(pane, file, line, at.offset)}
+}
+
+@(private = "file", require_results)
+changes_blank :: proc(b: u8) -> bool {
+	return b == ' ' || b == '\t' || b == '\r' || b == '\n' || b == '\v' || b == '\f'
+}
+
+// Ends a text drag: whitespace goes from both ends of the range, so selecting "a word " means the word,
+// and a range of nothing but whitespace is no selection.
+@(private = "file")
+changes_text_settle :: proc(pane: ^Changes_Pane) {
+	c := &pane.comments
+	s := c.selection
+	files := pane.model.view.files
+	if !s.active || s.file < 0 || s.file >= len(files) {return}
+	file := files[s.file]
+	first, first_offset, last, last_offset := -1, 0, -1, 0
+	for line in s.first ..= s.last {
+		text, found := changes_line_text(file, line)
+		if !found {continue}
+		low := line == s.first ? clamp(s.first_offset, 0, len(text)) : 0
+		high := line == s.last ? clamp(s.last_offset, 0, len(text)) : len(text)
+		for low < high && changes_blank(text[low]) {low += 1}
+		if low < high {
+			first, first_offset = line, low
+			break
+		}
+	}
+	for line := s.last; line >= first && first >= 0; line -= 1 {
+		text, found := changes_line_text(file, line)
+		if !found {continue}
+		low := line == first ? first_offset : 0
+		high := line == s.last ? clamp(s.last_offset, 0, len(text)) : len(text)
+		for high > low && changes_blank(text[high - 1]) {high -= 1}
+		if high > low {
+			last, last_offset = line, high
+			break
+		}
+	}
+	if first < 0 || last < 0 {
+		c.selection, c.held.file = {}, -1
+		return
+	}
+	c.selection.first, c.selection.first_offset = first, first_offset
+	c.selection.last, c.selection.last_offset = last, last_offset
+	changes_selection_hold(pane)
+}
+
+// Opens the editor on a new comment at the selection, starting with `text` already typed.
+@(private = "file")
+changes_comment_start :: proc(pane: ^Changes_Pane, text: string) {
+	c := &pane.comments
+	changes_editor_open(pane, len(c.items))
+	if c.editing == len(c.items) && text != "" {_ = ui.field_text(&c.editor, text)}
+}
+
+// Adds a label or a deletion on the selection at once, with no editor: the selection ends and the toolbar
+// closes with it.
+@(private = "file")
+changes_note_add :: proc(app: ^App, pane: ^Changes_Pane, note: Changes_Note) {
+	if !changes_comment_add(pane, note) {
+		notify(app, .Error, "Could not save the note.")
+		return
+	}
+	pane.comments.menu = false
+}
+
+// Adds the label at `index` of the quick labels setting on the selection; a label that is not there adds
+// nothing.
+@(private = "file")
+changes_label_apply :: proc(app: ^App, pane: ^Changes_Pane, index: int) {
+	label, found := ui.changes_label_at(app.settings.turns.quick_labels, index)
+	if !found {return}
+	changes_note_add(
+		app,
+		pane,
+		{
+			kind = .Label,
+			label_name = label.name,
+			label_colour = label.colour,
+			label_instruction = label.instruction,
+		},
+	)
+}
+
+// Opens the label menu, which closes the pane's other popovers, or closes it.
+@(private = "file")
+changes_label_menu_set :: proc(app: ^App, w: ^Window, pane: ^Changes_Pane, open: bool) {
+	c := &pane.comments
+	if c.menu == open {return}
+	if open {changes_popovers_close(app, w, pane, .Labels)}
+	c.menu, c.menu_row = open, 0
+}
+
+// Closes the label menu; a press elsewhere than on the toolbar and the menu does it.
+@(private)
+changes_labels_close :: proc(pane: ^Changes_Pane) {
+	pane.comments.menu = false
+}
+
+// Moves the label menu's key row by `step` labels, stopping at the first and the last.
+@(private)
+changes_label_menu_step :: proc(app: ^App, pane: ^Changes_Pane, step: int) {
+	count := ui.changes_label_count(app.settings.turns.quick_labels)
+	pane.comments.menu_row = clamp(pane.comments.menu_row + step, 0, max(0, count - 1))
+}
+
+// Whether a press on `part` is on the selection toolbar or its label menu, which a press elsewhere closes
+// the menu around.
+@(private)
+changes_selection_part :: proc(part: ui.Changes_Part) -> bool {
+	#partial switch part {
+	case .Toolbar, .Toolbar_Delete, .Toolbar_Comment, .Toolbar_Label, .Label_Menu, .Label_Row, .Label_Edit:
+		return true
+	}
+	return false
+}
+
+// Opens Settings on the quick labels, ending the selection the toolbar was over.
+@(private = "file")
+changes_labels_edit :: proc(app: ^App, w: ^Window, pane: ^Changes_Pane) {
+	c := &pane.comments
+	c.selection, c.dragging, c.menu = {}, false, false
+	c.held.file = -1
+	settings_reveal(app, w, {key = settings.QUICK_LABELS_KEY, search = .Clear, focus = .Control})
+}
+
+// Whether the pane shows the selection's toolbar: a selection no drag is making, not scrolled out of view.
+// A pane that is not on screen counts as shown, as there is nothing to scroll.
+@(private = "file", require_results)
+changes_toolbar_shown :: proc(app: ^App, w: ^Window, pane: ^Changes_Pane) -> bool {
+	c := &pane.comments
+	if !c.selection.active || c.dragging || c.editing >= 0 {return false}
+	shown, found := changes_pane_rect(w, pane.id)
+	if !found {return true}
+	return changes_geometry_of(app, w, pane, shown).selection_bar.bar.width > 0
+}
+
+// Takes presses on diff lines, the selection toolbar and its menu, comment controls and the send bar.
+// `at` says where a press on the code text landed.
 changes_comments_press :: proc(
 	app: ^App,
 	w: ^Window,
 	pane: ^Changes_Pane,
 	hit: ui.Changes_Hit,
 	e: input.Mouse_Button_Event,
+	at := Changes_Text_Point{},
 ) -> bool {
 	c := &pane.comments
 	extend := .Shift in e.modifiers
+	c.alt = .Alt in e.modifiers
 	#partial switch hit.part {
 	case .Line:
 		// Pressing away from the editor keeps what it holds.
 		changes_editor_close(app, pane, true)
-		same_file := c.selection.active && c.selection.file == hit.index
-		changes_select_line(pane, hit.index, hit.line, extend && same_file)
-		c.dragging = c.selection.active
-	case .Hunk_Comment:
+		if c.alt || c.select_lines {
+			changes_press_lines(pane, hit.index, hit.line, extend)
+		} else {
+			changes_press_text(pane, hit.index, hit.line, at, extend)
+		}
+	case .Gutter:
 		changes_editor_close(app, pane, true)
-		if changes_select_hunk(pane, hit.index, hit.line) {changes_editor_open(pane, len(c.items))}
+		changes_press_lines(pane, hit.index, hit.line, extend)
+	case .Hunk_Select:
+		changes_editor_close(app, pane, true)
+		_ = changes_select_hunk(pane, hit.index, hit.line)
+	case .Toolbar_Delete:
+		changes_note_add(app, pane, {kind = .Delete})
+	case .Toolbar_Comment:
+		c.menu = false
+		changes_comment_start(pane, "")
+	case .Toolbar_Label:
+		changes_label_menu_set(app, w, pane, !c.menu)
+	case .Label_Row:
+		changes_label_apply(app, pane, hit.index)
+	case .Label_Edit:
+		changes_labels_edit(app, w, pane)
+	case .Toolbar, .Label_Menu:
 	case .Comment_Button:
 		changes_editor_close(app, pane, true)
 		changes_editor_open(pane, len(c.items))
@@ -604,14 +830,24 @@ changes_comments_press :: proc(
 	return true
 }
 
-// Extends the line selection a press started while the pointer moves over lines of its file.
-changes_comments_drag :: proc(app: ^App, w: ^Window, pane: ^Changes_Pane, hit: ui.Changes_Hit) -> bool {
+// Extends the selection a press started while the pointer moves over lines of its file: by lines or, for a
+// text selection, to the byte `at` gives on the line under the pointer, the line's start over its numbers.
+changes_comments_drag :: proc(
+	app: ^App, w: ^Window, pane: ^Changes_Pane, hit: ui.Changes_Hit, at := Changes_Text_Point{},
+) -> bool {
 	c := &pane.comments
-	if !c.dragging || !c.selection.active || hit.part != .Line || hit.index != c.selection.file {return false}
-	first, last := min(c.anchor, hit.line), max(c.anchor, hit.line)
-	if first == c.selection.first && last == c.selection.last {return false}
-	c.selection.first, c.selection.last = first, last
-	changes_selection_hold(pane)
+	if !c.dragging || (hit.part != .Line && hit.part != .Gutter) {return false}
+	before := c.selection
+	if c.by_text {
+		if hit.index != c.drag_file {return false}
+		changes_text_extend(pane, hit.index, hit.line, hit.part == .Gutter ? 0 : at.offset)
+	} else {
+		if !c.selection.active || hit.index != c.selection.file {return false}
+		first, last := min(c.anchor, hit.line), max(c.anchor, hit.line)
+		c.selection.first, c.selection.last = first, last
+		changes_selection_hold(pane)
+	}
+	if c.selection == before {return false}
 	changes_comments_sync(pane)
 	w.dirty = true
 	return true
@@ -621,11 +857,73 @@ changes_comments_release :: proc(app: ^App, w: ^Window, pane: ^Changes_Pane) {
 	c := &pane.comments
 	dragged := c.dragging
 	c.dragging = false
+	if dragged && c.by_text {changes_text_settle(pane)}
+	changes_comments_sync(pane)
 	if ui.field_release(&c.editor) || dragged {w.dirty = true}
 }
 
-// The editor's keys while a comment is being written; else Enter opens it on the selection and Escape
-// ends the selection. Chords the editor has no use for go on to the shortcuts.
+// The digit a key types, 0 to 9; -1 for any other key.
+@(private = "file", require_results)
+changes_key_digit :: proc(key: input.Key) -> int {
+	if key >= .Digit_0 && key <= .Digit_9 {return int(key) - int(input.Key.Digit_0)}
+	if key >= .Numpad_0 && key <= .Numpad_9 {return int(key) - int(input.Key.Numpad_0)}
+	return -1
+}
+
+// The keys of the selection toolbar, while it shows: Alt and a digit apply that label (Alt+0 the tenth), and
+// with the menu open so do arrows with Enter and the plain digits; Delete or Backspace add a deletion;
+// Enter opens the comment editor empty, and a typed character opens it with that character; Escape closes
+// the menu, then the selection. Anything else is not the toolbar's.
+@(private = "file", require_results)
+changes_selection_key :: proc(
+	app: ^App, w: ^Window, pane: ^Changes_Pane, e, logical: input.Key_Event, modifiers: input.Modifiers,
+) -> bool {
+	c := &pane.comments
+	if !changes_toolbar_shown(app, w, pane) {return false}
+	key := logical.key
+	enter := key == .Enter || key == .Numpad_Enter
+	if digit := changes_key_digit(key); digit >= 0 && (modifiers == {.Alt} || (c.menu && modifiers == {})) {
+		changes_label_apply(app, pane, digit == 0 ? 9 : digit - 1)
+		return true
+	}
+	if modifiers == {} {
+		switch {
+		case key == .Escape:
+			if c.menu {
+				c.menu = false
+			} else {
+				c.selection, c.dragging = {}, false
+				c.held.file = -1
+			}
+			return true
+		case c.menu && (key == .Arrow_Down || key == .Arrow_Up):
+			if count := ui.changes_label_count(app.settings.turns.quick_labels); count > 0 {
+				c.menu_row = (c.menu_row + (key == .Arrow_Down ? 1 : count - 1)) % count
+			}
+			return true
+		case c.menu && enter:
+			changes_label_apply(app, pane, c.menu_row)
+			return true
+		case key == .Delete || key == .Backspace:
+			changes_note_add(app, pane, {kind = .Delete})
+			return true
+		case enter:
+			c.menu = false
+			changes_comment_start(pane, "")
+			return true
+		}
+	}
+	// Typing starts a comment with what was typed; a control character is not typing.
+	if modifiers - {.Shift} == {} && e.text != "" && e.text[0] >= ' ' && e.text[0] != 0x7f {
+		c.menu = false
+		changes_comment_start(pane, e.text)
+		return true
+	}
+	return false
+}
+
+// The editor's keys while a comment is being written; else the toolbar's keys over a selection. Chords the
+// editor has no use for go on to the shortcuts.
 changes_comments_key :: proc(app: ^App, w: ^Window, pane: ^Changes_Pane, e: input.Key_Event) -> bool {
 	if !e.pressed {return false}
 	c := &pane.comments
@@ -634,16 +932,7 @@ changes_comments_key :: proc(app: ^App, w: ^Window, pane: ^Changes_Pane, e: inpu
 	modifiers := e.modifiers & {.Control, .Shift, .Alt, .Super}
 	enter := logical.key == .Enter || logical.key == .Numpad_Enter
 	if c.editing < 0 {
-		if !c.selection.active || modifiers != {} {return false}
-		switch {
-		case logical.key == .Escape:
-			c.selection, c.dragging = {}, false
-			c.held.file = -1
-		case enter:
-			changes_editor_open(pane, len(c.items))
-		case:
-			return false
-		}
+		if !changes_selection_key(app, w, pane, e, logical, modifiers) {return false}
 	} else if logical.key == .Escape && modifiers == {} {
 		changes_editor_close(app, pane, false)
 	} else if enter && modifiers == {} {
@@ -672,6 +961,7 @@ changes_comments_view :: proc(app: ^App, pane: ^Changes_Pane) {
 	changes_comments_sync(pane)
 	c := &pane.comments
 	view := &pane.model.view
+	view.quick_labels = app.settings.turns.quick_labels
 	view.send = {
 		count = len(c.items),
 	}
@@ -1023,18 +1313,47 @@ changes_send_check :: proc(
 }
 
 when AIO_CONTROL {
+	// The text the selection covers, lines joined by line breaks, in temporary memory: the selected bytes of
+	// a text selection, the whole lines of a selection of lines.
+	@(private = "file")
+	changes_selection_text :: proc(pane: ^Changes_Pane) -> string {
+		s := pane.comments.selection
+		files := pane.model.view.files
+		if !s.active || s.file < 0 || s.file >= len(files) {return ""}
+		b := strings.builder_make(context.temp_allocator)
+		for line in s.first ..= s.last {
+			text, found := changes_line_text(files[s.file], line)
+			if !found {continue}
+			low, high := 0, len(text)
+			if s.partial {
+				if line == s.first {low = clamp(s.first_offset, 0, len(text))}
+				if line == s.last {high = clamp(s.last_offset, low, len(text))}
+			}
+			if line > s.first {strings.write_byte(&b, '\n')}
+			strings.write_string(&b, text[low:high])
+		}
+		return strings.to_string(b)
+	}
+
 	// The comment keys of the focused Agent changes pane, which may be nil; changes_state_report calls it.
 	changes_comments_state_report :: proc(r: ^State_Report, app: ^App, w: ^Window, pane: ^Changes_Pane) {
-		selection, reason := "", ""
+		selection, mode, selected, reason := "", "", "", ""
 		count, editing := 0, -1
-		can_send := false
-		send_rect, copy_rect, discard_rect, button_rect: render.Rect
+		can_send, select_lines, label_menu := false, false, false
+		advance: f32
+		send_rect, copy_rect, discard_rect, button_rect, select_lines_rect: render.Rect
+		bar: ui.Changes_Selection_Bar
 		if pane != nil {
 			changes_comments_view(app, pane)
 			c := &pane.comments
 			view := &pane.model.view
 			s := c.selection
-			if s.active {selection = fmt.tprintf("%d:%d-%d", s.file, s.first, s.last)}
+			if s.active {
+				selection = fmt.tprintf("%d:%d-%d", s.file, s.first, s.last)
+				mode = s.partial ? "text" : "lines"
+				selected = changes_selection_text(pane)
+			}
+			select_lines, label_menu = c.select_lines, c.menu
 			count, editing = len(c.items), c.editing
 			// Fresh, like Send, so the harness sees an agent exit at once.
 			if count > 0 {_, can_send, reason = changes_send_check(app, pane, fresh = true)}
@@ -1047,23 +1366,48 @@ when AIO_CONTROL {
 				state_text(r, fmt.tprintf("changes.comment.%d.kind", i), fmt.tprint(item.kind))
 				state_text(r, fmt.tprintf("changes.comment.%d.label", i), item.label_name)
 				state_value(r, fmt.tprintf("changes.comment.%d.partial", i), item.partial)
-				state_value(r, fmt.tprintf("changes.comment.%d.first_offset", i), item.first_offset)
-				state_value(r, fmt.tprintf("changes.comment.%d.last_offset", i), item.last_offset)
+				state_value(r, fmt.tprintf("changes.comment.%d.first_byte", i), item.first_offset)
+				state_value(r, fmt.tprintf("changes.comment.%d.last_byte", i), item.last_offset)
 			}
 			if shown, found := changes_pane_rect(w, pane.id); found {
 				g := changes_geometry_of(app, w, pane, shown)
+				mono := ui.text_mono(&w.ui_text, app.family)
+				advance = ui.text_width(&mono, "0")
 				send_rect, copy_rect, discard_rect = ui.changes_send_rects(g, view)
 				button_rect = ui.changes_comment_button_rect(g, view, &pane.state)
+				select_lines_rect = g.select_lines_button
+				bar = g.selection_bar
 				for file, n in view.files[:min(3, len(view.files))] {
 					for m in 0 ..< changes_line_count(file) {
 						rect := ui.changes_line_rect(g, view, &pane.state, n, m)
 						if rect.width <= 0 || rect.height <= 0 {continue}
 						state_rect(r, fmt.tprintf("changes.line.%d.%d.rect", n, m), rect)
+						_, column, _ := ui.changes_line_code(g, view, &pane.state, &mono, n, m)
+						state_value(r, fmt.tprintf("changes.line.%d.%d.text_x", n, m), column.text_x)
 					}
+				}
+				for k in 0 ..< bar.shown {
+					index := bar.first + k
+					label, _ := ui.changes_label_at(view.quick_labels, index)
+					state_rect(r, fmt.tprintf("changes.label_menu.%d.rect", index), ui.changes_label_row_rect(bar, k))
+					state_text(r, fmt.tprintf("changes.label_menu.%d.label", index), label.name)
 				}
 			}
 		}
 		state_text(r, "changes.selection", selection)
+		state_text(r, "changes.selection_mode", mode)
+		state_text(r, "changes.selection_text", selected)
+		state_value(r, "changes.select_lines", select_lines)
+		state_rect(r, "changes.select_lines_rect", select_lines_rect)
+		state_value(r, "changes.mono_advance", advance)
+		state_value(r, "changes.toolbar_open", bar.bar.width > 0)
+		state_rect(r, "changes.toolbar_rect", bar.bar)
+		state_rect(r, "changes.toolbar.delete_rect", bar.delete)
+		state_rect(r, "changes.toolbar.comment_rect", bar.comment)
+		state_rect(r, "changes.toolbar.label_rect", bar.label)
+		state_value(r, "changes.label_menu_open", label_menu)
+		state_rect(r, "changes.label_menu_rect", bar.menu)
+		state_rect(r, "changes.label_menu_edit_rect", bar.edit)
 		state_value(r, "changes.comments", count)
 		state_value(r, "changes.editing", editing)
 		state_value(r, "changes.send.can_send", can_send)
