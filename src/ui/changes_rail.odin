@@ -11,8 +11,102 @@ import "core:math"
 // runs out of room, one step at a time, measured with the text: nothing collapses on a fixed width. The ⋯
 // menu holds the buttons' actions once they have become one button.
 
+// The view buttons of the row, left to right. Each is also the ⋯ menu row it becomes once the buttons are
+// one, in the same order, so the row's width, placement, hit testing and drawing and the menu all follow
+// this list: a new button is an entry here, its part, its rect in Row_Button_Names and its case in
+// changes_row_button_entry.
+Row_Button :: enum u8 {
+	Layout,
+	Fold,
+	Filter,
+}
+
 @(private)
-CHANGES_TOOLS_ROWS :: 3
+CHANGES_TOOLS_ROWS :: len(Row_Button)
+
+// The part each button is hit as.
+CHANGES_ROW_BUTTON_PARTS :: [Row_Button]Changes_Part {
+	.Layout = .Layout_Button,
+	.Fold   = .Fold_Button,
+	.Filter = .Filter_Button,
+}
+
+// The buttons' rects, by name and by button. Both views are the same memory, so a button added to the list
+// needs its name here, which the assert below checks.
+Row_Button_Names :: struct {
+	layout_button, fold_button, filter_button: render.Rect,
+}
+
+Row_Button_Rects :: struct #raw_union {
+	using named: Row_Button_Names,
+	by_button:   [Row_Button]render.Rect,
+}
+
+#assert(size_of(Row_Button_Names) == size_of([Row_Button]render.Rect))
+
+// The button `part` stands for.
+changes_row_button_of :: proc(part: Changes_Part) -> (button: Row_Button, ok: bool) {
+	parts := CHANGES_ROW_BUTTON_PARTS
+	for p, b in parts {
+		if p == part {return b, true}
+	}
+	return
+}
+
+// What a button shows and does for the view: its icon, its ⋯ menu label and its tooltip, whether it works,
+// and its looks. `lit` is the "on" look of a toggle that is set; `checked` puts a check on its menu row;
+// `dot` marks a set filter; `warn` inks it as a warning; `popover` keeps it lit while the filter popover
+// it opens is.
+Row_Button_Entry :: struct {
+	icon:                                     Icon,
+	label, tooltip:                           string,
+	enabled, lit, checked, dot, warn, popover: bool,
+}
+
+changes_row_button_entry :: proc(view: ^Changes_View, button: Row_Button) -> Row_Button_Entry {
+	switch button {
+	case .Layout:
+		return {
+			icon    = .Side_By_Side,
+			label   = "Side-by-side",
+			tooltip = view.side_by_side ? "Unified view" : "Side-by-side view",
+			enabled = true,
+			lit     = view.side_by_side,
+			checked = view.side_by_side,
+		}
+	case .Fold:
+		label := view.any_expanded ? "Collapse all files" : "Expand all files"
+		// Folding needs files.
+		return {
+			icon = view.any_expanded ? .Collapse_All : .Expand_All,
+			label = label,
+			tooltip = label,
+			enabled = len(view.files) > 0,
+		}
+	case .Filter:
+		set := changes_filter_set(view)
+		return {
+			icon    = .Filter,
+			label   = "Filter files…",
+			tooltip = "Filter files",
+			enabled = true,
+			lit     = set,
+			dot     = set,
+			warn    = view.filter_invalid,
+			popover = true,
+		}
+	}
+	return {}
+}
+
+// The view button whose rect holds the point, shown or not enabled.
+changes_row_button_at :: proc(g: Changes_Geometry, x, y: f32) -> (button: Row_Button, ok: bool) {
+	for rect, b in g.by_button {
+		if render.rect_contains(rect, x, y) {return b, true}
+	}
+	return
+}
+
 @(private = "file")
 ROW_PAD_LEFT :: f32(4)
 @(private = "file")
@@ -158,7 +252,7 @@ row_width :: proc(
 	t := row_texts(view, text, plan, scale, range_buf, count_buf)
 	summary = math.ceil(summary_width(t, scale))
 	files = math.ceil((2 * ROW_FILES_PAD + ICON_BUTTON + ROW_FILES_GAP) * scale + t.files_width)
-	buttons := plan.buttons ? 3 : 1
+	buttons := plan.buttons ? len(Row_Button) : 1
 	button := math.round(ROW_BUTTON * scale)
 	width = (ROW_PAD_LEFT + ROW_SUMMARY_GAP + ROW_FILES_MARGIN + ROW_PAD_RIGHT) * scale + summary + files
 	width += f32(buttons) * button + f32(buttons - 1) * ROW_BUTTON_GAP * scale
@@ -194,35 +288,14 @@ row_place :: proc(g: ^Changes_Geometry, view: ^Changes_View, text: ^Text) {
 	cursor := g.files_button.x - ROW_FILES_MARGIN * s - button
 	gap := ROW_BUTTON_GAP * s
 	if steps < 1 {
-		g.filter_button = {cursor, top, button, button}
-		cursor -= gap + button
-		g.fold_button = {cursor, top, button, button}
-		cursor -= gap + button
-		g.layout_button = {cursor, top, button, button}
+		for i := len(Row_Button) - 1; i >= 0; i -= 1 {
+			g.by_button[Row_Button(i)] = {cursor, top, button, button}
+			cursor -= gap + button
+		}
 	} else {
 		g.tools_button = {cursor, top, button, button}
 	}
 	if g.tools_button.width > 0 {tools_place(g, view, text)}
-}
-
-// The ⋯ menu's label for row `row`.
-@(private)
-tools_row_label :: proc(view: ^Changes_View, row: int) -> string {
-	switch row {
-	case 0:
-		return "Side-by-side"
-	case 1:
-		return view.any_expanded ? "Collapse all files" : "Expand all files"
-	case 2:
-		return "Filter files…"
-	}
-	return ""
-}
-
-// Folding needs files; the other rows always work.
-@(private)
-tools_row_enabled :: proc(view: ^Changes_View, row: int) -> bool {
-	return row != 1 || len(view.files) > 0
 }
 
 // The ⋯ menu under the tools button, right-aligned to it and kept inside the pane.
@@ -231,7 +304,10 @@ tools_place :: proc(g: ^Changes_Geometry, view: ^Changes_View, text: ^Text) {
 	s := g.scale
 	body := text_styled(text, .Body)
 	widest: f32
-	for row in 0 ..< CHANGES_TOOLS_ROWS {widest = max(widest, text_width(&body, tools_row_label(view, row)))}
+	for row in 0 ..< CHANGES_TOOLS_ROWS {
+		label := changes_row_button_entry(view, Row_Button(row)).label
+		widest = max(widest, text_width(&body, label))
+	}
 	pad := OVERLAY_PADDING * s
 	width := math.ceil(widest + 2 * SPACE_3 * s + (ICON_INDICATOR + SPACE_2) * s + 2 * pad)
 	row := math.round(TOOLS_ROW_HEIGHT * s)
@@ -482,23 +558,18 @@ row_draw :: proc(
 	filter_set := changes_filter_set(view)
 	filter_ink: Maybe(render.Color)
 	if view.filter_invalid {filter_ink = theme.warning}
-	enabled := len(view.files) > 0
-	fold_icon: Icon = view.any_expanded ? .Collapse_All : .Expand_All
-	err := row_button_draw(
-		list, theme, g.row, g.layout_button, .Side_By_Side, .Layout_Button, view.side_by_side, false, false, nil,
-		state, s, pointer,
-	)
-	if err == .None {
+	err := render.Error.None
+	parts := CHANGES_ROW_BUTTON_PARTS
+	for button in Row_Button {
+		e := changes_row_button_entry(view, button)
+		ink: Maybe(render.Color)
+		if e.warn {ink = theme.warning}
+		lit := e.lit || (e.popover && state.filter_open)
 		err = row_button_draw(
-			list, theme, g.row, g.fold_button, fold_icon, .Fold_Button, false, !enabled, false, nil, state, s,
+			list, theme, g.row, g.by_button[button], e.icon, parts[button], lit, !e.enabled, e.dot, ink, state, s,
 			pointer,
 		)
-	}
-	if err == .None {
-		err = row_button_draw(
-			list, theme, g.row, g.filter_button, .Filter, .Filter_Button, state.filter_open || filter_set, false,
-			filter_set, filter_ink, state, s, pointer,
-		)
+		if err != .None {break}
 	}
 	if err == .None {
 		err = row_button_draw(
@@ -531,7 +602,8 @@ tools_menu_draw :: proc(
 	body := text_styled(text, .Body)
 	for row in 0 ..< CHANGES_TOOLS_ROWS {
 		rect := g.tools_rows[row]
-		enabled := tools_row_enabled(view, row)
+		entry := changes_row_button_entry(view, Row_Button(row))
+		enabled := entry.enabled
 		hit := Changes_Hit{.Tools_Row, row, 0}
 		hovered, pressed := enabled && state.hover == hit, enabled && state.press == hit && state.hover == hit
 		if hovered || pressed {
@@ -550,10 +622,10 @@ tools_menu_draw :: proc(
 		check := ICON_INDICATOR * s
 		right := rect.x + rect.width - SPACE_3 * s
 		if status := draw_fading_text(
-			&body, list, tools_row_label(view, row), x, baseline_in(rect.y, rect.height, &body), ink,
+			&body, list, entry.label, x, baseline_in(rect.y, rect.height, &body), ink,
 			right - check - SPACE_2 * s - x,
 		); status != .Ok {return status}
-		if row == 0 && view.side_by_side {
+		if entry.checked {
 			mark := render.Rect{right - check, rect.y, check, rect.height}
 			icon_draw(list, .Check, mark, theme.accent, ICON_INDICATOR, s)
 		}

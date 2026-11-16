@@ -452,18 +452,25 @@ changes_tools_open :: proc(app: ^App, w: ^Window, pane: ^Changes_Pane) {
 	w.dirty = true
 }
 
-// Runs row `row` of the ⋯ menu, which closes with it: the layout toggle, fold all, or the filter popover.
+// Runs a header-row button's action, from the button or from its row in the ⋯ menu: the layout toggle, fold
+// all, or the filter popover.
+@(private = "file")
+changes_row_button_run :: proc(app: ^App, w: ^Window, pane: ^Changes_Pane, button: ui.Row_Button) {
+	switch button {
+	case .Layout:
+		changes_layout_toggle(app, w, pane)
+	case .Fold:
+		changes_fold_all(app, w, pane)
+	case .Filter:
+		changes_filter_popover(app, w, pane, true)
+	}
+}
+
+// Runs row `row` of the ⋯ menu, which closes with it.
 @(private = "file")
 changes_tools_row :: proc(app: ^App, w: ^Window, pane: ^Changes_Pane, row: int) {
 	changes_tools_close(w, pane)
-	switch row {
-	case 0:
-		changes_layout_toggle(app, w, pane)
-	case 1:
-		changes_fold_all(app, w, pane)
-	case 2:
-		changes_filter_popover(app, w, pane, true)
-	}
+	changes_row_button_run(app, w, pane, ui.Row_Button(row))
 }
 
 // What the open list's highlighted choice is, so a new result can find it again: a file's path. In
@@ -980,12 +987,12 @@ changes_leave :: proc(app: ^App, w: ^Window) {
 
 @(private = "file", require_results)
 changes_cursor :: proc(hit: ui.Changes_Hit) -> platform.Cursor_Shape {
+	if _, button := ui.changes_row_button_of(hit.part); button {return .Hand}
 	#partial switch hit.part {
 	case .Hooks, .Notice_Button, .File_Header, .Strip_Bar, .Step_Back, .Step_Forward, .Range_Label,
-	     .Hunk_Comment, .Comment_Button, .Comment_Card, .Comment_Delete, .Send, .Copy, .Discard,
-	     .Layout_Button, .Filter_Button, .Filter_Clear, .Filter_Bar_Clear, .Fold_Button, .Sticky_Header,
-	     .Strip_Older, .Strip_Newer, .Summary, .Files_Button, .Tools_Button, .Source_Chip,
-	     .Worktree_Chip:
+	     .Hunk_Comment, .Comment_Button, .Comment_Card, .Comment_Delete, .Send, .Copy, .Discard, .Filter_Clear,
+	     .Filter_Bar_Clear, .Sticky_Header, .Strip_Older, .Strip_Newer, .Summary, .Files_Button, .Tools_Button,
+	     .Source_Chip, .Worktree_Chip:
 		return .Hand
 	case .Turn_List_Row, .Tools_Row:
 		if hit.index >= 0 {return .Hand}
@@ -1185,17 +1192,13 @@ changes_press :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) {
 		if header == (ui.Changes_Hit{.File_Header, hit.index, 0}) {
 			state.hover, state.press, state.lit = header, header, header
 		}
-	case .Fold_Button:
-		changes_fold_all(app, w, pane)
-	case .Layout_Button:
-		changes_layout_toggle(app, w, pane)
-	case .Filter_Button:
-		changes_filter_popover(app, w, pane, true)
 	case .Filter_Bar_Clear:
 		changes_filter_clear(app, w, pane)
 	case .Line, .Hunk_Comment, .Comment_Button, .Comment_Card, .Comment_Delete, .Comment_Editor, .Send, .Copy,
 	     .Discard:
 		_ = changes_comments_press(app, w, pane, hit, e)
+	case:
+		if button, ok := ui.changes_row_button_of(hit.part); ok {changes_row_button_run(app, w, pane, button)}
 	}
 }
 
@@ -1258,10 +1261,12 @@ changes_tooltip_hit :: proc(
 		hit.part = .Step_Back
 	case in_panel && render.rect_contains(g.step_forward, x, y):
 		hit.part = .Step_Forward
-	case render.rect_contains(g.fold_button, x, y):
-		hit.part = .Fold_Button
 	case render.rect_contains(g.files_button, x, y):
 		hit.part = .Files_Button
+	}
+	if button, ok := ui.changes_row_button_at(g, x, y); ok {
+		parts := ui.CHANGES_ROW_BUTTON_PARTS
+		hit.part = parts[button]
 	}
 	return
 }
@@ -1286,6 +1291,9 @@ changes_tooltip :: proc(app: ^App, w: ^Window, x, y: f32) -> string {
 		return cut ? changes_list_identity(pane, source) : ""
 	}
 	view := &pane.model.view
+	if button, ok := ui.changes_row_button_of(hit.part); ok {
+		return ui.changes_row_button_entry(view, button).tooltip
+	}
 	#partial switch hit.part {
 	case .Summary:
 		return "Source and turns"
@@ -1316,14 +1324,8 @@ changes_tooltip :: proc(app: ^App, w: ^Window, x, y: f32) -> string {
 		return ui.changes_turn_tooltip(view, hit.index, context.temp_allocator)
 	case .Turn_List_Row:
 		if hit.index >= 0 {return ui.changes_turn_tooltip(view, hit.index, context.temp_allocator)}
-	case .Fold_Button:
-		return view.any_expanded ? "Collapse all files" : "Expand all files"
-	case .Filter_Button:
-		return "Filter files"
 	case .Filter_Clear, .Filter_Bar_Clear:
 		return "Clear the filter"
-	case .Layout_Button:
-		return pane.side_by_side ? "Unified view" : "Side-by-side view"
 	case .File_Header, .Sticky_Header:
 		folded := hit.index >= 0 && hit.index < len(view.collapsed) && view.collapsed[hit.index]
 		return folded ? "Expand file" : "Collapse file"

@@ -267,11 +267,10 @@ changes_state_destroy :: proc(state: ^Changes_State) {
 // git scopes. The chip slices live in temporary memory, valid until the frame's temporary memory is freed.
 Changes_Geometry :: struct {
 	area, row, hooks, diff, notice, notice_button: render.Rect,
-	// The header row: its summary (one hit part), the three view buttons and the files button at the right
-	// end. The three view buttons are empty while `row_steps` is 1 or more, when `tools_button` stands for
-	// them.
+	// The header row: its summary (one hit part), the view buttons and the files button at the right end.
+	// The view buttons are empty while `row_steps` is 1 or more, when `tools_button` stands for them.
 	summary:                                        render.Rect,
-	layout_button, fold_button, filter_button:      render.Rect,
+	using view_buttons:                             Row_Button_Rects,
 	tools_button, files_button:                     render.Rect,
 	// How far the row's collapse ladder went, 0 to 5: 1 the buttons became one, 2 the files button lost its
 	// word, 3 the totals went, 4 the agent name, 5 the range got short.
@@ -564,7 +563,9 @@ changes_hit :: proc(
 	}
 	if state.tools_open && render.rect_contains(g.tools_menu, x, y) {
 		for row, i in g.tools_rows {
-			if render.rect_contains(row, x, y) {return tools_row_enabled(view, i) ? {.Tools_Row, i, 0} : {}}
+			if render.rect_contains(row, x, y) {
+				return changes_row_button_entry(view, Row_Button(i)).enabled ? {.Tools_Row, i, 0} : {}
+			}
 		}
 		return {.Tools_Row, -1, 0}
 	}
@@ -573,9 +574,10 @@ changes_hit :: proc(
 	}
 	if state.panel_open && render.rect_contains(g.panel, x, y) {return panel_hit(g, view, state, x, y)}
 	if render.rect_contains(g.summary, x, y) {return {.Summary, 0, 0}}
-	if render.rect_contains(g.fold_button, x, y) {return len(view.files) > 0 ? {.Fold_Button, 0, 0} : {}}
-	if render.rect_contains(g.filter_button, x, y) {return {.Filter_Button, 0, 0}}
-	if render.rect_contains(g.layout_button, x, y) {return {.Layout_Button, 0, 0}}
+	if button, ok := changes_row_button_at(g, x, y); ok {
+		parts := CHANGES_ROW_BUTTON_PARTS
+		return changes_row_button_entry(view, button).enabled ? {parts[button], 0, 0} : {}
+	}
 	if render.rect_contains(g.tools_button, x, y) {return {.Tools_Button, 0, 0}}
 	if render.rect_contains(g.files_button, x, y) {
 		return changes_files_listed(view) ? {.Files_Button, 0, 0} : {}
@@ -588,11 +590,12 @@ changes_hit :: proc(
 
 @(private = "file")
 changes_animated :: proc(hit: Changes_Hit) -> bool {
+	if _, button := changes_row_button_of(hit.part); button {return true}
 	#partial switch hit.part {
 	case .Hooks, .Notice_Button, .File_Header, .Step_Back, .Step_Forward, .Range_Label, .Hunk_Comment,
-	     .Comment_Button, .Comment_Delete, .Send, .Copy, .Discard, .Layout_Button, .Filter_Button, .Filter_Clear,
-	     .Filter_Bar_Clear, .Fold_Button, .Sticky_Header, .Strip_Older, .Strip_Newer, .Summary,
-	     .Files_Button, .Tools_Button, .Source_Chip, .Worktree_Chip:
+	     .Comment_Button, .Comment_Delete, .Send, .Copy, .Discard, .Filter_Clear, .Filter_Bar_Clear,
+	     .Sticky_Header, .Strip_Older, .Strip_Newer, .Summary, .Files_Button, .Tools_Button, .Source_Chip,
+	     .Worktree_Chip:
 		return true
 	}
 	return false
