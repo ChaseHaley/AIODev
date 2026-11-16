@@ -251,6 +251,7 @@ changes_range_of :: proc(
 	found: bool,
 ) {
 	new_low, new_high, old_low, old_high: i32
+	removed := false
 	flat := 0
 	for hunk in file.hunks {
 		if flat > last {break}
@@ -264,24 +265,25 @@ changes_range_of :: proc(
 			if at < first || at > last || !ui.changes_half_has(half, line.kind) {continue}
 			#partial switch line.kind {
 			case .Context:
-				// A cell holds one side: the left's lines are numbered by the old file.
+				if new_low == 0 {new_low = line.new_line}
+				new_high = line.new_line
+				// The left cell is the old file, so with removed lines in the range its context lines are
+				// counted by their old numbers as well.
 				if half == .Left {
 					if old_low == 0 {old_low = line.old_line}
 					old_high = line.old_line
-				} else {
-					if new_low == 0 {new_low = line.new_line}
-					new_high = line.new_line
 				}
 			case .Added:
 				if new_low == 0 {new_low = line.new_line}
 				new_high = line.new_line
 			case .Removed:
+				removed = true
 				if old_low == 0 {old_low = line.old_line}
 				old_high = line.old_line
 			}
 		}
 	}
-	if half == .Left && old_low > 0 {return .Old, old_low, old_high, true}
+	if half == .Left && removed {return .Old, old_low, old_high, true}
 	if new_low > 0 {return .New, new_low, new_high, true}
 	if old_low > 0 {return .Old, old_low, old_high, true}
 	return .New, 0, 0, false

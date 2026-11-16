@@ -1058,3 +1058,13 @@ a_text_drag_step_and_a_keystroke_leave_the_rows_as_they_are :: proc(t: ^testing.
 	_ = lay_out(&f, &view, &state)
 	testing.expect_value(t, state.rows.built, built + 1)
 }
+
+@(test)
+a_cell_holds_only_its_own_sides_lines :: proc(t: ^testing.T) {
+	testing.expect(t, !ui.changes_half_has(.Left, .Added))
+	testing.expect(t, ui.changes_half_has(.Left, .Removed))
+	testing.expect(t, ui.changes_half_has(.Left, .Context))
+	testing.expect(t, !ui.changes_half_has(.Right, .Removed))
+	testing.expect(t, ui.changes_half_has(.Right, .Added))
+	testing.expect(t, ui.changes_half_has(.Both, .Added))
+}

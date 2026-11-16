@@ -28,3 +28,22 @@ a_label_action_leaves_another_kept_field_to_its_own_save :: proc(t: ^testing.T) 
 	testing.expect(t, strings.contains(text, "turns.quick_labels = \"Verify this |"))
 	testing.expect(t, !strings.contains(text, "Clarify this"))
 }
+
+// A label field typed into and left goes with its own label through a Remove of an earlier one.
+@(test)
+a_kept_label_field_survives_removing_an_earlier_label :: proc(t: ^testing.T) {
+	f: Profile_Fixture
+	defer profile_fixture_destroy(t, &f)
+	if !profile_fixture_create(t, &f, "labelown", "") {return}
+	w := f.state.windows[0]
+	e := profile_open(&f)
+	ui.editor_label_toggle(e, 2)
+	if !testing.expect(t, ui.editor_select_key(e, "label.2.name")) {return}
+	ui.field_set(&e.value, "Renamed")
+	ui.editor_focus_row(e)
+	if !testing.expect(t, ui.editor_select_key(e, "interface.font_size")) {return}
+	ui.editor_request_set(e, ui.Label_Edit{kind = .Remove, id = 1})
+	app.editor_outcome(&f.state, w, .Label_Action)
+	labels := f.state.settings.turns.quick_labels
+	testing.expect(t, strings.has_prefix(labels, "Renamed |"), labels)
+}

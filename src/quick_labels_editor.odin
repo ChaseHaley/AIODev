@@ -56,13 +56,22 @@ editor_labels_edit :: proc(
 editor_labels_action :: proc(app: ^App, w: ^Window, edit: ui.Label_Edit, kept: ^ui.Editor_Kept) {
 	p := &w.editor
 	pending: ui.Editor_Kept
+	dropped := ""
 	if ui.editor_kept_is_label(p, kept^) {
 		_, _, problem := ui.editor_quick_labels_value(p, {kind = .Field, key = kept.key, value = kept.value})
-		if problem == "" {pending = kept^}
+		if problem == "" {
+			pending = kept^
+		} else if edit.kind != .Add {
+			// Remove, Move and Reset renumber the labels, so the row the field was typed in may now be another
+			// label's: the field is dropped with its reason in the status line, and rings no row.
+			dropped = problem
+			ui.editor_kept_destroy(kept)
+		}
 	}
 	if editor_labels_edit(app, w, edit, pending = pending) && pending.key != "" {
 		ui.editor_kept_destroy(kept)
 	}
+	if dropped != "" {ui.editor_message(p, dropped, true)}
 }
 
 // Says why a label change was refused: on the field's row when one field caused it, as for the

@@ -1432,7 +1432,7 @@ changes_tooltip :: proc(app: ^App, w: ^Window, x, y: f32) -> string {
 	case .Editor_Block:
 		return "Code block"
 	case .Editor_Suggest:
-		if view.span.old {return "Only removed lines are selected"}
+		if view.span.old {return "A suggestion replaces lines of the new file"}
 		return "Insert the selected lines as an editable replacement"
 	case .Send:
 		if !view.send.can_send {return view.send.reason}

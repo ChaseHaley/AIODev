@@ -971,3 +971,22 @@ a_left_cell_note_over_removed_and_context_lines_reanchors_whole :: proc(t: ^test
 	testing.expect_value(t, c.items[0].first_line, 0)
 	testing.expect_value(t, c.items[0].last_line, 2)
 }
+
+@(test)
+context_lines_selected_in_the_left_cell_stay_on_the_new_side_and_take_a_suggestion :: proc(t: ^testing.T) {
+	state: app.App
+	defer app.changes_app_destroy(&state.changes_state)
+	w: app.Window
+	pane := app.changes_pane_create(&state, {}, "C:/work/odin", .Repository)
+	if !testing.expect(t, pane != nil) {return}
+	pane.model.view.files = comments_text_files("  value := compute(a)")
+	c := &pane.comments
+	c.selection = {file = 0, first = 0, last = 0, active = true, half = .Left}
+	testing.expect(t, comments_key(&state, &w, pane, .Enter))
+	testing.expect_value(t, pane.model.view.span.old, false)
+	comments_press(&state, &w, pane, {part = .Editor_Suggest, index = 0})
+	testing.expect(t, strings.contains(markdown.edit_string(&c.buffer), "```suggestion"))
+	testing.expect(t, comments_save(&state, &w, pane))
+	if !testing.expect_value(t, len(c.items), 1) {return}
+	testing.expect_value(t, c.items[0].side, app.Comment_Side.New)
+}
