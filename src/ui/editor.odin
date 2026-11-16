@@ -3048,6 +3048,8 @@ row_parts_at :: proc(p: ^Editor, l: Editor_Layout, index: int, selected: bool) -
 	case .Process_Group, .Motion_Context, .Profile, .Profile_Add, .Opener, .Quick_Label, .Theme_Strip:
 		parts.reset = {}
 	}
+	// A label's field has no default of its own; Reset labels restores them all.
+	if row.label_field != .None {parts.reset = {}}
 	if parts.field.width > 0 && parts.text_right > parts.field.x {parts.text_right = parts.field.x}
 	parts.text_right -= 16 * s
 	if row.motion_part != .None {parts = editor_motion_parts(&row, parts)}
