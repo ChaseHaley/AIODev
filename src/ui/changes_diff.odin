@@ -334,10 +334,60 @@ card_delete_rect :: proc(card: render.Rect, scale: f32) -> render.Rect {
 	return {card.x + card.width - SPACE_1 * scale - size, card.y + SPACE_1 * scale, size, size}
 }
 
+// How far a card sits in from the band's edges, and the padding inside it that its text and its editor
+// start after.
+@(private = "file")
+card_inset :: proc(scale: f32) -> f32 {return 2 * SPACE_2 * scale}
+
+@(private = "file")
+card_pad :: proc(scale: f32) -> f32 {return SPACE_2 * scale}
+
+// A card's width in a diff area `diff_width` wide.
+@(private = "file")
+card_width :: proc(diff_width, scale: f32) -> f32 {return max(0, diff_width - 2 * card_inset(scale))}
+
+// The geometry a card's measuring and painting share, so a card is painted at the height it was measured:
+// the padding inside a card `width` wide and the width its text wraps at.
+@(private = "file")
+Card_Layout :: struct {
+	pad, text_width: f32,
+}
+
+@(private = "file")
+card_layout :: proc(width, scale: f32) -> Card_Layout {
+	return {pad = card_pad(scale), text_width = card_text_width(width, scale)}
+}
+
+// The lines a comment's text wraps into at `width`.
+@(private = "file")
+card_wrap :: proc(body: ^Text, s: string, width: f32) -> Wrap_Lines {
+	return {text = body, s = s, width = width, last_space = -1}
+}
+
 @(private = "file")
 editor_field_rect :: proc(card: render.Rect, scale: f32) -> render.Rect {
-	pad := SPACE_2 * scale
+	pad := card_pad(scale)
 	return {card.x + pad, card.y + pad, max(0, card.width - 2 * pad), HEIGHT_STANDARD * scale}
+}
+
+// The height of a card in `layout`: the editor's, or the comment's text wrapped, at least as tall as its
+// delete button.
+@(private = "file")
+card_height :: proc(
+	layout: Card_Layout, body, detail: ^Text, text: string, editing: bool, scale: f32,
+) -> int {
+	if editing {
+		return int(math.round(2 * layout.pad + HEIGHT_STANDARD * scale + SPACE_1 * scale + detail.line_height))
+	}
+	lines := card_wrap(body, text, layout.text_width)
+	count := 0
+	for {
+		_, _, ok := wrap_next(&lines)
+		if !ok {break}
+		count += 1
+	}
+	least := card_delete_size(scale) + 2 * SPACE_1 * scale
+	return int(math.round(max(least, 2 * layout.pad + f32(count) * body.line_height)))
 }
 
 // Measures each card at the cached width, for changes_layout: comment i's card, then the new-comment
@@ -351,35 +401,17 @@ changes_cards_measure :: proc(rows: ^Changes_Rows, view: ^Changes_View, text: ^T
 	s := rows.scale
 	body := text_styled(text, .Body)
 	detail := text_styled(text, .Detail)
-	pad := SPACE_2 * s
-	editor := int(math.round(2 * pad + HEIGHT_STANDARD * s + SPACE_1 * s + detail.line_height))
-	least := card_delete_size(s) + 2 * SPACE_1 * s
-	width := card_text_width(rows.width - 4 * SPACE_2 * s, s)
+	layout := card_layout(card_width(rows.width, s), s)
 	selection := view.selection
 	t.selection_row = -1
 	if selection.active {t.selection_row = range_row(rows, selection.file, selection.first, selection.last)}
 	for c, i in view.comments {
 		append(&t.card_rows, comment_attached(view, i) ? range_row(rows, c.file, c.first, c.last) : -1)
-		if view.editing == i {
-			append(&rows.cards, editor)
-			continue
-		}
-		lines := Wrap_Lines {
-			text       = &body,
-			s          = c.text,
-			width      = width,
-			last_space = -1,
-		}
-		count := 0
-		for {
-			_, _, ok := wrap_next(&lines)
-			if !ok {break}
-			count += 1
-		}
-		append(&rows.cards, int(math.round(max(least, 2 * pad + f32(count) * body.line_height))))
+		editing := view.editing == i
+		append(&rows.cards, card_height(layout, &body, &detail, c.text, editing, s))
 	}
 	writing := writing_new(view)
-	append(&rows.cards, writing ? editor : 0)
+	append(&rows.cards, writing ? card_height(layout, &body, &detail, "", true, s) : 0)
 	append(&t.card_rows, writing ? t.selection_row : -1)
 }
 
@@ -532,9 +564,9 @@ card_rect :: proc(
 	rows := &state.rows
 	if !rows.valid {return}
 	top := card_top(rows, view, card) or_return
-	inset := 2 * SPACE_2 * g.scale
 	y := g.diff.y - f32(state.diff_scroll) + f32(top)
-	return {g.diff.x + inset, y, max(0, g.diff.width - 2 * inset), f32(rows.cards[card])}, true
+	inset := card_inset(g.scale)
+	return {g.diff.x + inset, y, card_width(g.diff.width, g.scale), f32(rows.cards[card])}, true
 }
 
 // `r` when any of it is in the diff area's height, else zero.
@@ -1312,14 +1344,10 @@ paint_card :: proc(p: ^Diff_Paint, rect: render.Rect, card: int) -> render.Build
 		p.list, t, delete, .Close, hover, press, s, p.pointer, ICON_INDICATOR, RADIUS_CONTROL,
 	) != .None {return .Ok}
 	text := view.comments[card].text
-	lines := Wrap_Lines {
-		text       = p.body,
-		s          = text,
-		width      = card_text_width(rect.width, s),
-		last_space = -1,
-	}
-	x := rect.x + SPACE_2 * s
-	y := rect.y + SPACE_2 * s
+	layout := card_layout(rect.width, s)
+	lines := card_wrap(p.body, text, layout.text_width)
+	x := rect.x + layout.pad
+	y := rect.y + layout.pad
 	for {
 		start, end, ok := wrap_next(&lines)
 		if !ok || y >= p.bottom {break}
