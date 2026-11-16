@@ -402,22 +402,39 @@ changes_panel_close :: proc(w: ^Window, pane: ^Changes_Pane) {
 	w.dirty = true
 }
 
-// Opens the file list under the files button when the result has files. Opening closes the panel, the
-// filter popover and the ⋯ menu, and keeps the comment being written, as a list opening does.
+// The pane's popovers: each is open alone, so opening one closes the rest.
+@(private = "file")
+Changes_Popover :: enum {
+	Panel,
+	Files,
+	Tools,
+	Filter,
+}
+
+// Closes the panel with its turn list, the file list, the ⋯ menu and the filter popover, except `keep`.
+// Opening a popover keeps itself and closes the others; a new popover is a case here.
+@(private = "file")
+changes_popovers_close :: proc(app: ^App, w: ^Window, pane: ^Changes_Pane, keep: Changes_Popover) {
+	if keep != .Panel {changes_panel_close(w, pane)}
+	if keep != .Files {changes_list_close(w, pane)}
+	if keep != .Tools {changes_tools_close(w, pane)}
+	if keep != .Filter {changes_filter_popover(app, w, pane, false)}
+}
+
+// Opens the file list under the files button when the result has files. Opening closes the other popovers,
+// and keeps the comment being written, as a list opening does.
 @(private = "file")
 changes_files_open :: proc(app: ^App, w: ^Window, pane: ^Changes_Pane) {
 	if pane.state.files_open || len(pane.model.file_labels) == 0 {return}
-	changes_panel_close(w, pane)
-	changes_filter_popover(app, w, pane, false)
-	changes_tools_close(w, pane)
+	changes_popovers_close(app, w, pane, .Files)
 	changes_list_begin(app, pane)
 	pane.state.files_open = true
 	ui.dropdown_open(&pane.dropdown, changes_dropdown_choices(pane))
 	w.dirty = true
 }
 
-// Opens or closes the panel. Opening closes the file list, the filter popover and the ⋯ menu, keeps the
-// comment being written as a list opening does, and reads the agents again for the chips.
+// Opens or closes the panel. Opening closes the other popovers, keeps the comment being written as a list
+// opening does, and reads the agents again for the chips.
 @(private = "file")
 changes_panel_set :: proc(app: ^App, w: ^Window, pane: ^Changes_Pane, open: bool) {
 	if pane.state.panel_open == open {return}
@@ -425,9 +442,7 @@ changes_panel_set :: proc(app: ^App, w: ^Window, pane: ^Changes_Pane, open: bool
 		changes_panel_close(w, pane)
 		return
 	}
-	changes_list_close(w, pane)
-	changes_filter_popover(app, w, pane, false)
-	changes_tools_close(w, pane)
+	changes_popovers_close(app, w, pane, .Panel)
 	changes_list_begin(app, pane)
 	_ = changes_sources_refresh(app, pane)
 	pane.state.panel_open = true
@@ -441,12 +456,10 @@ changes_tools_close :: proc(w: ^Window, pane: ^Changes_Pane) {
 	w.dirty = true
 }
 
-// Opens the ⋯ menu, closing the panel, the file list and the filter popover.
+// Opens the ⋯ menu, closing the other popovers.
 @(private = "file")
 changes_tools_open :: proc(app: ^App, w: ^Window, pane: ^Changes_Pane) {
-	changes_panel_close(w, pane)
-	changes_list_close(w, pane)
-	changes_filter_popover(app, w, pane, false)
+	changes_popovers_close(app, w, pane, .Tools)
 	changes_list_begin(app, pane)
 	pane.state.tools_open = true
 	w.dirty = true
@@ -598,15 +611,13 @@ changes_layout_toggle :: proc(app: ^App, w: ^Window, pane: ^Changes_Pane) {
 	w.dirty = true
 }
 
-// Opens or closes the diff filter's popover. Opening closes the panel, the ⋯ menu, the file list and the
-// turn list and keeps the comment being written, as a list opening does; closing keeps the text.
+// Opens or closes the diff filter's popover. Opening closes the other popovers and keeps the comment being
+// written, as a list opening does; closing keeps the text.
 @(private = "file")
 changes_filter_popover :: proc(app: ^App, w: ^Window, pane: ^Changes_Pane, open: bool) {
 	if pane.state.filter_open == open {return}
 	if open {
-		changes_panel_close(w, pane)
-		changes_list_close(w, pane)
-		changes_tools_close(w, pane)
+		changes_popovers_close(app, w, pane, .Filter)
 		changes_list_begin(app, pane)
 	} else {
 		_ = ui.field_release(&pane.filter_editor)
