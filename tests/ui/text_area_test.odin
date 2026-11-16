@@ -269,6 +269,55 @@ scrolling_keeps_the_caret_in_the_box :: proc(t: ^testing.T) {
 }
 
 @(test)
+a_new_width_reveals_the_caret_again_even_at_the_same_height :: proc(t: ^testing.T) {
+	f: Area_Fixture
+	if !area_start(t, &f, "a\na\na\na\na\na\na\na\na\na") {return}
+	defer area_stop(&f)
+	box := area_box(&f, area_width(&f, 20), 1, 3)
+	markdown.edit_move(&f.buffer, len(f.buffer.text))
+	ui.text_area_reveal(box)
+	bottom := f.area.scroll
+	testing.expect(t, bottom > 0)
+	// The wheel leaves the text where it puts it for as long as the box is as it was.
+	testing.expect(t, ui.text_area_scroll(box, -1000))
+	ui.text_area_reveal(box)
+	testing.expect_value(t, f.area.scroll, f32(0))
+	// A box of another width, as after a resize, shows the caret again though it is as tall as before.
+	narrower := area_box(&f, area_width(&f, 19), 1, 3)
+	testing.expect_value(t, narrower.rect.height, box.rect.height)
+	ui.text_area_reveal(narrower)
+	testing.expect_value(t, f.area.scroll, bottom)
+}
+
+@(test)
+a_tab_is_four_spaces_wide_in_the_caret_the_pointer_and_the_wrap :: proc(t: ^testing.T) {
+	f: Area_Fixture
+	if !area_start(t, &f, "\ta\t\tb") {return}
+	defer area_stop(&f)
+	box := area_box(&f, area_width(&f, 40), 1, 5)
+	space := ui.text_width(&f.text, " ")
+	letter := ui.text_width(&f.text, "a")
+	zero := ui.text_area_caret_rect(box, 0)
+	testing.expect_value(t, ui.text_area_caret_rect(box, 1).x - zero.x, 4 * space)
+	testing.expect_value(t, ui.text_area_caret_rect(box, 2).x - zero.x, 4 * space + letter)
+	testing.expect_value(t, ui.text_area_caret_rect(box, 4).x - zero.x, 12 * space + letter)
+	// Either half of a tab puts the caret on the boundary beside it.
+	testing.expect_value(t, ui.text_area_offset_at(box, zero.x + 1.5 * space, zero.y + 1), 0)
+	testing.expect_value(t, ui.text_area_offset_at(box, zero.x + 2.5 * space, zero.y + 1), 1)
+	for offset in 0 ..= len(f.buffer.text) {
+		rect := ui.text_area_caret_rect(box, offset)
+		testing.expect_value(t, ui.text_area_offset_at(box, rect.x, rect.y + rect.height / 2), offset)
+	}
+	// Tabs take room in the wrap: a line of them is cut where four-space tabs run out of the box.
+	f2: Area_Fixture
+	if !area_start(t, &f2, "\t\t\t\tx") {return}
+	defer area_stop(&f2)
+	narrow := 8 * ui.text_width(&f2.text, " ") + 2 * ui.CONTROL_INSET + 0.5 * ui.text_width(&f2.text, " ")
+	lines := ui.text_area_lines(&f2.area, &f2.buffer, &f2.text, narrow, 1)
+	testing.expect(t, len(lines) > 1, "tabs have a width, so the line wraps")
+}
+
+@(test)
 the_pointer_places_the_caret_and_drags_a_selection :: proc(t: ^testing.T) {
 	f: Area_Fixture
 	if !area_start(t, &f, "aaaa\nbbbb\ncccc") {return}

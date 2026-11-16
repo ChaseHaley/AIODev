@@ -6,7 +6,7 @@ import "aio:syntax"
 import tr "aio:turns"
 import "core:math"
 
-@(private = "file")
+@(private)
 CHANGES_TAB_COLUMNS :: 4
 
 // Where a diff row's number, sign and text start. A unified row has two number columns, old and new; a
@@ -68,16 +68,34 @@ code_rune :: proc(t: ^Text, r: rune, space: f32) -> (glyph: font.Glyph, advance:
 	return g, font.glyph_advance(t.fonts, g, t.size_px), true
 }
 
+// Whether `r` joins the rune before it into one character: a combining mark, a variation selector or a zero
+// width joiner. A press never lands between such a rune and its base.
+@(private = "file")
+code_joins :: proc(r: rune) -> bool {
+	switch {
+	case 0x300 <= r && r <= 0x36F,
+	     0x1AB0 <= r && r <= 0x1AFF,
+	     0x1DC0 <= r && r <= 0x1DFF,
+	     0x20D0 <= r && r <= 0x20FF,
+	     0xFE00 <= r && r <= 0xFE0F,
+	     0xFE20 <= r && r <= 0xFE2F,
+	     r == 0x200D:
+		return true
+	}
+	return false
+}
+
 // The byte offset of the boundary nearest `x`, measured from where the text starts, in a code line `s` drawn
 // in `t` with `width` of room. It sees what the painter draws: the runes that start before `width`, so a
 // point past them is the end of the visible text. `s` is what the row draws, `mono_prefix` of the line.
+// A rune that joins the one before it is no boundary of its own.
 code_offset_at :: proc(t: ^Text, s: string, width, x: f32) -> int {
 	space := code_space(t)
 	pen: f32
 	for r, offset in s {
 		if pen >= width {return offset}
 		_, advance, _ := code_rune(t, r, space)
-		if x < pen + advance / 2 {return offset}
+		if !code_joins(r) && x < pen + advance / 2 {return offset}
 		pen += advance
 	}
 	return len(s)

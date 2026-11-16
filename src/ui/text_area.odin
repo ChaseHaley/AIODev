@@ -40,6 +40,7 @@ Text_Area :: struct {
 	revealed_caret:    int,
 	revealed_revision: u64,
 	revealed_height:   f32,
+	revealed_width:    f32,
 	// A pointer press in the box holds until the host calls `text_area_release`.
 	dragging:          bool,
 	caret:             Field_Caret,
@@ -67,13 +68,47 @@ text_area_reset :: proc(a: ^Text_Area) {
 	a^ = {lines = lines}
 }
 
-// The advance of one rune; a rune with no glyph takes no room, as `draw_text` skips it.
+// The advance of one rune as the area sets it: a tab is CHANGES_TAB_COLUMNS spaces wide, as in the diff's
+// code, and a rune with no glyph takes no room, as `draw_text` skips it. `space` is `code_space` of `t`.
 @(private = "file")
-area_advance :: proc(t: ^Text, r: rune) -> f32 {
-	if g, found := font.glyph_lookup(t.fonts, t.family, .Regular, r); found {
-		return font.glyph_advance(t.fonts, g, t.size_px)
+area_advance :: proc(t: ^Text, r: rune, space: f32) -> f32 {
+	_, advance, _ := code_rune(t, r, space)
+	return advance
+}
+
+// The width of `s` as the area draws it: the text between tabs as the font sets it, and each tab as the
+// columns it spans.
+@(private = "file")
+area_width :: proc(t: ^Text, s: string) -> f32 {
+	width: f32
+	rest := s
+	for rest != "" {
+		end := strings.index_byte(rest, '\t')
+		if end < 0 {return width + text_width(t, rest)}
+		width += text_width(t, rest[:end]) + CHANGES_TAB_COLUMNS * code_space(t)
+		rest = rest[end + 1:]
 	}
-	return 0
+	return width
+}
+
+// Draws one row of the area's text from `x`, leaving the room of each tab it holds empty.
+@(private = "file")
+area_row_draw :: proc(
+	t: ^Text, list: ^render.Draw_List, row: string, x, baseline: f32, color: render.Color,
+) -> render.Build_Status {
+	x, rest := x, row
+	for rest != "" {
+		end := strings.index_byte(rest, '\t')
+		run := end < 0 ? rest : rest[:end]
+		if run != "" {
+			if result := draw_text(t, list, run, x, baseline, color); result != .Ok {return result}
+			x += text_width(t, run)
+		}
+		if end < 0 {break}
+		x += CHANGES_TAB_COLUMNS * code_space(t)
+		rest = rest[end + 1:]
+	}
+	return .Ok
 }
 
 // Wraps the buffer's text to `width` pixels, unless that was already done for this text, width and font.
@@ -81,6 +116,7 @@ area_advance :: proc(t: ^Text, r: rune) -> f32 {
 // Spaces hang past the width instead of breaking a line, so they stay at their line's end.
 @(private = "file")
 area_wrap :: proc(a: ^Text_Area, b: ^markdown.Edit_Buffer, t: ^Text, width: f32) {
+	space := code_space(t)
 	if a.wrapped && a.wrapped_revision == b.revision && a.wrapped_width == width &&
 	   a.wrapped_size == t.size_px && a.wrapped_family == t.family {
 		return
@@ -102,7 +138,7 @@ area_wrap :: proc(a: ^Text_Area, b: ^markdown.Edit_Buffer, t: ^Text, width: f32)
 			offset = next
 			continue
 		}
-		advance := area_advance(t, r)
+		advance := area_advance(t, r, space)
 		if r == ' ' || r == '\t' {
 			pen += advance
 			// A space may break the line only after a word; a line of leading spaces stays whole.
@@ -200,9 +236,10 @@ area_row :: proc(a: ^Text_Area, offset: int) -> int {
 area_offset_in_row :: proc(a: ^Text_Area, b: ^markdown.Edit_Buffer, t: ^Text, row: int, x: f32) -> int {
 	line := a.lines[row]
 	s := markdown.edit_string(b)
+	space := code_space(t)
 	pen: f32
 	for r, i in s[line.start:line.end] {
-		advance := area_advance(t, r)
+		advance := area_advance(t, r, space)
 		if x < pen + advance / 2 {return line.start + i}
 		pen += advance
 	}
@@ -217,7 +254,7 @@ area_offset_in_row :: proc(a: ^Text_Area, b: ^markdown.Edit_Buffer, t: ^Text, ro
 // How far `offset` is from the text's left edge on its row.
 @(private = "file")
 area_x_of :: proc(a: ^Text_Area, b: ^markdown.Edit_Buffer, t: ^Text, row, offset: int) -> f32 {
-	return text_width(t, string(b.text[a.lines[row].start:offset]))
+	return area_width(t, string(b.text[a.lines[row].start:offset]))
 }
 
 @(private = "file")
@@ -255,7 +292,7 @@ text_area_reveal :: proc(box: Text_Area_Box) {
 	frame, t := area_laid_out(box)
 	a, b := box.area, box.buffer
 	if !(a.revealed && a.revealed_caret == b.caret && a.revealed_revision == b.revision &&
-		   a.revealed_height == frame.height) {
+		   a.revealed_height == frame.height && a.revealed_width == a.wrapped_width) {
 		top := f32(area_row(a, b.caret)) * t.line_height
 		if top < a.scroll {
 			a.scroll = top
@@ -263,7 +300,7 @@ text_area_reveal :: proc(box: Text_Area_Box) {
 			a.scroll = top + t.line_height - frame.height
 		}
 		a.revealed, a.revealed_caret, a.revealed_revision = true, b.caret, b.revision
-		a.revealed_height = frame.height
+		a.revealed_height, a.revealed_width = frame.height, a.wrapped_width
 	}
 	a.scroll = clamp(a.scroll, 0, area_max_scroll(a, frame, &t))
 }
@@ -339,15 +376,15 @@ text_area_draw :: proc(
 	first := max(0, int(math.floor(a.scroll / lh)))
 	last := min(len(a.lines) - 1, int(math.ceil((a.scroll + frame.height) / lh)) - 1)
 	low, high := markdown.edit_selection(b)
-	space := focused && low != high ? text_width(&t, " ") : 0
+	space := focused && low != high ? area_advance(&t, ' ', code_space(&t)) : 0
 	for row in first ..= last {
 		line := a.lines[row]
 		top := frame.y + f32(row) * lh - a.scroll
 		next := row + 1 < len(a.lines) ? a.lines[row + 1].start : line.end
 		hard := next > line.end
 		if focused && low != high && high > line.start && low < (hard ? next : line.end) {
-			left := frame.x + text_width(&t, s[line.start:clamp(low, line.start, line.end)])
-			right := frame.x + text_width(&t, s[line.start:clamp(high, line.start, line.end)])
+			left := frame.x + area_width(&t, s[line.start:clamp(low, line.start, line.end)])
+			right := frame.x + area_width(&t, s[line.start:clamp(high, line.start, line.end)])
 			if hard && high >= next {right += space}
 			right = min(right, frame.x + frame.width)
 			draw_rect(list, {rect = {left, top, right - left, lh}, color = theme.focus})
@@ -368,7 +405,7 @@ text_area_draw :: proc(
 		for row in first ..= last {
 			line := a.lines[row]
 			baseline := frame.y + f32(row) * lh - a.scroll + t.ascent
-			if result := draw_text(&t, list, s[line.start:line.end], frame.x, baseline, theme.text);
+			if result := area_row_draw(&t, list, s[line.start:line.end], frame.x, baseline, theme.text);
 			   result != .Ok {
 				return result
 			}

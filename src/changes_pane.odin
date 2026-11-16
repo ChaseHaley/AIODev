@@ -985,6 +985,13 @@ changes_wheel :: proc(app: ^App, w: ^Window, x, y: f32, rows: int) -> bool {
 		)
 		w.dirty = true
 	case:
+		// Over the note editor the wheel scrolls its text while it has more to show; at an end, or when the
+		// text fits, the diff takes it.
+		if box, visible := ui.changes_editor_box(g, view, &pane.state, &w.ui_text);
+		   visible && render.rect_contains(box.rect, x, y) && ui.text_area_scroll(box, f32(delta)) {
+			w.dirty = true
+			break
+		}
 		changes_diff_scroll(app, w, pane, shown, delta)
 	}
 	return true
