@@ -46,4 +46,7 @@ a_kept_label_field_survives_removing_an_earlier_label :: proc(t: ^testing.T) {
 	app.editor_outcome(&f.state, w, .Label_Action)
 	labels := f.state.settings.turns.quick_labels
 	testing.expect(t, strings.has_prefix(labels, "Renamed |"), labels)
+	// The label that took position 2 keeps its own name: the kept rename was applied once, not saved
+	// again onto whatever row now holds its old key.
+	testing.expect(t, strings.contains(labels, "; Match existing patterns |"), labels)
 }
