@@ -2,12 +2,10 @@ package main
 
 import "aio:layout"
 import "aio:markdown"
-import "aio:platform"
 import "aio:ui"
 import "core:log"
 import "core:os"
 import "core:time"
-import "core:unicode/utf8"
 
 // Editing a Markdown pane's file in place, shown as Obsidian's Live Preview shows it (WORK-441,
 // D-094): every line rendered but the caret's. Edits save shortly after typing stops.
@@ -223,12 +221,9 @@ markdown_text :: proc(app: ^App, w: ^Window, text: string) {
 
 @(private = "file", require_results)
 markdown_type :: proc(app: ^App, pane: ^Markdown_Pane, text: string) -> bool {
-	if text == "" {return false}
-	for r in text {
-		if r < 0x20 || r == 0x7f {return false}
-	}
-	if markdown.edit_insert(&pane.editor.buffer, text, true) {markdown_edited(app, pane)}
-	return true
+	kind := text_edit_type(&pane.editor.buffer, text)
+	if kind == .Edited {markdown_edited(app, pane)}
+	return kind != .Ignored
 }
 
 // Ticks or clears the task whose mark is at file offset `mark`: an undoable edit while editing, else
@@ -330,119 +325,21 @@ markdown_edit_vertical :: proc(
 @(require_results)
 markdown_edit_key :: proc(app: ^App, w: ^Window, pane: ^Markdown_Pane, key: Content_Key) -> bool {
 	e := pane.editor
-	b := &e.buffer
-	logical := key.logical
-	modifiers := logical.modifiers & {.Control, .Shift, .Alt, .Super}
-	// A character key types its text; Ctrl+Alt is AltGr, which types too. Ctrl and Alt alone make chords.
-	typing := modifiers & {.Control, .Alt} == {} || modifiers & {.Control, .Alt} == {.Control, .Alt}
-	if typing && .Super not_in modifiers && markdown_type(app, pane, logical.text) {
-		w.dirty = true
-		return true
-	}
-	if .Alt in modifiers || .Super in modifiers {return false}
-	control, shift := .Control in modifiers, .Shift in modifiers
-	switch key.clipboard {
-	case .Copy:
-		if text := markdown.edit_selected_text(b); text != "" {clipboard_copy(app, text)}
-		return true
-	case .Cut:
-		if text := markdown.edit_selected_text(b); text != "" && clipboard_copy(app, text) {
-			if markdown.edit_delete(b, false, false) {markdown_edited(app, pane)}
-		}
-		return true
-	case .Paste:
-		if text, ok := platform.clipboard_get_text(&app.platform, context.temp_allocator); ok {
-			if markdown.edit_insert(b, markdown_line_endings(text, b.newline)) {markdown_edited(app, pane)}
-		}
-		return true
-	case .None:
-	}
-	moved := true
-	edited := false
-	#partial switch logical.key {
-	case .Z:
-		if !control {return false}
-		edited = shift ? markdown.edit_redo(b) : markdown.edit_undo(b)
-	case .Y:
-		if !control || shift {return false}
-		edited = markdown.edit_redo(b)
-	case .A:
-		if !control || shift {return false}
-		markdown.edit_select_all(b)
-	case .Arrow_Left:
-		from, to := markdown.edit_selection(b)
-		switch {
-		case control: markdown.edit_move(b, markdown.edit_word_left(b, b.caret), shift)
-		case !shift && from != to: markdown.edit_move(b, from)
-		case: markdown.edit_move(b, markdown.edit_left(b, b.caret), shift)
-		}
-	case .Arrow_Right:
-		from, to := markdown.edit_selection(b)
-		switch {
-		case control: markdown.edit_move(b, markdown.edit_word_right(b, b.caret), shift)
-		case !shift && from != to: markdown.edit_move(b, to)
-		case: markdown.edit_move(b, markdown.edit_right(b, b.caret), shift)
-		}
-	case .Arrow_Up, .Arrow_Down:
-		if control {return false}
-		markdown_edit_vertical(app, w, pane, logical.key == .Arrow_Up ? -1 : 1, 0, shift)
-		w.dirty = true
-		return true
-	case .Page_Up, .Page_Down:
-		if control {return false}
-		markdown_edit_vertical(app, w, pane, 0, logical.key == .Page_Up ? -1 : 1, shift)
-		w.dirty = true
-		return true
-	case .Home:
-		markdown.edit_move(b, control ? b.floor : markdown.edit_line_start(b, b.caret), shift)
-	case .End:
-		markdown.edit_move(b, control ? len(b.text) : markdown.edit_line_end(b, b.caret), shift)
-	case .Backspace, .Delete:
-		if shift {return false}
-		edited = markdown.edit_delete(b, logical.key == .Delete, control)
-	case .Enter, .Numpad_Enter:
-		if control {return false}
-		// Shift+Enter breaks the line without continuing a list.
-		edited = shift ? markdown.edit_insert(b, b.newline) : markdown.edit_newline(b)
-	case .Tab:
-		if control {return false}
-		edited = markdown.edit_indent(b, shift)
-	case .Escape:
-		if modifiers != {} {return false}
-		markdown.edit_move(b, b.caret)
-	case:
-		moved = false
-	}
-	if !moved {return false}
-	if edited {
-		markdown_edited(app, pane)
-	} else {
+	result := text_edit_key(app, &e.buffer, key)
+	switch result.kind {
+	case .Ignored:
+		return false
+	case .Handled:
+	case .Moved:
 		e.goal_x, e.reveal = -1, true
 		markdown_editor_sync(pane)
+	case .Edited:
+		markdown_edited(app, pane)
+	case .Vertical:
+		markdown_edit_vertical(app, w, pane, result.lines, result.pages, result.extend)
 	}
 	w.dirty = true
 	return true
-}
-
-// Pasted text in the file's own line endings.
-@(private = "file")
-markdown_line_endings :: proc(text, newline: string) -> string {
-	out := make([dynamic]u8, 0, len(text), context.temp_allocator)
-	for i := 0; i < len(text); i += 1 {
-		c := text[i]
-		if c == '\r' {
-			if i + 1 < len(text) && text[i + 1] == '\n' {i += 1}
-			append(&out, newline)
-			continue
-		}
-		if c == '\n' {
-			append(&out, newline)
-			continue
-		}
-		append(&out, c)
-	}
-	if !utf8.valid_string(string(out[:])) {return text}
-	return string(out[:])
 }
 
 // Where the caret draws in a pane's view this frame: -1 unless the pane edits and has the keyboard.
