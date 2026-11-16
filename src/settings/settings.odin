@@ -559,6 +559,7 @@ Turns_Settings :: struct {
 	diff_view:             Diff_View,
 	diff_filter:           string,
 	diff_minimum_contrast: f64,
+	quick_labels:          string,
 }
 Window_Settings :: struct {
 	columns, rows, padding: int,
@@ -704,6 +705,7 @@ Setting_Validator :: enum {
 	None,
 	Padding_Groups,
 	Program_Icons,
+	Quick_Labels,
 	// A motion context's value, read for the context its key names.
 	Motion,
 }
@@ -1517,6 +1519,18 @@ SCHEMA :: [?]Schema_Entry {
 			"theme's exact colours.",
 	},
 	{
+		key = QUICK_LABELS_KEY,
+		title = "Quick labels",
+		kind = .String,
+		offset = offset_of(Settings, turns) + offset_of(Turns_Settings, quick_labels),
+		default_value = QUICK_LABELS_DEFAULT,
+		valid = {0, QUICK_LABELS_MAX},
+		control = .Group,
+		validator = .Quick_Labels,
+		description = "Labels for annotating Agent changes: " + QUICK_LABELS_EXAMPLE + ". The first nine take " +
+			"Alt+1 to Alt+9 in order. The instruction goes to the agent with the label.",
+	},
+	{
 		key = "shell.default_profile",
 		title = "Default shell profile",
 		kind = .String,
@@ -1955,6 +1969,12 @@ value_parse :: proc(
 			if !padding_groups_valid(value) {
 				buffer: [192]u8
 				issue, err := problem(.Invalid_Value, allocator, padding_groups_rules(buffer[:]))
+				return nil, issue, err
+			}
+		case .Quick_Labels:
+			if !quick_labels_valid(value) {
+				buffer: [320]u8
+				issue, err := problem(.Invalid_Value, allocator, quick_labels_rules(buffer[:]))
 				return nil, issue, err
 			}
 		case .Program_Icons:
