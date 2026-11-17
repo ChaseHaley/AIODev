@@ -128,6 +128,13 @@ Tray :: struct {
 Pick :: struct {
 	path: string,
 }
+// Files dropped from Explorer at a point of the selected window. Positions read as a mouse's do; the
+// paths borrow the arguments.
+Drop :: struct {
+	position:       Position,
+	pixels, screen: bool,
+	paths:          []string,
+}
 Command :: struct {
 	name:      string,
 	direction: layout.Direction,
@@ -192,6 +199,7 @@ Request :: union {
 	Dpi,
 	Tray,
 	Pick,
+	Drop,
 	Command,
 	Window_Select,
 	Window_Move,
@@ -228,6 +236,7 @@ Verb :: enum {
 	Dpi,
 	Tray,
 	Pick,
+	Drop,
 	Command,
 	Window,
 	Help,
@@ -256,6 +265,7 @@ VERB_NAMES := [Verb]string {
 	.Dpi     = "dpi",
 	.Tray    = "tray",
 	.Pick    = "pick",
+	.Drop    = "drop",
 	.Command = "command",
 	.Window  = "window",
 	.Help    = "help",
@@ -638,6 +648,8 @@ parse :: proc(args: []string, allocator := context.allocator) -> (Request, Parse
 		if len(args) != 2 || args[1] == "" {return {}, {args[0], "use pick <path> or pick --cancel"}}
 		if args[1] == "--cancel" {return Pick{}, {}}
 		return Pick{args[1]}, {}
+	case .Drop:
+		return parse_drop(args)
 	case .Type, .Focus, .Tray, .Resize, .Dpi:
 		if len(args) != 2 {return {}, bad}
 		s := args[1]
@@ -779,6 +791,30 @@ parse :: proc(args: []string, allocator := context.allocator) -> (Request, Parse
 		return parse_vt(args)
 	}
 	return {}, bad
+}
+
+@(private, require_results)
+parse_drop :: proc(args: []string) -> (Request, Parse_Error) {
+	bad := Parse_Error{args[0], "use drop <pos> [--px|--screen] <path>...; see help drop"}
+	if len(args) < 3 {return {}, bad}
+	position, ok := pair(args[1], ',', true)
+	if !ok {return {}, {args[1], "use col,row, pixel x,y with --px, or signed x,y with --screen"}}
+	d := Drop {
+		position = position,
+	}
+	first := 2
+	if args[first] == "--px" || args[first] == "--screen" {
+		d.pixels, d.screen = args[first] == "--px", args[first] == "--screen"
+		first += 1
+	}
+	if first >= len(args) {return {}, bad}
+	for path in args[first:] {
+		if path == "" || strings.contains_rune(path, '\n') {
+			return {}, {path, "use nonempty paths without line breaks"}
+		}
+	}
+	d.paths = args[first:]
+	return d, {}
 }
 
 @(private, require_results)

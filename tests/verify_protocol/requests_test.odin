@@ -34,6 +34,8 @@ parse_commands :: proc(t: ^testing.T) {
 		{"expect", "cell", "0,1", "underline=single", "fg=default", "bg=#00AAbb", "wide=false"},
 		{"focus", "in"}, {"focus", "out"}, {"tray", "open"}, {"tray", "hide"}, {"tray", "quit"},
 		{"pick", `C:\icons\nvim.png`}, {"pick", "--cancel"},
+		{"drop", "3,4", `C:\a.md`}, {"drop", "10,20", "--px", `C:\a.md`, `C:\b b\c.txt`},
+		{"drop", "-5,6", "--screen", `C:\a.md`},
 		{"resize", "1x1000"}, {"dpi", "48"}, {"dpi", "768"}, {"help"}, {"help", "screen"},
 		{"mouse", "move", "1,2"}, {"mouse", "down", "1,2", "--button", "right"},
 		{"mouse", "up", "1,2", "--button", "middle"}, {"mouse", "click", "1,2", "--button", "left"},
@@ -95,6 +97,8 @@ parse_errors :: proc(t: ^testing.T) {
 		{"screen", "1", "2"}, {"cells"}, {"cells", "x"}, {"cells", "0", "1"},
 		{"type"}, {"type", "a", "b"}, {"command", ""}, {"focus", "bad"}, {"tray", "bad"},
 		{"pick"}, {"pick", ""}, {"pick", "a", "b"},
+		{"drop"}, {"drop", "1,2"}, {"drop", "1,2", "--px"}, {"drop", "x", `C:\a.md`},
+		{"drop", "1,2", ""}, {"drop", "1,2", "a\nb"},
 		{"command", "pane.zoom", "--ratio", "0.5"}, {"command", "pane.split", "--ratio", "NaN"},
 		{"command", "pane.split", "--ratio", "0"}, {"command", "pane.split", "--ratio", "1"},
 		{"command", "pane.split", "--direction", "above"}, {"command", "pane.split", "--focus", "no"},
@@ -172,7 +176,7 @@ help_verbs :: proc(t: ^testing.T) {
 	testing.expect_value(t, verify_protocol.help(&b), verify_protocol.Error.None)
 	testing.expect_value(t, strings.to_string(b), verify_protocol.HELP_OVERVIEW)
 	for command in ([]string{"ping", "screen", "cells", "state", "wait", "expect", "type", "key",
-		"run", "mouse", "focus", "resize", "dpi", "tray", "pick", "command", "window", "help", "capture",
+		"run", "mouse", "drop", "focus", "resize", "dpi", "tray", "pick", "command", "window", "help", "capture",
 		"pixels", "diff", "draws", "perf", "vt"}) {
 		strings.builder_reset(&b)
 		testing.expect_value(t, verify_protocol.help(&b, command), verify_protocol.Error.None)
@@ -232,4 +236,25 @@ evidence_requests_default_to_the_whole_window :: proc(t: ^testing.T) {
 	vt, vt_error := verify_protocol.parse({"vt", "record", "on"})
 	testing.expect_value(t, vt_error.advice, "")
 	testing.expect(t, vt.(verify_protocol.Vt).recording)
+}
+
+@(test)
+drop_requests_carry_the_point_the_unit_and_every_path :: proc(t: ^testing.T) {
+	r, err := verify_protocol.parse({"drop", "10,20", "--px", `C:\a.md`, `C:\b b\c.txt`})
+	testing.expect_value(t, err.advice, "")
+	d := r.(verify_protocol.Drop)
+	testing.expect_value(t, d.position, verify_protocol.Position{10, 20})
+	testing.expect(t, d.pixels && !d.screen)
+	if !testing.expect_value(t, len(d.paths), 2) {return}
+	testing.expect_value(t, d.paths[1], `C:\b b\c.txt`)
+	r, err = verify_protocol.parse({"drop", "-5,6", "--screen", `C:\a.md`})
+	testing.expect_value(t, err.advice, "")
+	d = r.(verify_protocol.Drop)
+	testing.expect_value(t, d.position, verify_protocol.Position{-5, 6})
+	testing.expect(t, d.screen && !d.pixels)
+	r, err = verify_protocol.parse({"drop", "3,4", `C:\a.md`})
+	testing.expect_value(t, err.advice, "")
+	d = r.(verify_protocol.Drop)
+	testing.expect(t, !d.screen && !d.pixels)
+	testing.expect_value(t, len(d.paths), 1)
 }

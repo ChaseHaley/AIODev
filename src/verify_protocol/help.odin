@@ -7,7 +7,7 @@ import "core:strings"
 
 HELP_OVERVIEW :: `aioctl <command> [arguments]
 Inspect: ping, screen, cells, state, wait, expect, pixels, diff, draws, perf.
-Drive: type, key, run, mouse, focus, resize, dpi, tray, pick, command, window.
+Drive: type, key, run, mouse, drop, focus, resize, dpi, tray, pick, command, window.
 Record: vt record on|off.
 Use help <command> for grammar, evidence, output, and defaults.
 Coordinates and inclusive ranges are zero-based; quote each text argument in your shell.
@@ -432,6 +432,19 @@ Queues what the next file dialog chooses on a headless instance; --cancel closes
 Queued answers are used oldest first; a dialog with none queued cancels. State os.file_pick.*
 records each dialog's window, filter, pattern, starting folder and answer. No defaults.
 Output is one line: ok; <changes>. A desktop instance refuses: its dialog takes real input.
+`,
+		)
+	case .Drop:
+		put(
+			&w,
+			`drop <pos> [--px|--screen] <path>...
+Delivers a file drop from Explorer to the selected window at <pos>, as Windows delivers one: Markdown
+files open in a Markdown pane, a folder in a shell, any other file in Neovim in a terminal pane, each
+beside the pane under the point, or beside the focused pane when the point is on no pane.
+Positions are nonnegative col,row cell centers of the focused pane; --px uses client x,y pixels and
+--screen signed 32-bit screen pixels. Paths are absolute and local. At most 8 files open from one drop.
+Proves the app's drop path, not Explorer's drag. No defaults.
+Output is one line: ok; <changes>. Failures start with error:.
 `,
 		)
 	case .Command:

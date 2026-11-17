@@ -196,6 +196,7 @@ when AIO_CONTROL {
 		     verify_protocol.Key,
 		     verify_protocol.Run,
 		     verify_protocol.Mouse,
+		     verify_protocol.Drop,
 		     verify_protocol.Focus,
 		     verify_protocol.Resize,
 		     verify_protocol.Dpi,
@@ -1074,6 +1075,11 @@ when AIO_CONTROL {
 			return verify_chord(app, w.id, {.Enter, {}})
 		case verify_protocol.Mouse:
 			return verify_mouse(app, w, r)
+		case verify_protocol.Drop:
+			position, ok := verify_position(app, w, r.position, r.pixels, r.screen)
+			if !ok {return .Invalid_Argument}
+			paths := strings.join(r.paths, "\n", context.temp_allocator)
+			handle_event(app, platform.Files_Drop_Event{w.id, position.x, position.y, paths})
 		case verify_protocol.Window_Move:
 			if platform.window_set_position(
 				   &app.platform,

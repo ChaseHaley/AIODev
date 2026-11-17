@@ -52,6 +52,9 @@
     "find_navigation": {
       "lane": "headless"
     },
+    "file_drop": {
+      "lane": "headless"
+    },
     "font_pickers": {
       "lane": "headless"
     },
