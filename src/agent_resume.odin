@@ -5,6 +5,7 @@ import "aio:procinfo"
 import "aio:program_art"
 import "aio:pty"
 import "aio:term"
+import "aio:turns"
 import "core:crypto"
 import "core:fmt"
 import "core:log"
@@ -76,6 +77,9 @@ agent_environment :: proc(app: ^App, key: string, environment: ^[dynamic]pty.Env
 	append(environment, pty.Env_Var{TERM_SESSION_VARIABLE, key})
 	if record := agent_record_path(app, key); record != "" {
 		append(environment, pty.Env_Var{agent.RECORD_VARIABLE, record})
+	}
+	if app.paths.turns != "" {
+		append(environment, pty.Env_Var{turns.TURNS_VARIABLE, app.paths.turns})
 	}
 }
 
@@ -381,26 +385,73 @@ Hook_Outcome :: enum u8 {
 // hooks.json, for each harness whose settings directory exists. Claude Code runs hooks in Git Bash and
 // Codex in PowerShell, so the two commands quote aio's path for those shells.
 agent_hooks_install :: proc(app: ^App) {
+	aio, usable := hook_aio_path(app, "agent session")
+	if !usable {return}
+	claude := hook_install_file(
+		harness_directory("CLAUDE_CONFIG_DIR", ".claude"),
+		"settings.json",
+		{{"SessionStart", "", fmt.tprintf(`"%s" agent-session claude`, aio)}},
+	)
+	codex := hook_install_file(
+		harness_directory("CODEX_HOME", ".codex"),
+		"hooks.json",
+		{{"SessionStart", "", fmt.tprintf(`& "%s" agent-session codex`, aio)}},
+	)
+	hook_install_notify(app, claude, codex)
+}
+
+// Adds UserPromptSubmit, Stop and file edit PreToolUse hooks running `aio turn-hook` to Claude Code's
+// settings.json and Codex's hooks.json (WORK-487), quoted as agent_hooks_install does. Codex reports
+// its file edits as apply_patch, which is what its matcher names.
+agent_turn_hooks_install :: proc(app: ^App) {
+	aio, usable := hook_aio_path(app, "agent turn")
+	if !usable {return}
+	claude_command := fmt.tprintf(`"%s" turn-hook claude`, aio)
+	codex_command := fmt.tprintf(`& "%s" turn-hook codex`, aio)
+	claude := hook_install_file(
+		harness_directory("CLAUDE_CONFIG_DIR", ".claude"),
+		"settings.json",
+		{
+			{"UserPromptSubmit", "", fmt.tprintf("%s prompt", claude_command)},
+			{"Stop", "", fmt.tprintf("%s stop", claude_command)},
+			{"PreToolUse", "Edit|Write|MultiEdit|NotebookEdit", fmt.tprintf("%s edit", claude_command)},
+		},
+	)
+	codex := hook_install_file(
+		harness_directory("CODEX_HOME", ".codex"),
+		"hooks.json",
+		{
+			{"UserPromptSubmit", "", fmt.tprintf("%s prompt", codex_command)},
+			{"Stop", "", fmt.tprintf("%s stop", codex_command)},
+			{"PreToolUse", "apply_patch", fmt.tprintf("%s edit", codex_command)},
+		},
+	)
+	hook_install_notify(app, claude, codex)
+}
+
+// The path of aio.exe as a hook command quotes it, in temporary memory; false, after telling the user
+// why, when there is no aio beside AIODev or its folder name cannot be quoted. `what` names the hooks.
+@(private)
+hook_aio_path :: proc(app: ^App, what: string) -> (string, bool) {
 	if app.cli_directory == "" {
-		notify(app, .Error, "aio.exe is not beside AIODev, so the agent session hooks cannot run it.")
-		return
+		notify(
+			app,
+			.Error,
+			fmt.tprintf("aio.exe is not beside AIODev, so the %s hooks cannot run it.", what),
+		)
+		return "", false
 	}
 	aio, _ := filepath.join({app.cli_directory, CLI_EXECUTABLE}, context.temp_allocator)
 	aio, _ = strings.replace_all(aio, `\`, "/", context.temp_allocator)
 	if strings.index_any(aio, "\"$`'%") >= 0 {
 		notify(app, .Error, "AIODev's folder name has characters a hook command cannot quote.")
-		return
+		return "", false
 	}
-	claude := hook_install_file(
-		harness_directory("CLAUDE_CONFIG_DIR", ".claude"),
-		"settings.json",
-		fmt.tprintf(`"%s" agent-session claude`, aio),
-	)
-	codex := hook_install_file(
-		harness_directory("CODEX_HOME", ".codex"),
-		"hooks.json",
-		fmt.tprintf(`& "%s" agent-session codex`, aio),
-	)
+	return aio, true
+}
+
+@(private)
+hook_install_notify :: proc(app: ^App, claude, codex: Hook_Outcome) {
 	text := fmt.tprintf("Claude Code: %s. Codex: %s.", hook_outcome_text(claude), hook_outcome_text(codex))
 	if codex == .Added {
 		text = fmt.tprintf("%s Approve the new hook once with /hooks in Codex.", text)
@@ -420,8 +471,17 @@ harness_directory :: proc(variable, folder: string) -> string {
 	return path
 }
 
+// One hook to put in a harness's settings: its event, the tool matcher of the group (empty for none) and
+// the command it runs.
 @(private)
-hook_install_file :: proc(directory, file, command: string) -> Hook_Outcome {
+Hook_Entry :: struct {
+	event, matcher, command: string,
+}
+
+// Adds the entries to the settings file in `directory`, which is written once and only when one of them
+// was missing: Added when any was, Present when all were.
+@(private)
+hook_install_file :: proc(directory, file: string, entries: []Hook_Entry) -> Hook_Outcome {
 	if directory == "" || !os.is_dir(directory) {return .Absent}
 	path, _ := filepath.join({directory, file}, context.temp_allocator)
 	// A settings file kept as a link elsewhere, as dotfiles setups do, is updated where it lives.
@@ -443,15 +503,26 @@ hook_install_file :: proc(directory, file, command: string) -> Hook_Outcome {
 		}
 		text = string(data)
 	}
-	result, change := agent.hooks_install(text, command, HOOK_TIMEOUT_SECONDS, context.temp_allocator)
-	switch change {
-	case .Present:
-		return .Present
-	case .Invalid:
-		return .Unreadable
-	case .Added:
+	added := false
+	for entry in entries {
+		result, change := agent.hooks_install(
+			text,
+			entry.event,
+			entry.matcher,
+			entry.command,
+			HOOK_TIMEOUT_SECONDS,
+			context.temp_allocator,
+		)
+		switch change {
+		case .Present:
+		case .Invalid:
+			return .Unreadable
+		case .Added:
+			text, added = result, true
+		}
 	}
-	if !file_replace(path, result) {return .Failed}
+	if !added {return .Present}
+	if !file_replace(path, text) {return .Failed}
 	return .Added
 }
 

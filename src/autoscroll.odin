@@ -44,7 +44,7 @@ AUTOSCROLL_ANCHOR :: f32(28)
 @(private = "file")
 AUTOSCROLL_MAX_STEP :: 100 * time.Millisecond
 
-// The surfaces whose Middle press drops the anchor: pane content of every kind.
+// The surfaces whose Middle press drops the anchor: terminal, Markdown and Settings pane content.
 @(private = "file")
 AUTOSCROLL_TARGETS :: bit_set[Pointer_Target]{.Content, .Markdown_Page, .Settings_Page}
 
@@ -80,6 +80,9 @@ autoscroll_begin :: proc(app: ^App, w: ^Window, target: Pointer_Target, e: input
 	case .Markdown:
 		if markdown_find(app, pane.content.id) == nil {return false}
 	case .Settings:
+	case .Changes:
+		// Agent changes panes keep their own scrolling; their page is not an anchor target.
+		return false
 	}
 	pane_focus(app, w, pane.node)
 	tooltip_cancel(w)
@@ -208,6 +211,9 @@ autoscroll_animate :: proc(app: ^App, w: ^Window, frame: ui.Frame_Time) -> bool 
 	case .Settings:
 		_ = settings_layout_for(w, pane)
 		ui.editor_scroll_by(&w.editor, dip)
+	case .Changes:
+		autoscroll_end(app, w)
+		return false
 	}
 	return true
 }

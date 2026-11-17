@@ -109,6 +109,10 @@ settings_page_build :: proc(app: ^App, source: string, view: ^ui.Editor_View) ->
 		notify(app, .Error, "Could not build the program groups.")
 		return
 	}
+	if ui.editor_quick_labels_load(p, s.turns.quick_labels) != nil {
+		notify(app, .Error, "Could not build the quick labels.")
+		return
+	}
 	// Profiles are one dense table. The model rows come from the resolved profile list; each becomes
 	// a table row plus its inline editor rows, which stay hidden until the row expands.
 	table, table_error := ui.profile_table_build(&s.profiles, profile_command_exists)
@@ -205,6 +209,7 @@ SETTINGS_GROUP_AREAS := [?]struct {
 	{"Scrollback", .General},
 	{"Shell", .General},
 	{"Activity", .General},
+	{"Agent changes", .General},
 	{"Motion", .Advanced},
 	{"Profiles", .Advanced},
 	{"Link programs", .Advanced},
@@ -484,6 +489,13 @@ editor_outcome :: proc(app: ^App, w: ^Window, outcome: ui.Editor_Outcome) {
 	case .Process_Save:
 		editor_process_save(app, w)
 		return
+	case .Label_Action:
+		// A field left a moment ago is applied by the action itself: its key names a position the
+		// action may renumber.
+		if edit, ok := request.(ui.Label_Edit); ok {
+			editor_labels_action(app, w, edit, &kept)
+		}
+		return
 	case .Profile_Action:
 		editor_profile_action(app, w, request)
 		return
@@ -498,6 +510,11 @@ editor_outcome :: proc(app: ^App, w: ^Window, outcome: ui.Editor_Outcome) {
 		if row.process_field == .Add_Group || row.process_field == .Add_Program {
 			_ = ui.editor_process_activate(p, row)
 		} else {editor_process_save(app, w)}
+		return
+	}
+	if row.label_field != .None {
+		value := strings.clone(ui.field_string(&p.value), context.temp_allocator)
+		editor_labels_edit(app, w, {kind = .Field, key = row.key, value = value})
 		return
 	}
 	// Motion rows write a context's whole text or a curve or preset change, never their own key.
@@ -556,6 +573,10 @@ editor_outcome :: proc(app: ^App, w: ^Window, outcome: ui.Editor_Outcome) {
 		}
 	case .Opener_Add:
 		editor_opener_mutate(app, w, {kind = .Add})
+	case .Label_Add:
+		editor_labels_action(app, w, {kind = .Add}, &kept)
+	case .Label_Reset:
+		editor_labels_action(app, w, {kind = .Reset}, &kept)
 	}
 }
 
@@ -585,6 +606,10 @@ editor_kept_save :: proc(app: ^App, w: ^Window, kept: ^ui.Editor_Kept) {
 		}
 		if field, is_field := row.opener_field.?; is_field {
 			editor_opener_field(app, w, row.opener, field, kept.value, kept = true)
+			return
+		}
+		if row.label_field != .None {
+			editor_labels_edit(app, w, {kind = .Field, key = row.key, value = kept.value}, kept = true)
 			return
 		}
 		editor_setting_save(app, w, &row, kept.value, kept = true)
@@ -1293,6 +1318,11 @@ when AIO_CONTROL {
 		state_text(r, "settings.title", title)
 		state_text(r, "settings.message", p.message)
 		state_value(r, "settings.error", p.error)
+		state_text(r, "settings.labels.rows", settings_page_row_rects(p, page, .Labels))
+		state_value(r, "settings.labels.expanded", p.label_expanded)
+		state_value(r, "settings.labels.dragging", ui.editor_order_dragging(p, .Quick_Labels))
+		state_value(r, "settings.labels.drag_target", ui.editor_order_target(p))
+		state_text(r, "settings.labels.value", app.settings.turns.quick_labels)
 		state_text(r, "settings.process.rows", settings_page_row_rects(p, page, .Process))
 		state_value(r, "settings.process.expanded", p.process_expanded)
 		state_value(r, "settings.process.dragging", ui.editor_order_dragging(p, .Process_Groups))
@@ -1383,6 +1413,7 @@ when AIO_CONTROL {
 		Process,
 		Profile,
 		Opener,
+		Labels,
 	}
 
 	// A table's rows as key@x,y,w,h (process) or id@x,y,w,h (profile, link program), joined by ';',
@@ -1409,6 +1440,9 @@ when AIO_CONTROL {
 			case .Opener:
 				if row.kind != .Opener {continue}
 				name = row.opener
+			case .Labels:
+				if row.kind != .Quick_Label {continue}
+				name = row.key
 			}
 			rect := ui.editor_row_parts(p, page, index).row
 			if !first {strings.write_byte(&builder, ';')}

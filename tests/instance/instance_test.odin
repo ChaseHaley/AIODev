@@ -94,14 +94,17 @@ name_alphabet_and_boundaries :: proc(t: ^testing.T) {
 
 @(test)
 identities :: proc(t: ^testing.T) {
-	Case :: struct { name, id, log, layout, palette: string }
+	Case :: struct { name, id, log, layout, palette, agents, turns: string }
 	for item in ([]Case{
 		{"", "AIODev", `C:\local\AIODev\logs\aiodev.log`, `C:\local\AIODev\layout.json`,
-			`C:\local\AIODev\palette.json`},
+			`C:\local\AIODev\palette.json`, `C:\local\AIODev\agent-sessions`,
+			`C:\local\AIODev\agent-turns`},
 		{"test", "AIODev.test", `C:\local\AIODev\logs\aiodev.test.log`, `C:\local\AIODev\layout.test.json`,
-			`C:\local\AIODev\palette.test.json`},
+			`C:\local\AIODev\palette.test.json`, `C:\local\AIODev\agent-sessions.test`,
+			`C:\local\AIODev\agent-turns.test`},
 		{"A-0_z", "AIODev.A-0_z", `C:\local\AIODev\logs\aiodev.A-0_z.log`, `C:\local\AIODev\layout.A-0_z.json`,
-			`C:\local\AIODev\palette.A-0_z.json`},
+			`C:\local\AIODev\palette.A-0_z.json`, `C:\local\AIODev\agent-sessions.A-0_z`,
+			`C:\local\AIODev\agent-turns.A-0_z`},
 	}) {
 		options := instance.Options{name = item.name}
 		id, id_error := instance.app_id(options, context.allocator)
@@ -114,6 +117,8 @@ identities :: proc(t: ^testing.T) {
 		testing.expect_value(t, paths.log, item.log)
 		testing.expect_value(t, paths.layout, item.layout)
 		testing.expect_value(t, paths.palette, item.palette)
+		testing.expect_value(t, paths.agents, item.agents)
+		testing.expect_value(t, paths.turns, item.turns)
 		// Named instances share the default instance's roaming settings file.
 		testing.expect_value(t, paths.settings, `C:\roaming\AIODev\settings.ini`)
 		testing.expect_value(t, paths.captures, "")
@@ -131,6 +136,7 @@ data_directory_paths :: proc(t: ^testing.T) {
 	testing.expect_value(t, paths.log, `C:\repo\build\verify\verify\logs\aiodev.verify.log`)
 	testing.expect_value(t, paths.layout, `C:\repo\build\verify\verify\layout.verify.json`)
 	testing.expect_value(t, paths.palette, `C:\repo\build\verify\verify\palette.verify.json`)
+	testing.expect_value(t, paths.turns, `C:\repo\build\verify\verify\agent-turns.verify`)
 	testing.expect_value(t, paths.settings, `C:\repo\build\verify\verify\settings.ini`)
 	testing.expect_value(t, paths.captures, `C:\repo\build\verify\verify\captures`)
 	missing, missing_error := instance.paths_resolve({}, "", "")

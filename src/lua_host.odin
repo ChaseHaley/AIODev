@@ -213,7 +213,9 @@ lua_backend_log :: proc(data: rawptr, level, message: string) {
 @(private)
 lua_notice :: proc(app: ^App, kind: ui.Notice_Kind, text: string) {
 	key := u32(Notice_Key.Lua)
-	ui.notices_put(&app.notices, key, kind, text, ERROR_NOTICE_DURATION, app.animations, clock_now(&app.clock))
+	ui.notices_put(
+		&app.notices, key, kind, text, ERROR_NOTICE_DURATION, app.animations, clock_now(&app.clock), stack = true,
+	)
 	mark_all_dirty(app)
 }
 

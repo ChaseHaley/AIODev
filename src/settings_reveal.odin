@@ -107,6 +107,7 @@ settings_reveal_target :: proc(reveal: Settings_Reveal) -> Maybe(ui.Reveal_Targe
 	if section == .Link_Programs {return ui.Reveal_Openers{}}
 	if reveal.key == "" {return nil}
 	if reveal.key == settings.PADDING_GROUPS_KEY {return ui.Reveal_Program_Groups{}}
+	if reveal.key == settings.QUICK_LABELS_KEY {return ui.Reveal_Quick_Labels{}}
 	return ui.Reveal_Row{reveal.key}
 }
 

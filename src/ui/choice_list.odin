@@ -14,8 +14,10 @@ Choice_List :: struct {
 }
 
 // Eight DIPs of page margin on either side plus the popup's own eight-DIP inset.
-choice_list_rows :: proc(count: int, page_height, scale: f32, header_height: f32 = 0) -> int {
-	return min(count, CHOICE_LIST_ROWS,
+choice_list_rows :: proc(
+	count: int, page_height, scale: f32, header_height: f32 = 0, limit: int = CHOICE_LIST_ROWS,
+) -> int {
+	return min(count, limit,
 	           max(1, int((page_height - 24 * scale - header_height) / (CHOICE_HEIGHT * scale))))
 }
 

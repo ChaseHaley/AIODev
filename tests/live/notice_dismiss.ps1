@@ -28,7 +28,7 @@ function Close-Point([double]$Scale) {
     $points = foreach ($line in $rects) {
         if ($line -match '^rect \d+ ([\d.]+),([\d.]+) ([\d.]+)x([\d.]+) .* radius=([\d.]+)$') {
             $x, $y, $w, $h, $radius = 1..5 | ForEach-Object { [double]$Matches[$_] }
-            if ([Math]::Abs($x - ([double]$size[0] - 52*$Scale)) -lt 0.1 -and
+            if ([Math]::Abs($x - ([double]$size[0] - 48*$Scale)) -lt 0.1 -and
                 $w -eq 24*$Scale -and $h -eq $w -and $radius -eq 4*$Scale) {
                 [pscustomobject]@{x=$x+$w/2; y=$y+$h/2}
             }
@@ -67,9 +67,12 @@ try {
         Check (!$after.ContainsKey('notice.build_info')) 'close dismisses the notice before its timer expires'
         Check ($after.ContainsKey('notice.transient')) 'the other stacked notice stays visible'
         Check ($after['session.id'] -eq $before['session.id']) 'dismissal preserves the terminal session'
-        Start-Sleep -Milliseconds 200
-        Aio mouse click (Close-Point ($variant.dpi/96)) --px | Out-Null
-        Check (!(State).ContainsKey('notice.transient')) 'the remaining notice can also be dismissed'
+        # Notices from one source stack, so more than one may remain; each click closes the front one.
+        for ($left = @((State).Keys -match '^notice\.[a-z_]+(\.\d+)?$').Count; $left -gt 0; $left--) {
+            Start-Sleep -Milliseconds 200
+            Aio mouse click (Close-Point ($variant.dpi/96)) --px | Out-Null
+            Check (@((State).Keys -match '^notice\.[a-z_]+(\.\d+)?$').Count -eq $left - 1) 'each remaining notice can be dismissed'
+        }
     }
     Aio command app.build_info | Out-Null
     Start-Sleep -Milliseconds 12500

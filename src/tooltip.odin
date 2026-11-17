@@ -33,10 +33,12 @@ tooltip_label :: proc(app: ^App, w: ^Window, owner: Pointer_Target, x, y: f32) -
 
 // Where the shortcut a control's tooltip names comes from: the command the control runs, which the user
 // can rebind, or the fixed key the control's own surface handles, taken from the table its key handler
-// reads. nil names none.
+// reads. A string is keycap text for a gesture no single chord stands for, such as "type to start". nil
+// names none.
 Tooltip_Shortcut :: union {
 	Action,
 	commands.Shortcut,
+	string,
 }
 
 // The shortcut a control's tooltip shows beside its label, as menus write it, in out
@@ -48,6 +50,7 @@ tooltip_shortcut :: proc(app: ^App, w: ^Window, owner: Pointer_Target, x, y: f32
 	switch shortcut in shortcut_of(app, w, x, y) {
 	case Action: return action_shortcut_text(app, shortcut, out)
 	case commands.Shortcut: return commands.shortcut_text(shortcut, out)
+	case string: return string(out[:copy(out, shortcut)])
 	}
 	return ""
 }

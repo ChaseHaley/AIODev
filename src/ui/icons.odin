@@ -11,6 +11,7 @@ Icon :: enum {
 	Add,
 	Chevron_Down,
 	Chevron_Right,
+	Chevron_Left,
 	Arrow_Up,
 	Arrow_Down,
 	// The middle-click scroll anchor: a dot between up and down chevrons.
@@ -67,6 +68,30 @@ Icon :: enum {
 	Pencil,
 	// A program's window with an arrow leaving it: open in another program.
 	Launch,
+	// A page with a plus above a minus: what changed in a file.
+	Changes,
+	// A speech bubble: comment on lines of a diff.
+	Comment,
+	// A list of rows, each led by a dot: the files of a diff.
+	Files,
+	// A frame split into two columns of lines: old and new side by side.
+	Side_By_Side,
+	// A funnel: filter what shows.
+	Filter,
+	// Two chevrons pointing together: collapse every section.
+	Collapse_All,
+	// Two chevrons pointing apart: expand every section.
+	Expand_All,
+	// A key pointing left with a cross in it, the Delete key: ask for this text to be deleted.
+	Delete_Key,
+	// A lightning bolt: apply a quick label.
+	Bolt,
+	// A line above and below a boxed line: pick whole lines rather than text.
+	Select_Lines,
+	// Two angle brackets: a span of code inside a line of text.
+	Code,
+	// Two angle brackets in a box: a block of code.
+	Code_Block,
 }
 
 ICON_STROKE :: f32(1.25)
@@ -196,6 +221,52 @@ icon_draw :: proc(
 	}
 	switch icon {
 	case .None:
+	case .Comment:
+		pen_box(p, 1.5, 2.5, 13, 9, 2)
+		pen_path(p, {4.5, 11.5}, {4.5, 14.5}, {8, 11.5})
+	case .Files:
+		for y in ([?]f32{4, 8, 12}) {
+			pen_dot(p, 3, y)
+			pen_path(p, {6, y}, {14, y})
+		}
+	case .Side_By_Side:
+		pen_box(p, 1.5, 2.5, 13, 11, 2)
+		pen_path(p, {8, 2.5}, {8, 13.5})
+		pen_path(p, {3.5, 6}, {6, 6})
+		pen_path(p, {3.5, 9}, {6, 9})
+		pen_path(p, {10, 6}, {12.5, 6})
+		pen_path(p, {10, 9}, {12.5, 9})
+	case .Filter:
+		pen_path(p, {2, 3}, {14, 3}, {9.5, 8.5}, {9.5, 13.5}, {6.5, 12}, {6.5, 8.5}, {2, 3})
+	case .Delete_Key:
+		pen_path(p, {14.5, 3.5}, {6, 3.5}, {1.5, 8}, {6, 12.5}, {14.5, 12.5}, {14.5, 3.5})
+		pen_path(p, {8.5, 6}, {12, 9.5})
+		pen_path(p, {12, 6}, {8.5, 9.5})
+	case .Bolt:
+		pen_path(p, {9.5, 1.5}, {3.5, 9}, {8, 9}, {6.5, 14.5}, {12.5, 7}, {8, 7}, {9.5, 1.5})
+	case .Select_Lines:
+		pen_path(p, {3, 2.5}, {13, 2.5})
+		pen_box(p, 1.5, 5.5, 13, 5, 1)
+		pen_path(p, {4.5, 8}, {11.5, 8})
+		pen_path(p, {3, 13.5}, {10, 13.5})
+	case .Code:
+		pen_path(p, {5.5, 4}, {1.5, 8}, {5.5, 12})
+		pen_path(p, {10.5, 4}, {14.5, 8}, {10.5, 12})
+	case .Code_Block:
+		pen_box(p, 1.5, 2.5, 13, 11, 2)
+		pen_path(p, {6.5, 6}, {4.5, 8}, {6.5, 10})
+		pen_path(p, {9.5, 6}, {11.5, 8}, {9.5, 10})
+	case .Collapse_All:
+		pen_path(p, {4, 2.5}, {8, 6.5}, {12, 2.5})
+		pen_path(p, {4, 13.5}, {8, 9.5}, {12, 13.5})
+	case .Expand_All:
+		pen_path(p, {4, 6.5}, {8, 2.5}, {12, 6.5})
+		pen_path(p, {4, 9.5}, {8, 13.5}, {12, 9.5})
+	case .Changes:
+		pen_path(p, {3, 2}, {10, 2}, {13, 5}, {13, 14}, {3, 14}, {3, 2})
+		pen_path(p, {6.5, 6}, {9.5, 6})
+		pen_path(p, {8, 4.5}, {8, 7.5})
+		pen_path(p, {6.5, 11}, {9.5, 11})
 	case .Keyboard:
 		pen_box(p, 1, 3.5, 14, 9, 2)
 		for x in ([?]f32{4, 6.67, 9.33, 12}) {pen_dot(p, x, 6.5)}
@@ -249,6 +320,8 @@ icon_draw :: proc(
 		pen_path(p, {4, 6}, {8, 10}, {12, 6})
 	case .Chevron_Right:
 		pen_path(p, {6, 4}, {10, 8}, {6, 12})
+	case .Chevron_Left:
+		pen_path(p, {10, 4}, {6, 8}, {10, 12})
 	case .Arrow_Up:
 		pen_path(p, {8, 13}, {8, 3})
 		pen_path(p, {4, 7}, {8, 3}, {12, 7})

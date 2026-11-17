@@ -1,5 +1,6 @@
 package ui_test
 
+import "aio:render"
 import "aio:ui"
 import "aio:platform"
 import "core:testing"
@@ -164,4 +165,23 @@ font_popup_toggle_keeps_search_and_family_and_supports_pointer_and_keyboard :: p
 	testing.expect_value(t, choice_count(&p), 2)
 	ui.editor_key(&p, key({key = .Escape}))
 	testing.expect_value(t, ui.field_string(&p.value), "Consolas")
+}
+
+@(test)
+searchable_dropdown_shows_the_text_cursor_only_over_its_search_field :: proc(t: ^testing.T) {
+	d: ui.Dropdown
+	defer ui.dropdown_destroy(&d)
+	choices := [?]string{"a.odin", "b.odin", "c.odin"}
+	c := ui.Dropdown_Choices{choices = choices[:], labels = choices[:], searchable = true, min_width = 240}
+	field := render.Rect{600, 40, 24, 24}
+	a := ui.Dropdown_Anchor{field = field, row = field, bounds = render.Rect{0, 0, 900, 700}, align_end = true}
+	ui.dropdown_open(&d, c)
+	r := ui.dropdown_rect(&d, c, a, 1)
+	testing.expect(t, r.height > 0)
+	testing.expect_value(t, ui.dropdown_pointer(&d, c, a, r.x + 12, r.y + 14, 1), platform.Cursor_Shape.Text)
+	// Above the list, beside the button that opened it, and to either side of the search field.
+	testing.expect_value(t, ui.dropdown_pointer(&d, c, a, r.x + 12, r.y - 6, 1), platform.Cursor_Shape.Arrow)
+	testing.expect_value(t, ui.dropdown_pointer(&d, c, a, field.x - 30, field.y + 4, 1), platform.Cursor_Shape.Arrow)
+	testing.expect_value(t, ui.dropdown_pointer(&d, c, a, r.x - 20, r.y + 14, 1), platform.Cursor_Shape.Arrow)
+	testing.expect_value(t, ui.dropdown_pointer(&d, c, a, r.x + r.width + 20, r.y + 14, 1), platform.Cursor_Shape.Arrow)
 }

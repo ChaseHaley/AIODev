@@ -383,12 +383,18 @@ when AIO_CONTROL {
 		return fmt.tprintf("%d", key)
 	}
 
-	// A notice's state key and the start of its value that identifies it, kind and text. The report
-	// appends the time left and a closing parenthesis; a value that keeps this start is the same notice
-	// counting down.
-	verify_notice_entry :: proc(n: ui.Notice) -> (key, identity: string) {
+	// The state key of `live[index]` and the start of its value that identifies it, kind and text. The
+	// report appends the time left and a closing parenthesis; a value that keeps this start is the same
+	// notice counting down. A source whose notices stack names its first `notice.<source>` and later
+	// ones `notice.<source>.2` and so on, in arrival order.
+	verify_notice_entry :: proc(live: []ui.Notice, index: int) -> (key, identity: string) {
+		n := live[index]
+		ordinal := 1
+		for earlier in live[:index] {if earlier.key == n.key {ordinal += 1}}
 		kind := strings.to_lower(fmt.tprintf("%v", n.kind), context.temp_allocator)
-		return state_key("notice.%s", verify_notice_key(n.key)), fmt.tprintf("%s: %s (", kind, n.text)
+		identity = fmt.tprintf("%s: %s (", kind, n.text)
+		if ordinal == 1 {return state_key("notice.%s", verify_notice_key(n.key)), identity}
+		return state_key("notice.%s.%d", verify_notice_key(n.key), ordinal), identity
 	}
 
 	// Where every report writes the verification state: key=value entries in the order written. Each
@@ -440,12 +446,14 @@ when AIO_CONTROL {
 		}
 		w := verify_window(app)
 		verify_app_report(&r, app)
+		turns_state_report(&r, app)
 		palette_state_report(&r, app, w)
 		entry: ^Session_Entry
 		if w != nil {
 			entry = focused_session(app, w)
 			verify_window_report(&r, app, w, entry)
 			markdown_state_report(&r, app, w)
+			changes_state_report(&r, app, w)
 			settings_page_state_report(&r, app, w)
 			rename_state_report(&r, w)
 			tab_menu_state_report(&r, w)
@@ -783,14 +791,18 @@ when AIO_CONTROL {
 
 	verify_notices_report :: proc(r: ^State_Report, app: ^App) {
 		state_value(r, "notices.window", app.notice_window)
+		// The pointer is over the deck: it is open and every countdown stands still.
+		state_value(r, "notices.paused", app.notices.over)
 		holder := window_find(app, app.notice_window)
-		for n in ui.notices_live(&app.notices) {
+		clock := ui.notices_clock(&app.notices, clock_now(&app.clock))
+		live := ui.notices_live(&app.notices)
+		for n, i in live {
 			left := "sticky"
 			if expires, timed := ui.notice_expiry(n).?; timed {
-				remaining := max(i64(0), i64(time.tick_diff(clock_now(&app.clock), expires) / time.Millisecond))
+				remaining := max(i64(0), i64(time.tick_diff(clock, expires) / time.Millisecond))
 				left = fmt.tprintf("%dms", remaining)
 			}
-			key, identity := verify_notice_entry(n)
+			key, identity := verify_notice_entry(live, i)
 			state_valuef(r, key, "%s%s)", identity, left)
 			if n.action != "" && holder != nil {
 				rect := ui.notices_action_rect(&app.notices, &holder.ui_text, f32(holder.width), f32(holder.height),
@@ -1177,8 +1189,9 @@ when AIO_CONTROL {
 			}
 			if _, err := append(&parts, change); err != nil {return "", .Out_Of_Memory}
 		}
-		for n in ui.notices_live(&app.notices) {
-			key, identity := verify_notice_entry(n)
+		live := ui.notices_live(&app.notices)
+		for n, i in live {
+			key, identity := verify_notice_entry(live, i)
 			// Expiry countdown changes are not a new notice.
 			if strings.has_prefix(verify_value(d.before_state, key), identity) {continue}
 			value := strings.builder_make(context.temp_allocator)

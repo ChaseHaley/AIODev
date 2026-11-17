@@ -1,12 +1,22 @@
 package ui
 
 import "aio:input"
+import "aio:line_match"
 import "aio:platform"
 import "aio:render"
+import "aio:search"
 
 // A searchable list's filter field, with the overlay's padding above it.
 @(private)
 DROPDOWN_SEARCH_HEIGHT :: OVERLAY_PADDING + HEIGHT_STANDARD
+
+// The `.*` toggle inside the search field, as wide as the find bar's.
+@(private = "file")
+DROPDOWN_REGEX_WIDTH :: f32(FIND_TOGGLE)
+@(private = "file")
+DROPDOWN_INVALID_TEXT :: "Invalid regular expression"
+@(private = "file")
+DROPDOWN_EMPTY_TEXT :: "No fonts found"
 
 // The one dropdown a setting's choices open in, on the Settings page and in the everything palette.
 // It keeps what is open: the highlighted option and the first shown, the search a long list such
@@ -22,6 +32,15 @@ Dropdown :: struct {
 	toggle_focus: bool,
 	drag:         Dropdown_Drag,
 	bar_hover:    bool,
+	// The pointer is over the `.*` toggle, which then shows its hover.
+	regex_hover:  bool,
+	// The search is a regular expression, in a list with the `.*` toggle. The owner keeps the Dropdown, so
+	// the toggle stays as it was between opens.
+	regex:        bool,
+	// The regular expression does not compile, so nothing matches.
+	invalid:      bool,
+	// What the rows of a list with `rows` measured.
+	metrics:      Dropdown_Metrics,
 }
 
 // The pointer drags a selection in the search field, or holds the scrollbar thumb.
@@ -35,14 +54,32 @@ Dropdown_Search_Drag :: struct {}
 // The choices a dropdown shows, borrowed for the call. `labels`, when present, is what each choice
 // displays; `value` is the saved choice the list marks. A multiple choice marks the options `mask`
 // has on instead. `font_filter` adds the Show all fonts switch, on when `show_all_fonts`.
-// `min_width` is in DIPs; zero follows the field.
+// `min_width` is in DIPs; zero follows the field. `regex_toggle` puts the `.*` toggle in a searchable
+// list's search field. `faded`, parallel to `choices` when present, draws those choices faded; they
+// stay pickable. `search_text`, parallel to `choices` when present, is what the search matches in place
+// of the labels, so decorations such as a status mark or counts never get in a pattern's way.
 Dropdown_Choices :: struct {
 	choices, labels:                          []string,
 	value:                                    string,
 	mask:                                     u32,
 	multiple, searchable:                     bool,
 	font_filter, show_all_fonts:              bool,
+	regex_toggle:                             bool,
 	min_width:                                f32,
+	// The search field's hint; "" is "Search fonts".
+	placeholder:                              string,
+	// What the search shows when nothing matches; "" is "No fonts found".
+	empty_text:                               string,
+	faded:                                    []bool,
+	search_text:                              []string,
+	// Structured rows, parallel to `choices` when present: each option is drawn as its row instead of its
+	// label (see dropdown_row.odin). `rows_serial` changes whenever the rows do, so their measurements are
+	// kept between frames; `fit_content` widens the list to the widest row, up to the room `bounds` has.
+	rows:                                     []Dropdown_Row,
+	rows_serial:                              int,
+	fit_content:                              bool,
+	// How many options show at most; zero is CHOICE_LIST_ROWS.
+	max_rows:                                 int,
 }
 
 // Where a dropdown opens: under `field`, flipped above `row` when `bounds` has no room below, and
@@ -96,16 +133,54 @@ dropdown_highlighted :: proc(d: ^Dropdown, c: Dropdown_Choices) -> int {
 	return dropdown_source(d, c, d.list.index)
 }
 
-// Keeps the choices intact; only the list's index map changes while searching.
+// Keeps the choices intact; only the list's index map changes while searching. A regular expression
+// compiles once per search and matches each choice's search text anywhere, without regard to case.
 @(private)
 dropdown_filter :: proc(d: ^Dropdown, c: Dropdown_Choices) {
-	choice_matches_filter(&d.matches, c.choices, c.labels, field_string(&d.search))
-	d.list = {}
+	d.list, d.invalid = {}, false
+	query := field_string(&d.search)
+	searched := c
+	if c.search_text != nil {searched.labels = c.search_text}
+	if !c.regex_toggle || !d.regex || query == "" {
+		choice_matches_filter(&d.matches, searched.choices, searched.labels, query)
+		return
+	}
+	clear(&d.matches)
+	m: line_match.Matcher
+	// A pattern that fails to compile still holds its copy of the query.
+	defer line_match.destroy(&m)
+	switch line_match.init(&m, query, search.Options{regex = true}) {
+	case .Ok:
+	case .Invalid:
+		d.invalid = true
+		return
+	case .Out_Of_Memory:
+		return
+	}
+	for _, i in c.choices {
+		line_match.begin(&m, dropdown_label(searched, i))
+		if _, _, found := line_match.next(&m); found {append(&d.matches, i)}
+	}
+}
+
+// Flips the `.*` toggle and searches again.
+@(private)
+dropdown_regex_flip :: proc(d: ^Dropdown, c: Dropdown_Choices) {
+	d.regex = !d.regex
+	dropdown_filter(d, c)
+}
+
+// What the list says when it shows no options, "" while it shows some. A pattern that does not compile
+// says so before the list's own empty text.
+dropdown_empty_text :: proc(d: ^Dropdown, c: Dropdown_Choices) -> string {
+	if dropdown_count(d, c) > 0 {return ""}
+	if d.invalid && c.regex_toggle && d.regex {return DROPDOWN_INVALID_TEXT}
+	return c.empty_text != "" ? c.empty_text : DROPDOWN_EMPTY_TEXT
 }
 
 // Opens on the saved choice, or the first option of a multiple choice, with an empty search.
 dropdown_open :: proc(d: ^Dropdown, c: Dropdown_Choices) {
-	d.toggle_focus, d.drag, d.bar_hover = false, nil, false
+	d.toggle_focus, d.drag, d.bar_hover, d.regex_hover = false, nil, false, false
 	if c.searchable {
 		field_set(&d.search, "")
 		dropdown_filter(d, c)
@@ -121,7 +196,7 @@ dropdown_open :: proc(d: ^Dropdown, c: Dropdown_Choices) {
 
 // Drops what the pointer holds and the hover; the owner calls this as the list closes.
 dropdown_close :: proc(d: ^Dropdown) {
-	d.toggle_focus, d.drag, d.bar_hover = false, nil, false
+	d.toggle_focus, d.drag, d.bar_hover, d.regex_hover = false, nil, false, false
 }
 
 // Restores an open search over choices the owner rebuilt, as after the Show all fonts switch.
@@ -138,9 +213,11 @@ dropdown_header :: proc(c: Dropdown_Choices, scale: f32) -> f32 {
 	return (DROPDOWN_SEARCH_HEIGHT + (c.font_filter ? CHOICE_HEIGHT : 0)) * scale
 }
 
-// How many options fit: at most CHOICE_LIST_ROWS, fewer when the bounds are short.
+// How many options fit: at most CHOICE_LIST_ROWS (or the choices' `max_rows`), fewer when the bounds are
+// short.
 dropdown_rows :: proc(d: ^Dropdown, c: Dropdown_Choices, a: Dropdown_Anchor, scale: f32) -> int {
-	return choice_list_rows(dropdown_count(d, c), a.bounds.height, scale, dropdown_header(c, scale))
+	limit := c.max_rows > 0 ? c.max_rows : CHOICE_LIST_ROWS
+	return choice_list_rows(dropdown_count(d, c), a.bounds.height, scale, dropdown_header(c, scale), limit)
 }
 
 // Keeps the highlight on a shown row, as when the bounds change.
@@ -155,6 +232,7 @@ dropdown_rect :: proc(d: ^Dropdown, c: Dropdown_Choices, a: Dropdown_Anchor, sca
 	// The highlight stays on a shown row however the bounds changed since the list moved.
 	choice_list_keep_visible(&d.list, dropdown_count(d, c), rows)
 	width := max(a.field.width, c.min_width * s)
+	if c.fit_content {width = max(width, d.metrics.content)}
 	r := render.Rect {
 		a.align_end ? a.field.x + a.field.width - width : a.field.x,
 		a.field.y + a.field.height + SPACE_1 * s,
@@ -168,10 +246,36 @@ dropdown_contains :: proc(d: ^Dropdown, c: Dropdown_Choices, a: Dropdown_Anchor,
 	return render.rect_contains(dropdown_rect(d, c, a, scale), x, y)
 }
 
-@(private)
-dropdown_search_box :: proc(d: ^Dropdown, popup: render.Rect, text: ^Text, scale: f32) -> Field_Box {
+// The search field across the top of the list.
+@(private = "file")
+dropdown_search_rect :: proc(popup: render.Rect, scale: f32) -> render.Rect {
 	pad := OVERLAY_PADDING * scale
-	rect := render.Rect{popup.x + pad, popup.y + pad, popup.width - 2 * pad, HEIGHT_STANDARD * scale}
+	return {popup.x + pad, popup.y + pad, popup.width - 2 * pad, HEIGHT_STANDARD * scale}
+}
+
+// The `.*` toggle at the right inside the search field; zero for a list without one.
+@(private = "file")
+dropdown_regex_in :: proc(c: Dropdown_Choices, popup: render.Rect, scale: f32) -> render.Rect {
+	if !c.searchable || !c.regex_toggle {return {}}
+	field := dropdown_search_rect(popup, scale)
+	inset, width := SPACE_1 * scale, DROPDOWN_REGEX_WIDTH * scale
+	return {field.x + field.width - inset - width, field.y + inset, width, max(0, field.height - 2 * inset)}
+}
+
+// Where the open list's `.*` toggle is; zero when the list has none.
+dropdown_regex_rect :: proc(
+	d: ^Dropdown, c: Dropdown_Choices, a: Dropdown_Anchor, scale: f32,
+) -> render.Rect {
+	return dropdown_regex_in(c, dropdown_rect(d, c, a, scale), scale)
+}
+
+// The search's text, which stops short of the `.*` toggle.
+@(private)
+dropdown_search_box :: proc(
+	d: ^Dropdown, c: Dropdown_Choices, popup: render.Rect, text: ^Text, scale: f32,
+) -> Field_Box {
+	rect := dropdown_search_rect(popup, scale)
+	if regex := dropdown_regex_in(c, popup, scale); regex.width > 0 {rect.width = regex.x - rect.x}
 	return field_box_standard(&d.search, text, rect, scale)
 }
 
@@ -250,13 +354,14 @@ dropdown_wheel :: proc(d: ^Dropdown, c: Dropdown_Choices, a: Dropdown_Anchor, ro
 	return dropdown_scroll_to(d, c, a, d.list.scroll - rows, scale)
 }
 
-// The highlight follows the pointer, like the menus. Reports whether the highlight or the
-// scrollbar's hover changed.
+// The highlight follows the pointer, like the menus. Reports whether the highlight, the scrollbar's
+// hover or the `.*` toggle's hover changed.
 dropdown_hover :: proc(d: ^Dropdown, c: Dropdown_Choices, a: Dropdown_Anchor, x, y, scale: f32) -> bool {
 	bar, visible := dropdown_scrollbar(d, c, a, scale)
 	over := visible && scrollbar_contains(bar, x, y)
-	changed := over != d.bar_hover
-	d.bar_hover = over
+	on_regex := render.rect_contains(dropdown_regex_rect(d, c, a, scale), x, y)
+	changed := over != d.bar_hover || on_regex != d.regex_hover
+	d.bar_hover, d.regex_hover = over, on_regex
 	if index := dropdown_option_at(d, c, a, x, y, scale); index >= 0 && index != d.list.index {
 		d.list.index = index
 		changed = true
@@ -281,9 +386,13 @@ dropdown_press :: proc(
 		d.toggle_focus = true
 		return .Font_Filter
 	}
+	if render.rect_contains(dropdown_regex_in(c, r, s), x, y) {
+		dropdown_regex_flip(d, c)
+		return .Changed
+	}
 	if c.searchable && y < r.y + OVERLAY_PADDING * s + dropdown_header(c, s) {
 		if text != nil {
-			_ = field_move(&d.search, field_box_offset(dropdown_search_box(d, r, text, s), x), extend)
+			_ = field_move(&d.search, field_box_offset(dropdown_search_box(d, c, r, text, s), x), extend)
 		} else {field_select_all(&d.search)}
 		d.toggle_focus, d.drag = false, Dropdown_Search_Drag{}
 		return .Changed
@@ -311,7 +420,7 @@ dropdown_drag :: proc(
 	switch drag in d.drag {
 	case Dropdown_Search_Drag:
 		if text == nil {return false}
-		box := dropdown_search_box(d, dropdown_rect(d, c, a, scale), text, scale)
+		box := dropdown_search_box(d, c, dropdown_rect(d, c, a, scale), text, scale)
 		return field_move(&d.search, field_box_offset(box, x), true) != .None
 	case Scroll_Drag:
 		bar, visible := dropdown_scrollbar(d, c, a, scale)
@@ -339,6 +448,8 @@ dropdown_pointer :: proc(
 	s := scale
 	if bar, visible := dropdown_scrollbar(d, c, a, s); visible && scrollbar_contains(bar, x, y) {return .Arrow}
 	if render.rect_contains(dropdown_toggle_rect(c, r, s), x, y) {return .Hand}
+	if render.rect_contains(dropdown_regex_in(c, r, s), x, y) {return .Hand}
+	if !render.rect_contains(r, x, y) {return .Arrow}
 	if c.searchable && y < r.y + OVERLAY_PADDING * s + dropdown_header(c, s) {return .Text}
 	return dropdown_option_at(d, c, a, x, y, s) >= 0 ? .Hand : .Arrow
 }
@@ -356,6 +467,11 @@ dropdown_key :: proc(
 	taken: bool,
 ) {
 	if c.searchable {
+		// The find bar's own shortcut, so the key and its tooltip chip stay one.
+		if c.regex_toggle && find_key_button(e) == .Regex_Toggle {
+			dropdown_regex_flip(d, c)
+			return .Changed, true
+		}
 		if c.font_filter && e.key == .Tab {
 			d.toggle_focus = !d.toggle_focus
 			return .Changed, true
@@ -446,6 +562,7 @@ dropdown_draw :: proc(
 	pointer: [2]f32,
 	scale: f32,
 ) -> render.Build_Status {
+	dropdown_measure(d, c, text, scale)
 	r := dropdown_rect(d, c, a, scale)
 	if r.width == 0 {return .Ok}
 	s := scale
@@ -453,10 +570,28 @@ dropdown_draw :: proc(
 	if panel_draw(list, popover_panel(r, s), theme) != .None {return .Ok}
 	count := dropdown_rows(d, c, a, s)
 	if c.searchable {
-		box := dropdown_search_box(d, r, text, s)
-		box_draw(list, box.rect, theme, !d.toggle_focus, s)
-		if result := field_box_draw(box, list, theme, field_box_baseline(box), !d.toggle_focus, "Search fonts");
+		field := dropdown_search_rect(r, s)
+		box_draw(list, field, theme, !d.toggle_focus, s)
+		box := dropdown_search_box(d, c, r, text, s)
+		if result := field_box_draw(box, list, theme, field_box_baseline(box), !d.toggle_focus,
+			c.placeholder != "" ? c.placeholder : "Search fonts");
 		   result != .Ok {return result}
+		if regex := dropdown_regex_in(c, r, s); regex.width > 0 {
+			over := d.regex_hover
+			face, ink, err := button_draw(
+				list,
+				theme,
+				{rect = regex, hover = over ? 1 : 0, radius = RADIUS_CONTROL, selected = d.regex},
+				s,
+				pointer,
+			)
+			if err != .None {return .Ok}
+			if d.regex {ink = theme.accent}
+			label := text_styled(text, .Body)
+			x := face.x + (face.width - text_width(&label, ".*")) / 2
+			if result := draw_text(&label, list, ".*", x, baseline_in(face.y, face.height, &label), ink);
+			   result != .Ok {return result}
+		}
 		if render.push_layer(list, a.bounds) != .None {return .Ok}
 		if c.font_filter {
 			toggle := dropdown_toggle_rect(c, r, s)
@@ -476,8 +611,8 @@ dropdown_draw :: proc(
 		header := dropdown_header(c, s)
 		r.y += header
 		r.height -= header
-		if dropdown_count(d, c) == 0 {
-			return draw_text(text, list, "No fonts found", r.x + SPACE_3 * s,
+		if empty := dropdown_empty_text(d, c); empty != "" {
+			return draw_text(text, list, empty, r.x + SPACE_3 * s,
 			                 r.y + (r.height - text.line_height) / 2 + text.ascent,
 			                 theme.muted, r.width - 28 * s)
 		}
@@ -511,13 +646,28 @@ dropdown_draw :: proc(
 			mark := render.Rect{option.x, option.y + SPACE_2 * s, 3 * s, option.height - 2 * SPACE_2 * s}
 			draw_rect(list, {rect = mark, color = theme.accent, radius = pill_radius(mark)})
 		}
+		faded := source < len(c.faded) && c.faded[source]
+		if source < len(c.rows) {
+			body := text_styled(text, .Body)
+			detail := text_styled(text, .Detail)
+			cut_buf: [CHANGES_CLIP_BYTES + 8]u8
+			l := dropdown_row_layout(c.rows[source], option, d.metrics, &body, &detail, s, cut_buf[:])
+			if result := dropdown_row_draw(list, text, theme, c.rows[source], l, d.metrics, option, faded, s);
+			   result != .Ok {return result}
+			continue
+		}
+		ink := theme.text
+		if faded {
+			ink = theme.muted
+			ink.a *= DISABLED_ALPHA
+		}
 		if result := draw_text(
 			text,
 			list,
 			dropdown_label(c, source),
 			option.x + SPACE_3 * s,
 			option.y + (option.height - text.line_height) / 2 + text.ascent,
-			theme.text,
+			ink,
 			option.width - (c.multiple ? 44 : 24) * s,
 		); result != .Ok {return result}
 	}

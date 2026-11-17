@@ -4,9 +4,9 @@ import "core:encoding/json"
 import "core:strconv"
 import "core:strings"
 
-// Installing the SessionStart hooks. Claude Code's settings.json and Codex's hooks.json share the
-// shape {"hooks": {"SessionStart": [{"hooks": [{"type": "command", "command": ...}]}]}}. The new group
-// is spliced into the user's text, so the rest of the file keeps its formatting and member order.
+// Installing hooks. Claude Code's settings.json and Codex's hooks.json share the shape
+// {"hooks": {"<Event>": [{"matcher": ..., "hooks": [{"type": "command", "command": ...}]}]}}. The new
+// group is spliced into the user's text, so the rest of the file keeps its formatting and member order.
 
 Hook_Install :: enum u8 {
 	Added,
@@ -18,10 +18,11 @@ Hook_Install :: enum u8 {
 
 UTF8_BOM :: "\xef\xbb\xbf"
 
-// Adds a SessionStart group running `command` to a settings file's text, unless a hook already runs
-// it. Empty text stands for a file that does not exist yet. The new text is in `allocator`.
+// Adds a group running `command` to the `event` hooks of a settings file's text, unless a hook of that
+// event already runs it. A non-empty `matcher` is written on the group. Empty text stands for a file
+// that does not exist yet. The new text is in `allocator`.
 hooks_install :: proc(
-	text, command: string,
+	text, event, matcher, command: string,
 	timeout_seconds: int,
 	allocator := context.allocator,
 ) -> (
@@ -31,27 +32,49 @@ hooks_install :: proc(
 	bom := strings.has_prefix(text, UTF8_BOM)
 	body := bom ? text[len(UTF8_BOM):] : text
 	if strings.trim_space(body) == "" {body = "{}"}
-	present, valid := hooks_present(body, command)
+	present, valid := hooks_present(body, event, command)
 	if !valid {return "", .Invalid}
 	if present {return "", .Present}
 	command_json, command_error := json.marshal(command, {}, context.temp_allocator)
 	if command_error != nil {return "", .Invalid}
+	event_json, event_error := json.marshal(event, {}, context.temp_allocator)
+	if event_error != nil {return "", .Invalid}
+	matcher_part := ""
+	if matcher != "" {
+		matcher_json, matcher_error := json.marshal(matcher, {}, context.temp_allocator)
+		if matcher_error != nil {return "", .Invalid}
+		matcher_part = strings.concatenate(
+			{`"matcher":`, string(matcher_json), `,`},
+			context.temp_allocator,
+		)
+	}
 	digits: [20]u8
 	timeout := strconv.write_int(digits[:], i64(timeout_seconds), 10)
 	// Built by concatenation: fmt reads braces as its own syntax.
 	group := strings.concatenate(
-		{`{"hooks":[{"type":"command","command":`, string(command_json), `,"timeout":`, timeout, `}]}`},
+		{
+			`{`,
+			matcher_part,
+			`"hooks":[{"type":"command","command":`,
+			string(command_json),
+			`,"timeout":`,
+			timeout,
+			`}]}`,
+		},
 		context.temp_allocator,
 	)
 	root := skip_space(body, 0)
 	at: int
 	insertion: string
 	if hooks, has_hooks := member_value(body, root, "hooks"); !has_hooks {
-		event := strings.concatenate({`"hooks":{"SessionStart":[`, group, `]}`}, context.temp_allocator)
-		at, insertion = container_insert(body, root, event)
-	} else if groups, has_event := member_value(body, hooks, "SessionStart"); !has_event {
-		event := strings.concatenate({`"SessionStart":[`, group, `]`}, context.temp_allocator)
-		at, insertion = container_insert(body, hooks, event)
+		member := strings.concatenate(
+			{`"hooks":{`, string(event_json), `:[`, group, `]}`},
+			context.temp_allocator,
+		)
+		at, insertion = container_insert(body, root, member)
+	} else if groups, has_event := member_value(body, hooks, event); !has_event {
+		member := strings.concatenate({string(event_json), `:[`, group, `]`}, context.temp_allocator)
+		at, insertion = container_insert(body, hooks, member)
 	} else {
 		at, insertion = container_insert(body, groups, group)
 	}
@@ -67,10 +90,10 @@ hooks_install :: proc(
 	return result, .Added
 }
 
-// Whether the text is a settings object of the hooks shape, and whether one of its SessionStart hooks
+// Whether the text is a settings object of the hooks shape, and whether one of the hooks of `event`
 // already runs `command`.
 @(private)
-hooks_present :: proc(body, command: string) -> (present, valid: bool) {
+hooks_present :: proc(body, event, command: string) -> (present, valid: bool) {
 	// Strict JSON, as both harnesses read it; the splice does not step over comments.
 	value, parse_error := json.parse_string(body, .JSON, allocator = context.temp_allocator)
 	if parse_error != .None {return false, false}
@@ -80,7 +103,7 @@ hooks_present :: proc(body, command: string) -> (present, valid: bool) {
 	if !has_hooks {return false, true}
 	hooks, hooks_object := hooks_value.(json.Object)
 	if !hooks_object {return false, false}
-	event_value, has_event := hooks["SessionStart"]
+	event_value, has_event := hooks[event]
 	if !has_event {return false, true}
 	groups, is_array := event_value.(json.Array)
 	if !is_array {return false, false}

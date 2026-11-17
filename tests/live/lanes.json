@@ -7,6 +7,9 @@
     "activity_views": {
       "lane": "headless"
     },
+    "agent_changes": {
+      "lane": "headless"
+    },
     "arrange": {
       "lane": "headless"
     },

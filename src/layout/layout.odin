@@ -7,6 +7,7 @@ Content_Kind :: enum u8 {
 	Terminal,
 	Settings,
 	Markdown,
+	Changes,
 }
 
 // A reference to content owned elsewhere; panes display content, they never own it.

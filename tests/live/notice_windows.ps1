@@ -33,7 +33,7 @@ function Close-Points {
     foreach ($line in (Aio draws --region "0,0,$($size[0]),$($size[1])" --kind rect)) {
         if ($line -match '^rect \d+ ([\d.]+),([\d.]+) ([\d.]+)x([\d.]+) .* radius=([\d.]+)$') {
             $x, $y, $w, $h, $radius = 1..5 | ForEach-Object { [double]$Matches[$_] }
-            if ([Math]::Abs($x - ([double]$size[0] - 52*$scale)) -lt 0.1 -and
+            if ([Math]::Abs($x - ([double]$size[0] - 48*$scale)) -lt 0.1 -and
                 $w -eq 24*$scale -and $h -eq $w -and $radius -eq 4*$scale) {
                 "$([int]($x+$w/2)),$([int]($y+$h/2))"
             }
@@ -45,9 +45,11 @@ function Assert-Owner([string] $Owner, [string[]] $Windows, [string] $Label) {
         Select-Window $id
         $s = State
         if ($s['notices.window'] -ne $Owner) { throw "$Label wrong destination: $($s['notices.window'])" }
+        # A closed deck draws one readable card, with one close button, however many notices it holds.
         $count = @(Close-Points | Sort-Object -Unique).Count
-        $expected = if ($id -eq $Owner) { @($s.Keys | Where-Object { $_ -match '^notice\.' }).Count } else { 0 }
-        if ($id -eq $Owner -and $expected -eq 0) { throw "$Label has no notices to verify" }
+        $notices = @($s.Keys | Where-Object { $_ -match '^notice\.' }).Count
+        $expected = if ($id -eq $Owner) { [Math]::Min(1, $notices) } else { 0 }
+        if ($id -eq $Owner -and $notices -eq 0) { throw "$Label has no notices to verify" }
         if ($count -ne $expected) { throw "$Label window $id expected $expected toast, observed $count" }
         Aio capture --out (Join-Path $data "$Label-window$id.png") | Out-Null
     }

@@ -23,21 +23,24 @@ notice_allocator :: proc(data: rawptr, mode: runtime.Allocator_Mode, size, align
 	return state.backing.procedure(state.backing.data, mode, size, alignment, old_memory, old_size, location)
 }
 
+// Without a severity word, the symbol and colour alone tell severities apart, and the tinted card keeps
+// its text, its symbol and its action button readable in every shipped theme.
 @(test)
-notice_severities_have_unique_words_symbols_and_readable_theme_colors :: proc(t: ^testing.T) {
+notice_severities_have_unique_symbols_and_readable_tinted_cards :: proc(t: ^testing.T) {
 	for file in fixtures.SHIPPED_THEMES {
 		{
 			resolved := fixtures.shipped_theme_file(file) or_continue
 			theme := ui.theme_from(resolved, fixtures.default_interface())
 			for kind in ui.Notice_Kind {
-				label, symbol, color := ui.notice_style(kind, theme)
-				testing.expect(t, len(label) > 0)
-				testing.expectf(t, colour.contrast_ratio(color, theme.surface) >= 4.5,
-					"%v %v label contrast", file.name, kind)
+				symbol, color := ui.notice_style(kind, theme)
+				fill, _ := ui.notice_surface(color, theme)
+				testing.expectf(t, colour.contrast_ratio(theme.text, fill) >= 4.5, "%v %v text", file.name, kind)
+				testing.expectf(t, colour.contrast_ratio(color, fill) >= 3, "%v %v symbol", file.name, kind)
+				testing.expectf(t, colour.contrast_ratio(theme.surface, color) >= 4.5, "%v %v action", file.name, kind)
 				for other in ui.Notice_Kind {
 					if other == kind { continue }
-					other_label, other_symbol, other_color := ui.notice_style(other, theme)
-					testing.expect(t, label != other_label && symbol != other_symbol && color != other_color)
+					other_symbol, other_color := ui.notice_style(other, theme)
+					testing.expect(t, symbol != other_symbol && color != other_color)
 				}
 			}
 		}
@@ -199,15 +202,14 @@ notices_render_all_severities_with_bounded_reused_storage_at_multiple_scales :: 
 				theme := ui.theme_from(fixtures.shipped_theme(id), fixtures.default_interface())
 				render.draw_list_reset(&list)
 				testing.expect_value(t, ui.notices_draw(&n, &list, &text, theme,
-					width*scale, 1000*scale, scale), render.Build_Status.Ok)
+					width*scale, 1000*scale, scale, time.tick_now(), true), render.Build_Status.Ok)
 				testing.expect(t, len(list.glyphs) > 0)
-				testing.expect_value(t, len(list.rects), 46)
 				layers, rects, glyph_count, lines := cap(list.layers), cap(list.rects), cap(list.glyphs), cap(n.lines)
 				calls := allocations.calls
 				for _ in 0..<3 {
 					render.draw_list_reset(&list)
 					testing.expect_value(t, ui.notices_draw(&n, &list, &text, theme,
-						width*scale, 1000*scale, scale), render.Build_Status.Ok)
+						width*scale, 1000*scale, scale, time.tick_now(), true), render.Build_Status.Ok)
 					testing.expect_value(t, cap(list.layers), layers)
 					testing.expect_value(t, cap(list.rects), rects)
 					testing.expect_value(t, cap(list.glyphs), glyph_count)
@@ -227,26 +229,20 @@ notices_render_all_severities_with_bounded_reused_storage_at_multiple_scales :: 
 				render.draw_list_reset(&list)
 				theme := ui.theme_from(fixtures.shipped_theme("studio-dark"), fixtures.default_interface())
 				testing.expect_value(t, ui.notices_draw(&n, &list, &text, theme,
-					width*scale, 1000*scale, scale), render.Build_Status.Ok)
+					width*scale, 1000*scale, scale, time.tick_now(), true), render.Build_Status.Ok)
+				// Every card has the same width, whatever its text, so wrapping never changes.
 				box := list.rects[1].rect
-				testing.expect(t, box.width <= min(520, width-32)*scale)
-				testing.expect(t, box.x >= 16*scale)
+				testing.expect_value(t, box.width, min(440, width-32)*scale)
 				testing.expect_value(t, box.x+box.width, (width-16)*scale)
-				label, _, _ := ui.notice_style(.Success, theme)
-				strong := ui.text_styled(&text, .Strong)
-				visible_width := ui.text_width(&strong, label)
-				for line in n.lines[:min(len(n.lines), 4)] {
-					visible_width = max(visible_width, ui.text_width(&text, line))
-				}
-				testing.expect_value(t, box.width, min(min(520, width-32)*scale, visible_width+84*scale))
-				cx := box.x + box.width - 24*scale
-				cy := box.y + 24*scale
+				// The text stops at four lines.
+				testing.expect(t, box.height <= (2*12+28)*scale + 4*text.line_height)
+				cx := box.x + box.width - 20*scale
+				cy := box.y + 26*scale
 				hit := ui.notices_hit(&n, &text, width*scale, 1000*scale, scale, cx, cy)
 				testing.expect(t, hit.contains && hit.close)
 				testing.expect_value(t, hit.id, n.items[0].id)
 				testing.expect(t, !ui.notices_hit(&n, &text, width*scale, 1000*scale, scale,
 					box.x-1, cy).contains)
-				if len(message) < 10 && width == 1000 {testing.expect(t, box.width < 200*scale)}
 			}
 		}
 	}
@@ -274,4 +270,164 @@ notices_dismiss_one_anonymous_notice_and_ignore_stale_identity :: proc(t: ^testi
 	testing.expect(t, !ui.notices_dismiss(&n, old, false))
 	testing.expect_value(t, len(n.items), 1)
 	testing.expect_value(t, n.items[0].text, "new")
+}
+
+// The pointer over the deck stops every countdown; leaving resumes each with the time it had left, and a
+// notice that arrived meanwhile runs its full time from then.
+@(test)
+notices_pause_while_the_pointer_is_over_the_deck_and_resume_the_time_left :: proc(t: ^testing.T) {
+	n: ui.Notices
+	ui.notices_init(&n)
+	defer ui.notices_destroy(&n)
+	now := time.tick_now()
+	ui.notices_put(&n, 0, .Info, "first", 6*time.Second, false, now)
+	testing.expect(t, !ui.notices_pointer_over(&n, false, now, false))
+	over := time.tick_add(now, 2*time.Second)
+	testing.expect(t, ui.notices_pointer_over(&n, true, over, false))
+	testing.expect(t, !ui.notices_pointer_over(&n, true, over, false))
+	_, timed := ui.notices_deadline(&n)
+	testing.expect(t, !timed, "nothing is due while paused")
+	testing.expect(t, !ui.notices_expire(&n, false, time.tick_add(now, time.Hour)))
+	ui.notices_put(&n, 0, .Warning, "second", 12*time.Second, false, time.tick_add(over, 5*time.Second))
+	left := time.tick_add(over, 10*time.Second)
+	testing.expect(t, ui.notices_pointer_over(&n, false, left, false))
+	live := ui.notices_live(&n)
+	if !testing.expect_value(t, len(live), 2) {return}
+	testing.expect_value(t, ui.notice_expiry(live[0]).?, time.tick_add(left, 4*time.Second))
+	testing.expect_value(t, ui.notice_expiry(live[1]).?, time.tick_add(left, 12*time.Second))
+	testing.expect(t, ui.notices_expire(&n, false, time.tick_add(left, 4*time.Second)))
+	testing.expect_value(t, len(ui.notices_live(&n)), 1)
+	// The deck emptying under the pointer ends the pause, so the next notice counts down.
+	testing.expect(t, ui.notices_pointer_over(&n, true, left, false))
+	ui.notices_dismiss(&n, ui.notices_live(&n)[0].id, false)
+	ui.notices_put(&n, 0, .Info, "third", time.Second, false, left)
+	testing.expect(t, ui.notices_expire(&n, false, time.tick_add(left, time.Second)))
+}
+
+@(private)
+notice_text_open :: proc(t: ^testing.T, fonts: ^^font.System, device: ^^render.Device, cache: ^glyphs.Cache,
+	text: ^ui.Text) -> bool {
+	font_error: font.Error
+	fonts^, font_error = font.system_create()
+	if !testing.expect_value(t, font_error, font.Error.None) {return false}
+	device_error: render.Error
+	device^, device_error = render.device_create(.Warp)
+	if !testing.expect_value(t, device_error, render.Error.None) {return false}
+	glyphs.init(cache, fonts^, device^)
+	return testing.expect(t, ui.text_init(text, fonts^, cache, 16))
+}
+
+// Closed, the cards behind the front one take its height and step up NOTICE_STEP each, two at most, so
+// nothing shows below it; open, every card has its own height. The front card is the same height either
+// way, and a card leaving the middle gives up its step at once.
+@(test)
+notices_closed_deck_steps_cards_at_the_front_height_and_closes_a_leaving_step :: proc(t: ^testing.T) {
+	fonts: ^font.System
+	device: ^render.Device
+	cache: glyphs.Cache
+	text: ui.Text
+	defer {
+		glyphs.destroy(&cache)
+		if device != nil {render.device_destroy(device)}
+		if fonts != nil {font.system_destroy(fonts)}
+	}
+	if !notice_text_open(t, &fonts, &device, &cache, &text) {return}
+	n: ui.Notices
+	ui.notices_init(&n)
+	defer ui.notices_destroy(&n)
+	now := time.tick_now()
+	long :: "A useful message with enough text to wrap onto a second and maybe a third line of the card."
+	ui.notices_put(&n, 0, .Info, "oldest", time.Hour, false, now)
+	ui.notices_put(&n, 0, .Warning, long, time.Hour, false, now)
+	ui.notices_put(&n, 0, .Error, long, time.Hour, false, now)
+	ui.notices_put(&n, 0, .Success, "Saved", time.Hour, false, now, "Undo", "Ctrl+Z")
+	_ = ui.notices_hit(&n, &text, 1000, 800, 1, 0, 0)
+	cards := ui.notices_live(&n)
+	front := cards[3].card.box
+	testing.expect_value(t, front.y + front.height, f32(800 - 16))
+	for depth in 1..=3 {
+		card := cards[3 - depth].card
+		testing.expect_value(t, card.box.height, front.height)
+		testing.expect_value(t, card.box.y, front.y - f32(min(depth, 2) * 7))
+		testing.expect(t, card.content == 0)
+	}
+	testing.expect(t, cards[0].card.panel == 0, "only two cards peek out")
+	closed_front := front.height
+	ui.notices_pointer_over(&n, true, now, false)
+	_ = ui.notices_hit(&n, &text, 1000, 800, 1, 0, 0)
+	testing.expect_value(t, cards[3].card.box.height, closed_front)
+	for i in 0..<3 {
+		upper, lower := cards[i].card.box, cards[i + 1].card.box
+		testing.expect_value(t, upper.y + upper.height + 8, lower.y)
+		testing.expect(t, cards[i].card.content == 1 && upper.width == lower.width)
+	}
+	testing.expect(t, cards[1].card.box.height > closed_front, "an open card has its own height")
+	ui.notices_pointer_over(&n, false, now, false)
+	ui.notices_dismiss(&n, cards[2].id, false)
+	_ = ui.notices_hit(&n, &text, 1000, 800, 1, 0, 0)
+	cards = ui.notices_live(&n)
+	if !testing.expect_value(t, len(cards), 3) {return}
+	testing.expect_value(t, cards[1].card.box.y, cards[2].card.box.y - 7)
+	testing.expect_value(t, cards[0].card.box.y, cards[2].card.box.y - 14)
+	testing.expect(t, cards[0].card.panel == 1, "the oldest card moves up into the freed step")
+}
+
+// In an open deck, the cards above one that leaves slide down into its room rather than jumping.
+@(test)
+notices_open_deck_eases_cards_into_a_leaving_cards_room :: proc(t: ^testing.T) {
+	fonts: ^font.System
+	device: ^render.Device
+	cache: glyphs.Cache
+	text: ui.Text
+	defer {
+		glyphs.destroy(&cache)
+		if device != nil {render.device_destroy(device)}
+		if fonts != nil {font.system_destroy(fonts)}
+	}
+	if !notice_text_open(t, &fonts, &device, &cache, &text) {return}
+	n: ui.Notices
+	ui.notices_init(&n)
+	defer ui.notices_destroy(&n)
+	now := time.tick_now()
+	ui.notices_put(&n, 0, .Info, "oldest", time.Hour, false, now)
+	ui.notices_put(&n, 0, .Warning, "middle", time.Hour, false, now)
+	ui.notices_put(&n, 0, .Success, "newest", time.Hour, false, now)
+	ui.notices_pointer_over(&n, true, now, false)
+	_ = ui.notices_hit(&n, &text, 1000, 800, 1, 0, 0)
+	oldest := ui.notices_live(&n)[0].card.box.y
+	middle := ui.notices_live(&n)[1].card.box
+	testing.expect(t, ui.notices_dismiss(&n, ui.notices_live(&n)[1].id, true))
+	_ = ui.notices_hit(&n, &text, 1000, 800, 1, 0, 0)
+	testing.expect_value(t, ui.notices_live(&n)[0].card.box.y, oldest)
+	testing.expect(t, ui.notices_animating(&n))
+	ui.notices_animate(&n, true, test_frame(now))
+	ui.notices_animate(&n, true, test_frame(time.tick_add(now, 90*time.Millisecond)))
+	_ = ui.notices_hit(&n, &text, 1000, 800, 1, 0, 0)
+	halfway := ui.notices_live(&n)[0].card.box.y
+	testing.expect(t, halfway > oldest && halfway < oldest + middle.height + 8, "the card is on its way")
+	ui.notices_animate(&n, true, test_frame(time.tick_add(now, time.Second)))
+	_ = ui.notices_hit(&n, &text, 1000, 800, 1, 0, 0)
+	testing.expect_value(t, ui.notices_live(&n)[0].card.box.y, oldest + middle.height + 8)
+}
+
+// A stacking source keeps every different notice it shows, and a word-for-word repeat comes to the front
+// with its full time instead of adding a copy; a replacing source keeps only its latest.
+@(test)
+notices_from_a_stacking_source_all_stay :: proc(t: ^testing.T) {
+	n: ui.Notices
+	ui.notices_init(&n)
+	defer ui.notices_destroy(&n)
+	now := time.tick_now()
+	ui.notices_put(&n, 1, .Warning, "first", time.Hour, false, now, stack = true)
+	ui.notices_put(&n, 1, .Error, "second", time.Hour, false, now, stack = true)
+	ui.notices_put(&n, 2, .Warning, "stale", time.Hour, false, now)
+	ui.notices_put(&n, 2, .Warning, "current", time.Hour, false, now)
+	later := time.tick_add(now, time.Minute)
+	ui.notices_put(&n, 1, .Warning, "first", time.Hour, false, later, stack = true)
+	live := ui.notices_live(&n)
+	if !testing.expect_value(t, len(live), 3) {return}
+	testing.expect_value(t, live[0].text, "second")
+	testing.expect_value(t, live[1].text, "current")
+	testing.expect_value(t, live[2].text, "first")
+	testing.expect_value(t, ui.notice_expiry(live[2]).?, time.tick_add(later, time.Hour))
 }

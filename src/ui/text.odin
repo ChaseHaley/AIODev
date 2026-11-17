@@ -21,6 +21,11 @@ Theme :: struct {
 	scrollbar_track, scrollbar, scrollbar_hover, scrollbar_active: render.Color,
 	// Markdown code, inline code and frontmatter fills.
 	code_background: render.Color,
+	// The fills behind added and removed lines of a diff.
+	diff_added, diff_removed: render.Color,
+	// The terminal's 16 colours, which syntax colouring and per-agent tints take their hues from, so
+	// every theme's code reads like its terminal.
+	palette:                  [16]render.Color,
 	// The shared raised-hover look. `rim` is the colour of the pointer-following edge light;
 	// `hover_edge` is the hairline that holds a light fill's shape. lift and gloss are the
 	// interface.hover_lift and interface.hover_gloss settings.
@@ -36,7 +41,10 @@ theme_from :: proc(t: settings.Theme, interface: settings.Interface_Settings) ->
 		return colour.rgba(value.rgb, f32(value.a) / 255)
 	}
 	text, raised, accent := t.colors[.Text].rgb, t.colors[.Surface].rgb, t.colors[.Accent].rgb
+	palette: [16]render.Color
+	for &entry, i in palette {entry = c(t, settings.Theme_Token(int(settings.Theme_Token.Palette_0) + i))}
 	return {
+		palette = palette,
 		window = c(t, .Window),
 		pane = c(t, .Pane),
 		surface = c(t, .Surface),
@@ -65,6 +73,8 @@ theme_from :: proc(t: settings.Theme, interface: settings.Interface_Settings) ->
 		scrollbar_hover = c(t, .Scrollbar_Hover),
 		scrollbar_active = c(t, .Scrollbar_Active),
 		code_background = c(t, .Code_Background),
+		diff_added = c(t, .Diff_Added),
+		diff_removed = c(t, .Diff_Removed),
 		// Light mode's hover is paper: the opaque raised-surface colour, so the seat drawn
 		// underneath cannot show through and darken the tile, and its shape comes from the
 		// hairline and the seat rather than from ink. Dark mode keeps the translucent lift.
@@ -130,6 +140,14 @@ text_set_size :: proc(t: ^Text, size_px: f32) {
 	t.size_px = size_px
 	t.ascent = math.round(m.ascent)
 	t.line_height = math.round(m.ascent + m.descent + m.line_gap)
+}
+
+// The baseline that centres `t`'s capitals, and so digits and most lowercase, on the middle of the band
+// from `y` that is `height` tall. A line box centred on its ascent and descent sits capitals low, so a
+// label beside an icon uses this to share the icon's centre line.
+baseline_caps :: proc(y, height: f32, t: ^Text) -> f32 {
+	m := font.face_metrics(t.fonts, t.family.faces[.Regular], t.size_px)
+	return math.round(y + height / 2 + m.cap_height / 2)
 }
 
 text_width :: proc(t: ^Text, s: string) -> f32 {
@@ -313,6 +331,17 @@ text_styled :: proc(t: ^Text, style: Text_Style) -> Text {
 	}
 	if style == .Strong || style == .Title {copy.family = t.strong_family}
 	text_set_size(&copy, t.size_px * ratio)
+	return copy
+}
+
+// The terminal's font at 0.9 of `t`'s size, as Markdown sets its code; for source text and diffs.
+@(private = "file")
+MONO_RATIO :: f32(0.9)
+
+text_mono :: proc(t: ^Text, family: font.Family) -> Text {
+	copy := t^
+	copy.family, copy.strong_family = family, family
+	text_set_size(&copy, t.size_px * MONO_RATIO)
 	return copy
 }
 

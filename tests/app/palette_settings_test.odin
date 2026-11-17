@@ -100,6 +100,7 @@ palette_controls_match_the_settings_page_and_keep_complex_settings_jump_only :: 
 	expect_control(t, "status.ignore_apps", .Text)
 	expect_control(t, "input.leader", .None)
 	expect_control(t, settings.PADDING_GROUPS_KEY, .None)
+	expect_control(t, settings.QUICK_LABELS_KEY, .None)
 	size := ui.palette_setting(settings.schema_find("font.size")^)
 	testing.expect_value(t, size.minimum, 6)
 	testing.expect_value(t, size.maximum, 32)
@@ -111,6 +112,7 @@ palette_controls_match_the_settings_page_and_keep_complex_settings_jump_only :: 
 	testing.expect_value(t, gap.default_value, "4")
 	testing.expect(t, ui.palette_setting(settings.schema_find("input.leader")^).resettable)
 	testing.expect(t, !ui.palette_setting(settings.schema_find(settings.PADDING_GROUPS_KEY)^).resettable)
+	testing.expect(t, !ui.palette_setting(settings.schema_find(settings.QUICK_LABELS_KEY)^).resettable)
 	for entry in settings.SCHEMA {
 		row := ui.palette_setting(entry)
 		if row.control == .Slider {testing.expect(t, row.step > 0, entry.key)}
