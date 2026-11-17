@@ -402,7 +402,7 @@ link_program_run :: proc(
 // The command line that runs `program` on `path`, in temporary memory, naming its executable by the path
 // found for it so nothing searches again. A batch script runs through cmd.exe, which would read some
 // characters of a path as commands, so such a path is refused.
-@(private = "file")
+@(private)
 link_program_line :: proc(app: ^App, program: ^settings.Opener, path: string) -> (string, bool) {
 	line, err := settings.opener_command_line(program.command, path, context.temp_allocator)
 	if err != nil {return "", false}
