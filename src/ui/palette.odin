@@ -147,6 +147,9 @@ Palette_Setting :: struct {
 	control:                Palette_Control,
 	minimum, maximum, step: f64,
 	choices, choice_labels: []string,
+	// Any combination of `choices` is saved, as a setting of kind Set. Its dropdown flips options
+	// and saves each change with the list open, as on the Settings page.
+	multiple:               bool,
 	// The dropdown has a search field, as the Settings page gives font pickers, and is at least
 	// `choice_min_width` DIPs wide.
 	searchable:             bool,
@@ -1735,11 +1738,13 @@ palette_key_hints :: proc(p: ^Palette, out: ^[PALETTE_HINT_CAP]Key_Hint) -> int 
 		out[count^] = {keys = {first, second}, label = label}
 		count^ += 1
 	}
-	#partial switch _ in p.edit {
+	#partial switch edit in p.edit {
 	case Choice_Edit:
+		// A multiple choice saves each option as it flips, so Esc only closes its list.
+		multiple := p.settings[edit.setting].multiple
 		add(out, &count, LIST_NEXT_LABEL, LIST_PREVIOUS_LABEL, "Navigate")
-		add(out, &count, PALETTE_ACCEPT_LABEL, "", "Choose")
-		add(out, &count, PALETTE_CANCEL_LABEL, "", "Cancel")
+		add(out, &count, PALETTE_ACCEPT_LABEL, "", multiple ? "Toggle" : "Choose")
+		add(out, &count, PALETTE_CANCEL_LABEL, "", multiple ? "Close" : "Cancel")
 		return count
 	case Text_Edit:
 		add(out, &count, PALETTE_ACCEPT_LABEL, "", "Apply")
