@@ -77,9 +77,10 @@ try {
     Invoke-Aio key Ctrl+Enter
     Invoke-Aio expect state 'palette.edit=Choice'
     Shot 'choice-open'
+    # The list opens on the default bar (WORK-475); Down picks the next style.
     Invoke-Aio key Down Enter
     Invoke-Aio expect state 'palette.edit=None'
-    Invoke-Aio expect state 'palette.value=bar'
+    Invoke-Aio expect state 'palette.value=underline'
     Write-Output 'PASS the choice list opens and chooses in place'
 
     Search 'shell font' 'font.family'
