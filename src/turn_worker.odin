@@ -117,7 +117,8 @@ Turn_Job :: union {
 	Job_Watch_Root,
 }
 
-// One recorded segment, or an open turn, as the turn list shows it.
+// One recorded segment, or an open turn, as the turn list shows it. Only a turn with a changed file has a
+// row (tw_listed).
 Turn_Row :: struct {
 	id:        u64,
 	kind:      turns.Segment_Kind,
@@ -134,7 +135,7 @@ Turn_Row :: struct {
 	removed:   int,
 }
 
-// One agent with turns in a repository: a session, by its id when known, else by its pane.
+// One agent with a listed turn in a repository: a session, by its id when known, else by its pane.
 Turn_Agent :: struct {
 	session: turns.Session,
 	// Its saved turns, plus the open one.
@@ -163,7 +164,7 @@ Result_Query :: struct {
 	repository: string,
 	// The work tree found for the request's directory, with '/' separators.
 	worktree:   string,
-	// Newest first.
+	// Newest first; only turns that changed a file.
 	rows:       []Turn_Row,
 	// The ids the diff covers.
 	selected:   []u64,
@@ -2994,8 +2995,18 @@ tw_session_matches :: proc(want, have: turns.Session) -> bool {
 	return want.pane_key != "" && have.pane_key == want.pane_key
 }
 
+// Whether a turn is listed, and counts for its agent: it changed at least one file. A change that left a
+// file as it was (before and after the same) is not recorded, so no changes means no net change. This is
+// the one place the rule lives; the turn list, the strip, the range label and the agents all read what it
+// lets through.
+@(private = "file")
+tw_listed :: proc(segment: turns.Segment) -> bool {
+	return len(segment.changes) > 0
+}
+
 @(private = "file")
 tw_query_matches :: proc(job: Job_Query, segment: turns.Segment) -> bool {
+	if !tw_listed(segment) {return false}
 	if !job.agent {return true}
 	return segment.kind == .Turn && tw_session_matches(job.session, segment.session)
 }
@@ -3053,6 +3064,7 @@ tw_query_fill :: proc(
 	slice.sort_by_with_data(order[:], tw_segment_newer, store)
 	shown := make([dynamic]int, 0, len(lives), temp)
 	for live, i in lives {
+		if !tw_listed(live.segment) {continue}
 		if !job.agent || tw_session_matches(job.session, live.segment.session) {append(&shown, i)}
 	}
 	rows, rows_error := make([]Turn_Row, len(shown) + len(order), arena)
@@ -3283,11 +3295,12 @@ tw_agents :: proc(
 	titled := make([dynamic]i64, temp)
 	if store != nil {
 		for segment in store.segments {
-			if segment.kind != .Turn {continue}
+			if segment.kind != .Turn || !tw_listed(segment) {continue}
 			tw_agent_note(&found, &titled, segment.session, false, segment.ended, segment.title)
 		}
 	}
 	for live in lives {
+		if !tw_listed(live.segment) {continue}
 		tw_agent_note(&found, &titled, live.segment.session, true, now, live.segment.title)
 	}
 	slice.sort_by(found[:], proc(a, b: Turn_Agent) -> bool {
