@@ -587,3 +587,61 @@ wait_events_names_the_frame_handle_that_signaled :: proc(t: ^testing.T) {
 	testing.expect_value(t, err, p.Error.None)
 	testing.expect_value(t, signaled, -1)
 }
+
+// The shell's DROPFILES header, which an HDROP starts with.
+@(private = "file")
+Drop_Files :: struct {
+	files:       w.DWORD,
+	point:       w.POINT,
+	non_client:  w.BOOL,
+	wide:        w.BOOL,
+}
+
+// A drop built as Explorer builds one: the header, then each path and a final empty one, all NUL-ended.
+@(private = "file")
+drop_handle :: proc(paths: []string, x, y: i32) -> w.HANDLE {
+	units := make([dynamic]u16, context.temp_allocator)
+	for path in paths {
+		append(&units, ..w.utf8_to_utf16(path, context.temp_allocator))
+		append(&units, 0)
+	}
+	append(&units, 0)
+	size := size_of(Drop_Files) + len(units) * size_of(u16)
+	memory := w.GlobalAlloc(w.GMEM_MOVEABLE | w.GMEM_ZEROINIT, w.SIZE_T(size))
+	if memory == nil {return nil}
+	handle := w.HGLOBAL(memory)
+	header := (^Drop_Files)(w.GlobalLock(handle))
+	header^ = {size_of(Drop_Files), {x, y}, false, true}
+	copy(([^]u16)(uintptr(header) + size_of(Drop_Files))[:len(units)], units[:])
+	_ = w.GlobalUnlock(handle)
+	return w.HANDLE(handle)
+}
+
+@(test)
+dropped_files_arrive_as_one_event_at_the_drop_point :: proc(t: ^testing.T) {
+	platform: p.Platform
+	if !testing.expect_value(t, p.init(&platform, "AIODev.Test.Drop"), p.Init_Result.Primary) { return }
+	defer testing.expect_value(t, p.destroy(&platform), p.Error.None)
+	id, err := p.window_create(&platform, {hidden = true, width = 160, height = 100})
+	if !testing.expect_value(t, err, p.Error.None) { return }
+	hwnd := w.HWND(p.window_native_handle(&platform, id))
+	testing.expect(t, uint(w.GetWindowLongPtrW(hwnd, w.GWL_EXSTYLE)) & uint(w.WS_EX_ACCEPTFILES) != 0,
+		"the window asks for drops")
+	paths := []string{`C:\notes\one.md`, `C:\with space\日本語.txt`, `D:\three`}
+	handle := drop_handle(paths, 37, 91)
+	if !testing.expect(t, handle != nil) { return }
+	testing.expect(t, bool(w.PostMessageW(hwnd, w.WM_DROPFILES, w.WPARAM(uintptr(handle)), 0)))
+	events, poll_error := p.poll_events(&platform)
+	testing.expect_value(t, poll_error, p.Error.None)
+	drops := 0
+	for event in events {
+		if e, ok := event.(p.Files_Drop_Event); ok {
+			drops += 1
+			testing.expect_value(t, e.window, id)
+			testing.expect_value(t, e.x, i32(37))
+			testing.expect_value(t, e.y, i32(91))
+			testing.expect_value(t, e.paths, "C:\\notes\\one.md\nC:\\with space\\日本語.txt\nD:\\three")
+		}
+	}
+	testing.expect_value(t, drops, 1)
+}

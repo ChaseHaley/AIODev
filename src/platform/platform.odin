@@ -103,6 +103,13 @@ Tray_Notification_Event :: struct {
 Notification_Error_Event :: struct {
 	code: u32,
 }
+// Files dropped from the shell at a point of the window's client area. `paths` joins every full path with
+// '\n', which a file name cannot hold, and lives in the event queue's text storage until the next poll.
+Files_Drop_Event :: struct {
+	window: input.Window_Id,
+	x, y:   i32,
+	paths:  string,
+}
 Activate_Request_Event :: struct {}
 Settings_Event :: struct {}
 Wake_Event :: struct {}
@@ -124,6 +131,7 @@ Event :: union {
 	Notification_Error_Event,
 	Activate_Request_Event,
 	Settings_Event,
+	Files_Drop_Event,
 	Wake_Event,
 }
 
