@@ -2261,7 +2261,7 @@ choice_label :: proc(row: ^Editor_Row, value: string) -> string {
 // What a choice's field shows: a multiple choice lists the labels of its options that are on.
 @(private)
 choice_text :: proc(p: ^Editor, row: ^Editor_Row, selected: bool, value: string) -> string {
-	if row.multiple {return choice_set_label(row, selected ? p.choice_set : row.choice_mask)}
+	if row.multiple {return choice_set_label(row.choice_labels, selected ? p.choice_set : row.choice_mask)}
 	return choice_label(row, value)
 }
 
