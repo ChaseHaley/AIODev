@@ -658,14 +658,18 @@ try {
     Aio run "pwsh -NoProfile -File '$reviewer'" | Out-Null
     Await-File $reviewStarted 'the reviewer began its turn' | Out-Null
     $s = Open-Changes $reviewPane 'the reviewer opens the agent scope'
+    # An open turn with no file written is not listed, so the pane has no turns yet.
     $s = Await-State @{
-        'changes.turns' = 1; 'changes.turn.0.live' = 'true'; 'changes.first' = 0; 'changes.last' = 0
-        'changes.settled' = 'true'
-    } 'the open turn is a live row, selected'
+        'changes.turns' = 0; 'changes.turn.0.live' = ''; 'changes.notice' = 'no_turns'; 'changes.settled' = 'true'
+    } 'an open turn with no file is not listed'
     $reviewChanges = $s['panes.focused']
     Like $s['changes.agent'] '*Reviewer agent*' 'the source field names the reviewer'
-    Await-Like 'changes.range_label' 'Working*' 'the range label says the live turn is working' | Out-Null
     Set-Content -LiteralPath $reviewGo -Value 'x'
+    # The turn is listed, selected and live, once its first file is written.
+    $s = Await-State @{
+        'changes.turns' = 1; 'changes.turn.0.live' = 'true'; 'changes.first' = 0; 'changes.last' = 0
+    } 'the open turn is a live row, selected, once it has written a file' 5
+    Await-Like 'changes.range_label' 'Working*' 'the range label says the live turn is working' | Out-Null
     # Paths sort, so live.py comes first, then long.txt, notes.txt and zz.md.
     # The files must show within 3 s of the writes. A later live refresh may still be in flight then, so the
     # view settling is waited for separately.
@@ -1168,6 +1172,95 @@ try {
     Like $s['changes.tooltip_key'] '*K*' 'the summary tooltip names Ctrl+K'
     Aio mouse move (Middle (Rect $s 'changes.overview_rect')) --px | Out-Null
     Await-State @{ 'changes.tooltip' = 'Overview: click or drag to scroll' } 'the overview strip has its tooltip' | Out-Null
+
+    # (f) An agent whose turns change no file: only a turn that holds a changed file is listed. The agent
+    # writes a file in its first turn, then answers without an edit, then creates and deletes a file (a net
+    # nothing), then writes a file again. Each turn waits for the journey's go flag so every state is read.
+    $quiet = "$data/quiet.ps1"
+    function Quiet-Go($n) { Set-Content -LiteralPath "$data/quiet-go-$n.flag" -Value 'x' }
+    Set-Content -LiteralPath $quiet -Value (@("`$work = '$work'", "`$data = '$data'") + $report + @(
+        '$Host.UI.RawUI.WindowTitle = ''Quiet agent'''
+        'function Step($n) {'
+        '    $go = Join-Path $data (''quiet-go-'' + $n + ''.flag'')'
+        '    while (-not (Test-Path -LiteralPath $go)) { Start-Sleep -Milliseconds 50 }'
+        '}'
+        'Report ''working'' '''''
+        'Start-Sleep -Milliseconds 400'
+        'Set-Content -LiteralPath (Join-Path $work ''quiet-1.txt'') -Value ''one'''
+        'Start-Sleep -Milliseconds 700'
+        'Report ''done'' ''Quiet 1'''
+        'Step 1'
+        'Report ''working'' '''''
+        'Step 2'
+        'Report ''done'' ''Quiet 2'''
+        'Step 3'
+        'Report ''working'' '''''
+        'Start-Sleep -Milliseconds 400'
+        'Set-Content -LiteralPath (Join-Path $work ''quiet-tmp.txt'') -Value ''tmp'''
+        'Step 4'
+        'Remove-Item -LiteralPath (Join-Path $work ''quiet-tmp.txt'')'
+        'Start-Sleep -Milliseconds 700'
+        'Report ''done'' ''Quiet 3'''
+        'Step 5'
+        'Report ''working'' '''''
+        'Start-Sleep -Milliseconds 400'
+        'Set-Content -LiteralPath (Join-Path $work ''quiet-2.txt'') -Value ''two'''
+        'Start-Sleep -Milliseconds 700'
+        'Report ''done'' ''Quiet 4'''
+        'Start-Sleep -Seconds 900'
+    ))
+    Aio command tab.new | Out-Null
+    Await-State @{ 'tabs.count' = 6; 'tabs.selected' = 6 } 'tab 6 opens' | Out-Null
+    Aio wait text 'PS ' | Out-Null
+    $quietPane = (State)['panes.focused']
+    Aio run "cd '$work'; Write-Output ('READY_' + 'quiet')" | Out-Null
+    Aio wait text 'READY_quiet' | Out-Null
+    $saved = [int](State)['turns.saved']
+    Aio run "pwsh -NoProfile -File '$quiet'" | Out-Null
+    Await-AtLeast 'turns.saved' ($saved + 1) 'the quiet agent saves its first turn' 15 | Out-Null
+    Await-State @{ 'turns.open' = 0 } 'the first turn has ended' | Out-Null
+    $s = Open-Changes $quietPane 'the quiet agent opens the agent scope'
+    $s = Await-State @{
+        'changes.turns' = 1; 'changes.first' = 0; 'changes.last' = 0; 'changes.files' = 1; 'changes.settled' = 'true'
+        'changes.strip_bars' = 1; 'changes.range_label' = 'Turn 1'
+    } 'one turn with a file is listed'
+    # An open turn with no file yet is not a bar.
+    Quiet-Go 1
+    Await-State @{ 'turns.open' = 1 } 'the second turn is open with no file written' | Out-Null
+    Start-Sleep -Milliseconds 1500
+    $s = Await-State @{
+        'changes.turns' = 1; 'changes.settled' = 'true'; 'changes.strip_bars' = 1; 'changes.range_label' = 'Turn 1'
+        'changes.turn.0.live' = 'false'; 'changes.files' = 1
+    } 'an open turn that has written no file is not listed'
+    $s = Open-Panel
+    Aio capture --out "$data/agent-empty-open.png" | Out-Null
+    Close-Panel | Out-Null
+    # Ended without an edit, it is not saved and is not listed.
+    Quiet-Go 2
+    Await-State @{ 'turns.open' = 0 } 'the second turn ended' | Out-Null
+    Start-Sleep -Milliseconds 1000
+    Equal (State)['turns.saved'] ($saved + 1) 'a turn with no file is not saved'
+    Await-State @{ 'changes.turns' = 1; 'changes.settled' = 'true'; 'changes.strip_bars' = 1 } 'the ended empty turn is not listed' | Out-Null
+    # A turn lists once it holds a file, and drops out when its edits net to nothing.
+    Quiet-Go 3
+    $s = Await-State @{ 'changes.turns' = 2; 'changes.turn.0.live' = 'true'; 'changes.settled' = 'true' } `
+        'a turn is listed once it has written a file'
+    Quiet-Go 4
+    Await-State @{ 'turns.open' = 0 } 'the third turn ended' | Out-Null
+    Start-Sleep -Milliseconds 1000
+    Equal (State)['turns.saved'] ($saved + 1) 'a turn whose edits net to nothing is not saved'
+    Await-State @{ 'changes.turns' = 1; 'changes.settled' = 'true'; 'changes.strip_bars' = 1 } 'the turn that netted to nothing is not listed' | Out-Null
+    # The next turn with a file is turn 2: hidden turns are not counted.
+    Quiet-Go 5
+    Await-AtLeast 'turns.saved' ($saved + 2) 'the fourth turn is saved' 15 | Out-Null
+    $s = Await-State @{
+        'changes.turns' = 2; 'changes.first' = 0; 'changes.last' = 0; 'changes.files' = 1; 'changes.settled' = 'true'
+        'changes.strip_bars' = 2; 'changes.range_label' = 'Turn 2'; 'changes.file.0.path' = 'quiet-2.txt'
+    } 'two listed turns number 1 and 2 across the hidden ones'
+    Equal $s['changes.turn.0.live'] 'false' 'the newest listed turn has ended'
+    $s = Open-Panel
+    Aio capture --out "$data/agent-empty-turns.png" | Out-Null
+    Close-Panel | Out-Null
 
     # Recording off asks to delete what was recorded.
     if ((Turn-Directories).Count -eq 0) { throw "no agent-turns directory under $data while recording" }
