@@ -3,6 +3,7 @@ package main
 import "aio:input"
 import "aio:markdown"
 import "aio:platform"
+import "core:strings"
 import "core:unicode/utf8"
 
 // The keys of a multi-line text editor over a `markdown.Edit_Buffer`, shared by every pane or card that
@@ -130,23 +131,40 @@ text_edit_key :: proc(app: ^App, b: ^markdown.Edit_Buffer, key: Content_Key) -> 
 	return {kind = edited ? .Edited : .Moved}
 }
 
-// Pasted text in the buffer's own line endings.
+// Pasted text in the buffer's own line endings: the text itself when it already has them, which is
+// the usual case and costs a scan, else a copy with each line break replaced.
 @(private = "file")
 text_line_endings :: proc(text, newline: string) -> string {
-	out := make([dynamic]u8, 0, len(text), context.temp_allocator)
-	for i := 0; i < len(text); i += 1 {
-		c := text[i]
-		if c == '\r' {
-			if i + 1 < len(text) && text[i + 1] == '\n' {i += 1}
-			append(&out, newline)
-			continue
+	if !text_foreign_endings(text, newline) {return text}
+	out := make([dynamic]u8, 0, len(text) + len(text) / 8, context.temp_allocator)
+	rest := text
+	for len(rest) > 0 {
+		at := strings.index_any(rest, "\r\n")
+		if at < 0 {
+			append(&out, rest)
+			break
 		}
-		if c == '\n' {
-			append(&out, newline)
-			continue
-		}
-		append(&out, c)
+		append(&out, rest[:at])
+		append(&out, newline)
+		skip := 1
+		if rest[at] == '\r' && at + 1 < len(rest) && rest[at + 1] == '\n' {skip = 2}
+		rest = rest[at + skip:]
 	}
 	if !utf8.valid_string(string(out[:])) {return text}
 	return string(out[:])
+}
+
+// Whether `text` has a line break that is not `newline`, which is "\n" or "\r\n".
+@(private = "file")
+text_foreign_endings :: proc(text, newline: string) -> bool {
+	if newline == "\n" {return strings.index_byte(text, '\r') >= 0}
+	for i in 0 ..< len(text) {
+		switch text[i] {
+		case '\r':
+			if i + 1 >= len(text) || text[i + 1] != '\n' {return true}
+		case '\n':
+			if i == 0 || text[i - 1] != '\r' {return true}
+		}
+	}
+	return false
 }

@@ -120,6 +120,10 @@ markdown_edit_end :: proc(app: ^App, pane: ^Markdown_Pane) {
 		}
 	}
 	pane.editor = nil
+	// A new editor numbers its revisions from the start again, so nothing may stay marked as followed.
+	for other in app.markdown_panes {
+		if other.followed.editor == pane.id {other.followed = {}}
+	}
 	markdown_editor_destroy(e)
 	pane.revision += 1
 	ui.markdown_selection_clear(&pane.view)
@@ -158,13 +162,21 @@ markdown_editor_sync :: proc(pane: ^Markdown_Pane) {
 	_ = markdown_fold_reveal(pane, caret)
 }
 
-// After an edit: the live view follows and the file saves once typing pauses.
+// After an edit: the live view follows, panes reading the file follow it too, and the file saves once
+// typing pauses.
 @(private = "file")
 markdown_edited :: proc(app: ^App, pane: ^Markdown_Pane) {
 	e := pane.editor
 	e.save_at = time.tick_add(clock_now(&app.clock), MARKDOWN_SAVE_DELAY)
 	e.goal_x, e.reveal = -1, true
 	markdown_editor_sync(pane)
+	for other in app.markdown_panes {
+		if other != pane && other.editor == nil && document_same(other.path, pane.path) {
+			// The reader may be in another window.
+			mark_all_dirty(app)
+			break
+		}
+	}
 }
 
 // Writes the edits to the file. The stamp the poll compares becomes the written file's, so the pane
@@ -181,11 +193,55 @@ markdown_edit_save :: proc(app: ^App, pane: ^Markdown_Pane) -> bool {
 	}
 	e.save_at, e.save_failed = {}, false
 	if info, stat_error := os.stat(pane.path, context.temp_allocator); stat_error == nil {
-		if loaded, ok := &pane.load.(Markdown_Loaded); ok {
-			loaded.stamp = {info.modification_time, info.size}
+		stamp := Markdown_Stamp{info.modification_time, info.size}
+		if loaded, ok := &pane.load.(Markdown_Loaded); ok {loaded.stamp = stamp}
+		// A reading pane that shows these very edits has nothing to read back either.
+		for other in app.markdown_panes {
+			if loaded, ok := &other.load.(Markdown_Loaded); ok && other.followed == {pane.id, e.buffer.revision} {
+				loaded.stamp = stamp
+			}
 		}
 	}
 	return true
+}
+
+// What a reading pane shows of an editor's text: the editing pane and the buffer's revision.
+Markdown_Followed :: struct {
+	editor:   u32,
+	revision: u64,
+}
+
+// A pane reading a file that another pane edits shows the edits as they are made, not once they are
+// saved and the poll reads them: the next draw parses the editor's text for it. Panes that edit the
+// same file keep their own text.
+@(private)
+markdown_follow_edits :: proc(app: ^App, pane: ^Markdown_Pane) {
+	loaded, ok := &pane.load.(Markdown_Loaded)
+	if !ok || pane.editor != nil {return}
+	for other in app.markdown_panes {
+		e := other.editor
+		if e == nil || other == pane || !document_same(other.path, pane.path) {continue}
+		followed := Markdown_Followed{other.id, e.buffer.revision}
+		if pane.followed == followed {return}
+		next: markdown.Document
+		if !markdown.parse(markdown.edit_string(&e.buffer), &next) {
+			log.error("parsing the Markdown edits for another pane ran out of memory")
+			return
+		}
+		source, cloned := clone_bytes(e.buffer.text[:])
+		if !cloned {
+			markdown.document_destroy(&next)
+			return
+		}
+		markdown.document_destroy(&loaded.document)
+		delete(loaded.source)
+		loaded.document, loaded.source = next, source
+		pane.revision += 1
+		pane.followed = followed
+		ui.markdown_selection_clear(&pane.view)
+		markdown.search_restart(&pane.search)
+		return
+	}
 }
 
 // Saves the panes whose edits have waited long enough.
