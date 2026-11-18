@@ -442,7 +442,7 @@ changes_notice_text :: proc(view: ^Changes_View) -> (title, body: string) {
 		title, body = "Could not read changes", clip_bytes(view.detail, CHANGES_CLIP_BYTES)
 	case .No_Turns:
 		title = "No turns yet"
-		body = "Turns appear here when an agent in this repository starts working."
+		body = "Turns appear here when an agent in this repository changes files."
 	case .No_Changes:
 		title = "No changes"
 		body = changes_scope_turns(view.scope) ? "The selected turns changed no files." : "Nothing to show."
