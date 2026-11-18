@@ -30,6 +30,9 @@ Style :: struct {
 	cursor_phase_visible:                                             bool,
 	// Capture the cursor for a window-level transition without painting or animating it locally.
 	cursor_suppressed:                                                bool,
+	// Draw no cursor at all, not even the hollow one of a pane without the keyboard: the window's one
+	// caret is in another surface.
+	cursor_hidden:                                                    bool,
 	// The link under the pointer is view state, not cell style: it only adds an underline overlay.
 	hover:                                                            Maybe(term.Link_Range),
 	// The zero value draws the cursor only where the terminal puts it.
@@ -753,7 +756,7 @@ decorate :: proc(b: ^Builder, p: Cell_Paint, left, top: f32) -> render.Build_Sta
 build_cursor :: proc(v: ^View, b: ^Builder) -> Maybe(Cursor_Paint) {
 	if b.list.error != .None {return nil}
 	c := b.cursor
-	if !c.visible || !c.viewport_has_value ||
+	if b.style.cursor_hidden || !c.visible || !c.viewport_has_value ||
 	   (!b.style.cursor_phase_visible && b.style.cursor_effects.preset == .Off) {
 		return nil
 	}

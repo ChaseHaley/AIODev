@@ -23,6 +23,9 @@ Theme :: struct {
 	code_background: render.Color,
 	// The fills behind added and removed lines of a diff.
 	diff_added, diff_removed: render.Color,
+	// The text cursor in every text surface, and the text under a block of it; the terminal's cursor
+	// colours.
+	caret, caret_text: render.Color,
 	// The terminal's 16 colours, which syntax colouring and per-agent tints take their hues from, so
 	// every theme's code reads like its terminal.
 	palette:                  [16]render.Color,
@@ -56,6 +59,8 @@ theme_from :: proc(t: settings.Theme, interface: settings.Interface_Settings) ->
 		border = c(t, .Border),
 		selection = c(t, .Selection),
 		focus = c(t, .Focus),
+		caret = colour.rgba(settings.theme_cursor(t)),
+		caret_text = colour.rgba(settings.theme_cursor_text(t)),
 		error = c(t, .Danger),
 		success = c(t, .Success),
 		warning = c(t, .Warning),

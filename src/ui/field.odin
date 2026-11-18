@@ -205,6 +205,16 @@ field_release :: proc(f: ^Text_Field) -> bool {
 	return dragging
 }
 
+// The cell the caret occupies at `at`: the character under it, or a space past the end, one line tall.
+@(private)
+field_caret_cell :: proc(
+	f: ^Text_Field, text: ^Text, value: string, at, baseline, right: f32,
+) -> render.Rect {
+	width := text_width(text, " ")
+	if f.cursor < len(value) {width = text_width(text, value[f.cursor:rune_right(f, f.cursor)])}
+	return {at, baseline - text.ascent, max(1, min(width, right - at)), text.line_height}
+}
+
 field_draw :: proc(
 	f: ^Text_Field,
 	list: ^render.Draw_List,
@@ -214,31 +224,29 @@ field_draw :: proc(
 	focused: bool,
 	placeholder: string,
 	color: render.Color,
-	caret_width: f32,
 ) -> render.Build_Status {
 	value := field_string(f)
 	start := field_view_start(f, text, available)
+	selection: render.Rect
 	if focused && value != "" {
 		low, high := field_selection(f)
 		if low != high {
 			left := x + text_width(text, value[start:max(start, low)])
 			right := x + text_width(text, value[start:max(start, high)])
 			left, right = min(left, x + available), min(right, x + available)
-			draw_rect(
-				list,
-				{
-					rect = {left, baseline - text.ascent, right - left, text.line_height},
-					color = theme.focus,
-				},
-			)
+			selection = {left, baseline - text.ascent, right - left, text.line_height}
+			draw_rect(list, {rect = selection, color = theme.focus})
 		}
 	}
 	head: render.Rect
+	shown := false
 	if focused {
 		at := x + min(available, text_width(text, value[start:f.cursor]))
-		target := render.Rect{at, baseline - text.ascent, caret_width, text.line_height}
-		head = field_caret_pose(&f.caret, text.carets, {x, baseline}, target)
-		field_caret_body(&f.caret, list, theme.accent)
+		cell := field_caret_cell(f, text, value, at, baseline, x + available)
+		drawn: bool
+		head, drawn = field_caret_pose(&f.caret, text.carets, {x, baseline}, cell, theme)
+		shown = drawn && caret_shown(text.carets, f.caret.motion.active)
+		if drawn {field_caret_body(&f.caret, list, theme)}
 	}
 	if value == "" {
 		if result := draw_text(text, list, placeholder, x, baseline, theme.muted, available);
@@ -249,6 +257,11 @@ field_draw :: proc(
 	   result != .Ok {
 		return result
 	}
-	if focused {draw_rect(list, {rect = head, color = theme.accent})}
-	return .Ok
+	if !shown {return .Ok}
+	scope, block := field_caret_head(list, &f.caret, theme, head)
+	if !block {return .Ok}
+	defer clip_scope_close(list, scope)
+	// The block covers what is under it, which draws again over it in the cursor text colour.
+	under := value == "" ? placeholder : value[start:]
+	return draw_text(text, list, under, x, baseline, theme.caret_text, available)
 }

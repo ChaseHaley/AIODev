@@ -1575,7 +1575,6 @@ palette_query_box :: proc(p: ^Palette, l: Palette_Layout, text: ^Text, scale: f3
 		text = text,
 		rect = l.input,
 		inset = PALETTE_TEXT_INSET,
-		caret_width = 1.5,
 		radius = 0,
 		style = .Display,
 		scale = scale,
@@ -1890,7 +1889,8 @@ palette_draw :: proc(
 			placeholder = fmt.bprintf(buffer[:], "Choose a command for %s", commands.shortcut_text(chord, label[:]))
 		}
 		baseline := l.input.y + (l.input.height - query_text.line_height) / 2 + query_text.ascent
-		if result := field_box_draw(box, list, theme, baseline, true, placeholder); result != .Ok { return result }
+		open := presence_is_open(p.presence)
+		if result := field_box_draw(box, list, theme, baseline, open, placeholder); result != .Ok {return result}
 	}
 	if key_search_button_draw(list, theme, l.keys, p.keys.state != .Off, scale, pointer) != .None {return .Ok}
 	title_text := text^

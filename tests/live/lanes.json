@@ -23,6 +23,9 @@
         "{build}"
       ]
     },
+    "caret_travel": {
+      "lane": "headless"
+    },
     "claude_fullscreen": {
       "lane": "native",
       "reason": "Uses the real clipboard and runs Claude Code, whose fullscreen copy path is the subject."

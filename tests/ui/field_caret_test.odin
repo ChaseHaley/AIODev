@@ -26,8 +26,8 @@ caret_draw :: proc(
 ) -> render.Rect {
 	render.draw_list_reset(list)
 	_ = render.push_layer(list, {0, 0, 800, 100})
-	testing.expect_value(t, ui.field_draw(field, list, text, {accent = CARET_ACCENT}, 10, 30, 400, focused,
-		"", {1, 1, 1, 1}, 2), render.Build_Status.Ok)
+	testing.expect_value(t, ui.field_draw(field, list, text, {caret = CARET_ACCENT}, 10, 30, 400, focused,
+		"", {1, 1, 1, 1}), render.Build_Status.Ok)
 	head, _ := caret_head(list)
 	return head
 }
@@ -49,6 +49,7 @@ field_caret_moves_like_the_terminal_cursor :: proc(t: ^testing.T) {
 	if !testing.expect(t, ui.text_init(&text, fonts, &cache, 16)) {return}
 	carets: ui.Carets
 	text.carets = &carets
+	carets.style = {shape = .Bar, stroke = 1}
 	list := render.draw_list_init()
 	defer render.draw_list_destroy(&list)
 	field: ui.Text_Field
@@ -127,6 +128,7 @@ field_caret_smears_between_its_places :: proc(t: ^testing.T) {
 	if !testing.expect(t, ui.text_init(&text, fonts, &cache, 16)) {return}
 	carets: ui.Carets
 	text.carets = &carets
+	carets.style = {shape = .Bar, stroke = 1}
 	list := render.draw_list_init()
 	defer render.draw_list_destroy(&list)
 	field: ui.Text_Field

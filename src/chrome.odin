@@ -42,6 +42,13 @@ pane_has_keyboard :: proc(app: ^App, w: ^Window, pane: layout.Pane_Rect) -> bool
 	return pane_shows_focus(w, pane) && !palette_active(app, w) && !ui.find_has_keyboard(&w.find)
 }
 
+// The focused pane's terminal cursor is not drawn, not even hollow, while the palette or the find bar
+// has the keyboard: the one caret is there, and the pane's cursor returns when the keyboard does.
+// Panes that are not the window's focus keep their hollow cursor.
+pane_cursor_held_elsewhere :: proc(app: ^App, w: ^Window, pane: layout.Pane_Rect) -> bool {
+	return pane_shows_focus(w, pane) && (palette_active(app, w) || ui.find_has_keyboard(&w.find))
+}
+
 window_content_area :: proc(app: ^App, w: ^Window) -> layout.Rect {
 	return window_content_area_in(app, w, w.pane_fill)
 }

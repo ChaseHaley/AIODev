@@ -25,7 +25,6 @@ field_box_offset_agrees_with_its_frame_at_two_scales :: proc(t: ^testing.T) {
 			text        = &text,
 			rect        = rect,
 			inset       = 10,
-			caret_width = 1,
 			radius      = 5,
 			style       = .Body,
 			scale       = scale,
