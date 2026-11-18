@@ -626,6 +626,12 @@ when AIO_HEADLESS {
 		return .None
 	}
 
+	// Headless windows have no system pointer; the app keeps the last position its moves reported.
+	@(require_results)
+	pointer_client :: proc(p: ^Platform, id: input.Window_Id) -> ([2]i32, bool) {
+		return {}, false
+	}
+
 	@(require_results)
 	window_flash :: proc(p: ^Platform, id: input.Window_Id) -> Error {
 		if find_window(p, id) == nil {return .Invalid_Window}

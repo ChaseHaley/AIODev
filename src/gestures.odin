@@ -142,6 +142,7 @@ gesture_clear :: proc(app: ^App, w: ^Window) {
 		if surface.cancel != nil {surface.cancel(app, w)}
 	}
 	leader_cancel(w)
+	autoscroll_stop(w)
 	w.dirty = true
 }
 
@@ -203,6 +204,18 @@ gesture_release_taken :: proc(
 
 gesture_button :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) {
 	if w.phase == .Preparing {return}
+	if autoscroll_active(w) {
+		if e.pressed {
+			// A press while scrolling only ends it, and its release reaches nothing.
+			autoscroll_end(app, w)
+			w.gesture.captures[e.button] = Gesture_Cancelled{}
+			return
+		}
+		if e.button == .Middle && autoscroll_release(app, w) {
+			w.gesture.captures[.Middle] = nil
+			return
+		}
+	}
 	x, y := f32(e.x), f32(e.y)
 	if e.pressed {
 		target := pointer_target(app, w, x, y)
@@ -216,6 +229,10 @@ gesture_button :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) {
 			if pointer_surfaces[target].blurs_find && ui.find_has_keyboard(&w.find) {
 				ui.find_blur(&w.find, &app.find_history)
 			}
+		}
+		if !modal && autoscroll_begin(app, w, target, e) {
+			gesture_swallow(w, e.button, target)
+			return
 		}
 		pointer_press(app, w, target, e)
 		return
@@ -233,6 +250,7 @@ gesture_button :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) {
 
 gesture_move :: proc(app: ^App, w: ^Window, event: input.Mouse_Move_Event) {
 	if w.phase == .Preparing {return}
+	if autoscroll_move(app, w, event) {return}
 	e := event
 	e.buttons -= gesture_buttons(w, Gesture_Cancelled)
 	if event.buttons != {} && e.buttons == {} {return}
