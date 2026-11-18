@@ -553,14 +553,16 @@ changes_draw_paints_the_row_the_panel_the_menu_and_the_overview :: proc(t: ^test
 	ui.changes_layout(&state, &view, &f.text, &f.mono, tall.diff.width, 1)
 	if !draw_into(t, &f, &list, &view, &state, tall) {return}
 	green, red := render.Color{0, 1, 0, 1}, render.Color{1, 0, 0, 1}
+	// A tick the thumb crosses is split into its dimmed and full parts, so each run draws at least one rect.
+	same :: proc(a, b: render.Color) -> bool {return a.r == b.r && a.g == b.g && a.b == b.b}
 	added, removed := 0, 0
 	for rect in list.rects {
 		lane := tall.overview
 		if rect.rect.x < lane.x || rect.rect.x >= lane.x + lane.width {continue}
 		if rect.rect.y < lane.y || rect.rect.y >= lane.y + lane.height {continue}
-		if rect.color == green {added += 1}
-		if rect.color == red {removed += 1}
+		if same(rect.color, green) {added += 1}
+		if same(rect.color, red) {removed += 1}
 	}
-	testing.expect_value(t, added, len(state.rows.ticks) / 2)
-	testing.expect_value(t, removed, len(state.rows.ticks) / 2)
+	testing.expect(t, added >= len(state.rows.ticks) / 2)
+	testing.expect(t, removed >= len(state.rows.ticks) / 2)
 }
