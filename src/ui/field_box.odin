@@ -9,13 +9,12 @@ Field_Box :: struct {
 	text:        ^Text,
 	rect:        render.Rect,
 	inset:       f32,
-	caret_width: f32,
 	radius:      f32,
 	style:       Text_Style,
 	scale:       f32,
 }
 
-// The standard text field: Body text inset like a control, a one-DIP caret and the control corner.
+// The standard text field: Body text inset like a control and the control corner.
 // The palette query and the find bar keep looks of their own.
 field_box_standard :: proc(field: ^Text_Field, text: ^Text, rect: render.Rect, scale: f32) -> Field_Box {
 	return {
@@ -23,7 +22,6 @@ field_box_standard :: proc(field: ^Text_Field, text: ^Text, rect: render.Rect, s
 		text = text,
 		rect = rect,
 		inset = CONTROL_INSET,
-		caret_width = 1,
 		radius = RADIUS_CONTROL,
 		style = .Body,
 		scale = scale,
@@ -76,6 +74,5 @@ field_box_draw :: proc(
 		focused     = focused,
 		placeholder = placeholder,
 		color       = theme.text,
-		caret_width = max(1, box.caret_width * box.scale),
 	)
 }

@@ -843,7 +843,7 @@ draw_control :: proc(
 	if entry, typing := p.edit.(Text_Edit); typing && entry.setting == setting {
 		box := text_entry_box(p, control, text, scale)
 		box_draw(list, control, theme, true, scale)
-		return field_box_draw(box, list, theme, field_box_baseline(box), true, "Empty")
+		return field_box_draw(box, list, theme, field_box_baseline(box), presence_is_open(p.presence), "Empty")
 	}
 	switch s.control {
 	case .None:

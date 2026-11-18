@@ -626,6 +626,8 @@ Terminal_Settings :: struct {
 Cursor_Settings :: struct {
 	style:              Cursor_Style,
 	blink:              bool,
+	// Milliseconds a blinking cursor stays shown, and then hidden.
+	blink_interval:     int,
 	animation:          Cursor_Animation,
 	// Milliseconds one animation lasts.
 	animation_duration: int,
@@ -1797,7 +1799,17 @@ SCHEMA :: [?]Schema_Entry {
 		kind = .Bool,
 		offset = offset_of(Settings, cursor) + offset_of(Cursor_Settings, blink),
 		default_value = "true",
-		description = "Blink the cursor.",
+		description = "Blink the cursor in every terminal and text field. A program in a terminal can still " +
+			"ask its own cursor to blink or not.",
+	},
+	{
+		key = "cursor.blink_interval",
+		title = "Cursor blink interval (ms)",
+		kind = .Int,
+		offset = offset_of(Settings, cursor) + offset_of(Cursor_Settings, blink_interval),
+		default_value = "530",
+		valid = {200, 2000},
+		description = "How long a blinking cursor stays shown, and then hidden, in milliseconds.",
 	},
 	{
 		key = "cursor.animation",
@@ -1842,12 +1854,12 @@ SCHEMA :: [?]Schema_Entry {
 	},
 	{
 		key = "cursor.animation_across_panes",
-		title = "Animate cursor across panes",
+		title = "Animate cursor between panes and fields",
 		kind = .Bool,
 		offset = offset_of(Settings, cursor) + offset_of(Cursor_Settings, animation_across_panes),
 		default_value = "true",
-		description = "Use the selected cursor animation when switching between panes. " +
-			"Has no effect when \"Cursor animation\" is Off.",
+		description = "Use the selected cursor animation when the keyboard moves between panes, the " +
+			"palette, the find bar and other text fields. Has no effect when \"Cursor animation\" is Off.",
 	},
 	{
 		key = "control.enabled",

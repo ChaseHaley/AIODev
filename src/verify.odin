@@ -452,6 +452,7 @@ when AIO_CONTROL {
 		if w != nil {
 			entry = focused_session(app, w)
 			verify_window_report(&r, app, w, entry)
+			caret_state_report(&r, app, w)
 			markdown_state_report(&r, app, w)
 			changes_state_report(&r, app, w)
 			settings_page_state_report(&r, app, w)

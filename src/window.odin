@@ -677,11 +677,15 @@ window_render :: proc(app: ^App, w: ^Window, wait := true) {
 window_build_frame :: proc(app: ^App, w: ^Window) -> bool {
 	build := render.frame_build_begin(&w.list, app.device)
 	ui.carets_begin(&w.carets, cursor_effects(app), w.frame)
+	w.carets.style = cursor_caret_style(app, w)
+	w.carets.shown = cursor_visible(w)
 	for {
 		build_frame(app, w)
 		switch render.frame_build_finish(&build) {
 		case .Ready:
 			cursor_crossing_commit(app, w)
+			// A caret that moved shows at once and restarts its blink, so typing never hides it.
+			if w.carets.restart {cursor_blink_reset(w, clock_now(&app.clock))}
 			return true
 		case .Retry:
 		case .Failed: return false
@@ -739,8 +743,6 @@ build_frame :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 	if !over {pane_ghosts_draw_alone(app, w, false)}
 	if over {pane_motion_slide_clip(w, panes)}
 	if result := floating_capsules_draw(app, w); result != .Ok {return result}
-	cursor_crossing_draw(app, w)
-	cursor_blink_observe(w, blinking, clock_now(&app.clock))
 	if result := pane_drag_draw(app, w); result != .Ok {return result}
 	if result := arrange_outline_draw(app, w); result != .Ok {return result}
 	if result := tab_drag_draw(app, w); result != .Ok {return result}
@@ -776,6 +778,11 @@ build_frame :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 		if result != .Ok { return result }
 	}
 	if result := overlay_draw(app, w); result != .Ok {return result}
+	// The one caret flies above every surface, the palette and the overlays; the blink follows
+	// whichever surface holds it.
+	cursor_crossing_draw(app, w)
+	blinking ||= w.carets.claim.present && w.carets.claim.blinks
+	cursor_blink_observe(w, blinking, cursor_blink_interval(app), clock_now(&app.clock))
 	if result := status_inbox_draw(app, w); result != .Ok {return result}
 	if result := tooltip_draw(app, w); result != .Ok {return result}
 	if app.notice_window != w.id {return .Ok}
@@ -860,6 +867,11 @@ pane_draw :: proc(app: ^App, w: ^Window, pane: layout.Pane_Rect, blinking: ^bool
 		state.cursor = nil
 		if paint, shown := frame.cursor.?; shown {
 			state.cursor = cursor_paint_translate(paint, f.offset)
+			if pane_has_keyboard(app, w, pane) {
+				_ = ui.caret_claim(
+					&w.carets, terminal_caret_owner(pane.content), state.cursor.?, frame.cursor_blinking,
+				)
+			}
 		}
 	case .Settings:
 		if result := settings_pane_draw(app, w, pane); result != .Ok {return result}
@@ -925,7 +937,8 @@ terminal_pane_draw :: proc(
 		minimum_contrast = minimum_contrast,
 		focused = content_focused,
 		cursor_phase_visible = !content_focused || cursor_visible(w),
-		cursor_suppressed = cursor_crossing_suppresses(w, pane.content),
+		cursor_suppressed = content_focused && ui.caret_holds(&w.carets, terminal_caret_owner(pane.content)),
+		cursor_hidden = !content_focused && pane_cursor_held_elsewhere(app, w, pane),
 		cursor_effects = cursor_effects(app),
 		hover = link_hover_range(w, pane.content),
 	}

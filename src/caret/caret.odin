@@ -379,3 +379,77 @@ s_limit :: proc(s: ^[2]f32, from, to, limit: f32, at_most: bool) {
 	at := (edge - start) / slope
 	if slope > 0 {s[1] = min(s[1], at)} else {s[0] = max(s[0], at)}
 }
+
+// What a cursor looks like in its cell. Block_Hollow is the outline an unfocused terminal draws.
+Shape :: enum u8 {
+	Bar,
+	Block,
+	Underline,
+	Block_Hollow,
+}
+
+// A cursor as one frame drew it. `head` and `tail` are the cells where the head and the far end of its
+// smear or trail were drawn and `target` is the cell it is heading for; `shape` fills part of each.
+Paint :: struct {
+	head, tail, target:       render.Rect,
+	shape:                    Shape,
+	color, text_color:        render.Color,
+	stroke, minimum_contrast: f32,
+}
+
+// What of a cursor cell the shape fills, which is what a smear or trail stretches.
+shape_box :: proc(shape: Shape, stroke: f32, cell: render.Rect) -> render.Rect {
+	#partial switch shape {
+	case .Bar:
+		return {cell.x, cell.y, stroke * 2, cell.height}
+	case .Underline:
+		return {cell.x, cell.y + cell.height - stroke * 2, cell.width, stroke * 2}
+	}
+	return cell
+}
+
+// Draws the cursor's mark in `cell`; a block is the whole cell, and the glyph under it is the caller's.
+shape_draw :: proc(
+	list: ^render.Draw_List, shape: Shape, stroke: f32, cell: render.Rect, fill: render.Color, hollow := false,
+) {
+	switch {
+	case hollow || shape == .Block_Hollow:
+		right, bottom := cell.x + cell.width - stroke, cell.y + cell.height - stroke
+		_ = render.push_rect(list, {rect = {cell.x, cell.y, cell.width, stroke}, color = fill})
+		_ = render.push_rect(list, {rect = {cell.x, bottom, cell.width, stroke}, color = fill})
+		_ = render.push_rect(list, {rect = {cell.x, cell.y, stroke, cell.height}, color = fill})
+		_ = render.push_rect(list, {rect = {right, cell.y, stroke, cell.height}, color = fill})
+	case shape == .Block:
+		_ = render.push_rect(list, {rect = cell, color = fill})
+	case:
+		_ = render.push_rect(list, {rect = shape_box(shape, stroke, cell), color = fill})
+	}
+}
+
+// The smear or trail from the paint's tail through `corners` to its head, as the cursor's shape fills
+// each of their cells.
+paint_body_draw :: proc(
+	list: ^render.Draw_List, p: Paint, corners: []render.Rect, e: Effects, progress: f32,
+) {
+	boxes: [CORNERS_MAX]render.Rect
+	n := min(len(corners), CORNERS_MAX)
+	for cell, i in corners[:n] {boxes[i] = shape_box(p.shape, p.stroke, cell)}
+	tail, head := shape_box(p.shape, p.stroke, p.tail), shape_box(p.shape, p.stroke, p.head)
+	body_draw(list, tail, boxes[:n], head, e, p.color, progress)
+}
+
+// Eases `t`, 0..1, in and out, for what turns as a cursor travels: its colour and its shape.
+smooth :: proc(t: f32) -> f32 {
+	x := clamp(t, 0, 1)
+	return x * x * (3 - 2 * x)
+}
+
+// The colour a fraction `t` of the way from `a` to `b`.
+mix_colors :: proc(a, b: render.Color, t: f32) -> render.Color {
+	return {a.r + (b.r - a.r) * t, a.g + (b.g - a.g) * t, a.b + (b.b - a.b) * t, a.a + (b.a - a.a) * t}
+}
+
+// The box a fraction `t` of the way from `a` to `b`: the shape a head has while it turns into another.
+mix_rects :: proc(a, b: render.Rect, t: f32) -> render.Rect {
+	return lerp(a, b, t)
+}

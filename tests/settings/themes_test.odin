@@ -311,3 +311,56 @@ theme_name_edits_own_custom_theme_admission_and_line_layout :: proc(t: ^testing.
 		testing.expect_value(t, reason, "")
 	}
 }
+
+// WORK-497: the cursor is one colour in every surface, the accent unless a theme sets its own, and the
+// text under a block cursor is the text on accent unless it sets its own.
+@(test)
+the_cursor_follows_the_accent_unless_the_theme_sets_one :: proc(t: ^testing.T) {
+	for file in fixtures.SHIPPED_THEMES {
+		theme, ok := fixtures.shipped_theme_file(file)
+		if !ok {continue}
+		testing.expect_value(t, settings.theme_cursor(theme), theme.colors[.Accent].rgb)
+		testing.expect_value(t, settings.theme_cursor_text(theme), theme.colors[.Accent_Text].rgb)
+		terminal := settings.theme_terminal(theme)
+		testing.expect_value(t, terminal.cursor, theme.colors[.Accent].rgb)
+		testing.expect_value(t, terminal.cursor_text, theme.colors[.Accent_Text].rgb)
+	}
+	theme := fixtures.shipped_theme(settings.DEFAULT_THEME_ID)
+	theme.colors[.Cursor] = {0x12, 0x34, 0x56, 255}
+	theme.colors[.Cursor_Text] = {0x65, 0x43, 0x21, 255}
+	testing.expect_value(t, settings.theme_cursor(theme), settings.Color{0x12, 0x34, 0x56})
+	testing.expect_value(t, settings.theme_cursor_text(theme), settings.Color{0x65, 0x43, 0x21})
+	testing.expect_value(t, settings.theme_terminal(theme).cursor, settings.Color{0x12, 0x34, 0x56})
+	// An empty colour is how a theme file says "follow the accent".
+	cleared, parsed := settings.theme_color_parse(.Cursor, "", .Strict)
+	testing.expect(t, parsed)
+	testing.expect_value(t, cleared.a, u8(0))
+	text := settings.theme_color_text(.Cursor, cleared)
+	testing.expect_value(t, text, "")
+}
+
+@(test)
+the_blink_interval_has_a_default_and_a_range :: proc(t: ^testing.T) {
+	entry := settings.schema_find("cursor.blink_interval")
+	if !testing.expect(t, entry != nil) {return}
+	testing.expect_value(t, entry.default_value, "530")
+	testing.expect_value(t, entry.valid, settings.Range{200, 2000})
+	defaults, err := settings.defaults()
+	defer settings.destroy(&defaults)
+	testing.expect_value(t, err, nil)
+	testing.expect_value(t, defaults.cursor.blink_interval, 530)
+	for text in ([?]string{"cursor.blink_interval = 199", "cursor.blink_interval = 2001", "cursor.blink_interval = 5s"}) {
+		s, d, parse_error := settings.parse(text)
+		defer settings.destroy(&s)
+		defer settings.diagnostics_destroy(&d)
+		testing.expect_value(t, parse_error, nil)
+		testing.expect_value(t, len(d), 1)
+		testing.expect_value(t, s.cursor.blink_interval, 530)
+	}
+	s, d, parse_error := settings.parse("cursor.blink_interval = 250\n")
+	defer settings.destroy(&s)
+	defer settings.diagnostics_destroy(&d)
+	testing.expect_value(t, parse_error, nil)
+	testing.expect_value(t, len(d), 0)
+	testing.expect_value(t, s.cursor.blink_interval, 250)
+}

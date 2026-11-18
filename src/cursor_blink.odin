@@ -2,11 +2,9 @@ package main
 
 import "core:time"
 
-@(private)
-CURSOR_BLINK_INTERVAL :: 530 * time.Millisecond
-
 // The focused cursor's blink; nil is Off, a steady cursor. On shows the cursor while `visible` and
-// flips it when `deadline` passes. The procs in this file are the only writers.
+// flips it when `deadline` passes, `interval` later each time. The procs in this file are the only
+// writers.
 Cursor_Blink :: union {
 	Cursor_Blink_On,
 }
@@ -14,6 +12,12 @@ Cursor_Blink :: union {
 Cursor_Blink_On :: struct {
 	visible:  bool,
 	deadline: time.Tick,
+	interval: time.Duration,
+}
+
+// How long the cursor stays shown, and then hidden, while it blinks.
+cursor_blink_interval :: proc(app: ^App) -> time.Duration {
+	return time.Duration(app.settings.cursor.blink_interval) * time.Millisecond
 }
 
 // Whether the focused cursor is in its shown phase.
@@ -28,29 +32,33 @@ cursor_blink_deadline :: proc(w: ^Window) -> (time.Tick, bool) {
 	return on.deadline, blinking && window_drawable(w)
 }
 
-// The frame just built found whether the focused cursor blinks; a change starts or stops the cycle.
-// Drawing reports the fact because only the captured render state knows it.
-cursor_blink_observe :: proc(w: ^Window, blinking: bool, now: time.Tick) {
-	if blinking == (w.cursor_blink != nil) {return}
+// The frame just built found whether the focused cursor blinks; a change starts or stops the cycle,
+// and `interval` is the cursor.blink_interval setting. Drawing reports the fact because only the
+// captured render state knows it.
+cursor_blink_observe :: proc(w: ^Window, blinking: bool, interval: time.Duration, now: time.Tick) {
 	if !blinking {
 		w.cursor_blink = nil
 		return
 	}
-	w.cursor_blink = Cursor_Blink_On{true, time.tick_add(now, CURSOR_BLINK_INTERVAL)}
+	if on, running := &w.cursor_blink.(Cursor_Blink_On); running {
+		on.interval = interval
+		return
+	}
+	w.cursor_blink = Cursor_Blink_On{true, time.tick_add(now, interval), interval}
 }
 
 cursor_blink_tick :: proc(w: ^Window, now: time.Tick) {
 	on, blinking := &w.cursor_blink.(Cursor_Blink_On)
 	if !blinking || time.tick_diff(on.deadline, now) < 0 {return}
 	on.visible = !on.visible
-	on.deadline = time.tick_add(now, CURSOR_BLINK_INTERVAL)
+	on.deadline = time.tick_add(now, on.interval)
 	w.dirty = true
 }
 
 // Restarts the cycle with the cursor shown, so typing never hides the cursor.
 cursor_blink_reset :: proc(w: ^Window, now: time.Tick) {
 	if on, blinking := &w.cursor_blink.(Cursor_Blink_On); blinking {
-		on^ = {true, time.tick_add(now, CURSOR_BLINK_INTERVAL)}
+		on.visible, on.deadline = true, time.tick_add(now, on.interval)
 	}
 }
 
