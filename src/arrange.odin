@@ -104,20 +104,7 @@ pane_drop_preview :: proc(
 		if !drop.reorders_tab && !pane_minimum_allows(app, w, panes[:], nil, notify_failure = false) {
 			return {}, .Too_Small
 		}
-		if w.tabs_horizontal {
-			bar := window_tab_bar(app, w)
-			r := ui.tab_drop_region(bar, f32(w.width), w.scale)
-			return layout.Rect(ui.tab_tile_rect(bar, r.x, min(180 * w.scale, r.width), 0, w.scale)), .Fits
-		}
-		r := rail_new_tab_rect(w)
-		inset := 2 * w.scale
-		return {
-				r.x + inset,
-				r.y + inset,
-				max(0, min(180 * w.scale, r.width) - 2 * inset),
-				max(0, r.height - 2 * inset),
-			},
-			.Fits
+		return pane_new_tab_ghost(app, w), .Fits
 	case .Swap:
 		for pane in w.panes {if pane.node == drop.target {return pane.rect, .Fits}}
 		return {}, .Refused
@@ -133,6 +120,24 @@ pane_drop_preview :: proc(
 		return result.rect, .Too_Small
 	}
 	return result.rect, .Refused
+}
+
+// The tab a pane dropped on New tab would become: a tile at the end of the strip, or a row in the rail.
+@(private)
+pane_new_tab_ghost :: proc(app: ^App, w: ^Window) -> layout.Rect {
+	if w.tabs_horizontal {
+		bar := window_tab_bar(app, w)
+		r := ui.tab_drop_region(bar, f32(w.width), w.scale)
+		return layout.Rect(ui.tab_tile_rect(bar, r.x, min(180 * w.scale, r.width), 0, w.scale))
+	}
+	r := rail_new_tab_rect(w)
+	inset := 2 * w.scale
+	return {
+		r.x + inset,
+		r.y + inset,
+		max(0, min(180 * w.scale, r.width) - 2 * inset),
+		max(0, r.height - 2 * inset),
+	}
 }
 
 // Whether the outline shows: a destination the pane fits, or a tear-off with its window prepared.
@@ -250,75 +255,9 @@ pane_drag_target_move :: proc(
 	swap, changed_window: bool,
 ) -> bool {
 	if !window_linked(w) && pane_workspace_drag_move(app, source_window, w, x, y, swap) {return true}
-	title_height := window_title_height(w)
-	destination := selected_tab(w.workspace)
-	now := clock_now(&app.clock)
-	on_tab := -1
-	over_rail, rail_new_tab := false, false
-	if w.tabs_horizontal {
-		if tab, ok := window_tab_hit(app, w, window_tab_bar(app, w), x, y).(Tab_Chrome_Tab); ok {
-			if index := tab_index_by_id(w.workspace, tab.id); index >= 0 {
-				on_tab, destination = index, w.workspace.tabs[index]
-			}
-		}
-	} else {
-		rail_tab, new_tab_target, over := rail_pane_target(w, x, y)
-		over_rail, rail_new_tab = over, new_tab_target
-		if over && rail_tab >= 0 {
-			on_tab = rail_tab
-			if rail_tab < len(w.workspace.tabs) {destination = w.workspace.tabs[rail_tab]}
-		}
-	}
-	// A floating window covers the rail and the tiling's edge bands: a drop over it lands on its panes.
-	_, _, over_float := floating_frame_at(w, x, y)
-	if over_float {
-		on_tab, over_rail, rail_new_tab = -1, false, false
-		destination = selected_tab(w.workspace)
-	}
-	new_tab := !swap && !window_linked(w) &&
-		(w.tabs_horizontal
-				? ui.tab_drop_hit(window_tab_bar(app, w), f32(w.width), w.scale, x, y)
-				: over_rail && rail_new_tab)
-	pane_drag_hover(app, source_window, carry, w, destination, on_tab, swap, now)
-	target, direction := layout.INVALID_NODE, layout.Direction.Left
-	root := false
-	area := window_content_area(app, w)
-	band := min(24 * w.scale, area.width / 5, area.height / 5)
-	if destination != nil && on_tab >= 0 && on_tab < len(w.workspace.tabs) {
-		if destination != carry.source && !swap {target, direction = destination.tree.focus, .Right}
-	} else if !over_rail &&
-	   destination != nil &&
-	   x >= 0 &&
-	   x < f32(w.width) &&
-	   y >= title_height &&
-	   y < f32(w.height) {
-		if !swap && !over_float &&
-		   (x < area.x + band ||
-				   x >= area.x + area.width - band ||
-				   y < area.y + band ||
-				   y >= area.y + area.height - band) {
-			root, direction, target = true, nearest_side(area, x, y), destination.tree.focus
-			if destination == carry.source &&
-			   carry.node == destination.tree.root {target, root = layout.INVALID_NODE, false}
-		} else if pane, found := layout.hit_test(w.panes[:], x, y);
-		   found && (destination != carry.source || pane.node != carry.node) {
-			target, direction = pane.node, nearest_side(pane.rect, x, y)
-		}
-	}
-	if swap && destination != carry.source {target = layout.INVALID_NODE}
-	// Each place keeps only the fields it uses, so the same place compares equal wherever the pointer is.
-	next: Pane_Destination
-	switch {
-	case new_tab:
-		next = Pane_Drop{w.id, destination, .New_Tab, layout.INVALID_NODE, .Left, .Fits, false}
-	case target == layout.INVALID_NODE:
-	case swap:
-		next = Pane_Drop{w.id, destination, .Swap, target, .Left, .Fits, false}
-	case root:
-		next = Pane_Drop{w.id, destination, .Edge, target, direction, .Fits, false}
-	case:
-		next = Pane_Drop{w.id, destination, .Beside, target, direction, .Fits, false}
-	}
+	tabs := pane_drop_tabs(app, w, x, y, swap)
+	pane_drag_hover(app, source_window, carry, w, tabs.destination, tabs.on_tab, swap, clock_now(&app.clock))
+	next := pane_drop_place(app, w, x, y, tabs, carry.source, carry.node, swap)
 	if pane_destination_same(carry.destination, next) && !changed_window {return true}
 	rect: layout.Rect
 	if drop, placed := &next.(Pane_Drop); placed {
@@ -326,16 +265,127 @@ pane_drag_target_move :: proc(
 	}
 	shown := pane_drag_ghost_shown(a)
 	pane_drag_retarget(app, source_window, a, next)
-	// The ghost fades in on every drop kind, so crossing between the tab strip and a pane
-	// never flashes between faded and opaque.
-	ui.motion_target(&carry.reveal, 1, GHOST_DURATION, .Decelerate, app.animations)
+	drop_ghost_move(app, carry, rect, shown)
 	w.dirty = true
 	source_window.dirty = true
+	return true
+}
+
+// What a point of a window offers a dropped pane before any pane is looked at: the tab it would land in
+// and what the tab strip or rail says about the point.
+Drop_Tabs :: struct {
+	// The window's selected tab, or the tab under the pointer.
+	destination: ^Tab,
+	// The index of the tab under the pointer, or -1.
+	on_tab:      int,
+	over_rail:   bool,
+	// A floating window covers the rail and the tiling's edge bands: a drop over it lands on its panes.
+	over_float:  bool,
+	// The strip's New tab zone, or the rail's New tab row.
+	new_tab:     bool,
+}
+
+// A header drag and files dragged in from Explorer find their drop through this and pane_drop_place.
+@(private, require_results)
+pane_drop_tabs :: proc(app: ^App, w: ^Window, x, y: f32, swap: bool) -> Drop_Tabs {
+	tabs := Drop_Tabs {
+		destination = selected_tab(w.workspace),
+		on_tab      = -1,
+	}
+	rail_new_tab := false
+	if w.tabs_horizontal {
+		if tab, ok := window_tab_hit(app, w, window_tab_bar(app, w), x, y).(Tab_Chrome_Tab); ok {
+			if index := tab_index_by_id(w.workspace, tab.id); index >= 0 {
+				tabs.on_tab, tabs.destination = index, w.workspace.tabs[index]
+			}
+		}
+	} else {
+		rail_tab, new_tab_target, over := rail_pane_target(w, x, y)
+		tabs.over_rail, rail_new_tab = over, new_tab_target
+		if over && rail_tab >= 0 {
+			tabs.on_tab = rail_tab
+			if rail_tab < len(w.workspace.tabs) {tabs.destination = w.workspace.tabs[rail_tab]}
+		}
+	}
+	_, _, tabs.over_float = floating_frame_at(w, x, y)
+	if tabs.over_float {
+		tabs.on_tab, tabs.over_rail, rail_new_tab = -1, false, false
+		tabs.destination = selected_tab(w.workspace)
+	}
+	tabs.new_tab = !swap && !window_linked(w) &&
+		(w.tabs_horizontal
+				? ui.tab_drop_hit(window_tab_bar(app, w), f32(w.width), w.scale, x, y)
+				: tabs.over_rail && rail_new_tab)
+	return tabs
+}
+
+// Where a pane dropped at x, y lands, before its fit is judged: New tab on that zone, beside the focused
+// pane of the tab under the pointer, along a window edge in its band, or beside the pane under the pointer
+// on its nearest side. `source` and `node` name the pane being moved, which is no target for itself; files
+// dragged in have none. `edges` is false where a window offers no edge dock. Nil lands nowhere.
+@(private, require_results)
+pane_drop_place :: proc(
+	app: ^App,
+	w: ^Window,
+	x, y: f32,
+	tabs: Drop_Tabs,
+	source: ^Tab,
+	node: layout.Node_Id,
+	swap: bool,
+	edges := true,
+) -> Pane_Destination {
+	destination := tabs.destination
+	target, direction := layout.INVALID_NODE, layout.Direction.Left
+	root := false
+	area := window_content_area(app, w)
+	band := min(24 * w.scale, area.width / 5, area.height / 5)
+	if destination != nil && tabs.on_tab >= 0 && tabs.on_tab < len(w.workspace.tabs) {
+		if destination != source && !swap {target, direction = destination.tree.focus, .Right}
+	} else if !tabs.over_rail &&
+	   destination != nil &&
+	   x >= 0 &&
+	   x < f32(w.width) &&
+	   y >= window_title_height(w) &&
+	   y < f32(w.height) {
+		if edges &&
+		   !swap &&
+		   !tabs.over_float &&
+		   (x < area.x + band ||
+				   x >= area.x + area.width - band ||
+				   y < area.y + band ||
+				   y >= area.y + area.height - band) {
+			root, direction, target = true, nearest_side(area, x, y), destination.tree.focus
+			if destination == source && node == destination.tree.root {target, root = layout.INVALID_NODE, false}
+		} else if pane, found := layout.hit_test(w.panes[:], x, y);
+		   found && (destination != source || pane.node != node) {
+			target, direction = pane.node, nearest_side(pane.rect, x, y)
+		}
+	}
+	if swap && destination != source {target = layout.INVALID_NODE}
+	// Each place keeps only the fields it uses, so the same place compares equal wherever the pointer is.
+	switch {
+	case tabs.new_tab:
+		return Pane_Drop{w.id, destination, .New_Tab, layout.INVALID_NODE, .Left, .Fits, false}
+	case target == layout.INVALID_NODE:
+		return nil
+	case swap:
+		return Pane_Drop{w.id, destination, .Swap, target, .Left, .Fits, false}
+	case root:
+		return Pane_Drop{w.id, destination, .Edge, target, direction, .Fits, false}
+	}
+	return Pane_Drop{w.id, destination, .Beside, target, direction, .Fits, false}
+}
+
+// Sends the outline's place to `rect`: it eases there and fades in, as every drop kind does, so crossing
+// between the tab strip and a pane never flashes between faded and opaque. `shown` is whether it showed
+// before this move.
+@(private)
+drop_ghost_move :: proc(app: ^App, carry: ^Pane_Carry, rect: layout.Rect, shown: bool) {
+	ui.motion_target(&carry.reveal, 1, GHOST_DURATION, .Decelerate, app.animations)
 	values := [4]f32{rect.x, rect.y, rect.width, rect.height}
 	for &m, i in carry.ghost {
 		ui.motion_target(&m, values[i], GHOST_DURATION, .Decelerate, app.animations && shown)
 	}
-	return true
 }
 
 // Resting on another tab of the window shows it after a moment; it must not move the tab marked selection.
@@ -440,15 +490,22 @@ pane_drag_tick :: proc(app: ^App, w: ^Window, now: time.Tick) {
 }
 
 pane_drag_animating :: proc(w: ^Window) -> bool {
-	_, carry := pane_drag_state(w)
+	carry := drop_carry(w)
 	if carry == nil {return false}
 	if ui.motion_active(carry.reveal) {return true}
 	for m in carry.ghost {if ui.motion_active(m) {return true}}
 	return false
 }
 
-pane_drag_animate :: proc(app: ^App, w: ^Window, enabled: bool, frame: ui.Frame_Time) {
+// The outline state of the drop shown in w: a pane drag's, and no other drop yet.
+@(private)
+drop_carry :: proc(w: ^Window) -> ^Pane_Carry {
 	_, carry := pane_drag_state(w)
+	return carry
+}
+
+pane_drag_animate :: proc(app: ^App, w: ^Window, enabled: bool, frame: ui.Frame_Time) {
+	carry := drop_carry(w)
 	if carry == nil {return}
 	if !enabled && pane_drag_animating(w) {
 		for &m in carry.ghost {m.value = m.target}
@@ -463,9 +520,10 @@ pane_drag_animate :: proc(app: ^App, w: ^Window, enabled: bool, frame: ui.Frame_
 	}
 }
 
-// The label a drop would produce, independent of its drawing.
+// The label a drop would produce, independent of its drawing. `opening` is files being opened, not a pane
+// being moved.
 @(require_results)
-pane_drag_label :: proc(drop: Pane_Drop) -> string {
+pane_drag_label :: proc(drop: Pane_Drop, opening := false) -> string {
 	switch drop.place {
 	case .New_Tab:
 		if drop.reorders_tab {return "Move tab to end"}
@@ -476,10 +534,11 @@ pane_drag_label :: proc(drop: Pane_Drop) -> string {
 		return "Dock to workspace edge"
 	case .Beside, .Region:
 	}
-	return "Move pane here"
+	return opening ? "Open here" : "Move pane here"
 }
 
-// The outline of a pane drop: in the window it lands in, or around the pane a tear-off takes from its own.
+// The outline of a pane drop: in the window it lands in, or around the pane a tear-off takes from its own;
+// and of the files dragged over this window, which land where it shows.
 pane_drag_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 	a, carry := pane_drag_state(w)
 	if a != nil && !drag_tearing_off(a) {a = nil}
@@ -489,25 +548,30 @@ pane_drag_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 			break
 		}
 	}
-	if a == nil || !pane_drag_ghost_shown(a) {return .Ok}
+	if a == nil {return .Ok}
+	if !pane_drag_ghost_shown(a) {return .Ok}
+	if _, placed := carry.destination.(Pane_Drop); placed {return drop_outline_draw(app, w, carry, false)}
 	r := render.Rect{carry.ghost[0].value, carry.ghost[1].value, carry.ghost[2].value, carry.ghost[3].value}
 	if render.push_layer(&w.list, {0, 0, f32(w.width), f32(w.height)}) != .None {return .Ok}
-	radius := f32(app.settings.pane.corner_radius) * w.scale
 	// The thumbnail copies this pane live, so a tear-off marks it with an outline and nothing over its text.
+	radius := f32(app.settings.pane.corner_radius) * w.scale
+	_ = render.push_rect(&w.list, {rect = r, color = app.theme.accent, radius = radius, stroke = 2 * w.scale})
+	return .Ok
+}
+
+// The outline and label of a drop that fits, in the window it lands in.
+@(private)
+drop_outline_draw :: proc(app: ^App, w: ^Window, carry: ^Pane_Carry, opening: bool) -> render.Build_Status {
 	drop, placed := carry.destination.(Pane_Drop)
-	if !placed {
-		_ = render.push_rect(
-			&w.list,
-			{rect = r, color = app.theme.accent, radius = radius, stroke = 2 * w.scale},
-		)
-		return .Ok
-	}
+	if !placed || drop.fit != .Fits {return .Ok}
+	r := render.Rect{carry.ghost[0].value, carry.ghost[1].value, carry.ghost[2].value, carry.ghost[3].value}
+	if render.push_layer(&w.list, {0, 0, f32(w.width), f32(w.height)}) != .None {return .Ok}
 	ghost := carry.ghost
 	target := render.Rect{ghost[0].target, ghost[1].target, ghost[2].target, ghost[3].target}
 	opacity := carry.reveal.value
 	if pane_outline_draw(app, w, r, target, opacity) != .None {return .Ok}
 	r = target
-	label := pane_drag_label(drop)
+	label := pane_drag_label(drop, opening)
 	text := ui.text_styled(&w.ui_text, .Strong)
 	width := ui.text_width(&text, label)
 	label_color := app.theme.text
