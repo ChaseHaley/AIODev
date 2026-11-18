@@ -7,7 +7,7 @@ import "core:strings"
 
 HELP_OVERVIEW :: `aioctl <command> [arguments]
 Inspect: ping, screen, cells, state, wait, expect, pixels, diff, draws, perf.
-Drive: type, key, run, mouse, drop, focus, resize, dpi, tray, pick, command, window.
+Drive: type, key, run, mouse, drag, drop, focus, resize, dpi, tray, pick, command, window.
 Record: vt record on|off.
 Use help <command> for grammar, evidence, output, and defaults.
 Coordinates and inclusive ranges are zero-based; quote each text argument in your shell.
@@ -438,12 +438,27 @@ Output is one line: ok; <changes>. A desktop instance refuses: its dialog takes 
 		put(
 			&w,
 			`drop <pos> [--px|--screen] <path>...
-Delivers a file drop from Explorer to the selected window at <pos>, as Windows delivers one: Markdown
-files open in a Markdown pane, a folder in a shell, any other file in Neovim in a terminal pane, each
-beside the pane under the point, or beside the focused pane when the point is on no pane.
+Delivers a file drop from Explorer to the selected window at <pos>, as Windows delivers one. The first
+file opens where the drop outline would show at <pos> (see help drag): beside the pane under the point on
+its nearest side, along a window edge, or in a new tab; each further file opens beside the one before.
+A Markdown file opens in a Markdown pane, a folder in a shell, any other file in Neovim in a terminal pane.
 Positions are nonnegative col,row cell centers of the focused pane; --px uses client x,y pixels and
 --screen signed 32-bit screen pixels. Paths are absolute and local. At most 8 files open from one drop.
 Proves the app's drop path, not Explorer's drag. No defaults.
+Output is one line: ok; <changes>. Failures start with error:.
+`,
+		)
+	case .Drag:
+		put(
+			&w,
+			`drag enter|over <pos> [--px|--screen]
+drag leave
+Delivers a drag of files from Explorer over the selected window, as Windows delivers it before a drop:
+enter and over put the drop target at <pos>, leave takes it away. The window shows the pane header
+drag's outline where a drop would open the files; state files.dragging, files.drop.shown, .place (beside,
+edge or new_tab), .direction, .target (pane node), .tab (index), .root, .new_tab and .rect report it.
+A rest of 350 ms over another tab switches to it, and leave shows the tab that was showing again.
+Positions are read as for drop. Proves the app's drag path, not Explorer's. No defaults.
 Output is one line: ok; <changes>. Failures start with error:.
 `,
 		)

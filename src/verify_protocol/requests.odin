@@ -135,6 +135,18 @@ Drop :: struct {
 	pixels, screen: bool,
 	paths:          []string,
 }
+// Where a drag of files from Explorer is over the selected window: it entered, moved to a point or left.
+// Enter and Over carry a position, read as a mouse's.
+Drag_Phase :: enum {
+	Enter,
+	Over,
+	Leave,
+}
+Drag :: struct {
+	phase:          Drag_Phase,
+	position:       Position,
+	pixels, screen: bool,
+}
 Command :: struct {
 	name:      string,
 	direction: layout.Direction,
@@ -200,6 +212,7 @@ Request :: union {
 	Tray,
 	Pick,
 	Drop,
+	Drag,
 	Command,
 	Window_Select,
 	Window_Move,
@@ -237,6 +250,7 @@ Verb :: enum {
 	Tray,
 	Pick,
 	Drop,
+	Drag,
 	Command,
 	Window,
 	Help,
@@ -266,6 +280,7 @@ VERB_NAMES := [Verb]string {
 	.Tray    = "tray",
 	.Pick    = "pick",
 	.Drop    = "drop",
+	.Drag    = "drag",
 	.Command = "command",
 	.Window  = "window",
 	.Help    = "help",
@@ -650,6 +665,8 @@ parse :: proc(args: []string, allocator := context.allocator) -> (Request, Parse
 		return Pick{args[1]}, {}
 	case .Drop:
 		return parse_drop(args)
+	case .Drag:
+		return parse_drag(args)
 	case .Type, .Focus, .Tray, .Resize, .Dpi:
 		if len(args) != 2 {return {}, bad}
 		s := args[1]
@@ -791,6 +808,28 @@ parse :: proc(args: []string, allocator := context.allocator) -> (Request, Parse
 		return parse_vt(args)
 	}
 	return {}, bad
+}
+
+@(private, require_results)
+parse_drag :: proc(args: []string) -> (Request, Parse_Error) {
+	bad := Parse_Error{args[0], "use drag enter|over <pos> [--px|--screen] or drag leave; see help drag"}
+	if len(args) < 2 {return {}, bad}
+	if args[1] == "leave" {
+		if len(args) != 2 {return {}, bad}
+		return Drag{phase = .Leave}, {}
+	}
+	if args[1] != "enter" && args[1] != "over" || len(args) < 3 || len(args) > 4 {return {}, bad}
+	position, ok := pair(args[2], ',', true)
+	if !ok {return {}, {args[2], "use col,row, pixel x,y with --px, or signed x,y with --screen"}}
+	d := Drag {
+		phase    = args[1] == "enter" ? .Enter : .Over,
+		position = position,
+	}
+	if len(args) == 4 {
+		if args[3] != "--px" && args[3] != "--screen" {return {}, {args[3], "use --px or --screen"}}
+		d.pixels, d.screen = args[3] == "--px", args[3] == "--screen"
+	}
+	return d, {}
 }
 
 @(private, require_results)

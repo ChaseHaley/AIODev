@@ -176,7 +176,7 @@ help_verbs :: proc(t: ^testing.T) {
 	testing.expect_value(t, verify_protocol.help(&b), verify_protocol.Error.None)
 	testing.expect_value(t, strings.to_string(b), verify_protocol.HELP_OVERVIEW)
 	for command in ([]string{"ping", "screen", "cells", "state", "wait", "expect", "type", "key",
-		"run", "mouse", "drop", "focus", "resize", "dpi", "tray", "pick", "command", "window", "help", "capture",
+		"run", "mouse", "drag", "drop", "focus", "resize", "dpi", "tray", "pick", "command", "window", "help", "capture",
 		"pixels", "diff", "draws", "perf", "vt"}) {
 		strings.builder_reset(&b)
 		testing.expect_value(t, verify_protocol.help(&b, command), verify_protocol.Error.None)
@@ -257,4 +257,32 @@ drop_requests_carry_the_point_the_unit_and_every_path :: proc(t: ^testing.T) {
 	d = r.(verify_protocol.Drop)
 	testing.expect(t, !d.screen && !d.pixels)
 	testing.expect_value(t, len(d.paths), 1)
+}
+
+@(test)
+drag_requests_carry_the_phase_and_the_point :: proc(t: ^testing.T) {
+	r, err := verify_protocol.parse({"drag", "enter", "10,20", "--px"})
+	testing.expect_value(t, err.advice, "")
+	d := r.(verify_protocol.Drag)
+	testing.expect_value(t, d.phase, verify_protocol.Drag_Phase.Enter)
+	testing.expect_value(t, d.position, verify_protocol.Position{10, 20})
+	testing.expect(t, d.pixels && !d.screen)
+	r, err = verify_protocol.parse({"drag", "over", "-5,6", "--screen"})
+	testing.expect_value(t, err.advice, "")
+	d = r.(verify_protocol.Drag)
+	testing.expect_value(t, d.phase, verify_protocol.Drag_Phase.Over)
+	testing.expect(t, d.screen && !d.pixels)
+	r, err = verify_protocol.parse({"drag", "over", "3,4"})
+	testing.expect_value(t, err.advice, "")
+	testing.expect(t, !r.(verify_protocol.Drag).pixels)
+	r, err = verify_protocol.parse({"drag", "leave"})
+	testing.expect_value(t, err.advice, "")
+	testing.expect_value(t, r.(verify_protocol.Drag).phase, verify_protocol.Drag_Phase.Leave)
+	for args in ([][]string{
+		{"drag"}, {"drag", "enter"}, {"drag", "leave", "1,2"}, {"drag", "drop", "1,2"}, {"drag", "over", "x"},
+		{"drag", "over", "1,2", "--bad"}, {"drag", "over", "1,2", "--px", "--px"},
+	}) {
+		_, bad := verify_protocol.parse(args)
+		testing.expect(t, bad.advice != "", args[0])
+	}
 }

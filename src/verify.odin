@@ -197,6 +197,7 @@ when AIO_CONTROL {
 		     verify_protocol.Run,
 		     verify_protocol.Mouse,
 		     verify_protocol.Drop,
+		     verify_protocol.Drag,
 		     verify_protocol.Focus,
 		     verify_protocol.Resize,
 		     verify_protocol.Dpi,
@@ -492,6 +493,7 @@ when AIO_CONTROL {
 			floating_state_report(&r, w)
 			hidden_panes_state_report(&r, app, w)
 			drag_state_report(&r, w)
+			file_drag_state_report(&r, w)
 		}
 		if entry != nil {verify_session_report(&r, app, w, entry)}
 		verify_notices_report(&r, app)
@@ -1080,6 +1082,20 @@ when AIO_CONTROL {
 			if !ok {return .Invalid_Argument}
 			paths := strings.join(r.paths, "\n", context.temp_allocator)
 			handle_event(app, platform.Files_Drop_Event{w.id, position.x, position.y, paths})
+		case verify_protocol.Drag:
+			phases := [verify_protocol.Drag_Phase]platform.Files_Drag_Phase {
+				.Enter = .Enter,
+				.Over  = .Over,
+				.Leave = .Leave,
+			}
+			position: [2]i32
+			if r.phase != .Leave {
+				ok: bool
+				if position, ok = verify_position(app, w, r.position, r.pixels, r.screen); !ok {
+					return .Invalid_Argument
+				}
+			}
+			handle_event(app, platform.Files_Drag_Event{w.id, phases[r.phase], position.x, position.y})
 		case verify_protocol.Window_Move:
 			if platform.window_set_position(
 				   &app.platform,
