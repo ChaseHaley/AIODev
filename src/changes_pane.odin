@@ -1088,12 +1088,12 @@ changes_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: input.Mou
 		w.dirty = true
 		return
 	}
-	if pane.state.overview_held {
+	if pane.state.overview_drag.active {
 		if .Left in e.buttons {
 			pane.state.diff_scroll = ui.changes_overview_drag(&pane.state, g, y)
 			_ = ui.changes_scroll_diff(&pane.state, g, 0)
 		} else {
-			pane.state.overview_held = false
+			pane.state.overview_drag = {}
 		}
 		w.dirty = true
 		pointer_set(app, w, .Arrow)
@@ -1289,7 +1289,7 @@ changes_release :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) -> b
 		pane := changes_find(app, shown.content.id)
 		if pane == nil {continue}
 		if pane.state.turn_list_bar.active {pane.state.turn_list_bar, cleared = {}, true}
-		if pane.state.overview_held {pane.state.overview_held, cleared = false, true}
+		if pane.state.overview_drag.active {pane.state.overview_drag, cleared = {}, true}
 		if pane.state.press != {} {pane.state.press, cleared = {}, true}
 		if pane.dragging != .None {pane.dragging, cleared = .None, true}
 		if ui.field_release(&pane.filter_editor) {cleared = true}
@@ -1516,7 +1516,8 @@ when AIO_CONTROL {
 		filter_field_rect, filter_clear_rect, filter_bar_clear_rect: render.Rect
 		regex_rect, sticky_rect, strip_older_rect, strip_newer_rect: render.Rect
 		row_rect, summary_rect, panel_rect, files_button_rect, tools_button_rect: render.Rect
-		overview_rect, overview_box_rect, turn_title_rect: render.Rect
+		overview_rect, overview_thumb_rect, turn_title_rect: render.Rect
+		overview_state := ui.Scrollbar_State.Collapsed
 		row_steps := 0
 		range_title := ""
 		title_buffer: [96]u8
@@ -1535,7 +1536,8 @@ when AIO_CONTROL {
 				files_button_rect, tools_button_rect = g.files_button, g.tools_button
 				layout_button_rect, fold_button_rect, filter_button_rect = g.layout_button, g.fold_button, g.filter_button
 				filter_bar_clear_rect = g.filter_bar_clear
-				overview_rect, overview_box_rect = g.overview, ui.changes_overview_box(&pane.state, g)
+				overview_rect, overview_thumb_rect = g.overview, ui.changes_overview_thumb(&pane.state, g)
+				overview_state = ui.changes_overview_state(&pane.state, g, w.pointer)
 				if view.notice == .Recording_Off {notice_rect = g.notice_button}
 				// The panel's parts exist while it is open: the chips, the hooks button and the turn strip.
 				if pane.state.panel_open {
@@ -1681,7 +1683,10 @@ when AIO_CONTROL {
 		state_rect(r, "changes.files_button_rect", files_button_rect)
 		state_rect(r, "changes.tools_button_rect", tools_button_rect)
 		state_rect(r, "changes.overview_rect", overview_rect)
-		state_rect(r, "changes.overview_box_rect", overview_box_rect)
+		state_rect(r, "changes.overview_thumb_rect", overview_thumb_rect)
+		look := "rest"
+		if overview_state == .Hovered {look = "hover"} else if overview_state == .Active {look = "drag"}
+		state_text(r, "changes.overview_state", look)
 		state_rect(r, "changes.turn_title_rect", turn_title_rect)
 		state_rect(r, "changes.notice_button_rect", notice_rect)
 		state_rect(r, "changes.hooks_rect", hooks_rect)

@@ -1141,24 +1141,27 @@ the_overview_strip_scrolls_the_diff_by_press_and_drag :: proc(t: ^testing.T) {
 	if !testing.expect(t, total > 2 * visible) {return}
 	testing.expect_value(t, pane.state.diff_scroll, 0)
 
-	// A press below the box puts that point at the centre of the view, and a click releases the strip.
-	k := lane.height / f32(total)
+	// A press on the track below the thumb pages one view toward the pointer and holds nothing, as every
+	// scrollbar's track press does.
 	click(&f.state, w, {lane.x, lane.y + lane.height * 0.75 - 2, lane.width, 4})
-	testing.expect(t, !pane.state.overview_held)
-	middle := int((lane.height * 0.75 - f32(visible) * k / 2) / k)
-	testing.expect(t, abs(pane.state.diff_scroll - middle) <= int(2 / k) + 2)
+	testing.expect(t, !pane.state.overview_drag.active)
+	testing.expect_value(t, pane.state.diff_scroll, visible)
 
-	// A press inside the box holds it, and moving the pointer scrolls by its distance.
+	// A press on the thumb holds it where it was grabbed, and moving the pointer scrolls by its distance.
 	pane.state.diff_scroll = 0
 	g = app.changes_geometry_of(&f.state, w, pane, shown)
+	thumb := ui.changes_overview_thumb(&pane.state, g)
+	testing.expect(t, thumb.height >= 24)
 	x, y := i32(lane.x + lane.width / 2), i32(lane.y + 3)
 	app.handle_event(&f.state, input.Mouse_Button_Event{window = w.id, x = x, y = y, button = .Left, pressed = true})
-	testing.expect(t, pane.state.overview_held)
+	testing.expect(t, pane.state.overview_drag.active)
+	testing.expect_value(t, pane.state.diff_scroll, 0)
 	app.handle_event(&f.state, input.Mouse_Move_Event{window = w.id, x = x, y = y + 40, buttons = {.Left}})
 	moved := pane.state.diff_scroll
-	testing.expect(t, abs(f32(moved) - 40 / k) <= 2 / k + 2)
+	per_dip := f32(total - visible) / (lane.height - thumb.height)
+	testing.expect(t, abs(f32(moved) - 40 * per_dip) <= per_dip + 2)
 	app.handle_event(&f.state, input.Mouse_Button_Event{window = w.id, x = x, y = y + 40, button = .Left})
-	testing.expect(t, !pane.state.overview_held)
+	testing.expect(t, !pane.state.overview_drag.active)
 	// Released, moving no longer scrolls.
 	app.handle_event(&f.state, input.Mouse_Move_Event{window = w.id, x = x, y = y + 80})
 	testing.expect_value(t, pane.state.diff_scroll, moved)

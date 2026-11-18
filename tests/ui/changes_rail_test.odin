@@ -332,7 +332,7 @@ expand_files :: proc(f: ^Changes_Fixture, view: ^ui.Changes_View) {
 }
 
 @(test)
-changes_overview_maps_the_stream_and_scrolls_like_a_scrollbar :: proc(t: ^testing.T) {
+changes_overview_is_the_shared_scrollbar_over_the_map :: proc(t: ^testing.T) {
 	f: Changes_Fixture
 	view: ui.Changes_View
 	if !fixture_make(t, &f, &view) {return}
@@ -341,12 +341,11 @@ changes_overview_maps_the_stream_and_scrolls_like_a_scrollbar :: proc(t: ^testin
 	defer ui.changes_state_destroy(&state)
 	expand_files(&f, &view)
 
-	// A pane that fits the stream shows a box over the whole lane.
+	// A pane that fits the stream has nothing to scroll, so no thumb.
 	roomy := ui.changes_geometry({0, 0, 900, 900}, 1, &view, &f.text)
 	ui.changes_layout(&state, &view, &f.text, &f.mono, roomy.diff.width, 1)
 	testing.expect_value(t, roomy.overview.width, f32(12))
-	box := ui.changes_overview_box(&state, roomy)
-	testing.expect_value(t, box, render.Rect{roomy.overview.x, roomy.overview.y, 12, roomy.overview.height})
+	testing.expect_value(t, ui.changes_overview_thumb(&state, roomy), render.Rect{})
 
 	g := ui.changes_geometry({0, 0, 900, 150}, 1, &view, &f.text)
 	ui.changes_layout(&state, &view, &f.text, &f.mono, g.diff.width, 1)
@@ -355,15 +354,19 @@ changes_overview_maps_the_stream_and_scrolls_like_a_scrollbar :: proc(t: ^testin
 	total, visible := state.rows.total, int(g.diff.height)
 	limit := total - visible
 	if !testing.expect(t, limit > 0) {return}
-	k := lane.height / f32(total)
 
-	// The box is the visible part of the whole stream, at the top and at the bottom.
-	box = ui.changes_overview_box(&state, g)
-	testing.expect_value(t, box.y, lane.y)
-	testing.expect(t, abs(box.height - max(f32(visible) * k, 8)) < 0.01)
+	// The lane is the track and the thumb is the visible part: at least as tall as the shared bar's
+	// smallest thumb, flush with the lane's ends at the stream's ends, and inside its width.
+	bar, shown := ui.changes_overview_bar(&state, g)
+	if !testing.expect(t, shown) {return}
+	testing.expect_value(t, bar.track, lane)
+	thumb := bar.thumb
+	testing.expect(t, thumb.height >= 24)
+	testing.expect(t, thumb.x > lane.x && thumb.x + thumb.width < lane.x + lane.width)
+	testing.expect_value(t, thumb.y, lane.y)
 	state.diff_scroll = limit
-	box = ui.changes_overview_box(&state, g)
-	testing.expect(t, abs(box.y + box.height - (lane.y + lane.height)) < 0.01)
+	thumb = ui.changes_overview_thumb(&state, g)
+	testing.expect(t, abs(thumb.y + thumb.height - (lane.y + lane.height)) < 0.01)
 	state.diff_scroll = 0
 
 	// The lane answers with its own part, over what lies under it.
@@ -371,26 +374,30 @@ changes_overview_maps_the_stream_and_scrolls_like_a_scrollbar :: proc(t: ^testin
 	testing.expect_value(t, ui.changes_hit(g, &view, &state, x, y), ui.Changes_Hit{.Overview, 0, 0})
 	testing.expect(t, ui.changes_hit(g, &view, &state, lane.x - 2, y).part != .Overview)
 
-	// A press outside the box puts the point at the centre of the view.
-	press_y := lane.y + lane.height * 0.75
-	state.diff_scroll = ui.changes_overview_press(&state, g, press_y)
-	testing.expect(t, state.overview_held)
-	box = ui.changes_overview_box(&state, g)
-	testing.expect(t, abs(box.y + box.height / 2 - press_y) <= 1)
-	// The top and the bottom of the lane reach the stream's ends.
-	state.diff_scroll = ui.changes_overview_press(&state, g, lane.y)
-	testing.expect_value(t, state.diff_scroll, 0)
-	state.diff_scroll = ui.changes_overview_press(&state, g, lane.y + lane.height)
-	testing.expect_value(t, state.diff_scroll, limit)
+	// Like every scrollbar: rest away from the pointer, hover under it, held while dragged.
+	testing.expect_value(t, ui.changes_overview_state(&state, g, {lane.x - 20, y}), ui.Scrollbar_State.Collapsed)
+	testing.expect_value(t, ui.changes_overview_state(&state, g, {x, y}), ui.Scrollbar_State.Hovered)
 
-	// A press inside the box keeps where it was grabbed, and a drag moves by the pointer's distance.
+	// A press on the track pages one view toward the pointer and holds nothing.
+	state.diff_scroll = ui.changes_overview_press(&state, g, lane.y + lane.height - 1)
+	testing.expect_value(t, state.diff_scroll, min(visible, limit))
+	testing.expect(t, !state.overview_drag.active)
+	state.diff_scroll = limit
+	testing.expect_value(t, ui.changes_overview_press(&state, g, lane.y + 1), max(0, limit - visible))
+	testing.expect(t, !state.overview_drag.active)
+
+	// A press on the thumb leaves the view and keeps where it was grabbed; a drag moves by the pointer's
+	// distance in the lane, and the ends of the lane reach the ends of the stream.
 	state.diff_scroll = limit / 2
-	box = ui.changes_overview_box(&state, g)
-	grab := box.y + 3
+	thumb = ui.changes_overview_thumb(&state, g)
+	grab := thumb.y + 3
 	testing.expect_value(t, ui.changes_overview_press(&state, g, grab), limit / 2)
-	testing.expect_value(t, state.overview_grab, f32(3))
+	testing.expect(t, state.overview_drag.active)
+	testing.expect_value(t, state.overview_drag.grab, f32(3))
+	testing.expect_value(t, ui.changes_overview_state(&state, g, {lane.x - 20, y}), ui.Scrollbar_State.Active)
 	moved := ui.changes_overview_drag(&state, g, grab + 10)
-	testing.expect(t, abs(f32(moved - limit / 2) - 10 / k) <= 1 / k + 1)
+	per_dip := f32(limit) / (lane.height - thumb.height)
+	testing.expect(t, abs(f32(moved - limit / 2) - 10 * per_dip) <= 1)
 	testing.expect_value(t, ui.changes_overview_drag(&state, g, lane.y - 500), 0)
 	testing.expect_value(t, ui.changes_overview_drag(&state, g, lane.y + lane.height + 500), limit)
 

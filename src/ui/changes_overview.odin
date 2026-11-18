@@ -4,10 +4,12 @@ import "aio:render"
 import "core:math"
 
 // The overview strip at the right edge of the diff: the whole stream squeezed into the lane's height, each
-// file's span as a faint segment under a hairline, added and removed runs and comment cards as ticks, and
-// the part on screen as a translucent box. It replaces the pane scrollbar: a press or drag on it scrolls
-// as a scrollbar does. The ticks come from the cached rows (changes_ticks_build), so drawing allocates
-// nothing and never walks the diff.
+// file's span as a faint segment under a hairline, and added and removed runs and comment cards as ticks.
+// It replaces the pane scrollbar, so it is one: the visible part is the shared scrollbar's thumb (its
+// layout, colours, hover and drag states, and its track press that pages) laid over the map. The map
+// outside the thumb is dimmed, so the thumb reads whatever lies under it: green, red or an empty lane.
+// The ticks come from the cached rows (changes_ticks_build), so drawing allocates nothing and never walks
+// the diff.
 
 @(private = "file")
 OVERVIEW_TICK_INSET :: f32(3)
@@ -18,61 +20,85 @@ OVERVIEW_TICK_MINIMUM :: f32(2)
 @(private = "file")
 OVERVIEW_COMMENT_MINIMUM :: f32(4)
 @(private = "file")
-OVERVIEW_BOX_MINIMUM :: f32(8)
-@(private = "file")
 OVERVIEW_SEGMENT_ALPHA :: f32(0.5)
+// How much of a tick's strength remains outside the thumb.
 @(private = "file")
-OVERVIEW_BOX_ALPHA :: f32(0.09)
+OVERVIEW_DIM_ALPHA :: f32(0.45)
+// The thumb's outline, by state: at rest, under the pointer, held.
 @(private = "file")
-OVERVIEW_BOX_ACTIVE_ALPHA :: f32(0.14)
+@(rodata)
+OVERVIEW_OUTLINE_ALPHA := [Scrollbar_State]f32{.Collapsed = 0.55, .Hovered = 0.75, .Active = 0.95}
+// The thumb leaves the hairline at the lane's left edge and one more DIP clear, and the lane's right edge.
 @(private = "file")
-OVERVIEW_OUTLINE_ALPHA :: f32(0.2)
+OVERVIEW_THUMB_LEFT :: f32(2)
+@(private = "file")
+OVERVIEW_THUMB_RIGHT :: f32(1)
 
-// The stream height the strip maps: the whole stream, or the visible height when that is shorter.
-@(private = "file")
-overview_total :: proc(state: ^Changes_State, g: Changes_Geometry) -> int {
-	return max(state.rows.total, int(g.diff.height))
-}
-
-// The box over the part of the diff on screen, across the lane's width; empty without a lane.
-changes_overview_box :: proc(state: ^Changes_State, g: Changes_Geometry) -> render.Rect {
+// The strip as a scrollbar over the whole diff stream: the lane is its track, and the thumb is the visible
+// part. It is as wide at rest as the shared bar is under the pointer, because the lane is always a map
+// and a thin thumb would vanish in it. Nothing is shown while the stream fits the diff area.
+changes_overview_bar :: proc(state: ^Changes_State, g: Changes_Geometry) -> (bar: Scrollbar, visible: bool) {
 	lane := g.overview
-	total := overview_total(state, g)
-	if lane.width <= 0 || lane.height <= 0 || total <= 0 {return {}}
-	k := lane.height / f32(total)
-	height := min(lane.height, max(g.diff.height * k, OVERVIEW_BOX_MINIMUM * g.scale))
-	scroll := clamp(state.diff_scroll, 0, max(0, state.rows.total - int(g.diff.height)))
-	y := min(lane.y + f32(scroll) * k, lane.y + lane.height - height)
-	return {lane.x, y, lane.width, height}
+	if lane.width <= 0 || lane.height <= 0 {return}
+	extent := Scroll_Extent{state.rows.total, int(g.diff.height), state.diff_scroll}
+	bar, visible = scrollbar_layout(lane, extent, .Hovered, g.scale)
+	if !visible {return}
+	left, right := OVERVIEW_THUMB_LEFT * g.scale, OVERVIEW_THUMB_RIGHT * g.scale
+	bar.track = lane
+	bar.thumb.x, bar.thumb.width = lane.x + left, max(0, lane.width - left - right)
+	return bar, true
 }
 
-// The diff scroll that puts the box's top at `top`, a y in the window, kept inside the lane.
-@(private = "file")
-overview_scroll_for :: proc(state: ^Changes_State, g: Changes_Geometry, top: f32) -> int {
-	lane := g.overview
-	total := overview_total(state, g)
-	if lane.height <= 0 || total <= 0 {return state.diff_scroll}
-	k := lane.height / f32(total)
-	height := changes_overview_box(state, g).height
-	offset := clamp(top, lane.y, max(lane.y, lane.y + lane.height - height)) - lane.y
-	return clamp(int(math.round(offset / k)), 0, max(0, state.rows.total - int(g.diff.height)))
+// The thumb over the part of the diff on screen; empty while the stream fits.
+changes_overview_thumb :: proc(state: ^Changes_State, g: Changes_Geometry) -> render.Rect {
+	bar, visible := changes_overview_bar(state, g)
+	return visible ? bar.thumb : {}
 }
 
-// A press on the lane at `y`: holds the strip, and returns the diff scroll that puts the point at the
-// centre of the view, or keeps where the box was grabbed when the press lands inside the box.
+// What the strip's thumb shows: at rest, under the pointer, or held.
+changes_overview_state :: proc(
+	state: ^Changes_State,
+	g: Changes_Geometry,
+	pointer: [2]f32,
+) -> Scrollbar_State {
+	return scrollbar_state(render.rect_contains(g.overview, pointer.x, pointer.y), state.overview_drag)
+}
+
+// A press on the lane at `y`: a press on the thumb holds it where it was grabbed, and one on the track
+// pages toward the pointer. Returns the diff scroll.
 changes_overview_press :: proc(state: ^Changes_State, g: Changes_Geometry, y: f32) -> int {
-	box := changes_overview_box(state, g)
-	state.overview_held = true
-	state.overview_grab = y >= box.y && y < box.y + box.height ? y - box.y : box.height / 2
-	return overview_scroll_for(state, g, y - state.overview_grab)
+	bar, visible := changes_overview_bar(state, g)
+	if !visible {return state.diff_scroll}
+	return scrollbar_press(&state.overview_drag, bar, y)
 }
 
-// The diff scroll while the held strip is dragged to `y`.
+// The diff scroll while the held thumb is dragged to `y`.
 changes_overview_drag :: proc(state: ^Changes_State, g: Changes_Geometry, y: f32) -> int {
-	return overview_scroll_for(state, g, y - state.overview_grab)
+	bar, visible := changes_overview_bar(state, g)
+	if !visible {return state.diff_scroll}
+	return scrollbar_drag(state.overview_drag, bar, y)
 }
 
-// Draws the strip: its lane, each file's segment, the ticks and the box.
+// Draws a tick at full strength where the thumb covers it and dimmed above and below, so a run as long as
+// a file still shows where the thumb is. Without a thumb the tick is drawn whole.
+@(private = "file")
+overview_tick_draw :: proc(list: ^render.Draw_List, tick: render.Rect, color: render.Color, thumb: render.Rect) {
+	if thumb.height <= 0 {
+		draw_rect(list, {rect = tick, color = color})
+		return
+	}
+	dim := color
+	dim.a *= OVERVIEW_DIM_ALPHA
+	top, end := tick.y, tick.y + tick.height
+	inner_top, inner_end := clamp(thumb.y, top, end), clamp(thumb.y + thumb.height, top, end)
+	if inner_top > top {draw_rect(list, {rect = {tick.x, top, tick.width, inner_top - top}, color = dim})}
+	if inner_end > inner_top {
+		draw_rect(list, {rect = {tick.x, inner_top, tick.width, inner_end - inner_top}, color = color})
+	}
+	if end > inner_end {draw_rect(list, {rect = {tick.x, inner_end, tick.width, end - inner_end}, color = dim})}
+}
+
+// Draws the strip: its lane, each file's segment, the ticks and the thumb.
 @(private)
 overview_draw :: proc(
 	list: ^render.Draw_List,
@@ -90,11 +116,14 @@ overview_draw :: proc(
 	defer clip_scope_close(list, scope)
 	s := g.scale
 	rule := max(1, math.round(s))
+	look := changes_overview_state(state, g, pointer)
 	draw_rect(list, {rect = lane, color = theme.window})
+	if look != .Collapsed {draw_rect(list, {rect = lane, color = theme.scrollbar_track})}
 	draw_rect(list, {rect = {lane.x, lane.y, rule, lane.height}, color = theme.border})
-	total := overview_total(state, g)
+	total := max(rows.total, int(g.diff.height))
 	if total <= 0 {return}
 	k := lane.height / f32(total)
+	thumb := changes_overview_thumb(state, g)
 	body := render.Rect{lane.x + rule, lane.y, lane.width - rule, lane.height}
 	if view.notice == .None && len(rows.tops) == len(view.files) + 1 {
 		fill := theme.hover
@@ -123,16 +152,20 @@ overview_draw :: proc(
 		y := lane.y + math.round(f32(tick.y) * k)
 		height := max(least, math.round(f32(tick.height) * k))
 		if y >= lane.y + lane.height {continue}
-		draw_rect(list, {rect = {lane.x + inset, y, lane.width - 2 * inset, height}, color = color})
+		overview_tick_draw(list, {lane.x + inset, y, lane.width - 2 * inset, height}, color, thumb)
 	}
-	box := changes_overview_box(state, g)
-	if box.height <= 0 {return}
-	active := state.overview_held || render.rect_contains(lane, pointer.x, pointer.y)
-	fill, outline := theme.text, theme.text
-	fill.a *= active ? OVERVIEW_BOX_ACTIVE_ALPHA : OVERVIEW_BOX_ALPHA
-	outline.a *= OVERVIEW_OUTLINE_ALPHA
-	shown := render.Rect{box.x + s, box.y, box.width - 2 * s, box.height}
-	radius := RADIUS_CONTROL * s
-	draw_rect(list, {rect = shown, color = fill, radius = radius})
-	draw_rect(list, {rect = shown, color = outline, radius = radius, stroke = s})
+	if thumb.height <= 0 {return}
+	fill := theme.scrollbar
+	switch look {
+	case .Collapsed:
+	case .Hovered:
+		fill = theme.scrollbar_hover
+	case .Active:
+		fill = theme.scrollbar_active
+	}
+	radius := pill_radius(thumb)
+	draw_rect(list, {rect = thumb, color = fill, radius = radius})
+	outline := theme.text
+	outline.a *= OVERVIEW_OUTLINE_ALPHA[look]
+	draw_rect(list, {rect = thumb, color = outline, radius = radius, stroke = rule})
 }

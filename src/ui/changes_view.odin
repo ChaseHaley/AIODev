@@ -327,9 +327,8 @@ Changes_State :: struct {
 	// Code text colours raised to `minimum_contrast` per row background, kept while the theme and ratio hold.
 	inks:                     Changes_Inks,
 	turn_list_bar:            Scroll_Drag,
-	// The overview strip is held, and how far below the top of its box the pointer grabbed it.
-	overview_held:            bool,
-	overview_grab:            f32,
+	// The overview strip's thumb, held: where the pointer grabbed it.
+	overview_drag:            Scroll_Drag,
 }
 
 changes_state_destroy :: proc(state: ^Changes_State) {
