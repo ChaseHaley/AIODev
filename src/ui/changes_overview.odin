@@ -91,7 +91,12 @@ changes_overview_page :: proc(state: ^Changes_State, g: Changes_Geometry, x, y: 
 // Draws a tick at full strength where the thumb covers it and dimmed above and below, so a run as long as
 // a file still shows where the thumb is. Without a thumb the tick is drawn whole.
 @(private = "file")
-overview_tick_draw :: proc(list: ^render.Draw_List, tick: render.Rect, color: render.Color, thumb: render.Rect) {
+overview_tick_draw :: proc(
+	list: ^render.Draw_List,
+	tick: render.Rect,
+	color: render.Color,
+	thumb: render.Rect,
+) {
 	if thumb.height <= 0 {
 		draw_rect(list, {rect = tick, color = color})
 		return

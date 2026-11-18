@@ -130,6 +130,8 @@ Window :: struct {
 	overview: Workspace_Overview,
 	paste_confirm: Paste_Confirm,
 	wheel_remainder: f32,
+	// The sideways wheel's, kept apart so a partial notch in one direction is not spent in the other.
+	wheel_remainder_x: f32,
 	cursor_blink: Cursor_Blink,
 	cursor_crossing: Cursor_Crossing,
 	using frame_wakes: Frame_Wakes,

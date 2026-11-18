@@ -30,6 +30,8 @@ Scroll_Hold_Bar :: enum u8 {
 	Changes_Choices,
 	Changes_Turn_List,
 	Changes_Overview,
+	// The Agent changes diff's bottom scrollbar, along its columns.
+	Changes_H_Scroll,
 }
 
 Scroll_Hold :: struct {
@@ -99,7 +101,7 @@ scroll_hold_page :: proc(app: ^App, w: ^Window, hold: Scroll_Hold) -> (result: u
 		track := ui.Editor_Track.Page
 		if hold.bar == .Settings_Strip {track = .Strip} else if hold.bar == .Settings_Choices {track = .Choices}
 		return ui.editor_page(&w.editor, settings_layout(w), track, x, y), true
-	case .Changes_Choices, .Changes_Turn_List, .Changes_Overview:
+	case .Changes_Choices, .Changes_Turn_List, .Changes_Overview, .Changes_H_Scroll:
 		return changes_scroll_hold_page(app, w, hold)
 	}
 	return

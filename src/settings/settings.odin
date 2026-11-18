@@ -551,12 +551,29 @@ DIFF_VIEW_LABEL :: [Diff_View]string {
 #assert(len(Diff_View) == 2)
 DIFF_VIEW_NAMES :: []string{DIFF_VIEW_NAME[Diff_View(0)], DIFF_VIEW_NAME[Diff_View(1)]}
 DIFF_VIEW_LABELS :: []string{DIFF_VIEW_LABEL[Diff_View(0)], DIFF_VIEW_LABEL[Diff_View(1)]}
+// What Agent changes does with a code line wider than its pane.
+Long_Lines :: enum int {
+	Scroll,
+	Wrap,
+}
+LONG_LINES_NAME :: [Long_Lines]string {
+	.Scroll = "scroll",
+	.Wrap   = "wrap",
+}
+LONG_LINES_LABEL :: [Long_Lines]string {
+	.Scroll = "Scroll sideways",
+	.Wrap   = "Wrap",
+}
+#assert(len(Long_Lines) == 2)
+LONG_LINES_NAMES :: []string{LONG_LINES_NAME[Long_Lines(0)], LONG_LINES_NAME[Long_Lines(1)]}
+LONG_LINES_LABELS :: []string{LONG_LINES_LABEL[Long_Lines(0)], LONG_LINES_LABEL[Long_Lines(1)]}
 // Agent changes: whether to keep a private copy of the files agents change in each turn, for how many
 // days, and how new panes show diffs, which files they show and how legible their code text stays.
 Turns_Settings :: struct {
 	record:                bool,
 	retention_days:        int,
 	diff_view:             Diff_View,
+	diff_long_lines:       Long_Lines,
 	diff_filter:           string,
 	diff_minimum_contrast: f64,
 	quick_labels:          string,
@@ -1497,6 +1514,17 @@ SCHEMA :: [?]Schema_Entry {
 		names = DIFF_VIEW_NAMES,
 		labels = DIFF_VIEW_LABELS,
 		description = "How a new Agent changes pane shows diffs. Each pane can switch with its layout button.",
+	},
+	{
+		key = "turns.diff_long_lines",
+		title = "Long diff lines",
+		kind = .Enum,
+		offset = offset_of(Settings, turns) + offset_of(Turns_Settings, diff_long_lines),
+		default_value = "scroll",
+		names = LONG_LINES_NAMES,
+		labels = LONG_LINES_LABELS,
+		description = "What Agent changes does with a code line wider than its pane: scroll scrolls the code " +
+			"sideways, wrap breaks the line onto more rows. Open panes follow at once.",
 	},
 	{
 		key = "turns.diff_filter",

@@ -165,6 +165,8 @@ Changes_View :: struct {
 	// The least WCAG contrast code text and signs keep against the row they sit on; 1 or less keeps the
 	// theme's colours.
 	minimum_contrast: f32,
+	// Long lines wrap to the pane's width instead of scrolling sideways (turns.diff_long_lines).
+	wrap: bool,
 	// Show the "Install turn hooks" button in the panel.
 	hooks_offer: bool,
 	// Old and new side by side rather than one unified stream; the pane's own choice.
@@ -244,6 +246,8 @@ Changes_Part :: enum u8 {
 	Worktree_Chip,
 	// The overview strip at the right edge of the diff.
 	Overview,
+	// The scrollbar along the diff's bottom edge, which scrolls the code sideways.
+	H_Scroll,
 }
 
 // What a point is over. `index` is the bar or list row for the strip parts; the file for File_Header,
@@ -295,11 +299,19 @@ Changes_Rows :: struct {
 	detached:                               int,
 	// Each file's rows of diff lines, in either layout.
 	pairs:                                  Changes_Pairs,
+	// The widest line of every file, for the sideways scroll.
+	widths:                                 Changes_Widths,
+	// Whether long lines wrap (the view's `wrap` as of the last layout), and where they break.
+	wrapped:                                bool,
+	wrap:                                   Changes_Wrap,
 	total:                                  int,
 }
 
 // Per pane. The pane owns it and frees it with changes_state_destroy.
 Changes_State :: struct {
+	// How many text columns the code is scrolled sideways; each file holds it at its own limit.
+	h_scroll:                 int,
+	h_bar:                    Scroll_Drag,
 	diff_scroll:              int,
 	// Strip bars hidden at the left, and the turn list's scroll in pixels.
 	strip_offset:             int,
@@ -335,6 +347,9 @@ changes_state_destroy :: proc(state: ^Changes_State) {
 	delete(state.rows.tops)
 	delete(state.rows.cards)
 	delete(state.rows.ticks)
+	delete(state.rows.widths.code)
+	delete(state.rows.widths.head)
+	wrap_free(&state.rows.wrap)
 	delete(state.rows.notes)
 	virtual.arena_destroy(&state.rows.notes_arena)
 	changes_pairs_destroy(&state.rows.pairs)
@@ -589,6 +604,7 @@ changes_badge_forms :: proc(
 // comment cards at `width`, the diff area's width.
 changes_layout :: proc(state: ^Changes_State, view: ^Changes_View, text, mono: ^Text, width, scale: f32) {
 	rows := &state.rows
+	changes_widths_build(&rows.widths, view, mono)
 	key := collapsed_key(view)
 	comments := changes_comments_key(view)
 	digit := text_width(mono, "0")
@@ -597,7 +613,19 @@ changes_layout :: proc(state: ^Changes_State, view: ^Changes_View, text, mono: ^
 	   rows.line_height == mono.line_height && rows.digit == digit && rows.scale == scale &&
 	   rows.width == width && rows.body_line == text.line_height && rows.comments_key == comments &&
 	   rows.body_size == text.size_px && rows.body_family == text.family &&
-	   rows.pairs.side_by_side == view.side_by_side && !editor_stale(rows, view, text) {return}
+	   rows.pairs.side_by_side == view.side_by_side && rows.wrapped == view.wrap &&
+	   !editor_stale(rows, view, text) {
+		return
+	}
+	// A change of width, scale, font or mode that rewraps the rows keeps the row at the top of the diff there.
+	anchor: Changes_Anchor
+	if (rows.wrapped || view.wrap) && rows.valid && rows.revision == view.revision &&
+	   rows.collapsed_key == key && rows.notice == view.notice && rows.files == len(view.files) &&
+	   view.notice == .None && (rows.width != width || rows.scale != scale || rows.digit != digit ||
+	   rows.line_height != mono.line_height || rows.wrapped != view.wrap ||
+	   rows.pairs.side_by_side != view.side_by_side) {
+		anchor = changes_anchor_find(rows, view, state.diff_scroll)
+	}
 	rows.built += 1
 	rows.valid, rows.revision, rows.collapsed_key, rows.notice = true, view.revision, key, view.notice
 	rows.files, rows.omitted = len(view.files), view.omitted
@@ -611,6 +639,8 @@ changes_layout :: proc(state: ^Changes_State, view: ^Changes_View, text, mono: ^
 	rows.gap = int(math.round(SPACE_2 * scale))
 	rows.footer = int(math.round(HEIGHT_STANDARD * scale))
 	changes_pairs_build(&rows.pairs, view)
+	rows.wrapped = view.wrap
+	changes_wrap_build(rows, view, mono, max(0, width - 2 * SPACE_2 * scale))
 	changes_cards_measure(rows, view, text, mono)
 	clear(&rows.tops)
 	y := 0
@@ -628,6 +658,11 @@ changes_layout :: proc(state: ^Changes_State, view: ^Changes_View, text, mono: ^
 	rows.detached = changes_detached_height(rows, view)
 	rows.total += rows.detached
 	changes_ticks_build(rows, view)
+	if anchor.ok {
+		if at, placed := changes_anchor_place(rows, view, anchor); placed {
+			state.diff_scroll = clamp(at, 0, rows.total)
+		}
+	}
 }
 
 changes_scroll_diff :: proc(state: ^Changes_State, g: Changes_Geometry, delta: int) -> bool {
@@ -789,6 +824,7 @@ changes_draw :: proc(
 	}
 	state.turn_list_scroll = clamp(state.turn_list_scroll, 0, turn_list_limit(g, view))
 	state.diff_scroll = clamp(state.diff_scroll, 0, max(0, state.rows.total - int(g.diff.height)))
+	_ = changes_scroll_columns(state, g, view, 0)
 	g.selection_bar = changes_selection_place(g, view, state, text, mono)
 	rule := render.Rect{g.row.x, g.row.y + g.row.height - scale, g.row.width, scale}
 	draw_rect(list, {rect = rule, color = t.border})
