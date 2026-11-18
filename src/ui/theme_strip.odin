@@ -578,6 +578,11 @@ editor_strip_card_id :: proc(p: ^Editor, card: int) -> string {
 
 @(private)
 strip_color :: proc(t: settings.Theme, token: settings.Theme_Token) -> render.Color {
+	// A theme that sets no cursor draws it in the accent, as the terminal and every text field do.
+	#partial switch token {
+	case .Cursor:      return colour.rgba(settings.theme_cursor(t))
+	case .Cursor_Text: return colour.rgba(settings.theme_cursor_text(t))
+	}
 	value := t.colors[token]
 	return colour.rgba(value.rgb, f32(value.a) / 255)
 }
