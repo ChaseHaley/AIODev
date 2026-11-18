@@ -66,11 +66,12 @@ choice_set_toggle :: proc(p: ^Editor, index: int) -> Editor_Outcome {
 	return .Save
 }
 
+// What a multiple choice's field shows: the labels of the options `mask` has on, or None.
 @(private)
-choice_set_label :: proc(row: ^Editor_Row, mask: u32) -> string {
+choice_set_label :: proc(labels: []string, mask: u32) -> string {
 	if mask == 0 {return "None"}
 	b := strings.builder_make(context.temp_allocator)
-	for label, i in row.choice_labels {
+	for label, i in labels {
 		if !choice_set_has(mask, i) {continue}
 		if strings.builder_len(b) > 0 {strings.write_string(&b, ", ")}
 		strings.write_string(&b, label)

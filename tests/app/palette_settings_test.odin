@@ -85,6 +85,33 @@ palette_slider_saves_consecutive_steps :: proc(t: ^testing.T) {
 	}
 }
 
+// Each flipped option of a multiple choice saves through the settings file with its list open, on
+// top of the option flipped before it.
+@(test)
+palette_multiple_choice_saves_each_option_with_the_list_open :: proc(t: ^testing.T) {
+	f: Palette_Fixture
+	defer palette_fixture_destroy(t, &f)
+	if !palette_fixture_create(t, &f, "inline-multiple", second_window = false) {return}
+	s := &f.state
+	w := s.windows[0]
+	app.palette_open_mode(s, w, .Settings)
+	ui.palette_text(&s.palette, &s.registry, "interface.confirm")
+	if !testing.expect(t, len(s.palette.results) > 0) {return}
+	testing.expect_value(t, ui.palette_result_name(&s.palette, s.palette.results[0]), "interface.confirm")
+	confirm := s.settings.interface.confirm
+	app.handle_event(s, input.Key_Event{window = w.id, key = .Enter, modifiers = {.Control}, pressed = true})
+	testing.expect_value(t, ui.palette_editing(&s.palette), ui.Palette_Edit_Kind.Choice)
+	app.handle_event(s, input.Key_Event{window = w.id, key = .Enter, pressed = true})
+	testing.expect_value(t, s.settings.interface.confirm, confirm ~ {.Close_Split_Tab})
+	testing.expect_value(t, ui.palette_editing(&s.palette), ui.Palette_Edit_Kind.Choice)
+	app.handle_event(s, input.Key_Event{window = w.id, key = .Arrow_Down, pressed = true})
+	app.handle_event(s, input.Key_Event{window = w.id, key = .Space, pressed = true})
+	testing.expect_value(t, s.settings.interface.confirm, confirm ~ {.Close_Split_Tab, .Shell_Switch})
+	app.handle_event(s, input.Key_Event{window = w.id, key = .Escape, pressed = true})
+	testing.expect_value(t, ui.palette_editing(&s.palette), ui.Palette_Edit_Kind.None)
+	testing.expect(t, app.palette_active(s, w), "Escape closes only the list")
+}
+
 @(test)
 palette_controls_match_the_settings_page_and_keep_complex_settings_jump_only :: proc(t: ^testing.T) {
 	expect_control :: proc(t: ^testing.T, key: string, control: ui.Palette_Control) {
@@ -98,6 +125,9 @@ palette_controls_match_the_settings_page_and_keep_complex_settings_jump_only :: 
 	expect_control(t, "font.family", .Choice)
 	expect_control(t, "tabs.orientation", .Choice)
 	expect_control(t, "status.ignore_apps", .Text)
+	expect_control(t, "interface.confirm", .Choice)
+	expect_control(t, "status.surfaces", .Choice)
+	testing.expect(t, ui.palette_setting(settings.schema_find("interface.confirm")^).multiple)
 	expect_control(t, "input.leader", .None)
 	expect_control(t, settings.PADDING_GROUPS_KEY, .None)
 	expect_control(t, settings.QUICK_LABELS_KEY, .None)

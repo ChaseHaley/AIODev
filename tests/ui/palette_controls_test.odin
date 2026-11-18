@@ -6,6 +6,7 @@ import "aio:platform"
 import "aio:settings"
 import "aio:ui"
 import "core:strconv"
+import "core:strings"
 import "core:testing"
 
 @(private)
@@ -556,4 +557,78 @@ palette_alt_arrows_step_a_fractional_slider_onto_clean_decimals :: proc(t: ^test
 	testing.expect_value(t, value, "0.3")
 	number, ok := strconv.parse_f64(value)
 	testing.expect(t, ok && number == 0.3, "the saved text parses to the same double as \"0.3\"")
+}
+
+// A multiple choice opens the Settings page's dropdown with its saved options checked. Enter and Space
+// flip the highlighted option and save with the list open, Alt+arrows leave it alone, and Escape
+// closes only the list.
+@(test)
+palette_multiple_choice_flips_options_in_the_settings_dropdown :: proc(t: ^testing.T) {
+	entry := settings.schema_find("interface.confirm")
+	if !testing.expect(t, entry != nil) {return}
+	saved := "close_split_tab, multiline_paste"
+
+	page_editor: ui.Editor
+	defer ui.editor_destroy(&page_editor)
+	page_row := ui.schema_row(entry^)
+	page_row.value = saved
+	page_row.choice_mask, _, _ = settings.set_parse(entry.names, saved)
+	testing.expect_value(t, ui.editor_add(&page_editor, page_row, "Interface"), nil)
+	ui.editor_filter(&page_editor)
+	testing.expect(t, ui.editor_select_key(&page_editor, "interface.confirm"))
+	page_layout := ui.editor_layout({0, 40, 1200, 1400}, 1)
+	ui.editor_fit(&page_editor, page_layout)
+	ui.editor_key(&page_editor, {key = .Enter, pressed = true})
+	page_popup := ui.editor_popup_rect(&page_editor, page_layout)
+
+	rows := [1]ui.Palette_Setting{ui.palette_setting(entry^)}
+	testing.expect_value(t, rows[0].control, ui.Palette_Control.Choice)
+	testing.expect(t, rows[0].multiple)
+	p: ui.Palette
+	testing.expect_value(t, ui.palette_init(&p, rows[:]), nil)
+	defer ui.palette_destroy(&p)
+	v: Control_Values
+	control_set(&v, "interface.confirm", saved)
+	ui.palette_set_values(&p, {user = &v, value = control_value})
+	registry := commands.create()
+	defer commands.destroy(&registry)
+	ui.palette_open_mode(&p, &registry, .Settings)
+	ui.palette_fit(&p, 1000, 800, 1)
+
+	outcome, _ := ui.palette_key(&p, &registry, press(.Arrow_Right, {.Alt}))
+	testing.expect(t, outcome != .Set_Setting, "Alt+Right does not step a multiple choice")
+	_ = ui.palette_used_take(&p)
+
+	ui.palette_key(&p, &registry, press(.Enter, {.Control}))
+	testing.expect_value(t, ui.palette_editing(&p), ui.Palette_Edit_Kind.Choice)
+	testing.expect(t, ui.palette_used_take(&p), "opening the list is a use")
+	l := ui.palette_layout(&p, 1000, 800, 1)
+	testing.expect_value(t, ui.palette_popup_rect(&p, l).height, page_popup.height)
+	testing.expect_value(t, p.buffers.dropdown.list.index, page_editor.dropdown.list.index)
+
+	// Enter flips the first option off and saves; the list stays open on it.
+	outcome, _ = ui.palette_key(&p, &registry, press(.Enter))
+	key, value := chosen_value(&p)
+	testing.expect_value(t, outcome, ui.Outcome.Set_Setting)
+	testing.expect_value(t, key, "interface.confirm")
+	testing.expect_value(t, value, "multiline_paste")
+	control_set(&v, "interface.confirm", strings.clone(value, context.temp_allocator))
+	ui.palette_saved(&p, true)
+	testing.expect_value(t, ui.palette_editing(&p), ui.Palette_Edit_Kind.Choice)
+	testing.expect_value(t, p.buffers.dropdown.list.index, 0)
+
+	// Space flips the next option on, on top of the saved value.
+	ui.palette_key(&p, &registry, press(.Arrow_Down))
+	outcome, _ = ui.palette_key(&p, &registry, press(.Space))
+	_, value = chosen_value(&p)
+	testing.expect_value(t, outcome, ui.Outcome.Set_Setting)
+	testing.expect_value(t, value, "shell_switch, multiline_paste")
+	control_set(&v, "interface.confirm", strings.clone(value, context.temp_allocator))
+	ui.palette_saved(&p, true)
+	testing.expect_value(t, ui.palette_editing(&p), ui.Palette_Edit_Kind.Choice)
+
+	outcome, _ = ui.palette_key(&p, &registry, press(.Escape))
+	testing.expect_value(t, outcome, ui.Outcome.Changed)
+	testing.expect(t, ui.presence_is_open(p.presence), "Escape closes only the list")
+	testing.expect_value(t, ui.palette_editing(&p), ui.Palette_Edit_Kind.None)
 }
