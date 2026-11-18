@@ -5,9 +5,11 @@ import "aio:glyphs"
 import "aio:render"
 import "aio:turns"
 import "aio:ui"
+import "core:log"
 import "core:math"
 import "core:strings"
 import "core:testing"
+import "core:time"
 
 @(private = "file")
 Scroll_Fixture :: struct {
@@ -450,4 +452,37 @@ a_resize_keeps_the_row_at_the_top_of_a_wrapped_diff :: proc(t: ^testing.T) {
 	testing.expect_value(t, ui.changes_line_rect(narrow, &view, &state, 1, 2).y, narrow.diff.y)
 	wide := scroll_lay_out(&f, &view, &state, 900)
 	testing.expect_value(t, ui.changes_line_rect(wide, &view, &state, 1, 2).y, wide.diff.y)
+}
+
+// Resizing a pane rebuilds the wrapped rows of the whole diff on every width. In a monospace font a line of
+// plain ASCII is counted by its length, so a diff of 50 000 lines costs one step per row and stays well
+// inside a frame; the milliseconds are logged for the record.
+@(test)
+a_resize_rebuilds_the_wrapped_rows_of_a_large_diff_inside_a_frame :: proc(t: ^testing.T) {
+	f: Scroll_Fixture
+	view: ui.Changes_View
+	if !scroll_make(t, &f, &view) {return}
+	defer scroll_destroy(&f)
+	family, err := font.family_load(f.fonts, "Cascadia Mono")
+	if err != .None {return}
+	f.mono = ui.text_mono(&f.text, family)
+	lines := make([]turns.Diff_Line, 50_000, context.temp_allocator)
+	text := strings.repeat("x", 100, context.temp_allocator)
+	for i in 0 ..< len(lines) {
+		lines[i] = {kind = .Context, old_line = i32(i + 1), new_line = i32(i + 1), text = text}
+	}
+	hunks := [1]turns.Hunk{{old_start = 1, old_count = 50_000, new_start = 1, new_count = 50_000, lines = lines}}
+	files := [1]turns.Diff_File{{old_path = "big.odin", new_path = "big.odin", status = .Modified, hunks = hunks[:]}}
+	view.files, view.wrap = files[:], true
+	state: ui.Changes_State
+	defer ui.changes_state_destroy(&state)
+	_ = scroll_lay_out(&f, &view, &state, 900)
+	started := time.tick_now()
+	steps := 40
+	for step in 0 ..< steps {
+		_ = scroll_lay_out(&f, &view, &state, f32(400 + step * 10))
+	}
+	each := time.duration_milliseconds(time.tick_since(started)) / f64(steps)
+	log.infof("wrapped rows of 50000 lines rebuilt at %d widths: %.2f ms each", steps, each)
+	testing.expect(t, each < 16, "a resize step stays inside a frame")
 }
