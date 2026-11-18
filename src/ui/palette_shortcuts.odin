@@ -73,7 +73,8 @@ palette_binding_outcome :: proc(
 
 // The owner reports whether the value the last Set_Setting named saved. A saved shortcut ends only
 // the inline row, and a refused one stays open to correct. A dropdown is open only when its Show all
-// fonts switch saved, and then lists the other filter's fonts.
+// fonts switch saved, and then lists the other filter's fonts, or when an option of a multiple choice
+// flipped, and then marks the saved options.
 palette_saved :: proc(p: ^Palette, saved: bool) {
 	#partial switch &edit in p.edit {
 	case Shortcut_Edit:
