@@ -272,11 +272,12 @@ link_choice_item :: proc(
 
 // Where the row `choice` opens when clicked: Markdown in a float or a split as Open does today, a shell in
 // a right split, and a program at its own placement. Default for a program that runs as its own window.
+// Open from a pane `in_float` splits that float instead of adding another, as markdown_open_at does.
 @(private = "file")
-link_choice_default :: proc(app: ^App, choice: Link_Choice) -> Link_Placement {
+link_choice_default :: proc(app: ^App, choice: Link_Choice, in_float: bool) -> Link_Placement {
 	#partial switch choice.action {
 	case .Open:
-		return app.settings.pane.markdown_floating ? .Float : .Split_Right
+		return app.settings.pane.markdown_floating && !in_float ? .Float : .Split_Right
 	case .Open_Shell:
 		return .Split_Right
 	case .Program:
@@ -294,12 +295,13 @@ link_choice_default :: proc(app: ^App, choice: Link_Choice) -> Link_Placement {
 	return .Default
 }
 
-// Fills `submenu` with the placements of row `choice`, its click marked Default.
+// Fills `submenu` with the placements of row `choice` on a link of a pane `in_float` or not, its click
+// marked Default.
 @(private = "file")
-link_submenu_build :: proc(app: ^App, submenu: ^ui.Menu, choice: Link_Choice) {
+link_submenu_build :: proc(app: ^App, submenu: ^ui.Menu, choice: Link_Choice, in_float: bool) {
 	ui.menu_clear(submenu)
 	submenu.width = LINK_SUBMENU_WIDTH
-	default := link_choice_default(app, choice)
+	default := link_choice_default(app, choice, in_float)
 	for placement in Link_Placement.Split_Right ..= Link_Placement.Linked_Window {
 		row := LINK_PLACEMENTS[placement]
 		place := choice
@@ -382,7 +384,8 @@ link_program_run :: proc(
 	line, ready := link_program_line(app, program, document.target)
 	if !ready {return}
 	placement := choice.placement
-	if placement == .Default {placement = link_choice_default(app, choice)}
+	// A program's own placement does not depend on where its link is.
+	if placement == .Default {placement = link_choice_default(app, choice, false)}
 	if placement == .Default {
 		if app.opener.program == nil || !app.opener.program(line, directory) {
 			notify(app, .Error, fmt.tprintf("Could not start %s.", name))
@@ -594,7 +597,10 @@ document_submenu_open :: proc(app: ^App, w: ^Window, row: int, select_first: boo
 		return
 	}
 	if current, open := sub.row.?; open && current == row && !select_first {return}
-	link_submenu_build(app, &sub.menu, choice)
+	_, content, _ := document_link_subject(w)
+	tree := window_tree(w)
+	in_float := tree != nil && layout.is_floating(tree, layout.find_content(tree, content))
+	link_submenu_build(app, &sub.menu, choice, in_float)
 	submenu_place(w, sub, parent, row, LINK_SUBMENU_WIDTH, select_first)
 }
 
