@@ -1,6 +1,7 @@
 package ui_test
 
 import "core:fmt"
+import "core:time"
 import "core:testing"
 import "aio:commands"
 import "aio:render"
@@ -38,6 +39,79 @@ scrollbar_track_pages_and_thumb_drags_clamped :: proc(t: ^testing.T) {
 	testing.expect_value(t, ui.scrollbar_drag(drag, bar, -500), 0)
 	testing.expect_value(t, ui.scrollbar_drag(drag, bar, 5000), 90)
 	testing.expect_value(t, ui.scrollbar_drag(drag, bar, bar.thumb.y + 5), 40)
+}
+
+@(test)
+scrollbar_page_pages_toward_the_pointer_and_stops_at_the_thumb :: proc(t: ^testing.T) {
+	// Windows' own delays: the first repeat after 200 ms, then one every 50 ms.
+	testing.expect_value(t, ui.SCROLLBAR_REPEAT_DELAY, 200 * time.Millisecond)
+	testing.expect_value(t, ui.SCROLLBAR_REPEAT_INTERVAL, 50 * time.Millisecond)
+
+	bar, _ := ui.scrollbar_layout({0, 0, 100, 200}, {total = 100, visible = 10, offset = 40}, .Collapsed, 1)
+	x := bar.track.x + 2
+	offset, result := ui.scrollbar_page(bar, x, bar.thumb.y - 1)
+	testing.expect_value(t, offset, 30)
+	testing.expect_value(t, result, ui.Scroll_Page.Paged)
+	offset, result = ui.scrollbar_page(bar, x, bar.thumb.y + bar.thumb.height)
+	testing.expect_value(t, offset, 50)
+	testing.expect_value(t, result, ui.Scroll_Page.Paged)
+	// The thumb under the pointer: the view has met it, and nothing is held.
+	offset, result = ui.scrollbar_page(bar, x, bar.thumb.y + 2)
+	testing.expect_value(t, offset, 40)
+	testing.expect_value(t, result, ui.Scroll_Page.On_Thumb)
+	// Off the track the page pauses, above and beside it alike.
+	offset, result = ui.scrollbar_page(bar, bar.track.x - 1, bar.thumb.y - 1)
+	testing.expect_value(t, offset, 40)
+	testing.expect_value(t, result, ui.Scroll_Page.Off_Track)
+	_, result = ui.scrollbar_page(bar, x, -1)
+	testing.expect_value(t, result, ui.Scroll_Page.Off_Track)
+	// A view that cannot go further toward the pointer reports it rather than a page.
+	stale := bar
+	stale.extent.offset = 0
+	offset, result = ui.scrollbar_page(stale, x, stale.thumb.y - 1)
+	testing.expect_value(t, offset, 0)
+	testing.expect_value(t, result, ui.Scroll_Page.Stuck)
+
+	// Repeating toward a fixed pointer pages every time and stops with the thumb under it, from either
+	// side, in the fewest whole pages; moving the pointer retargets it.
+	area := render.Rect{0, 0, 100, 200}
+	pointer := f32(120)
+	view := 0
+	for steps in 0 ..< 100 {
+		b, _ := ui.scrollbar_layout(area, {total = 100, visible = 10, offset = view}, .Collapsed, 1)
+		next, page := ui.scrollbar_page(b, x, pointer)
+		if page != .Paged {
+			testing.expect_value(t, page, ui.Scroll_Page.On_Thumb)
+			testing.expect(t, pointer >= b.thumb.y && pointer < b.thumb.y + b.thumb.height)
+			testing.expect(t, steps > 1)
+			break
+		}
+		testing.expect(t, next > view)
+		view = next
+		testing.expect(t, steps < 99)
+	}
+	pointer = 10
+	before := view
+	for _ in 0 ..< 100 {
+		b, _ := ui.scrollbar_layout(area, {total = 100, visible = 10, offset = view}, .Collapsed, 1)
+		next, page := ui.scrollbar_page(b, x, pointer)
+		if page != .Paged {break}
+		testing.expect(t, next < view)
+		view = next
+	}
+	testing.expect(t, view < before)
+
+	// A horizontal bar pages along x.
+	wide, _ := ui.scrollbar_layout_horizontal({0, 0, 200, 100}, {total = 100, visible = 10, offset = 40}, .Collapsed, 1)
+	y := wide.track.y + 2
+	offset, result = ui.scrollbar_page(wide, wide.thumb.x - 1, y)
+	testing.expect_value(t, offset, 30)
+	testing.expect_value(t, result, ui.Scroll_Page.Paged)
+	offset, result = ui.scrollbar_page(wide, wide.thumb.x + wide.thumb.width, y)
+	testing.expect_value(t, offset, 50)
+	testing.expect_value(t, result, ui.Scroll_Page.Paged)
+	_, result = ui.scrollbar_page(wide, wide.thumb.x + 2, y)
+	testing.expect_value(t, result, ui.Scroll_Page.On_Thumb)
 }
 
 @(test)

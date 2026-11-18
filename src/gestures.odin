@@ -143,6 +143,7 @@ gesture_clear :: proc(app: ^App, w: ^Window) {
 	}
 	leader_cancel(w)
 	autoscroll_stop(w)
+	scroll_hold_end(w)
 	w.dirty = true
 }
 
@@ -218,6 +219,7 @@ gesture_button :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) {
 	}
 	x, y := f32(e.x), f32(e.y)
 	if e.pressed {
+		if e.button == .Left {scroll_hold_end(w)}
 		target := pointer_target(app, w, x, y)
 		modal := pointer_modal(target)
 		if !modal {
@@ -237,6 +239,7 @@ gesture_button :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) {
 		pointer_press(app, w, target, e)
 		return
 	}
+	if e.button == .Left {scroll_hold_end(w)}
 	capture := w.gesture.captures[e.button]
 	w.gesture.captures[e.button] = nil
 	if _, cancelled := capture.(Gesture_Cancelled); cancelled {return}
@@ -251,6 +254,8 @@ gesture_button :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) {
 gesture_move :: proc(app: ^App, w: ^Window, event: input.Mouse_Move_Event) {
 	if w.phase == .Preparing {return}
 	if autoscroll_move(app, w, event) {return}
+	// A held track press follows the pointer; a move without the button means its release was missed.
+	if .Left in event.buttons {scroll_hold_move(w, f32(event.x), f32(event.y))} else {scroll_hold_end(w)}
 	e := event
 	e.buttons -= gesture_buttons(w, Gesture_Cancelled)
 	if event.buttons != {} && e.buttons == {} {return}

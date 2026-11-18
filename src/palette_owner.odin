@@ -251,6 +251,9 @@ palette_press :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) {
 		return
 	}
 	outcome, id := ui.palette_mouse_press(p, &app.registry, l, x, y, &w.ui_text)
+	if track := ui.palette_take_track(p); e.pressed && e.button == .Left && track != .None {
+		scroll_hold_begin(app, w, track == .Results ? .Palette_Results : .Palette_Choices, {}, x, y)
+	}
 	on_palette_outcome(app, w, outcome, id)
 }
 

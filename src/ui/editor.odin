@@ -481,6 +481,8 @@ Editor :: struct {
 	// The page's own scrollbar: its thumb drag and whether the pointer is over its track.
 	page_drag:                                                         Scroll_Drag,
 	page_bar_hover:                                                    bool,
+	// The scrollbar whose track the last press landed on, until the window takes it; see editor_take_track.
+	track:                                                             Editor_Track,
 	rows:                                                              [dynamic]Editor_Row,
 	groups:                                                            [dynamic]Editor_Group,
 	items:                                                             [dynamic]Editor_Item,
@@ -2894,6 +2896,55 @@ editor_page_scrollbar :: proc(p: ^Editor, l: Editor_Layout) -> (bar: Scrollbar, 
 	return scrollbar_layout(area, extent, scrollbar_state(p.page_bar_hover, p.page_drag), s)
 }
 
+// The settings page's scrollbars a held track press can page.
+Editor_Track :: enum u8 {
+	None,
+	// The page's own scrollbar.
+	Page,
+	// The theme filmstrip's, along its bottom.
+	Strip,
+	// The open choice list of a row.
+	Choices,
+}
+
+// The scrollbar whose track the last press landed on, which the window then holds. Reading it ends it.
+editor_take_track :: proc(p: ^Editor) -> Editor_Track {
+	track := p.track
+	p.track = .None
+	return track
+}
+
+// Scrolls the page so the bar's offset (pixels) is at its top.
+@(private)
+editor_page_scroll_to :: proc(p: ^Editor, l: Editor_Layout, offset: int) {
+	p.jump_group = -1
+	editor_scroll_keep(p, editor_offset_position(p, f32(offset) / l.row_height))
+}
+
+// One page of a held track press toward (x, y) on the bar `track`; see scrollbar_page.
+editor_page :: proc(p: ^Editor, l: Editor_Layout, track: Editor_Track, x, y: f32) -> Scroll_Page {
+	switch track {
+	case .None:
+	case .Page:
+		bar, visible := editor_page_scrollbar(p, l)
+		if !visible {return .Off_Track}
+		offset, result := scrollbar_page(bar, x, y)
+		if result == .Paged {editor_page_scroll_to(p, l, offset)}
+		return result
+	case .Strip:
+		bar, visible := editor_strip_scrollbar(p, l, strip_head(p))
+		if !visible {return .Off_Track}
+		offset, result := scrollbar_page(bar, x, y)
+		if result == .Paged {p.strip.wheel = f32(offset) - p.strip.scroll.target}
+		return result
+	case .Choices:
+		c, a, open := editor_dropdown(p, l)
+		if !open {return .Off_Track}
+		return dropdown_page(&p.dropdown, c, a, x, y, l.scale)
+	}
+	return .Off_Track
+}
+
 // Applies viewport-dependent navigation state before input or drawing. Layout and draw are queries;
 // neither drawing once nor drawing the selected profile row is a prerequisite for keyboard use.
 // With `text`, descriptions wrap to this layout and type size; without it rows keep the heights
@@ -3206,7 +3257,9 @@ editor_press :: proc(
 			return .Changed
 		}
 		if c, a, open := editor_dropdown(p, l); open {
-			switch dropdown_press(&p.dropdown, c, a, text, x, y, extend, s) {
+			outcome := dropdown_press(&p.dropdown, c, a, text, x, y, extend, s)
+			if dropdown_take_track(&p.dropdown) {p.track = .Choices}
+			switch outcome {
 			case .None, .Closed:
 				return .None
 			case .Changed:
@@ -3252,8 +3305,9 @@ editor_press :: proc(
 		return .Changed
 	}
 	if bar, visible := editor_page_scrollbar(p, l); visible && scrollbar_contains(bar, x, y) {
-		p.jump_group = -1
-		editor_scroll_keep(p, editor_offset_position(p, f32(scrollbar_press(&p.page_drag, bar, y)) / l.row_height))
+		offset := scrollbar_press(&p.page_drag, bar, y)
+		if !p.page_drag.active {p.track = .Page}
+		editor_page_scroll_to(p, l, offset)
 		return .Changed
 	}
 	if render.rect_contains(editor_keys_rect(l), x, y) {return editor_key_search_toggle(p)}

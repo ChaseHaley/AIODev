@@ -97,6 +97,8 @@ Window :: struct {
 	selection: Selection_Drag,
 	// Middle-click scrolling and its anchor; see autoscroll.odin.
 	autoscroll: Autoscroll,
+	// A track press held on a scrollbar, repeating its page; see scroll_hold.odin.
+	scroll_hold: Scroll_Hold,
 	// The terminal link under the pointer; see term_links.odin.
 	link_hover: Maybe(Link_Hover),
 	pointer: [2]f32,

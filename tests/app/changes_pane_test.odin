@@ -1112,6 +1112,89 @@ the_tools_menu_holds_the_view_buttons_when_the_row_runs_out_of_room :: proc(t: ^
 	testing.expect(t, g.filter_popover.width > 0 && g.filter_button.width == 0)
 }
 
+// Holding a press on the overview strip's track pages the diff toward the pointer, as every scrollbar's
+// does: once at the press, then repeatedly until the thumb is under the pointer, retargeting as the pointer
+// moves, pausing off the track and stopping at the release.
+@(test)
+a_held_press_on_the_overview_track_keeps_paging_until_the_thumb_meets_the_pointer :: proc(t: ^testing.T) {
+	f: Fixture
+	defer {
+		app.app_destroy(&f.state)
+		testing.expect_value(t, os.remove_all(f.directory), nil)
+		delete(f.directory)
+	}
+	if !fixture_start(t, &f, "OverviewHold") {return}
+	w := f.state.windows[0]
+	app.window_resize(&f.state, w, 2400, 900)
+	app.run_action(&f.state, w, .Agent_Changes)
+	if !testing.expect_value(t, len(f.state.changes_panes), 1) {return}
+	pane := f.state.changes_panes[0]
+	shown, found := changes_pane_of(&f.state, w)
+	if !testing.expect(t, found) {return}
+	lines := make([]turns.Diff_Line, 60)
+	defer delete(lines)
+	hunks: [1]turns.Hunk
+	files := fill_four_files(&f, pane, lines, &hunks)
+	defer delete(files)
+
+	g := app.changes_geometry_of(&f.state, w, pane, shown)
+	lane := g.overview
+	total, visible := pane.state.rows.total, int(g.diff.height)
+	if !testing.expect(t, lane.width > 0 && total > 3 * visible) {return}
+	limit := total - visible
+	x := i32(lane.x + lane.width / 2)
+	middle := i32(lane.y + lane.height / 2)
+	top, bottom := i32(lane.y + 2), i32(lane.y + lane.height - 2)
+	button :: proc(w: ^app.Window, x, y: i32, pressed: bool) -> input.Mouse_Button_Event {
+		return {window = w.id, x = x, y = y, button = .Left, pressed = pressed}
+	}
+	move :: proc(w: ^app.Window, x, y: i32) -> input.Mouse_Move_Event {
+		return {window = w.id, x = x, y = y, buttons = {.Left}}
+	}
+
+	// The press pages once toward the pointer (down, from the top) and holds the track.
+	app.handle_event(&f.state, button(w, x, middle, true))
+	testing.expect_value(t, pane.state.diff_scroll, visible)
+	testing.expect_value(t, w.scroll_hold.bar, app.Scroll_Hold_Bar.Changes_Overview)
+	testing.expect(t, !pane.state.overview_drag.active)
+
+	// One page per repeat, until the thumb is under the pointer; then it stops with the press held.
+	previous, pages := pane.state.diff_scroll, 0
+	for pages < 40 {
+		if !hold_repeat(&f.state, w) {break}
+		current := pane.state.diff_scroll
+		if current == previous {break}
+		testing.expect_value(t, current - previous, visible)
+		previous = current
+		pages += 1
+	}
+	testing.expect(t, pages >= 1 && pages < 40)
+	g = app.changes_geometry_of(&f.state, w, pane, shown)
+	thumb := ui.changes_overview_thumb(&pane.state, g)
+	testing.expect(t, f32(middle) >= thumb.y && f32(middle) < thumb.y + thumb.height)
+	_ = hold_repeat(&f.state, w)
+	testing.expect_value(t, pane.state.diff_scroll, previous)
+
+	// Moving the pointer to the bottom retargets it: the diff pages down to its end.
+	app.handle_event(&f.state, move(w, x, bottom))
+	for _ in 0 ..< 60 {_ = hold_repeat(&f.state, w)}
+	testing.expect_value(t, pane.state.diff_scroll, limit)
+
+	// Off the lane it pauses, and back on the lane it resumes toward the pointer.
+	app.handle_event(&f.state, move(w, i32(lane.x - 40), top))
+	for _ in 0 ..< 10 {_ = hold_repeat(&f.state, w)}
+	testing.expect_value(t, pane.state.diff_scroll, limit)
+	app.handle_event(&f.state, move(w, x, top))
+	_ = hold_repeat(&f.state, w)
+	testing.expect_value(t, pane.state.diff_scroll, limit - visible)
+
+	// The release ends it.
+	app.handle_event(&f.state, button(w, x, top, false))
+	testing.expect_value(t, w.scroll_hold.bar, app.Scroll_Hold_Bar.None)
+	testing.expect(t, !hold_repeat(&f.state, w))
+	testing.expect_value(t, pane.state.diff_scroll, limit - visible)
+}
+
 @(test)
 the_overview_strip_scrolls_the_diff_by_press_and_drag :: proc(t: ^testing.T) {
 	f: Fixture

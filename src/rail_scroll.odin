@@ -124,15 +124,27 @@ rail_scrollbar_state :: proc(w: ^Window) -> ui.Scrollbar_State {
 	return ui.scrollbar_state(w.rail_bar_hover, w.rail_bar_drag)
 }
 
-// A Left press on the rail's scrollbar: the track glides a page toward the pointer and the thumb holds the
-// bar. False when the point is not on the bar.
+// A Left press on the rail's scrollbar: the track glides a page toward the pointer and holds the track, the
+// thumb holds the bar. False when the point is not on the bar.
 rail_scrollbar_press :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {
 	bar, visible := rail_scrollbar(w)
 	if !visible || !ui.scrollbar_contains(bar, x, y) {return false}
 	offset := ui.scrollbar_press(&w.rail_bar_drag, bar, y)
-	if !w.rail_bar_drag.active {rail_scroll_glide(app, w, f32(offset))}
+	if !w.rail_bar_drag.active {
+		rail_scroll_glide(app, w, f32(offset))
+		scroll_hold_begin(app, w, .Rail, {}, x, y)
+	}
 	w.dirty = true
 	return true
+}
+
+// One page of a held track press toward (x, y) on the rail's scrollbar, glided as the press is.
+rail_scrollbar_page :: proc(app: ^App, w: ^Window, x, y: f32) -> ui.Scroll_Page {
+	bar, visible := rail_scrollbar(w)
+	if !visible {return .Off_Track}
+	offset, result := ui.scrollbar_page(bar, x, y)
+	if result == .Paged {rail_scroll_glide(app, w, f32(offset))}
+	return result
 }
 
 // The held thumb follows the pointer; false when no thumb is held.

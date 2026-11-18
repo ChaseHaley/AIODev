@@ -1168,7 +1168,9 @@ changes_press :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) {
 	// The open file list takes the press, and a press outside it only closes it.
 	if changes_list_open(pane) {
 		choices, anchor := changes_dropdown_choices(pane), changes_dropdown_anchor(pane, g)
-		switch ui.dropdown_press(&pane.dropdown, choices, anchor, &w.ui_text, x, y, false, w.scale) {
+		outcome := ui.dropdown_press(&pane.dropdown, choices, anchor, &w.ui_text, x, y, false, w.scale)
+		if ui.dropdown_take_track(&pane.dropdown) {scroll_hold_begin(app, w, .Changes_Choices, shown.content, x, y)}
+		switch outcome {
 		case .Chosen:
 			changes_list_choose(app, w, pane, ui.dropdown_highlighted(&pane.dropdown, choices))
 			changes_list_close(w, pane)
@@ -1182,6 +1184,7 @@ changes_press :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) {
 		if bar, visible := ui.changes_turn_list_scrollbar(state, g, view);
 		   visible && ui.scrollbar_contains(bar, x, y) {
 			state.turn_list_scroll = ui.scrollbar_press(&state.turn_list_bar, bar, y)
+			if !state.turn_list_bar.active {scroll_hold_begin(app, w, .Changes_Turn_List, shown.content, x, y)}
 			return
 		}
 	}
@@ -1235,6 +1238,7 @@ changes_press :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) {
 	case .Overview:
 		state.diff_scroll = ui.changes_overview_press(state, g, y)
 		_ = ui.changes_scroll_diff(state, g, 0)
+		if !state.overview_drag.active {scroll_hold_begin(app, w, .Changes_Overview, shown.content, x, y)}
 	case .Hooks:
 		run_action(app, w, .Install_Turn_Hooks, .Button)
 	case .Notice_Button:
@@ -1303,6 +1307,41 @@ changes_release :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) -> b
 // Ends whatever the pointer holds on an Agent changes pane: a press, a drag or the overview strip.
 changes_cancel :: proc(app: ^App, w: ^Window) {
 	_ = changes_release(app, w, {button = .Left})
+}
+
+// One page of a held track press on an Agent changes pane's file list, turn list or overview strip,
+// toward (x, y). `shown` is false once the pane, or the list the press began on, is gone.
+changes_scroll_hold_page :: proc(
+	app: ^App,
+	w: ^Window,
+	hold: Scroll_Hold,
+) -> (
+	result: ui.Scroll_Page,
+	shown: bool,
+) {
+	pane := changes_find(app, hold.content.id)
+	rect, found := changes_pane_rect(w, hold.content.id)
+	if pane == nil || !found {return}
+	g := changes_geometry_of(app, w, pane, rect)
+	x, y := hold.pointer.x, hold.pointer.y
+	switch hold.bar {
+	case .Changes_Choices:
+		if !changes_list_open(pane) {return}
+		result = ui.dropdown_page(
+			&pane.dropdown, changes_dropdown_choices(pane), changes_dropdown_anchor(pane, g), x, y, w.scale,
+		)
+	case .Changes_Turn_List:
+		if !pane.state.turn_list_open {return}
+		result = ui.changes_turn_list_page(&pane.state, g, &pane.model.view, x, y)
+	case .Changes_Overview:
+		result = ui.changes_overview_page(&pane.state, g, x, y)
+		if result == .Paged {_ = ui.changes_scroll_diff(&pane.state, g, 0)}
+	case .None, .Pane, .Rail, .Palette_Results, .Palette_Choices:
+		return
+	case .Settings_Page, .Settings_Strip, .Settings_Choices:
+		return
+	}
+	return result, true
 }
 
 // The control a tooltip describes: what a press would reach, as changes_press finds it, or a disabled

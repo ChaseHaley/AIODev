@@ -244,6 +244,8 @@ Palette :: struct {
 	availability: Palette_Availability,
 	reset_hover:  int,
 	scroll_hover: bool,
+	// The scrollbar whose track the last press landed on, until the window takes it; see palette_take_track.
+	track:        Palette_Track,
 	// The query's record mode, and the pointer over its keyboard button.
 	keys:         Key_Search,
 	keys_hover:   bool,
@@ -1559,14 +1561,47 @@ palette_mouse_press :: proc(
 	return .None, 0
 }
 
-// A press on the results' scrollbar: the track jumps, the thumb starts a drag.
+// A press on the results' scrollbar: the track pages toward the pointer, the thumb starts a drag.
 @(private)
 palette_bar_press :: proc(p: ^Palette, l: Palette_Layout, y: f32) -> Outcome {
 	drag: Scroll_Drag
 	offset := scrollbar_press(&drag, l.bar, y)
-	if drag.active {drag_set(p, Scrollbar_Drag{drag.grab})}
+	if drag.active {drag_set(p, Scrollbar_Drag{drag.grab})} else {p.track = .Results}
 	palette_scroll_to(p, offset)
 	return .Changed
+}
+
+// The palette's scrollbars a held track press can page.
+Palette_Track :: enum u8 {
+	None,
+	// The results list.
+	Results,
+	// The open choice list of a setting.
+	Choices,
+}
+
+// The scrollbar whose track the last press landed on, which the window then holds. Reading it ends it.
+palette_take_track :: proc(p: ^Palette) -> Palette_Track {
+	track := p.track
+	p.track = .None
+	return track
+}
+
+// One page of a held track press toward (x, y) on the bar `track`; see scrollbar_page.
+palette_page :: proc(p: ^Palette, l: Palette_Layout, track: Palette_Track, x, y: f32) -> Scroll_Page {
+	switch track {
+	case .None:
+	case .Results:
+		if !l.bar_visible {return .Off_Track}
+		offset, result := scrollbar_page(l.bar, x, y)
+		if result == .Paged {_ = palette_scroll_to(p, offset)}
+		return result
+	case .Choices:
+		c, a, open := palette_dropdown(p, l)
+		if !open {return .Off_Track}
+		return dropdown_page(&p.buffers.dropdown, c, a, x, y, l.scale)
+	}
+	return .Off_Track
 }
 
 palette_query_box :: proc(p: ^Palette, l: Palette_Layout, text: ^Text, scale: f32) -> Field_Box {

@@ -421,7 +421,10 @@ editor_strip_press :: proc(p: ^Editor, l: Editor_Layout, index: int, x, y: f32) 
 	strip := &p.strip
 	if bar, visible := editor_strip_scrollbar(p, l, index); visible && scrollbar_contains(bar, x, y) {
 		offset := scrollbar_press(&strip.bar_drag, bar, x)
-		if !strip.bar_drag.active {strip.wheel = f32(offset) - strip.scroll.target}
+		if !strip.bar_drag.active {
+			strip.wheel = f32(offset) - strip.scroll.target
+			p.track = .Strip
+		}
 		return .Changed
 	}
 	view := strip_view(editor_strip_rect(p, l, index), l.scale)

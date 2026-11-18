@@ -1,6 +1,7 @@
 package ui
 
 import "aio:render"
+import "core:time"
 
 // The one scrollbar every scrolling surface shows: terminal panes, the everything palette,
 // dropdown lists and the theme filmstrip. The track is the whole expansion zone: the thumb is thin
@@ -91,21 +92,67 @@ scrollbar_span :: proc(bar: Scrollbar, r: render.Rect) -> (start, length: f32) {
 
 scrollbar_contains :: proc(bar: Scrollbar, x, y: f32) -> bool {return render.rect_contains(bar.track, x, y)}
 
-// A press on the track pages toward the pointer, or on the thumb starts a drag. `at` is the
-// pointer's coordinate along the bar: y for a vertical bar, x for a horizontal one. Returns the
-// offset the surface scrolls to.
-scrollbar_press :: proc(drag: ^Scroll_Drag, bar: Scrollbar, at: f32) -> int {
+// Where one page toward `at` lands: `at` is the pointer's coordinate along the bar, y for a vertical bar
+// and x for a horizontal one. A point on the thumb stays where the view is, and reports it.
+@(private = "file")
+scrollbar_toward :: proc(bar: Scrollbar, at: f32) -> (offset: int, on_thumb: bool) {
 	e := bar.extent
 	range := max(0, e.total - e.visible)
 	start, length := scrollbar_span(bar, bar.thumb)
 	switch {
 	case at < start:
-		return clamp(e.offset - e.visible, 0, range)
+		return clamp(e.offset - e.visible, 0, range), false
 	case at >= start + length:
-		return clamp(e.offset + e.visible, 0, range)
+		return clamp(e.offset + e.visible, 0, range), false
 	}
-	drag^ = {active = true, grab = at - start}
-	return e.offset
+	return e.offset, true
+}
+
+// A press on the track pages toward the pointer, or on the thumb starts a drag. `at` is the
+// pointer's coordinate along the bar: y for a vertical bar, x for a horizontal one. Returns the
+// offset the surface scrolls to.
+scrollbar_press :: proc(drag: ^Scroll_Drag, bar: Scrollbar, at: f32) -> int {
+	offset, on_thumb := scrollbar_toward(bar, at)
+	if on_thumb {
+		start, _ := scrollbar_span(bar, bar.thumb)
+		drag^ = {active = true, grab = at - start}
+	}
+	return offset
+}
+
+// What a page toward the pointer found.
+Scroll_Page :: enum u8 {
+	// The pointer is not on the track: a held press pauses, as Windows does.
+	Off_Track,
+	// The thumb is under the pointer: the view has met it.
+	On_Thumb,
+	// The view cannot go further toward the pointer.
+	Stuck,
+	// The view pages toward the pointer; `offset` is where it goes.
+	Paged,
+}
+
+// The held track press, as Windows repeats it: the first page comes with the press, the next after
+// SCROLLBAR_REPEAT_DELAY and then one every SCROLLBAR_REPEAT_INTERVAL for as long as the button stays
+// down, each paging toward wherever the pointer is then, until the thumb reaches it. Wine's
+// dlls/win32u/scroll.c (SCROLL_FIRST_DELAY 200, SCROLL_REPEAT_DELAY 50) and ReactOS's scrollbar.c use
+// these values; Windows reads no system setting for them.
+SCROLLBAR_REPEAT_DELAY :: 200 * time.Millisecond
+SCROLLBAR_REPEAT_INTERVAL :: 50 * time.Millisecond
+
+// One page toward the pointer at (x, y), the step a held track press repeats. Nothing moves while the
+// pointer is off the track or on the thumb.
+scrollbar_page :: proc(bar: Scrollbar, x, y: f32) -> (offset: int, result: Scroll_Page) {
+	offset = bar.extent.offset
+	if !scrollbar_contains(bar, x, y) {return offset, .Off_Track}
+	toward, on_thumb := scrollbar_toward(bar, bar.horizontal ? x : y)
+	switch {
+	case on_thumb:
+		return offset, .On_Thumb
+	case toward == offset:
+		return offset, .Stuck
+	}
+	return toward, .Paged
 }
 
 scrollbar_drag :: proc(drag: Scroll_Drag, bar: Scrollbar, at: f32) -> int {

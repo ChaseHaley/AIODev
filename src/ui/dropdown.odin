@@ -41,6 +41,9 @@ Dropdown :: struct {
 	invalid:      bool,
 	// What the rows of a list with `rows` measured.
 	metrics:      Dropdown_Metrics,
+	// The last press was on the scrollbar's track and the owner has not yet taken it; see
+	// dropdown_take_track.
+	track:        bool,
 }
 
 // The pointer drags a selection in the search field, or holds the scrollbar thumb.
@@ -350,6 +353,28 @@ dropdown_scroll_to :: proc(
 	return choice_list_scroll_to(&d.list, offset, dropdown_count(d, c), dropdown_rows(d, c, a, scale))
 }
 
+// One page of a held track press toward (x, y), on the scrollbar of the list the owner passes; see
+// scrollbar_page.
+dropdown_page :: proc(
+	d: ^Dropdown,
+	c: Dropdown_Choices,
+	a: Dropdown_Anchor,
+	x, y, scale: f32,
+) -> Scroll_Page {
+	bar, visible := dropdown_scrollbar(d, c, a, scale)
+	if !visible {return .Off_Track}
+	offset, result := scrollbar_page(bar, x, y)
+	if result == .Paged {_ = dropdown_scroll_to(d, c, a, offset, scale)}
+	return result
+}
+
+// Whether the last press landed on the scrollbar's track, which the owner then holds. Reading it ends it.
+dropdown_take_track :: proc(d: ^Dropdown) -> bool {
+	track := d.track
+	d.track = false
+	return track
+}
+
 dropdown_wheel :: proc(d: ^Dropdown, c: Dropdown_Choices, a: Dropdown_Anchor, rows: int, scale: f32) -> bool {
 	return dropdown_scroll_to(d, c, a, d.list.scroll - rows, scale)
 }
@@ -400,7 +425,7 @@ dropdown_press :: proc(
 	if bar, visible := dropdown_scrollbar(d, c, a, s); visible && scrollbar_contains(bar, x, y) {
 		held: Scroll_Drag
 		_ = dropdown_scroll_to(d, c, a, scrollbar_press(&held, bar, y), s)
-		if held.active {d.drag = held}
+		if held.active {d.drag = held} else {d.track = true}
 		return .Changed
 	}
 	index := dropdown_option_at(d, c, a, x, y, s)

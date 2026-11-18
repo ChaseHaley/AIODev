@@ -79,6 +79,15 @@ changes_overview_drag :: proc(state: ^Changes_State, g: Changes_Geometry, y: f32
 	return scrollbar_drag(state.overview_drag, bar, y)
 }
 
+// One page of a held track press toward (x, y) on the strip; see scrollbar_page.
+changes_overview_page :: proc(state: ^Changes_State, g: Changes_Geometry, x, y: f32) -> Scroll_Page {
+	bar, visible := changes_overview_bar(state, g)
+	if !visible {return .Off_Track}
+	offset, result := scrollbar_page(bar, x, y)
+	if result == .Paged {state.diff_scroll = offset}
+	return result
+}
+
 // Draws a tick at full strength where the thumb covers it and dimmed above and below, so a run as long as
 // a file still shows where the thumb is. Without a thumb the tick is drawn whole.
 @(private = "file")

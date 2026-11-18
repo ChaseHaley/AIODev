@@ -590,6 +590,7 @@ Window_Timer :: enum u8 {
 	Cursor_Blink,
 	Capture_Hold,
 	Selection_Autoscroll,
+	Scroll_Hold,
 	Tooltip,
 	Hidden_Panes,
 	Link_Submenu,
@@ -610,6 +611,8 @@ window_timer_advance :: proc(app: ^App, w: ^Window, timer: Window_Timer, now: ti
 		capture_hold_tick(w, now)
 	case .Selection_Autoscroll:
 		selection_autoscroll_tick(app, w, now)
+	case .Scroll_Hold:
+		scroll_hold_tick(app, w, now)
 	case .Tooltip:
 		tooltip_tick(w, now)
 	case .Hidden_Panes:
@@ -636,6 +639,8 @@ window_timer_deadline :: proc(w: ^Window, timer: Window_Timer) -> (time.Tick, bo
 		return capture_hold_deadline(w)
 	case .Selection_Autoscroll:
 		return selection_autoscroll_deadline(w)
+	case .Scroll_Hold:
+		return scroll_hold_deadline(w)
 	case .Tooltip:
 		return tooltip_deadline(w)
 	case .Hidden_Panes:
