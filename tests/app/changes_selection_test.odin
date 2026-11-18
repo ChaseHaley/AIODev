@@ -73,7 +73,7 @@ diff_store_fill :: proc(s: ^Diff_Store) -> []turns.Diff_File {
 // The window, its Agent changes pane filled with the diff store, and its geometry.
 @(private = "file")
 selecting_pane :: proc(
-	t: ^testing.T, f: ^Selecting,
+	t: ^testing.T, f: ^Selecting, long_line := false,
 ) -> (
 	w: ^app.Window,
 	pane: ^app.Changes_Pane,
@@ -88,6 +88,8 @@ selecting_pane :: proc(
 		pane = pane.id,
 		diff = {files = diff_store_fill(&f.store)},
 	}
+	// Flat line 5 is 600 columns of digits, far wider than the pane, when asked for.
+	if long_line {f.store.lines[5].text = strings.repeat("0123456789", 60, context.temp_allocator)}
 	app.changes_fill_plain(&f.state, pane, &plain)
 	return w, pane, true
 }
@@ -114,7 +116,7 @@ selecting_at :: proc(
 	cell, column, _ := ui.changes_line_code(g, view, &pane.state, &mono, 0, line, x)
 	text, _ := ui_line_text(view, line)
 	return {
-		column.text_x + ui.code_x_of(&mono, text, column.width, offset) + 1,
+		column.text_x + ui.code_x_of(&mono, text, column.width, offset, column.scroll) + 1,
 		cell.y + cell.height / 2,
 	}
 }
@@ -382,9 +384,52 @@ the_wheel_over_the_note_editor_scrolls_its_text_not_the_diff :: proc(t: ^testing
 
 	// Past the twelve lines the box shows, the wheel moves the text and leaves the diff where it was.
 	diff := pane.state.diff_scroll
-	testing.expect(t, app.changes_wheel(&f.state, w, x, y, -2))
+	testing.expect(t, app.changes_wheel(&f.state, w, x, y, -2, 0, {}))
 	testing.expect(t, c.area.scroll > 0, "the editor's text scrolls")
 	testing.expect_value(t, pane.state.diff_scroll, diff)
+}
+
+// A line wider than the pane scrolls sideways with Shift and the wheel (or a sideways wheel), and a drag
+// over the end that scrolled into view selects exactly the characters under the pointer.
+@(test)
+a_drag_past_the_old_edge_selects_the_characters_scrolled_into_view :: proc(t: ^testing.T) {
+	f: Selecting
+	defer selecting_stop(t, &f)
+	if !selecting_start(t, &f, "Edge") {return}
+	w, pane, ok := selecting_pane(t, &f, long_line = true)
+	if !ok {return}
+	c := &pane.comments
+	view := &pane.model.view
+	g := selecting_geometry(&f, w, pane)
+	mono := ui.text_mono(&w.ui_text, f.state.family)
+	row := ui.changes_line_rect(g, view, &pane.state, 0, 5)
+	x, y := row.x + row.width / 2, row.y + row.height / 2
+	line := f.store.lines[5].text
+
+	// Unscrolled the end of the line is out of reach.
+	_, to, _ := ui.changes_line_visible(g, view, &pane.state, &mono, 0, 5)
+	testing.expect(t, to < len(line))
+
+	// Shift and the wheel scroll the code sideways, down going right, a sideways wheel too, and the diff
+	// stays where it was.
+	diff := pane.state.diff_scroll
+	testing.expect(t, app.changes_wheel(&f.state, w, x, y, -10, 0, {.Shift}))
+	testing.expect_value(t, pane.state.h_scroll, 20)
+	testing.expect_value(t, pane.state.diff_scroll, diff)
+	testing.expect(t, app.changes_wheel(&f.state, w, x, y, 0, 3, {}))
+	testing.expect_value(t, pane.state.h_scroll, 26)
+	testing.expect(t, app.changes_wheel(&f.state, w, x, y, 1, 0, {.Shift}))
+	testing.expect_value(t, pane.state.h_scroll, 24)
+
+	// To the end the last byte is in view, and a drag over its last characters selects exactly them.
+	testing.expect(t, app.changes_wheel(&f.state, w, x, y, -100_000, 0, {.Shift}))
+	g = selecting_geometry(&f, w, pane)
+	_, to, _ = ui.changes_line_visible(g, view, &pane.state, &mono, 0, 5)
+	testing.expect_value(t, to, len(line))
+	selecting_drag(&f, w, pane, 5, len(line) - 12, 5, len(line) - 4)
+	testing.expect_value(t, c.selection.first_offset, len(line) - 12)
+	testing.expect_value(t, c.selection.last_offset, len(line) - 4)
+	testing.expect(t, c.selection.partial)
 }
 
 // A comment pane with no window, to drive its keys: the quick labels are set and a selection of lines made.

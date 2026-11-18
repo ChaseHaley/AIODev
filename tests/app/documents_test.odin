@@ -3,6 +3,7 @@ package app_test
 import "core:encoding/json"
 import "core:fmt"
 import "core:os"
+import "core:slice"
 import "core:strings"
 import "core:sync"
 import "core:testing"
@@ -875,6 +876,45 @@ link_menu_opens_a_markdown_file_in_each_place_copies_it_and_shows_its_folder :: 
 	testing.expect(t, open >= 0 && !w.document_menu.menu.items[open].submenu)
 	testing.expect(t, link_row(w, .Open_External) < 0 && link_row(w, .Open_Folder) < 0)
 	testing.expect(t, link_row(w, .Copy) >= 0)
+}
+
+// A link in a floating terminal opens in its float: the menu marks Right split Default, as Open splits the
+// float even with pane.markdown_floating on, and a chosen Down split joins the float too.
+@(test)
+link_menu_in_a_float_splits_that_float :: proc(t: ^testing.T) {
+	sync.mutex_lock(&Link_Test_Lock)
+	defer sync.mutex_unlock(&Link_Test_Lock)
+	f: Palette_Fixture
+	defer palette_fixture_destroy(t, &f)
+	s, w, _, ok := float_fixture(t, &f, "documents-link-float")
+	if !ok {return}
+	s.settings.pane.markdown_floating = true
+	root, root_error := os.make_directory_temp("", "aio-link-float-*", context.allocator)
+	if !testing.expect_value(t, root_error, nil) {return}
+	defer {testing.expect_value(t, os.remove_all(root), nil); delete(root)}
+	path := fmt.aprintf(`%s\notes.md`, root)
+	defer delete(path)
+	if !testing.expect_value(t, os.write_entire_file(path, transmute([]u8)string("# Notes\n")), nil) {return}
+	tree := app.window_tree(w)
+	terminal, _ := layout.focused_content(tree)
+	source, _ := layout.float_of(tree, tree.focus)
+	// The app's ticks free temporary memory, so the copy is the test's own.
+	tiled := slice.clone(app.window_tiled_rects(w))
+	defer delete(tiled)
+	link_feed(t, &f, fmt.tprintf("\x1b[2J\x1b[3J\x1b[H%s", path))
+
+	if !menu_on_path(t, &f, terminal, {.Shift}) {return}
+	point_at(s, w, &w.document_menu.menu, link_row(w, .Open))
+	if !testing.expect(t, app.document_submenu_shown(w)) {return}
+	testing.expect_value(t, w.document_menu.submenu.items[placement_row(w, .Split_Right)].shortcut, "Default")
+	testing.expect_value(t, w.document_menu.submenu.items[placement_row(w, .Float)].shortcut, "")
+	choose_placement(s, w, &w.document_menu.menu, link_row(w, .Open), .Split_Down)
+	focused, _ := layout.focused_content(tree)
+	testing.expect_value(t, focused.kind, layout.Content_Kind.Markdown)
+	opened, in_float := layout.float_of(tree, tree.focus)
+	testing.expect(t, in_float && opened.id == source.id)
+	testing.expect_value(t, len(app.floating_rects(w)), 2)
+	testing.expect(t, slice.equal(app.window_tiled_rects(w), tiled))
 }
 
 // A folder opens a new shell there in each place, from a printed path or from its pin, with the profile of the

@@ -843,10 +843,17 @@ changes_code_offsets_follow_the_painters_rules :: proc(t: ^testing.T) {
 	}
 	testing.expect_value(t, ui.code_offset_at(&f.mono, text, room, advance + tab), 3)
 
-	// The room ends the visible text: the tab starts inside it, the "b" after it does not.
+	// The room ends the visible text: the tab starts inside it, the "b" after it does not, and a boundary
+	// beyond it is at the room's edge.
 	narrow := advance + space
 	testing.expect_value(t, ui.code_offset_at(&f.mono, text, narrow, 10000), 2)
-	testing.expect_value(t, ui.code_x_of(&f.mono, text, narrow, 4), advance + tab)
+	testing.expect_value(t, ui.code_x_of(&f.mono, text, narrow, 4), narrow)
+
+	// Scrolled, the text starts at the first rune the scroll reaches: the tab, past "a".
+	testing.expect_value(t, ui.code_offset_at(&f.mono, text, room, 0, advance), 1)
+	testing.expect_value(t, ui.code_offset_at(&f.mono, text, room, -20, advance), 1)
+	testing.expect(t, abs(ui.code_x_of(&f.mono, text, room, 4, advance) - (tab + after)) < 0.01)
+	testing.expect_value(t, ui.code_x_of(&f.mono, text, room, 0, advance), 0)
 }
 
 @(test)

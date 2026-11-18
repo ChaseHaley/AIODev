@@ -106,14 +106,12 @@ pane_place :: proc(
 	direction: Maybe(layout.Direction) = nil,
 ) -> bool {
 	tree := &workspace.tabs[tab_index].tree
-	// A floating pane does not split, so the content opens beside the tiled pane below it.
-	anchor := node
-	if layout.is_floating(tree, anchor) {anchor = layout.focus_tiled(tree)}
 	side := direction.? or_else (placement == .Split_Down ? layout.Direction.Down : layout.Direction.Right)
 	opened := false
 	switch placement {
 	case .Split_Right, .Split_Down:
-		failure := pane_split_insert(app, w, workspace, tab_index, anchor, side, ratio, focus, content, false)
+		// Beside a floating pane, the split stays inside its float, as Split right does there.
+		failure := pane_split_insert(app, w, workspace, tab_index, node, side, ratio, focus, content, false)
 		#partial switch failure {
 		case .None:
 			opened = true
@@ -126,6 +124,8 @@ pane_place :: proc(
 		opened = pane_new_tab(app, w, workspace, content, focus)
 	case .Linked_Window:
 		if w == nil || window_linked(w) || w.workspace != workspace || workspace.selected != tab_index {break}
+		// Only a tiled pane moves to a linked window, so a float's link opens beside the tiled pane below it.
+		anchor := layout.is_floating(tree, node) ? layout.focus_tiled(tree) : node
 		// The new pane leaves for its own window at once, so it needs no room in this one.
 		failure := pane_split_insert(app, nil, workspace, tab_index, anchor, side, ratio, false, content, false)
 		if failure != .None {break}

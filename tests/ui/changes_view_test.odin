@@ -1107,17 +1107,8 @@ changes_scroll_clamps_the_diff :: proc(t: ^testing.T) {
 }
 
 @(test)
-changes_text_helpers_never_walk_a_whole_long_line :: proc(t: ^testing.T) {
+clip_bytes_cuts_titles_and_paths_on_a_rune_boundary :: proc(t: ^testing.T) {
 	long := strings.repeat("x", 1 << 20, context.temp_allocator)
-	prefix := ui.mono_prefix(long, 400, 8)
-	testing.expect_value(t, len(prefix), 52)
-	testing.expect(t, raw_data(prefix) == raw_data(long))
-	testing.expect_value(t, ui.mono_prefix("short", 400, 8), "short")
-	testing.expect_value(t, ui.mono_prefix("abcdef", 0, 8), "ab")
-	// Multi-byte runes are counted as runes and never split.
-	testing.expect_value(t, ui.mono_prefix("ééééé", 16, 8), "éééé")
-	testing.expect_value(t, ui.mono_prefix("éé", 400, 0), "éé")
-
 	clipped := ui.clip_bytes(long, 512)
 	testing.expect_value(t, len(clipped), 512)
 	testing.expect_value(t, ui.clip_bytes("abc", 512), "abc")

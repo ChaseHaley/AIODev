@@ -245,8 +245,12 @@ New-Item -ItemType Directory -Path $work | Out-Null
 Git init -q
 Set-Content -LiteralPath (Join-Path $work 'a.txt') -Value @('one', 'two', 'three')
 Set-Content -LiteralPath (Join-Path $work 'b.txt') -Value @('keep', 'drop')
-# Only the reviewer of section (d) edits it, for a modified file whose two sides show side by side.
-Set-Content -LiteralPath (Join-Path $work 'notes.txt') -Value @('alpha', 'beta', 'gamma', 'delta')
+# Only the reviewer of section (d) edits it, for a modified file whose two sides show side by side. Its
+# changed line is long on both sides, wider than a pane, so the long-line checks have lines to scroll: the
+# digit groups make every byte tell its place.
+$wideOld = 'beta ' + ((1..50 | ForEach-Object { '{0:D3}_' -f $_ }) -join '')
+$wideNew = 'BETA ' + ((1..70 | ForEach-Object { '{0:D3}_' -f $_ }) -join '')
+Set-Content -LiteralPath (Join-Path $work 'notes.txt') -Value @('alpha', $wideOld, 'gamma', 'delta')
 Git add -A
 Git commit -q -m initial
 
@@ -629,7 +633,7 @@ try {
         ')'
         # Long enough to scroll, so the file list can put the header of a later file at the top.
         'Set-Content -LiteralPath (Join-Path $work ''long.txt'') -Value (1..200 | ForEach-Object { "line $_" })'
-        'Set-Content -LiteralPath (Join-Path $work ''notes.txt'') -Value @(''alpha'', ''BETA'', ''gamma'', ''delta'')'
+        "Set-Content -LiteralPath (Join-Path `$work 'notes.txt') -Value @('alpha', '$wideNew', 'gamma', 'delta')"
         # Sorts last, with no t in its path, and keeps enough below long.txt to scroll it to the top.
         'Set-Content -LiteralPath (Join-Path $work ''zz.md'') -Value (1..150 | ForEach-Object { "- entry $_" })'
         'while (-not (Test-Path -LiteralPath $end)) { Start-Sleep -Milliseconds 100 }'
@@ -988,6 +992,371 @@ try {
     Set-Content -LiteralPath "$data/settings.ini" -Value $ini -NoNewline
     Aio command settings.reload | Out-Null
     Await-State @{ 'theme.name' = $theme } 'the original theme returns' | Out-Null
+
+    # Middle-click scrolling: a Middle press on the diff drops the anchor and the diff scrolls toward the
+    # pointer, as a Markdown page does; the overview strip and the pinned header follow it.
+    $s = State
+    $row = Rect $s 'changes.line.0.1.rect'
+    $ax = [int]($row[0] + $row[2] / 2)
+    $ay = [int]($row[1] + $row[3] / 2)
+    $box = Rect $s 'changes.overview_box_rect'
+    Aio mouse click "$ax,$ay" --px --button middle | Out-Null
+    $s = State
+    Equal $s['pointer.shape'] 'resize_vertical' 'a middle click on the diff drops the anchor'
+    Equal $s['changes.diff_scroll'] 0 'the click alone does not scroll'
+    Equal $s['changes.selection_mode'] '' 'and selects nothing'
+    Aio capture --out "$data/agent-anchor.png" | Out-Null
+    Aio mouse move "$ax,$($ay + 160)" --px | Out-Null
+    Start-Sleep -Milliseconds 700
+    $s = State
+    $moved = [double]$s['changes.diff_scroll']
+    if ($moved -le 0) { throw "below the anchor expected the diff to scroll down, observed $moved" }
+    Write-Output "PASS below the anchor the diff scrolls down ($moved)"
+    if ([int]$s['changes.top_file'] -lt 1 -or [int]$s['changes.sticky_file'] -lt 0) {
+        throw "scrolling expected a later file at the top with a pinned header, observed top $($s['changes.top_file']) sticky $($s['changes.sticky_file'])"
+    }
+    Write-Output 'PASS the pinned header follows the scroll'
+    $moved2 = Rect $s 'changes.overview_box_rect'
+    if ($moved2[1] -le $box[1]) { throw "the overview box expected to follow the scroll, observed $($moved2[1]) over $($box[1])" }
+    Write-Output 'PASS the overview strip follows the scroll'
+    Aio capture --out "$data/agent-anchor-scrolling.png" | Out-Null
+    Aio mouse move "$ax,$($ay + 4)" --px | Out-Null
+    $a = [double](State)['changes.diff_scroll']
+    Start-Sleep -Milliseconds 400
+    Equal ([double](State)['changes.diff_scroll']) $a 'back in the dead zone it rests'
+    Aio mouse move "$ax,$($ay - 160)" --px | Out-Null
+    Start-Sleep -Milliseconds 500
+    if ([double](State)['changes.diff_scroll'] -ge $a) { throw 'above the anchor expected the diff to scroll up' }
+    Write-Output 'PASS above the anchor the diff scrolls up'
+    Aio mouse click "$ax,$($ay - 160)" --px | Out-Null
+    $a = [double](State)['changes.diff_scroll']
+    Start-Sleep -Milliseconds 400
+    $s = State
+    Equal ([double]$s['changes.diff_scroll']) $a 'a click ends scrolling'
+    Equal $s['changes.selection_mode'] '' 'the ending click selects nothing'
+    if ($s['pointer.shape'] -eq 'resize_vertical') { throw 'the pointer expected its usual shape after the anchor ended' }
+    Write-Output 'PASS the pointer returns to its usual shape'
+    # Hold the button: scrolling lasts while it is down and ends on its release.
+    Aio mouse wheel "$ax,$ay" 200 --px | Out-Null
+    Await-State @{ 'changes.diff_scroll' = '0' } 'the wheel brings the diff back to the top' | Out-Null
+    Aio mouse down "$ax,$ay" --px --button middle | Out-Null
+    Aio mouse move "$ax,$($ay + 160)" --px --button middle | Out-Null
+    Start-Sleep -Milliseconds 500
+    Aio mouse up "$ax,$($ay + 160)" --px --button middle | Out-Null
+    $a = [double](State)['changes.diff_scroll']
+    if ($a -le 0) { throw 'a middle drag expected to scroll the diff' }
+    Start-Sleep -Milliseconds 400
+    Equal ([double](State)['changes.diff_scroll']) $a 'releasing after a drag ends scrolling'
+    Aio mouse wheel "$ax,$ay" 200 --px | Out-Null
+    Await-State @{ 'changes.diff_scroll' = '0' } 'back at the top for the long lines' | Out-Null
+
+    # Long lines: notes.txt has a line of 205 bytes on its old side and one of 285 on its new side, both wider
+    # than the pane. They scroll sideways, never fade, and stay selectable, in either layout and at any size.
+    # The pixel of byte `$col` of flat line `$line` of file `$file`, a pixel past the boundary, allowing for how
+    # far the code is scrolled.
+    function Point-In($s, $file, $line, $col) {
+        $r = Rect $s "changes.line.$file.$line.rect"
+        $x = [double]$s["changes.line.$file.$line.text_x"] + ($col * [double]$s['changes.mono_advance']) -
+            [double]$s["changes.line.$file.$line.scroll"] + 1
+        return "$([int]$x),$([int]($r[1]+$r[3]/2))"
+    }
+    # Scrolls the code with the wheel and Shift over the new line: rows count down for the right.
+    function Scroll-Code($s, $rows) {
+        Aio mouse wheel (Middle (Rect $s 'changes.line.2.2.rect')) $rows --px --mods Shift | Out-Null
+    }
+    # The checks every layout and size owes: nothing fades, the pane cuts the new line, and at the end of the
+    # scroll the last byte of each long line is in view, the old and the new line scrolled alike. Starts and
+    # leaves the code at its start.
+    function Check-Long($label) {
+        $s = State
+        Equal $s['changes.faded_glyphs'] 0 "${label}: no glyph in the diff fades"
+        $limit = [int]$s['changes.h_limit']
+        if ($limit -le 0) { throw "$label expected the lines wider than the pane, observed h_limit $limit" }
+        Assert-Shown $s 'changes.h_bar_rect'
+        $first = [int]$s['changes.line.2.2.visible_to']
+        if ($first -ge $newLength) { throw "$label expected the pane to cut the new line, observed $first bytes" }
+        Scroll-Code $s -400
+        $s = Await-State @{
+            'changes.h_scroll' = $limit; 'changes.line.2.2.visible_to' = $newLength
+            'changes.line.2.1.visible_to' = $oldLength
+        } "$label scrolls to the end of both long lines"
+        Equal $s['changes.line.2.1.scroll'] $s['changes.line.2.2.scroll'] "$label`: the old and new line scroll alike"
+        Equal $s['changes.faded_glyphs'] 0 "$label`: still no fade at the end"
+        Aio capture --out "$data/agent-long-$($label -replace ' ', '-')-end.png" | Out-Null
+        Scroll-Code $s 400
+        Await-State @{ 'changes.h_scroll' = 0 } "$label returns to the start" | Out-Null
+    }
+    # Puts notes.txt at the top of the diff, as a change of scale leaves the scroll somewhere else.
+    function Show-Notes {
+        Open-Files | Out-Null
+        Aio type 'notes' | Out-Null
+        Await-Like 'changes.file_list.0.label' '*notes.txt*' 'the search keeps notes.txt' | Out-Null
+        Aio key Enter | Out-Null
+        Await-State @{ 'changes.files_open' = 'false'; 'changes.panel_open' = 'false'; 'changes.top_file' = 2 } `
+            'notes.txt is at the top' | Out-Null
+    }
+    $newLength = $wideNew.Length
+    $oldLength = $wideOld.Length
+    Open-Files | Out-Null
+    Aio type 'notes' | Out-Null
+    Await-Like 'changes.file_list.0.label' '*notes.txt*' 'the search keeps notes.txt' | Out-Null
+    Aio key Enter | Out-Null
+    $s = Await-State @{ 'changes.files_open' = 'false'; 'changes.panel_open' = 'false'; 'changes.top_file' = 2 } `
+        'picking notes.txt puts it at the top'
+    Equal $s['changes.h_scroll'] 0 'the code starts unscrolled'
+    Equal $s['changes.line.2.2.scroll'] 0 'and so does the new line'
+    $cut = [int]$s['changes.line.2.2.visible_to']
+    Write-Output "PASS the pane shows $cut of the new line's $newLength bytes before scrolling"
+    Aio capture --out "$data/agent-long-unified-wide.png" | Out-Null
+    Check-Long 'unified wide'
+    # The scrollbar is the app's own: thin at rest, wider under the pointer, with a thumb that drags and a track
+    # that pages.
+    $s = State
+    $track = Rect $s 'changes.h_bar_rect'
+    $thumb = Rect $s 'changes.h_bar_thumb_rect'
+    Aio mouse move (Middle (Rect $s 'changes.line.2.2.rect')) --px | Out-Null
+    $rest = (Rect (State) 'changes.h_bar_thumb_rect')[3]
+    Aio capture --out "$data/agent-long-scrollbar-rest.png" | Out-Null
+    Aio mouse move (Middle $thumb) --px | Out-Null
+    $s = Await-State @{ 'changes.hover_part' = 'H_Scroll' } 'the pointer over the scrollbar hovers it'
+    $hover = (Rect $s 'changes.h_bar_thumb_rect')[3]
+    if ($hover -le $rest) { throw "the scrollbar expected a thicker thumb under the pointer than $rest, observed $hover" }
+    Write-Output "PASS the scrollbar thumb widens under the pointer ($rest to $hover px)"
+    Aio capture --out "$data/agent-long-scrollbar-hover.png" | Out-Null
+    $before = [int]$s['changes.h_scroll']
+    Aio mouse click "$([int]($track[0] + $track[2] - 10)),$([int]($track[1] + $track[3] / 2))" --px | Out-Null
+    $paged = [int](State)['changes.h_scroll']
+    if ($paged -le $before) { throw "a press on the track past the thumb expected to page the code, observed $paged" }
+    Write-Output "PASS a press on the track pages the code ($paged columns)"
+    Scroll-Code (State) 400
+    Await-State @{ 'changes.h_scroll' = 0 } 'back at the start after paging' | Out-Null
+
+    # Shift and the wheel scroll the code sideways, four columns for two rows; the numbers stay where they are.
+    $s = State
+    $gutter = $s['changes.line.2.2.text_x']
+    Scroll-Code $s -2
+    $s = Await-State @{ 'changes.h_scroll' = 4 } 'Shift and the wheel scroll the code four columns'
+    Equal $s['changes.line.2.2.text_x'] $gutter 'the numbers and the sign stay where they were'
+    Equal $s['changes.faded_glyphs'] 0 'a scrolled line does not fade'
+
+    # A drag over the part scrolled into view selects the characters under the pointer, past where the old
+    # edge was; a note on it keeps its bytes and its excerpt.
+    $limit = [int]$s['changes.h_limit']
+    Scroll-Code $s -400
+    $s = Await-State @{ 'changes.h_scroll' = $limit } 'scrolled to the end for the drag'
+    $from = $newLength - 20
+    $to = $newLength - 8
+    if ($from -le $cut) { throw "the drag expected to start past the old edge at byte $cut, starts at $from" }
+    $want = $wideNew.Substring($from, $to - $from)
+    Aio mouse drag (Point-In $s 2 2 $from) (Point-In $s 2 2 $to) --px | Out-Null
+    $s = Await-State @{
+        'changes.selection_mode' = 'text'; 'changes.selection_text' = $want; 'changes.toolbar_open' = 'true'
+    } 'a drag past the old edge selects the characters under the pointer'
+    Aio key Alt+2 | Out-Null
+    $s = Await-State @{ 'changes.comments' = 1; 'changes.comment.0.partial' = 'true' } `
+        'Alt+2 saves a note on part of the scrolled line'
+    Equal $s['changes.comment.0.path'] 'notes.txt' 'the note is on notes.txt'
+    Equal $s['changes.comment.0.first_byte'] $from 'the note starts at the first selected byte'
+    Equal $s['changes.comment.0.last_byte'] $to 'and ends at the last'
+    Aio capture --out "$data/agent-long-note.png" | Out-Null
+    $s = Await-NoNotices 'no notice covers Copy'
+    Aio mouse move (Middle (Rect $s 'changes.copy_rect')) --px | Out-Null
+    Click-Rect $s 'changes.copy_rect'
+    # The state shows the message's quotes escaped, so the excerpt is matched between them.
+    Await-Like 'os.clipboard' "*, at *$want*" 'Copy quotes the excerpt of the scrolled line' | Out-Null
+    $s = Await-NoNotices 'no notice covers Discard'
+    Aio mouse move (Middle (Rect $s 'changes.discard_rect')) --px | Out-Null
+    Click-Rect $s 'changes.discard_rect'
+    Await-State @{ 'changes.comments' = 0 } 'Discard clears the long-line note' | Out-Null
+
+    # A drag that runs out of the pane scrolls the code on while the pointer stays out, and selects on.
+    $s = State
+    Scroll-Code $s 400
+    $s = Await-State @{ 'changes.h_scroll' = 0; 'changes.selection_mode' = '' } 'back at the start for the edge drag'
+    $row = Rect $s 'changes.line.2.2.rect'
+    $edge = "$([int]($row[0] + $row[2] + 4)),$([int]($row[1] + $row[3] / 2))"
+    Aio mouse down (Point-In $s 2 2 20) --px | Out-Null
+    Aio mouse move $edge --px | Out-Null
+    Start-Sleep -Milliseconds 900
+    $dragged = [int](State)['changes.h_scroll']
+    Aio mouse up $edge --px | Out-Null
+    if ($dragged -le 0) { throw "a drag past the edge expected to scroll the code, observed $dragged columns" }
+    Write-Output "PASS a drag past the pane's edge scrolled the code $dragged columns"
+    $s = Await-State @{ 'changes.selection_mode' = 'text' } 'the drag past the edge selects text'
+    $text = $s['changes.selection_text']
+    if ($text.Length -le ($cut - 20) -or -not $wideNew.Substring(20).StartsWith($text)) {
+        throw "the drag past the edge expected the text from byte 20 on, past byte $cut; observed '$text'"
+    }
+    Write-Output "PASS the drag past the edge selected $($text.Length) bytes from byte 20, past the old edge"
+    Aio key Esc | Out-Null
+    $s = Await-State @{ 'changes.selection_mode' = '' } 'Escape ends the selection'
+
+    # The scrollbar along the bottom edge: dragging its thumb scrolls the code.
+    Scroll-Code $s 400
+    $s = Await-State @{ 'changes.h_scroll' = 0 } 'back at the start for the scrollbar'
+    $thumb = Rect $s 'changes.h_bar_thumb_rect'
+    $thumbY = [int]($thumb[1] + $thumb[3] / 2)
+    Aio mouse drag "$([int]($thumb[0] + $thumb[2] / 2)),$thumbY" "$([int]($thumb[0] + $thumb[2] / 2 + 80)),$thumbY" --px | Out-Null
+    $moved = [int](State)['changes.h_scroll']
+    if ($moved -le 0) { throw "dragging the scrollbar thumb expected to scroll the code, observed $moved columns" }
+    Write-Output "PASS dragging the scrollbar thumb scrolls the code $moved columns"
+    Scroll-Code (State) 400
+    Await-State @{ 'changes.h_scroll' = 0 } 'back at the start after the scrollbar' | Out-Null
+
+    # At 150% the end of a long line is still reachable and nothing fades.
+    Aio dpi 144 | Out-Null
+    Start-Sleep -Milliseconds 800
+    Show-Notes
+    Aio capture --out "$data/agent-long-unified-144.png" | Out-Null
+    Check-Long 'unified 150 percent'
+    Aio dpi 96 | Out-Null
+    Await-State @{ 'changes.row_steps' = '0'; 'changes.h_scroll' = 0 } 'the pane goes back to 100%' | Out-Null
+    Show-Notes
+
+    # A narrow pane needs more columns; the same checks hold.
+    $wideLimit = [int](State)['changes.h_limit']
+    Resize-Window 70
+    $s = State
+    if ([int]$s['changes.h_limit'] -le $wideLimit) {
+        throw "a narrow pane expected more columns than $wideLimit, observed $($s['changes.h_limit'])"
+    }
+    Write-Output "PASS a narrow pane scrolls further ($($s['changes.h_limit']) columns, $wideLimit when wide)"
+    Aio capture --out "$data/agent-long-unified-narrow.png" | Out-Null
+    Check-Long 'unified narrow'
+    Resize-Window 150
+
+    # Side by side: the old and new line stay on one row and scroll together, each inside its own half.
+    $s = State
+    Click-Rect $s 'changes.layout_button_rect'
+    $s = Await-State @{ 'changes.side_by_side' = 'true'; 'changes.top_file' = 2; 'changes.h_scroll' = 0 } `
+        'the layout toggle shows the long lines side by side'
+    $old = Rect $s 'changes.line.2.1.rect'
+    $new = Rect $s 'changes.line.2.2.rect'
+    if (-not ($new[0] -gt $old[0] -and $new[1] -eq $old[1])) {
+        throw "side by side expected the old line left of the new on one row, observed $($old -join ',') and $($new -join ',')"
+    }
+    Write-Output 'PASS the old and new long lines share a row'
+    Aio capture --out "$data/agent-long-side-by-side-wide.png" | Out-Null
+    Check-Long 'side by side wide'
+    $s = State
+    Scroll-Code $s -400
+    $s = Await-State @{ 'changes.line.2.2.visible_to' = $newLength } 'scrolled to the end in the right half'
+    Aio mouse drag (Point-In $s 2 2 $from) (Point-In $s 2 2 $to) --px | Out-Null
+    Await-State @{ 'changes.selection_mode' = 'text'; 'changes.selection_text' = $want } `
+        'a drag in the right half selects the same characters' | Out-Null
+    Aio key Esc | Out-Null
+    Await-State @{ 'changes.selection_mode' = '' } 'Escape ends the side by side selection' | Out-Null
+    Scroll-Code (State) 400
+    Await-State @{ 'changes.h_scroll' = 0 } 'back at the start in side by side' | Out-Null
+    Resize-Window 70
+    Aio capture --out "$data/agent-long-side-by-side-narrow.png" | Out-Null
+    Check-Long 'side by side narrow'
+    Resize-Window 150
+    $s = State
+    Click-Rect $s 'changes.layout_button_rect'
+    Await-State @{ 'changes.side_by_side' = 'false'; 'changes.top_file' = 2 } 'the layout toggle goes back to unified' | Out-Null
+
+    # Wrap: the same lines with turns.diff_long_lines = wrap, which the open pane follows at once. Nothing
+    # scrolls sideways or fades, every byte is in view, a row is as tall as the lines its text wraps to, and a
+    # drag across the wrapped lines selects the bytes under the pointer. The pixel of byte `$col` of flat
+    # line `$line` of notes.txt in wrapped lines: its line of text, and the column on it.
+    function Point-Wrap($s, $line, $col) {
+        $r = Rect $s "changes.line.2.$line.rect"
+        $new = Rect $s 'changes.line.2.2.rect'
+        $adv = [double]$s['changes.mono_advance']
+        $room = $new[0] + $new[2] - [double]$s['changes.line.2.2.text_x']
+        $cols = [int][math]::Floor(($room + 0.01) / $adv)
+        $one = (Rect $s 'changes.line.2.0.rect')[3]
+        $x = [double]$s["changes.line.2.$line.text_x"] + ($col % $cols) * $adv + 1
+        $y = $r[1] + ([math]::Floor($col / $cols) + 0.5) * $one
+        return "$([int]$x),$([int]$y)"
+    }
+    function Check-Wrap($label, $sideBySide) {
+        $s = State
+        Equal $s['changes.long_lines'] 'wrap' "${label}: long lines wrap"
+        Equal $s['changes.faded_glyphs'] 0 "${label}: no glyph in the diff fades"
+        Equal $s['changes.h_limit'] 0 "${label}: nothing scrolls sideways"
+        Assert-Hidden $s 'changes.h_bar_rect'
+        $one = Rect $s 'changes.line.2.0.rect'
+        $old = Rect $s 'changes.line.2.1.rect'
+        $new = Rect $s 'changes.line.2.2.rect'
+        if ($new[3] -lt 2 * $one[3]) { throw "$label expected the new line to wrap onto two lines or more, observed height $($new[3]) over $($one[3])" }
+        if ($old[3] -lt 2 * $one[3]) { throw "$label expected the old line to take two lines or more, observed height $($old[3])" }
+        Write-Output "PASS ${label}: the new line takes $([math]::Round($new[3] / $one[3])) lines"
+        Equal $s['changes.line.2.2.visible_to'] $newLength "${label}: every byte of the new line is in view"
+        if ($sideBySide) {
+            Equal $old[1] $new[1] "${label}: the pair shares a row"
+            Equal $old[3] $new[3] "${label}: the pair is as tall as its taller side"
+        }
+        # A drag from the second line of text to the third selects the bytes between.
+        $adv = [double]$s['changes.mono_advance']
+        $cols = [int][math]::Floor(($new[0] + $new[2] - [double]$s['changes.line.2.2.text_x'] + 0.01) / $adv)
+        $a = $cols + 3
+        $b = 2 * $cols + 8
+        $text = $wideNew.Substring($a, $b - $a)
+        Aio mouse drag (Point-Wrap $s 2 $a) (Point-Wrap $s 2 $b) --px | Out-Null
+        Await-State @{ 'changes.selection_mode' = 'text'; 'changes.selection_text' = $text } `
+            "${label}: a drag across wrapped lines selects the bytes under the pointer" | Out-Null
+        Aio key Esc | Out-Null
+        Await-State @{ 'changes.selection_mode' = '' } "${label}: Escape ends the selection" | Out-Null
+        Aio capture --out "$data/agent-wrap-$($label -replace ' ', '-').png" | Out-Null
+    }
+    $wrapIni = Get-Content -LiteralPath "$data/settings.ini" -Raw
+    Add-Content -LiteralPath "$data/settings.ini" -Value "`nturns.diff_long_lines = wrap"
+    Aio command settings.reload | Out-Null
+    Await-State @{ 'changes.long_lines' = 'wrap'; 'changes.top_file' = 2; 'changes.h_limit' = 0 } `
+        'the open pane wraps at once and keeps notes.txt at the top' | Out-Null
+    Check-Wrap 'unified wide' $false
+    # A partial note on a wrapped line keeps its bytes and its excerpt.
+    $s = State
+    $a = 120
+    $b = 131
+    $text = $wideNew.Substring($a, $b - $a)
+    Aio mouse drag (Point-Wrap $s 2 $a) (Point-Wrap $s 2 $b) --px | Out-Null
+    Await-State @{ 'changes.selection_text' = $text; 'changes.toolbar_open' = 'true' } 'a drag on a wrapped line selects its bytes' | Out-Null
+    Aio key Alt+2 | Out-Null
+    $s = Await-State @{ 'changes.comments' = 1; 'changes.comment.0.partial' = 'true' } 'Alt+2 saves a note on part of the wrapped line'
+    Equal $s['changes.comment.0.first_byte'] $a 'the wrapped note starts at the first selected byte'
+    Equal $s['changes.comment.0.last_byte'] $b 'and ends at the last'
+    Aio capture --out "$data/agent-wrap-note.png" | Out-Null
+    $s = Await-NoNotices 'no notice covers Copy on the wrapped line'
+    Aio mouse move (Middle (Rect $s 'changes.copy_rect')) --px | Out-Null
+    Click-Rect $s 'changes.copy_rect'
+    Await-Like 'os.clipboard' "*, at *$text*" 'Copy quotes the excerpt of the wrapped line' | Out-Null
+    $s = Await-NoNotices 'no notice covers Discard on the wrapped line'
+    Aio mouse move (Middle (Rect $s 'changes.discard_rect')) --px | Out-Null
+    Click-Rect $s 'changes.discard_rect'
+    Await-State @{ 'changes.comments' = 0 } 'Discard clears the wrapped note' | Out-Null
+    # Narrower, the rows wrap further and the top row stays where it was.
+    $wideHeight = (Rect (State) 'changes.line.2.2.rect')[3]
+    Resize-Window 70
+    $s = Await-State @{ 'changes.top_file' = 2 } 'a narrow pane keeps notes.txt at the top'
+    if ((Rect $s 'changes.line.2.2.rect')[3] -le $wideHeight) { throw "a narrow pane expected the new line taller than $wideHeight" }
+    Write-Output 'PASS a narrow pane wraps the new line onto more lines'
+    Check-Wrap 'unified narrow' $false
+    Resize-Window 150
+    $s = State
+    Click-Rect $s 'changes.layout_button_rect'
+    Await-State @{ 'changes.side_by_side' = 'true'; 'changes.top_file' = 2 } 'wrapped, the layout toggle shows side by side' | Out-Null
+    Check-Wrap 'side by side wide' $true
+    Resize-Window 70
+    Await-State @{ 'changes.top_file' = 2 } 'the narrow side by side pane keeps notes.txt at the top' | Out-Null
+    Check-Wrap 'side by side narrow' $true
+    Resize-Window 150
+    $s = State
+    Click-Rect $s 'changes.layout_button_rect'
+    Await-State @{ 'changes.side_by_side' = 'false'; 'changes.top_file' = 2 } 'wrapped, the layout toggle goes back to unified' | Out-Null
+    Set-Content -LiteralPath "$data/settings.ini" -Value $wrapIni -NoNewline
+    Aio command settings.reload | Out-Null
+    Await-State @{ 'changes.long_lines' = 'scroll'; 'changes.top_file' = 2 } 'the setting back to scroll puts the sideways scroll back' | Out-Null
+
+    # Back to live.py at the top, unscrolled, for the notes below.
+    Open-Files | Out-Null
+    Aio type 'live' | Out-Null
+    Await-Like 'changes.file_list.0.label' '*live.py*' 'the search keeps live.py' | Out-Null
+    Aio key Enter | Out-Null
+    Await-State @{ 'changes.files_open' = 'false'; 'changes.panel_open' = 'false'; 'changes.top_file' = 0 } `
+        'picking live.py scrolls to the top again' | Out-Null
 
     # Notes: drag over text and label it with Alt+2, pick lines with Alt and delete them with Del, type to write
     # a comment with a suggestion from the tool and save it with Ctrl+Enter, edit one note, remove one, copy

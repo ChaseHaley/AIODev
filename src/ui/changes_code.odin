@@ -5,6 +5,7 @@ import "aio:render"
 import "aio:syntax"
 import tr "aio:turns"
 import "core:math"
+import "core:unicode/utf8"
 
 @(private)
 CHANGES_TAB_COLUMNS :: 4
@@ -16,6 +17,9 @@ Code_Column :: struct {
 	old_x, new_x, sign_x, text_x: f32,
 	// The room for text, from `text_x` to the cell's right edge.
 	width:                        f32,
+	// How far the file's text is scrolled left, in pixels: a multiple of a digit's advance. Only
+	// changes_line_code sets it.
+	scroll:                       f32,
 }
 
 // The column of a row or cell `cell` wide, whose number columns are `number_width` wide and whose digits
@@ -57,6 +61,90 @@ code_space :: proc(t: ^Text) -> f32 {
 	return 0
 }
 
+// What a code line's layout reads of the font, found once per paint or hit test. `cell` is how far a digit
+// advances, the unit the text scrolls by; `mono` says every printable ASCII rune advances that far, which
+// lets a walk count such runes by byte instead of looking each one up.
+Code_Font :: struct {
+	space, cell: f32,
+	mono:        bool,
+}
+
+@(private = "file")
+code_advance :: proc(t: ^Text, r: rune) -> f32 {
+	if g, found := font.glyph_lookup(t.fonts, t.family, .Regular, r); found {
+		return font.glyph_advance(t.fonts, g, t.size_px)
+	}
+	return 0
+}
+
+code_font :: proc(t: ^Text) -> Code_Font {
+	f := Code_Font {
+		space = code_space(t),
+		cell  = code_advance(t, '0'),
+	}
+	f.mono = f.cell > 0
+	for r in ([?]rune{' ', 'W', 'i', '.', 'm', '~'}) {
+		if code_advance(t, r) != f.cell {f.mono = false}
+	}
+	return f
+}
+
+// How close to a column's edge a rune's pen may be and still count as on it; float sums of advances drift
+// by far less.
+@(private)
+CODE_EDGE :: f32(0.01)
+
+// Where a code line's text first reaches `target` from its start: the byte offset of the first rune that
+// starts at or past it, and the pen there. A line that ends first returns its length. Printable ASCII is
+// counted by byte in a monospace font, so a line of any length costs a byte scan, not a lookup per rune.
+@(private)
+code_seek :: proc(t: ^Text, f: Code_Font, s: string, target: f32) -> (offset: int, pen: f32) {
+	cells: int
+	extra: f32
+	for offset < len(s) {
+		pen = f32(cells) * f.cell + extra
+		if pen >= target - CODE_EDGE {return}
+		if b := s[offset]; f.mono && b >= 0x20 && b < 0x7F {
+			cells += 1
+			offset += 1
+			continue
+		}
+		r, size := utf8.decode_rune_in_string(s[offset:])
+		_, advance, _ := code_rune(t, r, f.space)
+		extra += advance
+		offset += size
+	}
+	return len(s), f32(cells) * f.cell + extra
+}
+
+// How wide a code line's text is.
+code_width :: proc(t: ^Text, f: Code_Font, s: string) -> f32 {
+	_, pen := code_seek(t, f, s, max(f32))
+	return pen
+}
+
+// The byte length of the start of `s` that fits `room`, at least one rune: where a wrapped code line breaks.
+// Printable ASCII is counted by byte in a monospace font, as code_seek does, so a long line is a byte scan.
+code_fit :: proc(t: ^Text, f: Code_Font, s: string, room: f32) -> int {
+	limit := room + CODE_EDGE
+	cells: int
+	extra: f32
+	for offset := 0; offset < len(s); {
+		if b := s[offset]; f.mono && b >= 0x20 && b < 0x7F {
+			if offset > 0 && f32(cells + 1) * f.cell + extra > limit {return offset}
+			cells += 1
+			offset += 1
+			continue
+		}
+		r, size := utf8.decode_rune_in_string(s[offset:])
+		_, advance, _ := code_rune(t, r, f.space)
+		if offset > 0 && f32(cells) * f.cell + extra + advance > limit {return offset}
+		extra += advance
+		offset += size
+	}
+	return len(s)
+}
+
 // How one rune of a code line lays out: a tab advances CHANGES_TAB_COLUMNS spaces from the pen and draws
 // nothing, a rune without a glyph takes no room and draws nothing, and any other draws `glyph`. Painting,
 // measuring and the hit test all read this, so they cannot disagree.
@@ -85,33 +173,28 @@ code_joins :: proc(r: rune) -> bool {
 	return false
 }
 
-// The byte offset of the boundary nearest `x`, measured from where the text starts, in a code line `s` drawn
-// in `t` with `width` of room. It sees what the painter draws: the runes that start before `width`, so a
-// point past them is the end of the visible text. `s` is what the row draws, `mono_prefix` of the line.
-// A rune that joins the one before it is no boundary of its own.
-code_offset_at :: proc(t: ^Text, s: string, width, x: f32) -> int {
-	space := code_space(t)
-	pen: f32
-	for r, offset in s {
-		if pen >= width {return offset}
-		_, advance, _ := code_rune(t, r, space)
-		if !code_joins(r) && x < pen + advance / 2 {return offset}
+// The byte offset of the boundary nearest `x`, measured from where the visible text starts, in a code line
+// `s` drawn in `t` with `width` of room, scrolled `scroll` pixels. It sees what the painter draws: the runes
+// that start before `width`, so a point past them is the end of the visible text, and one before the first
+// visible rune is that rune's start. A rune that joins the one before it is no boundary of its own.
+code_offset_at :: proc(t: ^Text, s: string, width, x: f32, scroll: f32 = 0) -> int {
+	f := code_font(t)
+	offset, pen := code_seek(t, f, s, scroll)
+	for offset < len(s) {
+		if pen - scroll >= width {return offset}
+		r, size := utf8.decode_rune_in_string(s[offset:])
+		_, advance, _ := code_rune(t, r, f.space)
+		if !code_joins(r) && x < pen - scroll + advance / 2 {return offset}
 		pen += advance
+		offset += size
 	}
 	return len(s)
 }
 
-// Where the boundary at byte `offset` of `s` is, measured from where the text starts: the inverse of
-// code_offset_at, with the same visible text. An offset past it is the end of the visible text.
-code_x_of :: proc(t: ^Text, s: string, width: f32, offset: int) -> f32 {
-	space := code_space(t)
-	pen: f32
-	for r, at in s {
-		if at >= offset || pen >= width {break}
-		_, advance, _ := code_rune(t, r, space)
-		pen += advance
-	}
-	return pen
+// Where the boundary at byte `offset` of `s` is, measured from where the visible text starts: the inverse of
+// code_offset_at, with the same visible text. An offset scrolled out of sight is at an edge of it.
+code_x_of :: proc(t: ^Text, s: string, width: f32, offset: int, scroll: f32 = 0) -> f32 {
+	return clamp(code_width(t, code_font(t), s[:clamp(offset, 0, len(s))]) - scroll, 0, width)
 }
 
 // A byte range of a code line drawn apart from the rest: a tint behind it, a line under it and one through
@@ -122,19 +205,23 @@ Code_Run :: struct {
 	selected:                bool,
 }
 
-// One line of code to draw. `spans` and `runs` are byte offsets into `text`, which starts where the line
-// does; text outside the spans takes ink `plain`. `inks` colours the text, and runs marked `selected` take
-// `selected_inks` instead (`inks` again when it is nil). The tints and lines fill the row `top` and
-// `height` give, from `x` to the room's end.
+// One line of code to draw. `spans` and `runs` are byte offsets into the line, and `text` is the line from
+// byte `base` on (a whole line has base 0; a row of a wrapped block starts mid-line); text outside the spans
+// takes ink `plain`. `inks` colours the text, and runs marked `selected` take `selected_inks` instead
+// (`inks` again when it is nil). The text starts at `x`, scrolled left by `scroll` pixels, and shows the
+// runes that fit whole in `width`; the tints and lines fill the row `top` and `height` give, from `x` to the
+// room's end.
 Code_Line :: struct {
-	text:                      string,
-	spans:                     []syntax.Span,
-	runs:                      []Code_Run,
-	x, width:                  f32,
-	top, height, baseline:     f32,
-	scale:                     f32,
-	inks, selected_inks:       ^[CHANGES_INKS]render.Color,
-	plain:                     int,
+	text:                  string,
+	base:                  int,
+	spans:                 []syntax.Span,
+	runs:                  []Code_Run,
+	font:                  Code_Font,
+	x, width, scroll:      f32,
+	top, height, baseline: f32,
+	scale:                 f32,
+	inks, selected_inks:   ^[CHANGES_INKS]render.Color,
+	plain:                 int,
 }
 
 // Draws the end of a run: its tint behind the glyphs, then the lines under and through them.
@@ -156,53 +243,73 @@ code_run_draw :: proc(list: ^render.Draw_List, line: Code_Line, run: Code_Run, x
 	}
 }
 
-// Draws the start of a code line from `line.x`, fading out over the last fifth of `line.width` when it runs
-// past it. Each rune is coloured by the span it is in. Spans come from the whole file, which a clean or
-// smudge filter can make differ from the diff text, so they are only read at offsets inside the text: one
-// reaching past the end colours what is inside, and an empty or out-of-order one is skipped.
+// Draws a code line from `line.x`: the runes from the one `line.scroll` reaches that fit whole before the
+// room ends, each coloured by the span it is in. Spans come from the whole file, which a clean or smudge
+// filter can make differ from the diff text, so they are only read at offsets inside the text: one reaching
+// past the end colours what is inside, and an empty or out-of-order one is skipped. A run that goes on past
+// the room fills what is left of it.
 code_line_draw :: proc(list: ^render.Draw_List, t: ^Text, line: Code_Line) -> render.Build_Status {
 	if line.width <= 0 {return .Ok}
 	palette := CHANGES_SYNTAX_PALETTE
-	space := code_space(t)
-	start := len(list.glyphs)
-	pen := line.x
+	f := line.font
+	right := line.x + line.width
+	offset, pen := code_seek(t, f, line.text, line.scroll)
+	x := line.x + pen - line.scroll
 	next, run_at := 0, 0
 	open: bool
 	run_x: f32
-	clipped := false
-	for r, offset in line.text {
-		if pen >= line.x + line.width {
-			clipped = true
-			break
-		}
-		for run_at < len(line.runs) && line.runs[run_at].end <= offset {
-			if open {code_run_draw(list, line, line.runs[run_at], run_x, pen)}
+	for offset < len(line.text) {
+		r, size := utf8.decode_rune_in_string(line.text[offset:])
+		g, advance, drawn := code_rune(t, r, f.space)
+		at := line.base + offset
+		for run_at < len(line.runs) && line.runs[run_at].end <= at {
+			if open {code_run_draw(list, line, line.runs[run_at], run_x, x)}
 			open = false
 			run_at += 1
 		}
-		if !open && run_at < len(line.runs) && line.runs[run_at].start <= offset {
-			open, run_x = true, pen
+		if x + advance > right + CODE_EDGE {
+			if !open && run_at < len(line.runs) && line.runs[run_at].start <= at {open, run_x = true, x}
+			if open {x = right}
+			break
 		}
-		for next < len(line.spans) && int(line.spans[next].end) <= offset {next += 1}
+		if !open && run_at < len(line.runs) && line.runs[run_at].start <= at {
+			open, run_x = true, x
+		}
+		for next < len(line.spans) && int(line.spans[next].end) <= at {next += 1}
 		inks := line.inks
 		if open && line.runs[run_at].selected && line.selected_inks != nil {inks = line.selected_inks}
 		c := inks[line.plain]
-		if next < len(line.spans) && int(line.spans[next].start) <= offset {
+		if next < len(line.spans) && int(line.spans[next].start) <= at {
 			index := palette[line.spans[next].kind]
 			c = inks[index >= 0 ? index : CHANGES_INK_TEXT]
 		}
-		g, advance, drawn := code_rune(t, r, space)
 		if drawn {
-			if result := draw_glyph(t, list, g, pen, line.baseline, c); result != .Ok {return result}
+			if result := draw_glyph(t, list, g, x, line.baseline, c); result != .Ok {return result}
 		}
-		pen += advance
+		x += advance
+		offset += size
 	}
-	if open {code_run_draw(list, line, line.runs[run_at], run_x, pen)}
-	if clipped || pen > line.x + line.width {
-		for &glyph in list.glyphs[start:] {
-			glyph.flags |= render.GLYPH_FADE
-			glyph.fade_start, glyph.fade_end = line.x + line.width * 0.8, line.x + line.width
+	if open {code_run_draw(list, line, line.runs[run_at], run_x, x)}
+	return .Ok
+}
+
+// Draws `s` in one colour with its start at `origin`, showing the runes that fit whole between `left` and
+// `right`. A line of plain code text that scrolls: a hunk's header and the "no newline" marker.
+code_text_draw :: proc(
+	list: ^render.Draw_List, t: ^Text, f: Code_Font, s: string, origin, left, right, baseline: f32,
+	color: render.Color,
+) -> render.Build_Status {
+	offset, pen := code_seek(t, f, s, left - origin)
+	x := origin + pen
+	for offset < len(s) {
+		r, size := utf8.decode_rune_in_string(s[offset:])
+		g, advance, drawn := code_rune(t, r, f.space)
+		if x + advance > right + CODE_EDGE {break}
+		if drawn {
+			if result := draw_glyph(t, list, g, x, baseline, color); result != .Ok {return result}
 		}
+		x += advance
+		offset += size
 	}
 	return .Ok
 }
