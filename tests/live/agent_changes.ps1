@@ -1047,7 +1047,7 @@ try {
     $row = Rect $s 'changes.line.0.1.rect'
     $ax = [int]($row[0] + $row[2] / 2)
     $ay = [int]($row[1] + $row[3] / 2)
-    $box = Rect $s 'changes.overview_box_rect'
+    $box = Rect $s 'changes.overview_thumb_rect'
     Aio mouse click "$ax,$ay" --px --button middle | Out-Null
     $s = State
     Equal $s['pointer.shape'] 'resize_vertical' 'a middle click on the diff drops the anchor'
@@ -1064,7 +1064,7 @@ try {
         throw "scrolling expected a later file at the top with a pinned header, observed top $($s['changes.top_file']) sticky $($s['changes.sticky_file'])"
     }
     Write-Output 'PASS the pinned header follows the scroll'
-    $moved2 = Rect $s 'changes.overview_box_rect'
+    $moved2 = Rect $s 'changes.overview_thumb_rect'
     if ($moved2[1] -le $box[1]) { throw "the overview box expected to follow the scroll, observed $($moved2[1]) over $($box[1])" }
     Write-Output 'PASS the overview strip follows the scroll'
     Aio capture --out "$data/agent-anchor-scrolling.png" | Out-Null
