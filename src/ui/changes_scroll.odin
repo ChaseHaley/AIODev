@@ -167,6 +167,7 @@ changes_line_visible :: proc(
 ) {
 	_, column := changes_line_code(g, view, state, mono, file, line) or_return
 	text, _ := line_text(view, file, line)
+	if wrap_valid(&state.rows) {return 0, len(text), true}
 	from = code_offset_at(mono, text, column.width, -1, column.scroll)
 	to = code_offset_at(mono, text, column.width, max(f32), column.scroll)
 	return from, to, true

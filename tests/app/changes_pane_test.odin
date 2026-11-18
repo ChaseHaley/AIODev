@@ -633,6 +633,46 @@ the_diff_carries_the_minimum_contrast_setting_into_the_next_frame :: proc(t: ^te
 	testing.expect_value(t, pane.model.view.minimum_contrast, 7)
 }
 
+@(test)
+the_long_lines_setting_picks_wrap_or_scroll_and_open_panes_follow_it :: proc(t: ^testing.T) {
+	s, d, err := settings.parse("")
+	testing.expect_value(t, err, nil)
+	defer settings.destroy(&s)
+	defer settings.diagnostics_destroy(&d)
+	testing.expect_value(t, s.turns.diff_long_lines, settings.Long_Lines.Scroll)
+	wrap, wrap_diagnostics, wrap_error := settings.parse("turns.diff_long_lines = wrap\n")
+	testing.expect_value(t, wrap_error, nil)
+	defer settings.destroy(&wrap)
+	defer settings.diagnostics_destroy(&wrap_diagnostics)
+	testing.expect_value(t, wrap.turns.diff_long_lines, settings.Long_Lines.Wrap)
+	bad, bad_diagnostics, bad_error := settings.parse("turns.diff_long_lines = fade\n")
+	testing.expect_value(t, bad_error, nil)
+	defer settings.destroy(&bad)
+	defer settings.diagnostics_destroy(&bad_diagnostics)
+	testing.expect_value(t, bad.turns.diff_long_lines, settings.Long_Lines.Scroll)
+	testing.expect(t, len(bad_diagnostics) > 0, "the refused value is reported")
+
+	f: Fixture
+	defer {
+		app.app_destroy(&f.state)
+		testing.expect_value(t, os.remove_all(f.directory), nil)
+		delete(f.directory)
+	}
+	if !fixture_start(t, &f, "LongLines") {return}
+	w := f.state.windows[0]
+	app.run_action(&f.state, w, .Agent_Changes)
+	if !testing.expect_value(t, len(f.state.changes_panes), 1) {return}
+	pane := f.state.changes_panes[0]
+	shown, found := changes_pane_of(&f.state, w)
+	if !testing.expect(t, found) {return}
+	_ = app.changes_geometry_of(&f.state, w, pane, shown)
+	testing.expect_value(t, pane.model.view.wrap, false)
+	testing.expect(t, app.settings_save_value(&f.state, "turns.diff_long_lines", "wrap", "Could not save."))
+	_ = app.changes_geometry_of(&f.state, w, pane, shown)
+	testing.expect_value(t, pane.model.view.wrap, true)
+	testing.expect_value(t, pane.state.rows.wrapped, true)
+}
+
 @(private = "file")
 tooltip_at :: proc(f: ^Fixture, w: ^app.Window, rect: render.Rect) -> string {
 	return app.changes_tooltip(&f.state, w, rect.x + rect.width / 2, rect.y + rect.height / 2)

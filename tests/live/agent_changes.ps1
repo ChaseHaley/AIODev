@@ -989,6 +989,63 @@ try {
     Aio command settings.reload | Out-Null
     Await-State @{ 'theme.name' = $theme } 'the original theme returns' | Out-Null
 
+    # Middle-click scrolling: a Middle press on the diff drops the anchor and the diff scrolls toward the
+    # pointer, as a Markdown page does; the overview strip and the pinned header follow it.
+    $s = State
+    $row = Rect $s 'changes.line.0.1.rect'
+    $ax = [int]($row[0] + $row[2] / 2)
+    $ay = [int]($row[1] + $row[3] / 2)
+    $box = Rect $s 'changes.overview_box_rect'
+    Aio mouse click "$ax,$ay" --px --button middle | Out-Null
+    $s = State
+    Equal $s['pointer.shape'] 'resize_vertical' 'a middle click on the diff drops the anchor'
+    Equal $s['changes.diff_scroll'] 0 'the click alone does not scroll'
+    Equal $s['changes.selection_mode'] '' 'and selects nothing'
+    Aio capture --out "$data/agent-anchor.png" | Out-Null
+    Aio mouse move "$ax,$($ay + 160)" --px | Out-Null
+    Start-Sleep -Milliseconds 700
+    $s = State
+    $moved = [double]$s['changes.diff_scroll']
+    if ($moved -le 0) { throw "below the anchor expected the diff to scroll down, observed $moved" }
+    Write-Output "PASS below the anchor the diff scrolls down ($moved)"
+    if ([int]$s['changes.top_file'] -lt 1 -or [int]$s['changes.sticky_file'] -lt 0) {
+        throw "scrolling expected a later file at the top with a pinned header, observed top $($s['changes.top_file']) sticky $($s['changes.sticky_file'])"
+    }
+    Write-Output 'PASS the pinned header follows the scroll'
+    $moved2 = Rect $s 'changes.overview_box_rect'
+    if ($moved2[1] -le $box[1]) { throw "the overview box expected to follow the scroll, observed $($moved2[1]) over $($box[1])" }
+    Write-Output 'PASS the overview strip follows the scroll'
+    Aio capture --out "$data/agent-anchor-scrolling.png" | Out-Null
+    Aio mouse move "$ax,$($ay + 4)" --px | Out-Null
+    $a = [double](State)['changes.diff_scroll']
+    Start-Sleep -Milliseconds 400
+    Equal ([double](State)['changes.diff_scroll']) $a 'back in the dead zone it rests'
+    Aio mouse move "$ax,$($ay - 160)" --px | Out-Null
+    Start-Sleep -Milliseconds 500
+    if ([double](State)['changes.diff_scroll'] -ge $a) { throw 'above the anchor expected the diff to scroll up' }
+    Write-Output 'PASS above the anchor the diff scrolls up'
+    Aio mouse click "$ax,$($ay - 160)" --px | Out-Null
+    $a = [double](State)['changes.diff_scroll']
+    Start-Sleep -Milliseconds 400
+    $s = State
+    Equal ([double]$s['changes.diff_scroll']) $a 'a click ends scrolling'
+    Equal $s['changes.selection_mode'] '' 'the ending click selects nothing'
+    if ($s['pointer.shape'] -eq 'resize_vertical') { throw 'the pointer expected its usual shape after the anchor ended' }
+    Write-Output 'PASS the pointer returns to its usual shape'
+    # Hold the button: scrolling lasts while it is down and ends on its release.
+    Aio mouse wheel "$ax,$ay" 200 --px | Out-Null
+    Await-State @{ 'changes.diff_scroll' = '0' } 'the wheel brings the diff back to the top' | Out-Null
+    Aio mouse down "$ax,$ay" --px --button middle | Out-Null
+    Aio mouse move "$ax,$($ay + 160)" --px --button middle | Out-Null
+    Start-Sleep -Milliseconds 500
+    Aio mouse up "$ax,$($ay + 160)" --px --button middle | Out-Null
+    $a = [double](State)['changes.diff_scroll']
+    if ($a -le 0) { throw 'a middle drag expected to scroll the diff' }
+    Start-Sleep -Milliseconds 400
+    Equal ([double](State)['changes.diff_scroll']) $a 'releasing after a drag ends scrolling'
+    Aio mouse wheel "$ax,$ay" 200 --px | Out-Null
+    Await-State @{ 'changes.diff_scroll' = '0' } 'back at the top for the long lines' | Out-Null
+
     # Long lines: notes.txt has a line of 205 bytes on its old side and one of 285 on its new side, both wider
     # than the pane. They scroll sideways, never fade, and stay selectable, in either layout and at any size.
     # The pixel of byte `$col` of flat line `$line` of file `$file`, a pixel past the boundary, allowing for how
@@ -1048,6 +1105,27 @@ try {
     Write-Output "PASS the pane shows $cut of the new line's $newLength bytes before scrolling"
     Aio capture --out "$data/agent-long-unified-wide.png" | Out-Null
     Check-Long 'unified wide'
+    # The scrollbar is the app's own: thin at rest, wider under the pointer, with a thumb that drags and a track
+    # that pages.
+    $s = State
+    $track = Rect $s 'changes.h_bar_rect'
+    $thumb = Rect $s 'changes.h_bar_thumb_rect'
+    Aio mouse move (Middle (Rect $s 'changes.line.2.2.rect')) --px | Out-Null
+    $rest = (Rect (State) 'changes.h_bar_thumb_rect')[3]
+    Aio capture --out "$data/agent-long-scrollbar-rest.png" | Out-Null
+    Aio mouse move (Middle $thumb) --px | Out-Null
+    $s = Await-State @{ 'changes.hover_part' = 'H_Scroll' } 'the pointer over the scrollbar hovers it'
+    $hover = (Rect $s 'changes.h_bar_thumb_rect')[3]
+    if ($hover -le $rest) { throw "the scrollbar expected a thicker thumb under the pointer than $rest, observed $hover" }
+    Write-Output "PASS the scrollbar thumb widens under the pointer ($rest to $hover px)"
+    Aio capture --out "$data/agent-long-scrollbar-hover.png" | Out-Null
+    $before = [int]$s['changes.h_scroll']
+    Aio mouse click "$([int]($track[0] + $track[2] - 10)),$([int]($track[1] + $track[3] / 2))" --px | Out-Null
+    $paged = [int](State)['changes.h_scroll']
+    if ($paged -le $before) { throw "a press on the track past the thumb expected to page the code, observed $paged" }
+    Write-Output "PASS a press on the track pages the code ($paged columns)"
+    Scroll-Code (State) 400
+    Await-State @{ 'changes.h_scroll' = 0 } 'back at the start after paging' | Out-Null
 
     # Shift and the wheel scroll the code sideways, four columns for two rows; the numbers stay where they are.
     $s = State
@@ -1173,6 +1251,100 @@ try {
     $s = State
     Click-Rect $s 'changes.layout_button_rect'
     Await-State @{ 'changes.side_by_side' = 'false'; 'changes.top_file' = 2 } 'the layout toggle goes back to unified' | Out-Null
+
+    # Wrap: the same lines with turns.diff_long_lines = wrap, which the open pane follows at once. Nothing
+    # scrolls sideways or fades, every byte is in view, a row is as tall as the lines its text wraps to, and a
+    # drag across the wrapped lines selects the bytes under the pointer. The pixel of byte `$col` of flat
+    # line `$line` of notes.txt in wrapped lines: its line of text, and the column on it.
+    function Point-Wrap($s, $line, $col) {
+        $r = Rect $s "changes.line.2.$line.rect"
+        $new = Rect $s 'changes.line.2.2.rect'
+        $adv = [double]$s['changes.mono_advance']
+        $room = $new[0] + $new[2] - [double]$s['changes.line.2.2.text_x']
+        $cols = [int][math]::Floor(($room + 0.01) / $adv)
+        $one = (Rect $s 'changes.line.2.0.rect')[3]
+        $x = [double]$s["changes.line.2.$line.text_x"] + ($col % $cols) * $adv + 1
+        $y = $r[1] + ([math]::Floor($col / $cols) + 0.5) * $one
+        return "$([int]$x),$([int]$y)"
+    }
+    function Check-Wrap($label, $sideBySide) {
+        $s = State
+        Equal $s['changes.long_lines'] 'wrap' "${label}: long lines wrap"
+        Equal $s['changes.faded_glyphs'] 0 "${label}: no glyph in the diff fades"
+        Equal $s['changes.h_limit'] 0 "${label}: nothing scrolls sideways"
+        Assert-Hidden $s 'changes.h_bar_rect'
+        $one = Rect $s 'changes.line.2.0.rect'
+        $old = Rect $s 'changes.line.2.1.rect'
+        $new = Rect $s 'changes.line.2.2.rect'
+        if ($new[3] -lt 2 * $one[3]) { throw "$label expected the new line to wrap onto two lines or more, observed height $($new[3]) over $($one[3])" }
+        if ($old[3] -lt 2 * $one[3]) { throw "$label expected the old line to take two lines or more, observed height $($old[3])" }
+        Write-Output "PASS ${label}: the new line takes $([math]::Round($new[3] / $one[3])) lines"
+        Equal $s['changes.line.2.2.visible_to'] $newLength "${label}: every byte of the new line is in view"
+        if ($sideBySide) {
+            Equal $old[1] $new[1] "${label}: the pair shares a row"
+            Equal $old[3] $new[3] "${label}: the pair is as tall as its taller side"
+        }
+        # A drag from the second line of text to the third selects the bytes between.
+        $adv = [double]$s['changes.mono_advance']
+        $cols = [int][math]::Floor(($new[0] + $new[2] - [double]$s['changes.line.2.2.text_x'] + 0.01) / $adv)
+        $a = $cols + 3
+        $b = 2 * $cols + 8
+        $text = $wideNew.Substring($a, $b - $a)
+        Aio mouse drag (Point-Wrap $s 2 $a) (Point-Wrap $s 2 $b) --px | Out-Null
+        Await-State @{ 'changes.selection_mode' = 'text'; 'changes.selection_text' = $text } `
+            "${label}: a drag across wrapped lines selects the bytes under the pointer" | Out-Null
+        Aio key Esc | Out-Null
+        Await-State @{ 'changes.selection_mode' = '' } "${label}: Escape ends the selection" | Out-Null
+        Aio capture --out "$data/agent-wrap-$($label -replace ' ', '-').png" | Out-Null
+    }
+    $wrapIni = Get-Content -LiteralPath "$data/settings.ini" -Raw
+    Add-Content -LiteralPath "$data/settings.ini" -Value "`nturns.diff_long_lines = wrap"
+    Aio command settings.reload | Out-Null
+    Await-State @{ 'changes.long_lines' = 'wrap'; 'changes.top_file' = 2; 'changes.h_limit' = 0 } `
+        'the open pane wraps at once and keeps notes.txt at the top' | Out-Null
+    Check-Wrap 'unified wide' $false
+    # A partial note on a wrapped line keeps its bytes and its excerpt.
+    $s = State
+    $a = 120
+    $b = 131
+    $text = $wideNew.Substring($a, $b - $a)
+    Aio mouse drag (Point-Wrap $s 2 $a) (Point-Wrap $s 2 $b) --px | Out-Null
+    Await-State @{ 'changes.selection_text' = $text; 'changes.toolbar_open' = 'true' } 'a drag on a wrapped line selects its bytes' | Out-Null
+    Aio key Alt+2 | Out-Null
+    $s = Await-State @{ 'changes.comments' = 1; 'changes.comment.0.partial' = 'true' } 'Alt+2 saves a note on part of the wrapped line'
+    Equal $s['changes.comment.0.first_byte'] $a 'the wrapped note starts at the first selected byte'
+    Equal $s['changes.comment.0.last_byte'] $b 'and ends at the last'
+    Aio capture --out "$data/agent-wrap-note.png" | Out-Null
+    $s = Await-NoNotices 'no notice covers Copy on the wrapped line'
+    Aio mouse move (Middle (Rect $s 'changes.copy_rect')) --px | Out-Null
+    Click-Rect $s 'changes.copy_rect'
+    Await-Like 'os.clipboard' "*, at *$text*" 'Copy quotes the excerpt of the wrapped line' | Out-Null
+    $s = Await-NoNotices 'no notice covers Discard on the wrapped line'
+    Aio mouse move (Middle (Rect $s 'changes.discard_rect')) --px | Out-Null
+    Click-Rect $s 'changes.discard_rect'
+    Await-State @{ 'changes.comments' = 0 } 'Discard clears the wrapped note' | Out-Null
+    # Narrower, the rows wrap further and the top row stays where it was.
+    $wideHeight = (Rect (State) 'changes.line.2.2.rect')[3]
+    Resize-Window 70
+    $s = Await-State @{ 'changes.top_file' = 2 } 'a narrow pane keeps notes.txt at the top'
+    if ((Rect $s 'changes.line.2.2.rect')[3] -le $wideHeight) { throw "a narrow pane expected the new line taller than $wideHeight" }
+    Write-Output 'PASS a narrow pane wraps the new line onto more lines'
+    Check-Wrap 'unified narrow' $false
+    Resize-Window 150
+    $s = State
+    Click-Rect $s 'changes.layout_button_rect'
+    Await-State @{ 'changes.side_by_side' = 'true'; 'changes.top_file' = 2 } 'wrapped, the layout toggle shows side by side' | Out-Null
+    Check-Wrap 'side by side wide' $true
+    Resize-Window 70
+    Await-State @{ 'changes.top_file' = 2 } 'the narrow side by side pane keeps notes.txt at the top' | Out-Null
+    Check-Wrap 'side by side narrow' $true
+    Resize-Window 150
+    $s = State
+    Click-Rect $s 'changes.layout_button_rect'
+    Await-State @{ 'changes.side_by_side' = 'false'; 'changes.top_file' = 2 } 'wrapped, the layout toggle goes back to unified' | Out-Null
+    Set-Content -LiteralPath "$data/settings.ini" -Value $wrapIni -NoNewline
+    Aio command settings.reload | Out-Null
+    Await-State @{ 'changes.long_lines' = 'scroll'; 'changes.top_file' = 2 } 'the setting back to scroll puts the sideways scroll back' | Out-Null
 
     # Back to live.py at the top, unscrolled, for the notes below.
     Open-Files | Out-Null

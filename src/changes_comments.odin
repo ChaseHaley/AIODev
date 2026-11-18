@@ -1580,6 +1580,8 @@ when AIO_CONTROL {
 				select_lines_rect = g.select_lines_button
 				limit, _ := ui.changes_h_extent(g, view, &pane.state)
 				h_bar, _ := ui.changes_h_scrollbar(g, view, &pane.state)
+				state_text(r, "changes.long_lines", view.wrap ? "wrap" : "scroll")
+				state_text(r, "changes.hover_part", fmt.tprint(pane.state.hover.part))
 				state_value(r, "changes.h_scroll", pane.state.h_scroll)
 				state_value(r, "changes.h_limit", limit)
 				state_rect(r, "changes.h_bar_rect", h_bar.track)
