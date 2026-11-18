@@ -263,6 +263,90 @@ a_file_changed_on_disk_reloads_unless_edits_wait :: proc(t: ^testing.T) {
 	testing.expect(t, strings.contains(file_text(t, f.file), "mine "))
 }
 
+// A second pane showing the file reads what the first edits as it is typed or pasted, not once the save
+// falls due and the poll reads it, and does not read its own file back after that save.
+@(test)
+a_pane_reading_the_file_shows_edits_before_they_save :: proc(t: ^testing.T) {
+	f: Edit_Fixture
+	defer edit_fixture_destroy(t, &f)
+	w, reader := edit_fixture_start(t, &f, "Follow", "# Title\n\nbody\n")
+	if reader == nil {return}
+	node := app.window_tree(w).focus
+	if !testing.expect(t, app.markdown_open_placed(&f.state, w, node, f.file, .Split_Down)) {return}
+	if !testing.expect_value(t, len(f.state.markdown_panes), 2) {return}
+	editor := f.state.markdown_panes[1]
+	if !testing.expect(t, app.markdown_focused(&f.state, w) == editor) {return}
+	app.run_action(&f.state, w, .Edit_Markdown)
+	if !testing.expect(t, app.markdown_editing(editor)) {return}
+
+	edit_press(&f.state, w, .End, {.Control})
+	if !testing.expect(t, platform.clipboard_set_text(&f.state.platform, "pasted\n\n- more\n")) {return}
+	edit_press(&f.state, w, .V, {.Control})
+	if !testing.expect(t, strings.contains(markdown.edit_string(&editor.editor.buffer), "- more")) {return}
+	testing.expect_value(t, file_text(t, f.file), "# Title\n\nbody\n")
+	app.tick(&f.state)
+	shown := string(app.markdown_document(reader).text[:])
+	testing.expect(t, strings.contains(shown, "pasted"), shown)
+	testing.expect(t, strings.contains(shown, "more"), shown)
+	testing.expect_value(t, file_text(t, f.file), "# Title\n\nbody\n")
+
+	revision := reader.revision
+	save_now(&f.state, editor)
+	testing.expect_value(t, file_text(t, f.file), "# Title\n\nbody\npasted\n\n- more\n")
+	f.state.markdown_deadline = time.tick_now()
+	app.markdown_tick(&f.state)
+	testing.expect_value(t, reader.revision, revision)
+}
+
+// A save by another program shows in the pane when the folder reports it, without waiting for the poll.
+@(test)
+a_change_on_disk_shows_without_waiting_for_the_poll :: proc(t: ^testing.T) {
+	f: Edit_Fixture
+	defer edit_fixture_destroy(t, &f)
+	_, pane := edit_fixture_start(t, &f, "Watch", "one\n")
+	if pane == nil {return}
+	testing.expect(t, pane.watch != 0)
+	// The poll is an hour away, so only the watch can bring the new text in.
+	f.state.markdown_deadline = time.tick_add(time.tick_now(), time.Hour)
+	if !testing.expect_value(t, os.write_entire_file(f.file, "two, from disk\n"), nil) {return}
+	shown := false
+	for _ in 0 ..< 300 {
+		time.sleep(10 * time.Millisecond)
+		app.markdown_tick(&f.state)
+		if strings.contains(string(app.markdown_document(pane).text[:]), "two, from disk") {
+			shown = true
+			break
+		}
+	}
+	testing.expect(t, shown, "the pane never showed the saved text")
+}
+
+// Pasted text takes the buffer's own line endings, whichever it arrives with, and goes in whole when it
+// already has them.
+@(test)
+pasted_text_takes_the_files_line_endings :: proc(t: ^testing.T) {
+	cases := [?]struct {
+		source, clipboard, want: string,
+	} {
+		{"a\n", "x\r\ny\rz\nw", "a\nx\ny\nz\nw"},
+		{"a\r\n", "x\ny\rz\r\nw", "a\r\nx\r\ny\r\nz\r\nw"},
+		{"a\n", "x\ny\n", "a\nx\ny\n"},
+		{"a\r\n", "x\r\ny\r\n", "a\r\nx\r\ny\r\n"},
+	}
+	for c in cases {
+		f: Edit_Fixture
+		defer edit_fixture_destroy(t, &f)
+		w, pane := edit_fixture_start(t, &f, "Paste", c.source)
+		if pane == nil {return}
+		app.run_action(&f.state, w, .Edit_Markdown)
+		if !testing.expect(t, app.markdown_editing(pane)) {return}
+		edit_press(&f.state, w, .End, {.Control})
+		if !testing.expect(t, platform.clipboard_set_text(&f.state.platform, c.clipboard)) {return}
+		edit_press(&f.state, w, .V, {.Control})
+		testing.expect_value(t, markdown.edit_string(&pane.editor.buffer), c.want)
+	}
+}
+
 // Windows delivers a typed character as its key's text, not as a text event of its own; AltGr's
 // Ctrl+Alt types, while a Ctrl chord's control character does not.
 @(test)

@@ -28,6 +28,7 @@ Window_Motion :: enum u8 {
 	Cursor,
 	Field_Carets,
 	Confirmation,
+	Autoscroll,
 	Changes,
 }
 
@@ -76,6 +77,8 @@ window_motion_advance :: proc(app: ^App, w: ^Window, part: Window_Motion, frame:
 		return w.carets.moving
 	case .Confirmation:
 		confirmation_advance(app, w, frame)
+	case .Autoscroll:
+		return autoscroll_animate(app, w, frame)
 	case .Changes:
 		return changes_animate(app, w, frame)
 	}
@@ -123,6 +126,8 @@ window_motion_running :: proc(app: ^App, w: ^Window, part: Window_Motion) -> boo
 		return w.carets.moving
 	case .Confirmation:
 		return confirmation_active(w)
+	case .Autoscroll:
+		return autoscroll_moving(w)
 	case .Changes:
 		return changes_animating(app, w)
 	}

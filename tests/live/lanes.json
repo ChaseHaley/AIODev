@@ -97,6 +97,9 @@
     "markdown_find": {
       "lane": "headless"
     },
+    "middle_click_scroll": {
+      "lane": "headless"
+    },
     "motion": {
       "lane": "native",
       "reason": "Changes Windows' own client-animation setting (SystemParametersInfo) and checks the app follows it."

@@ -11,11 +11,13 @@ import "aio:markdown"
 import "aio:platform"
 import "aio:render"
 import "aio:search"
+import "aio:turns"
 import "aio:ui"
 import "core:log"
 import "core:os"
 import "core:path/filepath"
 import "core:strings"
+import "core:sync"
 import "core:time"
 
 // Markdown panes: one local file per pane, read-only, reloaded when the file changes (WORK-319).
@@ -101,6 +103,10 @@ Markdown_App :: struct {
 	next_markdown_id:  u32,
 	// Zero while no pane is registered, so nothing polls.
 	markdown_deadline: time.Tick,
+	// The folders of the panes' files, watched on a thread of their own; nil until a pane needs it.
+	markdown_watch:    ^turns.Watch_Set,
+	// The watch thread set it: a folder reported news, so the next tick reads what changed.
+	markdown_woken:    bool,
 	// The markdown.* settings with their fonts loaded; markdown_style_apply sets it.
 	markdown_style:    ui.Markdown_Style,
 }
@@ -149,6 +155,11 @@ Markdown_Pane :: struct {
 	heading:                string,
 	// Edit mode, or nil while the pane reads the file (markdown_edit.odin).
 	editor:                 ^Markdown_Editor,
+	// The watch on the file's folder in App.markdown_watch; zero without one (markdown_watch.odin).
+	watch:                  turns.Watch_Id,
+	// What a reading pane shows of another pane's unsaved edits (markdown_edit.odin); zero when it shows
+	// the file.
+	followed:               Markdown_Followed,
 }
 
 @(require_results)
@@ -158,7 +169,8 @@ markdown_find :: proc(app: ^App, id: u32) -> ^Markdown_Pane {
 }
 
 @(private)
-markdown_pane_destroy :: proc(pane: ^Markdown_Pane) {
+markdown_pane_destroy :: proc(state: ^Markdown_App, pane: ^Markdown_Pane) {
+	markdown_watch_stop(state, pane)
 	documents_destroy(&pane.documents)
 	if e := pane.editor; e != nil {
 		// The pane closing is the last chance to keep its edits.
@@ -185,8 +197,9 @@ markdown_pane_destroy :: proc(pane: ^Markdown_Pane) {
 }
 
 markdown_app_destroy :: proc(state: ^Markdown_App) {
-	for pane in state.markdown_panes {markdown_pane_destroy(pane)}
+	for pane in state.markdown_panes {markdown_pane_destroy(state, pane)}
 	delete(state.markdown_panes)
+	turns.watch_set_destroy(state.markdown_watch)
 	state^ = {}
 }
 
@@ -233,12 +246,12 @@ markdown_pane_create :: proc(app: ^App, path: string, verified: bool) -> ^Markdo
 	if err != nil {return nil}
 	if !markdown_path_set(pane, path) {free(pane); return nil}
 	if _, append_error := append(&app.markdown_panes, pane); append_error != nil {
-		markdown_pane_destroy(pane)
+		markdown_pane_destroy(&app.markdown_state, pane)
 		return nil
 	}
 	app.next_markdown_id += 1
 	pane.id = app.next_markdown_id
-	if verified {markdown_pane_verified(pane)}
+	if verified {markdown_pane_verified(app, pane)}
 	if app.markdown_deadline == {} {app.markdown_deadline = time.tick_add(clock_now(&app.clock), MARKDOWN_POLL)}
 	return pane
 }
@@ -276,30 +289,34 @@ markdown_load_enter :: proc(pane: ^Markdown_Pane, next: Markdown_Load) -> bool {
 	pane.load = next
 	if _, loaded := next.(Markdown_Loaded); loaded {
 		pane.revision += 1
+		// The file's text is now what the pane shows, not an editor's.
+		pane.followed = {}
 		ui.markdown_selection_clear(&pane.view)
 		markdown.search_restart(&pane.search)
 	}
 	return changed
 }
 
-// The path passed the local-file checks; from now on the poll follows the file itself.
+// The path passed the local-file checks; from now on the poll follows the file itself, and its folder
+// reports changes to it.
 @(private = "file")
-markdown_pane_verified :: proc(pane: ^Markdown_Pane) {
+markdown_pane_verified :: proc(app: ^App, pane: ^Markdown_Pane) {
 	_ = markdown_load_enter(pane, Markdown_Missing{})
 	_ = markdown_pane_load(pane)
+	markdown_watch_start(app, pane)
 }
 
 // Checks a restored path before anything reads it, then follows the file. Returns whether the pane
 // shows something new.
 @(private = "file", require_results)
-markdown_pane_poll :: proc(pane: ^Markdown_Pane) -> bool {
+markdown_pane_poll :: proc(app: ^App, pane: ^Markdown_Pane) -> bool {
 	if pane.load != nil {return markdown_pane_load(pane)}
 	file, ok := localpath.prepare_open(pane.path)
 	if !ok {return false}
 	defer localpath.open_file_destroy(&file)
 	// An active file is never rendered, whatever its name; any other safe file may be explicitly shown.
 	if file.confirm || !markdown_path_set(pane, file.target) {return false}
-	markdown_pane_verified(pane)
+	markdown_pane_verified(app, pane)
 	return true
 }
 
@@ -373,29 +390,39 @@ markdown_referenced :: proc(app: ^App, id: u32) -> bool {
 	return false
 }
 
-// Frees panes nothing shows any more and picks up file changes. Polling costs nothing until a pane
-// exists, and the file attributes it reads do not download a cloud placeholder.
+// Frees panes nothing shows any more and picks up file changes: at once for a folder that reported one
+// (markdown_watch.odin), and for every pane at each poll, which covers what a watch misses. Polling
+// costs nothing until a pane exists, and the file attributes it reads do not download a cloud
+// placeholder.
 markdown_tick :: proc(app: ^App) {
 	if app.markdown_deadline == {} {return}
 	now := clock_now(&app.clock)
 	markdown_saves_due(app, now)
+	if sync.atomic_exchange(&app.markdown_woken, false) {markdown_watch_drain(app)}
 	if time.tick_diff(now, app.markdown_deadline) > 0 {return}
 	changed := false
 	for i := len(app.markdown_panes) - 1; i >= 0; i -= 1 {
 		pane := app.markdown_panes[i]
 		if !markdown_referenced(app, pane.id) {
-			markdown_pane_destroy(pane)
+			markdown_pane_destroy(&app.markdown_state, pane)
 			ordered_remove(&app.markdown_panes, i)
 			continue
 		}
-		changed = markdown_pane_poll(pane) || changed
-		// A file gone from disk ends editing, unless edits wait to bring it back.
-		if e := pane.editor; e != nil && e.save_at == {} {
-			if _, loaded := pane.load.(Markdown_Loaded); !loaded {markdown_edit_end(app, pane)}
-		}
+		changed = markdown_pane_refresh(app, pane) || changed
 	}
 	app.markdown_deadline = len(app.markdown_panes) > 0 ? time.tick_add(now, MARKDOWN_POLL) : {}
 	if changed {mark_all_dirty(app)}
+}
+
+// Reads the pane's file if it changed. Returns whether the pane shows something new.
+@(private, require_results)
+markdown_pane_refresh :: proc(app: ^App, pane: ^Markdown_Pane) -> bool {
+	changed := markdown_pane_poll(app, pane)
+	// A file gone from disk ends editing, unless edits wait to bring it back.
+	if e := pane.editor; e != nil && e.save_at == {} {
+		if _, loaded := pane.load.(Markdown_Loaded); !loaded {markdown_edit_end(app, pane)}
+	}
+	return changed
 }
 
 // Shows a verified file beside `node`: the pane already showing it, or else a new split toward `direction`,
@@ -679,6 +706,7 @@ markdown_pane_draw :: proc(
 ) {
 	pane := markdown_find(app, shown.content.id)
 	g := markdown_geometry_of(app, w, shown)
+	if pane != nil {markdown_follow_edits(app, pane)}
 	document := pane != nil ? markdown_document(pane) : nil
 	if document == nil {return false, markdown_message_draw(app, w, pane, g)}
 	view := &pane.view
