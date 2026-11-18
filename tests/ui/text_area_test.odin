@@ -423,7 +423,7 @@ a_text_area_draws_its_selection_caret_and_only_the_lines_in_view :: proc(t: ^tes
 	theme := ui.Theme {
 		text   = {1, 1, 1, 1},
 		muted  = {0.5, 0.5, 0.5, 1},
-		focus  = {0, 1, 0, 1},
+		text_selection = {0, 1, 0, 1},
 		accent = {0.25, 0.5, 1, 1},
 		border = {0.2, 0.2, 0.2, 1},
 	}
@@ -433,7 +433,7 @@ a_text_area_draws_its_selection_caret_and_only_the_lines_in_view :: proc(t: ^tes
 	testing.expect_value(t, ui.text_area_draw(box, &list, theme, true, "Write a comment"), render.Build_Status.Ok)
 	selections := 0
 	for instance in list.rects {
-		if instance.color == theme.focus {selections += 1}
+		if instance.color == theme.text_selection {selections += 1}
 	}
 	// "a\na" selected over two lines: one rect for each, the first widened by the line break.
 	testing.expect_value(t, selections, 2)

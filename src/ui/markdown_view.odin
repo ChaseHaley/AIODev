@@ -1066,7 +1066,8 @@ draw_matches :: proc(
 	}
 }
 
-// Text in a match takes find's colour, except where the selection covers it, as in a terminal.
+// Text in a match takes find's colour, except where the selection covers it, as in a terminal; selected
+// text takes `selected_ink` when the theme sets one.
 @(private = "file")
 draw_run :: proc(
 	v: ^Markdown_View,
@@ -1078,6 +1079,7 @@ draw_run :: proc(
 	color: render.Color,
 	find: Markdown_Find,
 	selected_from, selected_to: int,
+	selected_ink: Maybe(render.Color),
 ) -> render.Build_Status {
 	m := &v.faces[run.face]
 	shown := text^
@@ -1093,6 +1095,7 @@ draw_run :: proc(
 				matched := next < len(find.matches) && find.matches[next].start <= offset
 				in_selection := offset >= selected_from && offset < selected_to
 				ink := matched && !in_selection ? find.foreground : color
+				if selected, recolour := selected_ink.?; recolour && in_selection {ink = selected}
 				if result := draw_glyph(&shown, list, g, pen, baseline, ink); result != .Ok {return result}
 			}
 		}
@@ -1160,10 +1163,12 @@ markdown_draw :: proc(
 				left := string_advance(v, run.face, string(doc.text[run.start:start]))
 				middle := string_advance(v, run.face, string(doc.text[start:stop]))
 				rect := render.Rect{x + left, line.top + origin_y, middle, line.height}
-				draw_rect(list, {rect = rect, color = theme.selection})
+				draw_rect(list, {rect = rect, color = theme.text_selection})
 			}
 			color := colors[run.color]
-			result := draw_run(v, doc, text, list, run, x, baseline, color, find, from, to)
+			result := draw_run(
+				v, doc, text, list, run, x, baseline, color, find, from, to, theme.text_selection_text,
+			)
 			if result != .Ok {return result}
 			thickness := max(1, math.round(v.scale))
 			if run.link >= 0 && int(run.link) == hover_link {
@@ -1198,7 +1203,7 @@ markdown_draw :: proc(
 								if run.flags & {.Task_Open, .Task_Done} != {} {continue}
 								result := draw_run(
 									v, doc, text, list, run, run.x + g.left, line.baseline + origin_y,
-									theme.caret_text, {}, 0, 0,
+									theme.caret_text, {}, 0, 0, nil,
 								)
 								if result != .Ok {return result}
 							}

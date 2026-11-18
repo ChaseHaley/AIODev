@@ -13,6 +13,10 @@ CURSOR :: render.Color{1, 0, 0, 1}
 @(private = "file")
 CURSOR_TEXT :: render.Color{0, 0, 1, 1}
 @(private = "file")
+SELECTION :: render.Color{0, 1, 0, 1}
+@(private = "file")
+SELECTED_TEXT :: render.Color{1, 1, 0, 1}
+@(private = "file")
 INK :: render.Color{1, 1, 1, 1}
 
 @(private = "file")
@@ -42,7 +46,7 @@ fixture_start :: proc(t: ^testing.T, f: ^Fixture, value: string) -> bool {
 	f.list = render.draw_list_init()
 	ui.field_set(&f.field, value)
 	f.theme = {
-		caret = CURSOR, caret_text = CURSOR_TEXT, text = INK, muted = INK,
+		caret = CURSOR, caret_text = CURSOR_TEXT, text_selection = SELECTION, text = INK, muted = INK,
 	}
 	return true
 }
@@ -242,4 +246,29 @@ a_blinking_caret_hides_until_it_moves :: proc(t: ^testing.T) {
 	f.carets.shown = false
 	draw(t, &f)
 	testing.expect_value(t, len(rects_of(&f, CURSOR)), 1)
+}
+
+// One selection fill in every text surface, and selected text in the theme's selection text colour when
+// the theme sets one, as in a terminal.
+@(test)
+selected_text_uses_the_theme_selection_colours :: proc(t: ^testing.T) {
+	f: Fixture
+	if !fixture_start(t, &f, "hello world") {return}
+	defer fixture_stop(&f)
+	f.field.anchor, f.field.cursor = 0, 5
+	f.carets.style = {shape = .Bar, stroke = 1}
+
+	frame(&f, 0)
+	draw(t, &f)
+	fill := rects_of(&f, SELECTION)
+	testing.expect_value(t, len(fill), 1)
+	if len(fill) == 1 {testing.expect_value(t, fill[0].width, ui.text_width(&f.text, "hello"))}
+	testing.expect_value(t, glyphs_of(&f, SELECTED_TEXT), 0)
+
+	f.theme.text_selection_text = SELECTED_TEXT
+	frame(&f, 1)
+	draw(t, &f)
+	testing.expect(t, glyphs_of(&f, SELECTED_TEXT) > 0, "selected text takes the selection text colour")
+	clip, clipped := clip_of_glyphs(&f, SELECTED_TEXT)
+	testing.expect(t, clipped && clip == fill[0], "selected text is clipped to the selection")
 }

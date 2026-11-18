@@ -235,7 +235,7 @@ field_draw :: proc(
 			right := x + text_width(text, value[start:max(start, high)])
 			left, right = min(left, x + available), min(right, x + available)
 			selection = {left, baseline - text.ascent, right - left, text.line_height}
-			draw_rect(list, {rect = selection, color = theme.focus})
+			draw_rect(list, {rect = selection, color = theme.text_selection})
 		}
 	}
 	head: render.Rect
@@ -256,6 +256,16 @@ field_draw :: proc(
 	} else if result := draw_text(text, list, value[start:], x, baseline, color, available);
 	   result != .Ok {
 		return result
+	}
+	// Selected text takes the theme's selection text colour, as a terminal's does, when it sets one.
+	if ink, recolour := theme.text_selection_text.?; recolour && selection.width > 0 {
+		scope, opened := clip_scope_open(list, selection)
+		if opened {
+			draw_rect(list, {rect = selection, color = theme.text_selection})
+			result := draw_text(text, list, value[start:], x, baseline, ink, available)
+			clip_scope_close(list, scope)
+			if result != .Ok {return result}
+		}
 	}
 	if !shown {return .Ok}
 	scope, block := field_caret_head(list, &f.caret, theme, head)

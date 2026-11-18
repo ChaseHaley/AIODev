@@ -387,7 +387,7 @@ text_area_draw :: proc(
 	space := focused && low != high ? area_advance(&t, ' ', code_space(&t)) : 0
 	for row in first ..= last {
 		if rect, selected := area_selection_rect(a, &t, s, frame, row, low, high, space); selected && focused {
-			draw_rect(list, {rect = rect, color = theme.focus})
+			draw_rect(list, {rect = rect, color = theme.text_selection})
 		}
 	}
 	head: render.Rect
@@ -412,6 +412,21 @@ text_area_draw :: proc(
 			   result != .Ok {
 				return result
 			}
+		}
+	}
+	// Selected text takes the theme's selection text colour, as a terminal's does, when it sets one.
+	if ink, recolour := theme.text_selection_text.?; recolour && focused && low != high {
+		for row in first ..= last {
+			rect, selected := area_selection_rect(a, &t, s, frame, row, low, high, space)
+			if !selected {continue}
+			line := a.lines[row]
+			baseline := frame.y + f32(row) * lh - a.scroll + t.ascent
+			again, scoped := clip_scope_open(list, rect)
+			if !scoped {continue}
+			draw_rect(list, {rect = rect, color = theme.text_selection})
+			result := area_row_draw(&t, list, s[line.start:line.end], frame.x, baseline, ink)
+			clip_scope_close(list, again)
+			if result != .Ok {return result}
 		}
 	}
 	if !shown {return .Ok}
