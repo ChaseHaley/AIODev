@@ -1251,11 +1251,12 @@ turn_worker_shows_an_open_turn_live_and_saves_it_under_the_same_id :: proc(t: ^t
 	if !begun_ok {return}
 	defer worker_release(begun)
 	if !testing.expect_value(t, len(begun.repositories), 1) {return}
-	// Only a pane that reads turns is told of what the turn changes.
+	// An open turn that has changed no file is not listed yet: it shows when its first file lands.
 	first, first_ok := worker_query(t, &f, f.repo, KEY_A, true, nil)
 	if !first_ok {return}
 	defer worker_release(first)
-	if testing.expect_value(t, len(first.rows), 1) {testing.expect(t, first.rows[0].live)}
+	testing.expect_value(t, len(first.rows), 0)
+	testing.expect_value(t, len(first.agents), 0)
 
 	if !worker_write(t, &f, "a.txt", "one\ntwo\nthree\nfour\n") {return}
 	if !worker_write(t, &f, "c.odin", "package c\n\nmain :: proc() {}\n") {return}
@@ -1494,4 +1495,107 @@ turn_worker_ends_a_turn_when_it_ended_not_when_its_end_runs :: proc(t: ^testing.
 		later := strings.has_prefix(entry, "late-") || strings.has_prefix(entry, "keep.txt=")
 		testing.expectf(t, later, "Between has %s", entry)
 	}
+}
+
+// A turn that changed no file is neither listed nor counted for its agent: not while open, not once ended,
+// not when its edits net to nothing, and not when a store written earlier holds one.
+@(test)
+turn_worker_lists_only_turns_that_changed_a_file :: proc(t: ^testing.T) {
+	f: Worker_Fixture
+	defer worker_stop(&f)
+	if !worker_start(t, &f) {return}
+	base := worker_now()
+	saved, saved_ok := worker_record(t, &f, KEY_A, base, "one\ntwo\n")
+	if !saved_ok {return}
+	defer worker_release(saved)
+	if !testing.expect_value(t, len(saved.repositories), 1) {return}
+	key := saved.repositories[0]
+	files := worker_segment_files(&f, key)
+	only, only_ok := worker_query(t, &f, f.repo, KEY_A, true, nil)
+	if !only_ok {return}
+	defer worker_release(only)
+	if !testing.expect_value(t, len(only.rows), 1) {return}
+	real_id := only.rows[0].id
+
+	// Another agent's open turn with no file yet: neither a row nor an agent, for any source.
+	empty := base + 10_000
+	if !worker_begin(t, &f, KEY_B, empty) {return}
+	for agent in ([2]bool{false, true}) {
+		open, open_ok := worker_query(t, &f, f.repo, KEY_A, agent, nil)
+		if !open_ok {return}
+		defer worker_release(open)
+		if !testing.expect_value(t, len(open.rows), 1) {return}
+		testing.expect(t, !open.rows[0].live)
+		testing.expect_value(t, open.rows[0].id, real_id)
+		if testing.expect_value(t, len(open.selected), 1) {testing.expect_value(t, open.selected[0], real_id)}
+		if testing.expect_value(t, len(open.agents), 1) {
+			testing.expect_value(t, open.agents[0].session.pane_key, KEY_A)
+			testing.expect_value(t, open.agents[0].turns, 1)
+		}
+	}
+	// An agent whose every turn is empty has no rows of its own.
+	own, own_ok := worker_query(t, &f, f.repo, KEY_B, true, nil)
+	if !own_ok {return}
+	defer worker_release(own)
+	testing.expect_value(t, len(own.rows), 0)
+	testing.expect_value(t, len(own.selected), 0)
+	testing.expect_value(t, len(own.diff.files), 0)
+
+	// The turn lists itself once its first file lands, and is gone again when its edits net to nothing.
+	if !worker_write(t, &f, "a.txt", "x\n") {return}
+	worker_settle(&f)
+	writing, writing_ok := worker_query(t, &f, f.repo, KEY_B, true, nil)
+	if !writing_ok {return}
+	defer worker_release(writing)
+	if testing.expect_value(t, len(writing.rows), 1) {
+		testing.expect(t, writing.rows[0].live)
+		testing.expect_value(t, writing.rows[0].files, 1)
+	}
+	testing.expect_value(t, len(writing.agents), 2)
+	if !worker_write(t, &f, "a.txt", "one\ntwo\n") {return}
+	worker_settle(&f)
+	reverted, reverted_ok := worker_query(t, &f, f.repo, KEY_B, true, nil)
+	if !reverted_ok {return}
+	defer worker_release(reverted)
+	testing.expect_value(t, len(reverted.rows), 0)
+	testing.expect_value(t, len(reverted.agents), 1)
+
+	// Ending it saves nothing.
+	end := app.Job_End {
+		pane_key  = KEY_B,
+		session   = worker_session(KEY_B),
+		started   = empty,
+		ended     = max(empty + 1000, worker_now()),
+		end_state = .Done,
+		sources   = {.Status},
+	}
+	if !worker_post(t, &f, end) || !worker_idle(t, &f) {return}
+	testing.expect_value(t, worker_segment_files(&f, key), files)
+
+	// A store written before turns without files went unsaved may still hold one, newest of all.
+	app.turn_worker_destroy(f.worker)
+	legacy := turns.Segment {
+		id        = real_id + 1_000_000_000,
+		kind      = .Turn,
+		session   = worker_session(KEY_C),
+		started   = base + 20_000,
+		ended     = base + 21_000,
+		end_state = .Done,
+		title     = "Empty",
+		sources   = {.Status},
+	}
+	text, encoded := turns.segment_encode(legacy, context.temp_allocator)
+	if !testing.expect(t, encoded) {return}
+	path := fmt.tprintf("%s/%s/segments/%s", f.turns_dir, key, turns.segment_file_name(legacy.id, context.temp_allocator))
+	if !testing.expect(t, os.write_entire_file(path, text) == nil) {return}
+	f.worker = app.turn_worker_create(f.turns_dir, nil)
+	if !testing.expect(t, f.worker != nil, "creating the worker again") {return}
+	old, old_ok := worker_query(t, &f, f.repo, KEY_C, false, nil)
+	if !old_ok {return}
+	defer worker_release(old)
+	if !testing.expect_value(t, len(old.rows), 1) {return}
+	testing.expect_value(t, old.rows[0].id, real_id)
+	if testing.expect_value(t, len(old.selected), 1) {testing.expect_value(t, old.selected[0], real_id)}
+	if testing.expect_value(t, len(old.agents), 1) {testing.expect_value(t, old.agents[0].session.pane_key, KEY_A)}
+	testing.expect_value(t, len(old.diff.files), 1)
 }

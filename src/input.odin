@@ -249,6 +249,7 @@ on_key :: proc(app: ^App, w: ^Window, e: input.Key_Event) {
 	if w.phase == .Preparing {return}
 	// Every surface ignores releases, so a consumed press's release is dropped before routing.
 	if key_release_suppressed(w, e) {return}
+	if autoscroll_key(app, w, e) {return}
 	// Menus navigate by the layout's letters, so Ctrl+N and Ctrl+P match the palette on any layout.
 	key := Overlay_Key{e, e}
 	key.logical.key = commands.logical_key(e.key, e.unshifted)
@@ -437,6 +438,10 @@ terminal_key :: proc(app: ^App, w: ^Window, e: input.Key_Event) {
 @(private)
 on_wheel :: proc(app: ^App, w: ^Window, e: input.Mouse_Wheel_Event) {
 	if w.phase == .Preparing {return}
+	if autoscroll_active(w) {
+		autoscroll_end(app, w)
+		return
+	}
 	if drag_wheel(app, w, e.delta_y) {return}
 	kind := overlay_kind(app, w)
 	if kind in OVERLAY_FIRST {

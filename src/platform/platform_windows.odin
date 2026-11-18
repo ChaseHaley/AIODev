@@ -1141,6 +1141,17 @@ when !AIO_HEADLESS {
 		return .None
 	}
 
+	// Where the system pointer is in the window's client coordinates, wherever it is on screen, even past
+	// the window's edges and without capture; false when it cannot be read.
+	@(require_results)
+	pointer_client :: proc(p: ^Platform, id: input.Window_Id) -> ([2]i32, bool) {
+		window := find_window(p, id)
+		if window == nil {return {}, false}
+		point: w.POINT
+		if !bool(w.GetCursorPos(&point)) || !bool(w.ScreenToClient(window.hwnd, &point)) {return {}, false}
+		return {point.x, point.y}, true
+	}
+
 	@(require_results)
 	window_flash :: proc(p: ^Platform, id: input.Window_Id) -> Error {
 		window := find_window(p, id)

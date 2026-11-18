@@ -6,8 +6,8 @@ param(
     [switch] $Capture
 )
 
-# Settings change in place from the palette: a toggle, a slider, a choice list and a text entry,
-# while Enter still jumps to the setting in Settings.
+# Settings change in place from the palette: a toggle, a slider, a choice list, a multiple choice
+# list and a text entry, while Enter still jumps to the setting in Settings.
 $ErrorActionPreference = 'Stop'
 $ctl = Join-Path $Repository 'build/aioctl.exe'
 $directory = Join-Path $Repository "build/verify/$Name"
@@ -40,6 +40,10 @@ function Search([string] $Query, [string] $Key) {
     Invoke-Aio key Ctrl+A Backspace
     Invoke-Aio type $Query
     Invoke-Aio expect state "palette.item=$Key"
+}
+
+function Equal([string] $Actual, [string] $Expected, [string] $What) {
+    if ($Actual -ne $Expected) { throw "${What}: expected '$Expected', got '$Actual'" }
 }
 
 if (-not $Prepared) { Invoke-Aio launch --fresh --size 120x36 }
@@ -77,9 +81,10 @@ try {
     Invoke-Aio key Ctrl+Enter
     Invoke-Aio expect state 'palette.edit=Choice'
     Shot 'choice-open'
+    # The list opens on the default bar (WORK-475); Down picks the next style.
     Invoke-Aio key Down Enter
     Invoke-Aio expect state 'palette.edit=None'
-    Invoke-Aio expect state 'palette.value=bar'
+    Invoke-Aio expect state 'palette.value=underline'
     Write-Output 'PASS the choice list opens and chooses in place'
 
     Search 'shell font' 'font.family'
@@ -113,6 +118,34 @@ try {
     Invoke-Aio expect state 'settings.key=pane.gap'
     Write-Output 'PASS Enter still jumps to the setting'
     Shot 'jumped'
+
+    # A multiple choice opens the same list; Enter and Space flip options and save with it open.
+    Invoke-Aio command app.palette_settings
+    Search 'confirm before' 'interface.confirm'
+    Equal (Read-State)['palette.value'] 'close_split_tab, shell_switch, multiline_paste' 'the default prompts'
+    Invoke-Aio key Ctrl+Enter
+    Invoke-Aio expect state 'palette.edit=Choice'
+    Shot 'multiple-open'
+    Invoke-Aio key Enter
+    Invoke-Aio expect state 'palette.edit=Choice'
+    Equal (Read-State)['palette.value'] 'shell_switch, multiline_paste' 'Enter flips the first option off'
+    Invoke-Aio key Down Space
+    Invoke-Aio expect state 'palette.edit=Choice'
+    Equal (Read-State)['palette.value'] 'multiline_paste' 'Space flips the second option off'
+    Shot 'multiple-flipped'
+    Write-Output 'PASS a multiple choice flips options with its list open'
+    Invoke-Aio key Esc
+    Invoke-Aio expect state 'palette.edit=None'
+    Invoke-Aio expect state 'palette.open=true'
+    Write-Output 'PASS Escape closes only the multiple choice list'
+    $saved = Get-Content -LiteralPath (Join-Path $directory 'settings.ini') |
+        Where-Object { $_ -match '^\s*interface\.confirm\s*=' }
+    Equal "$saved".Trim() 'interface.confirm = multiline_paste' 'settings.ini'
+    Invoke-Aio key Enter
+    Invoke-Aio expect state 'settings.key=interface.confirm'
+    Equal (Read-State)['settings.value'] 'multiline_paste' 'the Settings page value'
+    Shot 'multiple-settings'
+    Write-Output 'PASS settings.ini and the Settings page agree on the saved options'
 }
 finally {
     if (-not $Prepared) { & $ctl --name $Name stop | Write-Output }

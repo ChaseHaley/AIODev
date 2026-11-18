@@ -125,6 +125,7 @@ palette_setting :: proc(entry: settings.Schema_Entry) -> Palette_Setting {
 		step             = row.step,
 		choices          = row.choices,
 		choice_labels    = row.choice_labels,
+		multiple         = row.multiple,
 		searchable       = row.searchable,
 		choice_min_width = row.choice_min_width,
 		filter_key       = entry.choice_filter,
@@ -137,8 +138,7 @@ palette_setting :: proc(entry: settings.Schema_Entry) -> Palette_Setting {
 	case .Integer, .Number:
 		s.control = .Slider
 	case .Choice:
-		// A multiple choice keeps its popup open between options, so it is edited on the page.
-		s.control = row.multiple ? .None : .Choice
+		s.control = .Choice
 	case .Text:
 		s.control = entry.control == .Group ? .None : .Text
 	}
@@ -328,8 +328,9 @@ choice_copy :: proc(p: ^Palette, s: ^Palette_Setting) -> bool {
 	return true
 }
 
-// The open dropdown's choices: the copies Edit_Buffers keeps, marked at the saved value. A font list
-// carries the Show all fonts switch, set from the other filter's saved value.
+// The open dropdown's choices: the copies Edit_Buffers keeps, marked at the saved value, or at the
+// saved options of a multiple choice. A font list carries the Show all fonts switch, set from the
+// other filter's saved value.
 @(private)
 choice_dropdown :: proc(p: ^Palette, setting: int) -> Dropdown_Choices {
 	s := &p.settings[setting]
@@ -338,10 +339,12 @@ choice_dropdown :: proc(p: ^Palette, setting: int) -> Dropdown_Choices {
 		choices     = p.buffers.choices[:],
 		labels      = p.buffers.labels[:],
 		value       = current,
+		multiple    = s.multiple,
 		searchable  = s.searchable,
 		font_filter = s.filter_key != "",
 		min_width   = s.choice_min_width,
 	}
+	if c.multiple {c.mask, _, _ = settings.set_parse(c.choices, current)}
 	if c.font_filter && p.values.value != nil {
 		show_all, _ := p.values.value(p.values.user, s.filter_key)
 		c.show_all_fonts = show_all == "true"
@@ -393,7 +396,8 @@ open_text :: proc(p: ^Palette, setting: int) -> Outcome {
 }
 
 // Acts on what the open dropdown reported: a picked option saves and closes the list, Escape closes
-// it, and the Show all fonts switch saves the other filter with the list open.
+// it, and the Show all fonts switch saves the other filter with the list open. In a multiple choice
+// a picked option flips and saves with the list open, as on the Settings page.
 @(private)
 choice_outcome :: proc(p: ^Palette, setting: int, outcome: Dropdown_Outcome) -> Outcome {
 	switch outcome {
@@ -405,10 +409,15 @@ choice_outcome :: proc(p: ^Palette, setting: int, outcome: Dropdown_Outcome) -> 
 		c := choice_dropdown(p, setting)
 		index := dropdown_highlighted(&p.buffers.dropdown, c)
 		if index < 0 {return .None}
+		s := &p.settings[setting]
+		if c.multiple {
+			palette_use(p, {kind = .Setting, name = s.key})
+			return choose_setting(p, s.key, settings.set_text(c.choices, c.mask ~ (1 << u32(index))))
+		}
 		// Choosing closes the list, which frees its copies.
 		value, clone_error := strings.clone(c.choices[index], context.temp_allocator)
 		if clone_error != nil {return .None}
-		return choose_value(p, &p.settings[setting], value)
+		return choose_value(p, s, value)
 	case .Closed:
 		edit_set(p, nil)
 		return .Changed
@@ -421,8 +430,8 @@ choice_outcome :: proc(p: ^Palette, setting: int, outcome: Dropdown_Outcome) -> 
 	return .None
 }
 
-// After the owner saved the Show all fonts switch, the open list shows the fonts of the other filter
-// with the search and the switch's focus as they were.
+// After the owner saved the Show all fonts switch, or an option of a multiple choice, the open list
+// shows the saved choices with the search and the switch's focus as they were.
 @(private)
 choice_reload :: proc(p: ^Palette, setting: int) {
 	d := &p.buffers.dropdown
@@ -466,7 +475,8 @@ control_step :: proc(p: ^Palette, setting: int, direction: int) -> Outcome {
 	case .Slider:
 		return step_number(p, s, direction)
 	case .Choice:
-		return step_choice(p, s, direction)
+		// A multiple choice has no next value; its options flip in its list.
+		return s.multiple ? .None : step_choice(p, s, direction)
 	}
 	return .None
 }
@@ -849,6 +859,10 @@ draw_control :: proc(
 			theme.muted, number_box.width)
 	case .Choice:
 		choice, listing := p.edit.(Choice_Edit)
+		if s.multiple {
+			mask, _, _ := settings.set_parse(s.choices, value)
+			label = choice_set_label(s.choice_labels, mask)
+		}
 		return dropdown_field_draw(list, text, theme, control, label, listing && choice.setting == setting, scale)
 	case .Text:
 		box_draw(list, control, theme, false, scale)
