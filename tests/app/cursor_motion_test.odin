@@ -508,7 +508,9 @@ blink_hidden_cursor_animates_in_cached_panes_and_across_focus :: proc(t: ^testin
 	w.frame = finish
 	if !testing.expect(t, app.window_build_frame(s, w)) {return}
 	if !cursor_restore_frame(t, s, w) {return}
-	testing.expect(t, !app.cursor_visible(w) && !app.cursor_motion_animating(w))
+	// A flight leaves the caret solid and restarts the blink, which goes on blinking afterwards.
+	_, blinking = w.cursor_blink.(app.Cursor_Blink_On)
+	testing.expect(t, blinking && app.cursor_visible(w) && !app.cursor_motion_animating(w))
 }
 
 // Text fields follow the terminal's cursor animation: the palette's caret glides as the query

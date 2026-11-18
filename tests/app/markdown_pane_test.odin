@@ -10,6 +10,7 @@ import "aio:term"
 import "aio:ui"
 import "core:fmt"
 import "core:os"
+import "core:slice"
 import "core:strings"
 import "core:testing"
 import "core:time"
@@ -684,6 +685,45 @@ wikilinks_to_headings_open_and_scroll_to_them :: proc(t: ^testing.T) {
 	testing.expect_value(t, len(f.state.markdown_panes), 2)
 	if !testing.expect(t, app.window_build_frame(&f.state, w)) {return}
 	expect_heading_at_top(t, pane, "Lower")
+}
+
+// A link clicked in a floating Markdown pane splits its float, whether pane.markdown_floating is on or
+// off, and leaves the tiled panes as they were.
+@(test)
+markdown_link_in_a_float_splits_that_float :: proc(t: ^testing.T) {
+	f: Fixture
+	defer fixture_destroy(t, &f)
+	if !fixture_start(t, &f, "FloatLink") {return}
+	f.state.settings.pane.markdown_floating = true // Opens the document as a float.
+	f.state.animations = false
+	if !testing.expect_value(t, os.write_entire_file(f.file, "# Doc\n\n[second](second.md) [third](third.md)\n"), nil) {
+		return
+	}
+	for name in ([?]string{"\\second.md", "\\third.md"}) {
+		path := strings.concatenate({f.directory, name}, context.temp_allocator)
+		if !testing.expect_value(t, os.write_entire_file(path, "# Linked\n"), nil) {return}
+	}
+	testing.expect_value(t, open(&f.state, f.file, true).status, cli_protocol.Status.Ok)
+	w := f.state.windows[0]
+	tree := app.window_tree(w)
+	source, floating := layout.float_of(tree, tree.focus)
+	if !testing.expect(t, floating) || !testing.expect_value(t, len(f.state.markdown_panes), 1) {return}
+	pane := f.state.markdown_panes[0]
+	// The app's ticks free temporary memory, so the copy is the test's own.
+	tiled := slice.clone(app.window_tiled_rects(w))
+	defer delete(tiled)
+
+	for setting, link in ([?]bool{false, true}) {
+		f.state.settings.pane.markdown_floating = setting
+		link_click(t, &f.state, w, pane, link)
+		if !testing.expect_value(t, len(f.state.markdown_panes), link + 2) {return}
+		content, _ := layout.focused_content(tree)
+		testing.expect_value(t, content, layout.Content{.Markdown, f.state.markdown_panes[link + 1].id})
+		opened, in_float := layout.float_of(tree, tree.focus)
+		testing.expectf(t, in_float && opened.id == source.id, "with markdown_floating %v", setting)
+		testing.expect_value(t, len(app.floating_rects(w)), link + 2)
+		testing.expect(t, slice.equal(app.window_tiled_rects(w), tiled))
+	}
 }
 
 // Both link spellings split off their fragment as the heading to show; a block reference shows none.

@@ -426,7 +426,8 @@ markdown_pane_refresh :: proc(app: ^App, pane: ^Markdown_Pane) -> bool {
 }
 
 // Shows a verified file beside `node`: the pane already showing it, or else a new split toward `direction`,
-// or a float with `floating`. `w` is the window showing the workspace, or nil.
+// or a float with `floating`. Beside a floating pane `floating` splits inside its float instead of adding
+// another. `w` is the window showing the workspace, or nil.
 @(require_results)
 markdown_open_at :: proc(
 	app: ^App,
@@ -457,7 +458,8 @@ markdown_open_at :: proc(
 	pane := markdown_pane_create(app, path, true)
 	if pane == nil {return false}
 	markdown_heading_request(pane, heading)
-	placement: Pane_Placement = floating ? .Float : .Split_Right
+	tree := &workspace.tabs[tab_index].tree
+	placement: Pane_Placement = floating && !layout.is_floating(tree, node) ? .Float : .Split_Right
 	content := layout.Content{.Markdown, pane.id}
 	return pane_place(app, w, workspace, tab_index, node, content, placement, focus, ratio, direction)
 }

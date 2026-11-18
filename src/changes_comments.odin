@@ -1021,7 +1021,8 @@ changes_comments_press :: proc(
 }
 
 // Extends the selection a press started while the pointer moves over lines of its file: by lines or, for a
-// text selection, to the byte `at` gives on the line under the pointer, the line's start over its numbers.
+// text selection, to the byte `at` gives on the line under the pointer, the first column shown over its
+// numbers.
 changes_comments_drag :: proc(
 	app: ^App, w: ^Window, pane: ^Changes_Pane, hit: ui.Changes_Hit, at := Changes_Text_Point{},
 ) -> bool {
@@ -1030,7 +1031,7 @@ changes_comments_drag :: proc(
 	before := c.selection
 	if c.by_text {
 		if hit.index != c.drag_file {return false}
-		changes_text_extend(pane, hit.index, hit.line, hit.part == .Gutter ? 0 : at.offset)
+		changes_text_extend(pane, hit.index, hit.line, at.offset)
 	} else {
 		if !c.selection.active || hit.index != c.selection.file {return false}
 		first, last := min(c.anchor, hit.line), max(c.anchor, hit.line)
@@ -1577,6 +1578,22 @@ when AIO_CONTROL {
 					state_rect(r, fmt.tprintf("changes.comment.%d.remove_rect", i), remove)
 				}
 				select_lines_rect = g.select_lines_button
+				limit, _ := ui.changes_h_extent(g, view, &pane.state)
+				h_bar, _ := ui.changes_h_scrollbar(g, view, &pane.state)
+				state_text(r, "changes.long_lines", view.wrap ? "wrap" : "scroll")
+				state_text(r, "changes.hover_part", fmt.tprint(pane.state.hover.part))
+				state_value(r, "changes.h_scroll", pane.state.h_scroll)
+				state_value(r, "changes.h_limit", limit)
+				state_rect(r, "changes.h_bar_rect", h_bar.track)
+				state_rect(r, "changes.h_bar_thumb_rect", h_bar.thumb)
+				// Faded glyphs the last frame put in the diff: the code never fades, so none.
+				faded := 0
+				for glyph in w.list.glyphs {
+					if glyph.flags & render.GLYPH_FADE != 0 && render.rect_contains(g.diff, glyph.rect.x, glyph.rect.y) {
+						faded += 1
+					}
+				}
+				state_value(r, "changes.faded_glyphs", faded)
 				bar = g.selection_bar
 				for file, n in view.files[:min(3, len(view.files))] {
 					for m in 0 ..< changes_line_count(file) {
@@ -1585,6 +1602,10 @@ when AIO_CONTROL {
 						state_rect(r, fmt.tprintf("changes.line.%d.%d.rect", n, m), rect)
 						_, column, _ := ui.changes_line_code(g, view, &pane.state, &mono, n, m)
 						state_value(r, fmt.tprintf("changes.line.%d.%d.text_x", n, m), column.text_x)
+						state_value(r, fmt.tprintf("changes.line.%d.%d.scroll", n, m), column.scroll)
+						from, to, _ := ui.changes_line_visible(g, view, &pane.state, &mono, n, m)
+						state_value(r, fmt.tprintf("changes.line.%d.%d.visible_from", n, m), from)
+						state_value(r, fmt.tprintf("changes.line.%d.%d.visible_to", n, m), to)
 					}
 				}
 				for k in 0 ..< bar.shown {

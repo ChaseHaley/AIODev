@@ -9,7 +9,7 @@ import "core:unicode/utf8"
 // The text of a saved note, read-only: paragraphs with **bold** and `inline code`, fenced code blocks in
 // mono with the diff's syntax colours, and ```suggestion blocks drawn as a small diff of the replaced
 // lines against the new ones. One layout at a width gives the height and the painted rows, so a card is
-// painted at the height it was measured. Code lines do not wrap: like the diff's they fade at the edge.
+// painted at the height it was measured. Code lines wrap where they run out of room, as the paragraphs do.
 
 // How a run of a paragraph's text is set.
 Note_Style :: enum u8 {
@@ -141,6 +141,8 @@ Note_Row :: struct {
 	y, height:    f32,
 	first, count: int,
 	text:         string,
+	// Where `text` starts in its line, for a row that continues a line which ran past the room.
+	base:         int,
 	line, frame:  int,
 }
 
@@ -254,6 +256,9 @@ Note_Metrics :: struct {
 	// The padding of an inline code chip, a code row's height, the padding inside a code frame, the gap
 	// between blocks, a suggestion's heading and a space.
 	chip, row, pad, gap, head, space: f32,
+	// The diff font's metrics and how much room a code row's text has, which a code line wraps at.
+	code:                            Code_Font,
+	room:                            f32,
 }
 
 @(private = "file")
@@ -333,6 +338,40 @@ paragraph_line :: proc(l: ^Note_Layout, m: ^Note_Metrics, line: string, y: f32) 
 	return y + height
 }
 
+// How much room the text of a code row has in a body `width` wide: what is left of the width after the
+// padding at both ends and the sign's column. A digit is the sign's width.
+@(private = "file")
+note_code_room :: proc(width, digit, scale: f32) -> f32 {
+	return max(0, width - 2 * SPACE_2 * scale - digit - SPACE_1 * scale)
+}
+
+// Lays line `index` of a block, which finds its syntax colours, as code rows from `y`: one row, or several
+// where it runs past the room, each starting where the one before it ran out. Returns where the next row
+// starts.
+@(private = "file")
+code_rows_append :: proc(
+	l: ^Note_Layout, m: ^Note_Metrics, kind: Note_Row_Kind, y: f32, line: string, index, frame: int,
+) -> f32 {
+	y, base := y, 0
+	for {
+		rest := line[base:]
+		cut := code_fit(&m.mono, m.code, rest, m.room)
+		row := Note_Row {
+			kind   = kind,
+			y      = y,
+			height = m.row,
+			text   = rest[:cut],
+			base   = base,
+			line   = index,
+			frame  = frame,
+		}
+		_, _ = append(&l.rows, row)
+		y += m.row
+		base += cut
+		if base >= len(line) {return y}
+	}
+}
+
 // Lays `source` out in `width`, in `allocator`: temporary memory for a layout drawn at once, or the
 // memory of a cache that keeps it. The layout points into `source` and `original`, which the caller keeps
 // as long as the layout. `text` is the interface text and `mono` the diff's; `original` is the new-side
@@ -352,6 +391,8 @@ note_body_layout :: proc(
 	m.gap = math.round(SPACE_1 * scale)
 	m.head = math.round(HEIGHT_COMPACT * scale)
 	m.space = text_width(&m.body, " ")
+	m.code = code_font(mono)
+	m.room = note_code_room(width, m.code.cell, scale)
 	l := Note_Layout {
 		rows     = make([dynamic]Note_Row, allocator),
 		pieces   = make([dynamic]Note_Piece, allocator),
@@ -382,16 +423,7 @@ note_body_layout :: proc(
 			_, _ = append(&l.rows, Note_Row{kind = .Header, y = y, height = m.head, frame = frame})
 			y += m.head
 			for line, i in original {
-				removed := Note_Row {
-					kind   = .Removed,
-					y      = y,
-					height = m.row,
-					text   = line,
-					line   = i,
-					frame  = frame,
-				}
-				_, _ = append(&l.rows, removed)
-				y += m.row
+				y = code_rows_append(&l, &m, .Removed, y, line, i, frame)
 			}
 		} else {
 			y += m.pad
@@ -399,16 +431,7 @@ note_body_layout :: proc(
 		body := block.text
 		for line, i in strings.split(body, "\n", allocator) {
 			kind: Note_Row_Kind = block.kind == .Suggestion ? .Added : .Code
-			row := Note_Row {
-				kind   = kind,
-				y      = y,
-				height = m.row,
-				text   = strings.trim_right(line, "\r"),
-				line   = i,
-				frame  = frame,
-			}
-			_, _ = append(&l.rows, row)
-			y += m.row
+			y = code_rows_append(&l, &m, kind, y, strings.trim_right(line, "\r"), i, frame)
 		}
 		y += m.pad
 		laid := Note_Frame {
@@ -459,11 +482,11 @@ note_body_draw :: proc(
 	detail := text_styled(text, .Detail)
 	chip := SPACE_1 * scale
 	radius := RADIUS_CONTROL * scale
-	digit := text_width(mono, "0")
-	right := origin.x + l.width
+	code := code_font(mono)
+	digit := code.cell
 	sign_x := origin.x + SPACE_2 * scale
 	text_x := sign_x + digit + SPACE_1 * scale
-	room := right - SPACE_2 * scale - text_x
+	room := note_code_room(l.width, digit, scale)
 	// A frame's rows are drawn over its fill and under its outline, which the second pass puts on top.
 	for frame in l.frames {
 		y := origin.y + frame.y
@@ -518,12 +541,14 @@ note_body_draw :: proc(
 			}
 			table := &inks.table[background]
 			baseline := baseline_in(y, row.height, mono)
-			if sign != "" {
+			if sign != "" && row.base == 0 {
 				if r := draw_text(mono, list, sign, sign_x, baseline, table[sign_ink]); r != .Ok {return r}
 			}
 			line := Code_Line {
-				text     = mono_prefix(row.text, room, digit),
+				text     = row.text,
+				base     = row.base,
 				spans    = spans_of(file, row.line),
+				font     = code,
 				x        = text_x,
 				width    = room,
 				top      = y,

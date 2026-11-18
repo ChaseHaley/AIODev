@@ -106,13 +106,14 @@ pane_scrollbar_drag_to :: proc(app: ^App, content: layout.Content, offset: int) 
 	}
 }
 
-// A Left press on the bar of the shown pane: a track press pages once, and only a thumb press holds
-// the bar. False when the point is not on its bar.
+// A Left press on the bar of the shown pane: a track press pages once and holds the track, a thumb
+// press holds the thumb. False when the point is not on its bar.
 pane_scrollbar_press :: proc(app: ^App, w: ^Window, pane: layout.Pane_Rect, x, y: f32) -> bool {
 	bar, visible := pane_scrollbar_geometry(app, w, pane)
 	if !visible || !ui.scrollbar_contains(bar, x, y) {return false}
 	grab: ui.Scroll_Drag
 	// A track press pages once from wherever the view is; a thumb press leaves it in place.
+	side := ui.scrollbar_side(bar, y)
 	offset := ui.scrollbar_press(&grab, bar, y)
 	#partial switch pane.content.kind {
 	case .Terminal:
@@ -124,9 +125,36 @@ pane_scrollbar_press :: proc(app: ^App, w: ^Window, pane: layout.Pane_Rect, x, y
 		if page := markdown_find(app, pane.content.id); page != nil {page.view.scroll = offset}
 	}
 	w.scrollbars.drag = nil
-	if grab.active {w.scrollbars.drag = Pane_Scroll_Drag{pane.content, grab}}
+	if grab.active {
+		w.scrollbars.drag = Pane_Scroll_Drag{pane.content, grab}
+	} else {
+		scroll_hold_begin(app, w, .Pane, pane.content, x, y, side)
+	}
 	w.dirty = true
 	return true
+}
+
+// One page of a held track press toward (x, y) on the bar of the pane showing `content`. `shown` is
+// false when that pane is gone. A terminal's pages go to the row, as a drag's moves do.
+pane_scrollbar_page :: proc(
+	app: ^App,
+	w: ^Window,
+	content: layout.Content,
+	x, y: f32,
+	side: ui.Scroll_Side,
+) -> (
+	result: ui.Scroll_Page,
+	shown: bool,
+) {
+	for pane in w.panes {
+		if pane.content != content {continue}
+		bar, visible := pane_scrollbar_geometry(app, w, pane)
+		if !visible {return .Off_Track, true}
+		offset, page := ui.scrollbar_page(bar, x, y, side)
+		if page == .Paged {pane_scrollbar_drag_to(app, content, offset)}
+		return page, true
+	}
+	return
 }
 
 // The held thumb follows the pointer, over whichever pane it passes. A page that stopped showing its

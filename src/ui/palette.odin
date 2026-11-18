@@ -244,6 +244,9 @@ Palette :: struct {
 	availability: Palette_Availability,
 	reset_hover:  int,
 	scroll_hover: bool,
+	// The scrollbar whose track the last press landed on, until the window takes it; see palette_take_track.
+	track:        Palette_Track,
+	track_side:   Scroll_Side,
 	// The query's record mode, and the pointer over its keyboard button.
 	keys:         Key_Search,
 	keys_hover:   bool,
@@ -1559,14 +1562,54 @@ palette_mouse_press :: proc(
 	return .None, 0
 }
 
-// A press on the results' scrollbar: the track jumps, the thumb starts a drag.
+// A press on the results' scrollbar: the track pages toward the pointer, the thumb starts a drag.
 @(private)
 palette_bar_press :: proc(p: ^Palette, l: Palette_Layout, y: f32) -> Outcome {
 	drag: Scroll_Drag
+	side := scrollbar_side(l.bar, y)
 	offset := scrollbar_press(&drag, l.bar, y)
-	if drag.active {drag_set(p, Scrollbar_Drag{drag.grab})}
+	if drag.active {drag_set(p, Scrollbar_Drag{drag.grab})} else {p.track, p.track_side = .Results, side}
 	palette_scroll_to(p, offset)
 	return .Changed
+}
+
+// The palette's scrollbars a held track press can page.
+Palette_Track :: enum u8 {
+	None,
+	// The results list.
+	Results,
+	// The open choice list of a setting.
+	Choices,
+}
+
+// The scrollbar whose track the last press landed on, which the window then holds. Reading it ends it.
+palette_take_track :: proc(p: ^Palette) -> (track: Palette_Track, side: Scroll_Side) {
+	track, side = p.track, p.track_side
+	p.track, p.track_side = .None, .None
+	return
+}
+
+// One page of a held track press toward (x, y) on the bar `track`; see scrollbar_page.
+palette_page :: proc(
+	p: ^Palette,
+	l: Palette_Layout,
+	track: Palette_Track,
+	x, y: f32,
+	side: Scroll_Side,
+) -> Scroll_Page {
+	switch track {
+	case .None:
+	case .Results:
+		if !l.bar_visible {return .Off_Track}
+		offset, result := scrollbar_page(l.bar, x, y, side)
+		if result == .Paged {_ = palette_scroll_to(p, offset)}
+		return result
+	case .Choices:
+		c, a, open := palette_dropdown(p, l)
+		if !open {return .Off_Track}
+		return dropdown_page(&p.buffers.dropdown, c, a, x, y, l.scale, side)
+	}
+	return .Off_Track
 }
 
 palette_query_box :: proc(p: ^Palette, l: Palette_Layout, text: ^Text, scale: f32) -> Field_Box {
@@ -1575,7 +1618,6 @@ palette_query_box :: proc(p: ^Palette, l: Palette_Layout, text: ^Text, scale: f3
 		text = text,
 		rect = l.input,
 		inset = PALETTE_TEXT_INSET,
-		caret_width = 1.5,
 		radius = 0,
 		style = .Display,
 		scale = scale,
@@ -1890,7 +1932,8 @@ palette_draw :: proc(
 			placeholder = fmt.bprintf(buffer[:], "Choose a command for %s", commands.shortcut_text(chord, label[:]))
 		}
 		baseline := l.input.y + (l.input.height - query_text.line_height) / 2 + query_text.ascent
-		if result := field_box_draw(box, list, theme, baseline, true, placeholder); result != .Ok { return result }
+		open := presence_is_open(p.presence)
+		if result := field_box_draw(box, list, theme, baseline, open, placeholder); result != .Ok {return result}
 	}
 	if key_search_button_draw(list, theme, l.keys, p.keys.state != .Off, scale, pointer) != .None {return .Ok}
 	title_text := text^

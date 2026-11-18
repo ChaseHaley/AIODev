@@ -115,6 +115,9 @@ Changes_Pane :: struct {
 	cursor:     int,
 	dragging:   Changes_Drag,
 	moving:     bool,
+	// Where the pointer was at the last move of a text drag, and when the code last scrolled sideways for it.
+	drag_point: [2]f32,
+	edge_tick:  time.Tick,
 }
 
 // App embeds it; this file owns it, and changes_app_destroy releases it.
@@ -305,6 +308,20 @@ changes_under_pointer :: proc(app: ^App, w: ^Window, x, y: f32) -> (^Changes_Pan
 	return changes_find(app, shown.content.id), shown
 }
 
+// Whether a Middle press at the point drops the scroll anchor on an Agent changes pane: on the diff's lines,
+// numbers and empty space, not on a control, a panel or list over it, a header or a note's card.
+@(private, require_results)
+changes_anchor_hit :: proc(app: ^App, w: ^Window, shown: layout.Pane_Rect, x, y: f32) -> bool {
+	pane := changes_find(app, shown.content.id)
+	if pane == nil || changes_list_open(pane) {return false}
+	g := changes_geometry_of(app, w, pane, shown)
+	#partial switch ui.changes_hit(g, &pane.model.view, &pane.state, x, y).part {
+	case .Diff, .Line, .Gutter:
+		return true
+	}
+	return false
+}
+
 // The pane's geometry with its diff rows laid out. The comments' part of the view and the chips' are filled
 // first: they are temporary memory or borrowed from the model, and the rows, the draw and every hit test
 // read them. The code text contrast follows the setting here, so a settings reload shows on the next frame.
@@ -318,6 +335,7 @@ changes_geometry_of :: proc(
 	changes_comments_view(app, pane)
 	changes_chips_view(pane)
 	pane.model.view.minimum_contrast = f32(app.settings.turns.diff_minimum_contrast)
+	pane.model.view.wrap = app.settings.turns.diff_long_lines == .Wrap
 	mono := ui.text_mono(&w.ui_text, app.family)
 	g := ui.changes_geometry(pane_body_rect(w, shown), w.scale, &pane.model.view, &w.ui_text, &pane.state)
 	ui.changes_layout(&pane.state, &pane.model.view, &w.ui_text, &mono, g.diff.width, w.scale)
@@ -757,7 +775,7 @@ changes_move :: proc(app: ^App, pane: ^Changes_Pane, g: ui.Changes_Geometry, ste
 	changes_select(app, pane, g, clamp(from + step, 0, len(view.turns) - 1), extend)
 }
 
-@(private = "file")
+@(private)
 changes_diff_scroll :: proc(app: ^App, w: ^Window, pane: ^Changes_Pane, shown: layout.Pane_Rect, delta: int) {
 	g := changes_geometry_of(app, w, pane, shown)
 	if ui.changes_scroll_diff(&pane.state, g, delta) {w.dirty = true}
@@ -809,9 +827,47 @@ changes_animate :: proc(app: ^App, w: ^Window, frame: ui.Frame_Time) -> bool {
 		pane := changes_find(app, shown.content.id)
 		if pane == nil {continue}
 		pane.moving = ui.changes_animate(&pane.state, app.animations, frame)
+		if changes_edge_scroll(app, w, pane, shown, frame) {pane.moving = true}
 		changed = changed || pane.moving
 	}
 	return changed
+}
+
+// How long a text drag waits between sideways steps while its pointer is out of the cell.
+@(private = "file")
+CHANGES_EDGE_STEP :: 50 * time.Millisecond
+
+// While a text selection is dragged, with the pointer left or right of the text it started in, scrolls the
+// code a few columns each CHANGES_EDGE_STEP, more the farther out the pointer is, and extends the selection
+// to the text now under the pointer's edge. True while the pointer is out, so frames keep coming.
+@(private = "file")
+changes_edge_scroll :: proc(
+	app: ^App, w: ^Window, pane: ^Changes_Pane, shown: layout.Pane_Rect, frame: ui.Frame_Time,
+) -> bool {
+	c := &pane.comments
+	if !c.dragging || !c.by_text || c.drag_cell.width <= 0 {return false}
+	g := changes_geometry_of(app, w, pane, shown)
+	view := &pane.model.view
+	mono := ui.text_mono(&w.ui_text, app.family)
+	_, column, found := ui.changes_line_code(g, view, &pane.state, &mono, c.drag_file, c.anchor, c.drag_cell.x)
+	if !found {return false}
+	right := c.drag_cell.x + c.drag_cell.width
+	x := pane.drag_point.x
+	over := x < column.text_x ? x - column.text_x : max(0, x - right)
+	if over == 0 {
+		pane.edge_tick = {}
+		return false
+	}
+	if pane.edge_tick != {} && time.tick_diff(pane.edge_tick, frame.display) < CHANGES_EDGE_STEP {return true}
+	pane.edge_tick = frame.display
+	columns := 1 + min(7, int(abs(over) / (2 * ui.text_width(&mono, "0"))))
+	if over < 0 {columns = -columns}
+	if !ui.changes_scroll_columns(&pane.state, g, view, columns) {return false}
+	reach := clamp(x, c.drag_cell.x, right - 1)
+	hit := ui.changes_hit(g, view, &pane.state, reach, pane.drag_point.y)
+	_ = changes_comments_drag(app, w, pane, hit, changes_text_at(app, w, pane, g, hit, reach, pane.drag_point.y))
+	w.dirty = true
+	return true
 }
 
 @(private)
@@ -957,10 +1013,17 @@ changes_key :: proc(app: ^App, w: ^Window, e: input.Key_Event) {
 	}
 }
 
-// Rows are the scrolled lines, positive toward the top, as the mouse wheel reports them. Over the open
-// panel only the strip scrolls; the open file list takes the wheel.
+// How many text columns one wheel row scrolls the code sideways.
+@(private = "file")
+CHANGES_WHEEL_COLUMNS :: 2
+
+// Rows are the scrolled lines, positive toward the top, as the mouse wheel reports them, and `columns` the
+// scrolled sideways, positive toward the right, as a sideways wheel reports them. Shift and the wheel scroll
+// the code sideways too. Over the open panel only the strip scrolls; the open file list takes the wheel.
 @(require_results)
-changes_wheel :: proc(app: ^App, w: ^Window, x, y: f32, rows: int) -> bool {
+changes_wheel :: proc(
+	app: ^App, w: ^Window, x, y: f32, rows, columns: int, modifiers: input.Modifiers,
+) -> bool {
 	pane, shown := changes_under_pointer(app, w, x, y)
 	if shown.content.kind != .Changes {return false}
 	if pane == nil {return true}
@@ -985,6 +1048,12 @@ changes_wheel :: proc(app: ^App, w: ^Window, x, y: f32, rows: int) -> bool {
 		)
 		w.dirty = true
 	case:
+		// Shift turns the wheel sideways, as a sideways wheel does: up goes left.
+		sideways := .Shift in modifiers ? columns - rows : columns
+		if sideways != 0 {
+			if ui.changes_scroll_columns(&pane.state, g, view, sideways * CHANGES_WHEEL_COLUMNS) {w.dirty = true}
+			break
+		}
 		// Over the note editor the wheel scrolls its text while it has more to show; at an end, or when the
 		// text fits, the diff takes it.
 		if box, visible := ui.changes_editor_box(g, view, &pane.state, &w.ui_text);
@@ -1054,14 +1123,14 @@ changes_drag_turns :: proc(app: ^App, pane: ^Changes_Pane, g: ui.Changes_Geometr
 // is; nothing for any other hit. The numbers' byte is the start of the line's text.
 @(private = "file", require_results)
 changes_text_at :: proc(
-	app: ^App, w: ^Window, pane: ^Changes_Pane, g: ui.Changes_Geometry, hit: ui.Changes_Hit, x: f32,
+	app: ^App, w: ^Window, pane: ^Changes_Pane, g: ui.Changes_Geometry, hit: ui.Changes_Hit, x, y: f32,
 ) -> Changes_Text_Point {
 	if hit.part != .Line && hit.part != .Gutter {return {}}
 	mono := ui.text_mono(&w.ui_text, app.family)
-	offset, cell, _ := ui.changes_text_point(g, &pane.model.view, &pane.state, &mono, hit.index, hit.line, x)
+	offset, cell, _ := ui.changes_text_point(g, &pane.model.view, &pane.state, &mono, hit.index, hit.line, x, y)
 	half := ui.Changes_Half.Both
 	if pane.state.rows.pairs.side_by_side {half = cell.x < g.diff.x + g.diff.width / 2 ? .Left : .Right}
-	return {hit.part == .Line ? offset : 0, cell, half}
+	return {offset, cell, half}
 }
 
 changes_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: input.Mouse_Move_Event) {
@@ -1088,12 +1157,23 @@ changes_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: input.Mou
 		w.dirty = true
 		return
 	}
-	if pane.state.overview_held {
+	if pane.state.h_bar.active {
+		bar, visible := ui.changes_h_scrollbar(g, view, &pane.state)
+		if visible && .Left in e.buttons {
+			target := ui.scrollbar_drag(pane.state.h_bar, bar, x)
+			_ = ui.changes_scroll_columns(&pane.state, g, view, target - pane.state.h_scroll)
+		} else {
+			pane.state.h_bar = {}
+		}
+		w.dirty = true
+		return
+	}
+	if pane.state.overview_drag.active {
 		if .Left in e.buttons {
 			pane.state.diff_scroll = ui.changes_overview_drag(&pane.state, g, y)
 			_ = ui.changes_scroll_diff(&pane.state, g, 0)
 		} else {
-			pane.state.overview_held = false
+			pane.state.overview_drag = {}
 		}
 		w.dirty = true
 		pointer_set(app, w, .Arrow)
@@ -1135,19 +1215,22 @@ changes_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: input.Mou
 	}
 	if .Left not_in e.buttons {pane.dragging = .None}
 	if alt := .Alt in e.modifiers; pane.comments.alt != alt {pane.comments.alt, w.dirty = alt, true}
-	// A text selection side by side stays within the cell it started in, so its drag reads the pointer
-	// clamped to that cell.
+	// A text selection stays within the cell it started in, so its drag reads the pointer clamped to that
+	// cell.
 	c := &pane.comments
 	reach := x
-	if c.dragging && c.by_text && view.side_by_side && .Left in e.buttons && c.drag_cell.width > 0 {
+	if c.dragging && c.by_text && .Left in e.buttons && c.drag_cell.width > 0 {
 		reach = clamp(x, c.drag_cell.x, c.drag_cell.x + c.drag_cell.width - 1)
+		// A text drag past the cell's edge scrolls the code on, a step a frame until the pointer is back.
+		pane.drag_point, pane.moving = {x, y}, true
+		w.dirty = true
 	}
 	hit := ui.changes_hit(g, view, &pane.state, reach, y)
 	shape := changes_cursor(hit, view.select_lines || view.alt)
 	if pane.dragging != .None {
 		changes_drag_turns(app, pane, g, hit)
 	} else if c.dragging && .Left in e.buttons {
-		if changes_comments_drag(app, w, pane, hit, changes_text_at(app, w, pane, g, hit, reach)) {
+		if changes_comments_drag(app, w, pane, hit, changes_text_at(app, w, pane, g, hit, reach, y)) {
 			w.dirty = true
 		}
 	}
@@ -1168,7 +1251,11 @@ changes_press :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) {
 	// The open file list takes the press, and a press outside it only closes it.
 	if changes_list_open(pane) {
 		choices, anchor := changes_dropdown_choices(pane), changes_dropdown_anchor(pane, g)
-		switch ui.dropdown_press(&pane.dropdown, choices, anchor, &w.ui_text, x, y, false, w.scale) {
+		outcome := ui.dropdown_press(&pane.dropdown, choices, anchor, &w.ui_text, x, y, false, w.scale)
+		if side := ui.dropdown_take_track(&pane.dropdown); side != .None {
+			scroll_hold_begin(app, w, .Changes_Choices, shown.content, x, y, side)
+		}
+		switch outcome {
 		case .Chosen:
 			changes_list_choose(app, w, pane, ui.dropdown_highlighted(&pane.dropdown, choices))
 			changes_list_close(w, pane)
@@ -1181,7 +1268,9 @@ changes_press :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) {
 	if state.turn_list_open {
 		if bar, visible := ui.changes_turn_list_scrollbar(state, g, view);
 		   visible && ui.scrollbar_contains(bar, x, y) {
+			side := ui.scrollbar_side(bar, y)
 			state.turn_list_scroll = ui.scrollbar_press(&state.turn_list_bar, bar, y)
+			if !state.turn_list_bar.active {scroll_hold_begin(app, w, .Changes_Turn_List, shown.content, x, y, side)}
 			return
 		}
 	}
@@ -1232,9 +1321,19 @@ changes_press :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) {
 		changes_source_pick(app, pane, hit.index)
 	case .Worktree_Chip:
 		changes_worktree_pick(app, pane, hit.index)
+	case .H_Scroll:
+		if bar, visible := ui.changes_h_scrollbar(g, view, state); visible {
+			side := ui.scrollbar_side(bar, x)
+			target := ui.scrollbar_press(&state.h_bar, bar, x)
+			_ = ui.changes_scroll_columns(state, g, view, target - state.h_scroll)
+			if !state.h_bar.active {scroll_hold_begin(app, w, .Changes_H_Scroll, shown.content, x, y, side)}
+		}
 	case .Overview:
+		side: ui.Scroll_Side
+		if bar, visible := ui.changes_overview_bar(state, g); visible {side = ui.scrollbar_side(bar, y)}
 		state.diff_scroll = ui.changes_overview_press(state, g, y)
 		_ = ui.changes_scroll_diff(state, g, 0)
+		if !state.overview_drag.active {scroll_hold_begin(app, w, .Changes_Overview, shown.content, x, y, side)}
 	case .Hooks:
 		run_action(app, w, .Install_Turn_Hooks, .Button)
 	case .Notice_Button:
@@ -1275,7 +1374,7 @@ changes_press :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) {
 	     .Editor_Untag, .Editor_Bold, .Editor_Code, .Editor_Block, .Editor_Suggest, .Editor_Cancel,
 	     .Editor_Save, .Send, .Copy, .Discard, .Toolbar, .Toolbar_Delete, .Toolbar_Comment, .Toolbar_Label,
 	     .Label_Menu, .Label_Row, .Label_Edit:
-		_ = changes_comments_press(app, w, pane, hit, e, changes_text_at(app, w, pane, g, hit, x))
+		_ = changes_comments_press(app, w, pane, hit, e, changes_text_at(app, w, pane, g, hit, x, y))
 	case:
 		if button, ok := ui.changes_row_button_of(hit.part); ok {changes_row_button_run(app, w, pane, button)}
 	}
@@ -1289,7 +1388,8 @@ changes_release :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) -> b
 		pane := changes_find(app, shown.content.id)
 		if pane == nil {continue}
 		if pane.state.turn_list_bar.active {pane.state.turn_list_bar, cleared = {}, true}
-		if pane.state.overview_held {pane.state.overview_held, cleared = false, true}
+		if pane.state.overview_drag.active {pane.state.overview_drag, cleared = {}, true}
+		if pane.state.h_bar.active {pane.state.h_bar, cleared = {}, true}
 		if pane.state.press != {} {pane.state.press, cleared = {}, true}
 		if pane.dragging != .None {pane.dragging, cleared = .None, true}
 		if ui.field_release(&pane.filter_editor) {cleared = true}
@@ -1303,6 +1403,44 @@ changes_release :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) -> b
 // Ends whatever the pointer holds on an Agent changes pane: a press, a drag or the overview strip.
 changes_cancel :: proc(app: ^App, w: ^Window) {
 	_ = changes_release(app, w, {button = .Left})
+}
+
+// One page of a held track press on an Agent changes pane's file list, turn list or overview strip,
+// toward (x, y). `shown` is false once the pane, or the list the press began on, is gone.
+changes_scroll_hold_page :: proc(
+	app: ^App,
+	w: ^Window,
+	hold: Scroll_Hold,
+) -> (
+	result: ui.Scroll_Page,
+	shown: bool,
+) {
+	pane := changes_find(app, hold.content.id)
+	rect, found := changes_pane_rect(w, hold.content.id)
+	if pane == nil || !found {return}
+	g := changes_geometry_of(app, w, pane, rect)
+	x, y := hold.pointer.x, hold.pointer.y
+	switch hold.bar {
+	case .Changes_Choices:
+		if !changes_list_open(pane) {return}
+		result = ui.dropdown_page(
+			&pane.dropdown, changes_dropdown_choices(pane), changes_dropdown_anchor(pane, g), x, y, w.scale,
+			hold.side,
+		)
+	case .Changes_Turn_List:
+		if !pane.state.turn_list_open {return}
+		result = ui.changes_turn_list_page(&pane.state, g, &pane.model.view, x, y, hold.side)
+	case .Changes_Overview:
+		result = ui.changes_overview_page(&pane.state, g, x, y, hold.side)
+		if result == .Paged {_ = ui.changes_scroll_diff(&pane.state, g, 0)}
+	case .Changes_H_Scroll:
+		result = ui.changes_h_page(&pane.state, g, &pane.model.view, x, y, hold.side)
+	case .None, .Pane, .Rail, .Palette_Results, .Palette_Choices:
+		return
+	case .Settings_Page, .Settings_Strip, .Settings_Choices:
+		return
+	}
+	return result, true
 }
 
 // The control a tooltip describes: what a press would reach, as changes_press finds it, or a disabled
@@ -1516,7 +1654,8 @@ when AIO_CONTROL {
 		filter_field_rect, filter_clear_rect, filter_bar_clear_rect: render.Rect
 		regex_rect, sticky_rect, strip_older_rect, strip_newer_rect: render.Rect
 		row_rect, summary_rect, panel_rect, files_button_rect, tools_button_rect: render.Rect
-		overview_rect, overview_box_rect, turn_title_rect: render.Rect
+		overview_rect, overview_thumb_rect, turn_title_rect: render.Rect
+		overview_state := ui.Scrollbar_State.Collapsed
 		row_steps := 0
 		range_title := ""
 		title_buffer: [96]u8
@@ -1535,7 +1674,8 @@ when AIO_CONTROL {
 				files_button_rect, tools_button_rect = g.files_button, g.tools_button
 				layout_button_rect, fold_button_rect, filter_button_rect = g.layout_button, g.fold_button, g.filter_button
 				filter_bar_clear_rect = g.filter_bar_clear
-				overview_rect, overview_box_rect = g.overview, ui.changes_overview_box(&pane.state, g)
+				overview_rect, overview_thumb_rect = g.overview, ui.changes_overview_thumb(&pane.state, g)
+				overview_state = ui.changes_overview_state(&pane.state, g, w.pointer)
 				if view.notice == .Recording_Off {notice_rect = g.notice_button}
 				// The panel's parts exist while it is open: the chips, the hooks button and the turn strip.
 				if pane.state.panel_open {
@@ -1681,7 +1821,10 @@ when AIO_CONTROL {
 		state_rect(r, "changes.files_button_rect", files_button_rect)
 		state_rect(r, "changes.tools_button_rect", tools_button_rect)
 		state_rect(r, "changes.overview_rect", overview_rect)
-		state_rect(r, "changes.overview_box_rect", overview_box_rect)
+		state_rect(r, "changes.overview_thumb_rect", overview_thumb_rect)
+		look := "rest"
+		if overview_state == .Hovered {look = "hover"} else if overview_state == .Active {look = "drag"}
+		state_text(r, "changes.overview_state", look)
 		state_rect(r, "changes.turn_title_rect", turn_title_rect)
 		state_rect(r, "changes.notice_button_rect", notice_rect)
 		state_rect(r, "changes.hooks_rect", hooks_rect)

@@ -271,17 +271,25 @@ text_area_offset_at :: proc(box: Text_Area_Box, x, y: f32) -> int {
 	return area_offset_in_row(a, box.buffer, &t, row, x - frame.x)
 }
 
-// Where the caret draws for `offset`, in the window.
+// The cell the caret occupies for `offset`, in the window: the character under it, or a space at the
+// end of a line, one line tall.
 @(require_results)
 text_area_caret_rect :: proc(box: Text_Area_Box, offset: int) -> render.Rect {
 	frame, t := area_laid_out(box)
 	a := box.area
-	at := clamp(offset, 0, len(box.buffer.text))
+	s := markdown.edit_string(box.buffer)
+	at := clamp(offset, 0, len(s))
 	row := area_row(a, at)
+	space := code_space(&t)
+	width := area_advance(&t, ' ', space)
+	if at < len(s) && s[at] != '\n' && s[at] != '\r' {
+		r, _ := utf8.decode_rune_in_string(s[at:])
+		width = area_advance(&t, r, space)
+	}
 	return {
 		frame.x + area_x_of(a, box.buffer, &t, row, at),
 		frame.y + f32(row) * t.line_height - a.scroll,
-		max(1, box.scale),
+		max(1, width),
 		t.line_height,
 	}
 }
@@ -378,23 +386,18 @@ text_area_draw :: proc(
 	low, high := markdown.edit_selection(b)
 	space := focused && low != high ? area_advance(&t, ' ', code_space(&t)) : 0
 	for row in first ..= last {
-		line := a.lines[row]
-		top := frame.y + f32(row) * lh - a.scroll
-		next := row + 1 < len(a.lines) ? a.lines[row + 1].start : line.end
-		hard := next > line.end
-		if focused && low != high && high > line.start && low < (hard ? next : line.end) {
-			left := frame.x + area_width(&t, s[line.start:clamp(low, line.start, line.end)])
-			right := frame.x + area_width(&t, s[line.start:clamp(high, line.start, line.end)])
-			if hard && high >= next {right += space}
-			right = min(right, frame.x + frame.width)
-			draw_rect(list, {rect = {left, top, right - left, lh}, color = theme.focus})
+		if rect, selected := area_selection_rect(a, &t, s, frame, row, low, high, space); selected && focused {
+			draw_rect(list, {rect = rect, color = theme.text_selection})
 		}
 	}
 	head: render.Rect
+	shown := false
 	if focused {
-		target := text_area_caret_rect(box, b.caret)
-		head = field_caret_pose(&a.caret, t.carets, {frame.x, frame.y - a.scroll}, target)
-		field_caret_body(&a.caret, list, theme.accent)
+		cell := text_area_caret_rect(box, b.caret)
+		drawn: bool
+		head, drawn = field_caret_pose(&a.caret, t.carets, {frame.x, frame.y - a.scroll}, cell, theme)
+		shown = drawn && caret_shown(t.carets, a.caret.motion.active)
+		if drawn {field_caret_body(&a.caret, list, theme)}
 	}
 	if len(s) == 0 {
 		if result := draw_text(&t, list, placeholder, frame.x, frame.y + t.ascent, theme.muted, frame.width);
@@ -411,8 +414,58 @@ text_area_draw :: proc(
 			}
 		}
 	}
-	if focused {draw_rect(list, {rect = head, color = theme.accent})}
+	// Selected text takes the theme's selection text colour, as a terminal's does, when it sets one.
+	if ink, recolour := theme.text_selection_text.?; recolour && focused && low != high {
+		for row in first ..= last {
+			rect, selected := area_selection_rect(a, &t, s, frame, row, low, high, space)
+			if !selected {continue}
+			line := a.lines[row]
+			baseline := frame.y + f32(row) * lh - a.scroll + t.ascent
+			again, scoped := clip_scope_open(list, rect)
+			if !scoped {continue}
+			draw_rect(list, {rect = rect, color = theme.text_selection})
+			result := area_row_draw(&t, list, s[line.start:line.end], frame.x, baseline, ink)
+			clip_scope_close(list, again)
+			if result != .Ok {return result}
+		}
+	}
+	if !shown {return .Ok}
+	caret_scope, block := field_caret_head(list, &a.caret, theme, head)
+	if !block {return .Ok}
+	defer clip_scope_close(list, caret_scope)
+	// The block covers the text under it, which draws again over it in the cursor text colour.
+	if len(s) == 0 {
+		return draw_text(&t, list, placeholder, frame.x, frame.y + t.ascent, theme.caret_text, frame.width)
+	}
+	for row in first ..= last {
+		line := a.lines[row]
+		top := frame.y + f32(row) * lh - a.scroll
+		if top + lh <= head.y || top >= head.y + head.height {continue}
+		baseline := top + t.ascent
+		if result := area_row_draw(&t, list, s[line.start:line.end], frame.x, baseline, theme.caret_text);
+		   result != .Ok {
+			return result
+		}
+	}
 	return .Ok
+}
+
+// The part of row `row` the selection covers, in the window; false when it covers none. `space` is the
+// width a selected line break adds.
+@(private = "file")
+area_selection_rect :: proc(
+	a: ^Text_Area, t: ^Text, s: string, frame: render.Rect, row, low, high: int, space: f32,
+) -> (rect: render.Rect, selected: bool) {
+	if low == high {return}
+	line := a.lines[row]
+	next := row + 1 < len(a.lines) ? a.lines[row + 1].start : line.end
+	hard := next > line.end
+	if !(high > line.start && low < (hard ? next : line.end)) {return}
+	left := frame.x + area_width(t, s[line.start:clamp(low, line.start, line.end)])
+	right := frame.x + area_width(t, s[line.start:clamp(high, line.start, line.end)])
+	if hard && high >= next {right += space}
+	right = min(right, frame.x + frame.width)
+	return {left, frame.y + f32(row) * t.line_height - a.scroll, right - left, t.line_height}, true
 }
 
 // Wraps the selection in `before` and `after`, as a formatting button does; with nothing selected it

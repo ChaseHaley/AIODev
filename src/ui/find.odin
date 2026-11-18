@@ -455,7 +455,6 @@ find_draw :: proc(
 		text        = base,
 		rect        = l.query,
 		inset       = 0,
-		caret_width = 1.5,
 		radius      = 0,
 		style       = .Body,
 		scale       = scale,

@@ -6,6 +6,7 @@ import "aio:render"
 import "aio:settings"
 import "core:log"
 import "core:math"
+import "core:unicode/utf8"
 
 // A rendered Markdown document: every run measured and placed once per width, then drawn only where
 // the viewport shows it. Positions are DIP-scaled pixels from the top left of the column.
@@ -920,6 +921,37 @@ markdown_caret_at :: proc(
 	return
 }
 
+// The cell a caret at text offset `offset` occupies, in the view's own coordinates: the character under
+// it, or a space at the end of a line, one line tall. See markdown_caret_at.
+markdown_caret_cell :: proc(
+	v: ^Markdown_View,
+	doc: ^markdown.Document,
+	offset: int,
+) -> (
+	cell: render.Rect,
+	found: bool,
+) {
+	rect, index, ok := markdown_caret_at(v, doc, offset)
+	if !ok {return}
+	line := v.lines[index]
+	cell = rect
+	for i in 0 ..< line.run_count {
+		run := v.runs[line.first_run + i]
+		if .Marker in run.flags {continue}
+		if offset >= int(run.start) && offset < int(run.end) {
+			r, _ := utf8.decode_rune_in_string(string(doc.text[offset:run.end]))
+			cell.width = max(rect.width, rune_advance(v, run.face, r))
+			return cell, true
+		}
+	}
+	// At the end of a line there is no character: a space of the line's last face stands in for it.
+	if line.run_count > 0 {
+		last := v.runs[line.first_run + line.run_count - 1]
+		cell.width = max(rect.width, rune_advance(v, last.face, ' '))
+	}
+	return cell, true
+}
+
 // The text offset nearest a point in the view's own coordinates, as markdown_caret_at gives them, for
 // moving a caret up and down lines.
 markdown_offset_near :: proc(v: ^Markdown_View, doc: ^markdown.Document, lx, ly: f32) -> int {
@@ -1034,7 +1066,8 @@ draw_matches :: proc(
 	}
 }
 
-// Text in a match takes find's colour, except where the selection covers it, as in a terminal.
+// Text in a match takes find's colour, except where the selection covers it, as in a terminal; selected
+// text takes `selected_ink` when the theme sets one.
 @(private = "file")
 draw_run :: proc(
 	v: ^Markdown_View,
@@ -1046,6 +1079,7 @@ draw_run :: proc(
 	color: render.Color,
 	find: Markdown_Find,
 	selected_from, selected_to: int,
+	selected_ink: Maybe(render.Color),
 ) -> render.Build_Status {
 	m := &v.faces[run.face]
 	shown := text^
@@ -1061,6 +1095,7 @@ draw_run :: proc(
 				matched := next < len(find.matches) && find.matches[next].start <= offset
 				in_selection := offset >= selected_from && offset < selected_to
 				ink := matched && !in_selection ? find.foreground : color
+				if selected, recolour := selected_ink.?; recolour && in_selection {ink = selected}
 				if result := draw_glyph(&shown, list, g, pen, baseline, ink); result != .Ok {return result}
 			}
 		}
@@ -1128,10 +1163,12 @@ markdown_draw :: proc(
 				left := string_advance(v, run.face, string(doc.text[run.start:start]))
 				middle := string_advance(v, run.face, string(doc.text[start:stop]))
 				rect := render.Rect{x + left, line.top + origin_y, middle, line.height}
-				draw_rect(list, {rect = rect, color = theme.selection})
+				draw_rect(list, {rect = rect, color = theme.text_selection})
 			}
 			color := colors[run.color]
-			result := draw_run(v, doc, text, list, run, x, baseline, color, find, from, to)
+			result := draw_run(
+				v, doc, text, list, run, x, baseline, color, find, from, to, theme.text_selection_text,
+			)
 			if result != .Ok {return result}
 			thickness := max(1, math.round(v.scale))
 			if run.link >= 0 && int(run.link) == hover_link {
@@ -1145,11 +1182,35 @@ markdown_draw :: proc(
 		}
 	}
 	if caret >= 0 {
-		if rect, _, found := markdown_caret_at(v, doc, caret); found {
-			target := render.Rect{rect.x + g.left, rect.y + origin_y, rect.width, rect.height}
-			head := field_caret_pose(&v.caret, text.carets, {g.left, origin_y}, target)
-			field_caret_body(&v.caret, list, theme.accent)
-			draw_rect(list, {rect = head, color = theme.accent})
+		if cell, found := markdown_caret_cell(v, doc, caret); found {
+			cell.x, cell.y = cell.x + g.left, cell.y + origin_y
+			head, drawn := field_caret_pose(&v.caret, text.carets, {g.left, origin_y}, cell, theme)
+			if drawn {
+				field_caret_body(&v.caret, list, theme)
+				if caret_shown(text.carets, v.caret.motion.active) {
+					scope, block := field_caret_head(list, &v.caret, theme, head)
+					if block {
+						defer clip_scope_close(list, scope)
+						// The block covers the text under it, which draws again over it in the cursor
+						// text colour.
+						for index := line_at(v, head.y - origin_y);
+						    index < len(v.lines) && v.lines[index].top + origin_y < head.y + head.height;
+						    index += 1 {
+							line := v.lines[index]
+							if line.top + origin_y + line.height <= head.y {continue}
+							for i in 0 ..< line.run_count {
+								run := v.runs[line.first_run + i]
+								if run.flags & {.Task_Open, .Task_Done} != {} {continue}
+								result := draw_run(
+									v, doc, text, list, run, run.x + g.left, line.baseline + origin_y,
+									theme.caret_text, {}, 0, 0, nil,
+								)
+								if result != .Ok {return result}
+							}
+						}
+					}
+				}
+			}
 		}
 	}
 	return .Ok

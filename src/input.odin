@@ -464,10 +464,15 @@ on_wheel :: proc(app: ^App, w: ^Window, e: input.Mouse_Wheel_Event) {
 	}
 	w.wheel_remainder += e.delta_y * WHEEL_LINES
 	rows := int(w.wheel_remainder)
+	w.wheel_remainder -= f32(rows)
+	w.wheel_remainder_x += e.delta_x * WHEEL_LINES
+	columns := int(w.wheel_remainder_x)
+	w.wheel_remainder_x -= f32(columns)
 	if rows == 0 {
+		// A sideways wheel alone scrolls the code of an Agent changes pane, and nothing else.
+		if columns != 0 && kind == .None {_ = changes_wheel(app, w, f32(e.x), f32(e.y), 0, columns, e.modifiers)}
 		return
 	}
-	w.wheel_remainder -= f32(rows)
 	if kind != .None {
 		overlay_input(app, w, kind, Overlay_Wheel{e.delta_y, rows})
 		return
@@ -485,7 +490,7 @@ on_wheel :: proc(app: ^App, w: ^Window, e: input.Mouse_Wheel_Event) {
 	}
 	if _, _, header := pane_header_hit(w, f32(e.x), f32(e.y)); header {return}
 	if markdown_wheel(app, w, f32(e.x), f32(e.y), rows) {return}
-	if changes_wheel(app, w, f32(e.x), f32(e.y), rows) {return}
+	if changes_wheel(app, w, f32(e.x), f32(e.y), rows, columns, e.modifiers) {return}
 	if entry := pane_at(app, w, e.x, e.y); entry != nil {
 		term.scroll(entry.session, rows, e.modifiers, f32(e.x), f32(e.y))
 		w.dirty = true

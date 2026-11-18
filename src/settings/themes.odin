@@ -190,8 +190,18 @@ THEME_TOKENS :: [Theme_Token]Token_Info {
 		"Default shell background and its pane card.",
 		.Opaque,
 	},
-	.Cursor = {"cursor", "Cursor", "Cursor color.", .Opaque},
-	.Cursor_Text = {"cursor_text", "Cursor text", "Text under the block cursor.", .Opaque},
+	.Cursor = {
+		"cursor",
+		"Cursor",
+		"Color of the cursor in terminals and text fields; empty follows the accent.",
+		.Optional,
+	},
+	.Cursor_Text = {
+		"cursor_text",
+		"Cursor text",
+		"Text under a block cursor; empty follows the text on accent.",
+		.Optional,
+	},
 	.Selection_Background = {
 		"selection_background",
 		"Selection background",
@@ -311,13 +321,25 @@ color_light :: proc(c: Color) -> bool {
 	return 0.2126 * f32(c.r) + 0.7152 * f32(c.g) + 0.0722 * f32(c.b) > 127.5
 }
 
+// The color of the cursor in every surface: the theme's own, or its accent when it sets none.
+theme_cursor :: proc(t: Theme) -> Color {
+	if c := t.colors[.Cursor]; c.a != 0 {return c.rgb}
+	return t.colors[.Accent].rgb
+}
+
+// The text under a block cursor: the theme's own, or the text on accent when it sets none.
+theme_cursor_text :: proc(t: Theme) -> Color {
+	if c := t.colors[.Cursor_Text]; c.a != 0 {return c.rgb}
+	return t.colors[.Accent_Text].rgb
+}
+
 // The terminal colors a theme gives every session.
 theme_terminal :: proc(t: Theme) -> Color_Settings {
 	c := Color_Settings {
 		foreground                 = t.colors[.Foreground].rgb,
 		background                 = t.colors[.Background].rgb,
-		cursor                     = t.colors[.Cursor].rgb,
-		cursor_text                = t.colors[.Cursor_Text].rgb,
+		cursor                     = theme_cursor(t),
+		cursor_text                = theme_cursor_text(t),
 		selection_background       = t.colors[.Selection_Background].rgb,
 		search_foreground          = t.colors[.Search_Foreground].rgb,
 		search_background          = t.colors[.Search_Background].rgb,

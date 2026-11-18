@@ -277,6 +277,16 @@ settings_page_press :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) 
 	if e.button != .Left || !settings_active(w) {return}
 	x, y := f32(e.x), f32(e.y)
 	press := ui.editor_press(&w.editor, settings_layout(w), &w.ui_text, x, y, .Shift in e.modifiers)
+	track, side := ui.editor_take_track(&w.editor)
+	switch track {
+	case .None:
+	case .Page:
+		scroll_hold_begin(app, w, .Settings_Page, {}, x, y, side)
+	case .Strip:
+		scroll_hold_begin(app, w, .Settings_Strip, {}, x, y, side)
+	case .Choices:
+		scroll_hold_begin(app, w, .Settings_Choices, {}, x, y, side)
+	}
 	editor_outcome(app, w, press)
 }
 

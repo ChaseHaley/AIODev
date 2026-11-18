@@ -420,8 +420,12 @@ editor_strip_key :: proc(p: ^Editor, row: ^Editor_Row, e: input.Key_Event) -> (E
 editor_strip_press :: proc(p: ^Editor, l: Editor_Layout, index: int, x, y: f32) -> Editor_Outcome {
 	strip := &p.strip
 	if bar, visible := editor_strip_scrollbar(p, l, index); visible && scrollbar_contains(bar, x, y) {
+		side := scrollbar_side(bar, x)
 		offset := scrollbar_press(&strip.bar_drag, bar, x)
-		if !strip.bar_drag.active {strip.wheel = f32(offset) - strip.scroll.target}
+		if !strip.bar_drag.active {
+			strip.wheel = f32(offset) - strip.scroll.target
+			p.track, p.track_side = .Strip, side
+		}
 		return .Changed
 	}
 	view := strip_view(editor_strip_rect(p, l, index), l.scale)
@@ -578,6 +582,11 @@ editor_strip_card_id :: proc(p: ^Editor, card: int) -> string {
 
 @(private)
 strip_color :: proc(t: settings.Theme, token: settings.Theme_Token) -> render.Color {
+	// A theme that sets no cursor draws it in the accent, as the terminal and every text field do.
+	#partial switch token {
+	case .Cursor:      return colour.rgba(settings.theme_cursor(t))
+	case .Cursor_Text: return colour.rgba(settings.theme_cursor_text(t))
+	}
 	value := t.colors[token]
 	return colour.rgba(value.rgb, f32(value.a) / 255)
 }
