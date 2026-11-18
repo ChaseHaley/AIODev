@@ -244,6 +244,8 @@ Changes_Part :: enum u8 {
 	Worktree_Chip,
 	// The overview strip at the right edge of the diff.
 	Overview,
+	// The scrollbar along the diff's bottom edge, which scrolls the code sideways.
+	H_Scroll,
 }
 
 // What a point is over. `index` is the bar or list row for the strip parts; the file for File_Header,
@@ -295,11 +297,16 @@ Changes_Rows :: struct {
 	detached:                               int,
 	// Each file's rows of diff lines, in either layout.
 	pairs:                                  Changes_Pairs,
+	// The widest line of every file, for the sideways scroll.
+	widths:                                 Changes_Widths,
 	total:                                  int,
 }
 
 // Per pane. The pane owns it and frees it with changes_state_destroy.
 Changes_State :: struct {
+	// How many text columns the code is scrolled sideways; each file holds it at its own limit.
+	h_scroll:                 int,
+	h_bar:                    Scroll_Drag,
 	diff_scroll:              int,
 	// Strip bars hidden at the left, and the turn list's scroll in pixels.
 	strip_offset:             int,
@@ -336,6 +343,8 @@ changes_state_destroy :: proc(state: ^Changes_State) {
 	delete(state.rows.tops)
 	delete(state.rows.cards)
 	delete(state.rows.ticks)
+	delete(state.rows.widths.code)
+	delete(state.rows.widths.head)
 	delete(state.rows.notes)
 	virtual.arena_destroy(&state.rows.notes_arena)
 	changes_pairs_destroy(&state.rows.pairs)
@@ -590,6 +599,7 @@ changes_badge_forms :: proc(
 // comment cards at `width`, the diff area's width.
 changes_layout :: proc(state: ^Changes_State, view: ^Changes_View, text, mono: ^Text, width, scale: f32) {
 	rows := &state.rows
+	changes_widths_build(&rows.widths, view, mono)
 	key := collapsed_key(view)
 	comments := changes_comments_key(view)
 	digit := text_width(mono, "0")
@@ -790,6 +800,7 @@ changes_draw :: proc(
 	}
 	state.turn_list_scroll = clamp(state.turn_list_scroll, 0, turn_list_limit(g, view))
 	state.diff_scroll = clamp(state.diff_scroll, 0, max(0, state.rows.total - int(g.diff.height)))
+	_ = changes_scroll_columns(state, g, view, 0)
 	g.selection_bar = changes_selection_place(g, view, state, text, mono)
 	rule := render.Rect{g.row.x, g.row.y + g.row.height - scale, g.row.width, scale}
 	draw_rect(list, {rect = rule, color = t.border})

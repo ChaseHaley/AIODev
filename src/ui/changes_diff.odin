@@ -604,7 +604,9 @@ changes_line_code :: proc(
 	if cell.width <= 0 {return}
 	digit := text_width(mono, "0")
 	number := code_number_width(&view.files[file], digit)
-	return cell, code_column(cell, number, digit, g.scale, !state.rows.pairs.side_by_side), true
+	column = code_column(cell, number, digit, g.scale, !state.rows.pairs.side_by_side)
+	column.scroll = f32(changes_h_columns(state, view, file, diff_band(g).width)) * digit
+	return cell, column, true
 }
 
 // The diff_scroll that puts `file`'s header at the top of the diff, in either layout, or the current one
@@ -700,6 +702,9 @@ changes_diff_hit :: proc(
 	}
 	if !render.rect_contains(g.diff, x, y) {return {}}
 	if hit := selection_bar_hit(g, x, y); hit.part != .None {return hit}
+	if bar, shown := changes_h_scrollbar(g, view, state); shown && scrollbar_contains(bar, x, y) {
+		return {.H_Scroll, 0, 0}
+	}
 	// Under a notice the stream holds only the comments.
 	if view.notice != .None {return comment_hit(g, view, state, x, y)}
 	rows := &state.rows
@@ -793,19 +798,6 @@ clip_bytes :: proc(s: string, limit: int) -> string {
 	return s[:end]
 }
 
-// The leading runes of `s` that can reach `width` in a monospace font whose glyphs advance `advance`, plus
-// two, so the fade still sees the overflow. A minified line is therefore never walked whole.
-mono_prefix :: proc(s: string, width, advance: f32) -> string {
-	if advance <= 0 {return clip_bytes(s, CHANGES_CLIP_BYTES)}
-	limit := int(max(0, width) / advance) + 2
-	count := 0
-	for _, offset in s {
-		if count == limit {return s[:offset]}
-		count += 1
-	}
-	return s
-}
-
 // The text of a file header: the path, or old and new for a rename or copy.
 @(private = "file")
 file_label :: proc(buf: []u8, f: ^tr.Diff_File) -> string {
@@ -866,6 +858,9 @@ Diff_Paint :: struct {
 	digit:                f32,
 	// How wide the current file's line number columns are.
 	number_width:         f32,
+	// The text's font, and how far the current file's code is scrolled left, in pixels.
+	font:                 Code_Font,
+	scroll:               f32,
 }
 
 @(private = "file")
@@ -1216,14 +1211,15 @@ paint_code :: proc(
 		}
 		plain = CHANGES_INK_TEXT
 	}
-	text := mono_prefix(d.text, column.width, p.digit)
 	runs: [CHANGES_LINE_EDGES + 1]Code_Run
 	line := Code_Line {
-		text          = text,
+		text          = d.text,
 		spans         = spans,
-		runs          = line_runs(marks, len(text), &runs),
+		runs          = line_runs(marks, len(d.text), &runs),
+		font          = p.font,
 		x             = column.text_x,
 		width         = column.width,
+		scroll        = p.scroll,
 		top           = row.y,
 		height        = row.height,
 		baseline      = baseline,
@@ -1233,6 +1229,16 @@ paint_code :: proc(
 		plain         = plain,
 	}
 	return code_line_draw(p.list, p.mono, line)
+}
+
+// The "no newline" marker in `column`, scrolled with the code.
+@(private = "file")
+paint_marker :: proc(p: ^Diff_Paint, column: Code_Column, baseline: f32) -> render.Build_Status {
+	left := column.text_x
+	return code_text_draw(
+		p.list, p.mono, p.font, CHANGES_NO_NEWLINE, left - p.scroll, left, left + column.width, baseline,
+		p.theme.faint,
+	)
 }
 
 @(private = "file")
@@ -1254,11 +1260,7 @@ paint_line :: proc(
 	marks_draw(p, marks, row)
 	row_pick_draw(p, file, flat, picked, row)
 	column := code_column(row, p.number_width, p.digit, p.scale, true)
-	if line.kind == .No_Newline {
-		return draw_fading_text(
-			p.mono, p.list, "No newline at end of file", column.text_x, baseline, t.faint, column.width,
-		)
-	}
+	if line.kind == .No_Newline {return paint_marker(p, column, baseline)}
 	if line.kind != .Added {
 		if r := number_draw(p, line.old_line, column.old_x, baseline); r != .Ok {return r}
 	}
@@ -1294,11 +1296,7 @@ paint_cell :: proc(
 	row_pick_draw(p, file, line, picked, cell)
 	baseline := baseline_in(cell.y, cell.height, p.mono)
 	column := code_column(cell, p.number_width, p.digit, s, false)
-	if d.kind == .No_Newline {
-		return draw_fading_text(
-			p.mono, p.list, "No newline at end of file", column.text_x, baseline, t.faint, column.width,
-		)
-	}
+	if d.kind == .No_Newline {return paint_marker(p, column, baseline)}
 	if r := number_draw(p, old ? d.old_line : d.new_line, column.old_x, baseline); r != .Ok {return r}
 	return paint_code(p, d, file, line, picked, &marks, column, cell, baseline)
 }
@@ -1313,17 +1311,19 @@ paint_hunk :: proc(
 	draw_rect(p.list, {rect = header, color = t.code_background})
 	pointed := p.pointer.y >= p.top && p.pointer.y < p.bottom
 	picking := len(h.lines) > 0 && pointed && render.rect_contains(header, p.pointer.x, p.pointer.y)
-	buf: [64]u8
-	label := fmt.bprintf(buf[:], "@@ -%d,%d +%d,%d @@", h.old_start, h.old_count, h.new_start, h.new_count)
+	buf: [CHANGES_HUNK_LABEL_BYTES]u8
+	label := hunk_label(buf[:], h)
 	baseline := baseline_in(y, f32(rows.hunk), p.mono)
-	room := p.card_width - 2 * SPACE_2 * s
-	if picking {room -= header.height + SPACE_1 * s}
-	x := p.card_x + SPACE_2 * s
-	if r := draw_fading_text(p.mono, p.list, label, x, baseline, t.muted, room); r != .Ok {return r}
+	// The header scrolls with the code; the room the select button takes at its right is always kept.
+	left := p.card_x + SPACE_2 * s
+	right := p.card_x + p.card_width - SPACE_2 * s - header.height - SPACE_1 * s
+	origin := left - p.scroll
+	if r := code_text_draw(p.list, p.mono, p.font, label, origin, left, right, baseline, t.muted); r != .Ok {
+		return r
+	}
 	if h.section != "" {
-		after := text_width(p.mono, label) + SPACE_2 * s
-		section := mono_prefix(h.section, room - after, p.digit)
-		if r := draw_fading_text(p.mono, p.list, section, x + after, baseline, t.faint, room - after);
+		after := origin + code_width(p.mono, p.font, label) + p.font.cell
+		if r := code_text_draw(p.list, p.mono, p.font, h.section, after, left, right, baseline, t.faint);
 		   r != .Ok {return r}
 	}
 	if picking {
@@ -1436,6 +1436,7 @@ paint_file :: proc(p: ^Diff_Paint, rows: ^Changes_Rows, i: int, y: f32) -> rende
 		)
 	}
 	p.number_width = code_number_width(f, p.digit)
+	p.scroll = f32(changes_h_columns(p.state, view, i, p.card_width)) * p.digit
 	flat := 0
 	for &hunk, h in f.hunks {
 		base, count := hunk_rows(rows, i, h)
@@ -1518,6 +1519,7 @@ diff_draw :: proc(
 		top        = g.diff.y,
 		bottom     = g.diff.y + g.diff.height,
 		digit      = text_width(mono, "0"),
+		font       = code_font(mono),
 	}
 	if notice {return paint_comments(&p, g, rows)}
 	scroll := state.diff_scroll
@@ -1549,6 +1551,9 @@ diff_draw :: proc(
 		if r := paint_header(&p, sticky, {p.card_x, rect.y, p.card_width, rect.height}, .Sticky_Header); r != .Ok {
 			return r
 		}
+	}
+	if bar, shown := changes_h_scrollbar(g, view, state); shown {
+		scrollbar_draw(list, theme, bar, scrollbar_state(state.hover.part == .H_Scroll, state.h_bar))
 	}
 	return selection_bar_draw(list, text, theme, g, view, state, pointer)
 }

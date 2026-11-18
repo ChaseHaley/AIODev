@@ -245,8 +245,12 @@ New-Item -ItemType Directory -Path $work | Out-Null
 Git init -q
 Set-Content -LiteralPath (Join-Path $work 'a.txt') -Value @('one', 'two', 'three')
 Set-Content -LiteralPath (Join-Path $work 'b.txt') -Value @('keep', 'drop')
-# Only the reviewer of section (d) edits it, for a modified file whose two sides show side by side.
-Set-Content -LiteralPath (Join-Path $work 'notes.txt') -Value @('alpha', 'beta', 'gamma', 'delta')
+# Only the reviewer of section (d) edits it, for a modified file whose two sides show side by side. Its
+# changed line is long on both sides, wider than a pane, so the long-line checks have lines to scroll: the
+# digit groups make every byte tell its place.
+$wideOld = 'beta ' + ((1..50 | ForEach-Object { '{0:D3}_' -f $_ }) -join '')
+$wideNew = 'BETA ' + ((1..70 | ForEach-Object { '{0:D3}_' -f $_ }) -join '')
+Set-Content -LiteralPath (Join-Path $work 'notes.txt') -Value @('alpha', $wideOld, 'gamma', 'delta')
 Git add -A
 Git commit -q -m initial
 
@@ -629,7 +633,7 @@ try {
         ')'
         # Long enough to scroll, so the file list can put the header of a later file at the top.
         'Set-Content -LiteralPath (Join-Path $work ''long.txt'') -Value (1..200 | ForEach-Object { "line $_" })'
-        'Set-Content -LiteralPath (Join-Path $work ''notes.txt'') -Value @(''alpha'', ''BETA'', ''gamma'', ''delta'')'
+        "Set-Content -LiteralPath (Join-Path `$work 'notes.txt') -Value @('alpha', '$wideNew', 'gamma', 'delta')"
         # Sorts last, with no t in its path, and keeps enough below long.txt to scroll it to the top.
         'Set-Content -LiteralPath (Join-Path $work ''zz.md'') -Value (1..150 | ForEach-Object { "- entry $_" })'
         'while (-not (Test-Path -LiteralPath $end)) { Start-Sleep -Milliseconds 100 }'
@@ -984,6 +988,199 @@ try {
     Set-Content -LiteralPath "$data/settings.ini" -Value $ini -NoNewline
     Aio command settings.reload | Out-Null
     Await-State @{ 'theme.name' = $theme } 'the original theme returns' | Out-Null
+
+    # Long lines: notes.txt has a line of 205 bytes on its old side and one of 285 on its new side, both wider
+    # than the pane. They scroll sideways, never fade, and stay selectable, in either layout and at any size.
+    # The pixel of byte `$col` of flat line `$line` of file `$file`, a pixel past the boundary, allowing for how
+    # far the code is scrolled.
+    function Point-In($s, $file, $line, $col) {
+        $r = Rect $s "changes.line.$file.$line.rect"
+        $x = [double]$s["changes.line.$file.$line.text_x"] + ($col * [double]$s['changes.mono_advance']) -
+            [double]$s["changes.line.$file.$line.scroll"] + 1
+        return "$([int]$x),$([int]($r[1]+$r[3]/2))"
+    }
+    # Scrolls the code with the wheel and Shift over the new line: rows count down for the right.
+    function Scroll-Code($s, $rows) {
+        Aio mouse wheel (Middle (Rect $s 'changes.line.2.2.rect')) $rows --px --mods Shift | Out-Null
+    }
+    # The checks every layout and size owes: nothing fades, the pane cuts the new line, and at the end of the
+    # scroll the last byte of each long line is in view, the old and the new line scrolled alike. Starts and
+    # leaves the code at its start.
+    function Check-Long($label) {
+        $s = State
+        Equal $s['changes.faded_glyphs'] 0 "${label}: no glyph in the diff fades"
+        $limit = [int]$s['changes.h_limit']
+        if ($limit -le 0) { throw "$label expected the lines wider than the pane, observed h_limit $limit" }
+        Assert-Shown $s 'changes.h_bar_rect'
+        $first = [int]$s['changes.line.2.2.visible_to']
+        if ($first -ge $newLength) { throw "$label expected the pane to cut the new line, observed $first bytes" }
+        Scroll-Code $s -400
+        $s = Await-State @{
+            'changes.h_scroll' = $limit; 'changes.line.2.2.visible_to' = $newLength
+            'changes.line.2.1.visible_to' = $oldLength
+        } "$label scrolls to the end of both long lines"
+        Equal $s['changes.line.2.1.scroll'] $s['changes.line.2.2.scroll'] "$label`: the old and new line scroll alike"
+        Equal $s['changes.faded_glyphs'] 0 "$label`: still no fade at the end"
+        Aio capture --out "$data/agent-long-$($label -replace ' ', '-')-end.png" | Out-Null
+        Scroll-Code $s 400
+        Await-State @{ 'changes.h_scroll' = 0 } "$label returns to the start" | Out-Null
+    }
+    # Puts notes.txt at the top of the diff, as a change of scale leaves the scroll somewhere else.
+    function Show-Notes {
+        Open-Files | Out-Null
+        Aio type 'notes' | Out-Null
+        Await-Like 'changes.file_list.0.label' '*notes.txt*' 'the search keeps notes.txt' | Out-Null
+        Aio key Enter | Out-Null
+        Await-State @{ 'changes.files_open' = 'false'; 'changes.panel_open' = 'false'; 'changes.top_file' = 2 } `
+            'notes.txt is at the top' | Out-Null
+    }
+    $newLength = $wideNew.Length
+    $oldLength = $wideOld.Length
+    Open-Files | Out-Null
+    Aio type 'notes' | Out-Null
+    Await-Like 'changes.file_list.0.label' '*notes.txt*' 'the search keeps notes.txt' | Out-Null
+    Aio key Enter | Out-Null
+    $s = Await-State @{ 'changes.files_open' = 'false'; 'changes.panel_open' = 'false'; 'changes.top_file' = 2 } `
+        'picking notes.txt puts it at the top'
+    Equal $s['changes.h_scroll'] 0 'the code starts unscrolled'
+    Equal $s['changes.line.2.2.scroll'] 0 'and so does the new line'
+    $cut = [int]$s['changes.line.2.2.visible_to']
+    Write-Output "PASS the pane shows $cut of the new line's $newLength bytes before scrolling"
+    Aio capture --out "$data/agent-long-unified-wide.png" | Out-Null
+    Check-Long 'unified wide'
+
+    # Shift and the wheel scroll the code sideways, four columns for two rows; the numbers stay where they are.
+    $s = State
+    $gutter = $s['changes.line.2.2.text_x']
+    Scroll-Code $s -2
+    $s = Await-State @{ 'changes.h_scroll' = 4 } 'Shift and the wheel scroll the code four columns'
+    Equal $s['changes.line.2.2.text_x'] $gutter 'the numbers and the sign stay where they were'
+    Equal $s['changes.faded_glyphs'] 0 'a scrolled line does not fade'
+
+    # A drag over the part scrolled into view selects the characters under the pointer, past where the old
+    # edge was; a note on it keeps its bytes and its excerpt.
+    $limit = [int]$s['changes.h_limit']
+    Scroll-Code $s -400
+    $s = Await-State @{ 'changes.h_scroll' = $limit } 'scrolled to the end for the drag'
+    $from = $newLength - 20
+    $to = $newLength - 8
+    if ($from -le $cut) { throw "the drag expected to start past the old edge at byte $cut, starts at $from" }
+    $want = $wideNew.Substring($from, $to - $from)
+    Aio mouse drag (Point-In $s 2 2 $from) (Point-In $s 2 2 $to) --px | Out-Null
+    $s = Await-State @{
+        'changes.selection_mode' = 'text'; 'changes.selection_text' = $want; 'changes.toolbar_open' = 'true'
+    } 'a drag past the old edge selects the characters under the pointer'
+    Aio key Alt+2 | Out-Null
+    $s = Await-State @{ 'changes.comments' = 1; 'changes.comment.0.partial' = 'true' } `
+        'Alt+2 saves a note on part of the scrolled line'
+    Equal $s['changes.comment.0.path'] 'notes.txt' 'the note is on notes.txt'
+    Equal $s['changes.comment.0.first_byte'] $from 'the note starts at the first selected byte'
+    Equal $s['changes.comment.0.last_byte'] $to 'and ends at the last'
+    Aio capture --out "$data/agent-long-note.png" | Out-Null
+    $s = Await-NoNotices 'no notice covers Copy'
+    Aio mouse move (Middle (Rect $s 'changes.copy_rect')) --px | Out-Null
+    Click-Rect $s 'changes.copy_rect'
+    # The state shows the message's quotes escaped, so the excerpt is matched between them.
+    Await-Like 'os.clipboard' "*, at *$want*" 'Copy quotes the excerpt of the scrolled line' | Out-Null
+    $s = Await-NoNotices 'no notice covers Discard'
+    Aio mouse move (Middle (Rect $s 'changes.discard_rect')) --px | Out-Null
+    Click-Rect $s 'changes.discard_rect'
+    Await-State @{ 'changes.comments' = 0 } 'Discard clears the long-line note' | Out-Null
+
+    # A drag that runs out of the pane scrolls the code on while the pointer stays out, and selects on.
+    $s = State
+    Scroll-Code $s 400
+    $s = Await-State @{ 'changes.h_scroll' = 0; 'changes.selection_mode' = '' } 'back at the start for the edge drag'
+    $row = Rect $s 'changes.line.2.2.rect'
+    $edge = "$([int]($row[0] + $row[2] + 4)),$([int]($row[1] + $row[3] / 2))"
+    Aio mouse down (Point-In $s 2 2 20) --px | Out-Null
+    Aio mouse move $edge --px | Out-Null
+    Start-Sleep -Milliseconds 900
+    $dragged = [int](State)['changes.h_scroll']
+    Aio mouse up $edge --px | Out-Null
+    if ($dragged -le 0) { throw "a drag past the edge expected to scroll the code, observed $dragged columns" }
+    Write-Output "PASS a drag past the pane's edge scrolled the code $dragged columns"
+    $s = Await-State @{ 'changes.selection_mode' = 'text' } 'the drag past the edge selects text'
+    $text = $s['changes.selection_text']
+    if ($text.Length -le ($cut - 20) -or -not $wideNew.Substring(20).StartsWith($text)) {
+        throw "the drag past the edge expected the text from byte 20 on, past byte $cut; observed '$text'"
+    }
+    Write-Output "PASS the drag past the edge selected $($text.Length) bytes from byte 20, past the old edge"
+    Aio key Esc | Out-Null
+    $s = Await-State @{ 'changes.selection_mode' = '' } 'Escape ends the selection'
+
+    # The scrollbar along the bottom edge: dragging its thumb scrolls the code.
+    Scroll-Code $s 400
+    $s = Await-State @{ 'changes.h_scroll' = 0 } 'back at the start for the scrollbar'
+    $thumb = Rect $s 'changes.h_bar_thumb_rect'
+    $thumbY = [int]($thumb[1] + $thumb[3] / 2)
+    Aio mouse drag "$([int]($thumb[0] + $thumb[2] / 2)),$thumbY" "$([int]($thumb[0] + $thumb[2] / 2 + 80)),$thumbY" --px | Out-Null
+    $moved = [int](State)['changes.h_scroll']
+    if ($moved -le 0) { throw "dragging the scrollbar thumb expected to scroll the code, observed $moved columns" }
+    Write-Output "PASS dragging the scrollbar thumb scrolls the code $moved columns"
+    Scroll-Code (State) 400
+    Await-State @{ 'changes.h_scroll' = 0 } 'back at the start after the scrollbar' | Out-Null
+
+    # At 150% the end of a long line is still reachable and nothing fades.
+    Aio dpi 144 | Out-Null
+    Start-Sleep -Milliseconds 800
+    Show-Notes
+    Aio capture --out "$data/agent-long-unified-144.png" | Out-Null
+    Check-Long 'unified 150 percent'
+    Aio dpi 96 | Out-Null
+    Await-State @{ 'changes.row_steps' = '0'; 'changes.h_scroll' = 0 } 'the pane goes back to 100%' | Out-Null
+    Show-Notes
+
+    # A narrow pane needs more columns; the same checks hold.
+    $wideLimit = [int](State)['changes.h_limit']
+    Resize-Window 70
+    $s = State
+    if ([int]$s['changes.h_limit'] -le $wideLimit) {
+        throw "a narrow pane expected more columns than $wideLimit, observed $($s['changes.h_limit'])"
+    }
+    Write-Output "PASS a narrow pane scrolls further ($($s['changes.h_limit']) columns, $wideLimit when wide)"
+    Aio capture --out "$data/agent-long-unified-narrow.png" | Out-Null
+    Check-Long 'unified narrow'
+    Resize-Window 150
+
+    # Side by side: the old and new line stay on one row and scroll together, each inside its own half.
+    $s = State
+    Click-Rect $s 'changes.layout_button_rect'
+    $s = Await-State @{ 'changes.side_by_side' = 'true'; 'changes.top_file' = 2; 'changes.h_scroll' = 0 } `
+        'the layout toggle shows the long lines side by side'
+    $old = Rect $s 'changes.line.2.1.rect'
+    $new = Rect $s 'changes.line.2.2.rect'
+    if (-not ($new[0] -gt $old[0] -and $new[1] -eq $old[1])) {
+        throw "side by side expected the old line left of the new on one row, observed $($old -join ',') and $($new -join ',')"
+    }
+    Write-Output 'PASS the old and new long lines share a row'
+    Aio capture --out "$data/agent-long-side-by-side-wide.png" | Out-Null
+    Check-Long 'side by side wide'
+    $s = State
+    Scroll-Code $s -400
+    $s = Await-State @{ 'changes.line.2.2.visible_to' = $newLength } 'scrolled to the end in the right half'
+    Aio mouse drag (Point-In $s 2 2 $from) (Point-In $s 2 2 $to) --px | Out-Null
+    Await-State @{ 'changes.selection_mode' = 'text'; 'changes.selection_text' = $want } `
+        'a drag in the right half selects the same characters' | Out-Null
+    Aio key Esc | Out-Null
+    Await-State @{ 'changes.selection_mode' = '' } 'Escape ends the side by side selection' | Out-Null
+    Scroll-Code (State) 400
+    Await-State @{ 'changes.h_scroll' = 0 } 'back at the start in side by side' | Out-Null
+    Resize-Window 70
+    Aio capture --out "$data/agent-long-side-by-side-narrow.png" | Out-Null
+    Check-Long 'side by side narrow'
+    Resize-Window 150
+    $s = State
+    Click-Rect $s 'changes.layout_button_rect'
+    Await-State @{ 'changes.side_by_side' = 'false'; 'changes.top_file' = 2 } 'the layout toggle goes back to unified' | Out-Null
+
+    # Back to live.py at the top, unscrolled, for the notes below.
+    Open-Files | Out-Null
+    Aio type 'live' | Out-Null
+    Await-Like 'changes.file_list.0.label' '*live.py*' 'the search keeps live.py' | Out-Null
+    Aio key Enter | Out-Null
+    Await-State @{ 'changes.files_open' = 'false'; 'changes.panel_open' = 'false'; 'changes.top_file' = 0 } `
+        'picking live.py scrolls to the top again' | Out-Null
 
     # Notes: drag over text and label it with Alt+2, pick lines with Alt and delete them with Del, type to write
     # a comment with a suggestion from the tool and save it with Ctrl+Enter, edit one note, remove one, copy

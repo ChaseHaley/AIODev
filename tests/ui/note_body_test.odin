@@ -4,6 +4,7 @@ import "aio:font"
 import "aio:glyphs"
 import "aio:render"
 import "aio:ui"
+import "core:strings"
 import "core:testing"
 
 @(private = "file")
@@ -269,4 +270,56 @@ note_body_draws_chips_fills_signs_and_syntax_colours :: proc(t: ^testing.T) {
 	testing.expect_value(t, status, render.Build_Status.Ok)
 	testing.expect_value(t, len(list.rects), 0)
 	testing.expect_value(t, len(list.glyphs), 0)
+}
+
+// A code line wider than the body wraps onto more rows, each as much of it as fits, so the card grows to
+// show all of it and nothing fades. A continuation keeps its line's syntax colours and has no sign.
+@(test)
+note_code_lines_wrap_at_the_room_instead_of_fading :: proc(t: ^testing.T) {
+	f: Note_Fixture
+	if !note_fixture_make(t, &f) {return}
+	defer note_fixture_destroy(&f)
+	digit := ui.text_width(&f.mono, "0")
+	width := f32(300)
+	room := width - 2 * 8 - digit - 4
+	line := strings.concatenate({"x := \"", strings.repeat("a", 60, context.temp_allocator), "\""}, context.temp_allocator)
+	source := strings.concatenate({"```odin\n", line, "\n```"}, context.temp_allocator)
+	layout := ui.note_body_layout(&f.text, &f.mono, source, nil, width, 1)
+	if !testing.expect(t, len(layout.rows) > 1) {return}
+	next := 0
+	for row, i in layout.rows {
+		testing.expect_value(t, row.kind, ui.Note_Row_Kind.Code)
+		testing.expect_value(t, row.line, 0)
+		testing.expect_value(t, row.base, next)
+		testing.expect(t, ui.text_width(&f.mono, row.text) <= room + 0.01)
+		testing.expect(t, len(row.text) > 0)
+		if i > 0 {testing.expect_value(t, row.y, layout.rows[i - 1].y + layout.rows[i - 1].height)}
+		next += len(row.text)
+	}
+	testing.expect_value(t, next, len(line))
+	row_height := layout.rows[0].height
+	testing.expect_value(t, layout.frames[0].height, 4 + f32(len(layout.rows)) * row_height + 4)
+
+	theme: ui.Theme
+	theme.text = {1, 1, 1, 1}
+	inks: ui.Changes_Inks
+	green := render.Color{0, 1, 0, 1}
+	for background in ui.Changes_Background {
+		for i in 0 ..< ui.CHANGES_INKS {inks.table[background][i] = {1, 0, 0, 1}}
+	}
+	inks.table[.Context][2] = green
+	ui.note_body_highlight(&layout, .None)
+	list := render.draw_list_init()
+	defer render.draw_list_destroy(&list)
+	testing.expect_value(t, render.push_layer(&list, {0, 0, 800, 600}), render.Error.None)
+	status := ui.note_body_draw(&list, &f.text, &f.mono, theme, &inks, &layout, {20, 10}, 1, 0, 600)
+	testing.expect_value(t, status, render.Build_Status.Ok)
+	strings_drawn := 0
+	for glyph in list.glyphs {
+		testing.expect(t, glyph.flags & render.GLYPH_FADE == 0)
+		testing.expect(t, glyph.rect.x + glyph.rect.width <= 20 + width - 8 + 1.5)
+		if glyph.color == green {strings_drawn += 1}
+	}
+	// The string literal, quotes included, is coloured on every row it runs over.
+	testing.expect_value(t, strings_drawn, 62)
 }

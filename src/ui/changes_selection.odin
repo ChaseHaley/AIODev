@@ -96,8 +96,7 @@ changes_text_point :: proc(
 	cell, column, ok = changes_line_code(g, view, state, mono, file, line, x)
 	if !ok {return}
 	text, _ := line_text(view, file, line)
-	prefix := mono_prefix(text, column.width, state.rows.digit)
-	return code_offset_at(mono, prefix, column.width, x - column.text_x), cell, true
+	return code_offset_at(mono, text, column.width, x - column.text_x, column.scroll), cell, true
 }
 
 // Places the toolbar over the selection and, while the label menu is open, the menu under it. The toolbar
@@ -137,13 +136,12 @@ changes_selection_place :: proc(
 
 	// Over the first line's selected start, as much of it as the toolbar is wide.
 	line, _ := line_text(view, s.file, s.first)
-	prefix := mono_prefix(line, column.width, rows.digit)
 	start, span := column.text_x, column.width
 	if s.partial {
-		stop := s.first == s.last ? s.last_offset : len(prefix)
-		begin := code_x_of(mono, prefix, column.width, s.first_offset)
+		stop := s.first == s.last ? s.last_offset : len(line)
+		begin := code_x_of(mono, line, column.width, s.first_offset, column.scroll)
 		start += begin
-		span = code_x_of(mono, prefix, column.width, stop) - begin
+		span = code_x_of(mono, line, column.width, stop, column.scroll) - begin
 	}
 	centre := start + min(span, CHANGES_BAR_SPAN * scale) / 2
 

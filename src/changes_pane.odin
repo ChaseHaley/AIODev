@@ -115,6 +115,9 @@ Changes_Pane :: struct {
 	cursor:     int,
 	dragging:   Changes_Drag,
 	moving:     bool,
+	// Where the pointer was at the last move of a text drag, and when the code last scrolled sideways for it.
+	drag_point: [2]f32,
+	edge_tick:  time.Tick,
 }
 
 // App embeds it; this file owns it, and changes_app_destroy releases it.
@@ -809,9 +812,47 @@ changes_animate :: proc(app: ^App, w: ^Window, frame: ui.Frame_Time) -> bool {
 		pane := changes_find(app, shown.content.id)
 		if pane == nil {continue}
 		pane.moving = ui.changes_animate(&pane.state, app.animations, frame)
+		if changes_edge_scroll(app, w, pane, shown, frame) {pane.moving = true}
 		changed = changed || pane.moving
 	}
 	return changed
+}
+
+// How long a text drag waits between sideways steps while its pointer is out of the cell.
+@(private = "file")
+CHANGES_EDGE_STEP :: 50 * time.Millisecond
+
+// While a text selection is dragged, with the pointer left or right of the text it started in, scrolls the
+// code a few columns each CHANGES_EDGE_STEP, more the farther out the pointer is, and extends the selection
+// to the text now under the pointer's edge. True while the pointer is out, so frames keep coming.
+@(private = "file")
+changes_edge_scroll :: proc(
+	app: ^App, w: ^Window, pane: ^Changes_Pane, shown: layout.Pane_Rect, frame: ui.Frame_Time,
+) -> bool {
+	c := &pane.comments
+	if !c.dragging || !c.by_text || c.drag_cell.width <= 0 {return false}
+	g := changes_geometry_of(app, w, pane, shown)
+	view := &pane.model.view
+	mono := ui.text_mono(&w.ui_text, app.family)
+	_, column, found := ui.changes_line_code(g, view, &pane.state, &mono, c.drag_file, c.anchor, c.drag_cell.x)
+	if !found {return false}
+	right := c.drag_cell.x + c.drag_cell.width
+	x := pane.drag_point.x
+	over := x < column.text_x ? x - column.text_x : max(0, x - right)
+	if over == 0 {
+		pane.edge_tick = {}
+		return false
+	}
+	if pane.edge_tick != {} && time.tick_diff(pane.edge_tick, frame.display) < CHANGES_EDGE_STEP {return true}
+	pane.edge_tick = frame.display
+	columns := 1 + min(7, int(abs(over) / (2 * ui.text_width(&mono, "0"))))
+	if over < 0 {columns = -columns}
+	if !ui.changes_scroll_columns(&pane.state, g, view, columns) {return false}
+	reach := clamp(x, c.drag_cell.x, right - 1)
+	hit := ui.changes_hit(g, view, &pane.state, reach, pane.drag_point.y)
+	_ = changes_comments_drag(app, w, pane, hit, changes_text_at(app, w, pane, g, hit, reach))
+	w.dirty = true
+	return true
 }
 
 @(private)
@@ -957,10 +998,17 @@ changes_key :: proc(app: ^App, w: ^Window, e: input.Key_Event) {
 	}
 }
 
-// Rows are the scrolled lines, positive toward the top, as the mouse wheel reports them. Over the open
-// panel only the strip scrolls; the open file list takes the wheel.
+// How many text columns one wheel row scrolls the code sideways.
+@(private = "file")
+CHANGES_WHEEL_COLUMNS :: 2
+
+// Rows are the scrolled lines, positive toward the top, as the mouse wheel reports them, and `columns` the
+// scrolled sideways, positive toward the right, as a sideways wheel reports them. Shift and the wheel scroll
+// the code sideways too. Over the open panel only the strip scrolls; the open file list takes the wheel.
 @(require_results)
-changes_wheel :: proc(app: ^App, w: ^Window, x, y: f32, rows: int) -> bool {
+changes_wheel :: proc(
+	app: ^App, w: ^Window, x, y: f32, rows, columns: int, modifiers: input.Modifiers,
+) -> bool {
 	pane, shown := changes_under_pointer(app, w, x, y)
 	if shown.content.kind != .Changes {return false}
 	if pane == nil {return true}
@@ -985,6 +1033,12 @@ changes_wheel :: proc(app: ^App, w: ^Window, x, y: f32, rows: int) -> bool {
 		)
 		w.dirty = true
 	case:
+		// Shift turns the wheel sideways, as a sideways wheel does: up goes left.
+		sideways := .Shift in modifiers ? columns - rows : columns
+		if sideways != 0 {
+			if ui.changes_scroll_columns(&pane.state, g, view, sideways * CHANGES_WHEEL_COLUMNS) {w.dirty = true}
+			break
+		}
 		// Over the note editor the wheel scrolls its text while it has more to show; at an end, or when the
 		// text fits, the diff takes it.
 		if box, visible := ui.changes_editor_box(g, view, &pane.state, &w.ui_text);
@@ -1061,7 +1115,7 @@ changes_text_at :: proc(
 	offset, cell, _ := ui.changes_text_point(g, &pane.model.view, &pane.state, &mono, hit.index, hit.line, x)
 	half := ui.Changes_Half.Both
 	if pane.state.rows.pairs.side_by_side {half = cell.x < g.diff.x + g.diff.width / 2 ? .Left : .Right}
-	return {hit.part == .Line ? offset : 0, cell, half}
+	return {offset, cell, half}
 }
 
 changes_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: input.Mouse_Move_Event) {
@@ -1084,6 +1138,17 @@ changes_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: input.Mou
 			pane.state.turn_list_scroll = ui.scrollbar_drag(pane.state.turn_list_bar, bar, y)
 		} else {
 			pane.state.turn_list_bar = {}
+		}
+		w.dirty = true
+		return
+	}
+	if pane.state.h_bar.active {
+		bar, visible := ui.changes_h_scrollbar(g, view, &pane.state)
+		if visible && .Left in e.buttons {
+			target := ui.scrollbar_drag(pane.state.h_bar, bar, x)
+			_ = ui.changes_scroll_columns(&pane.state, g, view, target - pane.state.h_scroll)
+		} else {
+			pane.state.h_bar = {}
 		}
 		w.dirty = true
 		return
@@ -1135,12 +1200,15 @@ changes_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: input.Mou
 	}
 	if .Left not_in e.buttons {pane.dragging = .None}
 	if alt := .Alt in e.modifiers; pane.comments.alt != alt {pane.comments.alt, w.dirty = alt, true}
-	// A text selection side by side stays within the cell it started in, so its drag reads the pointer
-	// clamped to that cell.
+	// A text selection stays within the cell it started in, so its drag reads the pointer clamped to that
+	// cell.
 	c := &pane.comments
 	reach := x
-	if c.dragging && c.by_text && view.side_by_side && .Left in e.buttons && c.drag_cell.width > 0 {
+	if c.dragging && c.by_text && .Left in e.buttons && c.drag_cell.width > 0 {
 		reach = clamp(x, c.drag_cell.x, c.drag_cell.x + c.drag_cell.width - 1)
+		// A text drag past the cell's edge scrolls the code on, a step a frame until the pointer is back.
+		pane.drag_point, pane.moving = {x, y}, true
+		w.dirty = true
 	}
 	hit := ui.changes_hit(g, view, &pane.state, reach, y)
 	shape := changes_cursor(hit, view.select_lines || view.alt)
@@ -1232,6 +1300,11 @@ changes_press :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) {
 		changes_source_pick(app, pane, hit.index)
 	case .Worktree_Chip:
 		changes_worktree_pick(app, pane, hit.index)
+	case .H_Scroll:
+		if bar, visible := ui.changes_h_scrollbar(g, view, state); visible {
+			target := ui.scrollbar_press(&state.h_bar, bar, x)
+			_ = ui.changes_scroll_columns(state, g, view, target - state.h_scroll)
+		}
 	case .Overview:
 		state.diff_scroll = ui.changes_overview_press(state, g, y)
 		_ = ui.changes_scroll_diff(state, g, 0)
@@ -1290,6 +1363,7 @@ changes_release :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) -> b
 		if pane == nil {continue}
 		if pane.state.turn_list_bar.active {pane.state.turn_list_bar, cleared = {}, true}
 		if pane.state.overview_held {pane.state.overview_held, cleared = false, true}
+		if pane.state.h_bar.active {pane.state.h_bar, cleared = {}, true}
 		if pane.state.press != {} {pane.state.press, cleared = {}, true}
 		if pane.dragging != .None {pane.dragging, cleared = .None, true}
 		if ui.field_release(&pane.filter_editor) {cleared = true}
@@ -1386,6 +1460,8 @@ changes_tooltip :: proc(app: ^App, w: ^Window, x, y: f32) -> string {
 		if hit.index >= 0 && hit.index < len(view.worktree_labels) {return view.worktree_labels[hit.index]}
 	case .Overview:
 		return "Overview: click or drag to scroll"
+	case .H_Scroll:
+		return "Scroll sideways: Shift and the wheel do too"
 	case .Hooks:
 		return "Install hooks so turns begin before the first edit"
 	case .Step_Back:
