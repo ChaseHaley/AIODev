@@ -766,7 +766,7 @@ build_cursor :: proc(v: ^View, b: ^Builder) -> Maybe(Cursor_Paint) {
 	}
 	paint := Cursor_Paint {
 		head = cell, tail = cell, target = cell,
-		shape = c.visual_style, color = b.cursor_color, text_color = b.style.cursor_text,
+		shape = cursor_shape(c.visual_style), color = b.cursor_color, text_color = b.style.cursor_text,
 		stroke = max(1, m.underline_thickness), minimum_contrast = b.style.minimum_contrast,
 	}
 	if b.style.cursor_suppressed {return paint}

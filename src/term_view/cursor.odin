@@ -8,11 +8,18 @@ import "core:math"
 
 // Cell geometry, not just the filled bar/underline. Head and tail describe the last healthy draw;
 // target is the terminal's current logical destination, including a wide character's full width.
-Cursor_Paint :: struct {
-	head, tail, target:    render.Rect,
-	shape:                 ghostty.Cursor_Style,
-	color, text_color:    render.Color,
-	stroke, minimum_contrast: f32,
+Cursor_Paint :: caret.Paint
+
+// The shape the terminal's render state reports, as the caret package names it.
+@(private)
+cursor_shape :: proc(style: ghostty.Cursor_Style) -> caret.Shape {
+	switch style {
+	case .Bar:          return .Bar
+	case .Block:        return .Block
+	case .Underline:    return .Underline
+	case .Block_Hollow: return .Block_Hollow
+	}
+	return .Block
 }
 
 @(private)
@@ -20,12 +27,16 @@ Cursor_Transition_Pose :: struct {
 	head, tail: render.Rect,
 }
 
-// Fixed, resource-free motion owned by the window. It uses exactly the local cursor's engine.
+// Fixed, resource-free motion owned by the window. It uses exactly the local cursor's engine. The head
+// turns from the colour and shape it left to those of the surface it is going to as it travels.
 Cursor_Transition :: struct {
 	motion: caret.Motion,
 	paint: Cursor_Paint,
 	text_color: render.Color,
 	staged: Maybe(Cursor_Transition_Pose),
+	color_from: render.Color,
+	shape_from: caret.Shape,
+	stroke_from: f32,
 }
 
 // Start from the pose actually drawn, never a scheduler sample. Starting does not read a clock.
@@ -33,6 +44,9 @@ cursor_transition_start :: proc(t: ^Cursor_Transition, from, to: Cursor_Paint, e
 	t^ = {
 		paint = to,
 		text_color = to.text_color,
+		color_from = from.color,
+		shape_from = from.shape,
+		stroke_from = from.stroke,
 		motion = {
 			effects = effects,
 			target = to.target,
@@ -75,11 +89,15 @@ cursor_transition_draw :: proc(t: ^Cursor_Transition, list: ^render.Draw_List, c
 	if render.push_layer(list, clip) != .None {return}
 	p := t.paint
 	p.head, p.tail = t.motion.head, t.motion.tail
+	turn := t.motion.active ? caret.smooth(t.motion.progress) : 1
+	p.color = caret.mix_colors(t.color_from, p.color, turn)
 	cursor_draw_body(list, p, nil, t.motion.effects, t.motion.progress)
-	if p.shape == .Block {
-		_ = render.push_rect(list, {rect = p.head, color = p.color})
-	} else {
+	if p.shape == .Block_Hollow {
 		cursor_outline(list, p)
+	} else {
+		from := caret.shape_box(t.shape_from, t.stroke_from, p.head)
+		to := caret.shape_box(p.shape, p.stroke, p.head)
+		_ = render.push_rect(list, {rect = caret.mix_rects(from, to, turn), color = p.color})
 	}
 	if list.error == .None {
 		t.staged = Cursor_Transition_Pose{p.head, p.tail}
@@ -239,34 +257,11 @@ cursor_note_row :: proc(b: ^Builder, y, start: int) {
 	if i >= 0 && i < len(b.cursor_text) {b.cursor_text[i] = {start, len(b.list.glyphs)}}
 }
 
-// What of a cursor cell the cursor's shape fills, which is what a smear or trail stretches.
-@(private)
-cursor_box :: proc(p: Cursor_Paint, cell: render.Rect) -> render.Rect {
-	stroke := p.stroke
-	#partial switch p.shape {
-	case .Bar:
-		return {cell.x, cell.y, stroke * 2, cell.height}
-	case .Underline:
-		return {cell.x, cell.y + cell.height - stroke * 2, cell.width, stroke * 2}
-	}
-	return cell
-}
-
 @(private)
 cursor_outline :: proc(list: ^render.Draw_List, p: Cursor_Paint, hollow := false) {
-	cell, stroke, fill := p.head, p.stroke, p.color
-	b := Builder{list = list}
-	switch {
-	case hollow || p.shape == .Block_Hollow:
-		rect(&b, {cell.x, cell.y, cell.width, stroke}, fill)
-		rect(&b, {cell.x, cell.y + cell.height - stroke, cell.width, stroke}, fill)
-		rect(&b, {cell.x, cell.y, stroke, cell.height}, fill)
-		rect(&b, {cell.x + cell.width - stroke, cell.y, stroke, cell.height}, fill)
-	case p.shape == .Bar:
-		rect(&b, {cell.x, cell.y, stroke * 2, cell.height}, fill)
-	case p.shape == .Underline:
-		rect(&b, {cell.x, cell.y + cell.height - stroke * 2, cell.width, stroke * 2}, fill)
-	}
+	// A block rests between a cell's background and its glyph, so only the hollow outline draws here.
+	if p.shape == .Block && !hollow {return}
+	caret.shape_draw(list, p.shape, p.stroke, p.head, p.color, hollow)
 }
 
 // Draws the cursor partway along its motion: the smear or trail under the text, then the head above
@@ -295,16 +290,11 @@ cursor_draw_moving :: proc(v: ^View, b: ^Builder, paint: Cursor_Paint) {
 	}
 }
 
-// The smear or trail from the paint's tail through `corners` to its head, as the cursor's shape fills
-// each of their cells.
 @(private)
 cursor_draw_body :: proc(
 	list: ^render.Draw_List, p: Cursor_Paint, corners: []render.Rect, e: caret.Effects, progress: f32,
 ) {
-	boxes: [caret.CORNERS_MAX]render.Rect
-	n := min(len(corners), caret.CORNERS_MAX)
-	for cell, i in corners[:n] {boxes[i] = cursor_box(p, cell)}
-	caret.body_draw(list, cursor_box(p, p.tail), boxes[:n], cursor_box(p, p.head), e, p.color, progress)
+	caret.paint_body_draw(list, p, corners, e, progress)
 }
 
 @(private)

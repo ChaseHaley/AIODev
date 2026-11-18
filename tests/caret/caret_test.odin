@@ -43,3 +43,40 @@ trail_follows_the_path_the_cursor_took :: proc(t: ^testing.T) {
 	testing.expect_value(t, len(caret.motion_corners(&m)), 0)
 	testing.expect(t, m.tail.x > b.x && m.tail.x < c.x)
 }
+
+// A shape fills the part of its cell it names; a bar and an underline are as thick as two strokes, and a
+// smear or trail stretches those parts, not the whole cell.
+@(test)
+shapes_fill_the_part_of_the_cell_they_name :: proc(t: ^testing.T) {
+	cell := render.Rect{10, 20, 9, 19}
+	testing.expect_value(t, caret.shape_box(.Block, 1, cell), cell)
+	testing.expect_value(t, caret.shape_box(.Bar, 1, cell), render.Rect{10, 20, 2, 19})
+	testing.expect_value(t, caret.shape_box(.Underline, 2, cell), render.Rect{10, 35, 9, 4})
+
+	list := render.draw_list_init()
+	defer render.draw_list_destroy(&list)
+	_ = render.push_layer(&list, {0, 0, 100, 100})
+	caret.shape_draw(&list, .Bar, 1, cell, {1, 0, 0, 1})
+	testing.expect_value(t, len(list.rects), 1)
+	testing.expect_value(t, list.rects[0].rect, render.Rect{10, 20, 2, 19})
+	// Hollow is an outline of four strokes, whatever the shape.
+	caret.shape_draw(&list, .Bar, 1, cell, {1, 0, 0, 1}, hollow = true)
+	testing.expect_value(t, len(list.rects), 5)
+}
+
+// A cursor that goes to another surface turns into that surface's colour and shape on the way.
+@(test)
+a_travelling_cursor_turns_its_colour_and_shape :: proc(t: ^testing.T) {
+	testing.expect_value(t, caret.smooth(0), f32(0))
+	testing.expect_value(t, caret.smooth(1), f32(1))
+	testing.expect_value(t, caret.smooth(0.5), f32(0.5))
+	testing.expect_value(t, caret.smooth(-3), f32(0))
+	red, blue := render.Color{1, 0, 0, 1}, render.Color{0, 0, 1, 1}
+	testing.expect_value(t, caret.mix_colors(red, blue, 0), red)
+	testing.expect_value(t, caret.mix_colors(red, blue, 1), blue)
+	testing.expect_value(t, caret.mix_colors(red, blue, 0.5), render.Color{0.5, 0, 0.5, 1})
+	block := caret.shape_box(.Block, 1, {0, 0, 9, 19})
+	bar := caret.shape_box(.Bar, 1, {0, 0, 9, 19})
+	testing.expect_value(t, caret.mix_rects(block, bar, 1), bar)
+	testing.expect_value(t, caret.mix_rects(block, bar, 0.5), render.Rect{0, 0, 5.5, 19})
+}
