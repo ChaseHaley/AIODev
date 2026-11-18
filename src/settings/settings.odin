@@ -119,6 +119,7 @@ CONFIRM_PROMPT_LABELS :: []string {
 Pane_Settings :: struct {
 	gap, corner_radius:            int,
 	markdown_floating:             bool,
+	drop_limit:                    int,
 	resume_agents:                 bool,
 	minimum_columns, minimum_rows: int,
 	focus_border, unfocused_dim:   int,
@@ -874,6 +875,16 @@ SCHEMA :: [?]Schema_Entry {
 		default_value = "false",
 		description = "Open a Markdown file from a terminal link or \"Open Markdown file\" in a float above the " +
 			"tab, so the panes already there keep their size.",
+	},
+	{
+		key = "pane.drop_limit",
+		title = "Files opened per drop",
+		kind = .Int,
+		offset = offset_of(Settings, pane) + offset_of(Pane_Settings, drop_limit),
+		default_value = "8",
+		valid = {1, 32},
+		description = "The most files that open from one drop on a window. The rest are left, and a notice " +
+			"says how many opened.",
 	},
 	{
 		key = "pane.resume_agents",
