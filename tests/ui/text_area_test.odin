@@ -1,11 +1,13 @@
 package ui_test
 
+import "aio:caret"
 import "aio:font"
 import "aio:glyphs"
 import "aio:markdown"
 import "aio:render"
 import "aio:ui"
 import "core:testing"
+import "core:time"
 
 @(private = "file")
 Area_Fixture :: struct {
@@ -452,4 +454,63 @@ a_text_area_draws_its_selection_caret_and_only_the_lines_in_view :: proc(t: ^tes
 	_ = render.push_layer(&list, {0, 0, 800, 400})
 	testing.expect_value(t, ui.text_area_draw(box, &list, theme, false, "Hi"), render.Build_Status.Ok)
 	testing.expect_value(t, len(list.glyphs), 2)
+}
+
+// The note editor's caret is the window's: it claims it, follows cursor.style (a block redraws the
+// character under it in the cursor text colour) and fills its selection like every other surface.
+@(test)
+a_text_area_claims_the_caret_and_draws_its_shape_and_selection :: proc(t: ^testing.T) {
+	device, device_error := render.device_create(.Warp)
+	if !testing.expect_value(t, device_error, render.Error.None) {return}
+	defer render.device_destroy(device)
+	f: Area_Fixture
+	cache: glyphs.Cache
+	if !area_start(t, &f, "abc def", &cache) {return}
+	defer area_stop(&f)
+	glyphs.init(&cache, f.fonts, device)
+	defer glyphs.destroy(&cache)
+	list := render.draw_list_init()
+	defer render.draw_list_destroy(&list)
+	carets: ui.Carets
+	f.text.carets = &carets
+	carets.style = {shape = .Block, stroke = 1}
+	cursor, cursor_text, selection, selected_text := render.Color{1, 0, 0, 1}, render.Color{0, 0, 1, 1},
+		render.Color{0, 1, 0, 1}, render.Color{1, 1, 0, 1}
+	theme := ui.Theme {
+		text = {1, 1, 1, 1}, muted = {0.5, 0.5, 0.5, 1}, border = {0.2, 0.2, 0.2, 1},
+		caret = cursor, caret_text = cursor_text, text_selection = selection, text_selection_text = selected_text,
+	}
+	box := area_box(&f, area_width(&f, 20), 1, 3)
+	draw :: proc(t: ^testing.T, box: ui.Text_Area_Box, list: ^render.Draw_List, carets: ^ui.Carets, theme: ui.Theme) {
+		render.draw_list_reset(list)
+		ui.carets_begin(carets, {}, render.frame_time_at(time.tick_add({}, time.Second)))
+		_ = render.push_layer(list, {0, 0, 800, 400})
+		testing.expect_value(t, ui.text_area_draw(box, list, theme, true, ""), render.Build_Status.Ok)
+	}
+	count :: proc(list: ^render.Draw_List, color: render.Color) -> (rects, glyphs: int) {
+		for instance in list.rects {
+			if instance.color == color {rects += 1}
+		}
+		for glyph in list.glyphs {
+			if glyph.color == color {glyphs += 1}
+		}
+		return
+	}
+
+	f.buffer.anchor, f.buffer.caret = 1, 1
+	draw(t, box, &list, &carets, theme)
+	testing.expect(t, carets.claim.present && carets.claim.owner == ui.caret_owner_of(&f.area.caret))
+	testing.expect_value(t, carets.claim.paint.shape, caret.Shape.Block)
+	block, redrawn := count(&list, cursor)
+	testing.expect_value(t, block, 1)
+	_, text_glyphs := count(&list, cursor_text)
+	testing.expect(t, text_glyphs > 0 && redrawn == 0, "the character under the block draws in the cursor text colour")
+	testing.expect_value(t, carets.claim.paint.target.width, ui.text_width(&f.text, "b"))
+
+	f.buffer.anchor, f.buffer.caret = 0, 3
+	draw(t, box, &list, &carets, theme)
+	fills, _ := count(&list, selection)
+	testing.expect(t, fills >= 1, "the selection is filled with the theme's selection colour")
+	_, ink := count(&list, selected_text)
+	testing.expect(t, ink > 0, "selected text takes the selection text colour")
 }

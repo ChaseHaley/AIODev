@@ -62,21 +62,23 @@ Remove-Item -LiteralPath $work, $captures -Recurse -Force -ErrorAction SilentlyC
 New-Item -ItemType Directory -Force $work, $captures | Out-Null
 $note = Join-Path $work 'note.md'
 "# Title`n`nSome words here to edit.`n" | Set-Content -LiteralPath $note -Encoding utf8
-function Write-Settings([string] $Extra) {
-    @"
-control.enabled = true
-shell.command = pwsh.exe -NoLogo -NoProfile -NoExit
-cursor.blink = false
-cursor.style = bar
-cursor.animation = smear
-cursor.animation_duration = 500
-cursor.animation_strength = 65
-window.columns = 120
-window.rows = 32
-$Extra
-"@ | Set-Content -LiteralPath $settings -Encoding utf8
+# The journey's settings with `$Overrides` replacing keys, so no key appears twice.
+function Write-Settings([hashtable] $Overrides = @{}) {
+    $values = [ordered]@{
+        'control.enabled' = 'true'
+        'shell.command' = 'pwsh.exe -NoLogo -NoProfile -NoExit'
+        'cursor.blink' = 'false'
+        'cursor.style' = 'bar'
+        'cursor.animation' = 'smear'
+        'cursor.animation_duration' = '500'
+        'cursor.animation_strength' = '65'
+        'window.columns' = '120'
+        'window.rows' = '32'
+    }
+    foreach ($key in $Overrides.Keys) { $values[$key] = $Overrides[$key] }
+    ($values.GetEnumerator() | ForEach-Object { "$($_.Key) = $($_.Value)" }) | Set-Content -LiteralPath $settings -Encoding utf8
 }
-Write-Settings ''
+Write-Settings
 
 Invoke-Aio launch --fresh --settings $settings | Out-Null
 try {
@@ -171,7 +173,7 @@ try {
     Start-Sleep -Milliseconds 600
 
     # Blocks: cursor.style = block gives every surface a block, in the cursor text colour over its text.
-    Write-Settings "cursor.style = block`ncursor.blink_interval = 200"
+    Write-Settings @{ 'cursor.style' = 'block'; 'cursor.blink_interval' = '200' }
     Copy-Item -LiteralPath $settings -Destination (Read-State)['app.settings'] -Force
     Invoke-Aio command settings.reload | Out-Null
     Wait-For 'caret.shape' 'block'
@@ -183,7 +185,7 @@ try {
     Invoke-Aio key Esc | Out-Null
 
     # cursor.blink follows the one window phase in every surface, and cursor.blink_interval sets it.
-    Write-Settings "cursor.style = bar`ncursor.blink = true`ncursor.blink_interval = 200"
+    Write-Settings @{ 'cursor.blink' = 'true'; 'cursor.blink_interval' = '200' }
     Copy-Item -LiteralPath $settings -Destination (Read-State)['app.settings'] -Force
     Invoke-Aio command settings.reload | Out-Null
     Invoke-Aio key Ctrl+Shift+P | Out-Null
@@ -193,7 +195,7 @@ try {
     Invoke-Aio key Esc | Out-Null
 
     # Off: focus changes do not fly, and the loop is quiet afterwards.
-    Write-Settings "cursor.animation = off`ncursor.blink = false"
+    Write-Settings @{ 'cursor.animation' = 'off' }
     Copy-Item -LiteralPath $settings -Destination (Read-State)['app.settings'] -Force
     Invoke-Aio command settings.reload | Out-Null
     Start-Sleep -Milliseconds 500
