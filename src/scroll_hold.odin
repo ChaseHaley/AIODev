@@ -39,14 +39,24 @@ Scroll_Hold :: struct {
 	content: layout.Content,
 	// The pointer as the last move left it; each repeat pages toward it.
 	pointer: [2]f32,
+	// The side of the thumb the press began on; the repeat pages only from there.
+	side:    ui.Scroll_Side,
 	// When the next page is due.
 	due:     time.Tick,
 }
 
 // Holds the track press at (x, y) that has just paged once on `bar`.
-scroll_hold_begin :: proc(app: ^App, w: ^Window, bar: Scroll_Hold_Bar, content: layout.Content, x, y: f32) {
+scroll_hold_begin :: proc(
+	app: ^App,
+	w: ^Window,
+	bar: Scroll_Hold_Bar,
+	content: layout.Content,
+	x, y: f32,
+	side: ui.Scroll_Side,
+) {
 	w.scroll_hold = {
 		bar     = bar,
+		side    = side,
 		content = content,
 		pointer = {x, y},
 		due     = time.tick_add(clock_now(&app.clock), ui.SCROLLBAR_REPEAT_DELAY),
@@ -88,19 +98,19 @@ scroll_hold_page :: proc(app: ^App, w: ^Window, hold: Scroll_Hold) -> (result: u
 	switch hold.bar {
 	case .None:
 	case .Pane:
-		return pane_scrollbar_page(app, w, hold.content, x, y)
+		return pane_scrollbar_page(app, w, hold.content, x, y, hold.side)
 	case .Rail:
-		return rail_scrollbar_page(app, w, x, y), !w.tabs_horizontal
+		return rail_scrollbar_page(app, w, x, y, hold.side), !w.tabs_horizontal
 	case .Palette_Results, .Palette_Choices:
 		if !palette_active(app, w) {return}
 		track := ui.Palette_Track.Results if hold.bar == .Palette_Results else .Choices
 		l := ui.palette_layout(&app.palette, f32(w.width), f32(w.height), w.scale)
-		return ui.palette_page(&app.palette, l, track, x, y), true
+		return ui.palette_page(&app.palette, l, track, x, y, hold.side), true
 	case .Settings_Page, .Settings_Strip, .Settings_Choices:
 		if !settings_active(w) {return}
 		track := ui.Editor_Track.Page
 		if hold.bar == .Settings_Strip {track = .Strip} else if hold.bar == .Settings_Choices {track = .Choices}
-		return ui.editor_page(&w.editor, settings_layout(w), track, x, y), true
+		return ui.editor_page(&w.editor, settings_layout(w), track, x, y, hold.side), true
 	case .Changes_Choices, .Changes_Turn_List, .Changes_Overview, .Changes_H_Scroll:
 		return changes_scroll_hold_page(app, w, hold)
 	}

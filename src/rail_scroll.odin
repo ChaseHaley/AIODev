@@ -129,20 +129,21 @@ rail_scrollbar_state :: proc(w: ^Window) -> ui.Scrollbar_State {
 rail_scrollbar_press :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {
 	bar, visible := rail_scrollbar(w)
 	if !visible || !ui.scrollbar_contains(bar, x, y) {return false}
+	side := ui.scrollbar_side(bar, y)
 	offset := ui.scrollbar_press(&w.rail_bar_drag, bar, y)
 	if !w.rail_bar_drag.active {
 		rail_scroll_glide(app, w, f32(offset))
-		scroll_hold_begin(app, w, .Rail, {}, x, y)
+		scroll_hold_begin(app, w, .Rail, {}, x, y, side)
 	}
 	w.dirty = true
 	return true
 }
 
 // One page of a held track press toward (x, y) on the rail's scrollbar, glided as the press is.
-rail_scrollbar_page :: proc(app: ^App, w: ^Window, x, y: f32) -> ui.Scroll_Page {
+rail_scrollbar_page :: proc(app: ^App, w: ^Window, x, y: f32, side: ui.Scroll_Side) -> ui.Scroll_Page {
 	bar, visible := rail_scrollbar(w)
 	if !visible {return .Off_Track}
-	offset, result := ui.scrollbar_page(bar, x, y)
+	offset, result := ui.scrollbar_page(bar, x, y, side)
 	if result == .Paged {rail_scroll_glide(app, w, f32(offset))}
 	return result
 }

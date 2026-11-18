@@ -783,24 +783,29 @@ try {
     Write-Output "PASS holding the overview track pages repeatedly ($paged -> $held, a page is $page) until the thumb reaches the pointer"
     Start-Sleep -Milliseconds 500
     Equal ([double](State)['changes.diff_scroll']) $held 'the held press stops paging once the thumb is under the pointer'
-    # Leaving the track pauses it, however far the thumb is from the pointer, and coming back resumes it.
-    Aio mouse move "$($laneX - 200),$([int]($lane[1] + 4))" --px | Out-Null
+    # As on a native scrollbar, the press repeats only toward the side it began on. The pointer crossing to the
+    # other side of the thumb pauses it rather than reversing it, leaving the track pauses it too, and back on
+    # its side, ahead of the thumb, it resumes.
+    Aio mouse move "$laneX,$([int]($lane[1] + 4))" --px | Out-Null
+    Start-Sleep -Milliseconds 700
+    Equal ([double](State)['changes.diff_scroll']) $held 'the held press pauses, not reverses, across the thumb'
+    Aio mouse move "$($laneX - 200),$([int]($lane[1] + $lane[3] - 3))" --px | Out-Null
     Start-Sleep -Milliseconds 700
     Equal ([double](State)['changes.diff_scroll']) $held 'the held press pauses off the track'
-    Aio mouse move "$laneX,$([int]($lane[1] + 4))" --px | Out-Null
-    Await-State @{ 'changes.diff_scroll' = '0' } 'the held press resumes and pages to the top when the pointer returns' | Out-Null
-    Aio mouse up "$laneX,$([int]($lane[1] + 4))" --px | Out-Null
+    Aio mouse move "$laneX,$([int]($lane[1] + $lane[3] - 3))" --px | Out-Null
+    Await-AtLeast 'changes.diff_scroll' ($held + 1) 'the held press resumes when the pointer is back ahead of the thumb' | Out-Null
+    Aio mouse up "$laneX,$([int]($lane[1] + $lane[3] - 3))" --px | Out-Null
     # The thumb drags by where it was grabbed, so the view does not jump under the pointer.
-    Aio mouse move "$laneX,$([int]($lane[1] + $lane[3] - 4))" --px | Out-Null
+    Aio mouse move "$laneX,$([int]($lane[1] + 4))" --px | Out-Null
     $s = State
     $thumb = Rect $s 'changes.overview_thumb_rect'
     Aio mouse down "$laneX,$([int]($thumb[1] + 6))" --px | Out-Null
-    Aio mouse move "$laneX,$([int]($thumb[1] + 6 + 120))" --px | Out-Null
+    Aio mouse move "$laneX,$([int]($thumb[1] + 6 - 120))" --px | Out-Null
     $s = Await-State @{ 'changes.overview_state' = 'drag' } 'the overview thumb is held while it is dragged'
     $moved = Rect $s 'changes.overview_thumb_rect'
-    if ([Math]::Abs(($moved[1] - $thumb[1]) - 120) -gt 4) { throw "the dragged thumb did not follow by 120 px: $($thumb[1]) -> $($moved[1])" }
+    if ([Math]::Abs(($moved[1] - $thumb[1]) + 120) -gt 4) { throw "the dragged thumb did not follow by 120 px up: $($thumb[1]) -> $($moved[1])" }
     Write-Output "PASS the dragged overview thumb moves by the pointer's distance and keeps its grab ($($thumb[1]) -> $($moved[1]))"
-    Aio mouse up "$laneX,$([int]($thumb[1] + 6 + 120))" --px | Out-Null
+    Aio mouse up "$laneX,$([int]($thumb[1] + 6 - 120))" --px | Out-Null
     # Holding the top of the lane pages to the top of the diff.
     Aio mouse down "$laneX,$([int]($lane[1] + 2))" --px | Out-Null
     Await-State @{ 'changes.diff_scroll' = '0' } 'holding the top of the overview scrolls to the top' | Out-Null

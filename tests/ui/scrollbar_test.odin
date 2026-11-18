@@ -49,26 +49,35 @@ scrollbar_page_pages_toward_the_pointer_and_stops_at_the_thumb :: proc(t: ^testi
 
 	bar, _ := ui.scrollbar_layout({0, 0, 100, 200}, {total = 100, visible = 10, offset = 40}, .Collapsed, 1)
 	x := bar.track.x + 2
-	offset, result := ui.scrollbar_page(bar, x, bar.thumb.y - 1)
+	offset, result := ui.scrollbar_page(bar, x, bar.thumb.y - 1, .Before)
 	testing.expect_value(t, offset, 30)
 	testing.expect_value(t, result, ui.Scroll_Page.Paged)
-	offset, result = ui.scrollbar_page(bar, x, bar.thumb.y + bar.thumb.height)
+	offset, result = ui.scrollbar_page(bar, x, bar.thumb.y + bar.thumb.height, .After)
 	testing.expect_value(t, offset, 50)
 	testing.expect_value(t, result, ui.Scroll_Page.Paged)
 	// The thumb under the pointer: the view has met it, and nothing is held.
-	offset, result = ui.scrollbar_page(bar, x, bar.thumb.y + 2)
+	offset, result = ui.scrollbar_page(bar, x, bar.thumb.y + 2, .Before)
 	testing.expect_value(t, offset, 40)
 	testing.expect_value(t, result, ui.Scroll_Page.On_Thumb)
-	// Off the track the page pauses, above and beside it alike.
-	offset, result = ui.scrollbar_page(bar, bar.track.x - 1, bar.thumb.y - 1)
+	// A press that began below the thumb does not reverse when the pointer crosses above it: it pauses, as a
+	// native scrollbar does, and pages again once the pointer is back below.
+	offset, result = ui.scrollbar_page(bar, x, bar.thumb.y - 1, .After)
 	testing.expect_value(t, offset, 40)
 	testing.expect_value(t, result, ui.Scroll_Page.Off_Track)
-	_, result = ui.scrollbar_page(bar, x, -1)
+	offset, result = ui.scrollbar_page(bar, x, bar.thumb.y + bar.thumb.height, .Before)
+	testing.expect_value(t, result, ui.Scroll_Page.Off_Track)
+	testing.expect_value(t, ui.scrollbar_side(bar, bar.thumb.y - 1), ui.Scroll_Side.Before)
+	testing.expect_value(t, ui.scrollbar_side(bar, bar.thumb.y + 2), ui.Scroll_Side.None)
+	// Off the track the page pauses, above and beside it alike.
+	offset, result = ui.scrollbar_page(bar, bar.track.x - 1, bar.thumb.y - 1, .Before)
+	testing.expect_value(t, offset, 40)
+	testing.expect_value(t, result, ui.Scroll_Page.Off_Track)
+	_, result = ui.scrollbar_page(bar, x, -1, .After)
 	testing.expect_value(t, result, ui.Scroll_Page.Off_Track)
 	// A view that cannot go further toward the pointer reports it rather than a page.
 	stale := bar
 	stale.extent.offset = 0
-	offset, result = ui.scrollbar_page(stale, x, stale.thumb.y - 1)
+	offset, result = ui.scrollbar_page(stale, x, stale.thumb.y - 1, .Before)
 	testing.expect_value(t, offset, 0)
 	testing.expect_value(t, result, ui.Scroll_Page.Stuck)
 
@@ -79,7 +88,7 @@ scrollbar_page_pages_toward_the_pointer_and_stops_at_the_thumb :: proc(t: ^testi
 	view := 0
 	for steps in 0 ..< 100 {
 		b, _ := ui.scrollbar_layout(area, {total = 100, visible = 10, offset = view}, .Collapsed, 1)
-		next, page := ui.scrollbar_page(b, x, pointer)
+		next, page := ui.scrollbar_page(b, x, pointer, .After)
 		if page != .Paged {
 			testing.expect_value(t, page, ui.Scroll_Page.On_Thumb)
 			testing.expect(t, pointer >= b.thumb.y && pointer < b.thumb.y + b.thumb.height)
@@ -94,7 +103,7 @@ scrollbar_page_pages_toward_the_pointer_and_stops_at_the_thumb :: proc(t: ^testi
 	before := view
 	for _ in 0 ..< 100 {
 		b, _ := ui.scrollbar_layout(area, {total = 100, visible = 10, offset = view}, .Collapsed, 1)
-		next, page := ui.scrollbar_page(b, x, pointer)
+		next, page := ui.scrollbar_page(b, x, pointer, .Before)
 		if page != .Paged {break}
 		testing.expect(t, next < view)
 		view = next
@@ -104,13 +113,13 @@ scrollbar_page_pages_toward_the_pointer_and_stops_at_the_thumb :: proc(t: ^testi
 	// A horizontal bar pages along x.
 	wide, _ := ui.scrollbar_layout_horizontal({0, 0, 200, 100}, {total = 100, visible = 10, offset = 40}, .Collapsed, 1)
 	y := wide.track.y + 2
-	offset, result = ui.scrollbar_page(wide, wide.thumb.x - 1, y)
+	offset, result = ui.scrollbar_page(wide, wide.thumb.x - 1, y, .Before)
 	testing.expect_value(t, offset, 30)
 	testing.expect_value(t, result, ui.Scroll_Page.Paged)
-	offset, result = ui.scrollbar_page(wide, wide.thumb.x + wide.thumb.width, y)
+	offset, result = ui.scrollbar_page(wide, wide.thumb.x + wide.thumb.width, y, .After)
 	testing.expect_value(t, offset, 50)
 	testing.expect_value(t, result, ui.Scroll_Page.Paged)
-	_, result = ui.scrollbar_page(wide, wide.thumb.x + 2, y)
+	_, result = ui.scrollbar_page(wide, wide.thumb.x + 2, y, .Before)
 	testing.expect_value(t, result, ui.Scroll_Page.On_Thumb)
 }
 

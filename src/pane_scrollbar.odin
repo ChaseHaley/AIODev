@@ -113,6 +113,7 @@ pane_scrollbar_press :: proc(app: ^App, w: ^Window, pane: layout.Pane_Rect, x, y
 	if !visible || !ui.scrollbar_contains(bar, x, y) {return false}
 	grab: ui.Scroll_Drag
 	// A track press pages once from wherever the view is; a thumb press leaves it in place.
+	side := ui.scrollbar_side(bar, y)
 	offset := ui.scrollbar_press(&grab, bar, y)
 	#partial switch pane.content.kind {
 	case .Terminal:
@@ -127,7 +128,7 @@ pane_scrollbar_press :: proc(app: ^App, w: ^Window, pane: layout.Pane_Rect, x, y
 	if grab.active {
 		w.scrollbars.drag = Pane_Scroll_Drag{pane.content, grab}
 	} else {
-		scroll_hold_begin(app, w, .Pane, pane.content, x, y)
+		scroll_hold_begin(app, w, .Pane, pane.content, x, y, side)
 	}
 	w.dirty = true
 	return true
@@ -140,6 +141,7 @@ pane_scrollbar_page :: proc(
 	w: ^Window,
 	content: layout.Content,
 	x, y: f32,
+	side: ui.Scroll_Side,
 ) -> (
 	result: ui.Scroll_Page,
 	shown: bool,
@@ -148,7 +150,7 @@ pane_scrollbar_page :: proc(
 		if pane.content != content {continue}
 		bar, visible := pane_scrollbar_geometry(app, w, pane)
 		if !visible {return .Off_Track, true}
-		offset, page := ui.scrollbar_page(bar, x, y)
+		offset, page := ui.scrollbar_page(bar, x, y, side)
 		if page == .Paged {pane_scrollbar_drag_to(app, content, offset)}
 		return page, true
 	}

@@ -80,10 +80,15 @@ changes_overview_drag :: proc(state: ^Changes_State, g: Changes_Geometry, y: f32
 }
 
 // One page of a held track press toward (x, y) on the strip; see scrollbar_page.
-changes_overview_page :: proc(state: ^Changes_State, g: Changes_Geometry, x, y: f32) -> Scroll_Page {
+changes_overview_page :: proc(
+	state: ^Changes_State,
+	g: Changes_Geometry,
+	x, y: f32,
+	side: Scroll_Side,
+) -> Scroll_Page {
 	bar, visible := changes_overview_bar(state, g)
 	if !visible {return .Off_Track}
-	offset, result := scrollbar_page(bar, x, y)
+	offset, result := scrollbar_page(bar, x, y, side)
 	if result == .Paged {state.diff_scroll = offset}
 	return result
 }

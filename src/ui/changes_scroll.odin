@@ -159,11 +159,11 @@ changes_h_scrollbar :: proc(
 // One page of a held track press toward (x, y) on the scrollbar along the diff's bottom edge; see
 // scrollbar_page.
 changes_h_page :: proc(
-	state: ^Changes_State, g: Changes_Geometry, view: ^Changes_View, x, y: f32,
+	state: ^Changes_State, g: Changes_Geometry, view: ^Changes_View, x, y: f32, side: Scroll_Side,
 ) -> Scroll_Page {
 	bar, visible := changes_h_scrollbar(g, view, state)
 	if !visible {return .Off_Track}
-	offset, result := scrollbar_page(bar, x, y)
+	offset, result := scrollbar_page(bar, x, y, side)
 	if result == .Paged {_ = changes_scroll_columns(state, g, view, offset - state.h_scroll)}
 	return result
 }

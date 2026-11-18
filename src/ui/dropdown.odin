@@ -43,7 +43,7 @@ Dropdown :: struct {
 	metrics:      Dropdown_Metrics,
 	// The last press was on the scrollbar's track and the owner has not yet taken it; see
 	// dropdown_take_track.
-	track:        bool,
+	track:        Scroll_Side,
 }
 
 // The pointer drags a selection in the search field, or holds the scrollbar thumb.
@@ -360,18 +360,20 @@ dropdown_page :: proc(
 	c: Dropdown_Choices,
 	a: Dropdown_Anchor,
 	x, y, scale: f32,
+	side: Scroll_Side,
 ) -> Scroll_Page {
 	bar, visible := dropdown_scrollbar(d, c, a, scale)
 	if !visible {return .Off_Track}
-	offset, result := scrollbar_page(bar, x, y)
+	offset, result := scrollbar_page(bar, x, y, side)
 	if result == .Paged {_ = dropdown_scroll_to(d, c, a, offset, scale)}
 	return result
 }
 
-// Whether the last press landed on the scrollbar's track, which the owner then holds. Reading it ends it.
-dropdown_take_track :: proc(d: ^Dropdown) -> bool {
+// The side of the thumb the last press landed on, when it was on the scrollbar's track, which the owner then
+// holds; None otherwise. Reading it ends it.
+dropdown_take_track :: proc(d: ^Dropdown) -> Scroll_Side {
 	track := d.track
-	d.track = false
+	d.track = .None
 	return track
 }
 
@@ -424,8 +426,9 @@ dropdown_press :: proc(
 	}
 	if bar, visible := dropdown_scrollbar(d, c, a, s); visible && scrollbar_contains(bar, x, y) {
 		held: Scroll_Drag
+		side := scrollbar_side(bar, y)
 		_ = dropdown_scroll_to(d, c, a, scrollbar_press(&held, bar, y), s)
-		if held.active {d.drag = held} else {d.track = true}
+		if held.active {d.drag = held} else {d.track = side}
 		return .Changed
 	}
 	index := dropdown_option_at(d, c, a, x, y, s)

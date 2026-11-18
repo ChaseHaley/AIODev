@@ -764,7 +764,7 @@ edit_press :: proc(p: ^Palette, l: Palette_Layout, text: ^Text, x, y: f32) -> (O
 		c, a, _ := palette_dropdown(p, l)
 		if dropdown_contains(&p.buffers.dropdown, c, a, x, y, l.scale) {
 			outcome := dropdown_press(&p.buffers.dropdown, c, a, text, x, y, false, l.scale)
-			if dropdown_take_track(&p.buffers.dropdown) {p.track = .Choices}
+			if side := dropdown_take_track(&p.buffers.dropdown); side != .None {p.track, p.track_side = .Choices, side}
 			return choice_outcome(p, edit.setting, outcome), true
 		}
 		// A press on the open control closes the list, like the Settings page.

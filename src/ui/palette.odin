@@ -246,6 +246,7 @@ Palette :: struct {
 	scroll_hover: bool,
 	// The scrollbar whose track the last press landed on, until the window takes it; see palette_take_track.
 	track:        Palette_Track,
+	track_side:   Scroll_Side,
 	// The query's record mode, and the pointer over its keyboard button.
 	keys:         Key_Search,
 	keys_hover:   bool,
@@ -1565,8 +1566,9 @@ palette_mouse_press :: proc(
 @(private)
 palette_bar_press :: proc(p: ^Palette, l: Palette_Layout, y: f32) -> Outcome {
 	drag: Scroll_Drag
+	side := scrollbar_side(l.bar, y)
 	offset := scrollbar_press(&drag, l.bar, y)
-	if drag.active {drag_set(p, Scrollbar_Drag{drag.grab})} else {p.track = .Results}
+	if drag.active {drag_set(p, Scrollbar_Drag{drag.grab})} else {p.track, p.track_side = .Results, side}
 	palette_scroll_to(p, offset)
 	return .Changed
 }
@@ -1581,25 +1583,31 @@ Palette_Track :: enum u8 {
 }
 
 // The scrollbar whose track the last press landed on, which the window then holds. Reading it ends it.
-palette_take_track :: proc(p: ^Palette) -> Palette_Track {
-	track := p.track
-	p.track = .None
-	return track
+palette_take_track :: proc(p: ^Palette) -> (track: Palette_Track, side: Scroll_Side) {
+	track, side = p.track, p.track_side
+	p.track, p.track_side = .None, .None
+	return
 }
 
 // One page of a held track press toward (x, y) on the bar `track`; see scrollbar_page.
-palette_page :: proc(p: ^Palette, l: Palette_Layout, track: Palette_Track, x, y: f32) -> Scroll_Page {
+palette_page :: proc(
+	p: ^Palette,
+	l: Palette_Layout,
+	track: Palette_Track,
+	x, y: f32,
+	side: Scroll_Side,
+) -> Scroll_Page {
 	switch track {
 	case .None:
 	case .Results:
 		if !l.bar_visible {return .Off_Track}
-		offset, result := scrollbar_page(l.bar, x, y)
+		offset, result := scrollbar_page(l.bar, x, y, side)
 		if result == .Paged {_ = palette_scroll_to(p, offset)}
 		return result
 	case .Choices:
 		c, a, open := palette_dropdown(p, l)
 		if !open {return .Off_Track}
-		return dropdown_page(&p.buffers.dropdown, c, a, x, y, l.scale)
+		return dropdown_page(&p.buffers.dropdown, c, a, x, y, l.scale, side)
 	}
 	return .Off_Track
 }

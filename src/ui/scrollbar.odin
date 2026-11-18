@@ -122,7 +122,8 @@ scrollbar_press :: proc(drag: ^Scroll_Drag, bar: Scrollbar, at: f32) -> int {
 
 // What a page toward the pointer found.
 Scroll_Page :: enum u8 {
-	// The pointer is not on the track: a held press pauses, as Windows does.
+	// The pointer is off the track or on the other side of the thumb from where the press began: a held
+	// press pauses, as Windows does.
 	Off_Track,
 	// The thumb is under the pointer: the view has met it.
 	On_Thumb,
@@ -140,18 +141,52 @@ Scroll_Page :: enum u8 {
 SCROLLBAR_REPEAT_DELAY :: 200 * time.Millisecond
 SCROLLBAR_REPEAT_INTERVAL :: 50 * time.Millisecond
 
-// One page toward the pointer at (x, y), the step a held track press repeats. Nothing moves while the
-// pointer is off the track or on the thumb.
-scrollbar_page :: proc(bar: Scrollbar, x, y: f32) -> (offset: int, result: Scroll_Page) {
+// Which side of the thumb a track press landed on: the held press keeps paging only from that side, as a
+// native Windows scrollbar does (Wine's win32u/scroll.c fixes `hit_test` at the press and stops the timer
+// whenever the pointer's region differs from it, thumb included, restarting it on return).
+Scroll_Side :: enum u8 {
+	// On the thumb, or off the bar.
+	None,
+	// Before the thumb: above it, or left of it.
+	Before,
+	// After the thumb.
+	After,
+}
+
+// The side of the thumb the point `at` along the bar is on.
+scrollbar_side :: proc(bar: Scrollbar, at: f32) -> Scroll_Side {
+	start, length := scrollbar_span(bar, bar.thumb)
+	switch {
+	case at < start:
+		return .Before
+	case at >= start + length:
+		return .After
+	}
+	return .None
+}
+
+// One page toward the pointer at (x, y), the step a held track press repeats. `side` is where the press
+// began. Nothing moves while the pointer is off the track or on the other side of the thumb (Off_Track: the
+// press pauses and resumes when the pointer is back on its side), or on the thumb.
+scrollbar_page :: proc(
+	bar: Scrollbar,
+	x, y: f32,
+	side: Scroll_Side,
+) -> (
+	offset: int,
+	result: Scroll_Page,
+) {
 	offset = bar.extent.offset
 	if !scrollbar_contains(bar, x, y) {return offset, .Off_Track}
-	toward, on_thumb := scrollbar_toward(bar, bar.horizontal ? x : y)
-	switch {
-	case on_thumb:
+	at := bar.horizontal ? x : y
+	switch scrollbar_side(bar, at) {
+	case .None:
 		return offset, .On_Thumb
-	case toward == offset:
-		return offset, .Stuck
+	case .Before, .After:
+		if scrollbar_side(bar, at) != side {return offset, .Off_Track}
 	}
+	toward, _ := scrollbar_toward(bar, at)
+	if toward == offset {return offset, .Stuck}
 	return toward, .Paged
 }
 

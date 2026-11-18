@@ -1215,24 +1215,23 @@ a_held_press_on_the_overview_track_keeps_paging_until_the_thumb_meets_the_pointe
 	_ = hold_repeat(&f.state, w)
 	testing.expect_value(t, pane.state.diff_scroll, previous)
 
-	// Moving the pointer to the bottom retargets it: the diff pages down to its end.
+	// The press began below the thumb, so the pointer crossing above it pauses rather than reverses the
+	// paging, off the lane it pauses too, and back below the thumb it resumes down to the end.
+	app.handle_event(&f.state, move(w, x, top))
+	for _ in 0 ..< 10 {_ = hold_repeat(&f.state, w)}
+	testing.expect_value(t, pane.state.diff_scroll, previous)
+	app.handle_event(&f.state, move(w, i32(lane.x - 40), bottom))
+	for _ in 0 ..< 10 {_ = hold_repeat(&f.state, w)}
+	testing.expect_value(t, pane.state.diff_scroll, previous)
 	app.handle_event(&f.state, move(w, x, bottom))
 	for _ in 0 ..< 60 {_ = hold_repeat(&f.state, w)}
 	testing.expect_value(t, pane.state.diff_scroll, limit)
 
-	// Off the lane it pauses, and back on the lane it resumes toward the pointer.
-	app.handle_event(&f.state, move(w, i32(lane.x - 40), top))
-	for _ in 0 ..< 10 {_ = hold_repeat(&f.state, w)}
-	testing.expect_value(t, pane.state.diff_scroll, limit)
-	app.handle_event(&f.state, move(w, x, top))
-	_ = hold_repeat(&f.state, w)
-	testing.expect_value(t, pane.state.diff_scroll, limit - visible)
-
 	// The release ends it.
-	app.handle_event(&f.state, button(w, x, top, false))
+	app.handle_event(&f.state, button(w, x, bottom, false))
 	testing.expect_value(t, w.scroll_hold.bar, app.Scroll_Hold_Bar.None)
 	testing.expect(t, !hold_repeat(&f.state, w))
-	testing.expect_value(t, pane.state.diff_scroll, limit - visible)
+	testing.expect_value(t, pane.state.diff_scroll, limit)
 }
 
 @(test)

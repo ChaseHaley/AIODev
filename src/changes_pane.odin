@@ -1252,7 +1252,9 @@ changes_press :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) {
 	if changes_list_open(pane) {
 		choices, anchor := changes_dropdown_choices(pane), changes_dropdown_anchor(pane, g)
 		outcome := ui.dropdown_press(&pane.dropdown, choices, anchor, &w.ui_text, x, y, false, w.scale)
-		if ui.dropdown_take_track(&pane.dropdown) {scroll_hold_begin(app, w, .Changes_Choices, shown.content, x, y)}
+		if side := ui.dropdown_take_track(&pane.dropdown); side != .None {
+			scroll_hold_begin(app, w, .Changes_Choices, shown.content, x, y, side)
+		}
 		switch outcome {
 		case .Chosen:
 			changes_list_choose(app, w, pane, ui.dropdown_highlighted(&pane.dropdown, choices))
@@ -1266,8 +1268,9 @@ changes_press :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) {
 	if state.turn_list_open {
 		if bar, visible := ui.changes_turn_list_scrollbar(state, g, view);
 		   visible && ui.scrollbar_contains(bar, x, y) {
+			side := ui.scrollbar_side(bar, y)
 			state.turn_list_scroll = ui.scrollbar_press(&state.turn_list_bar, bar, y)
-			if !state.turn_list_bar.active {scroll_hold_begin(app, w, .Changes_Turn_List, shown.content, x, y)}
+			if !state.turn_list_bar.active {scroll_hold_begin(app, w, .Changes_Turn_List, shown.content, x, y, side)}
 			return
 		}
 	}
@@ -1320,14 +1323,17 @@ changes_press :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) {
 		changes_worktree_pick(app, pane, hit.index)
 	case .H_Scroll:
 		if bar, visible := ui.changes_h_scrollbar(g, view, state); visible {
+			side := ui.scrollbar_side(bar, x)
 			target := ui.scrollbar_press(&state.h_bar, bar, x)
 			_ = ui.changes_scroll_columns(state, g, view, target - state.h_scroll)
-			if !state.h_bar.active {scroll_hold_begin(app, w, .Changes_H_Scroll, shown.content, x, y)}
+			if !state.h_bar.active {scroll_hold_begin(app, w, .Changes_H_Scroll, shown.content, x, y, side)}
 		}
 	case .Overview:
+		side: ui.Scroll_Side
+		if bar, visible := ui.changes_overview_bar(state, g); visible {side = ui.scrollbar_side(bar, y)}
 		state.diff_scroll = ui.changes_overview_press(state, g, y)
 		_ = ui.changes_scroll_diff(state, g, 0)
-		if !state.overview_drag.active {scroll_hold_begin(app, w, .Changes_Overview, shown.content, x, y)}
+		if !state.overview_drag.active {scroll_hold_begin(app, w, .Changes_Overview, shown.content, x, y, side)}
 	case .Hooks:
 		run_action(app, w, .Install_Turn_Hooks, .Button)
 	case .Notice_Button:
@@ -1419,15 +1425,16 @@ changes_scroll_hold_page :: proc(
 		if !changes_list_open(pane) {return}
 		result = ui.dropdown_page(
 			&pane.dropdown, changes_dropdown_choices(pane), changes_dropdown_anchor(pane, g), x, y, w.scale,
+			hold.side,
 		)
 	case .Changes_Turn_List:
 		if !pane.state.turn_list_open {return}
-		result = ui.changes_turn_list_page(&pane.state, g, &pane.model.view, x, y)
+		result = ui.changes_turn_list_page(&pane.state, g, &pane.model.view, x, y, hold.side)
 	case .Changes_Overview:
-		result = ui.changes_overview_page(&pane.state, g, x, y)
+		result = ui.changes_overview_page(&pane.state, g, x, y, hold.side)
 		if result == .Paged {_ = ui.changes_scroll_diff(&pane.state, g, 0)}
 	case .Changes_H_Scroll:
-		result = ui.changes_h_page(&pane.state, g, &pane.model.view, x, y)
+		result = ui.changes_h_page(&pane.state, g, &pane.model.view, x, y, hold.side)
 	case .None, .Pane, .Rail, .Palette_Results, .Palette_Choices:
 		return
 	case .Settings_Page, .Settings_Strip, .Settings_Choices:

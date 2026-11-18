@@ -504,9 +504,9 @@ holding_the_horizontal_scrollbar_track_pages_the_code_until_the_thumb_meets_the_
 	if !testing.expect(t, visible) {return}
 	y := bar.track.y + 2
 	// Off the track nothing pages, and a pointer on the thumb has met it.
-	result := ui.changes_h_page(&state, g, &view, bar.track.x + 2, y - 20)
+	result := ui.changes_h_page(&state, g, &view, bar.track.x + 2, y - 20, .After)
 	testing.expect_value(t, result, ui.Scroll_Page.Off_Track)
-	result = ui.changes_h_page(&state, g, &view, bar.thumb.x + 2, y)
+	result = ui.changes_h_page(&state, g, &view, bar.thumb.x + 2, y, .After)
 	testing.expect_value(t, result, ui.Scroll_Page.On_Thumb)
 	testing.expect_value(t, state.h_scroll, 0)
 
@@ -514,7 +514,7 @@ holding_the_horizontal_scrollbar_track_pages_the_code_until_the_thumb_meets_the_
 	pointer := bar.track.x + bar.track.width * 0.6
 	pages, previous := 0, 0
 	for pages < 100 {
-		result = ui.changes_h_page(&state, g, &view, pointer, y)
+		result = ui.changes_h_page(&state, g, &view, pointer, y, .After)
 		if result != .Paged {break}
 		testing.expect(t, state.h_scroll > previous)
 		testing.expect(t, state.h_scroll - previous <= shown)
@@ -553,7 +553,7 @@ the_overview_thumb_and_its_held_press_work_in_wrap_mode :: proc(t: ^testing.T) {
 	state.diff_scroll = ui.changes_overview_press(&state, g, pointer)
 	testing.expect_value(t, state.diff_scroll, min(visible, state.rows.total - visible))
 	for _ in 0 ..< 100 {
-		if ui.changes_overview_page(&state, g, x, pointer) != .Paged {break}
+		if ui.changes_overview_page(&state, g, x, pointer, .After) != .Paged {break}
 	}
 	thumb = ui.changes_overview_thumb(&state, g)
 	testing.expect(t, pointer >= thumb.y && pointer < thumb.y + thumb.height)

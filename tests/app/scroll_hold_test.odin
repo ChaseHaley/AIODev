@@ -93,21 +93,22 @@ held_track_press_repeats_pages_until_the_thumb_meets_the_pointer :: proc(t: ^tes
 	testing.expect_value(t, stopped.offset, previous)
 	testing.expect_value(t, w.scroll_hold.bar, app.Scroll_Hold_Bar.Pane)
 
-	// Moving the pointer retargets it: to the top of the track the view pages up to its start.
-	app.gesture_move(&state, &w, input.Mouse_Move_Event{x = x, y = top, buttons = {.Left}})
-	for _ in 0 ..< 30 {_ = hold_repeat(&state, &w)}
-	topped, _ := term.scrollbar(&s)
-	testing.expect_value(t, topped.offset, 0)
+	// The press began above the thumb. The pointer crossing below it does not reverse the paging: it
+	// pauses, as a native scrollbar does, however long it waits.
+	app.gesture_move(&state, &w, input.Mouse_Move_Event{x = x, y = bottom, buttons = {.Left}})
+	for _ in 0 ..< 10 {_ = hold_repeat(&state, &w)}
+	crossed, _ := term.scrollbar(&s)
+	testing.expect_value(t, crossed.offset, previous)
 
-	// Off the track it pauses, however long it waits, and resumes when the pointer comes back.
-	app.gesture_move(&state, &w, input.Mouse_Move_Event{x = 0, y = bottom, buttons = {.Left}})
+	// Off the track it pauses too, and back above the thumb it resumes and pages up to the start.
+	app.gesture_move(&state, &w, input.Mouse_Move_Event{x = 0, y = top, buttons = {.Left}})
 	for _ in 0 ..< 10 {_ = hold_repeat(&state, &w)}
 	paused, _ := term.scrollbar(&s)
-	testing.expect_value(t, paused.offset, 0)
-	app.gesture_move(&state, &w, input.Mouse_Move_Event{x = x, y = bottom, buttons = {.Left}})
-	_ = hold_repeat(&state, &w)
+	testing.expect_value(t, paused.offset, previous)
+	app.gesture_move(&state, &w, input.Mouse_Move_Event{x = x, y = top, buttons = {.Left}})
+	for _ in 0 ..< 30 {_ = hold_repeat(&state, &w)}
 	resumed, _ := term.scrollbar(&s)
-	testing.expect_value(t, resumed.offset, start.len)
+	testing.expect_value(t, resumed.offset, 0)
 
 	// The release ends it: nothing is due, and nothing pages.
 	app.gesture_button(&state, &w, input.Mouse_Button_Event{button = .Left, pressed = false, x = x, y = bottom})

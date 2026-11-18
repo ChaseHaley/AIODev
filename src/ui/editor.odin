@@ -483,6 +483,7 @@ Editor :: struct {
 	page_bar_hover:                                                    bool,
 	// The scrollbar whose track the last press landed on, until the window takes it; see editor_take_track.
 	track:                                                             Editor_Track,
+	track_side:                                                        Scroll_Side,
 	rows:                                                              [dynamic]Editor_Row,
 	groups:                                                            [dynamic]Editor_Group,
 	items:                                                             [dynamic]Editor_Item,
@@ -2908,10 +2909,10 @@ Editor_Track :: enum u8 {
 }
 
 // The scrollbar whose track the last press landed on, which the window then holds. Reading it ends it.
-editor_take_track :: proc(p: ^Editor) -> Editor_Track {
-	track := p.track
-	p.track = .None
-	return track
+editor_take_track :: proc(p: ^Editor) -> (track: Editor_Track, side: Scroll_Side) {
+	track, side = p.track, p.track_side
+	p.track, p.track_side = .None, .None
+	return
 }
 
 // Scrolls the page so the bar's offset (pixels) is at its top.
@@ -2922,25 +2923,31 @@ editor_page_scroll_to :: proc(p: ^Editor, l: Editor_Layout, offset: int) {
 }
 
 // One page of a held track press toward (x, y) on the bar `track`; see scrollbar_page.
-editor_page :: proc(p: ^Editor, l: Editor_Layout, track: Editor_Track, x, y: f32) -> Scroll_Page {
+editor_page :: proc(
+	p: ^Editor,
+	l: Editor_Layout,
+	track: Editor_Track,
+	x, y: f32,
+	side: Scroll_Side,
+) -> Scroll_Page {
 	switch track {
 	case .None:
 	case .Page:
 		bar, visible := editor_page_scrollbar(p, l)
 		if !visible {return .Off_Track}
-		offset, result := scrollbar_page(bar, x, y)
+		offset, result := scrollbar_page(bar, x, y, side)
 		if result == .Paged {editor_page_scroll_to(p, l, offset)}
 		return result
 	case .Strip:
 		bar, visible := editor_strip_scrollbar(p, l, strip_head(p))
 		if !visible {return .Off_Track}
-		offset, result := scrollbar_page(bar, x, y)
+		offset, result := scrollbar_page(bar, x, y, side)
 		if result == .Paged {p.strip.wheel = f32(offset) - p.strip.scroll.target}
 		return result
 	case .Choices:
 		c, a, open := editor_dropdown(p, l)
 		if !open {return .Off_Track}
-		return dropdown_page(&p.dropdown, c, a, x, y, l.scale)
+		return dropdown_page(&p.dropdown, c, a, x, y, l.scale, side)
 	}
 	return .Off_Track
 }
@@ -3258,7 +3265,7 @@ editor_press :: proc(
 		}
 		if c, a, open := editor_dropdown(p, l); open {
 			outcome := dropdown_press(&p.dropdown, c, a, text, x, y, extend, s)
-			if dropdown_take_track(&p.dropdown) {p.track = .Choices}
+			if side := dropdown_take_track(&p.dropdown); side != .None {p.track, p.track_side = .Choices, side}
 			switch outcome {
 			case .None, .Closed:
 				return .None
@@ -3305,8 +3312,9 @@ editor_press :: proc(
 		return .Changed
 	}
 	if bar, visible := editor_page_scrollbar(p, l); visible && scrollbar_contains(bar, x, y) {
+		side := scrollbar_side(bar, y)
 		offset := scrollbar_press(&p.page_drag, bar, y)
-		if !p.page_drag.active {p.track = .Page}
+		if !p.page_drag.active {p.track, p.track_side = .Page, side}
 		editor_page_scroll_to(p, l, offset)
 		return .Changed
 	}

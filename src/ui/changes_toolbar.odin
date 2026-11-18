@@ -293,11 +293,11 @@ changes_turn_list_scrollbar :: proc(
 
 // One page of a held track press toward (x, y) on the turn list's scrollbar; see scrollbar_page.
 changes_turn_list_page :: proc(
-	state: ^Changes_State, g: Changes_Geometry, view: ^Changes_View, x, y: f32,
+	state: ^Changes_State, g: Changes_Geometry, view: ^Changes_View, x, y: f32, side: Scroll_Side,
 ) -> Scroll_Page {
 	bar, visible := changes_turn_list_scrollbar(state, g, view)
 	if !visible {return .Off_Track}
-	offset, result := scrollbar_page(bar, x, y)
+	offset, result := scrollbar_page(bar, x, y, side)
 	if result == .Paged {state.turn_list_scroll = offset}
 	return result
 }
