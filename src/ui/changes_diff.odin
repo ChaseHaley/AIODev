@@ -39,8 +39,50 @@ CHANGES_SYNTAX_PALETTE :: [syntax.Token_Kind]int {
 file_body_height :: proc(rows: ^Changes_Rows, view: ^Changes_View, i: int) -> int {
 	f := &view.files[i]
 	if f.binary || len(f.hunks) == 0 {return rows.note}
-	count := file_row_count(rows, i)
-	return len(f.hunks) * rows.hunk + count * rows.line + cards_through(rows, view, i, 0, count - 1)
+	total := 0
+	for h in 0 ..< len(f.hunks) {total += hunk_height(rows, view, i, h)}
+	return total
+}
+
+// How many lines of text row `row` of `file` takes: one, or as many as its taller side wraps to.
+@(private)
+row_text_lines :: proc(rows: ^Changes_Rows, file, row: int) -> int {
+	if !wrap_valid(rows) || file < 0 || file + 1 >= len(rows.pairs.file_pairs) || row < 0 {return 1}
+	at := rows.pairs.file_pairs[file] + row
+	if at + 1 >= len(rows.wrap.before) {return 1}
+	return int(rows.wrap.before[at + 1] - rows.wrap.before[at])
+}
+
+// How many lines of text the rows of `file` before row `row` take; `row` may be one past the last.
+@(private)
+lines_before :: proc(rows: ^Changes_Rows, file, row: int) -> int {
+	if !wrap_valid(rows) || file < 0 || file + 1 >= len(rows.pairs.file_pairs) {return row}
+	at := rows.pairs.file_pairs[file]
+	if at + row >= len(rows.wrap.before) {return row}
+	return int(rows.wrap.before[at + row] - rows.wrap.before[at])
+}
+
+// A row's height, a line's height for each line it wraps to.
+@(private)
+row_height :: proc(rows: ^Changes_Rows, file, row: int) -> int {
+	return row_text_lines(rows, file, row) * rows.line
+}
+
+// The height of hunk `h`'s header row: one line, and one more for each line its section wraps onto.
+@(private)
+hunk_head :: proc(rows: ^Changes_Rows, file, h: int) -> int {
+	if !wrap_valid(rows) || file < 0 || file >= len(rows.pairs.file_hunks) || h < 0 {return rows.hunk}
+	at := rows.pairs.file_hunks[file] + h
+	if at >= len(rows.wrap.head) {return rows.hunk}
+	return rows.hunk + int(rows.wrap.head[at]) * rows.line
+}
+
+// Hunk `h` of `file`: its header, its rows and the cards below them.
+@(private)
+hunk_height :: proc(rows: ^Changes_Rows, view: ^Changes_View, file, h: int) -> int {
+	base, count := hunk_rows(rows, file, h)
+	text := lines_before(rows, file, base + count) - lines_before(rows, file, base)
+	return hunk_head(rows, file, h) + text * rows.line + cards_through(rows, view, file, base, base + count - 1)
 }
 
 // One row of a hunk: the flat lines of its left and right cells, -1 for a blank cell. A unified row holds
@@ -437,17 +479,18 @@ changes_ticks_build :: proc(rows: ^Changes_Rows, view: ^Changes_View) {
 		y, flat := rows.tops[file] + rows.header, 0
 		for &hunk, h in f.hunks {
 			base, count := hunk_rows(rows, file, h)
-			y += rows.hunk
+			y += hunk_head(rows, file, h)
 			added, removed := -1, -1
 			for i in 0 ..< count {
 				pair := row_pair(rows, file, base + i)
+				height := row_height(rows, file, base + i)
 				if tick_line_kind(hunk.lines, flat, pair.left) == .Removed {
-					tick_add(rows, &removed, y, rows.line, .Removed)
+					tick_add(rows, &removed, y, height, .Removed)
 				}
 				if tick_line_kind(hunk.lines, flat, pair.right) == .Added {
-					tick_add(rows, &added, y, rows.line, .Added)
+					tick_add(rows, &added, y, height, .Added)
 				}
-				y += rows.line
+				y += height
 				if len(view.comments) > 0 {y += cards_through(rows, view, file, base + i, base + i)}
 			}
 			flat += len(hunk.lines)
@@ -464,7 +507,8 @@ changes_ticks_build :: proc(rows: ^Changes_Rows, view: ^Changes_View) {
 // hunk's first row in its file.
 @(private = "file")
 row_offset :: proc(rows: ^Changes_Rows, view: ^Changes_View, file, base, i: int) -> int {
-	return i * rows.line + cards_through(rows, view, file, base, base + i - 1)
+	before := lines_before(rows, file, base + i) - lines_before(rows, file, base)
+	return before * rows.line + cards_through(rows, view, file, base, base + i - 1)
 }
 
 // The last row of a hunk of `count` rows that starts at or above `local`, which is measured from the
@@ -487,10 +531,60 @@ row_top :: proc(rows: ^Changes_Rows, view: ^Changes_View, file, row: int) -> (y:
 	y = rows.tops[file] + rows.header
 	for h in 0 ..< len(view.files[file].hunks) {
 		base, count := hunk_rows(rows, file, h)
-		if row < base + count {return y + rows.hunk + row_offset(rows, view, file, base, row - base), true}
-		y += rows.hunk + count * rows.line + cards_through(rows, view, file, base, base + count - 1)
+		if row < base + count {
+			return y + hunk_head(rows, file, h) + row_offset(rows, view, file, base, row - base), true
+		}
+		y += hunk_height(rows, view, file, h)
 	}
 	return 0, false
+}
+
+// The row at the top of the diff and how far the top is below its start, found in the rows as they are, so
+// that a change that rewraps them can put the same row back at the top. `row` is -1 for a point that is
+// not in a row, which is held to its file's top; `offset` is negative above the first row of a hunk.
+Changes_Anchor :: struct {
+	ok:                 bool,
+	file, row, offset:  int,
+}
+
+@(private)
+changes_anchor_find :: proc(rows: ^Changes_Rows, view: ^Changes_View, scroll: int) -> Changes_Anchor {
+	file := changes_file_at(rows, scroll)
+	if file < 0 || file >= len(view.files) || file >= len(rows.tops) - 1 {return {}}
+	top := rows.tops[file]
+	f := &view.files[file]
+	if changes_collapsed(view, file) || f.binary || scroll < top + rows.header {
+		return {true, file, -1, scroll - top}
+	}
+	y := top + rows.header
+	for h in 0 ..< len(f.hunks) {
+		height := hunk_height(rows, view, file, h)
+		if scroll < y + height {
+			base, count := hunk_rows(rows, file, h)
+			local := scroll - y - hunk_head(rows, file, h)
+			if count == 0 {return {true, file, -1, scroll - top}}
+			if local < 0 {return {true, file, base, local}}
+			i := hunk_row_at(rows, view, file, base, count, local)
+			return {true, file, base + i, local - row_offset(rows, view, file, base, i)}
+		}
+		y += height
+	}
+	return {true, file, -1, scroll - top}
+}
+
+// Where in the stream the anchor's row starts now, with its offset; false when its file or row is gone.
+@(private)
+changes_anchor_place :: proc(
+	rows: ^Changes_Rows, view: ^Changes_View, a: Changes_Anchor,
+) -> (
+	at: int,
+	ok: bool,
+) {
+	if a.file < 0 || a.file >= len(rows.tops) - 1 {return}
+	if a.row < 0 {return rows.tops[a.file] + a.offset, true}
+	y, found := row_top(rows, view, a.file, a.row)
+	if !found {return rows.tops[a.file], true}
+	return y + a.offset, true
 }
 
 // The stream row where card `card` starts: under the lowest row that holds any of its lines, after the
@@ -509,7 +603,7 @@ card_top :: proc(rows: ^Changes_Rows, view: ^Changes_View, card: int) -> (y: int
 	}
 	row := card_row(rows, card)
 	y = row_top(rows, view, file, row) or_return
-	y += rows.line
+	y += row_height(rows, file, row)
 	for i in 0 ..< card {
 		if card_file(view, i) == file && card_row(rows, i) == row {y += card_slot(rows, i)}
 	}
@@ -545,11 +639,11 @@ diff_band :: proc(g: Changes_Geometry) -> render.Rect {
 	return {g.diff.x + pad, 0, max(0, g.diff.width - 2 * pad), 0}
 }
 
-// The row of the stream that starts at `top`, across the band.
+// The row of the stream that starts at `top`, `height` tall, across the band.
 @(private = "file")
-row_rect :: proc(g: Changes_Geometry, state: ^Changes_State, top: int) -> render.Rect {
+row_rect :: proc(g: Changes_Geometry, state: ^Changes_State, top, height: int) -> render.Rect {
 	band := diff_band(g)
-	return {band.x, g.diff.y - f32(state.diff_scroll) + f32(top), band.width, f32(state.rows.line)}
+	return {band.x, g.diff.y - f32(state.diff_scroll) + f32(top), band.width, f32(height)}
 }
 
 // The row of flat line `line` of `file` across the band; side by side, the cell that holds it, or the whole
@@ -564,7 +658,7 @@ line_cell :: proc(
 	row := line_row(rows, file, line)
 	top, ok := row_top(rows, view, file, row)
 	if !ok {return {}}
-	rect := row_rect(g, state, top)
+	rect := row_rect(g, state, top, row_height(rows, file, row))
 	if rows.pairs.side_by_side {
 		pair := row_pair(rows, file, row)
 		left, right, _ := row_halves(rect)
@@ -725,9 +819,10 @@ changes_diff_hit :: proc(
 	top, flat := rows.tops[file] + rows.header, 0
 	for &hunk, h in f.hunks {
 		base, count := hunk_rows(rows, file, h)
-		height := rows.hunk + count * rows.line + cards_through(rows, view, file, base, base + count - 1)
+		height := hunk_height(rows, view, file, h)
 		if at < top + height {
-			if at < top + rows.hunk {
+			if at < top + hunk_head(rows, file, h) {
+				// The select button sits on the header's first line.
 				header := band
 				header.y, header.height = origin + f32(top), f32(rows.hunk)
 				if len(hunk.lines) > 0 && render.rect_contains(hunk_select_rect(header, g.scale), x, y) {
@@ -735,9 +830,9 @@ changes_diff_hit :: proc(
 				}
 				return {.Diff, file, 0}
 			}
-			local := at - top - rows.hunk
+			local := at - top - hunk_head(rows, file, h)
 			i := hunk_row_at(rows, view, file, base, count, local)
-			if count == 0 || local >= row_offset(rows, view, file, base, i) + rows.line {
+			if count == 0 || local >= row_offset(rows, view, file, base, i) + row_height(rows, file, base + i) {
 				return {.Diff, file, 0}
 			}
 			pair := row_pair(rows, file, base + i)
@@ -861,6 +956,9 @@ Diff_Paint :: struct {
 	// The text's font, and how far the current file's code is scrolled left, in pixels.
 	font:                 Code_Font,
 	scroll:               f32,
+	// Whether long lines wrap, how tall a line of text is, and how much room a wrapped line's text has.
+	wrap:                 bool,
+	line_h, room:         f32,
 }
 
 @(private = "file")
@@ -1221,24 +1319,51 @@ paint_code :: proc(
 		width         = column.width,
 		scroll        = p.scroll,
 		top           = row.y,
-		height        = row.height,
+		height        = p.line_h,
 		baseline      = baseline,
 		scale         = p.scale,
 		inks          = row_inks(p, d.kind, false),
 		selected_inks = row_inks(p, d.kind, true),
 		plain         = plain,
 	}
-	return code_line_draw(p.list, p.mono, line)
+	if !p.wrap {return code_line_draw(p.list, p.mono, line)}
+	// Wrapped, each line the text breaks into is drawn under the one before; the first carries the sign.
+	length := wrap_plain(&p.state.rows, file, flat)
+	for k := max(0, int((p.top - row.y) / p.line_h)); ; k += 1 {
+		top := row.y + f32(k) * p.line_h
+		if top >= p.bottom {break}
+		start, end := wrap_row(p.mono, p.font, d.text, length, p.room, k)
+		line.text, line.base = d.text[start:end], start
+		line.top, line.baseline = top, baseline + f32(k) * p.line_h
+		if r := code_line_draw(p.list, p.mono, line); r != .Ok {return r}
+		if end >= len(d.text) {break}
+	}
+	return .Ok
 }
 
-// The "no newline" marker in `column`, scrolled with the code.
+// The "no newline" marker in `column`, scrolled with the code, or wrapped like any other text.
 @(private = "file")
-paint_marker :: proc(p: ^Diff_Paint, column: Code_Column, baseline: f32) -> render.Build_Status {
+paint_marker :: proc(
+	p: ^Diff_Paint, file, flat: int, column: Code_Column, baseline: f32,
+) -> render.Build_Status {
 	left := column.text_x
-	return code_text_draw(
-		p.list, p.mono, p.font, CHANGES_NO_NEWLINE, left - p.scroll, left, left + column.width, baseline,
-		p.theme.faint,
-	)
+	if !p.wrap {
+		return code_text_draw(
+			p.list, p.mono, p.font, CHANGES_NO_NEWLINE, left - p.scroll, left, left + column.width, baseline,
+			p.theme.faint,
+		)
+	}
+	length := wrap_plain(&p.state.rows, file, flat)
+	marker := CHANGES_NO_NEWLINE
+	for k := 0; ; k += 1 {
+		start, end := wrap_row(p.mono, p.font, marker, length, p.room, k)
+		if r := code_text_draw(
+			p.list, p.mono, p.font, marker[start:end], left, left, left + column.width,
+			baseline + f32(k) * p.line_h, p.theme.faint,
+		); r != .Ok {return r}
+		if end >= len(marker) {break}
+	}
+	return .Ok
 }
 
 @(private = "file")
@@ -1246,7 +1371,7 @@ paint_line :: proc(
 	p: ^Diff_Paint, line: ^tr.Diff_Line, file, flat: int, y, height: f32,
 ) -> render.Build_Status {
 	t := p.theme
-	baseline := baseline_in(y, height, p.mono)
+	baseline := baseline_in(y, p.line_h, p.mono)
 	row := render.Rect{p.card_x, y, p.card_width, height}
 	switch line.kind {
 	case .Added:
@@ -1260,7 +1385,7 @@ paint_line :: proc(
 	marks_draw(p, marks, row)
 	row_pick_draw(p, file, flat, picked, row)
 	column := code_column(row, p.number_width, p.digit, p.scale, true)
-	if line.kind == .No_Newline {return paint_marker(p, column, baseline)}
+	if line.kind == .No_Newline {return paint_marker(p, file, flat, column, baseline)}
 	if line.kind != .Added {
 		if r := number_draw(p, line.old_line, column.old_x, baseline); r != .Ok {return r}
 	}
@@ -1283,20 +1408,31 @@ paint_cell :: proc(
 		return .Ok
 	}
 	d := &h.lines[at]
+	// Wrapped, the row is as tall as its taller cell, and this cell's fill stops where its own text does.
+	own := cell
+	if p.wrap {
+		text := d.kind == .No_Newline ? CHANGES_NO_NEWLINE : d.text
+		lines := wrap_line_rows(p.mono, p.font, text, wrap_plain(&p.state.rows, file, line), p.room)
+		own.height = f32(lines) * p.line_h
+		if own.height < cell.height {
+			rest := render.Rect{cell.x, cell.y + own.height, cell.width, cell.height - own.height}
+			draw_rect(p.list, {rect = rest, color = t.code_background})
+		}
+	}
 	#partial switch d.kind {
 	case .Added:
-		draw_rect(p.list, {rect = cell, color = t.diff_added})
+		draw_rect(p.list, {rect = own, color = t.diff_added})
 	case .Removed:
-		draw_rect(p.list, {rect = cell, color = t.diff_removed})
+		draw_rect(p.list, {rect = own, color = t.diff_removed})
 	}
 	half := old ? Changes_Half.Left : Changes_Half.Right
 	picked := line_picked(p.view, file, line, d.kind, half)
 	marks := line_marks(p, file, line, len(d.text), d.kind, half)
-	marks_draw(p, marks, cell)
-	row_pick_draw(p, file, line, picked, cell)
-	baseline := baseline_in(cell.y, cell.height, p.mono)
+	marks_draw(p, marks, own)
+	row_pick_draw(p, file, line, picked, own)
+	baseline := baseline_in(cell.y, p.line_h, p.mono)
 	column := code_column(cell, p.number_width, p.digit, s, false)
-	if d.kind == .No_Newline {return paint_marker(p, column, baseline)}
+	if d.kind == .No_Newline {return paint_marker(p, file, line, column, baseline)}
 	if r := number_draw(p, old ? d.old_line : d.new_line, column.old_x, baseline); r != .Ok {return r}
 	return paint_code(p, d, file, line, picked, &marks, column, cell, baseline)
 }
@@ -1307,38 +1443,55 @@ paint_hunk :: proc(
 	p: ^Diff_Paint, rows: ^Changes_Rows, h: ^tr.Hunk, file, index, flat: int, y: f32,
 ) -> render.Build_Status {
 	t, s := p.theme, p.scale
-	header := render.Rect{p.card_x, y, p.card_width, f32(rows.hunk)}
+	header := render.Rect{p.card_x, y, p.card_width, f32(hunk_head(rows, file, index))}
 	draw_rect(p.list, {rect = header, color = t.code_background})
+	first := render.Rect{p.card_x, y, p.card_width, f32(rows.hunk)}
 	pointed := p.pointer.y >= p.top && p.pointer.y < p.bottom
-	picking := len(h.lines) > 0 && pointed && render.rect_contains(header, p.pointer.x, p.pointer.y)
+	picking := len(h.lines) > 0 && pointed && render.rect_contains(first, p.pointer.x, p.pointer.y)
 	buf: [CHANGES_HUNK_LABEL_BYTES]u8
 	label := hunk_label(buf[:], h)
 	baseline := baseline_in(y, f32(rows.hunk), p.mono)
-	// The header scrolls with the code; the room the select button takes at its right is always kept.
+	// The room the select button takes at the right is always kept.
 	left := p.card_x + SPACE_2 * s
-	right := p.card_x + p.card_width - SPACE_2 * s - header.height - SPACE_1 * s
+	right := p.card_x + p.card_width - SPACE_2 * s - first.height - SPACE_1 * s
 	origin := left - p.scroll
 	if r := code_text_draw(p.list, p.mono, p.font, label, origin, left, right, baseline, t.muted); r != .Ok {
 		return r
 	}
-	if h.section != "" {
+	if h.section != "" && !p.wrap {
 		after := origin + code_width(p.mono, p.font, label) + p.font.cell
 		if r := code_text_draw(p.list, p.mono, p.font, h.section, after, left, right, baseline, t.faint);
 		   r != .Ok {return r}
+	} else if h.section != "" {
+		// Wrapped, the section fills what the label leaves of the first line, then lines of its own.
+		rest := h.section
+		after := left + code_width(p.mono, p.font, label) + p.font.cell
+		cut := 0
+		if right - after >= p.font.cell {cut = code_fit(p.mono, p.font, rest, right - after)}
+		if r := code_text_draw(p.list, p.mono, p.font, rest[:cut], after, after, right, baseline, t.faint);
+		   r != .Ok {return r}
+		rest = rest[cut:]
+		for j := 1; len(rest) > 0; j += 1 {
+			cut = code_fit(p.mono, p.font, rest, right - left)
+			line := baseline + f32(j) * p.line_h
+			if r := code_text_draw(p.list, p.mono, p.font, rest[:cut], left, left, right, line, t.faint);
+			   r != .Ok {return r}
+			rest = rest[cut:]
+		}
 	}
 	if picking {
 		hover, press := changes_lit(p.state, {.Hunk_Select, file, flat})
-		button := hunk_select_rect(header, s)
+		button := hunk_select_rect(first, s)
 		if icon_button_draw(
 			p.list, t, button, .Select_Lines, hover, press, s, p.pointer, ICON_INDICATOR, RADIUS_CONTROL,
 		) != .None {return .Ok}
 	}
-	top := y + f32(rows.hunk)
-	height := f32(rows.line)
+	top := y + header.height
 	base, count := hunk_rows(rows, file, index)
 	for i := hunk_row_at(rows, p.view, file, base, count, int(p.top - top)); i < count; i += 1 {
 		row := top + f32(row_offset(rows, p.view, file, base, i))
 		if row >= p.bottom {break}
+		height := f32(row_height(rows, file, base + i))
 		pair := row_pair(rows, file, base + i)
 		if rows.pairs.side_by_side {
 			left, right, divider := row_halves({p.card_x, row, p.card_width, height})
@@ -1437,10 +1590,10 @@ paint_file :: proc(p: ^Diff_Paint, rows: ^Changes_Rows, i: int, y: f32) -> rende
 	}
 	p.number_width = code_number_width(f, p.digit)
 	p.scroll = f32(changes_h_columns(p.state, view, i, p.card_width)) * p.digit
+	p.room = code_room(rows, f, p.card_width)
 	flat := 0
 	for &hunk, h in f.hunks {
-		base, count := hunk_rows(rows, i, h)
-		height := f32(rows.hunk + count * rows.line + cards_through(rows, view, i, base, base + count - 1))
+		height := f32(hunk_height(rows, view, i, h))
 		if top + height > p.top {
 			if top >= p.bottom {break}
 			if r := paint_hunk(p, rows, &hunk, i, h, flat, top); r != .Ok {return r}
@@ -1520,6 +1673,8 @@ diff_draw :: proc(
 		bottom     = g.diff.y + g.diff.height,
 		digit      = text_width(mono, "0"),
 		font       = code_font(mono),
+		wrap       = wrap_valid(rows),
+		line_h     = f32(rows.line),
 	}
 	if notice {return paint_comments(&p, g, rows)}
 	scroll := state.diff_scroll

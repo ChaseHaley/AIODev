@@ -308,6 +308,20 @@ changes_under_pointer :: proc(app: ^App, w: ^Window, x, y: f32) -> (^Changes_Pan
 	return changes_find(app, shown.content.id), shown
 }
 
+// Whether a Middle press at the point drops the scroll anchor on an Agent changes pane: on the diff's lines,
+// numbers and empty space, not on a control, a panel or list over it, a header or a note's card.
+@(private, require_results)
+changes_anchor_hit :: proc(app: ^App, w: ^Window, shown: layout.Pane_Rect, x, y: f32) -> bool {
+	pane := changes_find(app, shown.content.id)
+	if pane == nil || changes_list_open(pane) {return false}
+	g := changes_geometry_of(app, w, pane, shown)
+	#partial switch ui.changes_hit(g, &pane.model.view, &pane.state, x, y).part {
+	case .Diff, .Line, .Gutter:
+		return true
+	}
+	return false
+}
+
 // The pane's geometry with its diff rows laid out. The comments' part of the view and the chips' are filled
 // first: they are temporary memory or borrowed from the model, and the rows, the draw and every hit test
 // read them. The code text contrast follows the setting here, so a settings reload shows on the next frame.
@@ -321,6 +335,7 @@ changes_geometry_of :: proc(
 	changes_comments_view(app, pane)
 	changes_chips_view(pane)
 	pane.model.view.minimum_contrast = f32(app.settings.turns.diff_minimum_contrast)
+	pane.model.view.wrap = app.settings.turns.diff_long_lines == .Wrap
 	mono := ui.text_mono(&w.ui_text, app.family)
 	g := ui.changes_geometry(pane_body_rect(w, shown), w.scale, &pane.model.view, &w.ui_text, &pane.state)
 	ui.changes_layout(&pane.state, &pane.model.view, &w.ui_text, &mono, g.diff.width, w.scale)
@@ -760,7 +775,7 @@ changes_move :: proc(app: ^App, pane: ^Changes_Pane, g: ui.Changes_Geometry, ste
 	changes_select(app, pane, g, clamp(from + step, 0, len(view.turns) - 1), extend)
 }
 
-@(private = "file")
+@(private)
 changes_diff_scroll :: proc(app: ^App, w: ^Window, pane: ^Changes_Pane, shown: layout.Pane_Rect, delta: int) {
 	g := changes_geometry_of(app, w, pane, shown)
 	if ui.changes_scroll_diff(&pane.state, g, delta) {w.dirty = true}
@@ -850,7 +865,7 @@ changes_edge_scroll :: proc(
 	if !ui.changes_scroll_columns(&pane.state, g, view, columns) {return false}
 	reach := clamp(x, c.drag_cell.x, right - 1)
 	hit := ui.changes_hit(g, view, &pane.state, reach, pane.drag_point.y)
-	_ = changes_comments_drag(app, w, pane, hit, changes_text_at(app, w, pane, g, hit, reach))
+	_ = changes_comments_drag(app, w, pane, hit, changes_text_at(app, w, pane, g, hit, reach, pane.drag_point.y))
 	w.dirty = true
 	return true
 }
@@ -1108,11 +1123,11 @@ changes_drag_turns :: proc(app: ^App, pane: ^Changes_Pane, g: ui.Changes_Geometr
 // is; nothing for any other hit. The numbers' byte is the start of the line's text.
 @(private = "file", require_results)
 changes_text_at :: proc(
-	app: ^App, w: ^Window, pane: ^Changes_Pane, g: ui.Changes_Geometry, hit: ui.Changes_Hit, x: f32,
+	app: ^App, w: ^Window, pane: ^Changes_Pane, g: ui.Changes_Geometry, hit: ui.Changes_Hit, x, y: f32,
 ) -> Changes_Text_Point {
 	if hit.part != .Line && hit.part != .Gutter {return {}}
 	mono := ui.text_mono(&w.ui_text, app.family)
-	offset, cell, _ := ui.changes_text_point(g, &pane.model.view, &pane.state, &mono, hit.index, hit.line, x)
+	offset, cell, _ := ui.changes_text_point(g, &pane.model.view, &pane.state, &mono, hit.index, hit.line, x, y)
 	half := ui.Changes_Half.Both
 	if pane.state.rows.pairs.side_by_side {half = cell.x < g.diff.x + g.diff.width / 2 ? .Left : .Right}
 	return {offset, cell, half}
@@ -1215,7 +1230,7 @@ changes_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: input.Mou
 	if pane.dragging != .None {
 		changes_drag_turns(app, pane, g, hit)
 	} else if c.dragging && .Left in e.buttons {
-		if changes_comments_drag(app, w, pane, hit, changes_text_at(app, w, pane, g, hit, reach)) {
+		if changes_comments_drag(app, w, pane, hit, changes_text_at(app, w, pane, g, hit, reach, y)) {
 			w.dirty = true
 		}
 	}
@@ -1348,7 +1363,7 @@ changes_press :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) {
 	     .Editor_Untag, .Editor_Bold, .Editor_Code, .Editor_Block, .Editor_Suggest, .Editor_Cancel,
 	     .Editor_Save, .Send, .Copy, .Discard, .Toolbar, .Toolbar_Delete, .Toolbar_Comment, .Toolbar_Label,
 	     .Label_Menu, .Label_Row, .Label_Edit:
-		_ = changes_comments_press(app, w, pane, hit, e, changes_text_at(app, w, pane, g, hit, x))
+		_ = changes_comments_press(app, w, pane, hit, e, changes_text_at(app, w, pane, g, hit, x, y))
 	case:
 		if button, ok := ui.changes_row_button_of(hit.part); ok {changes_row_button_run(app, w, pane, button)}
 	}
@@ -1460,8 +1475,6 @@ changes_tooltip :: proc(app: ^App, w: ^Window, x, y: f32) -> string {
 		if hit.index >= 0 && hit.index < len(view.worktree_labels) {return view.worktree_labels[hit.index]}
 	case .Overview:
 		return "Overview: click or drag to scroll"
-	case .H_Scroll:
-		return "Scroll sideways: Shift and the wheel do too"
 	case .Hooks:
 		return "Install hooks so turns begin before the first edit"
 	case .Step_Back:

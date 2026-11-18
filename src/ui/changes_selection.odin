@@ -81,12 +81,14 @@ line_text :: proc(view: ^Changes_View, file, line: int) -> (text: string, ok: bo
 	return changes_line_text(view.files[file], line)
 }
 
-// What a press at `x` lands on in flat line `line` of `file`: the byte of the line's text whose boundary is
-// nearest, and the cell the line is drawn in there, which is the half of a side-by-side row that `x` is in.
-// Only the line under the pointer is measured. False when the line has no row.
+// What a press at `x`, `y` lands on in flat line `line` of `file`: the byte of the line's text whose boundary
+// is nearest, and the cell the line is drawn in there, which is the half of a side-by-side row that `x` is
+// in. Wrapped, `y` picks which line of the text the press is on (the first without it). Only the line under
+// the pointer is measured. False when the line has no row.
 @(require_results)
 changes_text_point :: proc(
 	g: Changes_Geometry, view: ^Changes_View, state: ^Changes_State, mono: ^Text, file, line: int, x: f32,
+	y := f32(-1),
 ) -> (
 	offset: int,
 	cell: render.Rect,
@@ -96,7 +98,17 @@ changes_text_point :: proc(
 	cell, column, ok = changes_line_code(g, view, state, mono, file, line, x)
 	if !ok {return}
 	text, _ := line_text(view, file, line)
-	return code_offset_at(mono, text, column.width, x - column.text_x, column.scroll), cell, true
+	rows := &state.rows
+	if !wrap_valid(rows) {
+		return code_offset_at(mono, text, column.width, x - column.text_x, column.scroll), cell, true
+	}
+	f := code_font(mono)
+	room := code_room(rows, &view.files[file], diff_band(g).width)
+	plain := wrap_plain(rows, file, line)
+	k := y >= 0 ? int((y - cell.y) / f32(rows.line)) : 0
+	k = clamp(k, 0, wrap_line_rows(mono, f, text, plain, room) - 1)
+	start, end := wrap_row(mono, f, text, plain, room, k)
+	return start + code_offset_at(mono, text[start:end], column.width, x - column.text_x), cell, true
 }
 
 // Places the toolbar over the selection and, while the label menu is open, the menu under it. The toolbar
@@ -127,17 +139,27 @@ changes_selection_place :: proc(
 	if !top_ok || !bottom_ok || !found {return}
 	scale := g.scale
 	origin := g.diff.y - f32(state.diff_scroll)
-	first_y, last_y := origin + f32(top), origin + f32(bottom + rows.line)
+	first_y, last_y := origin + f32(top), origin + f32(bottom + row_height(rows, s.file, last_row))
 	visible, limit := g.diff.y, g.diff.y + g.diff.height
 	if sticky, header := changes_sticky_header(state, view, g); sticky >= 0 {
 		visible = max(visible, header.y + header.height)
 	}
 	if last_y <= visible || first_y >= limit {return}
 
-	// Over the first line's selected start, as much of it as the toolbar is wide.
+	// Over the first line's selected start, as much of it as the toolbar is wide. Wrapped, that is the line of
+	// text the start is on, and the toolbar sits over it.
 	line, _ := line_text(view, s.file, s.first)
 	start, span := column.text_x, column.width
-	if s.partial {
+	if s.partial && wrap_valid(rows) {
+		f := code_font(mono)
+		room := code_room(rows, &view.files[s.file], diff_band(g).width)
+		k, from, to := wrap_row_of(mono, f, line, wrap_plain(rows, s.file, s.first), room, s.first_offset)
+		first_y += f32(k * rows.line)
+		stop := s.first == s.last ? clamp(s.last_offset, from, to) : to
+		begin := code_x_of(mono, line[from:to], column.width, s.first_offset - from)
+		start += begin
+		span = code_x_of(mono, line[from:to], column.width, stop - from) - begin
+	} else if s.partial {
 		stop := s.first == s.last ? s.last_offset : len(line)
 		begin := code_x_of(mono, line, column.width, s.first_offset, column.scroll)
 		start += begin

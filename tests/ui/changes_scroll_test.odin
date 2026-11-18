@@ -324,3 +324,130 @@ a_line_of_a_million_columns_is_walked_by_bytes_not_runes :: proc(t: ^testing.T) 
 	x := ui.code_x_of(&f.mono, line, 400, scroll + 3, f32(scroll) * digit)
 	testing.expect(t, abs(x - 3 * digit) < 0.5)
 }
+
+// How many columns of `digit` fit `room`, as a wrapped row holds them.
+@(private = "file")
+wrap_columns :: proc(room, digit: f32) -> int {
+	return max(1, int((room + 0.01) / digit))
+}
+
+@(private = "file")
+wrap_rows_of :: proc(length, columns: int) -> int {return (length + columns - 1) / columns}
+
+@(test)
+wrapped_lines_take_more_rows_and_nothing_scrolls_or_fades :: proc(t: ^testing.T) {
+	f: Scroll_Fixture
+	view: ui.Changes_View
+	if !scroll_make(t, &f, &view) {return}
+	defer scroll_destroy(&f)
+	state, scrolled: ui.Changes_State
+	defer ui.changes_state_destroy(&state)
+	defer ui.changes_state_destroy(&scrolled)
+	_ = scroll_lay_out(&f, &view, &scrolled)
+	view.wrap = true
+	g := scroll_lay_out(&f, &view, &state)
+	list := render.draw_list_init()
+	defer render.draw_list_destroy(&list)
+	digit := ui.text_width(&f.mono, "0")
+	line := f32(state.rows.line)
+
+	_, column, _ := ui.changes_line_code(g, &view, &state, &f.mono, 1, 2)
+	columns := wrap_columns(column.width, digit)
+	added := ui.changes_line_rect(g, &view, &state, 1, 2)
+	removed := ui.changes_line_rect(g, &view, &state, 1, 1)
+	testing.expect_value(t, added.height, f32(wrap_rows_of(300, columns)) * line)
+	testing.expect_value(t, removed.height, f32(wrap_rows_of(250, columns)) * line)
+	testing.expect(t, state.rows.total > scrolled.rows.total, "wrapped lines make the diff taller")
+	testing.expect_value(t, column.scroll, 0)
+
+	// Nothing scrolls sideways: no extent, no scrollbar, and the wheel does nothing.
+	limit, _ := ui.changes_h_extent(g, &view, &state)
+	testing.expect_value(t, limit, 0)
+	_, bar := ui.changes_h_scrollbar(g, &view, &state)
+	testing.expect(t, !bar)
+	testing.expect(t, !ui.changes_scroll_columns(&state, g, &view, 10))
+
+	// Every character is drawn, inside the cell, none faded; the number and sign only once.
+	scroll_draw(t, &f, &view, &state, g, &list)
+	for glyph in list.glyphs {testing.expect(t, glyph.flags & render.GLYPH_FADE == 0)}
+	_, last, count := scroll_row_glyphs(&list, added, column.text_x - 1)
+	testing.expect_value(t, count, 300)
+	testing.expect(t, last <= column.text_x + column.width + 1.5)
+	_, _, with_gutter := scroll_row_glyphs(&list, added, 0)
+	testing.expect_value(t, with_gutter, 302)
+
+	// A press on the second line of the text is the second slice of the line.
+	at, _, ok := ui.changes_text_point(g, &view, &state, &f.mono, 1, 2, column.text_x + 5.4 * digit, added.y + line + 2)
+	testing.expect(t, ok)
+	testing.expect_value(t, at, columns + 5)
+	at, _, _ = ui.changes_text_point(g, &view, &state, &f.mono, 1, 2, column.text_x + 5.4 * digit, added.y + 2)
+	testing.expect_value(t, at, 5)
+
+	// The hunk header's long section wraps too, so the first line of b.odin sits lower than when scrolling.
+	scrolled_first := ui.changes_line_rect(g, &view, &scrolled, 1, 0)
+	first := ui.changes_line_rect(g, &view, &state, 1, 0)
+	testing.expect(t, first.y - scrolled_first.y >= line)
+}
+
+@(test)
+side_by_side_wrapped_pairs_take_the_taller_side :: proc(t: ^testing.T) {
+	f: Scroll_Fixture
+	view: ui.Changes_View
+	if !scroll_make(t, &f, &view) {return}
+	defer scroll_destroy(&f)
+	view.wrap, view.side_by_side = true, true
+	state: ui.Changes_State
+	defer ui.changes_state_destroy(&state)
+	g := scroll_lay_out(&f, &view, &state)
+	list := render.draw_list_init()
+	defer render.draw_list_destroy(&list)
+	digit := ui.text_width(&f.mono, "0")
+	line := f32(state.rows.line)
+	_, left, _ := ui.changes_line_code(g, &view, &state, &f.mono, 1, 1)
+	_, right, _ := ui.changes_line_code(g, &view, &state, &f.mono, 1, 2)
+	columns := wrap_columns(min(left.width, right.width), digit)
+	removed := ui.changes_line_rect(g, &view, &state, 1, 1)
+	added := ui.changes_line_rect(g, &view, &state, 1, 2)
+	testing.expect_value(t, removed.y, added.y)
+	testing.expect_value(t, removed.height, added.height)
+	testing.expect_value(t, added.height, f32(wrap_rows_of(300, columns)) * line)
+
+	// Each half draws all of its own text, inside its own cell.
+	scroll_draw(t, &f, &view, &state, g, &list)
+	for glyph in list.glyphs {testing.expect(t, glyph.flags & render.GLYPH_FADE == 0)}
+	in_left, in_right := 0, 0
+	for glyph in list.glyphs {
+		if glyph.rect.y < added.y || glyph.rect.y >= added.y + added.height {continue}
+		if glyph.rect.x >= left.text_x - 1 && glyph.rect.x + glyph.rect.width <= left.text_x + left.width + 1.5 {
+			in_left += 1
+		} else if glyph.rect.x >= right.text_x - 1 {
+			in_right += 1
+		}
+	}
+	testing.expect_value(t, in_left, 250)
+	testing.expect_value(t, in_right, 300)
+}
+
+@(test)
+a_resize_keeps_the_row_at_the_top_of_a_wrapped_diff :: proc(t: ^testing.T) {
+	f: Scroll_Fixture
+	view: ui.Changes_View
+	if !scroll_make(t, &f, &view) {return}
+	defer scroll_destroy(&f)
+	view.wrap = true
+	state: ui.Changes_State
+	defer ui.changes_state_destroy(&state)
+	g := scroll_lay_out(&f, &view, &state, 900)
+	// Scroll until the added line of b.odin is at the top of the diff.
+	row := ui.changes_line_rect(g, &view, &state, 1, 2)
+	state.diff_scroll += int(row.y - g.diff.y)
+	g = scroll_lay_out(&f, &view, &state, 900)
+	testing.expect_value(t, ui.changes_line_rect(g, &view, &state, 1, 2).y, g.diff.y)
+	scrolled := state.diff_scroll
+
+	narrow := scroll_lay_out(&f, &view, &state, 400)
+	testing.expect(t, state.diff_scroll != scrolled, "the rows wrap to more lines, so the scroll moved with them")
+	testing.expect_value(t, ui.changes_line_rect(narrow, &view, &state, 1, 2).y, narrow.diff.y)
+	wide := scroll_lay_out(&f, &view, &state, 900)
+	testing.expect_value(t, ui.changes_line_rect(wide, &view, &state, 1, 2).y, wide.diff.y)
+}

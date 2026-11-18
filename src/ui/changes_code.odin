@@ -123,6 +123,28 @@ code_width :: proc(t: ^Text, f: Code_Font, s: string) -> f32 {
 	return pen
 }
 
+// The byte length of the start of `s` that fits `room`, at least one rune: where a wrapped code line breaks.
+// Printable ASCII is counted by byte in a monospace font, as code_seek does, so a long line is a byte scan.
+code_fit :: proc(t: ^Text, f: Code_Font, s: string, room: f32) -> int {
+	limit := room + CODE_EDGE
+	cells: int
+	extra: f32
+	for offset := 0; offset < len(s); {
+		if b := s[offset]; f.mono && b >= 0x20 && b < 0x7F {
+			if offset > 0 && f32(cells + 1) * f.cell + extra > limit {return offset}
+			cells += 1
+			offset += 1
+			continue
+		}
+		r, size := utf8.decode_rune_in_string(s[offset:])
+		_, advance, _ := code_rune(t, r, f.space)
+		if offset > 0 && f32(cells) * f.cell + extra + advance > limit {return offset}
+		extra += advance
+		offset += size
+	}
+	return len(s)
+}
+
 // How one rune of a code line lays out: a tab advances CHANGES_TAB_COLUMNS spaces from the pen and draws
 // nothing, a rune without a glyph takes no room and draws nothing, and any other draws `glyph`. Painting,
 // measuring and the hit test all read this, so they cannot disagree.

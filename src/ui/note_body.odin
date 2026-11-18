@@ -345,18 +345,6 @@ note_code_room :: proc(width, digit, scale: f32) -> f32 {
 	return max(0, width - 2 * SPACE_2 * scale - digit - SPACE_1 * scale)
 }
 
-// The byte length of the start of `s` that fits `room`, at least one rune: where a code line wraps.
-@(private = "file")
-code_fit :: proc(m: ^Note_Metrics, s: string) -> int {
-	pen: f32
-	for r, at in s {
-		_, advance, _ := code_rune(&m.mono, r, m.code.space)
-		if pen + advance > m.room + CODE_EDGE && at > 0 {return at}
-		pen += advance
-	}
-	return len(s)
-}
-
 // Lays line `index` of a block, which finds its syntax colours, as code rows from `y`: one row, or several
 // where it runs past the room, each starting where the one before it ran out. Returns where the next row
 // starts.
@@ -367,7 +355,7 @@ code_rows_append :: proc(
 	y, base := y, 0
 	for {
 		rest := line[base:]
-		cut := code_fit(m, rest)
+		cut := code_fit(&m.mono, m.code, rest, m.room)
 		row := Note_Row {
 			kind   = kind,
 			y      = y,

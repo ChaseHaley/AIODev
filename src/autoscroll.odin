@@ -9,11 +9,12 @@ import "aio:ui"
 import "core:math"
 import "core:time"
 
-// Middle-click scrolling, as Windows applications do it: a Middle press on a terminal, Markdown or
-// settings pane drops an anchor, and the pane scrolls toward the pointer, faster the further the pointer
-// is above or below it. Releasing the button without having left the dead zone keeps scrolling until
-// the next press, key or wheel turn; releasing it after a drag past the dead zone ends it. A program that
-// reports the mouse keeps its Middle presses. nil is off; the procs in this file are the only writers.
+// Middle-click scrolling, as Windows applications do it: a Middle press on a terminal, Markdown, Agent
+// changes or settings pane drops an anchor, and the pane scrolls toward the pointer, faster the further
+// the pointer is above or below it. Releasing the button without having left the dead zone keeps scrolling
+// until the next press, key or wheel turn; releasing it after a drag past the dead zone ends it. A
+// program that reports the mouse keeps its Middle presses. nil is off; the procs in this file are the only
+// writers.
 Autoscroll :: union {
 	Autoscroll_On,
 }
@@ -44,9 +45,9 @@ AUTOSCROLL_ANCHOR :: f32(28)
 @(private = "file")
 AUTOSCROLL_MAX_STEP :: 100 * time.Millisecond
 
-// The surfaces whose Middle press drops the anchor: terminal, Markdown and Settings pane content.
+// The surfaces whose Middle press drops the anchor: terminal, Markdown, Settings and Agent changes content.
 @(private = "file")
-AUTOSCROLL_TARGETS :: bit_set[Pointer_Target]{.Content, .Markdown_Page, .Settings_Page}
+AUTOSCROLL_TARGETS :: bit_set[Pointer_Target]{.Content, .Markdown_Page, .Settings_Page, .Changes_Page}
 
 autoscroll_active :: proc(w: ^Window) -> bool {
 	return w.autoscroll != nil
@@ -81,8 +82,8 @@ autoscroll_begin :: proc(app: ^App, w: ^Window, target: Pointer_Target, e: input
 		if markdown_find(app, pane.content.id) == nil {return false}
 	case .Settings:
 	case .Changes:
-		// Agent changes panes keep their own scrolling; their page is not an anchor target.
-		return false
+		// Only the diff takes the anchor: not the header row, a panel or list over it, or the send bar.
+		if !changes_anchor_hit(app, w, pane, x, y) {return false}
 	}
 	pane_focus(app, w, pane.node)
 	tooltip_cancel(w)
@@ -212,8 +213,15 @@ autoscroll_animate :: proc(app: ^App, w: ^Window, frame: ui.Frame_Time) -> bool 
 		_ = settings_layout_for(w, pane)
 		ui.editor_scroll_by(&w.editor, dip)
 	case .Changes:
-		autoscroll_end(app, w)
-		return false
+		changes := changes_find(app, pane.content.id)
+		if changes == nil {
+			autoscroll_end(app, w)
+			return false
+		}
+		on.remainder += dip * w.scale
+		pixels := int(on.remainder)
+		on.remainder -= f32(pixels)
+		changes_diff_scroll(app, w, changes, pane, pixels)
 	}
 	return true
 }

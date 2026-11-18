@@ -104,6 +104,7 @@ file_scroll_limit :: proc(rows: ^Changes_Rows, view: ^Changes_View, file: int, b
 // How many text columns file `file`'s rows are scrolled by: the pane's offset, held at the file's limit.
 @(private)
 changes_h_columns :: proc(state: ^Changes_State, view: ^Changes_View, file: int, band: f32) -> int {
+	if view.wrap {return 0}
 	return min(state.h_scroll, file_scroll_limit(&state.rows, view, file, band))
 }
 
@@ -115,7 +116,10 @@ changes_h_extent :: proc(
 	limit, shown: int,
 ) {
 	rows := &state.rows
-	if !rows.valid || view.notice != .None || len(rows.tops) != len(view.files) + 1 || rows.digit <= 0 {return}
+	if view.wrap || !rows.valid || view.notice != .None || len(rows.tops) != len(view.files) + 1 ||
+	   rows.digit <= 0 {
+		return
+	}
 	band := diff_band(g).width
 	for &file, i in view.files {
 		if changes_collapsed(view, i) || file.binary || len(file.hunks) == 0 {continue}
