@@ -6,6 +6,7 @@ import "aio:localpath"
 import "aio:procinfo"
 import "aio:pty"
 import "aio:term"
+import "base:runtime"
 
 pane_split :: proc(
 	app: ^App,
@@ -202,7 +203,8 @@ pane_split_at :: proc(
 	return id, .None
 }
 
-// Splits `node` with content that exists already. See pane_split_at for how w and focus apply.
+// Splits `node` with content that exists already; with `edge`, adds it along an edge of the whole tiling
+// instead, and `node` is unused. See pane_split_at for how w and focus apply.
 @(require_results)
 pane_split_insert :: proc(
 	app: ^App,
@@ -215,12 +217,15 @@ pane_split_insert :: proc(
 	focus: bool,
 	content: layout.Content,
 	notify_minimum: bool,
+	edge := false,
 ) -> Pane_Split_Error {
 	tab := workspace.tabs[tab_index]
-	if failure := pane_split_check(app, w, tab, node, direction, ratio, notify_minimum); failure != .None {
+	if failure := pane_split_check(app, w, tab, node, direction, ratio, notify_minimum, edge); failure != .None {
 		return failure
 	}
-	if !pane_split_attach(app, w, workspace, tab_index, node, direction, ratio, focus, content) {return .Layout}
+	if !pane_split_attach(app, w, workspace, tab_index, node, direction, ratio, focus, content, edge) {
+		return .Layout
+	}
 	return .None
 }
 
@@ -233,16 +238,18 @@ pane_split_check :: proc(
 	direction: layout.Direction,
 	ratio: f32,
 	notify_minimum: bool,
+	edge := false,
 ) -> Pane_Split_Error {
 	if w == nil {return .None}
 	trial := pane_trial_split(app, w, direction, ratio, tree = &tab.tree, node = node,
-		notify_failure = notify_minimum)
+		notify_failure = notify_minimum, edge = edge)
 	if trial.error == .Minimum {return .Minimum}
 	if trial.error != .None {return .Check}
 	return .None
 }
 
-// A linked window's copy only arranges its slot, so its new pane joins the slot in the tab's tree.
+// A linked window's copy only arranges its slot, so its new pane joins the slot in the tab's tree. A linked
+// window offers no edge dock.
 @(private, require_results)
 pane_split_attach :: proc(
 	app: ^App,
@@ -254,10 +261,17 @@ pane_split_attach :: proc(
 	ratio: f32,
 	focus: bool,
 	content: layout.Content,
+	edge := false,
 ) -> bool {
 	if w != nil && window_linked(w) {return pane_link_split(app, w, node, direction, ratio, focus, content)}
 	tab := workspace.tabs[tab_index]
-	added, err := layout.split_direction(&tab.tree, node, direction, ratio, content)
+	added: layout.Node_Id
+	err: runtime.Allocator_Error
+	if edge {
+		added, err = layout.dock_content(&tab.tree, direction, content)
+	} else {
+		added, err = layout.split_direction(&tab.tree, node, direction, ratio, content)
+	}
 	if err != nil {return false}
 	if w == nil {return true}
 	visible := workspace.selected == tab_index

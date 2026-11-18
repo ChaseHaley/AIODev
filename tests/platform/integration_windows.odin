@@ -1,7 +1,9 @@
 package platform_test
 
 import "aio:input"
+import "base:runtime"
 import p "aio:platform"
+import "core:log"
 import "core:testing"
 import "core:thread"
 import "core:time"
@@ -617,21 +619,119 @@ drop_handle :: proc(paths: []string, x, y: i32) -> w.HANDLE {
 	return w.HANDLE(handle)
 }
 
+// An IDataObject as the shell hands a drop target: files as CF_HDROP, or data that is not files.
+@(private = "file")
+Fake_Data :: struct {
+	using object: p.Data_Object,
+	paths:        []string,
+	files:        bool,
+}
+
+@(private = "file")
+DV_E_FORMATETC :: w.HRESULT(-2147221404)
+
+@(private = "file")
+fake_data_vtable := p.Data_Object_VTable {
+	QueryInterface = proc "system" (this: ^p.Data_Object, riid: w.REFIID, object: ^rawptr) -> w.HRESULT {
+		object^ = nil
+		return w.HRESULT(-2147467262)
+	},
+	AddRef = proc "system" (this: ^p.Data_Object) -> w.ULONG {return 1},
+	Release = proc "system" (this: ^p.Data_Object) -> w.ULONG {return 1},
+	GetData = proc "system" (this: ^p.Data_Object, format: ^p.Format_Etc, medium: ^p.Storage_Medium) -> w.HRESULT {
+		context = runtime.default_context()
+		data := (^Fake_Data)(this)
+		if !data.files || format.format != w.CF_HDROP {return DV_E_FORMATETC}
+		handle := drop_handle(data.paths, 0, 0)
+		if handle == nil {return DV_E_FORMATETC}
+		medium^ = {
+			storage = p.TYMED_HGLOBAL,
+			global  = w.HGLOBAL(handle),
+		}
+		return 0
+	},
+	QueryGetData = proc "system" (this: ^p.Data_Object, format: ^p.Format_Etc) -> w.HRESULT {
+		data := (^Fake_Data)(this)
+		return data.files && format.format == w.CF_HDROP ? 0 : DV_E_FORMATETC
+	},
+}
+
+// Calls the drop target a window registered as OLE's drag loop would, with the pointer over client point
+// 37,91 of a hidden window. A real drag from Explorer takes the pointer and is for a person to try.
 @(test)
-dropped_files_arrive_as_one_event_at_the_drop_point :: proc(t: ^testing.T) {
+the_registered_drop_target_reports_a_drag_and_its_drop :: proc(t: ^testing.T) {
 	platform: p.Platform
 	if !testing.expect_value(t, p.init(&platform, "AIODev.Test.Drop"), p.Init_Result.Primary) { return }
 	defer testing.expect_value(t, p.destroy(&platform), p.Error.None)
 	id, err := p.window_create(&platform, {hidden = true, width = 160, height = 100})
 	if !testing.expect_value(t, err, p.Error.None) { return }
 	hwnd := w.HWND(p.window_native_handle(&platform, id))
-	testing.expect(t, uint(w.GetWindowLongPtrW(hwnd, w.GWL_EXSTYLE)) & uint(w.WS_EX_ACCEPTFILES) != 0,
-		"the window asks for drops")
+	target := p.window_drop_target(&platform, id)
+	if !testing.expect(t, target != nil, "the window registered a drop target") { return }
+	// OLE holds the registration: a second one for the window is refused as already made.
+	ALREADY_REGISTERED :: w.HRESULT(-2147221247)
+	testing.expect_value(t, p.RegisterDragDrop(hwnd, target), ALREADY_REGISTERED)
+
+	screen := w.POINT{37, 91}
+	testing.expect(t, bool(w.ClientToScreen(hwnd, &screen)))
+	point := p.Point_L{screen.x, screen.y}
 	paths := []string{`C:\notes\one.md`, `C:\with space\日本語.txt`, `D:\three`}
-	handle := drop_handle(paths, 37, 91)
-	if !testing.expect(t, handle != nil) { return }
-	testing.expect(t, bool(w.PostMessageW(hwnd, w.WM_DROPFILES, w.WPARAM(uintptr(handle)), 0)))
+	files := Fake_Data{object = {&fake_data_vtable}, paths = paths, files = true}
+	other := Fake_Data{object = {&fake_data_vtable}}
+	all := w.DWORD(p.DROPEFFECT_COPY | 2 | 4)
+
+	// Files entering, moving and leaving are reported at the point, and offered a copy.
+	effect := all
+	testing.expect_value(t, target.vtable.DragEnter(target, &files, 0, point, &effect), w.HRESULT(0))
+	testing.expect_value(t, effect, w.DWORD(p.DROPEFFECT_COPY))
+	effect = all
+	testing.expect_value(t, target.vtable.DragOver(target, 0, point, &effect), w.HRESULT(0))
+	testing.expect_value(t, effect, w.DWORD(p.DROPEFFECT_COPY))
+	testing.expect_value(t, target.vtable.DragLeave(target), w.HRESULT(0))
+	// A drag that does not offer a copy gets none.
+	effect = 2
+	_ = target.vtable.DragEnter(target, &files, 0, point, &effect)
+	testing.expect_value(t, effect, w.DWORD(p.DROPEFFECT_NONE))
+	_ = target.vtable.DragLeave(target)
+	// Data that is not files is refused and reports nothing.
+	effect = all
+	_ = target.vtable.DragEnter(target, &other, 0, point, &effect)
+	testing.expect_value(t, effect, w.DWORD(p.DROPEFFECT_NONE))
+	effect = all
+	_ = target.vtable.DragOver(target, 0, point, &effect)
+	testing.expect_value(t, effect, w.DWORD(p.DROPEFFECT_NONE))
+	_ = target.vtable.DragLeave(target)
+
 	events, poll_error := p.poll_events(&platform)
+	testing.expect_value(t, poll_error, p.Error.None)
+	phases := make([dynamic]p.Files_Drag_Phase, context.temp_allocator)
+	for event in events {
+		if e, ok := event.(p.Files_Drag_Event); ok {
+			append(&phases, e.phase)
+			testing.expect_value(t, e.window, id)
+			if e.phase != .Leave {
+				testing.expect_value(t, e.x, i32(37))
+				testing.expect_value(t, e.y, i32(91))
+			}
+		}
+	}
+	// Enter, Over and Leave for the first drag, then Enter and Leave of the second, which was offered no copy
+	// but still carried files.
+	testing.expect_value(t, len(phases), 5)
+	testing.expect_value(t, phases[0], p.Files_Drag_Phase.Enter)
+	testing.expect_value(t, phases[1], p.Files_Drag_Phase.Over)
+	testing.expect_value(t, phases[2], p.Files_Drag_Phase.Leave)
+
+	// The drop carries every path, joined, at the point.
+	effect = all
+	_ = target.vtable.DragEnter(target, &files, 0, point, &effect)
+	effect = all
+	testing.expect_value(t, target.vtable.Drop(target, &files, 0, point, &effect), w.HRESULT(0))
+	testing.expect_value(t, effect, w.DWORD(p.DROPEFFECT_COPY))
+	// The drop asks Windows to bring its window forward. This window is hidden and the test takes no input, so
+	// Windows is free to refuse; the answer is logged, and the drop must complete either way.
+	log.infof("foreground after the drop is the window: %v", w.GetForegroundWindow() == hwnd)
+	events, poll_error = p.poll_events(&platform)
 	testing.expect_value(t, poll_error, p.Error.None)
 	drops := 0
 	for event in events {

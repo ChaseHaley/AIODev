@@ -497,11 +497,13 @@ pane_drag_animating :: proc(w: ^Window) -> bool {
 	return false
 }
 
-// The outline state of the drop shown in w: a pane drag's, and no other drop yet.
+// The outline state of the drop shown in w: a pane drag's, or files dragged over w. Both are a Pane_Carry
+// and animate, draw and rest on tabs through the same code.
 @(private)
 drop_carry :: proc(w: ^Window) -> ^Pane_Carry {
-	_, carry := pane_drag_state(w)
-	return carry
+	if _, carry := pane_drag_state(w); carry != nil {return carry}
+	if files, over := &w.file_drag.(File_Drag); over {return &files.carry}
+	return nil
 }
 
 pane_drag_animate :: proc(app: ^App, w: ^Window, enabled: bool, frame: ui.Frame_Time) {
@@ -548,7 +550,10 @@ pane_drag_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 			break
 		}
 	}
-	if a == nil {return .Ok}
+	if a == nil {
+		if files, over := &w.file_drag.(File_Drag); over {return drop_outline_draw(app, w, &files.carry, true)}
+		return .Ok
+	}
 	if !pane_drag_ghost_shown(a) {return .Ok}
 	if _, placed := carry.destination.(Pane_Drop); placed {return drop_outline_draw(app, w, carry, false)}
 	r := render.Rect{carry.ghost[0].value, carry.ghost[1].value, carry.ghost[2].value, carry.ghost[3].value}

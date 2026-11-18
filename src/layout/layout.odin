@@ -908,6 +908,21 @@ dock_pane :: proc(
 	return added, true
 }
 
+// Adds a pane for `content` along an edge of the whole tiling, taking half of it: dock_pane for a pane that
+// does not exist yet.
+@(require_results)
+dock_content :: proc(
+	l: ^Layout,
+	direction: Direction,
+	content: Content,
+) -> (
+	Node_Id,
+	runtime.Allocator_Error,
+) {
+	axis, before := direction_parts(direction)
+	return wrap(l, l.root, axis, before, 0.5, content)
+}
+
 // Whether `node` lies under `region`.
 @(private, require_results)
 node_holds :: proc(l: ^Layout, region, node: Node_Id) -> bool {

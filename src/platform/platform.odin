@@ -103,6 +103,19 @@ Tray_Notification_Event :: struct {
 Notification_Error_Event :: struct {
 	code: u32,
 }
+// Where a drag of files from the shell is over a window: it entered, moved to a point or left. Windows sends
+// these while the pointer is held, before the drop that follows or the leave that cancels it.
+Files_Drag_Phase :: enum u8 {
+	Enter,
+	Over,
+	Leave,
+}
+// A drag of files over a window, at a point of its client area; Leave carries none.
+Files_Drag_Event :: struct {
+	window: input.Window_Id,
+	phase:  Files_Drag_Phase,
+	x, y:   i32,
+}
 // Files dropped from the shell at a point of the window's client area. `paths` joins every full path with
 // '\n', which a file name cannot hold, and lives in the event queue's text storage until the next poll.
 Files_Drop_Event :: struct {
@@ -131,6 +144,7 @@ Event :: union {
 	Notification_Error_Event,
 	Activate_Request_Event,
 	Settings_Event,
+	Files_Drag_Event,
 	Files_Drop_Event,
 	Wake_Event,
 }

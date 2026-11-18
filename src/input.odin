@@ -81,6 +81,10 @@ handle_event :: proc(app: ^App, event: platform.Event) {
 				hide_to_tray(app, w)
 			}
 		}
+	case platform.Files_Drag_Event:
+		if w := window_find(app, e.window); w != nil {
+			files_drag(app, w, e)
+		}
 	case platform.Files_Drop_Event:
 		if w := window_find(app, e.window); w != nil {
 			files_dropped(app, w, e)

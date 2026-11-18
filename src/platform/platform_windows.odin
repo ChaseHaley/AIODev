@@ -61,6 +61,7 @@ when !AIO_HEADLESS {
 		tabbed_title_bar:                 bool,
 		title_height, title_controls_end: i32,
 		screen:                           Maybe(Screen_Full),
+		drop_target:                      Drop_Target,
 	}
 	Platform :: struct {
 		allocator:                  runtime.Allocator,
@@ -88,6 +89,8 @@ when !AIO_HEADLESS {
 		frequency:                  w.LARGE_INTEGER,
 		taskbar:                    Service(^w.ITaskbarList3),
 		com_initialized:            bool,
+		// OleInitialize succeeded on this thread, so drop targets can register and one OleUninitialize is owed.
+		ole:                        bool,
 	}
 
 	// A service the platform starts on first use. Its failure is kept, so a broken service is neither
@@ -263,6 +266,12 @@ when !AIO_HEADLESS {
 			log.errorf("CreateWindowExW(host) failed: %d", w.GetLastError())
 			return .Failed
 		}
+		// Drag and drop needs OLE on the UI thread. Without it the app runs, but takes no drops.
+		if hr := OleInitialize(nil); hr >= 0 {
+			p.ole = true
+		} else {
+			log.errorf("OleInitialize failed: HRESULT 0x%x", u32(hr))
+		}
 		success = true
 		return .Primary
 	}
@@ -273,6 +282,7 @@ when !AIO_HEADLESS {
 		notifications_destroy(p)
 		first_error := p.error
 		for window in p.windows {
+			drop_target_revoke(window)
 			if !os_ok(w.DestroyWindow(window.hwnd), "DestroyWindow") {
 				if first_error == .None {
 					first_error = .Os
@@ -319,6 +329,7 @@ when !AIO_HEADLESS {
 		if first_error == .None {
 			first_error = p.error
 		}
+		if p.ole {OleUninitialize()}
 		p^ = {}
 		return first_error
 	}
@@ -356,44 +367,6 @@ when !AIO_HEADLESS {
 		copy(q.text[start:], bytes[:n])
 		q.text_used += n
 		return string(q.text[start:q.text_used])
-	}
-
-	// The longest path a drop carries: the app's local path checks admit nothing longer (localpath).
-	@(private)
-	DROP_PATH_MAX :: 4096
-
-	// Queues the files of a WM_DROPFILES message as one Files_Drop_Event. The paths are written
-	// straight into the queue's text storage, so a drop allocates nothing. A path too long to open,
-	// or that no longer fits the storage, is skipped.
-	@(private)
-	drop_files :: proc(p: ^Platform, window: ^Window, drop: w.HDROP) {
-		defer w.DragFinish(drop)
-		point: w.POINT
-		_ = w.DragQueryPoint(drop, &point)
-		q := &p.queues[p.write_queue]
-		start := q.text_used
-		wide: [DROP_PATH_MAX]u16 = ---
-		count := w.DragQueryFileW(drop, 0xFFFFFFFF, nil, 0)
-		for i in 0 ..< count {
-			length := int(w.DragQueryFileW(drop, i, nil, 0))
-			if length == 0 || length >= len(wide) {
-				log.warnf("platform: skipped a dropped path of %d UTF-16 units", length)
-				continue
-			}
-			// Each UTF-16 unit becomes at most three bytes, and a separator may precede the path.
-			if q.text_used + 3 * length + 1 > len(q.text) {
-				log.warn("platform: the drop's paths no longer fit the event queue")
-				break
-			}
-			if int(w.DragQueryFileW(drop, i, &wide[0], DROP_PATH_MAX)) != length {continue}
-			if q.text_used > start {
-				q.text[q.text_used] = '\n'
-				q.text_used += 1
-			}
-			q.text_used += utf16.decode_to_utf8(q.text[q.text_used:], wide[:length])
-		}
-		if q.text_used == start {return}
-		enqueue(p, Files_Drop_Event{window.id, point.x, point.y, string(q.text[start:q.text_used])})
 	}
 
 	@(require_results)
@@ -669,9 +642,8 @@ when !AIO_HEADLESS {
 			free(window, p.allocator)
 			return 0, .Os
 		}
-		// Windows delivers WM_DROPFILES to a window only once it has asked for it. A process running at a
-		// higher integrity level than Explorer is not sent drops from it (UIPI), however it asks.
-		w.DragAcceptFiles(window.hwnd, true)
+		// A process running at a higher integrity level than Explorer is not sent its drops (UIPI).
+		drop_target_register(p, window)
 		if window.tabbed_title_bar {
 			margins := w.MARGINS {
 				cyTopHeight = i32(TITLE_BAR_HEIGHT * dpi / 96),
@@ -734,6 +706,7 @@ when !AIO_HEADLESS {
 			if window.id != id {
 				continue
 			}
+			drop_target_revoke(window)
 			if !os_ok(w.DestroyWindow(window.hwnd), "DestroyWindow") {return .Os}
 			ordered_remove(&p.windows, i)
 			free(window, p.allocator)
@@ -1336,9 +1309,6 @@ when !AIO_HEADLESS {
 			if code == w.WM_CONTEXTMENU || code == w.WM_RBUTTONUP {
 				tray_popup(p)
 			}
-			return 0
-		case w.WM_DROPFILES:
-			drop_files(p, window, w.HDROP(uintptr(wp)))
 			return 0
 		case w.WM_CLOSE:
 			enqueue(p, Close_Request_Event{window.id})

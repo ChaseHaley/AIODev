@@ -70,6 +70,9 @@ Window :: struct {
 	divider: Divider_Gesture,
 	// The pane or tab drag this window's pointer holds; see drag.odin.
 	drag: Drag,
+	// Files dragged in from Explorer and over this window, with the outline of where they would open; see
+	// file_drop.odin.
+	file_drag: Maybe(File_Drag),
 	// Arrange mode in this window, and its outline and key card; see arrange_mode.odin.
 	arrange: Arrange_Mode,
 	using floats: Float_Window_State,

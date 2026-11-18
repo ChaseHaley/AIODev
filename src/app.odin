@@ -526,7 +526,11 @@ app_timers_advance :: proc(app: ^App, phase: Timer_Phase) {
 				if w := window_find(app, app.notice_window); w != nil {w.dirty = true}
 			}
 		case .Drag_Hover:
-			for i := 0; i < len(app.windows); i += 1 {pane_drag_tick(app, app.windows[i], clock_now(&app.clock))}
+			for i := 0; i < len(app.windows); i += 1 {
+				now := clock_now(&app.clock)
+				pane_drag_tick(app, app.windows[i], now)
+				files_drag_tick(app, app.windows[i], now)
+			}
 		case .Verify:
 			when AIO_CONTROL {verify_tick(app)}
 		case .Layout_Save:
@@ -559,6 +563,7 @@ app_timer_deadline :: proc(app: ^App, timer: App_Timer) -> (next: time.Tick, pen
 	case .Drag_Hover:
 		for w in app.windows {
 			if at, armed := drag_hover_deadline(w); armed {next, pending = earliest(next, pending, at)}
+			if at, armed := files_drag_deadline(w); armed {next, pending = earliest(next, pending, at)}
 		}
 	case .Verify:
 		when AIO_CONTROL {return verify_deadline(app)}

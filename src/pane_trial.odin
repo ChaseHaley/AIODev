@@ -1,6 +1,7 @@
 package main
 
 import "aio:layout"
+import "base:runtime"
 
 Pane_Trial_Error :: enum {
 	None,
@@ -44,8 +45,9 @@ pane_trial_evaluate :: proc(
 	return {error = .Invalid}
 }
 
-// Splits a copy of `tree` at `node` in w's content area. A nil tree means w's own tree at its focus;
-// any other tree belongs to a tab of w's workspace.
+// Splits a copy of `tree` at `node` in w's content area, or with `edge` along an edge of the whole tiling,
+// as dock_pane would take a pane there. A nil tree means w's own tree at its focus; any other tree belongs
+// to a tab of w's workspace.
 @(require_results)
 pane_trial_split :: proc(
 	app: ^App,
@@ -56,17 +58,24 @@ pane_trial_split :: proc(
 	tree: ^layout.Layout = nil,
 	node := layout.INVALID_NODE,
 	notify_failure := true,
+	edge := false,
 ) -> Pane_Trial_Result {
 	original, target := tree, node
 	if original == nil {
 		original = window_tree(w)
 		target = original.focus
 	}
-	if _, ok := layout.pane_content(original, target); !ok {return {error = .Invalid}}
+	if _, ok := layout.pane_content(original, target); !ok && !edge {return {error = .Invalid}}
 	trial, copy_error := layout.clone(original, allocator)
 	if copy_error != nil {return {error = .Allocation}}
 	defer layout.destroy(&trial)
-	added, err := layout.split_direction(&trial, target, direction, ratio, PANE_MEASUREMENT_CONTENT)
+	added: layout.Node_Id
+	err: runtime.Allocator_Error
+	if edge {
+		added, err = layout.dock_content(&trial, direction, PANE_MEASUREMENT_CONTENT)
+	} else {
+		added, err = layout.split_direction(&trial, target, direction, ratio, PANE_MEASUREMENT_CONTENT)
+	}
 	if err != nil {return {error = .Allocation}}
 	return pane_trial_evaluate(app, w, original, &trial, added, notify_failure)
 }
