@@ -140,7 +140,9 @@ app_relaunch :: proc(options: instance.Options) {
 		fmt.sbprintf(&line, " %s ", instance.FLAG_DATA_DIR)
 		argument_write(&line, options.data_dir)
 	}
-	if !platform.open_program(strings.to_string(line), directory) {log.error("restarting AIODev failed")}
+	command_line := strings.to_string(line)
+	log.infof("restarting AIODev: %s", command_line)
+	if !platform.open_program(command_line, directory) {log.error("restarting AIODev failed")}
 }
 
 // Writes a quoted command-line argument. A path holds no quotes, but backslashes before the closing quote

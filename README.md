@@ -44,7 +44,8 @@ To install from the zip instead, download `AIODev-<version>-windows-x64.zip` fro
 An installed AIODev updates itself: run Update AIODev from the everything palette. It installs the
 latest release while AIODev keeps running, then offers to restart into it. Restarting ends the
 programs running in panes; your layout and agent conversations come back. Installing while AIODev
-runs also works from any terminal; AIODev keeps running the previous version until it restarts.
+runs also works from any terminal; AIODev keeps running the previous version until Restart AIODev
+(also in the everything palette) starts the new one.
 
 The installer is per user: it copies AIODev to `%LOCALAPPDATA%\Programs\AIODev`, adds `aio` to your
 PATH and creates a Start menu shortcut. Settings live in `%APPDATA%\AIODev`; saved layouts and logs
