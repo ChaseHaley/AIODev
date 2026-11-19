@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256"><defs>
+  <radialGradient id="D5cscore" cx=".38" cy=".32" r=".75"><stop offset="0" stop-color="#ffffff"/><stop offset=".25" stop-color="#d4ccff"/><stop offset=".7" stop-color="#7a63f5"/><stop offset="1" stop-color="#3a2a9a"/></radialGradient>
+  <radialGradient id="D5csbg" cx=".5" cy=".45" r=".75"><stop offset="0" stop-color="#2a1f55"/><stop offset="1" stop-color="#08080b"/></radialGradient>
+  <radialGradient id="D5cshalo" cx=".5" cy=".5" r=".5"><stop offset="0" stop-color="#a194ff" stop-opacity=".55"/><stop offset="1" stop-color="#a194ff" stop-opacity="0"/></radialGradient>
+  <linearGradient id="D5csring" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#6fd6d6" stop-opacity=".25"/><stop offset=".5" stop-color="#6fd6d6"/><stop offset="1" stop-color="#e09bf0" stop-opacity=".35"/></linearGradient>
+  <filter id="D5csglow" x="-100%" y="-100%" width="300%" height="300%"><feGaussianBlur stdDeviation="5" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+  
+  <linearGradient id="D5csrim" x1="0" y1="0" x2="0" y2="1">
+    <stop offset="0" stop-color="#fff" stop-opacity=".22"/><stop offset=".35" stop-color="#fff" stop-opacity=".04"/>
+    <stop offset="1" stop-color="#fff" stop-opacity=".02"/></linearGradient><linearGradient id="D5cstile" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#8b6cff"/><stop offset=".55" stop-color="#6a4ff0"/><stop offset="1" stop-color="#c25fd6"/></linearGradient>
+  <radialGradient id="D5cshl" cx=".3" cy=".1" r=".8"><stop offset="0" stop-color="#fff" stop-opacity=".35"/><stop offset=".7" stop-color="#fff" stop-opacity="0"/></radialGradient>
+    <linearGradient id="D5csink" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#f4f2ff"/><stop offset="1" stop-color="#9d8cff"/></linearGradient></defs>
+    <rect x="8" y="8" width="240" height="240" rx="56" fill="url(#D5cstile)"/><rect x="8" y="8" width="240" height="240" rx="56" fill="url(#D5cshl)"/>
+    <g transform="rotate(-24 128 128)"><path d="M 16 128 A 112 42 0 0 1 240 128" fill="none" stroke="#1a1240" stroke-width="12" stroke-linecap="round" opacity="0.5"/></g>
+    <polyline points="88,68 154,128 88,188" fill="none" stroke="#fff" stroke-width="44" stroke-linecap="round" stroke-linejoin="round"/>
+    <g transform="rotate(-24 128 128)">
+      <path d="M 240 128 A 112 42 0 0 1 16 128" fill="none" stroke="#1a1240" stroke-width="18" stroke-linecap="round"/>
+      <g transform="translate(184.0 164.4) rotate(167.8)"><rect x="-34" y="-17" width="68" height="34" rx="12.2" fill="#7ff0e0"/></g>
+    </g></svg>
