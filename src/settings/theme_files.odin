@@ -117,10 +117,19 @@ theme_file_parse :: proc(text: string) -> (theme: Custom_Theme, issue: string) {
 		if !known {return {}, fmt.tprintf("Unknown theme color: %s", key)}
 		color_text, ok := entry.(json.String)
 		if !ok {return {}, fmt.tprintf("Expected a color string for %s", key)}
-		color, valid := theme_color_parse(token, string(color_text), .Strict)
-		if !valid {return {}, fmt.tprintf("Invalid theme color: %s", key)}
-		theme.colors[token] = color
+		value, problem := theme_value_parse(token, string(color_text), .Strict)
+		if problem != .None {
+			if clause := theme_link_issue(token, string(color_text), problem); clause != "" {
+				return {}, fmt.tprintf("Invalid theme color: %s, %s", key, clause)
+			}
+			return {}, fmt.tprintf("Invalid theme color: %s", key)
+		}
+		theme.colors[token] = value.color
+		if value.linked {theme.linked += {token}; theme.target[token] = value.target}
 		theme.overrides += {token}
+	}
+	if loop := theme_loop_text(theme.linked, &theme.target); loop != "" {
+		return {}, fmt.tprintf("Theme colors follow each other in a loop: %s", loop)
 	}
 	// The caller consumes these temporary IDs before the next scratch reset.
 	cloned, clone_error := strings.clone(string(id), context.temp_allocator)
@@ -137,8 +146,8 @@ theme_directory :: proc() -> string {
 	return fmt.tprintf("%s/themes", path)
 }
 
-// A complete theme file: every color of `theme` in token order, so it needs no base. Empty
-// metadata is left out.
+// A complete theme file: every color of `theme` in token order, so it needs no base. A color that
+// follows another is written as that color's key. Empty metadata is left out.
 @(require_results)
 theme_file_text :: proc(
 	id: string,
@@ -168,7 +177,8 @@ theme_file_text :: proc(
 	if write_parts(&builder, "  \"colors\": {\n") != nil {return "", false}
 	for info, token in THEME_TOKENS {
 		separator := token == max(Theme_Token) ? "\n" : ",\n"
-		value := theme_color_text(token, theme.colors[token])
+		linked := token in theme.linked
+		value := theme_value_text(token, {theme.colors[token], theme.target[token], linked})
 		if !field(&builder, "    ", info.key, value, separator) {return "", false}
 	}
 	if write_parts(&builder, "  }\n}\n") != nil {return "", false}

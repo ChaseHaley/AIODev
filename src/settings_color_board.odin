@@ -125,6 +125,13 @@ settings_color_group_area :: proc(title: string) -> (rank: int, found: bool) {
 	return
 }
 
+// The key of the color `token` follows in `t`, or "" when it holds its own color.
+@(private)
+settings_color_link :: proc(t: settings.Theme, token: settings.Theme_Token) -> string {
+	tokens := settings.THEME_TOKENS
+	return token in t.linked ? tokens[t.target[token]].key : ""
+}
+
 // One row per theme color in board order, each showing the value in effect; a custom theme's Reset
 // returns a color to its base theme. Then the board's groups and the card for the active theme.
 @(private, require_results)
@@ -138,6 +145,9 @@ settings_add_color_rows :: proc(p: ^ui.Editor, s: ^settings.Settings) -> bool {
 			title         = info.title,
 			description   = info.description,
 			badge         = tile.label,
+			ref           = info.key,
+			link          = settings_color_link(s.active_theme, tile.token),
+			default_link  = settings_color_link(base, tile.token),
 			value         = settings.theme_color_text(tile.token, s.active_theme.colors[tile.token]),
 			default_value = settings.theme_color_text(tile.token, base.colors[tile.token]),
 			kind          = info.kind == .Optional ? .Optional_Color : .Color,

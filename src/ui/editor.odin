@@ -79,6 +79,9 @@ Editor_Row_Flag :: enum {
 // own `opener`, the ID of the program they belong to.
 Editor_Row :: struct {
 	key, title, description, value, default_value: string,
+	// A color row: the key other colors name it by, the key of the color it follows ("" when it holds its
+	// own color) and the same for its base theme. `value` is the color it shows either way.
+	ref, link, default_link:                       string,
 	group:                                         int,
 	kind:                                          Row_Kind,
 	minimum, maximum:                              f64,
@@ -609,7 +612,7 @@ EDITOR_SECTION_LIMIT :: 8
 
 // Every string a row owns, in one place for editor_add's copies and editor_row_destroy's frees.
 @(private)
-row_owned_strings :: proc(row: ^Editor_Row) -> [10]^string {
+row_owned_strings :: proc(row: ^Editor_Row) -> [13]^string {
 	return {
 		&row.key,
 		&row.title,
@@ -621,6 +624,9 @@ row_owned_strings :: proc(row: ^Editor_Row) -> [10]^string {
 		&row.detail,
 		&row.note,
 		&row.opener,
+		&row.ref,
+		&row.link,
+		&row.default_link,
 	}
 }
 

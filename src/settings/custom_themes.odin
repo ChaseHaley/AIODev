@@ -124,15 +124,16 @@ custom_theme_value :: proc(
 		if !text_valid(value) {return "", "Expected UTF-8 text without NUL bytes."}
 		return fmt.tprintf("\"%s\"", value), ""
 	case .Color:
-		c, valid := theme_color_parse(parsed.token, value, policy)
-		if !valid {
-			tokens := THEME_TOKENS
-			if tokens[parsed.token].kind == .Translucent {
-				return "", "Expected a color such as #rrggbb or #rrggbbaa."
-			}
-			return "", "Expected a color such as #rrggbb."
+		v, link := theme_value_parse(parsed.token, value, policy)
+		if link == .None {return theme_value_text(parsed.token, v), ""}
+		if clause := theme_link_issue(parsed.token, value, link); clause != "" {
+			return "", fmt.tprintf("%s%s.", strings.to_upper(clause[:1], context.temp_allocator), clause[1:])
 		}
-		return theme_color_text(parsed.token, c), ""
+		tokens := THEME_TOKENS
+		if tokens[parsed.token].kind == .Translucent {
+			return "", "Expected a color such as #rrggbb or #rrggbbaa."
+		}
+		return "", "Expected a color such as #rrggbb."
 	}
 	return "", ""
 }
@@ -225,18 +226,23 @@ parse_custom_theme_key :: proc(
 		theme.name, theme.name_set = name, true
 	case .Color:
 		token := parsed.token
-		c, valid := theme_color_parse(token, value, .Strict)
-		if !valid {
-			tokens := THEME_TOKENS
-			expected := tokens[token].kind == .Translucent ? "#rrggbb or #rrggbbaa" : "#rrggbb"
-			message, message_error := strings.concatenate(
-				{"invalid color \"", value, "\", expected ", expected},
-				context.temp_allocator,
-			)
-			if message_error != nil {message = "invalid color"}
+		v, problem := theme_value_parse(token, value, .Strict)
+		if problem != .None {
+			message := theme_link_issue(token, value, problem)
+			if message == "" {
+				tokens := THEME_TOKENS
+				expected := tokens[token].kind == .Translucent ? "#rrggbb or #rrggbbaa" : "#rrggbb"
+				joined, message_error := strings.concatenate(
+					{"invalid color \"", value, "\", expected ", expected},
+					context.temp_allocator,
+				)
+				message = message_error != nil ? "invalid color" : joined
+			}
 			return diagnostic_append(diagnostics, line, key, message)
 		}
-		theme.colors[token] = c
+		theme.colors[token] = v.color
+		theme.linked -= {token}
+		if v.linked {theme.linked += {token}; theme.target[token] = v.target}
 		theme.overrides += {token}
 	}
 	return nil
@@ -283,8 +289,8 @@ theme_display_name :: proc(s: ^Settings, id: string) -> string {
 }
 
 // Resolves the active theme once per load, so the number of themes costs nothing per frame. An
-// unknown name or base falls back to the default theme and is reported when the caller collects
-// diagnostics.
+// unknown name or base falls back to the default theme, and colors that follow each other in a loop
+// to the default theme's colors; both are reported when the caller collects diagnostics.
 @(private, require_results)
 resolve_theme :: proc(s: ^Settings, diagnostics: ^[dynamic]Diagnostic) -> runtime.Allocator_Error {
 	custom := custom_theme_find(s, s.theme.name)
@@ -294,13 +300,21 @@ resolve_theme :: proc(s: ^Settings, diagnostics: ^[dynamic]Diagnostic) -> runtim
 		if base == nil {missing = next.base}
 		next = base
 	}
+	loop := ""
 	if custom == nil {
 		s.active_theme = theme_default()
 	} else {
-		s.active_theme = custom_theme_resolve(s, custom)
+		s.active_theme, loop = custom_theme_resolve_checked(s, custom)
 	}
 	if diagnostics != nil && missing != "" {
 		message := fmt.tprintf("unknown theme \"%s\"; using %s", missing, DEFAULT_THEME_ID)
+		theme_line := setting_line(s, "theme.name")
+		if err := diagnostic_append(diagnostics, theme_line, "theme.name", message); err != nil {
+			return err
+		}
+	}
+	if diagnostics != nil && loop != "" {
+		message := fmt.tprintf("theme colors follow each other in a loop (%s); using the default colors", loop)
 		theme_line := setting_line(s, "theme.name")
 		if err := diagnostic_append(diagnostics, theme_line, "theme.name", message); err != nil {
 			return err

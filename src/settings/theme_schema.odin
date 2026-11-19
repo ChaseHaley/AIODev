@@ -30,6 +30,8 @@ theme_schema_text :: proc(allocator := context.allocator) -> (string, bool) {
 		first = false
 		if !theme_field_schema(&builder, field) {return "", false}
 	}
+	if write_parts(&builder, "\n  },\n  \"$defs\": {\n    \"colorReference\": ") != nil {return "", false}
+	if !theme_reference_schema(&builder) {return "", false}
 	if write_parts(&builder, "\n  }\n}\n") != nil {return "", false}
 	text, clone_error := strings.clone(strings.to_string(builder), allocator)
 	return text, clone_error == nil
@@ -73,16 +75,43 @@ theme_field_schema :: proc(builder: ^strings.Builder, field: Theme_Field) -> boo
 			pattern := "^#[0-9a-fA-F]{6}$"
 			if info.kind == .Translucent {pattern = "^#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?$"}
 			if info.kind == .Optional {pattern = "^(#[0-9a-fA-F]{6})?$"}
-			property := struct {type, title, description, pattern: string} {
-				"string", info.title, info.description, pattern,
-			}
-			data, marshal_error := json.marshal(property, allocator = context.temp_allocator)
-			if marshal_error != nil {return false}
-			line := fmt.tprintf("%s        %q: %s", first ? "" : ",\n", info.key, data)
-			if write_parts(builder, line) != nil {return false}
+			title, title_error := json.marshal(info.title, allocator = context.temp_allocator)
+			description, description_error := json.marshal(info.description, allocator = context.temp_allocator)
+			if title_error != nil || description_error != nil {return false}
+			quoted_key := fmt.tprintf("%q", info.key)
+			quoted_pattern := fmt.tprintf("%q", pattern)
+			if write_parts(
+				   builder,
+				   first ? "" : ",\n",
+				   "        ",
+				   quoted_key,
+				   `: {"type":"string","title":`,
+				   string(title),
+				   `,"description":`,
+				   string(description),
+				   `,"anyOf":[{"pattern":`,
+				   quoted_pattern,
+				   `},{"$ref":"#/$defs/colorReference"}]}`,
+			   ) != nil {return false}
 			first = false
 		}
 		return write_parts(builder, "\n      }\n    }") == nil
 	}
 	return false
+}
+
+// The keys a color may follow: every theme color that always has a value.
+@(private, require_results)
+theme_reference_schema :: proc(builder: ^strings.Builder) -> bool {
+	if write_parts(builder, `{
+      "description": "The key of another color of this theme, which this color then follows.",
+      "enum": [`) != nil {return false}
+	first := true
+	for info in THEME_TOKENS {
+		if info.kind == .Optional {continue}
+		line := fmt.tprintf("%s%q", first ? "" : ", ", info.key)
+		if write_parts(builder, line) != nil {return false}
+		first = false
+	}
+	return write_parts(builder, "]\n    }") == nil
 }

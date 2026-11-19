@@ -1,6 +1,7 @@
 package settings
 
 import "aio:colour"
+import "core:fmt"
 import "core:strings"
 
 // The fallback theme, compiled in so a missing or emptied themes folder still has one. It is also the
@@ -246,20 +247,26 @@ THEME_TOKENS :: [Theme_Token]Token_Info {
 }
 
 // A resolved theme. `light` follows the window background and `terminal_light` the shell
-// background, so a custom theme needs no separate mode.
+// background, so a custom theme needs no separate mode. A color in `linked` follows the color
+// `target` names; its entry in `colors` already holds the color it ends at.
 Theme :: struct {
 	colors:                [Theme_Token]Theme_Color,
+	linked:                bit_set[Theme_Token],
+	target:                [Theme_Token]Theme_Token,
 	light, terminal_light: bool,
 }
 
 // A theme from a file or the settings file: the colors it sets over its base, another theme's ID.
 // Without a base, missing colors come from the default theme. `name` is free display text; the ID
 // stays the stable key. `base_set` and `name_set` record explicit lines, so a repeated one is
-// reported like any duplicate key. `external` marks a theme file.
+// reported like any duplicate key. `external` marks a theme file. A color in `linked` holds no
+// color of its own: it follows the color `target` names, wherever that ends up in the resolved theme.
 Custom_Theme :: struct {
 	id, base, name:     string,
 	colors:             [Theme_Token]Theme_Color,
 	overrides:          bit_set[Theme_Token],
+	linked:             bit_set[Theme_Token],
+	target:             [Theme_Token]Theme_Token,
 	base_set, name_set: bool,
 	external:           bool,
 }
@@ -273,27 +280,120 @@ token_find :: proc(key: string) -> (Theme_Token, bool) {
 
 token_terminal :: proc(token: Theme_Token) -> bool {return token >= FIRST_TERMINAL_TOKEN}
 
-// Applies a theme's overrides over its bases, nearest last. A missing base ends the chain at the
-// default theme, and the depth bound ends a cycle.
+// Applies a theme's overrides over its bases, nearest last, then resolves the colors that follow
+// another color. A missing base ends the chain at the default theme, and the depth bound ends a
+// cycle.
 custom_theme_resolve :: proc(s: ^Settings, c: ^Custom_Theme) -> Theme {
+	t, _ := custom_theme_resolve_checked(s, c)
+	return t
+}
+
+// custom_theme_resolve, also naming the loop of followed colors that the theme could not resolve,
+// such as "accent -> cursor -> accent"; empty when there is none. The colors that were part of or
+// led into the loop take the default theme's color. The loop text is temporary.
+custom_theme_resolve_checked :: proc(s: ^Settings, c: ^Custom_Theme) -> (t: Theme, loop: string) {
 	chain: [THEME_BASE_DEPTH]^Custom_Theme
 	count := 0
 	for next := c; next != nil && count < len(chain); count += 1 {
 		chain[count] = next
 		next = next.base == "" || s == nil ? nil : custom_theme_find(s, next.base)
 	}
-	t := theme_default()
+	t = theme_default()
 	for i := count - 1; i >= 0; i -= 1 {
-		for token in chain[i].overrides {t.colors[token] = chain[i].colors[token]}
+		layer := chain[i]
+		for token in layer.overrides {
+			t.colors[token] = layer.colors[token]
+			t.linked -= {token}
+			if token in layer.linked {t.linked += {token}; t.target[token] = layer.target[token]}
+		}
 	}
+	loop = theme_links_resolve(&t)
 	theme_finish(&t)
-	return t
+	return
 }
 
-// The compiled-in theme, complete in every color.
+// Gives every followed color the color it ends at, once, so nothing follows a link per frame. A color
+// whose links never end falls back to the default theme's own color and stops following.
+@(private)
+theme_links_resolve :: proc(t: ^Theme) -> (loop: string) {
+	if t.linked == {} {return ""}
+	tokens := THEME_TOKENS
+	resolved: [Theme_Token]Theme_Color
+	refused: bit_set[Theme_Token]
+	for token in t.linked {
+		end, reached := token, false
+		for _ in 0 ..< len(Theme_Token) {
+			if end not_in t.linked {reached = true; break}
+			end = t.target[end]
+		}
+		if !reached {refused += {token}; continue}
+		resolved[token] = t.colors[end]
+		if tokens[token].kind != .Translucent {resolved[token].a = 255}
+	}
+	if refused != {} {
+		loop = theme_loop_text(t.linked, &t.target)
+		fallback := theme_default()
+		for token in refused {resolved[token] = fallback.colors[token]}
+	}
+	for token in t.linked {t.colors[token] = resolved[token]}
+	t.linked -= refused
+	return
+}
+
+// Whether `token` may follow `target`: another color that always has a value. The optional colors
+// may be empty, so nothing follows them.
+theme_link_valid :: proc(token, target: Theme_Token) -> bool {
+	tokens := THEME_TOKENS
+	return token != target && tokens[target].kind != .Optional
+}
+
+// A color that a loop of followed colors passes through, or false when every link ends.
+@(private)
+theme_links_loop :: proc(
+	linked: bit_set[Theme_Token],
+	target: ^[Theme_Token]Theme_Token,
+) -> (
+	on: Theme_Token,
+	found: bool,
+) {
+	for token in linked {
+		at := token
+		for _ in 0 ..< len(Theme_Token) {
+			if at not_in linked {break}
+			at = target[at]
+		}
+		if at in linked {return at, true}
+	}
+	return
+}
+
+// "accent -> cursor -> accent" for the first loop of followed colors; empty when there is none. The
+// result is temporary.
+@(private)
+theme_loop_text :: proc(linked: bit_set[Theme_Token], target: ^[Theme_Token]Theme_Token) -> string {
+	start, found := theme_links_loop(linked, target)
+	if !found {return ""}
+	tokens := THEME_TOKENS
+	b := strings.builder_make(context.temp_allocator)
+	at := start
+	for {
+		strings.write_string(&b, tokens[at].key)
+		strings.write_string(&b, " -> ")
+		at = target[at]
+		if at == start {break}
+	}
+	strings.write_string(&b, tokens[start].key)
+	return strings.to_string(b)
+}
+
+// The compiled-in theme, complete in every color, none of them followed: every other theme's
+// fallback is made of concrete colors.
 theme_default :: proc() -> Theme {
 	file, issue := theme_file_parse(DEFAULT_THEME_TEXT)
-	assert(issue == "" && card(file.overrides) == len(Theme_Token), "invalid default theme")
+	assert(
+		issue == "" && card(file.overrides) == len(Theme_Token) && file.linked == {},
+		"invalid default theme",
+	)
 	t := Theme {
 		colors = file.colors,
 	}
@@ -394,4 +494,71 @@ theme_color_parse :: proc(
 		return colour.parse_translucent(text, policy)
 	}
 	return {}, false
+}
+
+// What a theme file or settings line holds for one color: a concrete color, or the color it follows.
+Theme_Value :: struct {
+	color:  Theme_Color,
+	target: Theme_Token,
+	linked: bool,
+}
+
+Theme_Value_Problem :: enum {
+	None,
+	// Neither a color nor a theme color's key.
+	Invalid,
+	// Reads as a theme color's key, but no theme color has it.
+	Unknown_Link,
+	Self_Link,
+	// The target may be empty, so it has no color to follow.
+	Optional_Link,
+}
+
+// Parses one color's value: the key of another theme color, such as accent, or a color as the token
+// allows.
+theme_value_parse :: proc(
+	token: Theme_Token,
+	text: string,
+	policy: colour.Parse_Policy,
+) -> (
+	value: Theme_Value,
+	problem: Theme_Value_Problem,
+) {
+	if target, found := token_find(strings.trim_space(text)); found {
+		if target == token {return {}, .Self_Link}
+		if !theme_link_valid(token, target) {return {}, .Optional_Link}
+		return {target = target, linked = true}, .None
+	}
+	color, valid := theme_color_parse(token, text, policy)
+	if valid {return {color = color}, .None}
+	for i in 0 ..< len(text) {
+		c := text[i]
+		keyed := (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_' || c == '.'
+		if !keyed || (i == 0 && (c < 'a' || c > 'z')) {return {}, .Invalid}
+	}
+	return {}, len(text) > 0 ? .Unknown_Link : .Invalid
+}
+
+// Why a followed color was refused, as a clause. Temporary; empty for a problem of the color itself.
+@(private)
+theme_link_issue :: proc(token: Theme_Token, text: string, problem: Theme_Value_Problem) -> string {
+	tokens := THEME_TOKENS
+	switch problem {
+	case .Unknown_Link:
+		return fmt.tprintf("no theme color is named \"%s\"", text)
+	case .Self_Link:
+		return fmt.tprintf("%s cannot follow itself", tokens[token].key)
+	case .Optional_Link:
+		return fmt.tprintf("%s may be empty, so no color can follow it", text)
+	case .Invalid, .None:
+	}
+	return ""
+}
+
+// The file text of one theme color: the key of the color it follows, or its own color as
+// theme_color_text writes it.
+theme_value_text :: proc(token: Theme_Token, value: Theme_Value) -> string {
+	tokens := THEME_TOKENS
+	if value.linked {return tokens[value.target].key}
+	return theme_color_text(token, value.color)
 }
