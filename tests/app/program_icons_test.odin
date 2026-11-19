@@ -72,6 +72,37 @@ program_icon_is_not_left_pending_when_the_worker_cannot_start :: proc(t: ^testin
 	testing.expect_value(t, queued, 1)
 }
 
+// The theme's tab bar and tab text key drawn artwork, so after a theme change the next draw asks for
+// the artwork in the new colours rather than reusing the old drawing (WORK-509).
+@(test)
+artwork_is_drawn_again_when_the_theme_changes :: proc(t: ^testing.T) {
+	state: app.App
+	if !art_catalogue(t, &state) {return}
+	defer program_art.catalogue_destroy(&state.program_art)
+	defer app.program_icon_cache_destroy(&state.program_icons)
+	defer app.process_worker_destroy(&state.processes)
+	state.settings.tabs.program_icons = true
+	entry: app.Session_Entry
+	colors := &state.settings.active_theme.colors
+	colors[.Tab_Bar], colors[.Tab_Text] = {0x0C, 0x0C, 0x0E, 255}, {0xA1, 0xA1, 0xAA, 255}
+	_, pending, _ := app.report_icon(&state, &entry, "claude", 16)
+	testing.expect(t, pending)
+	_, pending, _ = app.report_icon(&state, &entry, "claude", 16)
+	testing.expect(t, pending)
+	colors[.Tab_Bar], colors[.Tab_Text] = {0xEF, 0xEF, 0xF2, 255}, {0x52, 0x52, 0x5C, 255}
+	_, pending, _ = app.report_icon(&state, &entry, "claude", 16)
+	testing.expect(t, pending, "the light theme's artwork is still to be drawn")
+	backgrounds: [dynamic][3]u8
+	defer delete(backgrounds)
+	for icon in state.program_icons.icons {
+		if icon.state != .Free {append(&backgrounds, icon.paint.background)}
+	}
+	testing.expect_value(t, len(backgrounds), 2)
+	if len(backgrounds) == 2 {
+		testing.expect(t, backgrounds[0] != backgrounds[1], "one drawing per theme")
+	}
+}
+
 @(test)
 program_is_adopted_on_a_second_poll_and_dropped_at_the_prompt :: proc(t: ^testing.T) {
 	// Windows process ids are multiples of four, so these name no real process and reading their

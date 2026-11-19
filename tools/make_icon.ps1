@@ -1,63 +1,66 @@
 [CmdletBinding()]
 param()
 
+# Renders assets/aiodev.svg (32 px and up) and assets/aiodev-small.svg (16 to 24 px, drawn without
+# blur so it stays sharp) with headless Microsoft Edge, then writes assets/aiodev.ico and the 256 px
+# assets/aiodev-notification.png.
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Drawing
+
+$assets = Join-Path (Split-Path $PSScriptRoot -Parent) 'assets'
+$edge = @(
+    (Join-Path ${env:ProgramFiles(x86)} 'Microsoft\Edge\Application\msedge.exe'),
+    (Join-Path $env:ProgramFiles 'Microsoft\Edge\Application\msedge.exe')
+) | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
+if (-not $edge) { throw 'make_icon.ps1 needs Microsoft Edge to render the icon SVGs.' }
+
 $sizes = @(16, 20, 24, 32, 40, 48, 64, 256)
+$sources = @{
+    full  = [Convert]::ToBase64String([IO.File]::ReadAllBytes((Join-Path $assets 'aiodev.svg')))
+    small = [Convert]::ToBase64String([IO.File]::ReadAllBytes((Join-Path $assets 'aiodev-small.svg')))
+}
+$work = Join-Path ([IO.Path]::GetTempPath()) ('aiodev-icon-' + [guid]::NewGuid().ToString('N'))
+New-Item -ItemType Directory -Path $work | Out-Null
 $entries = New-Object 'System.Collections.Generic.List[byte[]]'
 
-foreach ($size in $sizes) {
-    $bitmap = New-Object System.Drawing.Bitmap($size, $size)
-    $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
-    $path = New-Object System.Drawing.Drawing2D.GraphicsPath
-    $rect = New-Object System.Drawing.RectangleF(0, 0, $size, $size)
-    $gradient = New-Object System.Drawing.Drawing2D.LinearGradientBrush(
-        $rect, [System.Drawing.ColorTranslator]::FromHtml('#1b1e24'),
-        [System.Drawing.ColorTranslator]::FromHtml('#0f1115'), 90)
-    $pen = New-Object System.Drawing.Pen(
-        [System.Drawing.ColorTranslator]::FromHtml('#e6e9ef'), ([single]($size / 8)))
-    $cursor = New-Object System.Drawing.SolidBrush(
-        [System.Drawing.ColorTranslator]::FromHtml('#61afef'))
-    $stream = New-Object System.IO.MemoryStream
-    try {
-        $graphics.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::AntiAlias
-        $radius = [single]($size / 4)
-        $path.AddArc(0, 0, $radius, $radius, 180, 90)
-        $path.AddArc($size - $radius, 0, $radius, $radius, 270, 90)
-        $path.AddArc($size - $radius, $size - $radius, $radius, $radius, 0, 90)
-        $path.AddArc(0, $size - $radius, $radius, $radius, 90, 90)
-        $path.CloseFigure()
-        $graphics.FillPath($gradient, $path)
-        $pen.StartCap = [System.Drawing.Drawing2D.LineCap]::Square
-        $pen.EndCap = [System.Drawing.Drawing2D.LineCap]::Square
-        $pen.LineJoin = [System.Drawing.Drawing2D.LineJoin]::Miter
-        $points = [System.Drawing.PointF[]]@(
-            (New-Object System.Drawing.PointF(($size * 0.28), ($size * 0.31))),
-            (New-Object System.Drawing.PointF(($size * 0.46), ($size * 0.5))),
-            (New-Object System.Drawing.PointF(($size * 0.28), ($size * 0.69))))
-        $graphics.DrawLines($pen, $points)
-        $graphics.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::None
-        $graphics.FillRectangle($cursor, [single][Math]::Round($size * 0.56),
-            [single][Math]::Round($size * 0.63), [single][Math]::Round($size * 0.22),
-            [single][Math]::Max(2, [Math]::Round($size / 8)))
-        $bitmap.Save($stream, [System.Drawing.Imaging.ImageFormat]::Png)
-        $entries.Add($stream.ToArray())
-    }
-    finally {
-        $stream.Dispose()
-        $cursor.Dispose()
-        $pen.Dispose()
-        $gradient.Dispose()
-        $path.Dispose()
-        $graphics.Dispose()
-        $bitmap.Dispose()
+try {
+    foreach ($size in $sizes) {
+        $source = if ($size -le 24) { $sources.small } else { $sources.full }
+        $html = Join-Path $work "icon-$size.html"
+        $shot = Join-Path $work "icon-$size.png"
+        [IO.File]::WriteAllText($html, "<!doctype html><html><body style=`"margin:0;background:transparent`"><img src=`"data:image/svg+xml;base64,$source`" width=`"$size`" height=`"$size`" style=`"display:block`"></body></html>")
+        # A window smaller than Edge's minimum is widened, so render into a 256 px window and crop.
+        $arguments = @('--headless=new', '--disable-gpu', '--hide-scrollbars', '--no-first-run',
+            '--force-device-scale-factor=1', '--default-background-color=00000000',
+            "--user-data-dir=`"$(Join-Path $work 'profile')`"", '--window-size=256,256',
+            "--screenshot=`"$shot`"", ('"file:///' + ($html -replace '\\', '/') + '"'))
+        Start-Process -FilePath $edge -ArgumentList $arguments -Wait -WindowStyle Hidden
+        if (-not (Test-Path -LiteralPath $shot)) { throw "Edge did not write $shot." }
+
+        $full = [Drawing.Bitmap]::FromFile($shot)
+        $stream = New-Object IO.MemoryStream
+        try {
+            $crop = $full.Clone((New-Object Drawing.Rectangle(0, 0, $size, $size)), [Drawing.Imaging.PixelFormat]::Format32bppArgb)
+            try {
+                if ($crop.GetPixel(0, 0).A -ne 0) { throw "The $size px render has an opaque corner; Edge did not keep the background transparent." }
+                $crop.Save($stream, [Drawing.Imaging.ImageFormat]::Png)
+            }
+            finally { $crop.Dispose() }
+            $entries.Add($stream.ToArray())
+        }
+        finally {
+            $stream.Dispose()
+            $full.Dispose()
+        }
     }
 }
+finally {
+    Remove-Item -LiteralPath $work -Recurse -Force -ErrorAction SilentlyContinue
+}
 
-$output = Join-Path (Split-Path $PSScriptRoot -Parent) 'assets\aiodev.ico'
-[System.IO.File]::WriteAllBytes((Join-Path (Split-Path $output) 'aiodev-notification.png'), $entries[$sizes.Count - 1])
-$file = [System.IO.File]::Create($output)
-$writer = New-Object System.IO.BinaryWriter($file)
+[IO.File]::WriteAllBytes((Join-Path $assets 'aiodev-notification.png'), $entries[$sizes.Count - 1])
+$file = [IO.File]::Create((Join-Path $assets 'aiodev.ico'))
+$writer = New-Object IO.BinaryWriter($file)
 try {
     $writer.Write([UInt16]0)
     $writer.Write([UInt16]1)

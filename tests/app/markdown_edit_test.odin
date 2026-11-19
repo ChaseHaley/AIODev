@@ -510,3 +510,185 @@ markdown_style_changes_keep_the_caret_and_folds_mapped :: proc(t: ^testing.T) {
 	chevron_click(t, &f.state, w, pane, strings.index(string(app.markdown_document(pane).text[:]), "Next"))
 	testing.expect_value(t, len(pane.folds.folds), 1)
 }
+
+@(private = "file")
+Click_Step :: struct {
+	x, y:      f32,
+	time_ns:   i64,
+	button:    input.Mouse_Button,
+	modifiers: input.Modifiers,
+}
+
+// A press and release of a mouse button at the window point, `time_ns` after the clock's start.
+@(private = "file")
+mouse_click :: proc(state: ^app.App, w: ^app.Window, step: Click_Step, release := true) {
+	for pressed in ([?]bool{true, false}) {
+		if !pressed && !release {break}
+		app.handle_event(state, input.Mouse_Button_Event{window = w.id, x = i32(math.round(step.x)),
+			y = i32(math.round(step.y)), button = step.button, pressed = pressed,
+			modifiers = step.modifiers, time_ns = step.time_ns})
+	}
+}
+
+// The window point just inside the left edge of the character at source offset `source`, which a click
+// takes as the boundary before it, with the pane laid out as its draw lays it out now.
+@(private = "file")
+char_point :: proc(
+	t: ^testing.T,
+	state: ^app.App,
+	w: ^app.Window,
+	pane: ^app.Markdown_Pane,
+	source: int,
+) -> (x, y: f32, ok: bool) {
+	g := edit_fitted(state, w, pane)
+	document := app.markdown_document(pane)
+	display := markdown.live_display(document, source)
+	rect, _, found := ui.markdown_caret_at(&pane.view, document, display)
+	if !testing.expect(t, found, "the character is not on screen") {return}
+	return g.left + rect.x + 1, g.top - f32(pane.view.scroll) + rect.y + rect.height / 2, true
+}
+
+@(private = "file")
+selected :: proc(pane: ^app.Markdown_Pane) -> string {
+	return markdown.edit_selected_text(&pane.editor.buffer)
+}
+
+// The first click of a double click moves the caret onto a rendered line, which then shows its markup and
+// shifts the text under the pointer. The second click still selects the word the first one hit, the third
+// the line, a drag after either grows by words or lines, and the keys then adjust the selection from the
+// anchor.
+@(test)
+a_double_click_selects_the_word_the_first_click_hit_and_shift_arrows_adjust_it :: proc(t: ^testing.T) {
+	f: Edit_Fixture
+	defer edit_fixture_destroy(t, &f)
+	source := "# Title\n\nalpha **bold** gamma\n\nlast line here\n"
+	w, pane := edit_fixture_start(t, &f, "Words", source)
+	if pane == nil {return}
+	app.run_action(&f.state, w, .Edit_Markdown)
+	if !testing.expect(t, app.markdown_editing(pane)) {return}
+	b := &pane.editor.buffer
+	gamma := strings.index(source, "gamma")
+	line := strings.index(source, "alpha")
+	line_end := strings.index(source[line:], "\n") + line
+
+	// The line is rendered, so its words sit where the markup is hidden.
+	x, y, found := char_point(t, &f.state, w, pane, gamma + 2)
+	if !found {return}
+	mouse_click(&f.state, w, {x, y, 1_000_000, .Left, {}})
+	testing.expect_value(t, b.caret, gamma + 2)
+	// The caret's line now shows its markup, which moves the word right: the same point is on other text.
+	shifted, _, _ := char_point(t, &f.state, w, pane, gamma + 2)
+	testing.expect(t, shifted > x + 1, "the first click should have shifted the line")
+
+	mouse_click(&f.state, w, {x, y, 101_000_000, .Left, {}}, release = false)
+	testing.expect_value(t, selected(pane), "gamma")
+	// Dragging with the button held keeps the word and grows by words.
+	ax, ay, _ := char_point(t, &f.state, w, pane, line + 2)
+	app.handle_event(&f.state, input.Mouse_Move_Event{window = w.id, x = i32(ax), y = i32(ay), buttons = {.Left}})
+	testing.expect_value(t, selected(pane), source[line:line_end])
+	testing.expect_value(t, b.anchor, line_end)
+	bx, by, _ := char_point(t, &f.state, w, pane, gamma + 2)
+	app.handle_event(&f.state, input.Mouse_Move_Event{window = w.id, x = i32(bx), y = i32(by), buttons = {.Left}})
+	testing.expect_value(t, selected(pane), "gamma")
+	app.handle_event(&f.state, input.Mouse_Button_Event{window = w.id, x = i32(bx), y = i32(by),
+		button = .Left, time_ns = 102_000_000})
+
+	// Shift+arrows adjust the word from its anchor, at its start.
+	edit_press(&f.state, w, .Arrow_Left, {.Shift})
+	testing.expect_value(t, selected(pane), "gamm")
+	edit_press(&f.state, w, .Arrow_Right, {.Shift, .Control})
+	testing.expect_value(t, selected(pane), "gamma")
+	edit_press(&f.state, w, .Home, {.Shift})
+	testing.expect_value(t, selected(pane), source[line:gamma])
+	testing.expect_value(t, b.anchor, gamma)
+	edit_press(&f.state, w, .End, {.Shift})
+	testing.expect_value(t, selected(pane), "gamma")
+	edit_press(&f.state, w, .Arrow_Down, {.Shift})
+	testing.expect_value(t, selected(pane), "gamma\n")
+	testing.expect_value(t, b.anchor, gamma)
+
+	// Leave the line so it renders again; then three clicks in a run on it, the layout redrawn between.
+	edit_press(&f.state, w, .End, {.Control})
+	x, y, _ = char_point(t, &f.state, w, pane, gamma + 2)
+	mouse_click(&f.state, w, {x, y, 2_000_000_000, .Left, {}})
+	_ = edit_fitted(&f.state, w, pane)
+	mouse_click(&f.state, w, {x, y, 2_100_000_000, .Left, {}})
+	testing.expect_value(t, selected(pane), "gamma")
+	_ = edit_fitted(&f.state, w, pane)
+	mouse_click(&f.state, w, {x, y, 2_200_000_000, .Left, {}})
+	testing.expect_value(t, selected(pane), "alpha **bold** gamma\n")
+	// A click too late for the run starts over.
+	mouse_click(&f.state, w, {x, y, 3_000_000_000, .Left, {}})
+	testing.expect_value(t, selected(pane), "")
+
+	// Shift+click extends from the anchor instead of counting.
+	edit_press(&f.state, w, .Home)
+	anchor := b.anchor
+	lx, ly, _ := char_point(t, &f.state, w, pane, strings.index(source, "last") + 2)
+	mouse_click(&f.state, w, {lx, ly, 4_000_000_000, .Left, {.Shift}})
+	testing.expect_value(t, b.anchor, anchor)
+	testing.expect_value(t, b.caret, strings.index(source, "last") + 2)
+}
+
+// A right-click on the editor's text opens the edit menu: the caret goes under the pointer unless it is
+// inside the selection, and rows that would do nothing are disabled.
+@(test)
+a_right_click_opens_the_edit_menu_with_what_it_can_do :: proc(t: ^testing.T) {
+	f: Edit_Fixture
+	defer edit_fixture_destroy(t, &f)
+	source := "alpha beta\n\ngamma\n"
+	w, pane := edit_fixture_start(t, &f, "Menu", source)
+	if pane == nil {return}
+	app.run_action(&f.state, w, .Edit_Markdown)
+	if !testing.expect(t, app.markdown_editing(pane)) {return}
+	b := &pane.editor.buffer
+	testing.expect(t, platform.clipboard_set_text(&f.state.platform, "pasted"))
+	beta := strings.index(source, "beta")
+
+	x, y, found := char_point(t, &f.state, w, pane, beta + 1)
+	if !found {return}
+	mouse_click(&f.state, w, {x, y, 1_000_000, .Right, {}})
+	_, shown := w.overlay.(app.Overlay_Edit_Menu)
+	if !testing.expect(t, shown, "the edit menu should be open") {return}
+	testing.expect_value(t, b.caret, beta + 1)
+	rows := map[string]bool{}
+	defer delete(rows)
+	for item in w.edit_menu.items {if !item.separator {rows[item.label] = item.enabled}}
+	testing.expect_value(t, len(rows), 6)
+	testing.expect(t, !rows["Undo"] && !rows["Redo"] && !rows["Cut"] && !rows["Copy"], "nothing to do yet")
+	testing.expect(t, rows["Paste"] && rows["Select all"])
+	app.overlay_close(&f.state, w)
+
+	// Inside a selection the right-click keeps it, and Cut and Copy are on.
+	edit_press(&f.state, w, .Home, {.Control})
+	edit_press(&f.state, w, .Arrow_Right, {.Control})
+	edit_press(&f.state, w, .Arrow_Right, {.Control, .Shift})
+	x, y, _ = char_point(t, &f.state, w, pane, beta + 2)
+	mouse_click(&f.state, w, {x, y, 2_000_000, .Right, {}})
+	testing.expect_value(t, selected(pane), "beta")
+	for item in w.edit_menu.items {
+		if item.label == "Cut" || item.label == "Copy" {testing.expect(t, item.enabled, item.label)}
+	}
+	for item, index in w.edit_menu.items {
+		if item.label != "Copy" {continue}
+		ui.menu_select(&w.edit_menu, index)
+		app.edit_menu_choose(&f.state, w)
+	}
+	copied, ok := platform.clipboard_get_text(&f.state.platform, context.temp_allocator)
+	testing.expect(t, ok && copied == "beta", copied)
+	_, still := w.overlay.(app.Overlay_Edit_Menu)
+	testing.expect(t, !still, "choosing a row closes the menu")
+
+	// Outside it the caret moves first, and Paste then goes in there.
+	gamma := strings.index(source, "gamma")
+	x, y, _ = char_point(t, &f.state, w, pane, gamma + 1)
+	mouse_click(&f.state, w, {x, y, 3_000_000, .Right, {}})
+	testing.expect_value(t, b.caret, gamma + 1)
+	testing.expect_value(t, selected(pane), "")
+	for item, index in w.edit_menu.items {
+		if item.label != "Paste" {continue}
+		ui.menu_select(&w.edit_menu, index)
+		app.edit_menu_choose(&f.state, w)
+	}
+	testing.expect_value(t, string(b.text[:]), "alpha beta\n\ngbetaamma\n")
+}

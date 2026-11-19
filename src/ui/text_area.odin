@@ -41,8 +41,12 @@ Text_Area :: struct {
 	revealed_revision: u64,
 	revealed_height:   f32,
 	revealed_width:    f32,
-	// A pointer press in the box holds until the host calls `text_area_release`.
+	// A pointer press in the box holds until the host calls `text_area_release`. A double or triple click
+	// holds the unit it selected, `unit_from`..`unit_to`, which the drag grows by.
 	dragging:          bool,
+	unit:              Maybe(markdown.Edit_Unit),
+	unit_from:         int,
+	unit_to:           int,
 	caret:             Field_Caret,
 }
 
@@ -322,6 +326,28 @@ text_area_scroll :: proc(box: Text_Area_Box, delta: f32) -> bool {
 	return a.scroll != was
 }
 
+// Scrolls by `lines` lines down, without moving the caret. False when nothing moved.
+text_area_scroll_lines :: proc(box: Text_Area_Box, lines: int) -> bool {
+	_, t := area_laid_out(box)
+	return text_area_scroll(box, f32(lines) * t.line_height)
+}
+
+// Home or End: to the start or end of the caret's row, as the box wraps it, then as the shared rules go
+// on (`markdown.edit_home_target`, `edit_end_target`).
+text_area_row_edge :: proc(box: Text_Area_Box, end, extend: bool) {
+	_, t := area_laid_out(box)
+	a, b := box.area, box.buffer
+	row := area_row(a, b.caret)
+	target: int
+	if end {
+		target = markdown.edit_end_target(b, area_offset_in_row(a, b, &t, row, max(f32)))
+	} else {
+		target = markdown.edit_home_target(b, a.lines[row].start)
+	}
+	markdown.edit_move(b, target, extend)
+	text_area_reveal(box)
+}
+
 // Up, Down, Page Up and Page Down: moves the caret `lines` lines (or `pages` boxes of lines) away,
 // keeping its column across shorter lines. Past the first or last line it goes to the text's start or end.
 text_area_vertical :: proc(box: Text_Area_Box, lines, pages: int, extend: bool) {
@@ -351,11 +377,25 @@ text_area_vertical :: proc(box: Text_Area_Box, lines, pages: int, extend: bool) 
 }
 
 // A pointer press or drag at a point of the window moves the caret there, or extends the selection to
-// it; a press starts a new selection unless `extend` is held. False for a move with no press before it.
-text_area_pointer :: proc(box: Text_Area_Box, x, y: f32, pressed, extend: bool) -> bool {
-	a := box.area
+// it; a press starts a new selection unless `extend` is held. A press that is a second or third click
+// of a run selects the word or the line there instead, and the drag after it grows by words or lines.
+// False for a move with no press before it.
+text_area_pointer :: proc(box: Text_Area_Box, x, y: f32, pressed, extend: bool, clicks := 1) -> bool {
+	a, b := box.area, box.buffer
 	if !pressed && !a.dragging {return false}
-	markdown.edit_move(box.buffer, text_area_offset_at(box, x, y), pressed ? extend : true)
+	at := text_area_offset_at(box, x, y)
+	switch unit, by_unit := a.unit.?; {
+	case pressed && clicks > 1 && !extend:
+		chosen: markdown.Edit_Unit = clicks == 2 ? .Word : .Line
+		from, to := markdown.edit_unit_at(b, at, chosen)
+		b.anchor, b.caret = from, to
+		a.unit, a.unit_from, a.unit_to = chosen, from, to
+	case !pressed && by_unit:
+		markdown.edit_select_unit(b, a.unit_from, a.unit_to, unit, at)
+	case:
+		markdown.edit_move(b, at, pressed ? extend : true)
+		a.unit = nil
+	}
 	if pressed {a.dragging = true}
 	text_area_reveal(box)
 	return true
@@ -364,7 +404,7 @@ text_area_pointer :: proc(box: Text_Area_Box, x, y: f32, pressed, extend: bool) 
 // Ends a pointer drag in the box, returning whether one was under way.
 text_area_release :: proc(a: ^Text_Area) -> bool {
 	dragging := a.dragging
-	a.dragging = false
+	a.dragging, a.unit = false, nil
 	return dragging
 }
 

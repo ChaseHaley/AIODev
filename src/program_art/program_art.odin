@@ -1,6 +1,8 @@
 package program_art
 
+import "aio:colour"
 import "aio:vector"
+import "core:math"
 import "core:mem"
 import "core:strconv"
 import "core:strings"
@@ -14,6 +16,14 @@ TABLE :: #load("../../assets/program_art.txt", string)
 
 // The artwork is drawn in a square this many units wide.
 VIEW :: 24
+
+// A brand colour fainter than this WCAG contrast against the background, the level for graphics, is
+// fitted to it when the artwork is drawn (`ink`).
+CONTRAST :: 3
+
+// A brand colour whose channels spread less than this (HSV chroma, of 255) is ink rather than a hue,
+// so below CONTRAST it takes the theme text colour instead of a grey fitted toward black or white.
+NEUTRAL_CHROMA :: 16
 
 Art :: struct {
 	// The first name is the canonical one; all are matched without case.
@@ -29,11 +39,11 @@ Layer :: struct {
 	path:    string,
 }
 
-// How to colour artwork. Layers without a brand colour, or every layer when `mono` is set, use
-// `text`. Comparable, so it can key a cache of drawn artwork.
+// The theme colours artwork is drawn against: `text` for layers without a brand colour and neutral
+// ones too faint on `background`. Comparable, so it keys the cache of drawn artwork and a theme change
+// draws the artwork again.
 Paint :: struct {
-	text: [3]u8,
-	mono: bool,
+	text, background: [3]u8,
 }
 
 // TABLE parsed once. Names and paths borrow from TABLE; `layers` backs every Art's layers.
@@ -107,15 +117,47 @@ draw :: proc(art: Art, size: int, paint: Paint, pixels: []u8) -> bool {
 	for &value in out {value = 0}
 	for layer in art.layers {
 		if !vector.fill({layer.path}, VIEW, layer.rule, size, coverage) {return false}
-		colour := paint.mono || !layer.branded ? paint.text : layer.colour
+		rgb := ink(layer, paint)
 		for alpha, i in coverage {
 			a := u32(alpha)
 			p := out[i * 4:i * 4 + 4]
-			for c in 0 ..< 3 {p[c] = u8((u32(colour[c]) * a + u32(p[c]) * (255 - a) + 127) / 255)}
+			for c in 0 ..< 3 {p[c] = u8((u32(rgb[c]) * a + u32(p[c]) * (255 - a) + 127) / 255)}
 			p[3] = u8((255 * a + u32(p[3]) * (255 - a) + 127) / 255)
 		}
 	}
 	return true
+}
+
+// The colour one layer is drawn in. A brand colour that reaches CONTRAST against the background
+// stays; a fainter neutral one takes the text colour; a fainter hue is moved toward black or white
+// until it reaches CONTRAST, so a multi-colour logo keeps every hue.
+@(require_results)
+ink :: proc(layer: Layer, paint: Paint) -> [3]u8 {
+	if !layer.branded {return paint.text}
+	brand, background := colour.rgba(layer.colour), colour.rgba(paint.background)
+	if colour.contrast_ratio(brand, background) >= CONTRAST {return layer.colour}
+	c := layer.colour
+	if max(c[0], c[1], c[2]) - min(c[0], c[1], c[2]) < NEUTRAL_CHROMA {return paint.text}
+	fitted := colour.minimum_contrast(brand, background, CONTRAST)
+	lighter := fitted.r + fitted.g + fitted.b > brand.r + brand.g + brand.b
+	value: [3]u8
+	for i in 0 ..< 3 {value[i] = u8(math.round(fitted[i] * 255))}
+	// Rounding to bytes can land just short of CONTRAST, so channels step one byte further toward
+	// the same extreme until it is reached or none can move.
+	for colour.contrast_ratio(colour.rgba(value), background) < CONTRAST {
+		moved := false
+		for &channel in value {
+			if lighter && channel < 255 {
+				channel += 1
+				moved = true
+			} else if !lighter && channel > 0 {
+				channel -= 1
+				moved = true
+			}
+		}
+		if !moved {break}
+	}
+	return value
 }
 
 // The number of layers in one table line, or zero for a comment or malformed entry.

@@ -44,7 +44,8 @@ To install from the zip instead, download `AIODev-<version>-windows-x64.zip` fro
 An installed AIODev updates itself: run Update AIODev from the everything palette. It installs the
 latest release while AIODev keeps running, then offers to restart into it. Restarting ends the
 programs running in panes; your layout and agent conversations come back. Installing while AIODev
-runs also works from any terminal; AIODev keeps running the previous version until it restarts.
+runs also works from any terminal; AIODev keeps running the previous version until Restart AIODev
+(also in the everything palette) starts the new one.
 
 The installer is per user: it copies AIODev to `%LOCALAPPDATA%\Programs\AIODev`, adds `aio` to your
 PATH and creates a Start menu shortcut. Settings live in `%APPDATA%\AIODev`; saved layouts and logs
@@ -66,6 +67,37 @@ ends that prompt.
 
 Releases are not code signed yet, so Windows SmartScreen may warn on first launch. See the
 [code signing policy](#code-signing-policy).
+
+## Neovim follows the theme
+
+Neovim run in an AIODev pane can follow the active theme, live. AIODev writes the theme to
+`<data folder>\nvim\current.json` whenever it changes and gives panes its path in `AIODEV_THEME_FILE`.
+The plugin that reads it is the `nvim` folder beside `aiodev.exe`. Add this to your `init.lua`:
+
+```lua
+if vim.env.AIODEV_CLI then vim.opt.rtp:append(vim.fs.dirname(vim.env.AIODEV_CLI) .. "/nvim") require("aiodev_theme").setup() end
+```
+
+The plugin sets `background`, applies the theme's colorscheme when it is installed and otherwise one
+generated from the theme's palette (`:colorscheme aiodev`). It installs nothing. Outside AIODev
+`AIODEV_CLI` is unset and nothing happens. Neovim configs that do not use the plugin and follow
+`background` also switch live, because AIODev reports light or dark to programs that ask for it.
+
+A theme file names its colorscheme in an optional `neovim` object, and AIODev's themes name these
+plugins. With lazy.nvim, `lazy = true` is enough: it loads the plugin when the colorscheme is applied.
+
+| Themes | lazy.nvim spec | Colorscheme |
+| --- | --- | --- |
+| Tokyo Night, Moon, Storm and Day | `{ "folke/tokyonight.nvim", lazy = true }` | `tokyonight-night`, `-moon`, `-storm`, `-day` |
+| Catppuccin Latte, Frappe, Macchiato, Mocha | `{ "catppuccin/nvim", name = "catppuccin", lazy = true }` | `catppuccin-latte`, `-frappe`, `-macchiato`, `-mocha` |
+| Gruvbox Dark, Light | `{ "ellisonleao/gruvbox.nvim", lazy = true }` | `gruvbox` |
+| Dracula | `{ "Mofiqul/dracula.nvim", lazy = true }` | `dracula` |
+| One Dark | `{ "navarasu/onedark.nvim", lazy = true }` | `onedark` |
+| Nord | `{ "gbprod/nord.nvim", lazy = true }` | `nord` |
+| Palenight | `{ "drewtempelmeyer/palenight.vim", lazy = true }` | `palenight` |
+
+Studio, Tide, Ember and custom themes use the generated colorscheme. A theme file you write can add
+`"neovim": { "plugin": "owner/repository", "colorscheme": "name" }`; it holds data only, never Lua.
 
 ## Build from source
 

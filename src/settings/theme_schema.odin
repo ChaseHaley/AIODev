@@ -64,6 +64,29 @@ theme_field_schema :: proc(builder: ^strings.Builder, field: Theme_Field) -> boo
       "description": "ID of another theme that supplies the colors this file leaves out.",
       "pattern": "`, ID_PATTERN, `"
     }`) == nil
+	case .Neovim:
+		return write_parts(
+			builder,
+			`{
+      "type": "object",
+      "description": "The Neovim colorscheme this theme matches, applied by the AIODev Neovim plugin when it is installed.",
+      "additionalProperties": false,
+      "required": ["plugin", "colorscheme"],
+      "properties": {
+        "plugin": {"type": "string", "description": "The plugin repository that provides the colorscheme.", "pattern": "`,
+			NEOVIM_PLUGIN_PATTERN,
+			`", "maxLength": `,
+			fmt.tprintf("%d", NEOVIM_PLUGIN_MAX_LENGTH),
+			`},
+        "colorscheme": {"type": "string", "description": "The colorscheme to apply.", "pattern": "`,
+			NEOVIM_COLORSCHEME_PATTERN,
+			`", "maxLength": `,
+			fmt.tprintf("%d", NEOVIM_COLORSCHEME_MAX_LENGTH),
+			`},
+        "background": {"enum": ["dark", "light"], "description": "The 'background' the colorscheme needs; absent, the theme's own light or dark applies."}
+      }
+    }`,
+		) == nil
 	case .Colors:
 		if write_parts(builder, `{
       "type": "object",

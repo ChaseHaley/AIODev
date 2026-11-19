@@ -1071,6 +1071,37 @@ markdown_caret_cell :: proc(
 	return cell, true
 }
 
+// The text offsets where the row holding offset `offset` starts and where its caret stops, for Home and
+// End on a soft-wrapped line. A row that wraps hands its end to the next row's start, so its caret
+// stops before the last character, as it does in a text area. False when the offset shows on no row.
+markdown_row_edges :: proc(
+	v: ^Markdown_View,
+	doc: ^markdown.Document,
+	offset: int,
+) -> (
+	start, end: int,
+	found: bool,
+) {
+	_, index, shown := markdown_caret_at(v, doc, offset)
+	if !shown {return}
+	line := v.lines[index]
+	start, end = -1, -1
+	for i in 0 ..< line.run_count {
+		run := v.runs[line.first_run + i]
+		if .Marker in run.flags {continue}
+		if start < 0 {start = int(run.start)}
+		end = int(run.end)
+	}
+	if start < 0 {return}
+	next := index + 1
+	if next < len(v.lines) && v.lines[next].block == line.block && v.lines[next].run_count > 0 &&
+	   int(v.runs[v.lines[next].first_run].start) == end && end > start {
+		_, size := utf8.decode_last_rune_in_string(string(doc.text[start:end]))
+		end -= size
+	}
+	return start, end, true
+}
+
 // The text offset nearest a point in the view's own coordinates, as markdown_caret_at gives them, for
 // moving a caret up and down lines.
 markdown_offset_near :: proc(v: ^Markdown_View, doc: ^markdown.Document, lx, ly: f32) -> int {

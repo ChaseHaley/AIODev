@@ -13,6 +13,17 @@
     $releaseArchiveUrl = ''
     $releaseSha256 = ''
 
+    # A kept theme file gains the neovim entry its packaged copy has when it has none, so an upgraded
+    # install follows its Neovim colorscheme too. Anything else in the file stays as the user left it.
+    function Add-NeovimEntry([string] $Packaged, [string] $Installed) {
+        $entry = [regex]::Match([IO.File]::ReadAllText($Packaged), '(?ms)^  "neovim": \{.*?^  \},\r?\n')
+        if (-not $entry.Success) { return }
+        $text = [IO.File]::ReadAllText($Installed)
+        $colors = [regex]::Matches($text, '(?m)^  "colors": \{')
+        if ($text.Contains('"neovim"') -or $colors.Count -ne 1) { return }
+        [IO.File]::WriteAllText($Installed, $text.Insert($colors[0].Index, $entry.Value))
+    }
+
     # Installs exactly the files build.ps1's package stage lists in files.txt, refusing a package that lacks
     # any of them, and keeps files.txt beside them so uninstall.ps1 removes exactly those. Themes the user may
     # have edited are kept; the theme schema is the app's and is replaced.
@@ -41,6 +52,7 @@
                 $target = Join-Path $Destination $name
                 $theme = $name -like 'themes\*'
                 if ($theme -and (Split-Path $name -Leaf) -ne 'theme.schema.json' -and (Test-Path -LiteralPath $target)) {
+                    Add-NeovimEntry (Join-Path $Source $name) $target
                     continue
                 }
                 New-Item -ItemType Directory -Force (Split-Path $target) | Out-Null

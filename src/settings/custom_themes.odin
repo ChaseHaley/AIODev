@@ -263,19 +263,20 @@ custom_theme_store :: proc(
 	s: ^Settings,
 	stored: ^Custom_Theme,
 	file: Custom_Theme,
-) -> runtime.Allocator_Error {
+) -> (
+	err: runtime.Allocator_Error,
+) {
 	theme := file
 	theme.id = stored.id
-	theme.base, theme.name = "", ""
-	if file.base != "" {theme.base = strings.clone(file.base, s.allocator) or_return}
-	if file.name != "" {
-		name, err := strings.clone(file.name, s.allocator)
-		if err != nil {
-			delete(theme.base, s.allocator)
-			return err
-		}
-		theme.name = name
+	theme.base, theme.name, theme.neovim = "", "", {}
+	defer if err != nil {
+		delete(theme.base, s.allocator)
+		delete(theme.name, s.allocator)
+		neovim_theme_destroy(theme.neovim, s.allocator)
 	}
+	if file.base != "" {theme.base = strings.clone(file.base, s.allocator) or_return}
+	if file.name != "" {theme.name = strings.clone(file.name, s.allocator) or_return}
+	if file.neovim.colorscheme != "" {theme.neovim = neovim_theme_clone(file.neovim, s.allocator) or_return}
 	stored^ = theme
 	return nil
 }

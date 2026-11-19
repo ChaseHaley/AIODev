@@ -16,8 +16,6 @@ import "core:time"
 // reach these surfaces; nothing is inferred from screen contents or titles. status_model.odin
 // classifies each record.
 
-@(private)
-STATUS_SPIN_PERIOD_MS :: 1200
 // At most one notification per pane in this interval keeps a chatty program from flooding them.
 @(private)
 STATUS_NOTICE_INTERVAL :: 5 * time.Second
@@ -125,12 +123,13 @@ status_indicator :: proc(summary: Status_Summary) -> (ui.Status_Mark, bool) {
 }
 
 // The spinner position for a mark this frame draws. Drawing a spinner keeps the window repainting
-// while system animations are on; a still spinner is drawn otherwise. Retained as a draw-time
+// while system animations are on; otherwise the spinner holds its still pose. Retained as a draw-time
 // flag: only drawing knows which marks are visible this frame.
 status_phase :: proc(app: ^App, w: ^Window, mark: ui.Status_Mark) -> f32 {
-	if mark.glyph != .Working || mark.progress >= 0 || !app.animations {return 0}
+	if mark.glyph != .Working || mark.progress >= 0 {return 0}
+	if !app.animations {return ui.STATUS_SPIN_STILL}
 	w.status_spinning = true
-	period := i64(STATUS_SPIN_PERIOD_MS) * i64(time.Millisecond)
+	period := i64(ui.STATUS_SPIN_PERIOD)
 	return f32(f64(w.frame.display._nsec % period) / f64(period))
 }
 

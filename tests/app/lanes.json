@@ -48,6 +48,7 @@
     "rail_overlay_closes_on_escape_and_after_a_selection",
     "rail_preview_windows_do_not_reserve_rail_width",
     "rail_rows_show_only_the_current_workspace_and_follow_switches",
+    "restart_command_stops_the_loop_for_restart_from_every_origin",
     "runtime_binding_conflicts_report_runtime_source_lines",
     "runtime_commands_share_fields_origins_bindings_and_catalogue",
     "scrollbar_drag_clamps_and_track_click_pages",

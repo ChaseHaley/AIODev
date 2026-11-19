@@ -5,6 +5,10 @@
   "name": "Catppuccin Latte",
   "author": "Catppuccin",
   "description": "Adapted from https://github.com/catppuccin/kitty/blob/main/themes/latte.conf (MIT). Interface roles follow the scheme's VS Code theme; a color changes only as far as the contrast contracts need. Terminal palette preserves the scheme.",
+  "neovim": {
+    "plugin": "catppuccin/nvim",
+    "colorscheme": "catppuccin-latte"
+  },
   "colors": {
     "window": "#dce0e8",
     "tab_bar": "#dce0e8",

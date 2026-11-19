@@ -209,6 +209,113 @@ edit_line_end :: proc(b: ^Edit_Buffer, at: int) -> int {
 	return end
 }
 
+// What a double click selects and a drag after it grows by: the word under the pointer, or the whole line.
+Edit_Unit :: enum u8 {
+	Word,
+	Line,
+}
+
+@(private)
+Edit_Class :: enum u8 {
+	None,
+	Space,
+	Word,
+	Other,
+}
+
+@(private)
+edit_class :: proc(r: rune) -> Edit_Class {
+	switch {
+	case unicode.is_space(r): return .Space
+	case word_rune(r): return .Word
+	}
+	return .Other
+}
+
+// The word at `at`, as Ctrl+Left and Ctrl+Right take words: a run of word characters, or on spaces or
+// other marks the run of those. A caret between two kinds takes the word it touches, so the end of a
+// word selects the word, not the space after it. Never crosses a line break; an empty line selects nothing.
+@(require_results)
+edit_word_at :: proc(b: ^Edit_Buffer, offset: int) -> (from, to: int) {
+	at := edit_clamp(b, offset)
+	start, end := edit_line_start(b, at), edit_line_end(b, at)
+	before, after: Edit_Class
+	if at > start {
+		r, _ := utf8.decode_last_rune(b.text[start:at])
+		before = edit_class(r)
+	}
+	if at < end {
+		r, _ := utf8.decode_rune(b.text[at:end])
+		after = edit_class(r)
+	}
+	class: Edit_Class
+	switch {
+	case after == .Word || before == .Word: class = .Word
+	case after == .Other || before == .Other: class = .Other
+	case after == .Space || before == .Space: class = .Space
+	case: return at, at
+	}
+	from, to = at, at
+	for from > start {
+		r, size := utf8.decode_last_rune(b.text[start:from])
+		if edit_class(r) != class {break}
+		from -= size
+	}
+	for to < end {
+		r, size := utf8.decode_rune(b.text[to:end])
+		if edit_class(r) != class {break}
+		to += size
+	}
+	return from, to
+}
+
+// The line holding `at` with its line ending, as a triple click selects it; the last line has none.
+@(require_results)
+edit_line_at :: proc(b: ^Edit_Buffer, offset: int) -> (from, to: int) {
+	at := edit_clamp(b, offset)
+	from, to = edit_line_start(b, at), edit_line_end(b, at)
+	if to < len(b.text) {to = edit_right(b, to)}
+	return from, to
+}
+
+@(require_results)
+edit_unit_at :: proc(b: ^Edit_Buffer, at: int, unit: Edit_Unit) -> (from, to: int) {
+	if unit == .Word {return edit_word_at(b, at)}
+	return edit_line_at(b, at)
+}
+
+// Selects the unit at `at`, or after the click that selected `from`..`to`, a drag to `at`: the selection
+// keeps that first unit and grows by whole units toward the pointer, the caret on the side it moved to.
+edit_select_unit :: proc(b: ^Edit_Buffer, from, to: int, unit: Edit_Unit, at: int) {
+	start, end := edit_unit_at(b, at, unit)
+	if start < from {
+		b.anchor, b.caret = to, start
+	} else {
+		b.anchor, b.caret = from, max(end, to)
+	}
+}
+
+// Where Home takes the caret. `row_start` is the start of the row the caret is on, which differs from the
+// line's start on a soft-wrapped line: the first press goes there. Then it toggles between the line's
+// first character that is not a space or tab and its start.
+@(require_results)
+edit_home_target :: proc(b: ^Edit_Buffer, row_start: int) -> int {
+	start := edit_line_start(b, b.caret)
+	if row_start > start && b.caret != row_start {return row_start}
+	end := edit_line_end(b, start)
+	indent := start
+	for indent < end && (b.text[indent] == ' ' || b.text[indent] == '\t') {indent += 1}
+	return b.caret != indent && indent < end ? indent : start
+}
+
+// Where End takes the caret: `row_end` first, the last place the caret reaches on its soft-wrapped row,
+// then the line's end.
+@(require_results)
+edit_end_target :: proc(b: ^Edit_Buffer, row_end: int) -> int {
+	end := edit_line_end(b, b.caret)
+	return row_end < end && b.caret != row_end ? row_end : end
+}
+
 // Replaces from..to with `text`, recorded for undo; the caret lands after the new text. A `run` joins
 // the edit before it when it carries on where that one stopped.
 @(require_results)

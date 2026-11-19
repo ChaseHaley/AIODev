@@ -643,6 +643,8 @@ Color_Settings :: struct {
 	selection_foreground:                                              Maybe(Color),
 	search_foreground, search_background, search_selected_background:  Color,
 	palette:                                                           [16]Color,
+	// Whether the shell background is light, which programs hear as the terminal's color scheme.
+	light:                                                             bool,
 }
 Settings :: struct {
 	keys:            [dynamic]Key_Binding,
@@ -2243,6 +2245,7 @@ destroy :: proc(s: ^Settings) {
 		delete(theme.id, s.allocator)
 		delete(theme.base, s.allocator)
 		delete(theme.name, s.allocator)
+		neovim_theme_destroy(theme.neovim, s.allocator)
 	}
 	delete(s.themes)
 	s^ = {}

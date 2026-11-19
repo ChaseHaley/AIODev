@@ -7,9 +7,37 @@ import "core:testing"
 import "core:thread"
 import "core:time"
 import app "../../src"
+import "aio:commands"
 import "aio:control"
 import "aio:layout"
 import "aio:platform"
+
+// Restart asks no question, as quit asks none, so each way of running it ends the loop to start again,
+// and a quit already under way stays a quit.
+@(test)
+restart_command_stops_the_loop_for_restart_from_every_origin :: proc(t: ^testing.T) {
+	state := app.App{registry = commands.create()}
+	defer commands.destroy(&state.registry)
+	if !testing.expect_value(t, app.register_actions(&state.registry), commands.Error.None) {return}
+	command := commands.find(&state.registry, "app.restart")
+	if !testing.expect(t, command != nil) {return}
+	testing.expect_value(t, command.title, "Restart AIODev")
+	testing.expect_value(t, command.shortcuts.count, 0)
+
+	invocation := commands.invocation(command.id, focus = true)
+	outcome := app.command_execute(&state, app.Control_Request{origin = .Cli}, invocation)
+	testing.expect(t, outcome.status == .Ok)
+	testing.expect_value(t, state.run, app.App_Run.Restart)
+
+	state.run = .Running
+	w := app.Window{}
+	app.run_action(&state, &w, app.Action(command.id), .Palette)
+	testing.expect_value(t, state.run, app.App_Run.Restart)
+
+	state.run = .Quit
+	app.run_action(&state, &w, app.Action(command.id), .Palette)
+	testing.expect_value(t, state.run, app.App_Run.Quit)
+}
 
 when app.AIO_CONTROL {
 	@(test)
@@ -37,6 +65,23 @@ when app.AIO_CONTROL {
 		app.app_quit(&state)
 		app.app_quit_release(&state)
 		testing.expect_value(t, state.run, app.App_Run.Device_Failed)
+		testing.expect(t, !app.app_running(&state))
+	}
+
+	// A restart through the harness answers before the app goes, as a quit does, and still restarts.
+	@(test)
+	app_run_holds_a_restart_open_and_goes_on_restarting :: proc(t: ^testing.T) {
+		state: app.App
+		app.app_restart(&state)
+		testing.expect_value(t, state.run, app.App_Run.Restart)
+		testing.expect(t, !app.app_running(&state))
+		testing.expect(t, app.app_quit_hold(&state))
+		testing.expect(t, app.app_running(&state))
+		app.app_quit(&state)
+		app.app_restart(&state)
+		testing.expect_value(t, state.run, app.App_Run.Draining_Restart)
+		app.app_quit_release(&state)
+		testing.expect_value(t, state.run, app.App_Run.Restart)
 		testing.expect(t, !app.app_running(&state))
 	}
 

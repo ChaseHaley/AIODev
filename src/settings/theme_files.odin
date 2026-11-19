@@ -18,6 +18,7 @@ Theme_Field :: enum {
 	Author,
 	Description,
 	Base,
+	Neovim,
 	Colors,
 }
 
@@ -25,6 +26,8 @@ Theme_Field_Kind :: enum {
 	String,
 	// The format version, which must be 1.
 	Version,
+	// The neovim object, checked by neovim_theme_parse.
+	Neovim,
 	// The colors object, checked token by token.
 	Colors,
 }
@@ -45,6 +48,7 @@ THEME_FIELDS := [Theme_Field]Theme_Field_Info {
 	.Author      = {key = "author", kind = .String},
 	.Description = {key = "description", kind = .String},
 	.Base        = {key = "base", kind = .String},
+	.Neovim      = {key = "neovim", kind = .Neovim},
 	.Colors      = {key = "colors", kind = .Colors, required = true},
 }
 
@@ -91,7 +95,7 @@ theme_file_parse :: proc(text: string) -> (theme: Custom_Theme, issue: string) {
 			if version, ok := entry.(json.Float); !ok || version != 1 {
 				return {}, "Expected theme version 1."
 			}
-		case .Colors:
+		case .Colors, .Neovim:
 		}
 	}
 	id, id_ok := object["id"].(json.String)
@@ -131,6 +135,11 @@ theme_file_parse :: proc(text: string) -> (theme: Custom_Theme, issue: string) {
 	if loop := theme_loop_text(theme.linked, &theme.target); loop != "" {
 		return {}, fmt.tprintf("Theme colors follow each other in a loop: %s", loop)
 	}
+	if neovim, has_neovim := object["neovim"]; has_neovim {
+		neovim_theme, neovim_issue := neovim_theme_parse(neovim)
+		if neovim_issue != "" {return {}, neovim_issue}
+		theme.neovim = neovim_theme
+	}
 	// The caller consumes these temporary IDs before the next scratch reset.
 	cloned, clone_error := strings.clone(string(id), context.temp_allocator)
 	if clone_error != nil {return {}, "Could not allocate theme ID."}
@@ -147,39 +156,37 @@ theme_directory :: proc() -> string {
 }
 
 // A complete theme file: every color of `theme` in token order, so it needs no base. A color that
-// follows another is written as that color's key. Empty metadata is left out.
+// follows another is written as that color's key. Empty metadata is left out, and so is `neovim`
+// without a colorscheme.
 @(require_results)
 theme_file_text :: proc(
 	id: string,
 	theme: Theme,
 	name := "",
 	description := "",
+	neovim := Neovim_Theme{},
 	allocator := context.allocator,
 ) -> (
 	string,
 	bool,
 ) {
 	if !theme_id_valid(id) {return "", false}
-	// A value that cannot be quoted fails the file rather than writing an empty string in its place.
-	field :: proc(b: ^strings.Builder, indent, key, value, separator: string) -> bool {
-		quoted_key, key_error := json.marshal(key, allocator = context.temp_allocator)
-		quoted_value, value_error := json.marshal(value, allocator = context.temp_allocator)
-		if key_error != nil || value_error != nil {return false}
-		return write_parts(b, indent, string(quoted_key), ": ", string(quoted_value), separator) == nil
-	}
 	builder, error := strings.builder_make(context.temp_allocator)
 	if error != nil {return "", false}
 	defer strings.builder_destroy(&builder)
 	if write_parts(&builder, "{\n  \"$schema\": \"./theme.schema.json\",\n  \"version\": 1,\n") != nil ||
-	   !field(&builder, "  ", "id", id, ",\n") {return "", false}
-	if name != "" && !field(&builder, "  ", "name", name, ",\n") {return "", false}
-	if description != "" && !field(&builder, "  ", "description", description, ",\n") {return "", false}
+	   !write_json_string(&builder, "  ", "id", id, ",\n") {return "", false}
+	if name != "" && !write_json_string(&builder, "  ", "name", name, ",\n") {return "", false}
+	if description != "" && !write_json_string(&builder, "  ", "description", description, ",\n") {
+		return "", false
+	}
+	if !write_neovim_theme(&builder, neovim) {return "", false}
 	if write_parts(&builder, "  \"colors\": {\n") != nil {return "", false}
 	for info, token in THEME_TOKENS {
 		separator := token == max(Theme_Token) ? "\n" : ",\n"
 		linked := token in theme.linked
 		value := theme_value_text(token, {theme.colors[token], theme.target[token], linked})
-		if !field(&builder, "    ", info.key, value, separator) {return "", false}
+		if !write_json_string(&builder, "    ", info.key, value, separator) {return "", false}
 	}
 	if write_parts(&builder, "  }\n}\n") != nil {return "", false}
 	text, clone_error := strings.clone(strings.to_string(builder), allocator)
@@ -211,7 +218,15 @@ theme_export :: proc(s: ^Settings, directory: string) -> (path: string, error: o
 		if open_error == .Exist {continue}
 		if open_error != nil {return "", open_error}
 		name := theme_display_name(s, s.theme.name)
-		text, ok := theme_file_text(id, s.active_theme, name, allocator = context.temp_allocator)
+		neovim: Neovim_Theme
+		if custom := custom_theme_find(s, s.theme.name); custom != nil {neovim = custom.neovim}
+		text, ok := theme_file_text(
+			id,
+			s.active_theme,
+			name,
+			neovim = neovim,
+			allocator = context.temp_allocator,
+		)
 		if !ok {
 			_ = os.close(file)
 			_ = os.remove(path)

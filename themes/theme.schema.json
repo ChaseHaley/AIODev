@@ -16,6 +16,17 @@
       "description": "ID of another theme that supplies the colors this file leaves out.",
       "pattern": "^[a-z0-9][a-z0-9_-]*$"
     },
+    "neovim": {
+      "type": "object",
+      "description": "The Neovim colorscheme this theme matches, applied by the AIODev Neovim plugin when it is installed.",
+      "additionalProperties": false,
+      "required": ["plugin", "colorscheme"],
+      "properties": {
+        "plugin": {"type": "string", "description": "The plugin repository that provides the colorscheme.", "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$", "maxLength": 100},
+        "colorscheme": {"type": "string", "description": "The colorscheme to apply.", "pattern": "^[A-Za-z0-9_.-]+$", "maxLength": 64},
+        "background": {"enum": ["dark", "light"], "description": "The 'background' the colorscheme needs; absent, the theme's own light or dark applies."}
+      }
+    },
     "colors": {
       "type": "object",
       "additionalProperties": false,
@@ -78,7 +89,7 @@
         "markdown_link_background": {"type":"string","title":"Link background","description":"Behind links.","anyOf":[{"pattern":"^#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?$"},{"$ref":"#/$defs/colorReference"}]},
         "markdown_wikilink_text": {"type":"string","title":"Wikilink text","description":"[[Note]] links and embeds; follows Link text.","anyOf":[{"pattern":"^#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?$"},{"$ref":"#/$defs/colorReference"}]},
         "markdown_wikilink_background": {"type":"string","title":"Wikilink background","description":"Behind [[Note]] links; follows Link background.","anyOf":[{"pattern":"^#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?$"},{"$ref":"#/$defs/colorReference"}]},
-        "markdown_inline_code_text": {"type":"string","title":"Inline code text","description":"Inline code; none keeps the text around.","anyOf":[{"pattern":"^#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?$"},{"$ref":"#/$defs/colorReference"}]},
+        "markdown_inline_code_text": {"type":"string","title":"Inline code text","description":"Inline code; follows the accent, and none keeps the text around.","anyOf":[{"pattern":"^#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?$"},{"$ref":"#/$defs/colorReference"}]},
         "markdown_inline_code_background": {"type":"string","title":"Inline code background","description":"Behind inline code; follows Code background.","anyOf":[{"pattern":"^#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?$"},{"$ref":"#/$defs/colorReference"}]},
         "markdown_code_block_text": {"type":"string","title":"Code block text","description":"Text of fenced code blocks.","anyOf":[{"pattern":"^#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?$"},{"$ref":"#/$defs/colorReference"}]},
         "markdown_code_block_background": {"type":"string","title":"Code block background","description":"Behind fenced code blocks; follows Code background.","anyOf":[{"pattern":"^#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?$"},{"$ref":"#/$defs/colorReference"}]},

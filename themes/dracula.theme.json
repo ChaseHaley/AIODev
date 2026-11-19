@@ -5,6 +5,10 @@
   "name": "Dracula",
   "author": "Dracula Theme",
   "description": "Adapted from https://github.com/dracula/kitty (MIT). Interface roles follow the scheme's VS Code theme; a color changes only as far as the contrast contracts need. Terminal palette preserves the scheme.",
+  "neovim": {
+    "plugin": "Mofiqul/dracula.nvim",
+    "colorscheme": "dracula"
+  },
   "colors": {
     "window": "#21222c",
     "tab_bar": "#21222c",

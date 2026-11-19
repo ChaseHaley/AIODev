@@ -63,8 +63,14 @@ Markdown_Stamp :: struct {
 Markdown_Gesture :: union {
 	Markdown_Selecting,
 }
+// A double or triple click holds its `unit`, which the drag grows the selection by, around the source
+// range `from`..`to` the click selected. The view scrolls every AUTOSCROLL_INTERVAL while the pointer is
+// past the page's top or bottom edge, as `scroll_at` says; zero means it is not.
 Markdown_Selecting :: struct {
-	pane: u32,
+	pane:      u32,
+	unit:      Maybe(markdown.Edit_Unit),
+	from, to:  int,
+	scroll_at: time.Tick,
 }
 
 // What the pointer is over among a window's Markdown panes: a link, or a pane's heading outline, whose
@@ -94,6 +100,8 @@ Markdown_Fold_Hover :: struct {
 Markdown_Pointer :: struct {
 	markdown_gesture: Markdown_Gesture,
 	markdown_hover:   Markdown_Hover,
+	// The editor's text clicks, which count double and triple clicks.
+	markdown_clicks:  Click_Run,
 }
 
 // The app's Markdown panes, which windows refer to by id, and when the poll next reads their files.
@@ -907,6 +915,22 @@ markdown_link_menu :: proc(
 	return true
 }
 
+// Whether a point is on the page's text, not on its scrollbar or its outline bars.
+@(private = "file", require_results)
+markdown_text_at :: proc(
+	app: ^App,
+	w: ^Window,
+	pane: ^Markdown_Pane,
+	shown: layout.Pane_Rect,
+	x, y: f32,
+) -> bool {
+	if bar, visible := pane_scrollbar_geometry(app, w, shown); visible && ui.scrollbar_contains(bar, x, y) {
+		return false
+	}
+	_, over := markdown_outline_under(app, w, pane, shown, x, y)
+	return !over
+}
+
 // The link a click at a point opens, or -1. A link on a line the editor shows as source is text to
 // edit there, so only Ctrl+click opens it.
 @(private = "file", require_results)
@@ -986,7 +1010,8 @@ markdown_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: input.Mo
 }
 
 // A held pane that left the window or stopped showing its document ends the gesture, since there is
-// nothing left for it to select or scroll.
+// nothing left for it to select or scroll. Past the page's top or bottom edge the page scrolls on a timer
+// (markdown_autoscroll_tick), so a held pointer keeps selecting without moving.
 @(private = "file")
 markdown_held_move :: proc(app: ^App, w: ^Window, x, y: f32) {
 	selecting, held := w.markdown_gesture.(Markdown_Selecting)
@@ -999,15 +1024,72 @@ markdown_held_move :: proc(app: ^App, w: ^Window, x, y: f32) {
 		return
 	}
 	g := markdown_geometry_of(app, w, shown)
-	if y < g.area.y {markdown_scroll(w, pane, shown, int(y - g.area.y))}
-	if y > g.area.y + g.area.height {markdown_scroll(w, pane, shown, int(y - g.area.y - g.area.height))}
-	if markdown_editing(pane) {
-		markdown_edit_point(w, pane, g, x, y, true)
-	} else {
-		ui.markdown_select_at(&pane.view, ui.markdown_offset_at(&pane.view, document, g, x, y), true)
+	markdown_selecting_extend(w, pane, document, g, selecting, x, y)
+	outside := y < g.area.y || y > g.area.y + g.area.height
+	if outside && selecting.scroll_at == {} {
+		selecting.scroll_at = time.tick_add(clock_now(&app.clock), AUTOSCROLL_INTERVAL)
+		w.markdown_gesture = selecting
+	} else if !outside && selecting.scroll_at != {} {
+		selecting.scroll_at = {}
+		w.markdown_gesture = selecting
 	}
 	w.dirty = true
 	pointer_set(app, w, .Text)
+}
+
+// The selection a held press makes follows the pointer to (`x`, `y`), which stays within the page so an
+// edge reaches the line at it.
+@(private = "file")
+markdown_selecting_extend :: proc(
+	w: ^Window,
+	pane: ^Markdown_Pane,
+	document: ^markdown.Document,
+	g: ui.Markdown_Geometry,
+	selecting: Markdown_Selecting,
+	x, pointer_y: f32,
+) {
+	y := clamp(pointer_y, g.area.y, max(g.area.y, g.area.y + g.area.height - 1))
+	switch unit, by_unit := selecting.unit.?; {
+	case !markdown_editing(pane):
+		ui.markdown_select_at(&pane.view, ui.markdown_offset_at(&pane.view, document, g, x, y), true)
+	case by_unit:
+		markdown_edit_unit_drag(w, pane, g, x, y, unit, selecting.from, selecting.to)
+	case:
+		_ = markdown_edit_point(w, pane, g, x, y, true)
+	}
+}
+
+markdown_autoscroll_deadline :: proc(w: ^Window) -> (time.Tick, bool) {
+	selecting, held := w.markdown_gesture.(Markdown_Selecting)
+	return selecting.scroll_at, held && selecting.scroll_at != {}
+}
+
+// Scrolls the page a step toward a held pointer past its top or bottom edge, faster the farther it is,
+// and extends the selection to the line that comes under it.
+markdown_autoscroll_tick :: proc(app: ^App, w: ^Window, now: time.Tick) {
+	selecting, held := w.markdown_gesture.(Markdown_Selecting)
+	if !held || selecting.scroll_at == {} || time.tick_diff(selecting.scroll_at, now) < 0 {return}
+	pane := markdown_find(app, selecting.pane)
+	shown, found := markdown_pane_rect(w, selecting.pane)
+	document := pane != nil ? markdown_document(pane) : nil
+	if !found || document == nil {
+		markdown_gesture_clear(app, w)
+		return
+	}
+	g := markdown_geometry_of(app, w, shown)
+	x, y := w.pointer.x, w.pointer.y
+	distance := y < g.area.y ? y - g.area.y : max(0, y - g.area.y - g.area.height)
+	if distance == 0 {
+		selecting.scroll_at = {}
+		w.markdown_gesture = selecting
+		return
+	}
+	reach := 3 * ui.markdown_line(&pane.view)
+	markdown_scroll(w, pane, shown, clamp(int(distance) / 4, -reach, reach) + (distance < 0 ? -1 : 1))
+	markdown_selecting_extend(w, pane, document, g, selecting, x, y)
+	selecting.scroll_at = time.tick_add(now, AUTOSCROLL_INTERVAL)
+	w.markdown_gesture = selecting
+	w.dirty = true
 }
 
 markdown_press :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) {
@@ -1017,7 +1099,12 @@ markdown_press :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) {
 	pane_focus(app, w, shown.node)
 	if pane == nil {return}
 	if e.button == .Right {
-		if markdown_link_menu(app, w, pane, shown, x, y) {gesture_swallow(w, .Right, .Markdown_Page)}
+		switch {
+		case markdown_link_menu(app, w, pane, shown, x, y): gesture_swallow(w, .Right, .Markdown_Page)
+		case markdown_editing(pane) && markdown_text_at(app, w, pane, shown, x, y):
+			gesture_swallow(w, .Right, .Markdown_Page)
+			markdown_edit_menu_open(app, w, pane, markdown_geometry_of(app, w, shown), x, y)
+		}
 		return
 	}
 	if e.button != .Left {return}
@@ -1026,6 +1113,7 @@ markdown_press :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) {
 	w.dirty = true
 	if pane_scrollbar_press(app, w, shown, x, y) {return}
 	g := markdown_geometry_of(app, w, shown)
+	editing := markdown_editing(pane)
 	// A press on the outline jumps to a heading and never starts a selection.
 	if heading, over := markdown_outline_under(app, w, pane, shown, x, y); over {
 		if heading >= 0 {
@@ -1034,6 +1122,18 @@ markdown_press :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) {
 			ui.markdown_scroll_to_offset(&pane.view, start, int(g.area.height))
 		}
 		return
+	}
+	if editing && .Shift not_in e.modifiers {
+		if count := click_run_count(w.markdown_clicks, pane.id, x, y, e.time_ns); count > 1 {
+			// The first click moved the caret and so changed the layout under the pointer: the word or
+			// line is the one that click hit.
+			unit: markdown.Edit_Unit = count == 2 ? .Word : .Line
+			at := w.markdown_clicks.at
+			from, to := markdown_edit_unit(w, pane, unit, at)
+			w.markdown_clicks = {pane.id, x, y, e.time_ns, count, at}
+			w.markdown_gesture = Markdown_Selecting{pane = pane.id, unit = unit, from = from, to = to}
+			return
+		}
 	}
 	if heading, on_chevron := ui.markdown_fold_at(&pane.view, document, g, x, y); on_chevron {
 		markdown_fold_toggle(pane, heading)
@@ -1049,13 +1149,14 @@ markdown_press :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) {
 		markdown_task_toggle(app, pane, mark)
 		return
 	}
-	if markdown_editing(pane) {
-		markdown_edit_point(w, pane, g, x, y, .Shift in e.modifiers)
+	if editing {
+		at := markdown_edit_point(w, pane, g, x, y, .Shift in e.modifiers)
+		w.markdown_clicks = .Shift in e.modifiers ? Click_Run{} : Click_Run{pane.id, x, y, e.time_ns, 1, at}
 	} else {
 		offset := ui.markdown_offset_at(&pane.view, document, g, x, y)
 		ui.markdown_select_at(&pane.view, offset, .Shift in e.modifiers)
 	}
-	w.markdown_gesture = Markdown_Selecting{pane.id}
+	w.markdown_gesture = Markdown_Selecting{pane = pane.id}
 }
 
 markdown_release :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) -> bool {
