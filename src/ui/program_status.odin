@@ -128,15 +128,15 @@ status_spinner_draw :: proc(list: ^render.Draw_List, r: render.Rect, ink: render
 		reach := smooth((phase - 0.02 - 0.21 * f32(i)) / 0.23)
 		if reach <= 0 {continue}
 		color := ink
-		color.a *= 0.72 * fade * smooth(reach / 0.15)
+		color.a *= 0.85 * fade * smooth(reach / 0.15)
 		if color.a <= 0 {continue}
 		from := point(r, unit, stars[i])
 		to := point(r, unit, stars[i] + (stars[i + 1] - stars[i]) * reach)
-		_ = render.push_segment(list, from, to, 0.86 * unit, color)
+		_ = render.push_segment(list, from, to, 1.5 * unit, color)
 	}
 	for star, i in stars {
 		flash := i == 0 ? bell(phase / 0.18) : bell((phase - 0.17 - 0.21 * f32(i - 1)) / 0.22)
-		radius := (0.85 + 0.22 * flash) * unit
+		radius := (1.15 + 0.3 * flash) * unit
 		color := ink
 		color.a *= 0.61 + 0.39 * flash
 		c := point(r, unit, star)
