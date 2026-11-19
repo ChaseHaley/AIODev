@@ -43,6 +43,7 @@ aio = {}
 ---@overload fun(name: "app.palette_tabs", fields?: aio.fields.app.palette_tabs): aio.Reply?, string?, integer?
 ---@overload fun(name: "app.palette_workspaces", fields?: aio.fields.app.palette_workspaces): aio.Reply?, string?, integer?
 ---@overload fun(name: "app.quit", fields?: aio.fields.app.quit): aio.Reply?, string?, integer?
+---@overload fun(name: "app.restart", fields?: aio.fields.app.restart): aio.Reply?, string?, integer?
 ---@overload fun(name: "app.select", fields: aio.fields.app.select): aio.Reply?, string?, integer?
 ---@overload fun(name: "app.update", fields?: aio.fields.app.update): aio.Reply?, string?, integer?
 ---@overload fun(name: "app.version", fields?: aio.fields.app.version): aio.Reply?, string?, integer?
@@ -1215,6 +1216,16 @@ function aio.app.palette_workspaces(fields) end
 ---@return string? message
 ---@return integer? status
 function aio.app.quit(fields) end
+
+---The fields of app.restart.
+---@class aio.fields.app.restart
+
+---Restart AIODev
+---@param fields? aio.fields.app.restart
+---@return aio.Reply? reply
+---@return string? message
+---@return integer? status
+function aio.app.restart(fields) end
 
 ---The fields of app.select.
 ---@class aio.fields.app.select

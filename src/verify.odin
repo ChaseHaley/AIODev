@@ -1559,12 +1559,13 @@ when AIO_CONTROL {
 		started = true
 	}
 
-	// Answers the request that quit and holds the app's quit until the answer is delivered. A failed
-	// graphics device ends the app regardless, so its answer says so and nothing is held.
+	// Answers the request that quit or restarted and holds the app's exit until the answer is delivered. A
+	// failed graphics device ends the app regardless, so its answer says so and nothing is held.
 	verify_quit :: proc(app: ^App, id: u64, now: time.Tick) {
 		v := &app.verify
+		restarting := app.run == .Restart
 		held := app_quit_hold(app)
-		response := control.Response{ok = held, text = "ok; quitting"}
+		response := control.Response{ok = held, text = restarting ? "ok; restarting" : "ok; quitting"}
 		if !held {response.text = "error: the graphics device was lost; AIODev is exiting"}
 		if err := control.respond(v.server, id, response); err != .None {
 			log.errorf("answering control request failed: %v", err)
