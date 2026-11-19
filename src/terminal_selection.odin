@@ -44,8 +44,8 @@ Selection_Autoscrolling :: struct {
 	deadline: time.Tick,
 }
 
-// How often an autoscrolling drag moves history by a row.
-@(private = "file")
+// How often an autoscrolling drag moves history by a row, or a Markdown page by a step.
+@(private)
 AUTOSCROLL_INTERVAL :: 30 * time.Millisecond
 
 selection_active :: proc(w: ^Window) -> bool {

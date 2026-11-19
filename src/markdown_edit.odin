@@ -311,7 +311,7 @@ markdown_task_toggle :: proc(app: ^App, pane: ^Markdown_Pane, mark: int) {
 	if markdown_pane_reload(pane) {mark_all_dirty(app)}
 }
 
-// Moves the caret to the text under a point, or extends the selection to it.
+// Moves the caret to the text under a point, or extends the selection to it. Returns where the caret is.
 @(private)
 markdown_edit_point :: proc(
 	w: ^Window,
@@ -319,10 +319,50 @@ markdown_edit_point :: proc(
 	g: ui.Markdown_Geometry,
 	x, y: f32,
 	extend: bool,
-) {
+) -> int {
 	e := pane.editor
 	offset := ui.markdown_offset_at(&pane.view, &e.document, g, x, y)
 	markdown.edit_move(&e.buffer, markdown.live_source(&e.document, offset), extend)
+	e.goal_x = -1
+	markdown_editor_sync(pane)
+	w.dirty = true
+	return e.buffer.caret
+}
+
+// Selects the word or line at source offset `at`, as a double or triple click does, and returns the
+// range. The pointer's own position is not asked: the click that placed `at` has since changed the layout.
+@(private)
+markdown_edit_unit :: proc(
+	w: ^Window,
+	pane: ^Markdown_Pane,
+	unit: markdown.Edit_Unit,
+	at: int,
+) -> (
+	from, to: int,
+) {
+	e := pane.editor
+	from, to = markdown.edit_unit_at(&e.buffer, at, unit)
+	e.buffer.anchor, e.buffer.caret = from, to
+	e.goal_x = -1
+	markdown_editor_sync(pane)
+	w.dirty = true
+	return
+}
+
+// A drag after a double or triple click: the selection is the unit the click selected, `from`..`to`,
+// grown by whole units to the one under the point.
+@(private)
+markdown_edit_unit_drag :: proc(
+	w: ^Window,
+	pane: ^Markdown_Pane,
+	g: ui.Markdown_Geometry,
+	x, y: f32,
+	unit: markdown.Edit_Unit,
+	from, to: int,
+) {
+	e := pane.editor
+	offset := ui.markdown_offset_at(&pane.view, &e.document, g, x, y)
+	markdown.edit_select_unit(&e.buffer, from, to, unit, markdown.live_source(&e.document, offset))
 	e.goal_x = -1
 	markdown_editor_sync(pane)
 	w.dirty = true
@@ -377,6 +417,24 @@ markdown_edit_vertical :: proc(
 	e.goal_x, e.reveal = x, true
 }
 
+// Home or End: to the start or end of the caret's row as the pane lays it out, which differs from the
+// line's on a soft-wrapped one; the shared rules take it from there.
+@(private = "file")
+markdown_edit_row_edge :: proc(app: ^App, w: ^Window, pane: ^Markdown_Pane, end, extend: bool) {
+	e := pane.editor
+	b := &e.buffer
+	row_start, row_end := markdown.edit_line_start(b, b.caret), markdown.edit_line_end(b, b.caret)
+	if _, fitted := markdown_edit_fitted(app, w, pane); fitted {
+		document := &e.document
+		display := markdown.live_display(document, b.caret)
+		if start, stop, found := ui.markdown_row_edges(&pane.view, document, display); found {
+			row_start, row_end = markdown.live_source(document, start), markdown.live_source(document, stop)
+		}
+	}
+	target := end ? markdown.edit_end_target(b, row_end) : markdown.edit_home_target(b, row_start)
+	markdown.edit_move(b, target, extend)
+}
+
 // The keys of a pane in edit mode. False for keys it leaves to shortcuts and the pane.
 @(require_results)
 markdown_edit_key :: proc(app: ^App, w: ^Window, pane: ^Markdown_Pane, key: Content_Key) -> bool {
@@ -393,9 +451,54 @@ markdown_edit_key :: proc(app: ^App, w: ^Window, pane: ^Markdown_Pane, key: Cont
 		markdown_edited(app, pane)
 	case .Vertical:
 		markdown_edit_vertical(app, w, pane, result.lines, result.pages, result.extend)
+	case .Row_Edge:
+		markdown_edit_row_edge(app, w, pane, result.end, result.extend)
+		e.goal_x, e.reveal = -1, true
+		markdown_editor_sync(pane)
+	case .Scroll:
+		if shown, found := markdown_pane_rect(w, pane.id); found {
+			markdown_scroll(w, pane, shown, result.lines * ui.markdown_line(&pane.view))
+		}
 	}
 	w.dirty = true
 	return true
+}
+
+// A right-click on the page's text in edit mode: the caret goes to the pointer first unless the point is
+// inside the selection, which stays, and then the edit menu opens there.
+@(private)
+markdown_edit_menu_open :: proc(
+	app: ^App,
+	w: ^Window,
+	pane: ^Markdown_Pane,
+	g: ui.Markdown_Geometry,
+	x, y: f32,
+) {
+	e := pane.editor
+	at := markdown.live_source(&e.document, ui.markdown_offset_at(&pane.view, &e.document, g, x, y))
+	from, to := markdown.edit_selection(&e.buffer)
+	if from == to || at < from || at > to {
+		markdown.edit_move(&e.buffer, at)
+		e.goal_x = -1
+		markdown_editor_sync(pane)
+	}
+	edit_menu_open(app, w, pane.id, &e.buffer, x, y)
+}
+
+// A choice from the edit menu, applied to the text of the pane it was opened for.
+@(private)
+markdown_edit_command :: proc(app: ^App, w: ^Window, id: u32, command: Text_Edit_Command) {
+	pane := markdown_find(app, id)
+	if !markdown_editing(pane) {return}
+	e := pane.editor
+	#partial switch text_edit_command(app, &e.buffer, command) {
+	case .Edited:
+		markdown_edited(app, pane)
+	case .Moved:
+		e.goal_x, e.reveal = -1, true
+		markdown_editor_sync(pane)
+	}
+	w.dirty = true
 }
 
 // Where the caret draws in a pane's view this frame: -1 unless the pane edits and has the keyboard.

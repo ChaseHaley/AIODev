@@ -13,6 +13,7 @@ Pointer_Target :: enum u8 {
 	Divider_Menu,
 	Activity_Menu,
 	Activity_Row_Menu,
+	Edit_Menu,
 	Profile_Menu,
 	Document_Menu,
 	Command_Menu,
@@ -132,6 +133,9 @@ pointer_surfaces := [Pointer_Target]Pointer_Surface {
 	.Activity_Row_Menu = {
 		claims = activity_row_menu_claims, hover = activity_row_menu_hover, press = activity_row_menu_button,
 		modal = true,
+	},
+	.Edit_Menu        = {
+		claims = edit_menu_claims, hover = edit_menu_hover, press = edit_menu_button, modal = true,
 	},
 	.Profile_Menu     = {
 		claims = profile_menu_claims, hover = profile_menu_hover, press = profile_menu_button, modal = true,

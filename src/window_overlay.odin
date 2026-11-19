@@ -12,6 +12,7 @@ Overlay_Surfaces :: struct {
 	divider_menu:      ui.Menu,
 	activity_menu:     ui.Menu,
 	activity_row_menu: ui.Menu,
+	edit_menu:         ui.Menu,
 	profile_menu:      Profile_Menu,
 	document_menu:     Document_Menu,
 	command_menu:      Command_Menu,
@@ -25,6 +26,7 @@ overlay_surfaces_init :: proc(s: ^Overlay_Surfaces) {
 	ui.menu_init(&s.divider_menu)
 	ui.menu_init(&s.activity_menu)
 	ui.menu_init(&s.activity_row_menu)
+	ui.menu_init(&s.edit_menu)
 	profile_menu_init(&s.profile_menu)
 	document_menu_init(&s.document_menu)
 	command_menu_init(&s.command_menu)
@@ -36,6 +38,7 @@ overlay_surfaces_destroy :: proc(w: ^Window) {
 	ui.menu_destroy(&w.divider_menu)
 	ui.menu_destroy(&w.activity_menu)
 	ui.menu_destroy(&w.activity_row_menu)
+	ui.menu_destroy(&w.edit_menu)
 	profile_menu_destroy(&w.profile_menu)
 	document_menu_destroy(w)
 	command_menu_destroy(w)
@@ -59,6 +62,7 @@ Window_Overlay :: union {
 	Overlay_Divider_Menu,
 	Overlay_Activity_Menu,
 	Overlay_Activity_Row_Menu,
+	Overlay_Edit_Menu,
 	Overlay_Profile_Menu,
 	Overlay_Document_Menu,
 	Overlay_Command_Menu,
@@ -113,6 +117,11 @@ Overlay_Activity_Row_Menu :: struct {
 	session: u32,
 }
 
+// The edit menu of a Markdown pane's text, which acts on that pane. Its rows are w.edit_menu.
+Overlay_Edit_Menu :: struct {
+	pane: u32,
+}
+
 Overlay_Profile_Menu :: struct {
 	mode: Profile_Menu_Mode,
 }
@@ -140,6 +149,7 @@ Overlay_Kind :: enum u8 {
 	Divider_Menu,
 	Activity_Menu,
 	Activity_Row_Menu,
+	Edit_Menu,
 	Profile_Menu,
 	Document_Menu,
 	Command_Menu,
@@ -156,6 +166,7 @@ overlay_kind :: proc(app: ^App, w: ^Window) -> Overlay_Kind {
 	case Overlay_Divider_Menu: return .Divider_Menu
 	case Overlay_Activity_Menu: return .Activity_Menu
 	case Overlay_Activity_Row_Menu: return .Activity_Row_Menu
+	case Overlay_Edit_Menu: return .Edit_Menu
 	case Overlay_Profile_Menu: return .Profile_Menu
 	case Overlay_Document_Menu: return .Document_Menu
 	case Overlay_Command_Menu: return .Command_Menu
@@ -219,7 +230,8 @@ overlay_close :: proc(app: ^App, w: ^Window, exit := Overlay_Exit.Cancel) {
 		command_menu_close(&w.command_menu, current.mode)
 	case Overlay_Tab_Menu:
 		submenu_reset(&w.tab_menu.submenu)
-	case Overlay_Divider_Menu, Overlay_Activity_Menu, Overlay_Activity_Row_Menu, Overlay_Profile_Menu:
+	case Overlay_Divider_Menu, Overlay_Activity_Menu, Overlay_Activity_Row_Menu, Overlay_Edit_Menu,
+	     Overlay_Profile_Menu:
 	}
 	w.overlay, w.dirty = nil, true
 }
@@ -244,6 +256,8 @@ overlay_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 		menu = activity_menu_draw(app, w)
 	case Overlay_Activity_Row_Menu:
 		menu = activity_row_menu_draw(app, w)
+	case Overlay_Edit_Menu:
+		menu = edit_menu_draw(app, w)
 	case Overlay_Profile_Menu:
 		menu = profile_menu_draw(app, w)
 	case Overlay_Document_Menu:

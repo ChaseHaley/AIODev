@@ -8,7 +8,9 @@ import "core:unicode/utf8"
 
 // The keys of a multi-line text editor over a `markdown.Edit_Buffer`, shared by every pane or card that
 // edits one: typing, the clipboard chords, undo, and the caret and edit keys. The host keeps what is
-// its own: saving, scrolling, and the vertical moves, which need the lines as it lays them out.
+// its own: saving, scrolling, and the moves that need the lines as it lays them out (vertical moves, and
+// Home and End on a soft-wrapped row).
+// (probe)
 
 // What a key did, so the host can follow it.
 Text_Edit_Kind :: enum {
@@ -22,14 +24,85 @@ Text_Edit_Kind :: enum {
 	Edited,
 	// Up, Down, Page Up or Page Down: the host moves the caret as its lines lay out.
 	Vertical,
+	// Home or End without Ctrl: the host knows where the caret's visual row starts and ends, since a
+	// soft-wrapped line has several, and moves the caret with `markdown.edit_home_target` or
+	// `edit_end_target`.
+	Row_Edge,
+	// Ctrl+Up or Ctrl+Down: the host scrolls its view by a line without moving the caret.
+	Scroll,
 }
 
 Text_Edit :: struct {
 	kind:         Text_Edit_Kind,
-	// For `.Vertical`: lines up (negative) or down, or pages, to move; one of them is set.
+	// For `.Vertical`: lines up (negative) or down, or pages, to move; one of them is set. For `.Scroll`
+	// the lines to scroll by.
 	lines, pages: int,
-	// For `.Vertical`: the selection grows with the caret.
+	// For `.Vertical` and `.Row_Edge`: the selection grows with the caret.
 	extend:       bool,
+	// For `.Row_Edge`: End rather than Home.
+	end:          bool,
+}
+
+// Cut, copy or paste at the buffer's selection, as the chord or the edit menu asks.
+@(require_results)
+text_edit_clipboard :: proc(app: ^App, b: ^markdown.Edit_Buffer, chord: Clipboard_Chord) -> Text_Edit_Kind {
+	switch chord {
+	case .Copy:
+		if text := markdown.edit_selected_text(b); text != "" {clipboard_copy(app, text)}
+	case .Cut:
+		if text := markdown.edit_selected_text(b); text != "" && clipboard_copy(app, text) {
+			if markdown.edit_delete(b, false, false) {return .Edited}
+		}
+	case .Paste:
+		if text, ok := platform.clipboard_get_text(&app.platform, context.temp_allocator); ok {
+			if markdown.edit_insert(b, text_line_endings(text, b.newline)) {return .Edited}
+		}
+	case .None:
+		return .Ignored
+	}
+	return .Handled
+}
+
+// What an editor's edit menu offers, each the same as its chord.
+Text_Edit_Command :: enum u8 {
+	Undo,
+	Redo,
+	Cut,
+	Copy,
+	Paste,
+	Select_All,
+}
+
+// Whether `command` would do anything to the buffer now, for the menu's disabled rows.
+@(require_results)
+text_edit_enabled :: proc(app: ^App, b: ^markdown.Edit_Buffer, command: Text_Edit_Command) -> bool {
+	switch command {
+	case .Undo: return len(b.undo) > 0
+	case .Redo: return len(b.redo) > 0
+	case .Cut, .Copy:
+		from, to := markdown.edit_selection(b)
+		return from != to
+	case .Paste:
+		text, ok := platform.clipboard_get_text(&app.platform, context.temp_allocator)
+		return ok && text != ""
+	case .Select_All: return len(b.text) > b.floor
+	}
+	return false
+}
+
+@(require_results)
+text_edit_command :: proc(app: ^App, b: ^markdown.Edit_Buffer, command: Text_Edit_Command) -> Text_Edit_Kind {
+	switch command {
+	case .Undo: return markdown.edit_undo(b) ? .Edited : .Handled
+	case .Redo: return markdown.edit_redo(b) ? .Edited : .Handled
+	case .Cut: return text_edit_clipboard(app, b, .Cut)
+	case .Copy: return text_edit_clipboard(app, b, .Copy)
+	case .Paste: return text_edit_clipboard(app, b, .Paste)
+	case .Select_All:
+		markdown.edit_select_all(b)
+		return .Moved
+	}
+	return .Handled
 }
 
 // Typed text goes in at the caret: a key's text from Windows, or text with no key of its own, such as an
@@ -61,22 +134,7 @@ text_edit_key :: proc(app: ^App, b: ^markdown.Edit_Buffer, key: Content_Key) -> 
 	}
 	if .Alt in modifiers || .Super in modifiers {return {}}
 	control, shift := .Control in modifiers, .Shift in modifiers
-	switch key.clipboard {
-	case .Copy:
-		if text := markdown.edit_selected_text(b); text != "" {clipboard_copy(app, text)}
-		return {kind = .Handled}
-	case .Cut:
-		if text := markdown.edit_selected_text(b); text != "" && clipboard_copy(app, text) {
-			if markdown.edit_delete(b, false, false) {return {kind = .Edited}}
-		}
-		return {kind = .Handled}
-	case .Paste:
-		if text, ok := platform.clipboard_get_text(&app.platform, context.temp_allocator); ok {
-			if markdown.edit_insert(b, text_line_endings(text, b.newline)) {return {kind = .Edited}}
-		}
-		return {kind = .Handled}
-	case .None:
-	}
+	if kind := text_edit_clipboard(app, b, key.clipboard); kind != .Ignored {return {kind = kind}}
 	edited := false
 	#partial switch logical.key {
 	case .Z:
@@ -103,17 +161,22 @@ text_edit_key :: proc(app: ^App, b: ^markdown.Edit_Buffer, key: Content_Key) -> 
 		case: markdown.edit_move(b, markdown.edit_right(b, b.caret), shift)
 		}
 	case .Arrow_Up, .Arrow_Down:
-		if control {return {}}
-		return {kind = .Vertical, lines = logical.key == .Arrow_Up ? -1 : 1, extend = shift}
+		up := logical.key == .Arrow_Up
+		if control {
+			if shift {return {}}
+			return {kind = .Scroll, lines = up ? -1 : 1}
+		}
+		return {kind = .Vertical, lines = up ? -1 : 1, extend = shift}
 	case .Page_Up, .Page_Down:
 		if control {return {}}
 		return {kind = .Vertical, pages = logical.key == .Page_Up ? -1 : 1, extend = shift}
 	case .Home:
-		markdown.edit_move(b, control ? b.floor : markdown.edit_line_start(b, b.caret), shift)
+		if !control {return {kind = .Row_Edge, extend = shift}}
+		markdown.edit_move(b, b.floor, shift)
 	case .End:
-		markdown.edit_move(b, control ? len(b.text) : markdown.edit_line_end(b, b.caret), shift)
+		if !control {return {kind = .Row_Edge, extend = shift, end = true}}
+		markdown.edit_move(b, len(b.text), shift)
 	case .Backspace, .Delete:
-		if shift {return {}}
 		edited = markdown.edit_delete(b, logical.key == .Delete, control)
 	case .Enter, .Numpad_Enter:
 		if control {return {}}

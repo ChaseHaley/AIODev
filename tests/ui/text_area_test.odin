@@ -514,3 +514,66 @@ a_text_area_claims_the_caret_and_draws_its_shape_and_selection :: proc(t: ^testi
 	_, ink := count(&list, selected_text)
 	testing.expect(t, ink > 0, "selected text takes the selection text colour")
 }
+
+@(test)
+a_second_and_third_click_select_the_word_and_the_line_and_a_drag_grows_them :: proc(t: ^testing.T) {
+	f: Area_Fixture
+	if !area_start(t, &f, "alpha beta gamma\nnext") {return}
+	defer area_stop(&f)
+	box := area_box(&f, area_width(&f, 40), 1, 10)
+	line := ui.text_styled(&f.text, .Body).line_height
+	beta := ui.text_area_caret_rect(box, 7)
+	gamma := ui.text_area_caret_rect(box, 13)
+	testing.expect(t, ui.text_area_pointer(box, beta.x + 1, beta.y + line / 2, true, false, 2))
+	testing.expect_value(t, markdown.edit_selected_text(&f.buffer), "beta")
+	testing.expect(t, ui.text_area_pointer(box, gamma.x + 1, gamma.y + line / 2, false, false))
+	testing.expect_value(t, markdown.edit_selected_text(&f.buffer), "beta gamma")
+	testing.expect(t, ui.text_area_release(&f.area))
+	testing.expect(t, ui.text_area_pointer(box, beta.x + 1, beta.y + line / 2, true, false, 3))
+	testing.expect_value(t, markdown.edit_selected_text(&f.buffer), "alpha beta gamma\n")
+	testing.expect(t, ui.text_area_release(&f.area))
+	// Shift extends from the anchor whatever the count, and a plain press forgets the unit.
+	testing.expect(t, ui.text_area_pointer(box, gamma.x + 1, gamma.y + line / 2, true, true, 2))
+	testing.expect_value(t, f.buffer.anchor, 0)
+	testing.expect_value(t, f.buffer.caret, 13)
+	testing.expect(t, ui.text_area_release(&f.area))
+	testing.expect(t, ui.text_area_pointer(box, beta.x + 1, beta.y + line / 2, true, false))
+	testing.expect(t, ui.text_area_pointer(box, gamma.x + 1, gamma.y + line / 2, false, false))
+	testing.expect_value(t, markdown.edit_selected_text(&f.buffer), "eta ga")
+}
+
+@(test)
+home_and_end_go_to_the_row_first_on_a_wrapped_line :: proc(t: ^testing.T) {
+	f: Area_Fixture
+	if !area_start(t, &f, "aaa bbb ccc ddd") {return}
+	defer area_stop(&f)
+	box := area_box(&f, area_width_of(&f, "aaa bbb"), 1, 10)
+	testing.expect_value(t, len(ui.text_area_lines(&f.area, &f.buffer, &f.text, box.rect.width, 1)), 2)
+	markdown.edit_move(&f.buffer, 10)
+	ui.text_area_row_edge(box, false, false)
+	testing.expect_value(t, f.buffer.caret, 8)
+	ui.text_area_row_edge(box, false, false)
+	testing.expect_value(t, f.buffer.caret, 0)
+	markdown.edit_move(&f.buffer, 2)
+	ui.text_area_row_edge(box, true, false)
+	testing.expect_value(t, f.buffer.caret, 7)
+	ui.text_area_row_edge(box, true, true)
+	testing.expect_value(t, f.buffer.caret, 15)
+	testing.expect_value(t, f.buffer.anchor, 7)
+}
+
+@(test)
+scrolling_by_lines_leaves_the_caret_where_it_is :: proc(t: ^testing.T) {
+	f: Area_Fixture
+	if !area_start(t, &f, "a\na\na\na\na\na\na\na\na\na") {return}
+	defer area_stop(&f)
+	box := area_box(&f, area_width(&f, 20), 1, 4)
+	line := ui.text_styled(&f.text, .Body).line_height
+	markdown.edit_move(&f.buffer, 0)
+	testing.expect(t, ui.text_area_scroll_lines(box, 2))
+	testing.expect_value(t, f.area.scroll, 2 * line)
+	testing.expect_value(t, f.buffer.caret, 0)
+	testing.expect(t, ui.text_area_scroll_lines(box, -5))
+	testing.expect_value(t, f.area.scroll, f32(0))
+	testing.expect(t, !ui.text_area_scroll_lines(box, -1))
+}
