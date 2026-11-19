@@ -205,4 +205,5 @@ settings_apply_running :: proc(app: ^App) {
 	program_icons_reload(app)
 	control_cli_sync(app)
 	turns_apply_settings(app)
+	changes_settings_applied(app)
 }

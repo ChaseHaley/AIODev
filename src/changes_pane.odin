@@ -108,6 +108,22 @@ Changes_Pane :: struct {
 	filter_editor: ui.Text_Field,
 	filter:     Changes_Filter,
 	filter_error: string,
+	// The saved filters (`turns.saved_filters`) the text's tokens were resolved against, owned; the tokens
+	// and the field's atoms made of them; and the saved filters an `@` being typed can complete to, as
+	// slices of the library.
+	filter_library: string,
+	filter_tokens: [dynamic]ui.Filter_Token,
+	filter_atoms: [dynamic]ui.Field_Atom,
+	filter_picks: [dynamic]ui.Filter_Pick,
+	filter_pick_row: int,
+	// An `@` is being typed from byte `filter_pending` to the caret: the text there is neither a token nor
+	// a term, and the picks complete it.
+	filter_typing: bool,
+	filter_pending: int,
+	// The name being typed for a filter the terms are saved as, and why it was refused; owned.
+	filter_name: ui.Text_Field,
+	filter_notice: string,
+	filter_savable: bool,
 	// Paths picked from the file list that show despite the filter, until its text changes; owned keys.
 	revealed:   map[string]struct{},
 	// The turn a selection extends from, and the turn the keys move; -1 for none.
@@ -203,6 +219,7 @@ changes_pane_create :: proc(
 	pane.model.view.first, pane.model.view.last = -1, -1
 	pane.comments.editing, pane.model.view.editing = -1, -1
 	ui.dropdown_init(&pane.dropdown)
+	_ = changes_filter_library_set(pane, app.settings.turns.saved_filters)
 	_ = ui.field_set(&pane.filter_editor, filter)
 	changes_filter_parse(pane)
 	if _, append_error := append(&app.changes_panes, pane); append_error != nil {
@@ -336,6 +353,7 @@ changes_geometry_of :: proc(
 	changes_chips_view(pane)
 	pane.model.view.minimum_contrast = f32(app.settings.turns.diff_minimum_contrast)
 	pane.model.view.wrap = app.settings.turns.diff_long_lines == .Wrap
+	changes_filter_view(pane)
 	mono := ui.text_mono(&w.ui_text, app.family)
 	g := ui.changes_geometry(pane_body_rect(w, shown), w.scale, &pane.model.view, &w.ui_text, &pane.state)
 	ui.changes_layout(&pane.state, &pane.model.view, &w.ui_text, &mono, g.diff.width, w.scale)
@@ -636,8 +654,8 @@ changes_layout_toggle :: proc(app: ^App, w: ^Window, pane: ^Changes_Pane) {
 }
 
 // Opens or closes the diff filter's popover. Opening closes the other popovers and keeps the comment being
-// written, as a list opening does; closing keeps the text.
-@(private = "file")
+// written, as a list opening does; closing keeps the text, which turns an `@` still being typed into a token.
+@(private)
 changes_filter_popover :: proc(app: ^App, w: ^Window, pane: ^Changes_Pane, open: bool) {
 	if pane.state.filter_open == open {return}
 	if open {
@@ -645,6 +663,8 @@ changes_filter_popover :: proc(app: ^App, w: ^Window, pane: ^Changes_Pane, open:
 		changes_list_begin(app, pane)
 	} else {
 		_ = ui.field_release(&pane.filter_editor)
+		pane.state.filter_naming = false
+		changes_filter_typing_end(app, w, pane)
 	}
 	pane.state.filter_open = open
 	w.dirty = true
@@ -676,15 +696,19 @@ changes_filter_edited :: proc(app: ^App, w: ^Window, pane: ^Changes_Pane) {
 	w.dirty = true
 }
 
-// Empties the filter, so every file shows.
+// Empties the filter, tokens included, so every file shows.
 changes_filter_clear :: proc(app: ^App, w: ^Window, pane: ^Changes_Pane) {
 	if changes_filter_text(pane) == "" {return}
 	_ = ui.field_set(&pane.filter_editor, "")
+	pane.filter_typing = false
 	changes_filter_edited(app, w, pane)
 }
 
-// Keys while the filter popover is open: Enter and Escape close it and keep the text, and the field takes
-// its editing keys. Chords the field has no use for go on to the shortcuts.
+// Keys while the filter popover is open. While an `@` is being typed Up and Down move through the saved
+// filters it offers, Enter or Tab completes with the one the keys are on, and Escape only ends the `@`; while
+// a name is being typed they go to it. Otherwise Enter and Escape close the popover and keep the text, Ctrl+S
+// starts naming the field's terms, Space toggles a token that is the selection, and the field takes its
+// editing keys. Chords the field has no use for go on to the shortcuts.
 @(private = "file")
 changes_filter_key :: proc(
 	app: ^App,
@@ -692,19 +716,53 @@ changes_filter_key :: proc(
 	pane: ^Changes_Pane,
 	logical, e: input.Key_Event,
 ) -> bool {
+	if pane.state.filter_naming {return changes_filter_name_key(app, w, pane, logical, e)}
 	modifiers := e.modifiers & {.Control, .Shift, .Alt, .Super}
 	#partial switch logical.key {
-	case .Enter, .Numpad_Enter, .Escape:
-		if modifiers == {} {
+	case .Enter, .Numpad_Enter, .Tab:
+		if modifiers == {} && pane.filter_typing {
+			changes_filter_pick_choose(app, w, pane, pane.filter_pick_row)
+			return true
+		}
+		if modifiers == {} && logical.key != .Tab {
 			changes_filter_popover(app, w, pane, false)
 			return true
 		}
+	case .Escape:
+		if modifiers == {} {
+			if pane.filter_typing {
+				changes_filter_typing_end(app, w, pane)
+			} else {
+				changes_filter_popover(app, w, pane, false)
+			}
+			return true
+		}
+	case .Arrow_Up, .Arrow_Down:
+		if modifiers == {} && pane.filter_typing {
+			step := logical.key == .Arrow_Down ? 1 : -1
+			pane.filter_pick_row = clamp(pane.filter_pick_row + step, 0, len(pane.filter_picks))
+			changes_filter_view(pane)
+			w.dirty = true
+			return true
+		}
+	case .S:
+		if modifiers == {.Control} {
+			changes_filter_name_begin(app, w, pane)
+			return true
+		}
+	}
+	if modifiers == {} && e.text == " " && changes_filter_toggle_selected(app, w, pane) {return true}
+	if e.text != "" && modifiers - {.Shift} == {} {
+		changes_filter_type(app, w, pane, e.text)
+		return true
 	}
 	edit := field_edit_key(app, &pane.filter_editor, logical)
 	switch edit.change {
 	case .Edited:
+		changes_filter_typing(pane, edit.pasted)
 		changes_filter_edited(app, w, pane)
 	case .Moved:
+		changes_filter_typing_end(app, w, pane)
 		w.dirty = true
 	case .None:
 		chord := clipboard_chord(logical) != .None
@@ -713,29 +771,13 @@ changes_filter_key :: proc(
 	return true
 }
 
-// A press in the filter field puts the caret under the pointer, or extends the selection to it; a drag
-// that press started extends it.
-@(private = "file")
-changes_filter_point :: proc(
-	w: ^Window,
-	pane: ^Changes_Pane,
-	g: ui.Changes_Geometry,
-	x: f32,
-	pressed, extend: bool,
-) {
-	box, visible := ui.changes_filter_box(g, &pane.model.view, &w.ui_text)
-	if !visible {return}
-	at := ui.field_box_offset(box, x)
-	if ui.field_pointer(&pane.filter_editor, at, pressed, extend) != .None {w.dirty = true}
-}
-
 // Typed or pasted text goes to the filter field or the open list's search, else to the comment being
 // written.
 changes_text :: proc(app: ^App, w: ^Window, text: string) -> bool {
 	pane := changes_focused(app, w)
 	if pane == nil {return false}
 	if pane.state.filter_open {
-		if ui.field_text(&pane.filter_editor, text) == .Edited {changes_filter_edited(app, w, pane)}
+		changes_filter_text_in(app, w, pane, text)
 		w.dirty = true
 		return true
 	}
@@ -1100,8 +1142,12 @@ changes_cursor :: proc(hit: ui.Changes_Hit, line_mode: bool) -> platform.Cursor_
 		return .Hand
 	case .Turn_List_Row, .Tools_Row:
 		if hit.index >= 0 {return .Hand}
+	case .Filter_Pick:
+		return .Hand
 	case .Filter_Field:
 		if hit.index >= 0 {return .Text}
+	case .Filter_Name:
+		return .Text
 	case .Comment_Editor:
 		return .Text
 	case .Line:
@@ -1193,7 +1239,7 @@ changes_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: input.Mou
 	}
 	if pane.filter_editor.dragging {
 		if .Left in e.buttons {
-			changes_filter_point(w, pane, g, x, false, false)
+			changes_filter_point(app, w, pane, g, x, false, false)
 		} else {
 			_ = ui.field_release(&pane.filter_editor)
 		}
@@ -1227,6 +1273,15 @@ changes_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: input.Mou
 	}
 	hit := ui.changes_hit(g, view, &pane.state, reach, y)
 	shape := changes_cursor(hit, view.select_lines || view.alt)
+	if hit.part == .Filter_Field && hit.index >= 0 {
+		if box, shown := ui.changes_filter_box(g, view, &w.ui_text); shown {
+			if token, _ := ui.filter_field_token_at(box, pane.filter_tokens[:], x); token >= 0 {shape = .Hand}
+		}
+	}
+	if hit.part == .Filter_Pick && pane.filter_pick_row != hit.index {
+		pane.filter_pick_row, w.dirty = hit.index, true
+		changes_filter_view(pane)
+	}
 	if pane.dragging != .None {
 		changes_drag_turns(app, pane, g, hit)
 	} else if c.dragging && .Left in e.buttons {
@@ -1283,9 +1338,13 @@ changes_press :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) {
 	if state.filter_open {
 		#partial switch hit.part {
 		case .Filter_Field:
-			if hit.index >= 0 {changes_filter_point(w, pane, g, x, true, extend)}
+			if hit.index >= 0 {changes_filter_point(app, w, pane, g, x, true, extend)}
 		case .Filter_Clear:
 			changes_filter_clear(app, w, pane)
+		case .Filter_Pick:
+			changes_filter_pick_choose(app, w, pane, hit.index)
+		case .Filter_Name:
+			changes_filter_name_point(w, pane, g, x, extend)
 		case:
 			changes_filter_popover(app, w, pane, false)
 		}
@@ -1393,6 +1452,7 @@ changes_release :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) -> b
 		if pane.state.press != {} {pane.state.press, cleared = {}, true}
 		if pane.dragging != .None {pane.dragging, cleared = .None, true}
 		if ui.field_release(&pane.filter_editor) {cleared = true}
+		if ui.field_release(&pane.filter_name) {cleared = true}
 		if pane.comments.dragging {cleared = true}
 		changes_comments_release(app, w, pane)
 	}
@@ -1636,6 +1696,19 @@ when AIO_CONTROL {
 	}
 
 	@(private = "file")
+	changes_token_state_name :: proc(state: ui.Filter_Token_State) -> string {
+		switch state {
+		case .Known:
+			return "known"
+		case .Unknown:
+			return "unknown"
+		case .Invalid:
+			return "invalid"
+		}
+		return ""
+	}
+
+	@(private = "file")
 	changes_highlighted :: proc(view: ^ui.Changes_View, file: int) -> bool {
 		if file >= len(view.highlights) {return false}
 		for spans in view.highlights[file].lines {if len(spans) > 0 {return true}}
@@ -1698,6 +1771,16 @@ when AIO_CONTROL {
 				if pane.state.filter_open {
 					filter_field_rect = g.filter_field
 					if changes_filter_text(pane) != "" {filter_clear_rect = g.filter_clear}
+					if box, shown := ui.changes_filter_box(g, view, &w.ui_text); shown {
+						for _, i in pane.filter_tokens {
+							rect := ui.filter_field_token_rect(box, pane.filter_tokens[:], i)
+							state_rect(r, changes_report_key("filter_token", i, "rect"), rect)
+						}
+					}
+					for row, i in g.filter_picks {
+						state_rect(r, changes_report_key("filter_pick", g.filter_pick_first + i, "rect"), row)
+					}
+					state_rect(r, "changes.filter_name_rect", g.filter_name)
 				}
 				if pane.state.files_open {
 					choices, anchor := changes_dropdown_choices(pane), changes_dropdown_anchor(pane, g)
@@ -1797,6 +1880,23 @@ when AIO_CONTROL {
 		state_value(r, "changes.filter_active", pane != nil && pane.model.view.filter_active)
 		state_value(r, "changes.filter_invalid", pane != nil && pane.model.view.filter_invalid)
 		state_text(r, "changes.filter_error", pane != nil ? pane.filter_error : "")
+		state_value(r, "changes.filter_tokens", pane != nil ? len(pane.filter_tokens) : 0)
+		state_value(r, "changes.filter_typing", pane != nil && pane.filter_typing)
+		state_value(r, "changes.filter_pick_row", pane != nil ? pane.filter_pick_row : 0)
+		state_value(r, "changes.filter_naming", pane != nil && pane.state.filter_naming)
+		state_value(r, "changes.filter_savable", pane != nil && pane.filter_savable)
+		state_text(r, "changes.filter_notice", pane != nil ? pane.filter_notice : "")
+		state_text(r, "changes.saved_filters", app.settings.turns.saved_filters)
+		if pane != nil {
+			for token, i in pane.filter_tokens {
+				state_text(r, changes_report_key("filter_token", i, "name"), token.name)
+				state_value(r, changes_report_key("filter_token", i, "on"), !token.off)
+				state_text(r, changes_report_key("filter_token", i, "state"), changes_token_state_name(token.state))
+			}
+			for pick, i in pane.filter_picks {
+				state_text(r, changes_report_key("filter_pick", i, "name"), pick.name)
+			}
+		}
 		state_value(r, "changes.hidden_files", pane != nil ? pane.model.view.hidden_count : 0)
 		state_value(r, "changes.total_files", pane != nil ? pane.model.view.total_files : 0)
 		state_value(r, "changes.shown_added", pane != nil ? pane.model.view.shown_added : 0)
