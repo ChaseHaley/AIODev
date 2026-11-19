@@ -813,3 +813,69 @@ a_reading_and_an_editing_pane_of_one_file_restyle_together :: proc(t: ^testing.T
 		testing.expect_value(t, editor.view.faces[.Body].size_px, reader.view.faces[.Body].size_px)
 	}
 }
+
+// The furthest right any laid-out character reaches, in window pixels, for the document the pane shows now.
+@(private = "file")
+reach_right :: proc(
+	t: ^testing.T,
+	state: ^app.App,
+	w: ^app.Window,
+	pane: ^app.Markdown_Pane,
+) -> (reach, column_right: f32, ok: bool) {
+	g := edit_fitted(state, w, pane)
+	document := app.markdown_document(pane)
+	for offset in 0 ..= len(document.text) {
+		rect, _, found := ui.markdown_caret_at(&pane.view, document, offset)
+		if !found {continue}
+		reach = max(reach, g.left + rect.x)
+	}
+	return reach, g.left + g.width, true
+}
+
+// Whichever line the caret is on, nothing of a document runs past the text column, as when reading:
+// frontmatter, a table, a fenced block and long unbroken words, links and list items included. (Spaces at a
+// line's end hang past the column while the caret is on it, as spaces hang in a wrapped line; they show nothing.)
+@(test)
+no_line_runs_past_the_column_wherever_the_caret_is :: proc(t: ^testing.T) {
+	f: Edit_Fixture
+	defer edit_fixture_destroy(t, &f)
+	source := strings.concatenate(
+		{
+			"---\ntitle: A frontmatter value that is far longer than the narrow column and goes on and on\n",
+			"tags: [alpha, beta, gamma, delta, epsilon, zeta, eta, theta, iota, kappa, lambda]\n---\n\n",
+			"# Heading with a [[Some Note#A Heading|a long alias that keeps going]] and a link\n\n",
+			"https://example.com/a/very/long/url/without/any/breaks/that/keeps/going/and/going/forever/and/ever\n\n",
+			"| Table | A header with a long label |\n|:--|:--|\n",
+			"| cell one with quite long text that wraps | `inline code that is long and unbreakable_______________` |\n\n",
+			"```text\nfenced code line that is far longer than the narrow column allows and must wrap somehow\n```\n\n",
+			"- item with a long line that goes on past the column and wraps around again and again\n",
+			"  - nested item with a long line that goes on past the column and wraps around again\n",
+			"> a quote with long text that goes on past the column and wraps around again and again\n",
+		},
+		context.temp_allocator,
+	)
+	w, pane := edit_fixture_start(t, &f, "Column", source)
+	if pane == nil {return}
+	if !testing.expect(t, app.settings_save_value(&f.state, "markdown.text_width", "300", "set")) {return}
+	slack := f32(2)
+	reading, column, ok := reach_right(t, &f.state, w, pane)
+	if !ok {return}
+	testing.expect(t, reading <= column + slack, fmt.tprintf("reading reaches %v past column %v", reading, column))
+	app.run_action(&f.state, w, .Edit_Markdown)
+	if !testing.expect(t, app.markdown_editing(pane)) {return}
+	edit_press(&f.state, w, .Home, {.Control})
+	worst: f32
+	line := 0
+	for ; line < 80; line += 1 {
+		reach, right, reached := reach_right(t, &f.state, w, pane)
+		if !reached {return}
+		if reach > right + slack && reach - right > worst {
+			worst = reach - right
+			testing.expect(t, false, fmt.tprintf("caret at %v: text reaches %v, column ends %v", pane.editor.buffer.caret, reach, right))
+		}
+		before := pane.editor.buffer.caret
+		edit_press(&f.state, w, .Arrow_Down)
+		if pane.editor.buffer.caret == before {break}
+	}
+	testing.expect(t, line > 10, "the caret walked the document")
+}
