@@ -15,6 +15,8 @@ Color :: [3]u8
 Colors :: struct {
 	foreground, background, cursor: Color,
 	palette:                        [16]Color,
+	// Whether the background is light: the color scheme programs are told of (CSI ? 996 n and mode 2031).
+	light:                          bool,
 }
 
 // color_from_ghostty converts libghostty's RGB struct to the opaque colour value every caller
@@ -94,9 +96,13 @@ Options :: struct {
 }
 
 // Host variables a session accepts on top of the three terminal ones, on the stack of spawn. The
-// app supplies at most five (pane id, instance name, aio path, terminal session key and agent record
-// path); the rest is headroom for a new one.
-MAX_HOST_ENVIRONMENT :: 6
+// app supplies at most seven (pane id, instance name, aio path, terminal session key, agent record
+// path, turns folder and theme record path); the rest is headroom for a new one.
+MAX_HOST_ENVIRONMENT :: 8
+
+// ESC [ ? 997 ; 1 n and its 2 form.
+@(private)
+COLOR_SCHEME_REPORT_MAX :: 16
 
 Wake :: struct {
 	procedure: proc(user: rawptr),
@@ -237,6 +243,8 @@ Session :: struct {
 	read_buffer:                                              [READ_CHUNK]u8,
 	// The mutex guards the capture: the reader thread appends, the main thread starts and stops.
 	recording:                                                Recording,
+	// What set_colors last applied, under `mutex`; a change is what mode 2031 reports.
+	colors:                                                   Colors,
 }
 
 @(private)
@@ -379,6 +387,7 @@ ghostty_create :: proc(s: ^Session, g: Geometry, session_options: Options) -> Er
 	render_hold: ghostty.Terminal_Render_Hold_Fn = on_render_hold
 	semantic_prompt: ghostty.Terminal_Semantic_Prompt_Fn = on_semantic_prompt
 	size: ghostty.Terminal_Size_Fn = on_size
+	color_scheme: ghostty.Terminal_Color_Scheme_Fn = on_color_scheme
 	image_limit := IMAGE_STORAGE_LIMIT
 	unlimited := max(uint)
 	png_decoder_install()
@@ -398,6 +407,7 @@ ghostty_create :: proc(s: ^Session, g: Geometry, session_options: Options) -> Er
 		// Unlimited: the engine's default byte cap, about one page, would prune before the line limit.
 		{.Scrollback_Max_Bytes, &unlimited},
 		{.Size, rawptr(size)},
+		{.Color_Scheme, rawptr(color_scheme)},
 		{.Kitty_Image_Storage_Limit, &image_limit},
 	}
 	for item in options {
@@ -844,6 +854,33 @@ on_write_pty :: proc "c" (terminal: ghostty.Terminal, userdata: rawptr, data: [^
 	}
 }
 
+// The scheme CSI ? 996 n asks for. The reader holds the mutex while libghostty parses.
+@(private)
+on_color_scheme :: proc "c" (
+	terminal: ghostty.Terminal,
+	userdata: rawptr,
+	out_scheme: ^ghostty.Color_Scheme,
+) -> bool {
+	s := (^Session)(userdata)
+	out_scheme^ = s.colors.light ? .Light : .Dark
+	return true
+}
+
+// Tells the program the scheme unasked, as mode 2031 promises; the caller holds the mutex.
+@(private)
+report_color_scheme :: proc(s: ^Session) {
+	report: [COLOR_SCHEME_REPORT_MAX]u8
+	written: uint
+	scheme := s.colors.light ? ghostty.Color_Scheme.Light : .Dark
+	if ghostty.color_scheme_report_encode(scheme, raw_data(report[:]), len(report), &written) != .Success {
+		log.error("term: encoding the color scheme report failed")
+		return
+	}
+	if queue_push(&s.queue, report[:written]) == .Full {
+		log.warn("term: dropped a color scheme report because the input queue has no room")
+	}
+}
+
 @(private)
 on_bell :: proc "c" (terminal: ghostty.Terminal, userdata: rawptr) {
 	sync.atomic_store(&(^Session)(userdata).bell, true)
@@ -979,9 +1016,12 @@ resize :: proc(s: ^Session, geometry: Geometry) {
 	mark_changed(s)
 }
 
+// Applies the colors. A program that enabled mode 2031 is told the color scheme when they changed.
 set_colors :: proc(s: ^Session, colors: Colors) {
 	sync.mutex_lock(&s.mutex)
 	defer sync.mutex_unlock(&s.mutex)
+	changed := colors != s.colors
+	s.colors = colors
 	foreground := ghostty_from_color(colors.foreground)
 	background := ghostty_from_color(colors.background)
 	cursor := ghostty_from_color(colors.cursor)
@@ -997,6 +1037,9 @@ set_colors :: proc(s: ^Session, colors: Colors) {
 	ok &&= ghostty.terminal_set(s.terminal, .Color_Palette, &palette) == .Success
 	if !ok {
 		log.error("term: applying colors failed")
+	}
+	if changed && mode_enabled(s, ghostty.MODE_COLOR_SCHEME_REPORT) {
+		report_color_scheme(s)
 	}
 	mark_changed(s)
 }
