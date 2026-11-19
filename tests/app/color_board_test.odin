@@ -89,3 +89,52 @@ color_board_edits_save_a_custom_copy_reset_and_delete :: proc(t: ^testing.T) {
 	board_center_press(&f, ui.editor_row_parts(p, p.fit_layout, profile_item(p, "theme.delete")).row)
 	testing.expect_value(t, f.state.settings.theme.name, theme)
 }
+
+// A color pointed at another through the inspector saves its key, follows that color when it changes,
+// and unlinking keeps the color it had resolved to.
+@(test)
+color_board_links_follow_the_color_they_point_at :: proc(t: ^testing.T) {
+	f: Profile_Fixture
+	defer profile_fixture_destroy(t, &f)
+	if !profile_fixture_create(t, &f, "color-board-links", PROFILE_FIXTURE_SETTINGS) {return}
+	_ = profile_open(&f)
+	w := f.state.windows[0]
+	app.run_action(&f.state, w, .Customize_Colors)
+	p := &w.editor
+	ui.editor_fit(p, ui.editor_layout({0, 40, 1200, 1400}, 1, true))
+	if !testing.expect(t, ui.color_board_shown(p)) {return}
+	app.settings_reveal_page(p, {key = "colors.cursor"})
+	testing.expect_value(t, ui.color_board_token_key(p), "colors.cursor")
+
+	// The source field lists the theme's colors; Accent is picked from the filtered list.
+	board_center_press(&f, ui.color_board_rect(p, p.fit_layout, .Link))
+	testing.expect_value(t, ui.editor_popup(p), ui.Editor_Popup.Choice)
+	ui.editor_text(p, "accent")
+	for _ in 0 ..< 2 {profile_press(&f, {key = .Arrow_Down})}
+	profile_press(&f, {key = .Enter})
+	copy := strings.clone(f.state.settings.theme.name, context.temp_allocator)
+	testing.expect(t, settings.theme_custom(&f.state.settings))
+	testing.expect(t, profile_file_has(f.path, fmt.tprintf("theme.custom.%s.cursor = accent", copy)))
+	theme := f.state.settings.active_theme
+	testing.expect(t, .Cursor in theme.linked)
+	testing.expect_value(t, theme.target[.Cursor], settings.Theme_Token.Accent)
+	testing.expect_value(t, f.state.settings.colors.cursor, theme.colors[.Accent].rgb)
+	testing.expect(t, ui.color_board_rect(p, p.fit_layout, .Unlink).width > 0)
+
+	// Changing Accent moves the cursor with it, and the saved line for the cursor stays a link.
+	app.settings_reveal_page(p, {key = "colors.accent"})
+	profile_press(&f, {key = .Enter})
+	ui.editor_text(p, "#22cc88")
+	profile_press(&f, {key = .Enter})
+	testing.expect_value(t, f.state.settings.colors.cursor, settings.Color{0x22, 0xcc, 0x88})
+	testing.expect_value(t, f.state.settings.active_theme.colors[.Cursor].rgb, settings.Color{0x22, 0xcc, 0x88})
+	testing.expect(t, profile_file_has(f.path, fmt.tprintf("theme.custom.%s.cursor = accent", copy)))
+	testing.expect(t, profile_file_has(f.path, fmt.tprintf("theme.custom.%s.accent = #22cc88", copy)))
+
+	// Unlink keeps the resolved color as the cursor's own.
+	app.settings_reveal_page(p, {key = "colors.cursor"})
+	board_center_press(&f, ui.color_board_rect(p, p.fit_layout, .Unlink))
+	testing.expect(t, !(.Cursor in f.state.settings.active_theme.linked))
+	testing.expect(t, profile_file_has(f.path, fmt.tprintf("theme.custom.%s.cursor = #22cc88", copy)))
+	testing.expect_value(t, ui.color_board_rect(p, p.fit_layout, .Unlink), render.Rect{})
+}
