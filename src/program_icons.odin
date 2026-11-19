@@ -1,6 +1,5 @@
 package main
 
-import "aio:colour"
 import "aio:localpath"
 import platform_api "aio:platform"
 import "aio:program_art"
@@ -20,11 +19,6 @@ import "core:strings"
 
 @(private)
 PROGRAM_ICON_LIMIT :: 32
-
-// Artwork with a brand colour fainter than this against the tab background uses the tab text
-// colour instead.
-@(private)
-PROGRAM_ART_CONTRAST :: 3
 
 // An icon's slot is free, then pending while its job reads it, then ready or missing until it is
 // reused or reloaded. A pending icon's path and pixels are borrowed by its job, so it is never freed.
@@ -315,7 +309,7 @@ program_named_source :: proc(
 		} else if !program_icon_missing(app, want, size, lookup) {return want, true}
 	}
 	if has_art {
-		paint := program_art_paint(app, art)
+		paint := program_art_paint(app)
 		want = {source = .Artwork, path = program_art.canonical(art), art = art, paint = paint}
 		if size == 0 {
 			if program_icon_find(&app.program_icons, want, 0, {.Ready}) != nil {return want, true}
@@ -352,20 +346,15 @@ program_named_file :: proc(app: ^App, name: string, art: program_art.Art, has_ar
 	return path, err == .None
 }
 
-// Artwork is drawn in its brand colours when every one stands out from the tab background,
-// otherwise wholly in the tab text colour, so dark logos stay visible on dark themes and light ones
-// on light themes, and a multi-colour logo is never partly recoloured.
+// Artwork is coloured layer by layer when the worker draws it (program_art.ink): a brand colour
+// that reaches program_art.CONTRAST against the tab bar stays, a fainter hue is darkened or
+// lightened until it does, and a faint black, grey or white takes the tab text colour. The tab bar
+// is what tabs and rail rows draw icons on, and the darkest surface of every bundled light theme, so
+// a darkened colour holds on the lighter pane headers, Activity rows and menus too.
 @(private)
-program_art_paint :: proc(app: ^App, art: program_art.Art) -> (paint: program_art.Paint) {
-	paint.text = app.settings.active_theme.colors[.Tab_Text].rgb
-	for layer in art.layers {
-		if !layer.branded {continue}
-		if colour.contrast_ratio(colour.rgba(layer.colour), app.theme.tab_bar) < PROGRAM_ART_CONTRAST {
-			paint.mono = true
-			return
-		}
-	}
-	return
+program_art_paint :: proc(app: ^App) -> program_art.Paint {
+	colors := &app.settings.active_theme.colors
+	return {text = colors[.Tab_Text].rgb, background = colors[.Tab_Bar].rgb}
 }
 
 when AIO_CONTROL {
