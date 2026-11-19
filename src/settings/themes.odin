@@ -352,7 +352,7 @@ THEME_TOKENS :: [Theme_Token]Token_Info {
 	.Md_Inline_Code_Text = {
 		"markdown_inline_code_text",
 		"Inline code text",
-		"Inline code; none keeps the text around.",
+		"Inline code; follows the accent, and none keeps the text around.",
 		.Clear,
 	},
 	.Md_Inline_Code_Background = {
@@ -675,6 +675,7 @@ TOKEN_DEFAULT_LINKS := #partial [Theme_Token]Maybe(Theme_Token) {
 	.Md_Link_Text              = .Accent,
 	.Md_Wikilink_Text          = .Md_Link_Text,
 	.Md_Wikilink_Background    = .Md_Link_Background,
+	.Md_Inline_Code_Text       = .Accent,
 	.Md_Inline_Code_Background = .Code_Background,
 	.Md_Code_Block_Text        = .Text,
 	.Md_Code_Block_Background  = .Code_Background,

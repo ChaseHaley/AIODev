@@ -123,7 +123,8 @@ the_shipped_defaults_draw_with_the_shared_colors_only :: proc(t: ^testing.T) {
 			   glyph.color != theme.accent_text {other += 1}
 		}
 		testing.expect_value(t, other, 0)
-		testing.expect_value(t, glyphs_in(&p, theme.accent), 4)
+		// The link text and the inline code, which follows the accent.
+		testing.expect_value(t, glyphs_in(&p, theme.accent), 4 + 4)
 		fills, _ := rects_in(&p, theme.code_background)
 		testing.expect_value(t, fills, 1)
 		// The quote's bar and the two rules of the table, and the checked box in the accent.

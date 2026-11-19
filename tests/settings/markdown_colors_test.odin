@@ -32,6 +32,7 @@ markdown_colors_default_to_the_shared_colors_in_every_shipped_theme :: proc(t: ^
 		}
 		// Each draws what Markdown drew from the shared colors: the same colors, not copies.
 		testing.expect_value(t, theme.colors[.Md_Link_Text], theme.colors[.Accent])
+		testing.expect_value(t, theme.colors[.Md_Inline_Code_Text], theme.colors[.Accent])
 		testing.expect_value(t, theme.colors[.Md_Wikilink_Text], theme.colors[.Accent])
 		testing.expect_value(t, theme.colors[.Md_Quote_Text], theme.colors[.Muted])
 		testing.expect_value(t, theme.colors[.Md_Table_Border], theme.colors[.Border])
