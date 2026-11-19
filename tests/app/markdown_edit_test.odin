@@ -777,3 +777,39 @@ edit_mode_lays_out_with_the_reading_modes_style :: proc(t: ^testing.T) {
 		markdown.live_display(app.markdown_document(pane), 0))
 	testing.expect(t, found && g.left + rect.x == reading_layout.left, "the caret's line starts at the column's edge")
 }
+
+// Two panes on one file, one reading and one editing, take every style change together: both lay the same
+// paragraph out in the same column, whichever setting changed and whichever pane was open first.
+@(test)
+a_reading_and_an_editing_pane_of_one_file_restyle_together :: proc(t: ^testing.T) {
+	f: Edit_Fixture
+	defer edit_fixture_destroy(t, &f)
+	words := "WRAPSTART the quick brown fox jumps over the lazy dog again and again until it wraps WRAPEND"
+	source := strings.concatenate({"# Title\n\n", words, "\n\nlast\n"}, context.temp_allocator)
+	w, reader := edit_fixture_start(t, &f, "TwoPanes", source)
+	if reader == nil {return}
+	node := app.window_tree(w).focus
+	if !testing.expect(t, app.markdown_open_placed(&f.state, w, node, f.file, .Split_Down)) {return}
+	if !testing.expect_value(t, len(f.state.markdown_panes), 2) {return}
+	editor := f.state.markdown_panes[1]
+	app.run_action(&f.state, w, .Edit_Markdown)
+	if !testing.expect(t, app.markdown_editing(editor) && !app.markdown_editing(reader)) {return}
+
+	changes := [?][2]string {
+		{"markdown.text_width", "300"},
+		{"markdown.font_size", "18"},
+		{"markdown.text_width", "420"},
+		{"markdown.line_height", "2"},
+	}
+	for change in changes {
+		if !testing.expect(t, app.settings_save_value(&f.state, change[0], change[1], "set")) {return}
+		read, read_ok := paragraph_layout(t, &f.state, w, reader, "WRAPSTART", "WRAPEND")
+		edit, edit_ok := paragraph_layout(t, &f.state, w, editor, "WRAPSTART", "WRAPEND")
+		if !read_ok || !edit_ok {return}
+		testing.expect_value(t, edit.rows, read.rows)
+		testing.expect_value(t, edit.right - edit.left, read.right - read.left)
+		testing.expect_value(t, editor.view.width, reader.view.width)
+		testing.expect_value(t, editor.view.faces[.Body].line_height, reader.view.faces[.Body].line_height)
+		testing.expect_value(t, editor.view.faces[.Body].size_px, reader.view.faces[.Body].size_px)
+	}
+}
