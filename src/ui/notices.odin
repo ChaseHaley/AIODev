@@ -56,9 +56,6 @@ NOTICE_SWEEP :: 1200 * time.Millisecond
 NOTICE_SWEEP_SHARE :: f32(0.3)
 @(private)
 NOTICE_SWEEP_CURVE :: settings.Motion_Curve{p = {0.4, 0, 0.6, 1}}
-// One turn of the spinner, the period of the working status spinner.
-@(private)
-NOTICE_SPIN :: 1200 * time.Millisecond
 
 Notice_Kind :: enum u8 {
 	Info,
@@ -688,7 +685,7 @@ notice_content_draw :: proc(
 	mark := render.Rect{l.chip.x + (l.chip.width - icon) / 2, l.chip.y + (l.chip.height - icon) / 2, icon, icon}
 	if item.duration == 0 {
 		n.spinning ||= d.spin
-		notice_spinner_draw(list, mark, color, d.spin ? notice_phase(d.now, NOTICE_SPIN) : 0, scale)
+		status_spinner_draw(list, mark, color, d.spin ? notice_phase(d.now, STATUS_SPIN_PERIOD) : STATUS_SPIN_STILL)
 	} else {
 		icon_draw(list, symbol, mark, color, ICON_BUTTON, scale)
 	}
@@ -766,25 +763,6 @@ notice_line_draw :: proc(
 	}
 	if item.card.left <= 0 {return}
 	draw_rect(list, {rect = {box.x, y, box.width * item.card.left, thickness}, color = color})
-}
-
-// A working spinner in the notice's colour: a faint ring with a dot running round it.
-@(private)
-notice_spinner_draw :: proc(
-	list: ^render.Draw_List, area: render.Rect, color: render.Color, phase, scale: f32,
-) {
-	size := min(area.width, area.height)
-	stroke := max(1, math.round(1.5 * scale))
-	track := color
-	track.a *= NOTICE_TINT_BORDER
-	draw_rect(list, {rect = area, color = track, radius = pill_radius(area), stroke = stroke})
-	dot := max(2 * scale, size * 0.3)
-	angle := phase * 2 * math.PI - math.PI / 2
-	orbit := (size - stroke) / 2
-	cx := area.x + area.width / 2 + math.cos(angle) * orbit
-	cy := area.y + area.height / 2 + math.sin(angle) * orbit
-	dot_rect := render.Rect{cx - dot / 2, cy - dot / 2, dot, dot}
-	draw_rect(list, {rect = dot_rect, color = color, radius = pill_radius(dot_rect)})
 }
 
 // Where `now` falls in a repeating `period`, from 0 up to 1.
