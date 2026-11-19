@@ -129,8 +129,7 @@ custom_theme_value :: proc(
 		if clause := theme_link_issue(parsed.token, value, link); clause != "" {
 			return "", fmt.tprintf("%s%s.", strings.to_upper(clause[:1], context.temp_allocator), clause[1:])
 		}
-		tokens := THEME_TOKENS
-		if tokens[parsed.token].kind == .Translucent {
+		if token_alpha(parsed.token) {
 			return "", "Expected a color such as #rrggbb or #rrggbbaa."
 		}
 		return "", "Expected a color such as #rrggbb."
@@ -230,8 +229,7 @@ parse_custom_theme_key :: proc(
 		if problem != .None {
 			message := theme_link_issue(token, value, problem)
 			if message == "" {
-				tokens := THEME_TOKENS
-				expected := tokens[token].kind == .Translucent ? "#rrggbb or #rrggbbaa" : "#rrggbb"
+				expected := token_alpha(token) ? "#rrggbb or #rrggbbaa" : "#rrggbb"
 				joined, message_error := strings.concatenate(
 					{"invalid color \"", value, "\", expected ", expected},
 					context.temp_allocator,

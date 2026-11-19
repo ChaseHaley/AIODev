@@ -73,7 +73,9 @@ theme_field_schema :: proc(builder: ^strings.Builder, field: Theme_Field) -> boo
 		first := true
 		for info in THEME_TOKENS {
 			pattern := "^#[0-9a-fA-F]{6}$"
-			if info.kind == .Translucent {pattern = "^#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?$"}
+			if info.kind == .Translucent || info.kind == .Clear {
+				pattern = "^#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?$"
+			}
 			if info.kind == .Optional {pattern = "^(#[0-9a-fA-F]{6})?$"}
 			title, title_error := json.marshal(info.title, allocator = context.temp_allocator)
 			description, description_error := json.marshal(info.description, allocator = context.temp_allocator)

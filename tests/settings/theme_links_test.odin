@@ -5,6 +5,16 @@ import "core:strings"
 import "core:testing"
 import fixtures "../fixtures"
 
+// The colors a theme follows because it says so: those that follow by default are left out, as every
+// theme follows them.
+explicit_links :: proc(t: settings.Theme) -> bit_set[settings.Theme_Token] {
+	linked := t.linked
+	for follows, token in settings.TOKEN_DEFAULT_LINKS {
+		if follows != nil {linked -= {token}}
+	}
+	return linked
+}
+
 @(test)
 a_followed_color_takes_the_color_it_ends_at_and_chains_resolve :: proc(t: ^testing.T) {
 	s, d, err := parse_themes(
@@ -23,7 +33,11 @@ a_followed_color_takes_the_color_it_ends_at_and_chains_resolve :: proc(t: ^testi
 	testing.expect_value(t, active.colors[.Pane_Focus], settings.Theme_Color{0x11, 0x22, 0x33, 255})
 	testing.expect_value(t, active.colors[.Focus], settings.Theme_Color{0x11, 0x22, 0x33, 255})
 	testing.expect_value(t, active.colors[.Cursor_Text], base.colors[.Accent_Text])
-	testing.expect_value(t, active.linked, bit_set[settings.Theme_Token]{.Cursor, .Focus, .Pane_Focus, .Cursor_Text})
+	testing.expect_value(
+		t,
+		explicit_links(active),
+		bit_set[settings.Theme_Token]{.Cursor, .Focus, .Pane_Focus, .Cursor_Text},
+	)
 	testing.expect_value(t, active.target[.Focus], settings.Theme_Token.Pane_Focus)
 	testing.expect_value(t, s.colors.cursor, settings.Color{0x11, 0x22, 0x33})
 	testing.expect_value(t, settings.theme_cursor(active), settings.Color{0x11, 0x22, 0x33})
@@ -77,7 +91,7 @@ colors_that_follow_each_other_in_a_loop_fall_back_with_a_diagnostic :: proc(t: ^
 	for token in ([?]settings.Theme_Token{.Text, .Muted, .Faint, .Tab_Text}) {
 		testing.expect_value(t, s.active_theme.colors[token], fallback.colors[token])
 	}
-	testing.expect_value(t, s.active_theme.linked, bit_set[settings.Theme_Token]{})
+	testing.expect_value(t, explicit_links(s.active_theme), bit_set[settings.Theme_Token]{})
 	testing.expect_value(t, s.active_theme.colors[.Accent], settings.Theme_Color{1, 2, 3, 255})
 }
 
@@ -101,7 +115,7 @@ a_link_to_an_unknown_color_or_one_that_may_be_empty_is_refused :: proc(t: ^testi
 	testing.expect_value(t, s.active_theme.colors[.Text], base.colors[.Text])
 	testing.expect_value(t, s.active_theme.colors[.Muted], base.colors[.Muted])
 	testing.expect_value(t, s.active_theme.colors[.Faint], settings.Theme_Color{10, 11, 12, 255})
-	testing.expect_value(t, s.active_theme.linked, bit_set[settings.Theme_Token]{})
+	testing.expect_value(t, explicit_links(s.active_theme), bit_set[settings.Theme_Token]{})
 }
 
 @(test)
@@ -111,7 +125,7 @@ no_shipped_theme_follows_a_color :: proc(t: ^testing.T) {
 		theme, ok := fixtures.shipped_theme_file(file)
 		if !ok {continue}
 		count += 1
-		testing.expect_value(t, theme.linked, bit_set[settings.Theme_Token]{})
+		testing.expect_value(t, explicit_links(theme), bit_set[settings.Theme_Token]{})
 	}
 	testing.expect(t, count >= 20)
 }
