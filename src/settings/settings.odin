@@ -578,6 +578,7 @@ Turns_Settings :: struct {
 	diff_filter:           string,
 	diff_minimum_contrast: f64,
 	quick_labels:          string,
+	saved_filters:         string,
 }
 Window_Settings :: struct {
 	columns, rows, padding: int,
@@ -726,6 +727,7 @@ Setting_Validator :: enum {
 	Padding_Groups,
 	Program_Icons,
 	Quick_Labels,
+	Saved_Filters,
 	// A motion context's value, read for the context its key names.
 	Motion,
 }
@@ -1547,7 +1549,8 @@ SCHEMA :: [?]Schema_Entry {
 		default_value = "",
 		valid = {0, 256},
 		description = "The filter a new Agent changes pane starts with: space-separated regular expressions on " +
-			"file paths; a term starting with ! hides matching files. Empty shows every file.",
+			"file paths; a term starting with ! hides matching files; @name uses a saved filter and ~@name " +
+			"keeps it off. Empty shows every file.",
 	},
 	{
 		key = "turns.diff_minimum_contrast",
@@ -1570,6 +1573,18 @@ SCHEMA :: [?]Schema_Entry {
 		validator = .Quick_Labels,
 		description = "Labels for annotating Agent changes: " + QUICK_LABELS_EXAMPLE + ". The first nine take " +
 			"Alt+1 to Alt+9 in order. The instruction goes to the agent with the label.",
+	},
+	{
+		key = SAVED_FILTERS_KEY,
+		title = "Saved filters",
+		kind = .String,
+		offset = offset_of(Settings, turns) + offset_of(Turns_Settings, saved_filters),
+		default_value = "",
+		valid = {0, SAVED_FILTERS_MAX},
+		control = .Group,
+		validator = .Saved_Filters,
+		description = "Named diff filters for Agent changes: " + SAVED_FILTERS_EXAMPLE + ". Type @ in the " +
+			"filter field to use one; a filter's pattern takes the field's own terms.",
 	},
 	{
 		key = "shell.default_profile",
@@ -2020,6 +2035,12 @@ value_parse :: proc(
 			if !padding_groups_valid(value) {
 				buffer: [192]u8
 				issue, err := problem(.Invalid_Value, allocator, padding_groups_rules(buffer[:]))
+				return nil, issue, err
+			}
+		case .Saved_Filters:
+			if !saved_filters_valid(value) {
+				buffer: [384]u8
+				issue, err := problem(.Invalid_Value, allocator, saved_filters_rules(buffer[:]))
 				return nil, issue, err
 			}
 		case .Quick_Labels:
