@@ -21,6 +21,8 @@ Theme :: struct {
 	scrollbar_track, scrollbar, scrollbar_hover, scrollbar_active: render.Color,
 	// Markdown code, inline code and frontmatter fills.
 	code_background: render.Color,
+	// The colours of Markdown's elements.
+	markdown: Markdown_Colors,
 	// The fills behind added and removed lines of a diff.
 	diff_added, diff_removed: render.Color,
 	// The text cursor in every text surface, and the text under a block of it; the terminal's cursor
@@ -82,6 +84,7 @@ theme_from :: proc(t: settings.Theme, interface: settings.Interface_Settings) ->
 		scrollbar_hover = c(t, .Scrollbar_Hover),
 		scrollbar_active = c(t, .Scrollbar_Active),
 		code_background = c(t, .Code_Background),
+		markdown = markdown_colors_from(t),
 		diff_added = c(t, .Diff_Added),
 		diff_removed = c(t, .Diff_Removed),
 		// Light mode's hover is paper: the opaque raised-surface colour, so the seat drawn

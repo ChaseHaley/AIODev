@@ -107,9 +107,19 @@ checkbox_rect :: proc(x, top, height, scale: f32) -> render.Rect {
 }
 
 checkbox_draw :: proc(list: ^render.Draw_List, box: render.Rect, checked: bool, theme: Theme, scale: f32) {
-	fill := checked ? theme.accent : theme.border
+	checkbox_paint(list, box, checked, checked ? theme.accent : theme.border, theme.accent_text, scale)
+}
+
+// A checkbox in the given colours: `fill` is its box and `tick` the mark of a checked one.
+checkbox_paint :: proc(
+	list: ^render.Draw_List,
+	box: render.Rect,
+	checked: bool,
+	fill, tick: render.Color,
+	scale: f32,
+) {
 	draw_rect(list, {rect = box, color = fill, radius = RADIUS_CONTROL * scale})
-	if checked {icon_draw(list, .Check, box, theme.accent_text, ICON_INDICATOR, scale)}
+	if checked && tick.a > 0 {icon_draw(list, .Check, box, tick, ICON_INDICATOR, scale)}
 }
 
 // A secondary text button: the raised surface with a hairline border and a centred label. The

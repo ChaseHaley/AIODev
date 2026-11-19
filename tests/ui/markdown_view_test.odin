@@ -280,6 +280,7 @@ only_the_hovered_link_is_underlined :: proc(t: ^testing.T) {
 	fit(&f, g.width)
 	theme: ui.Theme
 	theme.accent = {0, 0, 1, 1}
+	theme.markdown.link.text = theme.accent
 	underlines: [3]int
 	lefts: [3]f32
 	for hover, i in ([3]int{-1, 0, 1}) {
@@ -440,6 +441,9 @@ code_fills_take_the_code_background_token :: proc(t: ^testing.T) {
 	fit(&f, g.width)
 	theme: ui.Theme
 	theme.code_background = {0.25, 0.5, 0.75, 0.125}
+	// Both fills follow the token by default; the page's colours are resolved from the theme.
+	theme.markdown.inline_code.background = theme.code_background
+	theme.markdown.code_block.background = theme.code_background
 	testing.expect_value(t, ui.markdown_draw(&f.view, &f.doc, g, &list, &f.text, theme), render.Build_Status.Ok)
 	fills := 0
 	for rect in list.rects {if rect.color == theme.code_background {fills += 1}}
