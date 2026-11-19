@@ -81,6 +81,10 @@ Lua     aio exec runs a Lua script with the aio API against AIODev, or one actio
         asks AIODev for your actions and copies the built-in definitions when AIODev is not running.
         Both use the init.lua the running AIODev loads; --data-dir names an instance's data folder
         only when AIODev is not running.
+Neovim  Panes name the AIODev theme file in $AIODEV_THEME_FILE. To make Neovim in a pane follow the theme,
+        add this to init.lua (one line; the plugin is the nvim folder beside aio.exe):
+        if vim.env.AIODEV_CLI then vim.opt.rtp:append(vim.fs.dirname(vim.env.AIODEV_CLI) .. "/nvim");
+        require("aiodev_theme").setup() end
 Hooks   aio agent-session runs from a Claude Code or Codex SessionStart hook and records the
         session the hook names, so the pane can resume it; the "Install agent session hooks"
         command sets it up.
