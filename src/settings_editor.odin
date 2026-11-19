@@ -113,6 +113,10 @@ settings_page_build :: proc(app: ^App, source: string, view: ^ui.Editor_View) ->
 		notify(app, .Error, "Could not build the quick labels.")
 		return
 	}
+	if ui.editor_saved_filters_load(p, s.turns.saved_filters) != nil {
+		notify(app, .Error, "Could not build the saved filters.")
+		return
+	}
 	// Profiles are one dense table. The model rows come from the resolved profile list; each becomes
 	// a table row plus its inline editor rows, which stay hidden until the row expands.
 	table, table_error := ui.profile_table_build(&s.profiles, profile_command_exists)
@@ -496,6 +500,11 @@ editor_outcome :: proc(app: ^App, w: ^Window, outcome: ui.Editor_Outcome) {
 			editor_labels_action(app, w, edit, &kept)
 		}
 		return
+	case .Filter_Action:
+		if edit, ok := request.(ui.Filter_Edit); ok {
+			editor_filters_action(app, w, edit, &kept)
+		}
+		return
 	case .Profile_Action:
 		editor_profile_action(app, w, request)
 		return
@@ -515,6 +524,11 @@ editor_outcome :: proc(app: ^App, w: ^Window, outcome: ui.Editor_Outcome) {
 	if row.label_field != .None {
 		value := strings.clone(ui.field_string(&p.value), context.temp_allocator)
 		editor_labels_edit(app, w, {kind = .Field, key = row.key, value = value})
+		return
+	}
+	if row.filter_field != .None {
+		value := strings.clone(ui.field_string(&p.value), context.temp_allocator)
+		editor_filters_edit(app, w, {kind = .Field, key = row.key, value = value})
 		return
 	}
 	// Motion rows write a context's whole text or a curve or preset change, never their own key.
@@ -577,6 +591,8 @@ editor_outcome :: proc(app: ^App, w: ^Window, outcome: ui.Editor_Outcome) {
 		editor_labels_action(app, w, {kind = .Add}, &kept)
 	case .Label_Reset:
 		editor_labels_action(app, w, {kind = .Reset}, &kept)
+	case .Filter_Add:
+		editor_filters_action(app, w, {kind = .Add}, &kept)
 	}
 }
 
@@ -610,6 +626,10 @@ editor_kept_save :: proc(app: ^App, w: ^Window, kept: ^ui.Editor_Kept) {
 		}
 		if row.label_field != .None {
 			editor_labels_edit(app, w, {kind = .Field, key = row.key, value = kept.value}, kept = true)
+			return
+		}
+		if row.filter_field != .None {
+			editor_filters_edit(app, w, {kind = .Field, key = row.key, value = kept.value}, kept = true)
 			return
 		}
 		editor_setting_save(app, w, &row, kept.value, kept = true)
@@ -1323,6 +1343,11 @@ when AIO_CONTROL {
 		state_value(r, "settings.labels.dragging", ui.editor_order_dragging(p, .Quick_Labels))
 		state_value(r, "settings.labels.drag_target", ui.editor_order_target(p))
 		state_text(r, "settings.labels.value", app.settings.turns.quick_labels)
+		state_text(r, "settings.filters.rows", settings_page_row_rects(p, page, .Filters))
+		state_value(r, "settings.filters.expanded", p.filter_expanded)
+		state_value(r, "settings.filters.dragging", ui.editor_order_dragging(p, .Saved_Filters))
+		state_value(r, "settings.filters.drag_target", ui.editor_order_target(p))
+		state_text(r, "settings.filters.value", app.settings.turns.saved_filters)
 		state_text(r, "settings.process.rows", settings_page_row_rects(p, page, .Process))
 		state_value(r, "settings.process.expanded", p.process_expanded)
 		state_value(r, "settings.process.dragging", ui.editor_order_dragging(p, .Process_Groups))
@@ -1414,6 +1439,7 @@ when AIO_CONTROL {
 		Profile,
 		Opener,
 		Labels,
+		Filters,
 	}
 
 	// A table's rows as key@x,y,w,h (process) or id@x,y,w,h (profile, link program), joined by ';',
@@ -1442,6 +1468,9 @@ when AIO_CONTROL {
 				name = row.opener
 			case .Labels:
 				if row.kind != .Quick_Label {continue}
+				name = row.key
+			case .Filters:
+				if row.kind != .Saved_Filter {continue}
 				name = row.key
 			}
 			rect := ui.editor_row_parts(p, page, index).row
