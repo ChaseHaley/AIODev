@@ -13,6 +13,13 @@ Text_Field :: struct {
 	cursor, anchor: int,
 	dragging:       bool,
 	caret:          Field_Caret,
+	// Spans of `bytes` that the caret steps over and Backspace and Delete remove whole. The owner keeps them
+	// in order and apart and sets them again after every edit; the field never owns them.
+	atoms:          []Field_Atom,
+}
+
+Field_Atom :: struct {
+	start, end: int,
 }
 
 Field_Change :: enum {
@@ -84,18 +91,27 @@ field_text :: proc(f: ^Text_Field, text: string) -> Field_Change {
 	return change
 }
 
+// The edge of the atom a motion landed in the middle of, in the direction it was going.
+@(private)
+atom_edge :: proc(f: ^Text_Field, at: int, forward: bool) -> int {
+	for atom in f.atoms {
+		if at > atom.start && at < atom.end {return forward ? atom.end : atom.start}
+	}
+	return at
+}
+
 @(private)
 rune_left :: proc(f: ^Text_Field, at: int) -> int {
 	if at <= 0 {return 0}
 	_, n := utf8.decode_last_rune(f.bytes[:at])
-	return at - n
+	return atom_edge(f, at - n, false)
 }
 
 @(private)
 rune_right :: proc(f: ^Text_Field, at: int) -> int {
 	if at >= len(f.bytes) {return len(f.bytes)}
 	_, n := utf8.decode_rune(f.bytes[at:])
-	return at + n
+	return atom_edge(f, at + n, true)
 }
 
 // Word motion skips spaces, then the run of nonspace text beyond them.

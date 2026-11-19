@@ -44,7 +44,17 @@ FILTER_POPOVER_WIDTH :: f32(360)
 @(private = "file")
 FILTER_PLACEHOLDER :: "Show files matching…"
 @(private = "file")
-FILTER_HINT :: "Space-separated regular expressions; !term hides matches"
+FILTER_HINT :: "Space-separated regular expressions; !term hides; @ for saved"
+@(private = "file")
+FILTER_SAVE_HINT :: "Ctrl+S saves these terms as a filter"
+@(private = "file")
+FILTER_NAME_PLACEHOLDER :: "Name this filter"
+@(private = "file")
+FILTER_NAME_HINT :: "Enter saves, Escape cancels"
+@(private = "file")
+FILTER_MANAGE_LABEL :: "Edit filters…"
+@(private = "file")
+FILTER_PICK_ROWS :: 6
 @(private = "file")
 FILTER_CLEAR_LABEL :: "Clear"
 
@@ -565,7 +575,8 @@ filter_bar_place :: proc(g: ^Changes_Geometry, text: ^Text, y: f32) {
 }
 
 // The filter popover under the filter circle, or under ⋯ while the circles are collapsed, right-aligned
-// to it inside the pane: the field, with its clear button while it has text, and a hint line below.
+// to it inside the pane: the field, with its clear button while it has text, and below it a hint line, the
+// rows of the saved filters an `@` can complete to, or the name field of a filter being saved.
 @(private)
 filter_popover_place :: proc(g: ^Changes_Geometry, view: ^Changes_View, text: ^Text) {
 	s := g.scale
@@ -579,13 +590,41 @@ filter_popover_place :: proc(g: ^Changes_Geometry, view: ^Changes_View, text: ^T
 	y := g.row.y + g.row.height + SPACE_1 * s
 	small := text_styled(text, .Detail)
 	field := math.round(HEIGHT_STANDARD * s)
-	g.filter_popover = {x, y, width, math.round(2 * inset + field + SPACE_2 * s + small.line_height)}
 	g.filter_field = {x + inset, y + inset, width - 2 * inset, field}
+	height := 2 * inset + field + SPACE_2 * s + small.line_height
+	below := g.filter_field.y + field
+	switch {
+	case view.filter_naming:
+		g.filter_name = {g.filter_field.x, below + SPACE_2 * s, g.filter_field.width, field}
+		height += field + SPACE_2 * s
+	case view.filter_pick_open:
+		place_picks(g, view, x, below + SPACE_1 * s, width)
+		height = inset + field + SPACE_1 * s + f32(len(g.filter_picks)) * math.round(HEIGHT_STANDARD * s) +
+			OVERLAY_PADDING * s
+	}
+	g.filter_popover = {x, y, width, math.round(height)}
 	if view.filter_editor != nil && len(view.filter_editor.bytes) > 0 {
 		size := HEIGHT_COMPACT * s
 		f := g.filter_field
 		g.filter_clear = {f.x + f.width - SPACE_1 * s - size, f.y + (f.height - size) / 2, size, size}
 	}
+}
+
+// Lays out the rows of the saved filters an `@` can complete to under the field, at most
+// FILTER_PICK_ROWS of them, scrolled so the row the keys are on shows; the last row is Edit filters….
+@(private = "file")
+place_picks :: proc(g: ^Changes_Geometry, view: ^Changes_View, x, top, width: f32) {
+	s := g.scale
+	total := len(view.filter_picks) + 1
+	count := min(total, FILTER_PICK_ROWS)
+	rects, err := make([]render.Rect, count, context.temp_allocator)
+	if err != nil {return}
+	g.filter_pick_first = clamp(view.filter_pick_row - count + 1, 0, total - count)
+	height := math.round(HEIGHT_STANDARD * s)
+	for i in 0 ..< count {
+		rects[i] = {x + OVERLAY_PADDING * s, top + f32(i) * height, width - 2 * OVERLAY_PADDING * s, height}
+	}
+	g.filter_picks = rects
 }
 
 // The filter field's editing box, short of the clear button; false without an editor or a field.
@@ -669,8 +708,43 @@ filter_bar_draw :: proc(
 	)
 }
 
-// The open filter popover: the field (outlined in the error colour while the filter is invalid), its
-// clear button, and the hint or the error below.
+// The rows of the saved filters offered for an `@` being typed: the highlighted one has the hover fill, each
+// shows its name and, fading, its pattern; the row past the last filter opens Settings on them.
+@(private = "file")
+filter_picks_draw :: proc(
+	list: ^render.Draw_List, text: ^Text, theme: Theme, g: Changes_Geometry, view: ^Changes_View,
+) -> render.Build_Status {
+	s := g.scale
+	body, small := text_styled(text, .Body), text_styled(text, .Detail)
+	for rect, i in g.filter_picks {
+		index := g.filter_pick_first + i
+		if index == view.filter_pick_row {
+			draw_rect(list, {rect = rect, color = theme.hover, radius = RADIUS_CONTROL * s})
+		}
+		x, right := rect.x + SPACE_2 * s, rect.x + rect.width - SPACE_2 * s
+		baseline := baseline_in(rect.y, rect.height, &body)
+		if index >= len(view.filter_picks) {
+			status := draw_fading_text(&body, list, FILTER_MANAGE_LABEL, x, baseline, theme.muted, right - x)
+			if status != .Ok {return status}
+			continue
+		}
+		pick := view.filter_picks[index]
+		name := min(text_width(&body, pick.name), right - x)
+		if status := draw_text(&body, list, pick.name, x, baseline, theme.text, name); status != .Ok {return status}
+		pattern := x + name + SPACE_2 * s
+		if pattern >= right {continue}
+		pattern_baseline := baseline_in(rect.y, rect.height, &small)
+		status := draw_fading_text(
+			&small, list, pick.pattern, pattern, pattern_baseline, theme.faint, right - pattern,
+		)
+		if status != .Ok {return status}
+	}
+	return .Ok
+}
+
+// The open filter popover: the field (outlined in the error colour while the filter is invalid) with the
+// saved filters in it as tokens, its clear button, and below it the hint or the error, the saved filters an
+// `@` can complete to, or the name field of a filter being saved.
 @(private)
 filter_popover_draw :: proc(
 	list: ^render.Draw_List,
@@ -688,13 +762,16 @@ filter_popover_draw :: proc(
 	defer clip_scope_close(list, scope)
 	if panel_draw(list, popover_panel(g.filter_popover, s), theme) != .None {return .Ok}
 	field := g.filter_field
-	box_draw(list, field, theme, !view.filter_invalid, s)
+	box_draw(list, field, theme, !view.filter_invalid && !view.filter_naming, s)
 	if view.filter_invalid {
 		ring := render.Rect{field.x - 2 * s, field.y - 2 * s, field.width + 4 * s, field.height + 4 * s}
 		draw_rect(list, {rect = ring, color = theme.error, radius = (RADIUS_CONTROL + 2) * s, stroke = 2 * s})
 	}
 	if box, shown := changes_filter_box(g, view, text); shown {
-		status := field_box_draw(box, list, theme, field_box_baseline(box), true, FILTER_PLACEHOLDER)
+		baseline := field_box_baseline(box)
+		status := filter_field_draw(
+			box, view.filter_tokens, list, theme, baseline, !view.filter_naming, FILTER_PLACEHOLDER, pointer,
+		)
 		if status != .Ok {return status}
 	}
 	if g.filter_clear.width > 0 {
@@ -704,11 +781,29 @@ filter_popover_draw :: proc(
 		)
 		if err != .None {return .Ok}
 	}
+	if len(g.filter_picks) > 0 {return filter_picks_draw(list, text, theme, g, view)}
 	small := text_styled(text, .Detail)
 	hint, ink := FILTER_HINT, theme.muted
-	if view.filter_invalid {hint, ink = clip_bytes(view.filter_error, CHANGES_CLIP_BYTES), theme.error}
-	baseline := field.y + field.height + SPACE_2 * s + small.ascent
-	return draw_fading_text(&small, list, hint, field.x, baseline, ink, field.width)
+	hint_y := field.y + field.height + SPACE_2 * s
+	notice: [96]u8
+	switch {
+	case view.filter_naming:
+		name := g.filter_name
+		box_draw(list, name, theme, view.filter_notice == "", s)
+		box := field_box_standard(view.filter_name, text, name, s)
+		status := field_box_draw(box, list, theme, field_box_baseline(box), true, FILTER_NAME_PLACEHOLDER)
+		if status != .Ok {return status}
+		hint, ink = FILTER_NAME_HINT, theme.muted
+		if view.filter_notice != "" {hint, ink = clip_bytes(view.filter_notice, CHANGES_CLIP_BYTES), theme.error}
+		hint_y = name.y + name.height + SPACE_2 * s
+	case view.filter_invalid:
+		hint, ink = clip_bytes(view.filter_error, CHANGES_CLIP_BYTES), theme.error
+	case view.filter_unknown != "":
+		hint, ink = fmt.bprintf(notice[:], "No saved filter named %s", view.filter_unknown), theme.warning
+	case view.filter_savable:
+		hint = FILTER_SAVE_HINT
+	}
+	return draw_fading_text(&small, list, hint, field.x, hint_y + small.ascent, ink, field.width)
 }
 
 // A "+N" marker beside the strip for the `hidden` turns it can't show on that side; nothing when none.
