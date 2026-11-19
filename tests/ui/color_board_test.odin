@@ -374,7 +374,7 @@ color_board_points_a_color_at_another_and_unlinks_it :: proc(t: ^testing.T) {
 
 	// Custom color, the list's first choice, unlinks the same way.
 	board_press(&p, l, ui.color_board_rect(&p, l, .Link))
-	ui.editor_key(&p, key({key = .Home}))
+	for _ in 0 ..< 4 {ui.editor_key(&p, key({key = .Arrow_Up}))}
 	testing.expect_value(t, ui.editor_key(&p, key({key = .Enter})), ui.Editor_Outcome.Save)
 	testing.expect_value(t, ui.field_string(&p.value), "#ececf1")
 }
