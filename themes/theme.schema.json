@@ -16,6 +16,17 @@
       "description": "ID of another theme that supplies the colors this file leaves out.",
       "pattern": "^[a-z0-9][a-z0-9_-]*$"
     },
+    "neovim": {
+      "type": "object",
+      "description": "The Neovim colorscheme this theme matches, applied by the AIODev Neovim plugin when it is installed.",
+      "additionalProperties": false,
+      "required": ["plugin", "colorscheme"],
+      "properties": {
+        "plugin": {"type": "string", "description": "The plugin repository that provides the colorscheme.", "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$", "maxLength": 100},
+        "colorscheme": {"type": "string", "description": "The colorscheme to apply.", "pattern": "^[A-Za-z0-9_.-]+$", "maxLength": 64},
+        "background": {"enum": ["dark", "light"], "description": "The 'background' the colorscheme needs; absent, the theme's own light or dark applies."}
+      }
+    },
     "colors": {
       "type": "object",
       "additionalProperties": false,

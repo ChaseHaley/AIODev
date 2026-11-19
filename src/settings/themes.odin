@@ -255,13 +255,15 @@ Theme :: struct {
 // A theme from a file or the settings file: the colors it sets over its base, another theme's ID.
 // Without a base, missing colors come from the default theme. `name` is free display text; the ID
 // stays the stable key. `base_set` and `name_set` record explicit lines, so a repeated one is
-// reported like any duplicate key. `external` marks a theme file.
+// reported like any duplicate key. `external` marks a theme file, the only kind that can name a
+// Neovim colorscheme; a base never passes its `neovim` on, since changed colors no longer match it.
 Custom_Theme :: struct {
 	id, base, name:     string,
 	colors:             [Theme_Token]Theme_Color,
 	overrides:          bit_set[Theme_Token],
 	base_set, name_set: bool,
 	external:           bool,
+	neovim:             Neovim_Theme,
 }
 
 token_find :: proc(key: string) -> (Theme_Token, bool) {
@@ -340,6 +342,7 @@ theme_terminal :: proc(t: Theme) -> Color_Settings {
 		background                 = t.colors[.Background].rgb,
 		cursor                     = theme_cursor(t),
 		cursor_text                = theme_cursor_text(t),
+		light                      = t.terminal_light,
 		selection_background       = t.colors[.Selection_Background].rgb,
 		search_foreground          = t.colors[.Search_Foreground].rgb,
 		search_background          = t.colors[.Search_Background].rgb,

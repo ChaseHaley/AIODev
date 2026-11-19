@@ -5,6 +5,10 @@
   "name": "Palenight",
   "author": "Drew Tempelmeyer and Joshua Dick",
   "description": "Adapted from https://github.com/drewtempelmeyer/palenight.vim (MIT). Interface roles follow the scheme's VS Code theme; a color changes only as far as the contrast contracts need. Terminal palette preserves the scheme.",
+  "neovim": {
+    "plugin": "drewtempelmeyer/palenight.vim",
+    "colorscheme": "palenight"
+  },
   "colors": {
     "window": "#202330",
     "tab_bar": "#202330",

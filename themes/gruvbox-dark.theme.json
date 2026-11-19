@@ -5,6 +5,11 @@
   "name": "Gruvbox Dark",
   "author": "morhetz",
   "description": "Adapted from https://github.com/morhetz/gruvbox (MIT). Interface role colors tuned for text contrast; terminal palette preserves the scheme.",
+  "neovim": {
+    "plugin": "ellisonleao/gruvbox.nvim",
+    "colorscheme": "gruvbox",
+    "background": "dark"
+  },
   "colors": {
     "window": "#1d2021",
     "tab_bar": "#1d2021",
