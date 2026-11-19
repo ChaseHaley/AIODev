@@ -90,6 +90,7 @@ inputs_destroy :: proc(inputs: ^Inputs) {
 		for text in ([?]string{file.path, file.issue, file.theme.id, file.theme.base, file.theme.name}) {
 			delete(text, allocator)
 		}
+		neovim_theme_destroy(file.theme.neovim, allocator)
 	}
 	delete(inputs.theme_files)
 	for shell in inputs.detected {
@@ -114,10 +115,13 @@ theme_file_keep :: proc(
 		return nil
 	}
 	kept.theme = theme
-	kept.theme.id, kept.theme.base, kept.theme.name = "", "", ""
+	kept.theme.id, kept.theme.base, kept.theme.name, kept.theme.neovim = "", "", "", {}
 	kept.theme.id = strings.clone(theme.id, inputs.allocator) or_return
 	kept.theme.base = strings.clone(theme.base, inputs.allocator) or_return
 	kept.theme.name = strings.clone(theme.name, inputs.allocator) or_return
+	if theme.neovim.colorscheme != "" {
+		kept.theme.neovim = neovim_theme_clone(theme.neovim, inputs.allocator) or_return
+	}
 	return nil
 }
 

@@ -26,7 +26,17 @@ theme_color_edit :: proc(
 	updated, created, issue: string,
 	error: Theme_Edit_Error,
 ) {
-	if _, found := token_find(token_key); !found {return "", "", "", .Unavailable}
+	token, found := token_find(token_key)
+	if !found {return "", "", "", .Unavailable}
+	if followed, problem := theme_value_parse(token, value, .Permissive); problem == .None && followed.linked {
+		linked, target := s.active_theme.linked, s.active_theme.target
+		linked += {token}
+		target[token] = followed.target
+		if loop := theme_loop_text(linked, &target); loop != "" {
+			issue = fmt.tprintf("That would make colors follow each other in a loop: %s.", loop)
+			return "", "", issue, .Invalid
+		}
+	}
 	revision, clone_error := strings.clone(source, allocator)
 	if clone_error != nil {return "", "", "", .Allocation}
 	defer delete(revision, allocator)
@@ -94,7 +104,8 @@ theme_duplicate :: proc(
 		tokens := THEME_TOKENS
 		for token in custom.overrides {
 			key := custom_theme_field_key(id, tokens[token].key)
-			text := theme_color_text(token, custom.colors[token])
+			linked := token in custom.linked
+			text := theme_value_text(token, {custom.colors[token], custom.target[token], linked})
 			if text == "" {continue}
 			if _, error = theme_edit_line(&revision, key, text, allocator); error != .None {return}
 		}

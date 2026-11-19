@@ -5,6 +5,10 @@
   "name": "Nord",
   "author": "Sven Greb",
   "description": "Adapted from https://github.com/nordtheme/nord (MIT). Interface role colors tuned for text contrast; terminal palette preserves the scheme.",
+  "neovim": {
+    "plugin": "gbprod/nord.nvim",
+    "colorscheme": "nord"
+  },
   "colors": {
     "window": "#242933",
     "tab_bar": "#242933",

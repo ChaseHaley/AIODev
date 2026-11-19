@@ -4,6 +4,10 @@
   "id": "tokyonight-moon",
   "name": "Tokyo Night Moon",
   "description": "Terminal palette from folke/tokyonight.nvim extras/kitty (MIT).",
+  "neovim": {
+    "plugin": "folke/tokyonight.nvim",
+    "colorscheme": "tokyonight-moon"
+  },
   "colors": {
     "window": "#1b1d2b",
     "tab_bar": "#1b1d2b",

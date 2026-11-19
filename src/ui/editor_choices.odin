@@ -4,6 +4,7 @@ import "core:strings"
 
 // The selected row's choices as the shared dropdown shows them.
 editor_dropdown_choices :: proc(p: ^Editor, row: ^Editor_Row) -> Dropdown_Choices {
+	if popup, open := p.mode.(Editor_Choice_Popup); open && popup.link {return board_link_choices(p, row)}
 	return {
 		choices = row.choices,
 		labels = row.choice_labels,
@@ -24,6 +25,11 @@ editor_dropdown :: proc(p: ^Editor, l: Editor_Layout) -> (c: Dropdown_Choices, a
 	row := editor_row(p)
 	if row == nil || editor_popup(p) != .Choice {return}
 	a.bounds = l.page
+	if board_link_open(p) {
+		a.field = color_board_link_rect(p, l)
+		a.row = a.field
+		return editor_dropdown_choices(p, row), a, true
+	}
 	if p.selected >= p.scroll && p.selected < p.scroll + l.rows {
 		parts := editor_row_parts(p, l, p.selected)
 		a.field, a.row = parts.field, parts.row

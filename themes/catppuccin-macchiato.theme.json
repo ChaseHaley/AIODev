@@ -5,6 +5,10 @@
   "name": "Catppuccin Macchiato",
   "author": "Catppuccin",
   "description": "Adapted from https://github.com/catppuccin/kitty/blob/main/themes/macchiato.conf (MIT). Interface roles follow the scheme's VS Code theme; a color changes only as far as the contrast contracts need. Terminal palette preserves the scheme.",
+  "neovim": {
+    "plugin": "catppuccin/nvim",
+    "colorscheme": "catppuccin-macchiato"
+  },
   "colors": {
     "window": "#181926",
     "tab_bar": "#181926",

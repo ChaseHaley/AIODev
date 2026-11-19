@@ -5,6 +5,10 @@
   "name": "One Dark",
   "author": "GitHub Inc.",
   "description": "Adapted from https://github.com/atom/one-dark-syntax (MIT). Interface roles follow the scheme's VS Code theme; a color changes only as far as the contrast contracts need. Terminal palette preserves the scheme.",
+  "neovim": {
+    "plugin": "navarasu/onedark.nvim",
+    "colorscheme": "onedark"
+  },
   "colors": {
     "window": "#21252b",
     "tab_bar": "#21252b",

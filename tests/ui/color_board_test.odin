@@ -42,6 +42,10 @@ board_fixture :: proc(t: ^testing.T, p: ^ui.Editor) -> ui.Editor_Layout {
 			kind = .Optional_Color, action = .Theme_Color}, "Shell Text"},
 	}
 	for r in rows {testing.expect_value(t, ui.editor_add(p, r.row, r.group), nil)}
+	// A color row is named by its key without the prefix, which the page's owner sets as `ref`.
+	for &row in p.rows {
+		if strings.has_prefix(row.key, "colors.") {row.ref = strings.clone(row.key[len("colors."):])}
+	}
 	for &group in p.groups {
 		switch group.title {
 		case "Manage Theme":
@@ -165,7 +169,7 @@ color_board_keyboard_moves_edits_and_walks_like_a_form :: proc(t: ^testing.T) {
 		control: ui.Board_Control,
 	}
 	stops := [?]Stop{{"theme.display_name", .Tile}, {"theme.duplicate", .Tile}, {"theme.delete", .Tile},
-		{"colors.window", .Hex}}
+		{"colors.window", .Link}, {"colors.window", .Hex}}
 	for stop in stops {
 		ui.editor_key(&p, key({key = .Tab}))
 		testing.expect_value(t, ui.editor_row(&p).key, stop.key)
@@ -200,6 +204,8 @@ color_board_keyboard_moves_edits_and_walks_like_a_form :: proc(t: ^testing.T) {
 	ui.editor_key(&p, key({key = .Tab}))
 	ui.editor_key(&p, key({key = .Tab}))
 	ui.editor_key(&p, key({key = .Tab}))
+	ui.editor_key(&p, key({key = .Tab}))
+	testing.expect_value(t, p.board.control, ui.Board_Control.Link)
 	ui.editor_key(&p, key({key = .Tab}))
 	testing.expect_value(t, p.board.control, ui.Board_Control.Hex)
 	ui.editor_key(&p, key({key = .Tab}))
@@ -304,4 +310,95 @@ color_board_ring_slides_between_tiles_and_settles :: proc(t: ^testing.T) {
 	ui.editor_animate(&p, true, test_frame(time.tick_add(later, 80 * time.Millisecond + TEST_FRAME_PERIOD)))
 	testing.expect(t, !ui.editor_animating(&p))
 	testing.expect(t, !ui.editor_hover(&p, l, x, y), "the same hover changes nothing")
+}
+
+// The saved page the owner would publish after a link or unlink: the row shows the color it resolves to.
+@(private)
+board_follow :: proc(p: ^ui.Editor, key, link, value: string) {
+	for &row in p.rows {
+		if row.key != key {continue}
+		delete(row.link)
+		delete(row.value)
+		row.link, row.value = strings.clone(link), strings.clone(value)
+	}
+}
+
+@(test)
+color_board_points_a_color_at_another_and_unlinks_it :: proc(t: ^testing.T) {
+	p: ui.Editor
+	defer ui.editor_destroy(&p)
+	l := board_fixture(t, &p)
+	cursor := ui.editor_row_parts(&p, l, board_item(&p, "colors.cursor")).row
+	board_press(&p, l, cursor)
+	testing.expect_value(t, ui.color_board_token_key(&p), "colors.cursor")
+	link := ui.color_board_rect(&p, l, .Link)
+	testing.expect(t, link.width > 0)
+	testing.expect_value(t, ui.color_board_rect(&p, l, .Unlink), render.Rect{})
+
+	// The source field opens a list of the colors this one may follow: Custom color first, then every
+	// other color that always has a value, so not itself and not the optional Selection text.
+	testing.expect_value(t, board_press(&p, l, link), ui.Editor_Outcome.Changed)
+	testing.expect_value(t, ui.editor_popup(&p), ui.Editor_Popup.Choice)
+	links := &p.board.links
+	if testing.expect_value(t, links.count, 6) {
+		testing.expect_value(t, links.choices[0], "")
+		testing.expect_value(t, links.choices[1], "window")
+		testing.expect_value(t, links.choices[4], "accent")
+		for choice in links.choices[:links.count] {testing.expect(t, choice != "cursor")}
+	}
+	// Escape closes it without a change; the keyboard stays on the source field.
+	testing.expect_value(t, ui.editor_key(&p, key({key = .Escape})), ui.Editor_Outcome.Changed)
+	testing.expect_value(t, ui.editor_popup(&p), ui.Editor_Popup.None)
+	testing.expect_value(t, p.board.control, ui.Board_Control.Link)
+
+	// Enter reopens it, and picking Accent saves the color's key as its value.
+	ui.editor_key(&p, key({key = .Enter}))
+	testing.expect_value(t, ui.editor_popup(&p), ui.Editor_Popup.Choice)
+	for _ in 0 ..< 4 {ui.editor_key(&p, key({key = .Arrow_Down}))}
+	testing.expect_value(t, ui.editor_key(&p, key({key = .Enter})), ui.Editor_Outcome.Save)
+	testing.expect_value(t, ui.field_string(&p.value), "accent")
+	testing.expect_value(t, ui.editor_popup(&p), ui.Editor_Popup.None)
+
+	// Once saved the tile follows Accent: Unlink appears, and keeps the resolved color as its own.
+	board_follow(&p, "colors.cursor", "accent", "#ff8800")
+	unlink := ui.color_board_rect(&p, l, .Unlink)
+	testing.expect(t, unlink.width > 0)
+	testing.expect(t, ui.color_board_rect(&p, l, .Link).width < link.width)
+	testing.expect_value(t, board_press(&p, l, unlink), ui.Editor_Outcome.Save)
+	testing.expect_value(t, ui.field_string(&p.value), "#ff8800")
+
+	// Reset applies to a link even when the color it resolves to matches its base.
+	board_follow(&p, "colors.cursor", "accent", "#ececf1")
+	reset := ui.color_board_rect(&p, l, .Reset)
+	testing.expect_value(t, board_press(&p, l, reset), ui.Editor_Outcome.Reset)
+
+	// Custom color, the list's first choice, unlinks the same way.
+	board_press(&p, l, ui.color_board_rect(&p, l, .Link))
+	for _ in 0 ..< 4 {ui.editor_key(&p, key({key = .Arrow_Up}))}
+	testing.expect_value(t, ui.editor_key(&p, key({key = .Enter})), ui.Editor_Outcome.Save)
+	testing.expect_value(t, ui.field_string(&p.value), "#ececf1")
+}
+
+@(test)
+color_board_never_offers_a_target_that_would_make_a_loop :: proc(t: ^testing.T) {
+	p: ui.Editor
+	defer ui.editor_destroy(&p)
+	l := board_fixture(t, &p)
+	// Window follows Pane, which follows Surface: Surface may follow neither of them.
+	board_follow(&p, "colors.window", "pane", "#121215")
+	board_follow(&p, "colors.pane", "surface", "#1b1b20")
+	surface := ui.editor_row_parts(&p, l, board_item(&p, "colors.surface")).row
+	board_press(&p, l, surface)
+	board_press(&p, l, ui.color_board_rect(&p, l, .Link))
+	links := &p.board.links
+	testing.expect_value(t, links.count, 4)
+	for choice in links.choices[:links.count] {
+		testing.expect(t, choice != "window" && choice != "pane" && choice != "surface", choice)
+	}
+	// Accent, which nothing follows, may follow any of the others.
+	ui.editor_key(&p, key({key = .Escape}))
+	accent := ui.editor_row_parts(&p, l, board_item(&p, "colors.accent")).row
+	board_press(&p, l, accent)
+	board_press(&p, l, ui.color_board_rect(&p, l, .Link))
+	testing.expect_value(t, links.count, 6)
 }

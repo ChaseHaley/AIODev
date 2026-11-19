@@ -63,6 +63,7 @@ App :: struct {
 	// Theme files and machine shells the running revision was read with; saves and pages reuse them.
 	settings_inputs:       settings.Inputs,
 	settings:              settings.Settings,
+	theme_record:          Theme_Record,
 	using markdown_state:  Markdown_App,
 	using changes_state:   Changes_App,
 	dialogs:               File_Dialogs,
@@ -341,6 +342,7 @@ app_destroy :: proc(app: ^App) {
 	settings.inputs_destroy(&app.settings_inputs)
 	settings_notice_state_destroy(&app.settings_notices)
 	delete(app.settings_path)
+	theme_record_remove(app)
 	instance.paths_destroy(&app.paths)
 	delete(app.log_path)
 	layout_state_destroy(app)
@@ -769,6 +771,7 @@ apply_fonts :: proc(app: ^App) {
 
 apply_theme :: proc(app: ^App) {
 	app.theme = ui.theme_from(app.settings.active_theme, app.settings.interface)
+	theme_record_publish(app)
 }
 
 @(private)
@@ -777,6 +780,7 @@ terminal_colors :: proc(c: settings.Color_Settings) -> term.Colors {
 		foreground = c.foreground,
 		background = c.background,
 		cursor     = c.cursor,
+		light      = c.light,
 	}
 	for value, i in c.palette {
 		colors.palette[i] = value

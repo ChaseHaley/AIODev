@@ -121,7 +121,7 @@ session_config :: proc(
 		log.errorf("expanding the shell directory failed: %v", err)
 		directory = directory_text
 	}
-	environment := make([dynamic]pty.Env_Var, 0, 5, context.temp_allocator)
+	environment := make([dynamic]pty.Env_Var, 0, 7, context.temp_allocator)
 	append(&environment, pty.Env_Var{PANE_VARIABLE, fmt.tprintf("%d", pane)})
 	if app.options.name != "" {append(&environment, pty.Env_Var{INSTANCE_VARIABLE, app.options.name})}
 	if app.cli_directory != "" {
@@ -129,6 +129,9 @@ session_config :: proc(
 		append(&environment, pty.Env_Var{CLI_VARIABLE, cli})
 	}
 	agent_environment(app, key, &environment)
+	if record := theme_record_path(app); record != "" {
+		append(&environment, pty.Env_Var{settings.NEOVIM_RECORD_VARIABLE, record})
+	}
 	return {
 		command_line = settings.shell_command_line(command, app.settings.shell.integration),
 		title = title,

@@ -122,6 +122,8 @@ Size_Report_Size :: struct {
 
 Terminal_Size_Fn :: proc "c" (terminal: Terminal, userdata: rawptr, out_size: ^Size_Report_Size) -> bool
 
+Terminal_Color_Scheme_Fn :: proc "c" (terminal: Terminal, userdata: rawptr, out_scheme: ^Color_Scheme) -> bool
+
 Terminal_Mode_Config :: struct {
 	mode:  Mode,
 	value: bool,

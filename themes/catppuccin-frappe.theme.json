@@ -5,6 +5,10 @@
   "name": "Catppuccin Frappé",
   "author": "Catppuccin",
   "description": "Adapted from https://github.com/catppuccin/kitty/blob/main/themes/frappe.conf (MIT). Interface roles follow the scheme's VS Code theme; a color changes only as far as the contrast contracts need. Terminal palette preserves the scheme.",
+  "neovim": {
+    "plugin": "catppuccin/nvim",
+    "colorscheme": "catppuccin-frappe"
+  },
   "colors": {
     "window": "#232634",
     "tab_bar": "#232634",
