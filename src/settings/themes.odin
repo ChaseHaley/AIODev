@@ -367,12 +367,14 @@ theme_links_loop :: proc(
 	return
 }
 
-// "accent -> cursor -> accent" for the first loop of followed colors; empty when there is none. The
-// result is temporary.
+// "accent -> cursor -> accent" for the first loop of followed colors, starting at the loop's first
+// color in token order; empty when there is none. The result is temporary.
 @(private)
 theme_loop_text :: proc(linked: bit_set[Theme_Token], target: ^[Theme_Token]Theme_Token) -> string {
-	start, found := theme_links_loop(linked, target)
+	on, found := theme_links_loop(linked, target)
 	if !found {return ""}
+	start := on
+	for at := target[on]; at != on; at = target[at] {start = min(start, at)}
 	tokens := THEME_TOKENS
 	b := strings.builder_make(context.temp_allocator)
 	at := start
@@ -545,7 +547,10 @@ theme_link_issue :: proc(token: Theme_Token, text: string, problem: Theme_Value_
 	tokens := THEME_TOKENS
 	switch problem {
 	case .Unknown_Link:
-		return fmt.tprintf("no theme color is named \"%s\"", text)
+		return fmt.tprintf(
+			"no theme color is named \"%s\"; expected #rrggbb or the key of a theme color such as accent",
+			text,
+		)
 	case .Self_Link:
 		return fmt.tprintf("%s cannot follow itself", tokens[token].key)
 	case .Optional_Link:

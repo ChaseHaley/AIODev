@@ -60,14 +60,19 @@ BOARD_RESET_WIDTH :: f32(76)
 BOARD_CHIP_HEIGHT :: f32(22)
 @(private)
 BOARD_TEXT_LINE :: f32(16)
+@(private)
+BOARD_UNLINK_WIDTH :: f32(64)
 
 // Which part of the inspector has the keyboard while the selected row is a tile and its control has the
-// focus: the tile itself, the hex field, No Color or Reset. The picker's drags edit the hex field.
+// focus: the tile itself, the source field, Unlink, the hex field, No Color or Reset. The picker's drags
+// edit the hex field.
 Board_Control :: enum u8 {
 	Tile,
 	Hex,
 	No_Color,
 	Reset,
+	Link,
+	Unlink,
 }
 
 // What the inspector's card says about the theme the board edits; the board owns the strings. `base`
@@ -97,6 +102,8 @@ Board_Target :: enum u8 {
 	Hex,
 	No_Color,
 	Reset,
+	Link,
+	Unlink,
 }
 
 // A part of the board under a point, with the page line it acts on.
@@ -129,6 +136,8 @@ Color_Board :: struct {
 	hover_row, fade_row:          int,
 	hovered, faded:               bool,
 	hover_hit:                    Board_Hit,
+	// The colors the inspector's source dropdown offers while it is open.
+	links:                        Board_Links,
 }
 
 @(private)
@@ -148,6 +157,7 @@ Board_Side_Place :: struct {
 @(private)
 Board_Inspector :: struct {
 	rect, card, token, picker, hex, base, reset: render.Rect,
+	link, unlink:                               render.Rect,
 	title_y, detail_y, note_y, token_y, same_y:  f32,
 	fields, buttons:                             [BOARD_CARD_LIMIT]Board_Place,
 	field_count, button_count:                   int,
@@ -473,6 +483,18 @@ board_inspector_layout :: proc(p: ^Editor, width, s: f32) -> (b: Board_Inspector
 	b.token_y = y * s
 	// The title, then two lines of description.
 	y += BOARD_GROUP_HEADING + 2 * BOARD_TEXT_LINE
+	// The color's source: a field naming the color it follows, with Unlink beside it while it follows one.
+	linked := b.row >= 0 && p.rows[b.row].link != ""
+	if b.row >= 0 {
+		field_x := pad + BOARD_FIELD_LABEL
+		field_right := width - pad - (linked ? BOARD_UNLINK_WIDTH + SPACE_2 : 0)
+		b.link = {field_x * s, y * s, (field_right - field_x) * s, HEIGHT_STANDARD * s}
+		if linked {
+			unlink_x := width - pad - BOARD_UNLINK_WIDTH
+			b.unlink = {unlink_x * s, y * s, BOARD_UNLINK_WIDTH * s, HEIGHT_STANDARD * s}
+		}
+	}
+	y += HEIGHT_STANDARD + SPACE_2
 	optional := b.row >= 0 && p.rows[b.row].kind == .Optional_Color
 	// color_parts insets the wheel by SPACE_3, so the picker starts that far above and left of it. The
 	// hex field sits under its swatch, and No Color, for a color that may have none, under its wheel.
@@ -514,7 +536,10 @@ board_inspector_layout :: proc(p: ^Editor, width, s: f32) -> (b: Board_Inspector
 
 @(private)
 board_inspector_move :: proc(b: ^Board_Inspector, dx, dy: f32) {
-	for r in ([?]^render.Rect{&b.rect, &b.card, &b.token, &b.picker, &b.hex, &b.base, &b.reset}) {
+	rects := [?]^render.Rect {
+		&b.rect, &b.card, &b.token, &b.picker, &b.hex, &b.base, &b.reset, &b.link, &b.unlink,
+	}
+	for r in rects {
 		r^ = board_move_rect(r^, dx, dy)
 	}
 	for y in ([?]^f32{&b.title_y, &b.detail_y, &b.note_y, &b.token_y, &b.same_y}) {y^ += dy}
@@ -529,7 +554,9 @@ board_optional :: proc(p: ^Editor, b: ^Board_Inspector) -> bool {
 }
 
 @(private)
-board_modified :: proc(row: ^Editor_Row) -> bool {return row.value != row.default_value}
+board_modified :: proc(row: ^Editor_Row) -> bool {
+	return row.value != row.default_value || row.link != row.default_link
+}
 
 @(private)
 color_board_hit :: proc(p: ^Editor, b: ^Board_Layout, x, y, s: f32) -> Board_Hit {
@@ -545,6 +572,10 @@ color_board_hit :: proc(p: ^Editor, b: ^Board_Layout, x, y, s: f32) -> Board_Hit
 			if render.rect_contains(place.rect, x, y) {return {.Chip, place.item}}
 		}
 		if inspector.item < 0 {return {}}
+		if render.rect_contains(inspector.link, x, y) {return {.Link, inspector.item}}
+		if p.rows[inspector.row].link != "" && render.rect_contains(inspector.unlink, x, y) {
+			return {.Unlink, inspector.item}
+		}
 		c := color_parts(inspector.picker, board_optional(p, inspector), s)
 		ramp := render.Rect{c.ramp.x, c.ramp.y - 6 * s, c.ramp.width, c.ramp.height + 12 * s}
 		switch {
@@ -618,7 +649,7 @@ color_board_press :: proc(
 	Editor_Outcome,
 	bool,
 ) {
-	if !color_board_shown(p) {return .None, false}
+	if !color_board_shown(p) || board_link_open(p) {return .None, false}
 	if !render.rect_contains(l.list, x, y) {
 		if editor_popup(p) == .Color {
 			editor_mode_set(p, Editor_Editing{})
@@ -657,6 +688,12 @@ color_board_press :: proc(
 	case .Reset:
 		board_choose(p, hit.item, .Reset)
 		if board_modified(editor_row(p)) {return .Reset, true}
+	case .Link:
+		board_choose(p, hit.item, .Link)
+		board_link_open_popup(p)
+	case .Unlink:
+		board_choose(p, hit.item, .Unlink)
+		return board_unlink(p), true
 	}
 	return .Changed, true
 }
@@ -665,7 +702,7 @@ color_board_press :: proc(
 @(private)
 color_board_hover :: proc(p: ^Editor, l: Editor_Layout, x, y: f32) -> bool {
 	hit: Board_Hit
-	if color_board_shown(p) && render.rect_contains(l.list, x, y) && !editor_dragging(p) {
+	if color_board_shown(p) && render.rect_contains(l.list, x, y) && !editor_dragging(p) && !board_link_open(p) {
 		b := color_board_layout(p, l)
 		hit = color_board_hit(p, &b, x, y, l.scale)
 	}
@@ -686,7 +723,9 @@ board_hover_set :: proc(p: ^Editor, hit: Board_Hit) -> bool {
 
 @(private)
 color_board_pointer :: proc(p: ^Editor, l: Editor_Layout, x, y: f32) -> (platform.Cursor_Shape, bool) {
-	if !color_board_shown(p) || !render.rect_contains(l.list, x, y) {return .Arrow, false}
+	if !color_board_shown(p) || board_link_open(p) || !render.rect_contains(l.list, x, y) {
+		return .Arrow, false
+	}
 	b := color_board_layout(p, l)
 	hit := color_board_hit(p, &b, x, y, l.scale)
 	switch hit.target {
@@ -696,7 +735,7 @@ color_board_pointer :: proc(p: ^Editor, l: Editor_Layout, x, y: f32) -> (platfor
 		return .Text, true
 	case .Reset:
 		return board_modified(&p.rows[p.items[hit.item].row]) ? .Hand : .Arrow, true
-	case .Tile, .Chip, .Button, .Wheel, .Ramp, .No_Color:
+	case .Tile, .Chip, .Button, .Wheel, .Ramp, .No_Color, .Link, .Unlink:
 	}
 	return .Hand, true
 }
@@ -735,6 +774,10 @@ color_board_row_parts :: proc(p: ^Editor, l: Editor_Layout, index: int) -> (part
 // The picker while the board's hex field is being edited: the inspector's, at its fixed place.
 @(private)
 color_board_popup_rect :: proc(p: ^Editor, l: Editor_Layout) -> render.Rect {
+	if board_link_open(p) {
+		c, a, _ := editor_dropdown(p, l)
+		return dropdown_rect(&p.dropdown, c, a, l.scale)
+	}
 	if editor_popup(p) != .Color || !board_tile_item(p, p.selected) {return {}}
 	b := color_board_layout(p, l)
 	return b.inspector.item == p.selected ? b.inspector.picker : {}
@@ -819,7 +862,8 @@ color_board_group_at :: proc(p: ^Editor) -> int {
 // when the text goes nowhere.
 @(private)
 color_board_text :: proc(p: ^Editor) -> bool {
-	if !color_board_shown(p) || editor_focus(p) != .Control || !board_tile_item(p, p.selected) {return false}
+	if !color_board_shown(p) || board_link_open(p) {return false}
+	if editor_focus(p) != .Control || !board_tile_item(p, p.selected) {return false}
 	if board_hex_focused(p) {return false}
 	if p.board.control != .Tile {return true}
 	p.board.control = .Hex
@@ -838,7 +882,7 @@ board_hex_cancel :: proc(p: ^Editor) {
 // browser walks a form. Keys it leaves go on to the page.
 @(private)
 color_board_key :: proc(p: ^Editor, row: ^Editor_Row, e: input.Key_Event) -> (Editor_Outcome, bool) {
-	if !color_board_shown(p) || .Alt in e.modifiers {return .None, false}
+	if !color_board_shown(p) || board_link_open(p) || .Alt in e.modifiers {return .None, false}
 	b := &p.board
 	focus := editor_focus(p)
 	control := .Control in e.modifiers
@@ -871,6 +915,11 @@ color_board_key :: proc(p: ^Editor, row: ^Editor_Row, e: input.Key_Event) -> (Ed
 			return .Save, true
 		case .Reset:
 			return board_modified(row) ? .Reset : .None, true
+		case .Link:
+			board_link_open_popup(p)
+			return .Changed, true
+		case .Unlink:
+			return board_unlink(p), true
 		}
 	case .Arrow_Up, .Arrow_Down, .Page_Up, .Page_Down:
 		if control && (e.key == .Page_Up || e.key == .Page_Down) {return .None, false}
@@ -965,6 +1014,8 @@ Board_Stop_Kind :: enum u8 {
 	Search,
 	Tile,
 	Card,
+	Link,
+	Unlink,
 	Hex,
 	No_Color,
 	Reset,
@@ -982,7 +1033,7 @@ Board_Stop :: struct {
 // its base, then Reset to Defaults, and round again.
 @(private)
 board_tab :: proc(p: ^Editor, back: bool) -> Editor_Outcome {
-	stops: [BOARD_CARD_LIMIT + 6]Board_Stop
+	stops: [BOARD_CARD_LIMIT + 8]Board_Stop
 	count := 0
 	add :: proc(stops: []Board_Stop, count: ^int, stop: Board_Stop) {
 		if count^ < len(stops) {stops[count^] = stop; count^ += 1}
@@ -995,6 +1046,8 @@ board_tab :: proc(p: ^Editor, back: bool) -> Editor_Outcome {
 	}
 	if token >= 0 {
 		row := &p.rows[p.items[token].row]
+		add(stops[:], &count, {.Link, token})
+		if row.link != "" {add(stops[:], &count, {.Unlink, token})}
 		add(stops[:], &count, {.Hex, token})
 		if row.kind == .Optional_Color {add(stops[:], &count, {.No_Color, token})}
 		if board_modified(row) {add(stops[:], &count, {.Reset, token})}
@@ -1019,6 +1072,10 @@ board_tab :: proc(p: ^Editor, back: bool) -> Editor_Outcome {
 					current.kind = .No_Color
 				case p.board.control == .Reset:
 					current.kind = .Reset
+				case p.board.control == .Link:
+					current.kind = .Link
+				case p.board.control == .Unlink:
+					current.kind = .Unlink
 				}
 			}
 		}
@@ -1048,6 +1105,10 @@ board_tab :: proc(p: ^Editor, back: bool) -> Editor_Outcome {
 		field_select_all(&p.value)
 	case .No_Color:
 		board_choose(p, next.item, .No_Color)
+	case .Link:
+		board_choose(p, next.item, .Link)
+	case .Unlink:
+		board_choose(p, next.item, .Unlink)
 	case .Reset:
 		board_choose(p, next.item, .Reset)
 	}
@@ -1068,6 +1129,9 @@ color_board_carry :: proc(to, from: ^Editor) {
 	a.control = b.control
 	// Reset leaves the keyboard once it has nothing left to reset.
 	if a.control == .Reset && (!board_tile_row(to, a.row) || !board_modified(&to.rows[a.row])) {
+		a.control = .Tile
+	}
+	if a.control == .Unlink && (!board_tile_row(to, a.row) || to.rows[a.row].link == "") {
 		a.control = .Tile
 	}
 	a.ring, a.ring_from, a.ring_shown = b.ring, b.ring_from, b.ring_shown
@@ -1189,6 +1253,8 @@ Board_Part :: enum {
 	Hex,
 	No_Color,
 	Reset,
+	Link,
+	Unlink,
 	Ring,
 	Inspector,
 }
@@ -1210,6 +1276,10 @@ color_board_rect :: proc(p: ^Editor, l: Editor_Layout, part: Board_Part) -> rend
 		return c.no_color
 	case .Reset:
 		return inspector.reset
+	case .Link:
+		return inspector.link
+	case .Unlink:
+		return inspector.row >= 0 && p.rows[inspector.row].link != "" ? inspector.unlink : {}
 	case .Ring:
 		return board_ring_rect(p, &b)
 	case .Inspector:
@@ -1310,6 +1380,7 @@ board_tile_draw :: proc(
 		}
 	}
 	draw_rect(list, {rect = swatch, color = theme.border, radius = radius, stroke = s})
+	if row.link != "" {board_link_badge_draw(list, theme, swatch, s)}
 	light: f32
 	if b.hovered && b.hover_row == row_index {light = b.hover.value}
 	if b.faded && b.fade_row == row_index {light = max(light, b.fade.value)}
@@ -1517,6 +1588,7 @@ board_token_draw :: proc(
 		if r := draw_fading_text(&small, list, rest, x, line + BOARD_TEXT_LINE * s, theme.muted, right - x);
 		   r != .Ok {return r}
 	}
+	if r := board_link_draw(p, b, row, list, text, theme, clip, s, pointer); r != .Ok {return r}
 	optional := row.kind == .Optional_Color
 	c := color_parts(b.picker, optional, s)
 	hsv := board_hsv(p, b.row)
@@ -1670,6 +1742,10 @@ color_board_draw :: proc(
 	if r := board_token_draw(p, &b.inspector, list, text, theme, l.list, s, pointer); r != .Ok {return r}
 	if bar, visible := editor_page_scrollbar(p, l); visible {
 		scrollbar_draw(list, theme, bar, scrollbar_state(p.page_bar_hover, p.page_drag))
+	}
+	if board_link_open(p) {
+		choices, anchor, _ := editor_dropdown(p, l)
+		return dropdown_draw(&p.dropdown, choices, anchor, list, text, theme, pointer, s)
 	}
 	return .Ok
 }

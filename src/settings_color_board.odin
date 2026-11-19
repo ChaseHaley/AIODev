@@ -213,6 +213,14 @@ when AIO_CONTROL {
 		}
 		state_text(r, "settings.board.tiles", strings.to_string(tiles))
 		state_text(r, "settings.board.card", strings.to_string(card))
+		colors := strings.builder_make(context.temp_allocator)
+		for row in p.rows {
+			if row.action != .Theme_Color {continue}
+			if strings.builder_len(colors) > 0 {strings.write_byte(&colors, ';')}
+			fmt.sbprintf(&colors, "%s=%s", row.ref, row.value)
+			if row.link != "" {fmt.sbprintf(&colors, ">%s", row.link)}
+		}
+		state_text(r, "settings.board.colors", strings.to_string(colors))
 		for part in ui.Board_Part {
 			name := fmt.tprintf("settings.board.%s", strings.to_lower(fmt.tprint(part), context.temp_allocator))
 			state_rect(r, name, ui.color_board_rect(p, page, part))

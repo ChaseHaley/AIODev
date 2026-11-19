@@ -41,11 +41,14 @@ Dropdown_Mark :: struct {
 	tint: Dropdown_Tint,
 }
 
-// One option. `badge` is a letter or two in a square tinted by `badge_tint`; `primary` is the name,
-// `secondary` the folder; `added` and `removed` are the counts, shown as +A and −R unless both are zero.
+// One option. `badge` is a letter or two in a square tinted by `badge_tint`, or a solid square of
+// `swatch` when `swatched`; `primary` is the name, `secondary` the folder; `added` and `removed` are
+// the counts, shown as +A and −R unless both are zero.
 Dropdown_Row :: struct {
 	badge:             string,
 	badge_tint:        Dropdown_Tint,
+	swatch:            render.Color,
+	swatched:          bool,
 	primary:           string,
 	secondary:         string,
 	marks:             [2]Dropdown_Mark,
@@ -213,7 +216,13 @@ dropdown_row_draw :: proc(
 	tint := dropdown_tint_color(theme, row.badge_tint)
 	fill := tint
 	fill.a *= DROPDOWN_BADGE_ALPHA * alpha
-	draw_rect(list, {rect = l.badge, color = fill, radius = RADIUS_CONTROL * s})
+	if row.swatched {
+		radius := RADIUS_CONTROL * s
+		draw_rect(list, {rect = l.badge, color = with_alpha(row.swatch, alpha), radius = radius})
+		draw_rect(list, {rect = l.badge, color = with_alpha(theme.border, alpha), radius = radius, stroke = s})
+	} else {
+		draw_rect(list, {rect = l.badge, color = fill, radius = RADIUS_CONTROL * s})
+	}
 	if row.badge != "" {
 		ink := with_alpha(tint, alpha)
 		x := l.badge.x + (l.badge.width - text_width(&badge_text, row.badge)) / 2
