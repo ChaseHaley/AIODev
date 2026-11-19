@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256"><defs>
+  <radialGradient id="D5ccore" cx=".38" cy=".32" r=".75"><stop offset="0" stop-color="#ffffff"/><stop offset=".25" stop-color="#d4ccff"/><stop offset=".7" stop-color="#7a63f5"/><stop offset="1" stop-color="#3a2a9a"/></radialGradient>
+  <radialGradient id="D5cbg" cx=".5" cy=".45" r=".75"><stop offset="0" stop-color="#2a1f55"/><stop offset="1" stop-color="#08080b"/></radialGradient>
+  <radialGradient id="D5chalo" cx=".5" cy=".5" r=".5"><stop offset="0" stop-color="#a194ff" stop-opacity=".55"/><stop offset="1" stop-color="#a194ff" stop-opacity="0"/></radialGradient>
+  <linearGradient id="D5cring" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#6fd6d6" stop-opacity=".25"/><stop offset=".5" stop-color="#6fd6d6"/><stop offset="1" stop-color="#e09bf0" stop-opacity=".35"/></linearGradient>
+  <filter id="D5cglow" x="-100%" y="-100%" width="300%" height="300%"><feGaussianBlur stdDeviation="5" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+  
+  <linearGradient id="D5crim" x1="0" y1="0" x2="0" y2="1">
+    <stop offset="0" stop-color="#fff" stop-opacity=".22"/><stop offset=".35" stop-color="#fff" stop-opacity=".04"/>
+    <stop offset="1" stop-color="#fff" stop-opacity=".02"/></linearGradient><linearGradient id="D5ctile" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#8b6cff"/><stop offset=".55" stop-color="#6a4ff0"/><stop offset="1" stop-color="#c25fd6"/></linearGradient>
+  <radialGradient id="D5chl" cx=".3" cy=".1" r=".8"><stop offset="0" stop-color="#fff" stop-opacity=".35"/><stop offset=".7" stop-color="#fff" stop-opacity="0"/></radialGradient>
+    <linearGradient id="D5cink" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#efecff"/><stop offset=".55" stop-color="#a194ff"/><stop offset="1" stop-color="#7a63f5"/></linearGradient>
+    <linearGradient id="D5ccur" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#6fd6d6"/><stop offset="1" stop-color="#b6e3ff"/></linearGradient>
+    <linearGradient id="D5cspec" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fff" stop-opacity=".75"/><stop offset=".5" stop-color="#fff" stop-opacity="0"/></linearGradient>
+    <linearGradient id="D5ctrail" gradientUnits="userSpaceOnUse" x1="181.0" y1="162.6" x2="181.0" y2="162.6"><stop offset="0" stop-color="#8ff3e6"/><stop offset="1" stop-color="#6fd6d6" stop-opacity="0"/></linearGradient>
+    <filter id="D5cbloom" filterUnits="userSpaceOnUse" x="-64" y="-64" width="384" height="384">
+  <feGaussianBlur in="SourceGraphic" stdDeviation="16" result="f"/><feGaussianBlur in="SourceGraphic" stdDeviation="5" result="n"/>
+  <feMerge><feMergeNode in="f"/><feMergeNode in="n"/></feMerge></filter><filter id="D5ccbloom" filterUnits="userSpaceOnUse" x="-64" y="-64" width="384" height="384">
+  <feGaussianBlur in="SourceGraphic" stdDeviation="10" result="f"/><feGaussianBlur in="SourceGraphic" stdDeviation="3" result="n"/>
+  <feMerge><feMergeNode in="f"/><feMergeNode in="n"/></feMerge></filter><clipPath id="D5cclip"><rect x="8" y="8" width="240" height="240" rx="56"/></clipPath>
+  <filter id="D5cgrain" filterUnits="userSpaceOnUse" x="0" y="0" width="256" height="256">
+  <feTurbulence type="fractalNoise" baseFrequency=".85" numOctaves="2" stitchTiles="stitch"/>
+  <feColorMatrix values="0 0 0 0 1  0 0 0 0 1  0 0 0 0 1  0 0 0 .06 0"/></filter>
+    <filter id="D5cshadow" filterUnits="userSpaceOnUse" x="-32" y="-32" width="320" height="320"><feDropShadow dx="0" dy="8" stdDeviation="9" flood-color="#140e33" flood-opacity=".5"/></filter></defs><rect x="8" y="8" width="240" height="240" rx="56" fill="url(#D5ctile)"/><rect x="8" y="8" width="240" height="240" rx="56" fill="url(#D5chl)"/>
+    <g filter="url(#D5cshadow)">
+    <g transform="rotate(-24 128 128)"><path d="M 22 128 A 106 40 0 0 1 234 128" fill="none" stroke="#1a1240" stroke-width="12" stroke-linecap="round" opacity="0.45"/></g>
+    
+    <polyline points="104,90 146,128 104,166" fill="none" stroke="#ffffff" stroke-width="30" stroke-linecap="round" stroke-linejoin="round" />
+    
+    <g transform="rotate(-24 128 128)">
+      <path d="M 234 128 A 106 40 0 0 1 22 128" fill="none" stroke="#1a1240" stroke-width="12" stroke-linecap="round"/>
+      
+      
+      
+      <g transform="translate(181.0 162.6) rotate(167.7)"><rect x="-25" y="-11" width="50" height="22" rx="8.4" fill="#7ff0e0" /></g>
+      <g transform="translate(181.0 162.6) rotate(167.7)"><rect x="-25" y="-11" width="50" height="22" rx="8.4" fill="#fff" opacity=".3" transform="translate(0 -3) scale(.85 .35)"/></g>
+    </g></g>
+    
+    <rect x="9" y="9" width="238" height="238" rx="55" fill="none" stroke="url(#D5crim)" stroke-width="2"/></svg>

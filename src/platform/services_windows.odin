@@ -332,9 +332,13 @@ when !AIO_HEADLESS {
 
 	// Lets whichever process next asks take the foreground, until the user's next input; a restarted
 	// AIODev asks after this one's windows have gone, when it would otherwise open behind the others.
-	// Only a process that may take the foreground itself can pass that on.
+	// Only a process that holds the foreground can pass it on. A restart ordered while another program
+	// is in front must not pull the restarted AIODev over it, so that case passes nothing.
 	foreground_pass_on :: proc() {
 		ASFW_ANY :: max(w.DWORD)
+		holder: w.DWORD
+		w.GetWindowThreadProcessId(w.GetForegroundWindow(), &holder)
+		if holder != w.GetCurrentProcessId() {return}
 		if !bool(AllowSetForegroundWindow(ASFW_ANY)) {
 			log.warnf("AllowSetForegroundWindow failed: %d", w.GetLastError())
 		}
