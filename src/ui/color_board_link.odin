@@ -64,7 +64,9 @@ board_links_build :: proc(p: ^Editor, row: int) {
 	add(l, "", "Custom color", p.rows[row].value)
 	for other, index in p.rows {
 		if l.count >= len(l.choices) {break}
-		if index == row || !board_tile_row(p, index) || other.kind != .Color {continue}
+		if index == row || !board_tile_row(p, index) {continue}
+		// A color that may be none is followed only by another that may be.
+		if other.kind != .Color && !(other.clear && p.rows[row].clear) {continue}
 		if board_follows(p, index, row) {continue}
 		add(l, other.ref, other.title, other.value)
 	}

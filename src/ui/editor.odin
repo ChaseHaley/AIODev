@@ -82,6 +82,8 @@ Editor_Row :: struct {
 	// A color row: the key other colors name it by, the key of the color it follows ("" when it holds its
 	// own color) and the same for its base theme. `value` is the color it shows either way.
 	ref, link, default_link:                       string,
+	// A color row whose empty value is a color of its own, none, so other colors may follow it.
+	clear:                                         bool,
 	group:                                         int,
 	kind:                                          Row_Kind,
 	minimum, maximum:                              f64,

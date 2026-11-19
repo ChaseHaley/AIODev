@@ -17,8 +17,8 @@ import "core:strings"
 
 // The page owner names at most BOARD_GROUP_LIMIT groups holding at most BOARD_TILE_LIMIT colors.
 // Rows of the board's section outside those groups are the card's controls.
-BOARD_GROUP_LIMIT :: 16
-BOARD_TILE_LIMIT :: 64
+BOARD_GROUP_LIMIT :: 24
+BOARD_TILE_LIMIT :: 128
 @(private)
 BOARD_CARD_LIMIT :: 8
 @(private)
