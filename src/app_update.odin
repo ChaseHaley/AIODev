@@ -97,7 +97,7 @@ app_update_tick :: proc(app: ^App) {
 		owned, clone_error := strings.clone(message)
 		if w == nil || clone_error != nil || !gesture_cancel(app, w) {
 			delete(owned)
-			notify(app, .Info, fmt.tprintf("%s Quit and reopen AIODev to start it.", message))
+			notify(app, .Info, fmt.tprintf("%s Run Restart AIODev to start it.", message))
 			return
 		}
 		confirmation_ask(app, w, Update_Restart{owned}, extended = true)
@@ -138,13 +138,11 @@ update_restart_text :: proc(restart: Update_Restart) -> Confirmation_Text {
 @(private)
 update_restart_finish :: proc(app: ^App, accepted: bool) {
 	if accepted {
-		// The answer was just given here, so this process may still pass the foreground on.
-		platform.foreground_pass_on()
 		app_restart(app)
 		return
 	}
 	// aio only talks to the aiodev.exe beside it, and this process's image now lies under .replaced.
-	notify(app, .Info, "The new AIODev starts when you quit and reopen AIODev; until then aio cannot reach it.")
+	notify(app, .Info, "The new AIODev starts when you run Restart AIODev; until then aio cannot reach it.")
 }
 
 update_restart_destroy :: proc(restart: ^Update_Restart) {
