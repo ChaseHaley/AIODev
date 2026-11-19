@@ -692,3 +692,88 @@ a_right_click_opens_the_edit_menu_with_what_it_can_do :: proc(t: ^testing.T) {
 	}
 	testing.expect_value(t, string(b.text[:]), "alpha beta\n\ngbetaamma\n")
 }
+
+// How a pane lays the paragraph `from`..`to` (found in the text it shows) out: the rows it takes, the
+// left edge of its first character and the right edge of its widest row's last.
+@(private = "file")
+Paragraph_Layout :: struct {
+	rows:  int,
+	left:  f32,
+	right: f32,
+}
+
+@(private = "file")
+paragraph_layout :: proc(
+	t: ^testing.T,
+	state: ^app.App,
+	w: ^app.Window,
+	pane: ^app.Markdown_Pane,
+	first, last: string,
+) -> (out: Paragraph_Layout, ok: bool) {
+	g := edit_fitted(state, w, pane)
+	document := app.markdown_document(pane)
+	shown := string(document.text[:])
+	from := strings.index(shown, first)
+	to := strings.index(shown, last)
+	if !testing.expect(t, from >= 0 && to > from, "the paragraph is not shown") {return}
+	to += len(last)
+	row_y: f32 = -1
+	out.left, out.right = max(f32), 0
+	for offset in from ..< to {
+		rect, _, found := ui.markdown_caret_at(&pane.view, document, offset)
+		if !testing.expect(t, found, "a character is not laid out") {return}
+		if rect.y != row_y {row_y, out.rows = rect.y, out.rows + 1}
+		out.left = min(out.left, g.left + rect.x)
+		out.right = max(out.right, g.left + rect.x)
+	}
+	return out, true
+}
+
+// The style settings lay a pane out the same while it edits as while it reads: the same column, centred the
+// same, with the same face sizes and the same wrapping. Only the caret's line shows its markup, and block
+// spacing stays flush while editing, where the file's blank lines are the spacing (WORK-480).
+@(test)
+edit_mode_lays_out_with_the_reading_modes_style :: proc(t: ^testing.T) {
+	f: Edit_Fixture
+	defer edit_fixture_destroy(t, &f)
+	words := "WRAPSTART the quick brown fox jumps over the lazy dog again and again until it wraps WRAPEND"
+	source := strings.concatenate({"# Title\n\n", words, "\n\nlast\n"}, context.temp_allocator)
+	w, pane := edit_fixture_start(t, &f, "StyleParity", source)
+	if pane == nil {return}
+	// A narrow column, a roomy line and big headings, none of them the defaults.
+	changes := [?][2]string {
+		{"markdown.text_width", "300"},
+		{"markdown.line_height", "2"},
+		{"markdown.h1_size", "2.5"},
+		{"markdown.font_size", "17"},
+	}
+	for change in changes {
+		if !testing.expect(t, app.settings_save_value(&f.state, change[0], change[1], "set")) {return}
+	}
+	g := edit_fitted(&f.state, w, pane)
+	testing.expect(t, g.width <= 300 * w.scale, "the column is the narrow one")
+	reading_layout, reading_ok := paragraph_layout(t, &f.state, w, pane, "WRAPSTART", "WRAPEND")
+	reading_faces := pane.view.faces
+	reading_width := pane.view.width
+	if !reading_ok {return}
+	testing.expect(t, reading_layout.rows > 2, "the paragraph wraps in the narrow column")
+
+	app.run_action(&f.state, w, .Edit_Markdown)
+	if !testing.expect(t, app.markdown_editing(pane)) {return}
+	editing, editing_ok := paragraph_layout(t, &f.state, w, pane, "WRAPSTART", "WRAPEND")
+	if !editing_ok {return}
+	testing.expect_value(t, pane.view.width, reading_width)
+	testing.expect_value(t, editing.rows, reading_layout.rows)
+	testing.expect_value(t, editing.left, reading_layout.left)
+	testing.expect_value(t, editing.right, reading_layout.right)
+	for face in ui.Markdown_Face {
+		testing.expect_value(t, pane.view.faces[face].size_px, reading_faces[face].size_px)
+		testing.expect_value(t, pane.view.faces[face].line_height, reading_faces[face].line_height)
+	}
+	// The caret's line shows its markup but keeps the column.
+	edit_press(&f.state, w, .Home, {.Control})
+	g = edit_fitted(&f.state, w, pane)
+	rect, _, found := ui.markdown_caret_at(&pane.view, app.markdown_document(pane),
+		markdown.live_display(app.markdown_document(pane), 0))
+	testing.expect(t, found && g.left + rect.x == reading_layout.left, "the caret's line starts at the column's edge")
+}
