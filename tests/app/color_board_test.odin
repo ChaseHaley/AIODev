@@ -138,3 +138,53 @@ color_board_links_follow_the_color_they_point_at :: proc(t: ^testing.T) {
 	testing.expect(t, profile_file_has(f.path, fmt.tprintf("theme.custom.%s.cursor = #22cc88", copy)))
 	testing.expect_value(t, ui.color_board_rect(p, p.fit_layout, .Unlink), render.Rect{})
 }
+
+// The Markdown code colours are findable: text and fill read as a pair in a group of their own, the shared
+// code fill follows them, and a search for "code" lists the text tiles beside the fills.
+@(test)
+the_markdown_code_colors_sit_together_as_text_and_fill_pairs :: proc(t: ^testing.T) {
+	f: Profile_Fixture
+	defer profile_fixture_destroy(t, &f)
+	if !profile_fixture_create(t, &f, "color-board-code", PROFILE_FIXTURE_SETTINGS) {return}
+	_ = profile_open(&f)
+	w := f.state.windows[0]
+	app.run_action(&f.state, w, .Customize_Colors)
+	p := &w.editor
+	ui.editor_fit(p, ui.editor_layout({0, 40, 1200, 1400}, 1, true))
+	labels: [dynamic]string
+	defer delete(labels)
+	group_titles := map[string]bool{}
+	defer delete(group_titles)
+	for row in p.rows {
+		if row.action != .Theme_Color || !strings.contains(row.key, "code") {continue}
+		append(&labels, fmt.tprintf("%s=%s/%s", row.key[len("colors."):], p.groups[row.group].title, row.badge))
+		group_titles[p.groups[row.group].title] = true
+	}
+	expected := [?]string {
+		"markdown_inline_code_text=Markdown code/Inline code",
+		"markdown_inline_code_background=Markdown code/Inline code fill",
+		"markdown_code_block_text=Markdown code/Code block",
+		"markdown_code_block_background=Markdown code/Code block fill",
+		"code_background=Markdown code/Code fill",
+	}
+	for want in expected {
+		found := false
+		for have in labels {found ||= have == want}
+		testing.expectf(t, found, "missing %s in %v", want, labels)
+	}
+	testing.expect_value(t, len(group_titles), 1)
+
+	// Typing in the search shows the code colours as rows, text before fill.
+	ui.editor_text(p, "code")
+	ui.editor_fit(p, ui.editor_layout({0, 40, 1200, 1400}, 1, true))
+	shown: [dynamic]string
+	defer delete(shown)
+	for item in p.items {
+		if item.row >= 0 && p.rows[item.row].action == .Theme_Color {append(&shown, p.rows[item.row].key)}
+	}
+	for key in ([?]string{"colors.markdown_inline_code_text", "colors.markdown_code_block_text"}) {
+		found := false
+		for have in shown {found ||= have == key}
+		testing.expectf(t, found, "a search for code lists %s; it lists %v", key, shown)
+	}
+}

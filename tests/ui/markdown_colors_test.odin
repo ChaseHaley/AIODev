@@ -5,6 +5,7 @@ import "aio:glyphs"
 import "aio:markdown"
 import "aio:render"
 import "aio:ui"
+import "core:strings"
 import "core:testing"
 import fixtures "../fixtures"
 
@@ -261,4 +262,42 @@ the_checkbox_takes_its_box_and_tick_colours :: proc(t: ^testing.T) {
 	open, _ := rects_in(&p, GREEN)
 	testing.expect_value(t, done, 1)
 	testing.expect_value(t, open, 1)
+}
+
+// Code text takes its colours wherever code shows: inline code in a paragraph, a heading, a table cell and
+// a quote, and fenced and indented blocks, in reading and in edit mode wherever the caret is. Inside a
+// link the link's colour wins, as it does over every other style but markup.
+@(private = "file")
+CODE_PAGE :: "Inline `PARA` here\n\nA [link `LINK` text](https://a.example/x) here\n\n## Head `HEAD` end\n\n" +
+	"| Col | Other |\n|-----|-------|\n| `CELL` | x |\n\n```\nfenced block text\n```\n\n" +
+	"    indented block text\n\n> quote `QUOTE` end\n"
+
+@(private = "file")
+code_glyphs :: proc(t: ^testing.T, p: ^Page, label: string) {
+	theme: ui.Theme
+	m := &theme.markdown
+	m.fallback = GREY
+	m.inline_code.text = MAGENTA
+	m.code_block.text = CYAN
+	m.link.text = BLUE
+	if !page_draw(t, p, theme) {return}
+	// PARA, HEAD, CELL and QUOTE; LINK is the link's own colour. Fenced and indented block text.
+	testing.expectf(t, glyphs_in(p, MAGENTA) == 17, "%s: %d inline code glyphs", label, glyphs_in(p, MAGENTA))
+	testing.expectf(t, glyphs_in(p, CYAN) == 32, "%s: %d block code glyphs", label, glyphs_in(p, CYAN))
+	testing.expectf(t, glyphs_in(p, BLUE) >= 4 + 4 + 4, "%s: %d link glyphs", label, glyphs_in(p, BLUE))
+}
+
+@(test)
+code_text_colours_reach_every_kind_of_code_in_reading_and_edit_mode :: proc(t: ^testing.T) {
+	reading: Page
+	defer page_destroy(&reading)
+	if page_init(t, &reading, CODE_PAGE) {code_glyphs(t, &reading, "reading")}
+
+	for caret in ([?]string{"Inline", "fenced", "indented", "quote"}) {
+		editing: Page
+		defer page_destroy(&editing)
+		at := strings.index(CODE_PAGE, caret)
+		if !page_init(t, &editing, CODE_PAGE, live = true, from = at, to = at) {continue}
+		code_glyphs(t, &editing, caret)
+	}
 }
