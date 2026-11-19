@@ -11,9 +11,9 @@ import fixtures "../fixtures"
 // A page drawn into a list, to read the colours of what it drew.
 @(private = "file")
 Page :: struct {
-	fonts: ^font.System,
-	cache: glyphs.Cache,
-	device: render.Device,
+	fonts:  ^font.System,
+	cache:  glyphs.Cache,
+	device: ^render.Device,
 	text:  ui.Text,
 	doc:   markdown.Document,
 	view:  ui.Markdown_View,
@@ -220,8 +220,9 @@ a_background_draws_behind_its_element_and_none_draws_nothing :: proc(t: ^testing
 a_line_shown_as_source_keeps_its_element_and_markup_has_colours_of_its_own :: proc(t: ^testing.T) {
 	p: Page
 	defer page_destroy(&p)
-	// The caret is in the heading, so it shows as source; the paragraph below renders.
-	if !page_init(t, &p, "# Head\ntext\n", live = true, from = 2, to = 2) {return}
+	// The caret is in the heading, so it shows as source; the paragraph below renders. The file ends with no
+	// newline, so there is no empty last line to take a band of its own.
+	if !page_init(t, &p, "# Head\ntext", live = true, from = 2, to = 2) {return}
 	theme: ui.Theme
 	m := &theme.markdown
 	m.fallback = GREY
