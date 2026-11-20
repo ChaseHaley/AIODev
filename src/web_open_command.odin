@@ -14,9 +14,6 @@ control_web_open :: proc(
 	invocation: commands.Invocation,
 ) -> Outcome {
 	explicit_float := .Float in invocation.given
-	if explicit_float && invocation.given & {.Direction, .Ratio} != {} {
-		return outcome_failure(.Usage, "--float cannot be combined with --direction or --ratio")
-	}
 	url := ""
 	if .Text in invocation.given {
 		normalized, ok := links.normalize_web_input(invocation.text)

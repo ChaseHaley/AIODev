@@ -40,15 +40,17 @@ Panes   --pane takes a pane id, a pane name, here or focused. Inside an AIODev p
         default is here, the pane aio runs in; elsewhere it is the focused pane.
         --workspace takes a workspace id or name; workspace.change, pane.move_workspace
         and tab.move_workspace open their dialog without it.
-Files   aio pane.open_markdown [--direction left|right|up|down] [--focus] <file>
+Files   aio pane.open_markdown [--float | --direction left|right|up|down] [--focus] <file>
             Shows a Markdown file beside the pane and updates it when the file changes.
         aio pane.open_web [--float | --direction left|right|up|down] [--focus] [<url>]
             Opens a web pane beside the target, or a separate float with --float.
+        aio pane.agent_changes [--float]
+        aio settings.open [--float]
         aio layout.apply [--focus] <file>
             Opens a tab of named panes from a JSON layout; prints their ids in order.
 Common  aio tab.new [--cwd <directory>] [--name <name>] [--tab-name <name>] [--focus] [-- <program>]
         aio workspace.new [--cwd <directory>] [--name <name>] [--focus] [-- <program>]
-        aio pane.split [--direction left|right|up|down] [--ratio 0.05-0.95] [-- <program>]
+        aio pane.split [--float | --direction left|right|up|down] [-- <program>]
             Each prints the new pane's id, starts in aio's working directory unless --cwd
             names another, and leaves focus where it is unless --focus.
             tab.new --name names the pane; workspace.new --name names the workspace.

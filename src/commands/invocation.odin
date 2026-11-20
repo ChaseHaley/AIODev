@@ -262,7 +262,7 @@ argument_grammar := [Argument]struct {
 		"--float", "",
 		{
 			"opens a separate float; cannot be combined with --direction or --ratio",
-			"use pane preference",
+			"the command's usual placement",
 			"--float",
 		},
 	},
@@ -546,6 +546,14 @@ parse_invocation :: proc(
 			case:
 				result.workspace = value
 			}
+		}
+	}
+	if .Float in command.arguments {
+		if .Float in result.given && result.given & {.Direction, .Ratio} != {} {
+			return {}, {"--float", "cannot be combined with --direction or --ratio"}
+		}
+		if .Float not_in result.given && result.given & {.Bounds, .Unit} != {} {
+			return {}, {"--float", "use --float with --bounds or --unit"}
 		}
 	}
 	missing := command.required - result.given

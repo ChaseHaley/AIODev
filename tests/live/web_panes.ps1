@@ -131,7 +131,33 @@ try {
     $preference = Invoke-Aio @('settings.get', '--name', 'pane.web_floating')
     Check ($preference.Code -eq 0 -and $preference.Text -eq 'false') 'the flag changed the saved preference'
 
-    Write-Output "PASS web panes journey; restored $($urls.Count) web panes and opened two explicit floats"
+    # The same CLI flag works on every single-pane opener.
+    $markdown = Join-Path $work 'float.md'
+    Set-Content -LiteralPath $markdown '# Floating Markdown'
+    $openers = @(
+        @{ Kind = 'terminal'; Args = @('pane.split', '--float', '--bounds', '0.1,0.1,0.6,0.6') }
+        @{ Kind = 'markdown'; Args = @('pane.open_markdown', '--float', $markdown) }
+        @{ Kind = 'changes'; Args = @('pane.agent_changes', '--float') }
+        @{ Kind = 'settings'; Args = @('settings.open', '--float') }
+    )
+    $count = 2
+    foreach ($opener in $openers) {
+        $result = Invoke-Aio $opener.Args
+        Check ($result.Code -eq 0) "$($opener.Args[0]): $($result.Text)"
+        $count++
+        Wait-For 'tab.1.floating' "$count"
+        $state = Read-State
+        $matches = @($state.Keys | Where-Object {
+            $_ -match '^tab\.1\.pane\.\d+\.kind$' -and $state[$_] -eq $opener.Kind -and
+                $state.ContainsKey(($_ -replace '\.kind$', '.float'))
+        })
+        Check ($matches.Count -eq 1) "expected one floating $($opener.Kind) pane"
+    }
+    Check ((Read-State)['settings.active'] -eq 'true') 'floating Settings did not take focus'
+    $again = Invoke-Aio @('settings.open', '--float')
+    Check ($again.Code -eq 0 -and (Read-State)['tab.1.floating'] -eq "$count") 'Settings opened a duplicate'
+
+    Write-Output "PASS panes journey; --float placed every pane kind and restored $($urls.Count) web panes"
 } finally {
     & $ctl --name $Name stop | Out-Null
 }

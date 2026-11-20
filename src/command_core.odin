@@ -579,6 +579,7 @@ control_split :: proc(
 	target: Pane_Target,
 	invocation: commands.Invocation,
 ) -> Outcome {
+	if .Float in invocation.given {return control_floating_new(app, w, target, invocation)}
 	if failure, ok := control_profile_check(app, invocation.profile); !ok {return failure}
 	launch := Pane_Launch{invocation.program, invocation.directory, invocation.profile}
 	// A linked pane splits in the window showing it, whose tree is the one that decides the new pane's size.
