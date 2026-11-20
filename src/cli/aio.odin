@@ -81,7 +81,12 @@ Lua     aio exec runs a Lua script with the aio API against AIODev, or one actio
         asks AIODev for your actions and copies the built-in definitions when AIODev is not running.
         Both use the init.lua the running AIODev loads; --data-dir names an instance's data folder
         only when AIODev is not running.
-Neovim  Panes name the AIODev theme file in $AIODEV_THEME_FILE. To make Neovim in a pane follow the theme,
+Theme   Inside a pane, AIODEV_THEME_FILE points to the live theme JSON. Read it on each prompt
+        render for resolved #RRGGBB colors (colors.accent, colors.foreground, colors.background,
+        colors.palette[0..15], and more). The file is updated when the theme changes. No aio call
+        or Command line control setting is needed. In PowerShell 7:
+        (Get-Content -LiteralPath $env:AIODEV_THEME_FILE -Raw | ConvertFrom-Json).colors.accent
+Neovim  To make Neovim in a pane follow the theme,
         add this to init.lua (one line; the plugin is the nvim folder beside aio.exe):
         if vim.env.AIODEV_CLI then vim.opt.rtp:append(vim.fs.dirname(vim.env.AIODEV_CLI) .. "/nvim");
         require("aiodev_theme").setup() end
