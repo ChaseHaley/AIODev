@@ -8,6 +8,7 @@ Content_Kind :: enum u8 {
 	Settings,
 	Markdown,
 	Changes,
+	Web,
 }
 
 // A reference to content owned elsewhere; panes display content, they never own it.

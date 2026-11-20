@@ -238,3 +238,48 @@ trim_prose :: proc(text: string, start, end: int) -> int {
 	}
 	return trim
 }
+
+// Normalize_web_input turns text typed or scripted as a web address into one allowed() accepts: an http or
+// https URL passes as is, a bare host gets https (http for localhost, 127.0.0.1 and [::1]), and any other
+// scheme is refused. The result is allocated with `allocator`.
+@(require_results)
+normalize_web_input :: proc(raw: string, allocator := context.temp_allocator) -> (string, bool) {
+	trimmed := strings.trim_space(raw)
+	if trimmed == "" {return "", false}
+	if allowed(trimmed) {
+		cloned, err := strings.clone(trimmed, allocator)
+		return cloned, err == nil
+	}
+	if strings.contains(trimmed, "://") {return "", false}
+	host, valid := bare_authority_host(trimmed)
+	if !valid {return "", false}
+	prefix := "https://"
+	if strings.equal_fold(host, "localhost") || host == "127.0.0.1" || host == "[::1]" {
+		prefix = "http://"
+	}
+	candidate, err := strings.concatenate({prefix, trimmed}, allocator)
+	if err != nil {return "", false}
+	if !allowed(candidate) {delete(candidate, allocator); return "", false}
+	return candidate, true
+}
+
+// The host in a bare address with at most a numeric port. A scheme without slashes (such as
+// `about:blank` or `file:name`) is not a host and port.
+@(private, require_results)
+bare_authority_host :: proc(text: string) -> (string, bool) {
+	authority := text
+	if end := strings.index_any(authority, "/?#"); end >= 0 {authority = authority[:end]}
+	port_at := strings.index_byte(authority, ':')
+	if strings.has_prefix(authority, "[") {
+		close := strings.index_byte(authority, ']')
+		if close < 0 {return "", false}
+		if close + 1 == len(authority) {return authority, true}
+		port_at = close + 1
+		if authority[port_at] != ':' {return "", false}
+	}
+	if port_at < 0 {return authority, true}
+	port := authority[port_at + 1:]
+	if port == "" {return "", false}
+	for c in transmute([]u8)port {if c < '0' || c > '9' {return "", false}}
+	return authority[:port_at], true
+}

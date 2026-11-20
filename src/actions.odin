@@ -82,6 +82,8 @@ Action :: enum u32 {
 	Open_Markdown,
 	Edit_Markdown,
 	Open_Markdown_Default_App,
+	Open_Web,
+	Toggle_Web_Navigator,
 	Agent_Changes,
 	Duplicate_Tab,
 	Move_Tab_Left,
@@ -239,6 +241,7 @@ Command_Spec :: struct {
 	hidden:             bool,
 	control:            Control_Form,
 	param:              Action_Param,
+	keywords:           string,
 }
 
 // How a control request reaches a command.
@@ -464,6 +467,13 @@ ACTIONS :: [Action]Command_Descriptor {
 	.Edit_Markdown = {"pane.edit_markdown", "Toggle Markdown editing", nil, .Local, {}},
 	.Open_Markdown_Default_App = {
 		"pane.open_markdown_default_app", "Open Markdown in default app", nil, .Local, {},
+	},
+	.Open_Web = {
+		"pane.open_web", "Open web pane", nil, .Local,
+		{accepted = {.Text, .Direction, .Ratio, .Focus}, control = .Pane, keywords = "browser"},
+	},
+	.Toggle_Web_Navigator = {
+		"pane.toggle_web_navigator", "Toggle web pane URL bar", nil, .Local, {keywords = "browser"},
 	},
 	.Agent_Changes = {"pane.agent_changes", "Open agent changes", nil, .Local, {}},
 	.Duplicate_Tab = {"tab.duplicate", "Duplicate tab", nil, .Host, {}},
@@ -936,6 +946,21 @@ COMMAND_HELP :: #partial [Action]Command_Help {
 		"Opens the focused Markdown pane's file in the program Windows opens Markdown files with.",
 		nil,
 	},
+	.Open_Web = {
+		"Opens a new embedded web pane beside the pane; with an address it loads it (https is assumed when no " +
+		"scheme is given), else the URL bar is ready for one.",
+		{
+			{
+				.Text,
+				{description = "the http or https address to open", default = "a blank pane", example = "example.com"},
+			},
+			{.Direction, {default = "right, or a float when pane.web_floating is on"}},
+		},
+	},
+	.Toggle_Web_Navigator = {
+		"Shows or hides the URL navigator bar below the focused web pane's header.",
+		nil,
+	},
 	.Agent_Changes = {
 		"Opens Agent changes beside the focused pane, for that pane's agent. Each run opens another pane.",
 		nil,
@@ -1079,6 +1104,7 @@ register_actions :: proc(registry: ^commands.Registry) -> commands.Error {
 			arguments = descriptor.spec.accepted,
 			required  = descriptor.spec.required,
 			hidden    = descriptor.spec.hidden,
+			keywords  = descriptor.spec.keywords,
 			summary   = help[action].summary,
 			notes     = help[action].notes,
 		}
@@ -1352,6 +1378,13 @@ command_execute :: proc(app: ^App, ctx: Command_Context, invocation: commands.In
 		markdown_edit_toggle(app, w)
 	case .Open_Markdown_Default_App:
 		markdown_open_external(app, w)
+	case .Open_Web:
+		if t, named := target.?; named {
+			return control_web_open(app, window_for_workspace(app, t.workspace), t, invocation)
+		}
+		web_open_blank(app, w)
+	case .Toggle_Web_Navigator:
+		web_toggle_navigator(app, w)
 	case .Agent_Changes:
 		changes_open(app, w)
 	case .New_Floating:
@@ -1475,11 +1508,15 @@ command_execute :: proc(app: ^App, ctx: Command_Context, invocation: commands.In
 			length := app.settings.terminal.scroll_page_length
 			markdown_page(app, w, action == .Scroll_Partial_Up ? -length : length)
 		}
+	// A focused web pane zooms its page instead, as a browser would.
 	case .Font_Size_Increase:
+		if w != nil && web_zoom_focused(app, w, 1) {break}
 		set_font_points(app, app.font_points + 1)
 	case .Font_Size_Decrease:
+		if w != nil && web_zoom_focused(app, w, -1) {break}
 		set_font_points(app, app.font_points - 1)
 	case .Font_Size_Reset:
+		if w != nil && web_zoom_focused(app, w, 0) {break}
 		set_font_points(app, f32(app.settings.font.size))
 	case .Open_Settings:
 		if !platform.open_path(app.settings_path) {

@@ -72,7 +72,60 @@ scissor :: proc(clip: Rect, width, height: f32) -> d3d.RECT {
 frame_render :: proc(d: ^Device, s: ^Surface, list: ^Draw_List, clear: Color) -> Error {
 	assert(s.owner == d)
 	d.image_frame += 1
-	if err := list_draw(d, s.target, s.width, s.height, list, clear); err != .None {return err}
+	if err := list_draw_range(d, s.target, s.width, s.height, list, 0, len(list.layers), clear, true);
+	   err != .None {return err}
+	images_evict(d)
+	if s.chain == nil {
+		s.rendered += 1
+		return .None
+	}
+	return checked(d, s.chain->Present(1, {}), "Present", .Surface_Failed)
+}
+
+// Draws layers `[0:base_end]` of `list` into `s` without presenting, after uploading the frame's
+// instance buffers once. Pair with frame_render_overlay and frame_present when compositing overlays
+// above embedded platform visuals.
+@(require_results)
+frame_render_base :: proc(
+	d: ^Device,
+	s: ^Surface,
+	list: ^Draw_List,
+	base_end: int,
+	clear: Color,
+) -> Error {
+	assert(s.owner == d)
+	d.image_frame += 1
+	return list_draw_range(d, s.target, s.width, s.height, list, 0, base_end, clear, true)
+}
+
+// Draws layers `[from_layer:to_layer]` of `list` into a transparent external render target view
+// (such as a DirectComposition overlay swap chain), reusing the instance buffers frame_render_base
+// uploaded.
+@(require_results)
+frame_render_overlay :: proc(
+	d: ^Device,
+	target: rawptr,
+	width, height: i32,
+	list: ^Draw_List,
+	from_layer, to_layer: int,
+) -> Error {
+	return list_draw_range(
+		d,
+		(^d3d.IRenderTargetView)(target),
+		width,
+		height,
+		list,
+		from_layer,
+		to_layer,
+		{},
+		false,
+	)
+}
+
+// Finishes a frame started by frame_render_base: evicts idle images and presents `s`.
+@(require_results)
+frame_present :: proc(d: ^Device, s: ^Surface) -> Error {
+	assert(s.owner == d)
 	images_evict(d)
 	if s.chain == nil {
 		s.rendered += 1
@@ -90,15 +143,30 @@ list_draw :: proc(
 	list: ^Draw_List,
 	clear: Color,
 ) -> Error {
+	return list_draw_range(d, target, width, height, list, 0, len(list.layers), clear, true)
+}
+
+@(private, require_results)
+list_draw_range :: proc(
+	d: ^Device,
+	target: ^d3d.IRenderTargetView,
+	width, height: i32,
+	list: ^Draw_List,
+	from_layer, to_layer: int,
+	clear: Color,
+	upload: bool,
+) -> Error {
 	if list.error != .None {return list.error}
 	if list.atlas_generation != 0 && list.atlas_generation != atlas_generation(d) {
 		return .Atlas_Invalidated
 	}
-	if err := instance_upload(d, &d.rects, list.rects[:]); err != .None {
-		return err
-	}
-	if err := instance_upload(d, &d.glyphs, list.glyphs[:]); err != .None {
-		return err
+	if upload {
+		if err := instance_upload(d, &d.rects, list.rects[:]); err != .None {
+			return err
+		}
+		if err := instance_upload(d, &d.glyphs, list.glyphs[:]); err != .None {
+			return err
+		}
 	}
 	c := d.ctx
 	target := target
@@ -127,7 +195,9 @@ list_draw :: proc(
 		target_size       = {f32(width), f32(height)},
 		enhanced_contrast = d.gamma.enhanced_contrast,
 	}
-	for layer in list.layers {
+	start := clamp(from_layer, 0, len(list.layers))
+	stop := clamp(to_layer, start, len(list.layers))
+	for layer in list.layers[start:stop] {
 		clip := scissor(layer.clip, f32(width), f32(height))
 		if clip.right <= clip.left || clip.bottom <= clip.top {
 			continue

@@ -97,7 +97,7 @@ window_surface_settle :: proc(app: ^App, w: ^Window) {
 // Presents w's draw list. Any render call can lose the device; this module recovers it, here as for
 // making and resizing a surface, so callers only learn that the frame was not shown.
 window_surface_present :: proc(app: ^App, w: ^Window, background: render.Color) -> render.Error {
-	err := render.frame_render(app.device, window_surface(w), &w.list, background)
+	err := web_window_present(app, w, background)
 	if err == .Device_Lost {recover_device(app)}
 	return err
 }
@@ -107,6 +107,7 @@ window_surface_present :: proc(app: ^App, w: ^Window, background: render.Color) 
 // A window whose surface the new device loses too is left for its next frame to recover again.
 recover_device :: proc(app: ^App) {
 	log.warn("the graphics device was lost; recreating it")
+	web_device_lost(app)
 	for w in app.windows {window_surface_release(w)}
 	device, err := render.device_create(app.render_driver)
 	if err != .None {

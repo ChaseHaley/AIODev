@@ -84,6 +84,8 @@ autoscroll_begin :: proc(app: ^App, w: ^Window, target: Pointer_Target, e: input
 	case .Changes:
 		// Only the diff takes the anchor: not the header row, a panel or list over it, or the send bar.
 		if !changes_anchor_hit(app, w, pane, x, y) {return false}
+	case .Web:
+		return false
 	}
 	pane_focus(app, w, pane.node)
 	tooltip_cancel(w)
@@ -222,6 +224,9 @@ autoscroll_animate :: proc(app: ^App, w: ^Window, frame: ui.Frame_Time) -> bool 
 		pixels := int(on.remainder)
 		on.remainder -= f32(pixels)
 		changes_diff_scroll(app, w, changes, pane, pixels)
+	case .Web:
+		autoscroll_end(app, w)
+		return false
 	}
 	return true
 }

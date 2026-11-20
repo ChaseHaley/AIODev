@@ -234,7 +234,9 @@ link_choices :: proc(app: ^App, document: Document) -> []Maybe(Link_Choice) {
 			append(&rows, Link_Choice{action = .Program, program = u8(i)})
 		}
 	}
-	if markdown || document.folder {append(&rows, Link_Choice{action = .Open_External})}
+	if markdown || document.folder || (web && platform.webview_supported()) {
+		append(&rows, Link_Choice{action = .Open_External})
+	}
 	append(&rows, nil, Link_Choice{action = .Copy})
 	if file {append(&rows, Link_Choice{action = .Open_Folder})}
 	return rows[:]
@@ -255,7 +257,13 @@ link_choice_item :: proc(
 	#partial switch choice.action {
 	case .Open:
 		item.glyph = document_icon(document)
-		item.submenu = markdown_is_path(document.target) && !document_is_web(document.target)
+		web := document_is_web(document.target)
+		item.submenu = (markdown_is_path(document.target) && !web) || (web && platform.webview_supported())
+	case .Open_External:
+		if document_is_web(document.target) {
+			item.label = "Open in default browser"
+			item.glyph = .Launch
+		}
 	case .Open_Shell:
 		item.submenu = true
 	case .Program:
@@ -274,10 +282,12 @@ link_choice_item :: proc(
 // a right split, and a program at its own placement. Default for a program that runs as its own window.
 // Open from a pane `in_float` splits that float instead of adding another, as markdown_open_at does.
 @(private = "file")
-link_choice_default :: proc(app: ^App, choice: Link_Choice, in_float: bool) -> Link_Placement {
+link_choice_default :: proc(app: ^App, choice: Link_Choice, in_float, web: bool) -> Link_Placement {
 	#partial switch choice.action {
 	case .Open:
-		return app.settings.pane.markdown_floating && !in_float ? .Float : .Split_Right
+		if web && (!app.settings.pane.web_links || !platform.webview_supported()) {return .Default}
+		floating := web ? app.settings.pane.web_floating : app.settings.pane.markdown_floating
+		return floating && !in_float ? .Float : .Split_Right
 	case .Open_Shell:
 		return .Split_Right
 	case .Program:
@@ -298,10 +308,10 @@ link_choice_default :: proc(app: ^App, choice: Link_Choice, in_float: bool) -> L
 // Fills `submenu` with the placements of row `choice` on a link of a pane `in_float` or not, its click
 // marked Default.
 @(private = "file")
-link_submenu_build :: proc(app: ^App, submenu: ^ui.Menu, choice: Link_Choice, in_float: bool) {
+link_submenu_build :: proc(app: ^App, submenu: ^ui.Menu, choice: Link_Choice, in_float, web: bool) {
 	ui.menu_clear(submenu)
 	submenu.width = LINK_SUBMENU_WIDTH
-	default := link_choice_default(app, choice, in_float)
+	default := link_choice_default(app, choice, in_float, web)
 	for placement in Link_Placement.Split_Right ..= Link_Placement.Linked_Window {
 		row := LINK_PLACEMENTS[placement]
 		place := choice
@@ -346,7 +356,9 @@ link_choice_run :: proc(
 	case .Program:
 		link_program_run(app, w, content, document, choice)
 	case .Open_External:
-		if document.folder {
+		if document_is_web(document.target) {
+			if !target_open_url(app, document.target) {notify(app, .Error, "Could not open the link.")}
+		} else if document.folder {
 			target_open(app, w, File_Target{document.target})
 		} else {
 			document_link_open_external(app, w, document.target)
@@ -385,7 +397,7 @@ link_program_run :: proc(
 	if !ready {return}
 	placement := choice.placement
 	// A program's own placement does not depend on where its link is.
-	if placement == .Default {placement = link_choice_default(app, choice, false)}
+	if placement == .Default {placement = link_choice_default(app, choice, false, false)}
 	if placement == .Default {
 		if app.opener.program == nil || !app.opener.program(line, directory) {
 			notify(app, .Error, fmt.tprintf("Could not start %s.", name))
@@ -597,10 +609,10 @@ document_submenu_open :: proc(app: ^App, w: ^Window, row: int, select_first: boo
 		return
 	}
 	if current, open := sub.row.?; open && current == row && !select_first {return}
-	_, content, _ := document_link_subject(w)
+	document, content, _ := document_link_subject(w)
 	tree := window_tree(w)
 	in_float := tree != nil && layout.is_floating(tree, layout.find_content(tree, content))
-	link_submenu_build(app, &sub.menu, choice, in_float)
+	link_submenu_build(app, &sub.menu, choice, in_float, document_is_web(document.target))
 	submenu_place(w, sub, parent, row, LINK_SUBMENU_WIDTH, select_first)
 }
 
@@ -883,6 +895,12 @@ document_link_open_in :: proc(
 	if tree == nil {return}
 	node := layout.find_content(tree, content)
 	if node == layout.INVALID_NODE {node = tree.focus}
+	if document_is_web(document.target) {
+		if !web_open_placed(app, w, node, document.target, placement) {
+			notify(app, .Error, "Could not open the web pane.")
+		}
+		return
+	}
 	if document.folder {
 		if !os.is_dir(document.target) {
 			target_unavailable(app)
@@ -1764,7 +1782,7 @@ document_menu_button :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event)
 	if e.button != .Left {return}
 	if entry.action == .Url_Field || entry.action == .Search_Field {
 		if box, field, shown := document_field_box(w, entry.action); shown {
-			ui.field_pointer(field, ui.field_box_offset(box, x), true, .Shift in e.modifiers)
+			field_press(field, ui.field_box_offset(box, x), x, .Shift in e.modifiers, e.time_ns)
 			w.dirty = true
 		}
 		return

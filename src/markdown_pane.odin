@@ -511,18 +511,24 @@ markdown_open_focused :: proc(app: ^App, w: ^Window, path, heading: string) {
 	}
 }
 
-// The Open Markdown File command from a key or the palette.
-markdown_open_picker :: proc(app: ^App, w: ^Window) {
+// Opens the Markdown picker. A content menu supplies where the chosen file must go.
+markdown_open_picker :: proc(app: ^App, w: ^Window, menu: Maybe(Profile_Menu_Mode) = nil) {
 	if app.dialogs.markdown != nil || !gesture_cancel(app, w) {return}
 	palette_close(app, w)
 	directory := ""
-	if entry := focused_session(app, w); entry != nil {directory, _ = pane_directory(app, entry)}
+	entry := focused_session(app, w)
+	if mode, from_menu := menu.?; from_menu {
+		if split, opens_split := mode.(Profile_Menu_Split); opens_split {
+			entry = workspace_session_for_content(app, split.pane)
+		}
+	}
+	if entry != nil {directory, _ = pane_directory(app, entry)}
 	pick := platform.file_pick_start(&app.platform, w.id, "Markdown files", MARKDOWN_FILTER, directory)
 	if pick == nil {
 		notify(app, .Error, "Could not show the file dialog.")
 		return
 	}
-	app.dialogs.markdown = File_Dialog{pick, w.id}
+	app.dialogs.markdown = Markdown_Pick{{pick, w.id}, menu}
 }
 
 @(require_results)

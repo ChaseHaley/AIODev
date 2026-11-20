@@ -557,11 +557,11 @@ workspace_picker_menu_button_rect :: proc(w: ^Window, index: int) -> render.Rect
 	return {r.x + r.width - ui.SPACE_1 * w.scale - size, r.y + (r.height - size) / 2, size, size}
 }
 
-workspace_picker_click :: proc(app: ^App, w: ^Window, x, y: f32, extend: bool) {
+workspace_picker_click :: proc(app: ^App, w: ^Window, x, y: f32, extend: bool, time_ns := i64(0)) {
 	window_id := w.id
 	defer if window_find(app, window_id) == w {workspace_picker_layout_changed(w)}
 	p := &w.workspace_picker
-	if workspace_row_click(app, w, x, y, extend) { return }
+	if workspace_row_click(app, w, x, y, extend, time_ns) { return }
 	if hit := workspace_picker_hit(w, x, y); hit >= 0 {
 		row, on_row := workspace_picker_target_at(w, hit).(Picker_Workspace)
 		if workspace_picker_browsing(p) && on_row &&
@@ -572,18 +572,23 @@ workspace_picker_click :: proc(app: ^App, w: ^Window, x, y: f32, extend: bool) {
 		p.selected = hit
 		workspace_picker_choose(app, w)
 	} else if render.rect_contains(workspace_picker_field_rect(w), x, y) {
-		workspace_picker_pointer(w, x, true, extend)
+		workspace_picker_pointer(w, x, true, extend, time_ns)
 	}
 }
 
-workspace_picker_pointer :: proc(w: ^Window, x: f32, pressed, extend: bool) {
+workspace_picker_pointer :: proc(w: ^Window, x: f32, pressed, extend: bool, time_ns := i64(0)) {
 	defer workspace_picker_layout_changed(w)
 	if workspace_picker_icons(&w.workspace_picker) { workspace_picker_select_target(w, Picker_Emoji_Field{}) }
 	box := workspace_picker_query_box(w)
 	if _, renaming := w.workspace_picker.state.(Workspace_Picker_Rename); renaming {
 		box = workspace_row_rename_box(w)
 	}
-	ui.field_pointer(box.field, ui.field_box_offset(box, x), pressed, extend)
+	at := ui.field_box_offset(box, x)
+	if pressed {
+		field_press(box.field, at, x, extend, time_ns)
+	} else {
+		ui.field_pointer(box.field, at, false, true)
+	}
 	w.dirty = true
 }
 

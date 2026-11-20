@@ -8,10 +8,11 @@ import "core:fmt"
 import "core:log"
 import "core:strings"
 
-// The shell switch a confirmation asks about: the pane, the profile it switches to, and the names its
-// text shows.
+// A pending switch keeps the content it was asked about, not a node another pane could reuse.
 Pane_Swap :: struct {
-	pane:                     layout.Node_Id,
+	pane:                     layout.Content,
+	kind:                     layout.Content_Kind,
+	path:                     string,
 	profile_id, profile_name: string,
 	current_name:             string,
 }
@@ -20,6 +21,7 @@ pane_swap_destroy :: proc(swap: ^Pane_Swap) {
 	delete(swap.profile_id)
 	delete(swap.profile_name)
 	delete(swap.current_name)
+	delete(swap.path)
 	swap^ = {}
 }
 
@@ -45,14 +47,22 @@ pane_shell_swap_request :: proc(
 		pane_shell_swap(app, w, node, profile_id)
 		return
 	}
+	pane_swap_ask(app, w, content, entry, .Terminal, profile.id, profile.name, "")
+}
+
+@(private)
+pane_swap_ask :: proc(
+	app: ^App, w: ^Window, content: layout.Content, entry: ^Session_Entry,
+	kind: layout.Content_Kind, profile_id, name, path: string,
+) {
 	current := entry.profile_id
 	if found := settings.profile_find(&app.settings.profiles, entry.profile_id); found != nil {
 		current = found.name
 	}
 	if !gesture_cancel(app, w) {return}
-	owned_id, id_error := strings.clone(profile.id)
+	owned_id, id_error := strings.clone(profile_id)
 	if id_error != nil {notify(app, .Error, "Could not prepare the shell switch."); return}
-	owned_name, name_error := strings.clone(profile.name)
+	owned_name, name_error := strings.clone(name)
 	if name_error != nil {
 		delete(owned_id)
 		notify(app, .Error, "Could not prepare the shell switch.")
@@ -65,13 +75,16 @@ pane_shell_swap_request :: proc(
 		notify(app, .Error, "Could not prepare the shell switch.")
 		return
 	}
-	swap := Pane_Swap {
-		pane         = node,
-		profile_id   = owned_id,
-		profile_name = owned_name,
-		current_name = owned_current,
+	owned_path, path_error := strings.clone(path)
+	if path_error != nil {
+		delete(owned_id)
+		delete(owned_name)
+		delete(owned_current)
+		notify(app, .Error, "Could not prepare the pane switch.")
+		return
 	}
-	confirmation_ask(app, w, swap, show_option = true)
+	confirmation_ask(app, w, Pane_Swap{content, kind, owned_path, owned_id, owned_name, owned_current},
+		show_option = true)
 }
 
 pane_swap_text :: proc(swap: Pane_Swap) -> Confirmation_Text {
@@ -88,7 +101,13 @@ pane_swap_text :: proc(swap: Pane_Swap) -> Confirmation_Text {
 pane_swap_finish :: proc(app: ^App, w: ^Window, swap: Pane_Swap, opt_out, accept: bool) {
 	if !accept {return}
 	if opt_out {pane_swap_opt_out(app)}
-	pane_shell_swap(app, w, swap.pane, swap.profile_id)
+	if swap.kind == .Terminal {
+		node := pane_content_menu_node(w, swap.pane)
+		if node == layout.INVALID_NODE {return}
+		pane_shell_swap(app, w, node, swap.profile_id)
+	} else {
+		pane_content_replace(app, w, swap.pane, swap.kind, swap.path)
+	}
 }
 
 @(private)

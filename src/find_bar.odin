@@ -26,11 +26,13 @@ find_paste :: proc(app: ^App, w: ^Window) {
 Find_Target :: union {
 	^Session_Entry,
 	^Markdown_Pane,
+	^Web_Pane,
 }
 
 @(require_results)
 find_target :: proc(app: ^App, w: ^Window) -> Find_Target {
 	if pane := markdown_focused(app, w); pane != nil {return pane}
+	if pane := web_focused_pane(app, w); pane != nil {return pane}
 	if entry := focused_session(app, w); entry != nil {return entry}
 	return nil
 }
@@ -42,6 +44,8 @@ find_target_set :: proc(target: Find_Target, needle: string, options: search.Opt
 		if t != nil {term.search_set_needle(t.session, needle, options)}
 	case ^Markdown_Pane:
 		if t != nil {markdown.search_set(&t.search, needle, options)}
+	case ^Web_Pane:
+		if t != nil {web_find_set(t, needle, options)}
 	}
 }
 
@@ -53,6 +57,8 @@ find_target_select :: proc(w: ^Window, target: Find_Target, up: bool) {
 		if t != nil {term.search_select(t.session, up)}
 	case ^Markdown_Pane:
 		if t != nil {markdown_find_select(w, t, up)}
+	case ^Web_Pane:
+		if t != nil {web_find_select(t, up)}
 	}
 }
 
@@ -63,6 +69,8 @@ find_target_summary :: proc(target: Find_Target) -> (summary: search.Summary, ok
 		if t != nil {return term.search_summary(t.session), true}
 	case ^Markdown_Pane:
 		if t != nil {return markdown_find_summary(t), true}
+	case ^Web_Pane:
+		if t != nil {return web_find_summary(t), true}
 	}
 	return {}, false
 }
@@ -76,6 +84,8 @@ find_target_pending :: proc(target: Find_Target) -> bool {
 		return t != nil && term.search_pending(t.session)
 	case ^Markdown_Pane:
 		return t != nil && markdown_document(t) != nil && markdown.search_pending(&t.search)
+	case ^Web_Pane:
+		// WebView2 searches on its own and reports counts as events.
 	}
 	return false
 }
@@ -96,6 +106,7 @@ find_target_tick :: proc(app: ^App, target: Find_Target) {
 		term.search_update(t.session)
 	case ^Markdown_Pane:
 		markdown.search_update(&t.search, markdown_document(t), search.STEP_BUDGET)
+	case ^Web_Pane:
 	}
 	after, _ := find_target_summary(target)
 	if after != before {mark_all_dirty(app)}

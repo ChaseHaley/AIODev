@@ -148,6 +148,8 @@ Window :: struct {
 	// The dock edges shown beside the layout's dividers, refreshed with them by window_dividers.
 	dock_edges: Dock_Edges_Shown,
 	script_prompt: Script_Prompt,
+	// Embedded WebView2 DirectComposition host and layer split marks; zero until a web pane shows.
+	web: Web_Window_State,
 }
 
 // What the last frame drew that asks for another frame. build_frame clears it and drawing fills it in,
@@ -329,6 +331,7 @@ window_close :: proc(app: ^App, w: ^Window) {
 	window_overlays_cancel(app, w)
 	// A file dialog belongs to its native window, so it closes before the window does.
 	file_dialogs_window_closed(app, w.id)
+	web_window_destroy(app, w)
 	view, id := window_linked(w) ? w.workspace : nil, w.id
 	for i in 0 ..< len(app.windows) {
 		if app.windows[i] == w {
@@ -705,6 +708,7 @@ window_build_frame :: proc(app: ^App, w: ^Window) -> bool {
 build_frame :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 	blinking := false
 	w.frame_wakes = {}
+	web_window_prepare_frame(w)
 	pane_motion_drawn_reset(w)
 	cursor_crossing_prepare(app, w)
 	// While a workspace switch plays, all of this shrinks into its card; see workspace_overview.odin.
@@ -732,19 +736,25 @@ build_frame :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 	if !over {
 		if result := window_chrome_layers_draw(app, w); result != .Ok {return result}
 	}
+	// With a web pane shown, what follows draws into overlays above the web views: one after the tiled
+	// panes and chrome, and another after each floating group that shows a web pane.
+	web_overlay_split(w)
 	group := layout.INVALID_NODE
 	tree := window_tree(w)
 	for pane in w.panes {
 		if !pane.floating {continue}
 		// Each float's frame and header draw with it, so a higher float covers a lower one's.
 		if root := layout.float_root(tree, pane.node); root != group {
+			web_float_group_end(w)
 			group = root
 			from := render.draw_mark(&w.list)
 			frame := floating_header_draw(app, w, root)
 			pane_motion_region_drawn(w, PANE_MOTION_FRAME | pane.group, frame, from)
 		}
+		web_float_pane(app, w, pane)
 		if result := pane_draw_noted(app, w, pane, &blinking); result != .Ok {return result}
 	}
+	web_float_group_end(w)
 	// Floats shrinking into their capsules draw above the others.
 	if !over {pane_ghosts_draw_alone(app, w, false)}
 	if over {pane_motion_slide_clip(w, panes)}
@@ -890,6 +900,9 @@ pane_draw :: proc(app: ^App, w: ^Window, pane: layout.Pane_Rect, blinking: ^bool
 		drawn, result := changes_pane_draw(app, w, pane)
 		if result != .Ok {return result}
 		scrollbar = drawn
+	case .Web:
+		if result := web_pane_draw(app, w, pane); result != .Ok {return result}
+		scrollbar = false
 	}
 	pane_frame_content(w, f, content)
 	if card < len(w.list.rects) {w.list.rects[card].color = background}

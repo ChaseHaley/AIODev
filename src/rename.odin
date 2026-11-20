@@ -132,9 +132,14 @@ rename_field_box :: proc(app: ^App, w: ^Window) -> ui.Field_Box {
 	return ui.field_box_standard(&w.rename, &w.ui_text, rename_field_rect(app, w), w.scale)
 }
 
-rename_pointer :: proc(app: ^App, w: ^Window, x: f32, pressed, extend: bool) {
+rename_pointer :: proc(app: ^App, w: ^Window, x: f32, pressed, extend: bool, time_ns := i64(0)) {
 	box := rename_field_box(app, w)
-	ui.field_pointer(&w.rename, ui.field_box_offset(box, x), pressed, extend)
+	at := ui.field_box_offset(box, x)
+	if pressed {
+		field_press(&w.rename, at, x, extend, time_ns)
+	} else {
+		ui.field_pointer(&w.rename, at, false, true)
+	}
 	w.dirty = true
 }
 
@@ -263,7 +268,7 @@ rename_button :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) {
 		rename_finish(app, w, false)
 		gesture_swallow(w, e.button, .Rename)
 	} else if e.button == .Left && render.rect_contains(rename_field_rect(app, w), x, y) {
-		rename_pointer(app, w, x, true, .Shift in e.modifiers)
+		rename_pointer(app, w, x, true, .Shift in e.modifiers, e.time_ns)
 	}
 }
 

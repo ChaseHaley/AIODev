@@ -8,8 +8,7 @@ MENU_WIDTH :: f32(280)
 MENU_ROW_HEIGHT :: HEIGHT_STANDARD
 // A hairline with SPACE_1 above and below.
 MENU_SEPARATOR_HEIGHT :: 2 * SPACE_1 + 1
-// Enough for the longest owner: a profile menu's settings.PROFILE_LIMIT profiles and its separator,
-// Settings and Everything palette rows.
+// Enough for the profiles and content choices in the longest New tab menu.
 MENU_MAX_ITEMS :: 72
 
 Menu_Item :: struct {

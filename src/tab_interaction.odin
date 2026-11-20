@@ -169,7 +169,7 @@ tabs_tooltip :: proc(app: ^App, w: ^Window, x, y: f32) -> string {
 	case Tab_Chrome_Group:
 		group := tab_group_find(w.workspace, target.id)
 		if group != nil {return group.folded ? "Unfold group" : "Fold group"}
-	case Tab_Chrome_Profiles: return "Choose profile"
+	case Tab_Chrome_Profiles: return "Choose new tab content"
 	case Tab_Chrome_New: if w.tabs_horizontal {return "New tab"}
 	case nil:
 	}

@@ -456,6 +456,7 @@ when AIO_CONTROL {
 			verify_window_report(&r, app, w, entry)
 			caret_state_report(&r, app, w)
 			markdown_state_report(&r, app, w)
+			web_state_report(&r, app, w)
 			changes_state_report(&r, app, w)
 			settings_page_state_report(&r, app, w)
 			rename_state_report(&r, w)
@@ -699,6 +700,7 @@ when AIO_CONTROL {
 					state_value(r, state_key("tab.%d.pane.%d.keep_open", n, id), session.keep_open)
 				}
 				state_value(r, state_key("tab.%d.pane.%d.session", n, id), content.id)
+				state_word(r, state_key("tab.%d.pane.%d.kind", n, id), content.kind)
 				if floating, floated := layout.float_of(&tab.tree, layout.Node_Id(id)); floated {
 					b := floating.bounds
 					float_key := state_key("tab.%d.pane.%d.float", n, id)

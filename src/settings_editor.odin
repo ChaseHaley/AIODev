@@ -421,6 +421,7 @@ settings_page_shortcut_rows :: proc(app: ^App, p: ^ui.Editor, s: ^settings.Setti
 			key           = settings.binding_key(command.name),
 			title         = command.title,
 			value         = value,
+			keywords      = command.keywords,
 			default_value = commands.shortcut_set_text(command.defaults, context.temp_allocator),
 			kind          = .Shortcut,
 		}

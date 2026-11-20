@@ -143,7 +143,7 @@ Palette_Mode_Info :: struct {
 // A setting the palette can open in the settings editor, and the control it offers in place.
 // The strings are static schema text. A choice without `choices` asks Palette_Values for a live list.
 Palette_Setting :: struct {
-	key, title, group:      string,
+	key, title, group, keywords: string,
 	control:                Palette_Control,
 	minimum, maximum, step: f64,
 	choices, choice_labels: []string,
@@ -851,13 +851,14 @@ consider_item :: proc(
 	append_result(p, result, width, query, title_match ? title : "")
 }
 
-// A setting matches by its title, then its key and group, then the labels of its static choices, and
+// A setting matches by its title, then key, group and keywords, then the labels of its static choices, and
 // last by the existing title/group matcher's header alias.
 @(private)
 consider_setting :: proc(p: ^Palette, setting: int, query: string, width: int) {
 	s := p.settings[setting]
-	fields := [?]string{s.key, s.group}
-	rank, score, matched, title_match := rank_fields(query, s.title, fields[:], p.scratch, .Scattered)
+	fields := [?]string{s.key, s.group, s.keywords}
+	names := fields[:len(fields) - (s.keywords == "" ? 1 : 0)]
+	rank, score, matched, title_match := rank_fields(query, s.title, names, p.scratch, .Scattered)
 	result := Palette_Result {
 		kind        = .Setting,
 		command     = nil,
@@ -872,7 +873,7 @@ consider_setting :: proc(p: ^Palette, setting: int, query: string, width: int) {
 		return
 	}
 	if by_choice, label := choice_field_match(query, s.choices, s.choice_labels, p.scratch); by_choice.matched {
-		result.rank, result.score, result.value = field_rank(len(fields), by_choice.class), by_choice.score, label
+		result.rank, result.score, result.value = field_rank(len(names), by_choice.class), by_choice.score, label
 		append_result(p, result, width, query, label)
 		return
 	}

@@ -120,6 +120,7 @@ palette_setting :: proc(entry: settings.Schema_Entry) -> Palette_Setting {
 		key              = entry.key,
 		title            = entry.title,
 		group            = settings.group_title(entry.key),
+		keywords         = row.keywords,
 		minimum          = row.minimum,
 		maximum          = row.maximum,
 		step             = row.step,
