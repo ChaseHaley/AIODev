@@ -171,7 +171,6 @@ web_pane_url_zoom_and_documents_survive_a_layout_restart :: proc(t: ^testing.T) 
 	second: Web_Fixture
 	defer web_fixture_stop(t, &second)
 	if !web_fixture_start(t, &second, "restore", 2, directory) {return}
-	defer delete(directory)
 	s := &second.state
 	if !testing.expect_value(t, len(s.web_panes), 2) {return}
 	restored := 0
