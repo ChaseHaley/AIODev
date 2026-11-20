@@ -8,8 +8,6 @@ import "aio:render"
 Icon :: enum {
 	None,
 	Close,
-	// An @: a round inner loop with the stem that runs into the open outer ring.
-	At,
 	Add,
 	Chevron_Down,
 	Chevron_Right,
@@ -315,16 +313,6 @@ icon_draw :: proc(
 	case .Close:
 		pen_path(p, {4, 4}, {12, 12})
 		pen_path(p, {12, 4}, {4, 12})
-	case .At:
-		pen_arc(p, 8, 8, 2.4, 0, 2 * math.PI)
-		pen_path(p, {10.4, 5.8}, {10.4, 9.4}, {11.2, 10.7}, {12.6, 10.7}, {13.8, 9.8}, {14.5, 8})
-		// The outer ring, open at the lower right, as a polyline round the centre.
-		ring: [25][2]f32
-		for i in 0 ..< len(ring) {
-			angle := -1.7 * math.PI * f32(i) / f32(len(ring) - 1)
-			ring[i] = {8 + 6.5 * math.cos(angle), 8 + 6.5 * math.sin(angle)}
-		}
-		pen_path(p, ..ring[:])
 	case .Add:
 		pen_path(p, {8, 3}, {8, 13})
 		pen_path(p, {3, 8}, {13, 8})

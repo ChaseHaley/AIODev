@@ -47,24 +47,3 @@ field_pointer_drag_selects_between_offsets :: proc(t: ^testing.T) {
 	ui.field_pointer(&f, 0, true, true)
 	testing.expect_value(t, ui.field_selected_text(&f), "h")
 }
-
-@(test)
-a_field_atom_is_one_character_for_the_caret_the_selection_and_deletion :: proc(t: ^testing.T) {
-	f: ui.Text_Field
-	defer delete(f.bytes)
-	ui.field_set(&f, `ab @"No vendor" cd`)
-	f.atoms = []ui.Field_Atom{{3, 15}}
-	f.cursor, f.anchor = 15, 15
-	ui.field_key(&f, key({key = .Arrow_Left}))
-	testing.expect_value(t, f.cursor, 3)
-	ui.field_key(&f, key({key = .Arrow_Right}))
-	testing.expect_value(t, f.cursor, 15)
-	ui.field_key(&f, key({key = .Arrow_Left, modifiers = {.Shift}}))
-	testing.expect_value(t, ui.field_selected_text(&f), `@"No vendor"`)
-	ui.field_key(&f, key({key = .Arrow_Left, modifiers = {.Control}}))
-	testing.expect_value(t, f.cursor, 3)
-	f.cursor, f.anchor = 15, 15
-	testing.expect_value(t, ui.field_key(&f, key({key = .Backspace})), ui.Field_Change.Edited)
-	testing.expect_value(t, ui.field_string(&f), "ab  cd")
-	f.atoms = nil
-}

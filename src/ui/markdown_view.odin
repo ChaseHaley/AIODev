@@ -645,6 +645,7 @@ layout_bands :: proc(v: ^Markdown_View, doc: ^markdown.Document, index: int, x, 
 	}
 	#partial switch block.kind {
 	case .Paragraph:
+		if doc.live && is_blank(block) {break}
 		layout_append(v, &v.boxes, Box{{x - outset, top, right - x + outset, 0}, .Paragraph_Band, radius})
 	case .Heading:
 		element := Box_Element(int(Box_Element.H1_Band) + clamp(block.level, 1, 6) - 1)
@@ -652,16 +653,46 @@ layout_bands :: proc(v: ^Markdown_View, doc: ^markdown.Document, index: int, x, 
 	}
 }
 
+// The space reading puts above `block`, which follows `previous`.
 @(private = "file")
-gap_before :: proc(v: ^Markdown_View, doc: ^markdown.Document, index: int) -> f32 {
-	// An editor's lines sit flush, as the file's own lines do; blank lines are the spacing.
-	if index == 0 || doc.live {return 0}
-	block, previous := doc.blocks[index], doc.blocks[index - 1]
+reading_gap :: proc(v: ^Markdown_View, block, previous: markdown.Block) -> f32 {
 	line := v.faces[.Body].line_height
 	if block.kind == .Heading {return math.round(line * (block.level <= 2 ? 1.5 : 1.15))}
 	if previous.kind == .Heading {return math.round(line * 0.4)}
 	if block.tight {return math.round(2 * v.scale)}
 	return math.round(line * v.style.paragraph_spacing)
+}
+
+// An edit view's empty line between blocks; see blank_height.
+@(private = "file")
+is_blank :: proc(block: markdown.Block) -> bool {
+	return block.kind == .Paragraph && block.span_count == 0 && block.marker_end == block.marker_start &&
+		block.list_depth == 0 && !block.spacer
+}
+
+@(private = "file")
+gap_before :: proc(v: ^Markdown_View, doc: ^markdown.Document, index: int) -> f32 {
+	if index == 0 {return 0}
+	block, previous := doc.blocks[index], doc.blocks[index - 1]
+	// An editor's empty lines show the gap themselves, and a line after a hard break or inside a code block
+	// follows its block as the file's own lines do.
+	if doc.live && (is_blank(block) || is_blank(previous) || block.joined) {return 0}
+	return reading_gap(v, block, previous)
+}
+
+// The height of an empty line of the edit view. The first of a run of them between two blocks takes the
+// gap reading puts between those, so the blocks sit where reading puts them; reading folds the rest of the
+// run away, but each of those is a line to stand on, so it takes a body line. At the start or end of the
+// text there is no gap to show, so it takes a line too. Never less than a few pixels, so there is always a
+// row to click and to move the caret onto.
+@(private = "file")
+blank_height :: proc(v: ^Markdown_View, doc: ^markdown.Document, index: int) -> f32 {
+	line := v.faces[.Body].line_height
+	if index == 0 || is_blank(doc.blocks[index - 1]) {return line}
+	next := index + 1
+	for next < len(doc.blocks) && is_blank(doc.blocks[next]) {next += 1}
+	if next >= len(doc.blocks) {return line}
+	return max(reading_gap(v, doc.blocks[next], doc.blocks[index - 1]), math.round(4 * v.scale))
 }
 
 @(private = "file")
@@ -694,20 +725,33 @@ layout_block :: proc(
 	band_count := len(v.boxes) - bands
 	switch block.kind {
 	case .Paragraph, .Heading:
-		y = flow(v, doc, index, x, width, y, ctx)
+		if doc.live && is_blank(block) {
+			height := blank_height(v, doc, index)
+			line := Line{top = y, height = height, baseline = y, band_top = y, band_bottom = y + height}
+			line.first_run, line.block, line.left = i32(len(v.runs)), i32(index), x
+			layout_append(v, &v.lines, line)
+			y += height
+		} else {
+			y = flow(v, doc, index, x, width, y, ctx)
+		}
 	case .Code:
-		// An editor's code lines are blocks of their own, so each draws a flush band of the box.
+		// An editor's code lines are blocks of their own, so each draws a flush band of the box; its fence
+		// lines show as the padding above and below.
 		pad := SPACE_3 * s
 		inset, radius := pad, RADIUS_CONTROL * s
 		if doc.live {inset, radius = 0, 0}
+		if block.spacer {
+			layout_append(v, &v.boxes, Box{{x, y, width, pad}, .Code_Block, 0})
+			y += pad
+			break
+		}
 		box := len(v.boxes)
 		layout_append(v, &v.boxes, Box{{x, y, width, 0}, .Code_Block, radius})
 		y = flow(v, doc, index, x + pad, max(width - 2 * pad, 1), y + inset, {role = .Code_Block}) + inset
 		if box < len(v.boxes) {v.boxes[box].rect.height = y - top}
 	case .Rule:
 		height := max(1, math.round(s))
-		// An editor's rule is a line of the file, so it takes a line's height.
-		room := doc.live ? v.faces[.Body].line_height : height
+		room := height
 		rule := y + math.round((room - height) / 2)
 		layout_append(v, &v.boxes, Box{{x, rule, width, height}, .Rule, 0})
 		if doc.live {
@@ -1034,10 +1078,22 @@ markdown_caret_at :: proc(
 		block := doc.blocks[line.block]
 		content := block.marker_end > block.marker_start ? block.marker_end + 1 : block.marker_end
 		if text_runs == 0 && offset == content && !found {
-			return {line.left, line.top, width, line.height}, index, true
+			// An empty line of the edit view may be a gap shorter or taller than text: the caret keeps the
+			// height of text, centred in it.
+			body := v.faces[.Body].line_height
+			top, height := line.top, line.height
+			if doc.live && height != body {top, height = top + (height - body) / 2, body}
+			return {line.left, top, width, height}, index, true
 		}
 	}
 	return
+}
+
+// The top and height of line `index`, whole: of a gap that holds the caret, the gap itself rather than
+// the caret's own height.
+markdown_line_band :: proc(v: ^Markdown_View, index: int) -> (top, height: f32) {
+	line := v.lines[index]
+	return line.top, line.height
 }
 
 // The cell a caret at text offset `offset` occupies, in the view's own coordinates: the character under

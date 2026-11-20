@@ -33,8 +33,6 @@ Row_Kind :: enum {
 	Opener,
 	// A quick label's table line; its fields are ordinary rows that name it in `label`.
 	Quick_Label,
-	// A saved filter's table line; its fields are ordinary rows that name it in `filter`.
-	Saved_Filter,
 	// The Motion section: a context's header, and the field that opens the curve popover.
 	Motion_Context,
 	Curve,
@@ -55,7 +53,6 @@ Page_Action :: enum {
 	Opener_Add,
 	Label_Add,
 	Label_Reset,
-	Filter_Add,
 }
 
 // Facts the profile table draws beside a row. Ordinary settings rows leave these unset.
@@ -122,12 +119,6 @@ Editor_Row :: struct {
 	// field a row edits; zero and None for every other row.
 	label:         int,
 	label_field:   Label_Field,
-	// The saved filter a table line or field row belongs to, counted from 1 in page order, and the
-	// field a row edits; zero and None for every other row.
-	filter:        int,
-	filter_field:  Filter_Field,
-	// The id of the saved filter a table line stands for, which every edit writes back unchanged.
-	filter_id:     string,
 	// The Motion section part this row is, for `motion_context`. A field row is `motion_inherited`
 	// when its context leaves the field to a parent or the built-in fallback.
 	motion_part:      Motion_Part,
@@ -257,7 +248,6 @@ Order_Kind :: enum {
 	Process_Groups,
 	Openers,
 	Quick_Labels,
-	Saved_Filters,
 }
 
 // A reorder drag, then its blocks easing into place once it ends. Nil while nothing reorders;
@@ -283,7 +273,6 @@ Order_Block :: union #no_nil {
 	Order_Group,
 	Order_Opener,
 	Order_Label,
-	Order_Filter,
 }
 
 Order_Profile :: struct {
@@ -299,10 +288,6 @@ Order_Opener :: struct {
 }
 
 Order_Label :: struct {
-	id: int,
-}
-
-Order_Filter :: struct {
 	id: int,
 }
 
@@ -336,7 +321,6 @@ Editor_Request :: union {
 	Profile_Order_Request,
 	Process_Remove_Request,
 	Label_Edit,
-	Filter_Edit,
 	Opener_Remove_Request,
 	Opener_Order_Request,
 	Icon_Browse_Request,
@@ -468,7 +452,6 @@ Editor :: struct {
 	using processes:                                                   Process_Editor_State,
 	using openers:                                                     Opener_Editor_State,
 	using labels:                                                      Quick_Label_State,
-	using filters:                                                     Saved_Filter_State,
 	using motions:                                                     Motion_Editor_State,
 	using page:                                                        Page_Revision_State,
 	using themes:                                                      Theme_Page_State,
@@ -556,8 +539,6 @@ Editor_Outcome :: enum {
 	Process_Remove,
 	// The page owner performs the request for a quick label: remove or reorder.
 	Label_Action,
-	// The page owner performs the request for a saved filter: remove or reorder.
-	Filter_Action,
 	// The page owner performs the request for a link program: remove or reorder.
 	Opener_Action,
 	Font_Filter,
@@ -581,7 +562,6 @@ Editor_Kept :: struct {
 Editor_View :: struct {
 	process_expanded:  int,
 	label_expanded:    int,
-	filter_expanded:   int,
 	motion_expanded:   bit_set[settings.Motion_Context],
 	expanded:          string,
 	opener_expanded:   string,
@@ -637,7 +617,7 @@ EDITOR_SECTION_LIMIT :: 8
 
 // Every string a row owns, in one place for editor_add's copies and editor_row_destroy's frees.
 @(private)
-row_owned_strings :: proc(row: ^Editor_Row) -> [14]^string {
+row_owned_strings :: proc(row: ^Editor_Row) -> [13]^string {
 	return {
 		&row.key,
 		&row.title,
@@ -649,7 +629,6 @@ row_owned_strings :: proc(row: ^Editor_Row) -> [14]^string {
 		&row.detail,
 		&row.note,
 		&row.opener,
-		&row.filter_id,
 		&row.ref,
 		&row.link,
 		&row.default_link,
@@ -700,7 +679,6 @@ editor_destroy :: proc(p: ^Editor) {
 editor_view_take :: proc(p: ^Editor) -> (view: Editor_View, alloc_error: runtime.Allocator_Error) {
 	view.process_expanded = p.process_expanded
 	view.label_expanded = p.label_expanded
-	view.filter_expanded = p.filter_expanded
 	view.motion_expanded = p.motion_expanded
 	view.expanded = strings.clone(p.expanded) or_return
 	view.opener_expanded = strings.clone(p.opener_expanded) or_return
@@ -726,7 +704,6 @@ editor_view_destroy :: proc(view: ^Editor_View) {
 editor_view_restore :: proc(p: ^Editor, view: ^Editor_View) {
 	p.process_expanded = view.process_expanded
 	p.label_expanded = view.label_expanded
-	p.filter_expanded = view.filter_expanded
 	p.motion_expanded = view.motion_expanded
 	p.section = len(p.sections) > 0 ? clamp(view.section, 0, len(p.sections) - 1) : 0
 	delete(p.expanded)
@@ -745,7 +722,6 @@ editor_view_restore :: proc(p: ^Editor, view: ^Editor_View) {
 		p.opener_expanded = ""
 	}
 	if p.label_expanded != 0 && !editor_has_label_row(p, p.label_expanded) {p.label_expanded = 0}
-	if p.filter_expanded != 0 && !editor_has_filter_row(p, p.filter_expanded) {p.filter_expanded = 0}
 }
 
 // How a page meets a rebuild for a new revision.
@@ -980,7 +956,6 @@ editor_request_destroy :: proc(request: ^Editor_Request) {
 		delete(r.id)
 	case Process_Remove_Request:
 	case Label_Edit:
-	case Filter_Edit:
 	case Opener_Remove_Request:
 		delete(r.id)
 	case Opener_Order_Request:
@@ -1363,8 +1338,6 @@ Reveal_Target :: union #no_nil {
 	Reveal_Openers,
 	// The first quick label, or Add label when there is none.
 	Reveal_Quick_Labels,
-	// The first saved filter, or Add filter when there is none.
-	Reveal_Saved_Filters,
 }
 
 Reveal_Row :: struct {
@@ -1378,8 +1351,6 @@ Reveal_Program_Groups :: struct {}
 Reveal_Openers :: struct {}
 
 Reveal_Quick_Labels :: struct {}
-
-Reveal_Saved_Filters :: struct {}
 
 // Selects a row, opening the profile, program group, link program or motion context that owns it first. A
 // palette jump or a reveal must be able to land on a field the collapsed table is not showing.
@@ -1404,9 +1375,6 @@ editor_reveal :: proc(p: ^Editor, target: Reveal_Target) -> bool {
 	case Reveal_Quick_Labels:
 		key = QUICK_LABEL_ADD_KEY
 		for row in p.rows {if row.kind == .Quick_Label {key = row.key; break}}
-	case Reveal_Saved_Filters:
-		key = SAVED_FILTER_ADD_KEY
-		for row in p.rows {if row.kind == .Saved_Filter {key = row.key; break}}
 	}
 	for row in p.rows {
 		if row.key != key {continue}
@@ -1424,10 +1392,6 @@ editor_reveal :: proc(p: ^Editor, target: Reveal_Target) -> bool {
 		}
 		if row.kind != .Quick_Label && row.label > 0 && p.label_expanded != row.label {
 			p.label_expanded = row.label
-			editor_rebuild(p)
-		}
-		if row.kind != .Saved_Filter && row.filter > 0 && p.filter_expanded != row.filter {
-			p.filter_expanded = row.filter
 			editor_rebuild(p)
 		}
 		if motion_reveal(p, row) {editor_rebuild(p)}
@@ -1535,7 +1499,6 @@ row_available :: proc(p: ^Editor, row: Editor_Row) -> bool {
 	}
 	if row.opener != "" {return row.kind == .Opener || row.opener == p.opener_expanded}
 	if row.label > 0 {return row.kind == .Quick_Label || row.label == p.label_expanded}
-	if row.filter > 0 {return row.kind == .Saved_Filter || row.filter == p.filter_expanded}
 	#partial switch row.kind {
 	case .Profile, .Profile_Add:
 		return true
@@ -1807,8 +1770,6 @@ order_kind :: proc(p: ^Editor) -> (kind: Order_Kind, ok: bool) {
 			return .Openers, true
 		case Order_Label:
 			return .Quick_Labels, true
-		case Order_Filter:
-			return .Saved_Filters, true
 		}
 	case Order_Settling:
 		return o.kind, true
@@ -1870,8 +1831,6 @@ order_begin :: proc(p: ^Editor, block: Order_Block, from: int, grab: f32) {
 		grabbed, kind = b.id, .Openers
 	case Order_Label:
 		grabbed, kind = label_key(b.id), .Quick_Labels
-	case Order_Filter:
-		grabbed, kind = filter_key(b.id), .Saved_Filters
 	}
 	if current, ok := order_kind(p); ok && current != kind {profile_positions_clear(&p.profile_positions)}
 	if drag, dragging := p.order.(Order_Dragging); dragging {order_block_free(drag.block)}
@@ -1914,8 +1873,6 @@ order_head :: proc(row: Editor_Row, kind: Order_Kind) -> bool {
 		return row.kind == .Opener
 	case .Quick_Labels:
 		return row.kind == .Quick_Label
-	case .Saved_Filters:
-		return row.kind == .Saved_Filter
 	}
 	return false
 }
@@ -1932,8 +1889,6 @@ order_member :: proc(row, head: Editor_Row, kind: Order_Kind) -> bool {
 		return row.kind != .Opener && row.opener == head.opener
 	case .Quick_Labels:
 		return row.kind != .Quick_Label && row.label == head.label
-	case .Saved_Filters:
-		return row.kind != .Saved_Filter && row.filter == head.filter
 	}
 	return false
 }
@@ -1949,8 +1904,6 @@ order_block_key :: proc(head: Editor_Row, kind: Order_Kind) -> string {
 	case .Openers:
 		return head.opener
 	case .Quick_Labels:
-		return head.key
-	case .Saved_Filters:
 		return head.key
 	}
 	return ""
@@ -2466,7 +2419,7 @@ activate :: proc(p: ^Editor, row: ^Editor_Row) -> Editor_Outcome {
 	case .Theme_Strip:
 		editor_mode_set(p, Editor_Editing{})
 		editor_strip_enter(p, false)
-	case .Opener, .Quick_Label, .Saved_Filter:
+	case .Opener, .Quick_Label:
 		// The keyboard reaches the line's controls; Delete removes and Enter opens the fields.
 		editor_mode_set(p, Editor_Editing{})
 	case .Profile:
@@ -2634,7 +2587,6 @@ editor_key :: proc(p: ^Editor, raw: input.Key_Event) -> Editor_Outcome {
 	if result, handled := editor_process_key(p, row, e); handled {return result}
 	if result, handled := editor_opener_key(p, row, e); handled {return result}
 	if result, handled := editor_label_key(p, row, e); handled {return result}
-	if result, handled := editor_filter_key(p, row, e); handled {return result}
 	if result, handled := editor_motion_key(p, row, e); handled {return result}
 	if result, handled := editor_strip_key(p, row, e); handled {return result}
 	if editor_popup(p) != .None && row != nil {
@@ -2686,13 +2638,6 @@ editor_key :: proc(p: ^Editor, raw: input.Key_Event) -> Editor_Outcome {
 		   row.label == p.label_expanded &&
 		   (focus != .Control || row.kind == .Quick_Label) {
 			editor_label_toggle(p, row.label)
-			return .Changed
-		}
-		if row != nil &&
-		   row.filter > 0 &&
-		   row.filter == p.filter_expanded &&
-		   (focus != .Control || row.kind == .Saved_Filter) {
-			editor_filter_toggle(p, row.filter)
 			return .Changed
 		}
 		if focus != .Search {
@@ -3176,13 +3121,11 @@ row_parts_at :: proc(p: ^Editor, l: Editor_Layout, index: int, selected: bool) -
 		parts.text_right = parts.swatch.x - SPACE_3 * s
 	case .Shortcut:
 		shortcut_parts(&parts, s, selected)
-	case .Process_Group, .Motion_Context, .Profile, .Profile_Add, .Opener, .Quick_Label, .Saved_Filter,
-	     .Theme_Strip:
+	case .Process_Group, .Motion_Context, .Profile, .Profile_Add, .Opener, .Quick_Label, .Theme_Strip:
 		parts.reset = {}
 	}
 	// A label's field has no default of its own; Reset labels restores them all.
 	if row.label_field != .None {parts.reset = {}}
-	if row.filter_field != .None {parts.reset = {}}
 	if parts.field.width > 0 && parts.text_right > parts.field.x {parts.text_right = parts.field.x}
 	parts.text_right -= 16 * s
 	if row.motion_part != .None {parts = editor_motion_parts(&row, parts)}
@@ -3432,7 +3375,6 @@ editor_press :: proc(
 	}
 	if row.kind == .Opener {return editor_opener_press(p, row, parts, index, x, y, s)}
 	if row.kind == .Quick_Label {return editor_label_press(p, row, parts, index, x, y, s)}
-	if row.kind == .Saved_Filter {return editor_filter_press(p, row, parts, index, x, y, s)}
 	if row.kind == .Theme_Strip {return editor_strip_press(p, l, index, x, y)}
 	if row.motion_part != .None {
 		if result, handled := editor_motion_press(p, row, parts, x, y); handled {return result}
@@ -3665,10 +3607,6 @@ order_drop :: proc(p: ^Editor) -> Editor_Outcome {
 		if drag.target == drag.from {return .Changed}
 		editor_request_set(p, Label_Edit{kind = .Move, id = block.id, slot = drag.target})
 		return .Label_Action
-	case Order_Filter:
-		if drag.target == drag.from {return .Changed}
-		editor_request_set(p, Filter_Edit{kind = .Move, id = block.id, slot = drag.target})
-		return .Filter_Action
 	}
 	return .None
 }
@@ -3705,7 +3643,6 @@ editor_hover :: proc(p: ^Editor, l: Editor_Layout, x, y: f32, text: ^Text = nil)
 	}
 	item, reset, outline, description := -1, -1, -1, -1
 	browse := false
-	filter_default := false
 	profile_item, profile_control := -1, Profile_Control.Radio
 	strip_item := -1
 	if popup_open == .None && !editor_order_dragging(p, .Profiles) && !color_board_shown(p) &&
@@ -3723,9 +3660,6 @@ editor_hover :: proc(p: ^Editor, l: Editor_Layout, x, y: f32, text: ^Text = nil)
 			}
 			browse = render.rect_contains(parts.browse, x, y)
 			row := &p.rows[p.items[index].row]
-			if row.kind == .Saved_Filter {
-				filter_default = render.rect_contains(filter_default_rect(parts.row, l.scale), x, y)
-			}
 			if row.kind == .Profile {
 				table := profile_row_parts(row.kind, parts.row, l.scale)
 				profile_item = index
@@ -3769,7 +3703,6 @@ editor_hover :: proc(p: ^Editor, l: Editor_Layout, x, y: f32, text: ^Text = nil)
 	   section == p.hover_section &&
 	   over_page_bar == p.page_bar_hover &&
 	   profile_item == p.hover_profile_item &&
-	   filter_default == p.filter_default_hover &&
 	   profile_control == p.hover_profile_control {
 		return bar_changed || strip_changed || board_changed
 	}
@@ -3779,7 +3712,6 @@ editor_hover :: proc(p: ^Editor, l: Editor_Layout, x, y: f32, text: ^Text = nil)
 	p.keys_hover = keys
 	p.hover_section, p.page_bar_hover = section, over_page_bar
 	p.hover_profile_item, p.hover_profile_control = profile_item, profile_control
-	p.filter_default_hover = filter_default
 	return true
 }
 
@@ -3787,8 +3719,7 @@ editor_hover :: proc(p: ^Editor, l: Editor_Layout, x, y: f32, text: ^Text = nil)
 editor_hover_clear :: proc(p: ^Editor) -> (changed: bool) {
 	changed =
 		p.hover_item >= 0 || p.hover_reset >= 0 || p.hover_outline >= 0 || p.hover_clear || p.hover_browse ||
-		p.hover_profile_item >= 0 || p.filter_default_hover || p.dropdown.bar_hover || p.keys_hover ||
-		p.hover_section >= 0 ||
+		p.hover_profile_item >= 0 || p.dropdown.bar_hover || p.keys_hover || p.hover_section >= 0 ||
 		p.page_bar_hover
 	p.hover_item, p.hover_reset, p.hover_outline, p.hover_clear = -1, -1, -1, false
 	p.hover_description = -1
@@ -3797,7 +3728,6 @@ editor_hover_clear :: proc(p: ^Editor) -> (changed: bool) {
 	p.dropdown.bar_hover = false
 	p.hover_section, p.page_bar_hover = -1, false
 	p.hover_profile_item, p.hover_profile_control = -1, .Radio
-	p.filter_default_hover = false
 	changed = shortcut_chain_hover(&p.chain, {}) || changed
 	changed = editor_strip_hover_clear(p) || changed
 	changed = board_hover_set(p, {}) || changed
@@ -3882,11 +3812,6 @@ editor_pointer :: proc(p: ^Editor, l: Editor_Layout, x, y: f32, text: ^Text = ni
 		return .Hand
 	}
 	if row.kind == .Quick_Label {
-		cells := editor_block_parts(parts.row, s)
-		if render.rect_contains(cells.handle, x, y) {return filtering(p) ? .Arrow : .Resize_All}
-		return .Hand
-	}
-	if row.kind == .Saved_Filter {
 		cells := editor_block_parts(parts.row, s)
 		if render.rect_contains(cells.handle, x, y) {return filtering(p) ? .Arrow : .Resize_All}
 		return .Hand
@@ -4292,8 +4217,7 @@ control_draw :: proc(
 				return result
 			}
 		}
-	case .Process_Group, .Motion_Context, .Profile, .Profile_Add, .Opener, .Quick_Label, .Saved_Filter,
-	     .Theme_Strip:
+	case .Process_Group, .Motion_Context, .Profile, .Profile_Add, .Opener, .Quick_Label, .Theme_Strip:
 		return .Ok
 	}
 	if selected {
@@ -4754,11 +4678,6 @@ editor_draw :: proc(
 			   result != .Ok {return result}
 			continue
 		}
-		if row.kind == .Saved_Filter {
-			if result := editor_filter_draw(p, row, parts, selected, list, text, theme, pointer, s);
-			   result != .Ok {return result}
-			continue
-		}
 		if row.motion_part != .None {
 			if result := editor_motion_draw(p, item.row, parts, selected, index == p.hover_reset, list, text,
 				theme, l.list, pointer, s); result != .Ok {return result}
@@ -4780,7 +4699,7 @@ editor_draw :: proc(
 		}
 		// A profile's or link program's fields sit one step in from its line, as Motion's do.
 		text_x := row_text_x(row, r, s)
-		if row.profile != "" || row.opener != "" || row.label > 0 || row.filter > 0 {
+		if row.profile != "" || row.opener != "" || row.label > 0 {
 			// Expanded editors carry an accent rail so they read as part of the row above.
 			rail := render.Rect{r.x + 2 * s, r.y + SPACE_2 * s, 3 * s, r.height - 2 * SPACE_2 * s}
 			draw_rect(list, {rect = rail, color = theme.accent, radius = pill_radius(rail)})

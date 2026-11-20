@@ -156,7 +156,6 @@ live_block_begin :: proc(b: ^Live_Builder, block: Block, marker := "", separator
 	}
 	block := block
 	block.first_span, block.span_count = len(doc.spans), 0
-	block.tight = true
 	// A live block's marker_start is where it starts in the text, marker or not.
 	block.marker_start, block.marker_end = len(doc.text), len(doc.text)
 	if marker != "" {
@@ -234,11 +233,12 @@ live_raw_text :: proc(b: ^Live_Builder, at, end, first, last: int, plain: bool) 
 // A line shown rendered: its text in its block's style, the markup gone, a list item's marker hanging
 // before it.
 @(private = "file", require_results)
-live_rendered :: proc(b: ^Live_Builder, at, end, first, last: int, indent: int) -> bool {
+live_rendered :: proc(b: ^Live_Builder, at, end, first, last: int, indent: int, proto: Block) -> bool {
 	parsed := &b.l.parsed
 	owner := live_owner(b, first)
 	block := live_line_block(owner.kind == .Heading ? .Heading : .Paragraph, at, end, owner.level)
 	block.quote_depth, block.list_depth = owner.quote_depth, owner.list_depth
+	block.tight, block.joined = proto.tight, proto.joined
 	marker := ""
 	// The item's marker shows on the line its text starts.
 	starts := owner.span_count > 0 && parsed.spans[owner.first_span].source >= at
@@ -307,7 +307,7 @@ live_group_extent :: proc(b: ^Live_Builder, first, last, line_end: int) -> (grou
 live_group :: proc(
 	b: ^Live_Builder,
 	at, stop, first, last: int,
-	owner: Block,
+	owner, proto: Block,
 	indent: int,
 ) -> bool {
 	parsed := &b.l.parsed
@@ -315,6 +315,7 @@ live_group :: proc(
 	if group_end > at && b.source[group_end - 1] == '\r' {group_end -= 1}
 	revealed := at <= b.to && group_end >= b.from
 	block := live_line_block(.Paragraph, at, group_end)
+	block.tight, block.joined = proto.tight, proto.joined
 	marker := ""
 	if !revealed {
 		block.quote_depth, block.list_depth = owner.quote_depth, owner.list_depth
@@ -443,9 +444,10 @@ live_line :: proc(b: ^Live_Builder, at, line_end: int) -> bool {
 	rest := strings.trim_left(line[p.quote_end:], " \t")
 	block := live_line_block(.Paragraph, at, end)
 	if b.fence.count > 0 {
-		block.kind = .Code
+		block.kind, block.joined = .Code, true
 		if fence_closes(rest, b.fence) {
 			b.fence = {}
+			block.spacer = !revealed
 			return revealed ? live_raw(b, block, first, last, true) : live_block_begin(b, block)
 		}
 		return live_raw(b, block, first, last, true)
@@ -454,13 +456,16 @@ live_line :: proc(b: ^Live_Builder, at, line_end: int) -> bool {
 		b.fence = fence
 		block.kind = .Code
 		if revealed {return live_raw(b, block, first, last, true)}
-		if !live_block_begin(b, block) {return false}
 		info := strings.trim_space(rest[fence.count:])
+		block.spacer = info == ""
+		if !live_block_begin(b, block) {return false}
 		if info == "" {return true}
 		start := at + int(uintptr(raw_data(info)) - uintptr(raw_data(line)))
 		return live_text(b, info, start, start + len(info), {.Markup}, NO_LINK)
 	}
 	owner := first < last ? live_owner(b, first) : Block{kind = .Paragraph}
+	block.tight = owner.tight
+	block.joined = first < last && previous >= 0 && b.l.owner[b.l.order[first].span] == previous
 	if owner.kind == .Code {
 		block.kind = .Code
 		return live_raw(b, block, first, last, true)
@@ -468,7 +473,7 @@ live_line :: proc(b: ^Live_Builder, at, line_end: int) -> bool {
 	if first < last && owner.kind == .Paragraph {
 		if stop, grouped := live_group_extent(b, first, last, line_end); grouped {
 			b.group_end = stop
-			return live_group(b, at, stop, first, last, owner, live_indent(line, p))
+			return live_group(b, at, stop, first, last, owner, block, live_indent(line, p))
 		}
 	}
 	if revealed {
@@ -480,7 +485,7 @@ live_line :: proc(b: ^Live_Builder, at, line_end: int) -> bool {
 		return live_raw(b, block, first, last, false)
 	}
 	indent := live_indent(line, p)
-	if first < last {return live_rendered(b, at, end, first, last, indent)}
+	if first < last {return live_rendered(b, at, end, first, last, indent, block)}
 	if strings.trim_space(line) == "" {
 		// A blank line ends the lists above it, unless an item follows indented under them.
 		return live_block_begin(b, block)
@@ -554,7 +559,9 @@ live_table :: proc(b: ^Live_Builder, cell, at, region: int) -> bool {
 			start := line
 			if end > start && b.source[end - 1] == '\r' {end -= 1}
 			first, last := live_spans_in(b, start, end)
-			if !live_raw(b, live_line_block(.Code, start, end), first, last, true) {return false}
+			code := live_line_block(.Code, start, end)
+			code.joined = start != at
+			if !live_raw(b, code, first, last, true) {return false}
 			if newline < 0 {break}
 			line = start + newline + 1
 		}
@@ -616,7 +623,9 @@ live_frontmatter :: proc(b: ^Live_Builder, at, end: int) -> bool {
 		start := line
 		if stop > start && b.source[stop - 1] == '\r' {stop -= 1}
 		first, last := live_spans_in(b, start, stop)
-		if !live_raw(b, live_line_block(.Code, start, stop), first, last, true) {return false}
+		code := live_line_block(.Code, start, stop)
+		code.joined = start != at
+		if !live_raw(b, code, first, last, true) {return false}
 		if newline < 0 {break}
 		line = start + newline + 1
 	}

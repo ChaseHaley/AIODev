@@ -1018,3 +1018,119 @@ rows_of_a_hand_wrapped_paragraph_move_the_caret_by_row :: proc(t: ^testing.T) {
 	// The row is shorter than the file line it began in: End stops short of that line's end.
 	testing.expect(t, row_end - row_start < len("one two three four five six seven"), fmt.tprint(row_start, row_end))
 }
+
+// Where, in window pixels, the first character of the text `word` sits in the document the pane shows.
+@(private = "file")
+word_top :: proc(
+	t: ^testing.T,
+	state: ^app.App,
+	w: ^app.Window,
+	pane: ^app.Markdown_Pane,
+	word: string,
+) -> (y: f32, ok: bool) {
+	g := edit_fitted(state, w, pane)
+	document := app.markdown_document(pane)
+	at := strings.index(string(document.text[:]), word)
+	if !testing.expect(t, at >= 0, word) {return}
+	rect, _, found := ui.markdown_caret_at(&pane.view, document, at)
+	if !testing.expect(t, found, word) {return}
+	return g.top - f32(pane.view.scroll) + rect.y, true
+}
+
+MIXED_SPACING :: "---\ntitle: NoteValue\ntags: [alpha]\n---\n\n# Heading One\n\nParagraph one that\nis hand wrapped.\n\n" +
+	"## Heading Two\nDirectly after.\n\n- item a\n- item b\n\n- loose c\n\n> quote one\n>\n> quote two\n\n---\n\n" +
+	"```\ncode one\ncode two\n```\n\n| h1 | h2 |\n|----|----|\n| c1 | c2 |\n\nFinal paragraph"
+
+// Edit mode spaces blocks as reading does, for the same settings: with the caret away, every block starts
+// where reading puts it, though the file's empty lines are lines of their own.
+@(test)
+edit_mode_spaces_blocks_like_reading_mode :: proc(t: ^testing.T) {
+	words := [?]string {
+		"NoteValue", "Heading One", "Paragraph one", "Heading Two", "Directly after", "item a", "item b",
+		"loose c", "quote one", "quote two", "code one", "code two", "c1", "Final paragraph",
+	}
+	for settings in ([?][2]string{{"markdown.paragraph_spacing", "0.7"}, {"markdown.paragraph_spacing", "1.6"}}) {
+		f: Edit_Fixture
+		defer edit_fixture_destroy(t, &f)
+		w, pane := edit_fixture_start(t, &f, "Spacing", MIXED_SPACING)
+		if pane == nil {return}
+		testing.expect(t, app.settings_save_value(&f.state, settings[0], settings[1], "set"))
+		reading: [len(words)]f32
+		for word, i in words {
+			y, ok := word_top(t, &f.state, w, pane, word)
+			if !ok {return}
+			reading[i] = y
+		}
+		app.run_action(&f.state, w, .Edit_Markdown)
+		if !testing.expect(t, app.markdown_editing(pane)) {return}
+		edit_press(&f.state, w, .End, {.Control})
+		for word, i in words {
+			y, ok := word_top(t, &f.state, w, pane, word)
+			if !ok {return}
+			testing.expect(t, math.abs(y - reading[i]) <= 1, fmt.tprintf("%v (%v): reading %v, editing %v", word, settings[1], reading[i], y))
+		}
+	}
+}
+
+// An empty line is where reading's gap shows, and the caret stands in it at the height of text. Up and Down
+// step through each one, and a run of them is one gap plus a line for each empty line after the first.
+@(test)
+the_caret_stands_on_empty_lines_and_crosses_gaps :: proc(t: ^testing.T) {
+	f: Edit_Fixture
+	defer edit_fixture_destroy(t, &f)
+	source := "alpha\n\nbeta\n\n\ngamma\n"
+	w, pane := edit_fixture_start(t, &f, "Gaps", source)
+	if pane == nil {return}
+	alpha_read, ok1 := word_top(t, &f.state, w, pane, "alpha")
+	beta_read, ok2 := word_top(t, &f.state, w, pane, "beta")
+	if !ok1 || !ok2 {return}
+	app.run_action(&f.state, w, .Edit_Markdown)
+	if !testing.expect(t, app.markdown_editing(pane)) {return}
+	b := &pane.editor.buffer
+	line := f32(ui.markdown_line(&pane.view))
+	edit_press(&f.state, w, .Home, {.Control})
+	alpha, _ := word_top(t, &f.state, w, pane, "alpha")
+	beta, _ := word_top(t, &f.state, w, pane, "beta")
+	gamma, _ := word_top(t, &f.state, w, pane, "gamma")
+	// One empty line takes reading's gap; two take it and a line.
+	testing.expect_value(t, beta - alpha, beta_read - alpha_read)
+	testing.expect_value(t, gamma - beta, (beta_read - alpha_read) + line)
+
+	edit_press(&f.state, w, .Arrow_Down)
+	testing.expect_value(t, b.caret, 6)
+	g := edit_fitted(&f.state, w, pane)
+	document := app.markdown_document(pane)
+	rect, _, found := ui.markdown_caret_at(&pane.view, document, markdown.live_display(document, b.caret))
+	testing.expect(t, found && rect.height == line, "the caret on an empty line is as tall as text")
+	// It is centred in the gap, between the two paragraphs.
+	middle := g.top - f32(pane.view.scroll) + rect.y + rect.height / 2
+	testing.expect(t, middle > alpha && middle < beta + line, "the caret is in the gap")
+	edit_press(&f.state, w, .Arrow_Down)
+	testing.expect_value(t, b.caret, 7)
+	edit_press(&f.state, w, .Arrow_Down)
+	testing.expect_value(t, b.caret, 12)
+	edit_press(&f.state, w, .Arrow_Down)
+	testing.expect_value(t, b.caret, 13)
+	edit_press(&f.state, w, .Arrow_Down)
+	testing.expect_value(t, b.caret, 14)
+	for want in ([?]int{13, 12, 7, 6, 0}) {
+		edit_press(&f.state, w, .Arrow_Up)
+		testing.expect_value(t, b.caret, want)
+	}
+
+	// A click in the gap puts the caret on its empty line.
+	x, y := caret_row(&f.state, w, pane, 6)
+	mouse_click(&f.state, w, {x + 3, y + line / 2, 5_000_000_000, .Left, {}})
+	testing.expect_value(t, b.caret, 6)
+
+	// Enter at the end of a paragraph, typing, and undo all keep their places.
+	edit_press(&f.state, w, .Home, {.Control})
+	edit_press(&f.state, w, .End)
+	edit_press(&f.state, w, .Enter)
+	testing.expect_value(t, string(b.text[:8]), "alpha\n\n\n")
+	edit_press(&f.state, w, .Z, {.Control})
+	testing.expect_value(t, string(b.text[:]), source)
+	edit_press(&f.state, w, .Arrow_Down)
+	app.handle_event(&f.state, input.Text_Event{window = w.id, text = "x"})
+	testing.expect_value(t, string(b.text[:10]), "alpha\nx\nbe")
+}

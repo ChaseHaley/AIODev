@@ -139,26 +139,24 @@ changes_filter_popover_hangs_under_its_button_and_answers_first :: proc(t: ^test
 	// Empty: no clear button, and the editing box spans the field.
 	g := ui.changes_geometry({0, 0, 900, 600}, 1, &view, &f.text)
 	small := ui.text_styled(&f.text, .Detail)
-	height := f32(int(100 + small.line_height + 0.5))
+	height := f32(int(24 + 32 + 8 + small.line_height + 0.5))
 	// 360 wide, its right edge on the filter button's, hanging under the row.
 	popover := g.filter_popover
 	testing.expect_value(t, popover.width, f32(360))
 	testing.expect_value(t, popover.height, height)
 	testing.expect_value(t, popover.x + popover.width, g.filter_button.x + g.filter_button.width)
 	testing.expect_value(t, popover.y, g.row.y + g.row.height + 4)
-	field := g.filter_field
-	testing.expect_value(t, field, render.Rect{popover.x + 12, popover.y + 12, 336, 32})
+	testing.expect_value(t, g.filter_field, render.Rect{popover.x + 12, popover.y + 12, 336, 32})
 	testing.expect_value(t, g.filter_clear, render.Rect{})
-	testing.expect_value(t, g.filter_at, render.Rect{field.x + field.width - 4 - 24, field.y + 4, 24, 24})
 	box, shown := ui.changes_filter_box(g, &view, &f.text)
-	testing.expect(t, shown && box.rect == render.Rect{field.x, field.y, g.filter_at.x - field.x, field.height})
+	testing.expect(t, shown && box.rect == g.filter_field)
 
 	testing.expect(t, ui.field_set(&editor, "foo !.json") == nil)
 	g = ui.changes_geometry({0, 0, 900, 600}, 1, &view, &f.text)
+	field := g.filter_field
 	testing.expect_value(t, g.filter_clear, render.Rect{field.x + field.width - 4 - 24, field.y + 4, 24, 24})
-	testing.expect_value(t, g.filter_at, render.Rect{g.filter_clear.x - 24, field.y + 4, 24, 24})
 	box, shown = ui.changes_filter_box(g, &view, &f.text)
-	testing.expect(t, shown && box.rect.width == g.filter_at.x - field.x)
+	testing.expect(t, shown && box.rect.width == g.filter_clear.x - field.x)
 	ui.changes_layout(&state, &view, &f.text, &f.mono, g.diff.width, 1)
 
 	field_x, field_y := centre(g.filter_field)

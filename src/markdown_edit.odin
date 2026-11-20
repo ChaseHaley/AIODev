@@ -392,16 +392,19 @@ markdown_edit_vertical :: proc(
 	g, fitted := markdown_edit_fitted(app, w, pane)
 	if !fitted {return}
 	view := &pane.view
-	rect, _, found := ui.markdown_caret_at(view, &e.document, markdown.live_display(&e.document, e.buffer.caret))
+	display := markdown.live_display(&e.document, e.buffer.caret)
+	rect, row, found := ui.markdown_caret_at(view, &e.document, display)
 	if !found {return}
+	// The row's own extent, not the caret's, which is only text high on a blank line's gap.
+	row_top, row_height := ui.markdown_line_band(view, row)
 	x := e.goal_x >= 0 ? e.goal_x : rect.x
-	y := rect.y + rect.height / 2
+	y := row_top + row_height / 2
 	if pages != 0 {
 		page := g.area.height - f32(ui.markdown_line(view))
 		y += f32(pages) * page
 		_ = ui.markdown_scroll_by(view, int(f32(pages) * page), int(g.area.height))
 	} else {
-		y = lines < 0 ? rect.y - 1 : rect.y + rect.height + 1
+		y = lines < 0 ? row_top - 1 : row_top + row_height + 1
 	}
 	target: int
 	switch {

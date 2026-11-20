@@ -83,7 +83,7 @@ row_band :: proc(r: render.Rect, s: f32) -> render.Rect {
 @(private)
 row_text_x :: proc(row: ^Editor_Row, r: render.Rect, s: f32) -> f32 {
 	x := r.x + ITEM_INSET * s
-	if row.profile != "" || row.opener != "" || row.label > 0 || row.filter > 0 {x += SPACE_6 * s}
+	if row.profile != "" || row.opener != "" || row.label > 0 {x += SPACE_6 * s}
 	if row.motion_part in MOTION_FIELD_PARTS {x += f32(motion_depth(row.motion_context) + 1) * SPACE_6 * s}
 	return x
 }

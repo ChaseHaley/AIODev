@@ -472,14 +472,13 @@ the_file_list_regex_search_matches_paths_not_labels :: proc(t: ^testing.T) {
 }
 
 @(test)
-a_new_pane_starts_with_the_default_filters_or_takes_the_one_it_opens_from_and_keeps_it :: proc(t: ^testing.T) {
+a_new_pane_takes_the_default_filter_or_the_one_it_opens_from_and_keeps_it :: proc(t: ^testing.T) {
 	first: Fixture
 	if !fixture_start(t, &first, "FilterA") {return}
 	defer delete(first.directory)
 	defer testing.expect_value(t, os.remove_all(first.directory), nil)
 	w := first.state.windows[0]
-	library := "#00000001 * | !long; #00000002 Odin | \\.odin$; #00000003 * Docs | docs/"
-	saved := app.settings_save_value(&first.state, "turns.saved_filters", library, "Could not save.")
+	saved := app.settings_save_value(&first.state, "turns.diff_filter", "!long", "Could not save.")
 	testing.expect(t, saved)
 	app.run_action(&first.state, w, .Agent_Changes)
 	if !testing.expect_value(t, len(first.state.changes_panes), 1) {
@@ -487,12 +486,10 @@ a_new_pane_starts_with_the_default_filters_or_takes_the_one_it_opens_from_and_ke
 		return
 	}
 	from := first.state.changes_panes[0]
-	// Every filter marked on by default is an on token, in the library's order.
-	testing.expect_value(t, app.changes_filter_text(from), "@00000001 @00000003")
-	testing.expect_value(t, len(from.filter_tokens), 2)
+	testing.expect_value(t, app.changes_filter_text(from), "!long")
 	testing.expect(t, from.model.view.filter_active)
 
-	// A pane opened from an Agent changes pane copies its filter, not the defaults.
+	// A pane opened from an Agent changes pane copies its filter, not the setting.
 	_ = ui.field_set(&from.filter_editor, "notes")
 	app.changes_filter_changed(from)
 	app.run_action(&first.state, w, .Agent_Changes)
@@ -502,7 +499,7 @@ a_new_pane_starts_with_the_default_filters_or_takes_the_one_it_opens_from_and_ke
 	}
 	opened := first.state.changes_panes[1]
 	testing.expect_value(t, app.changes_filter_text(opened), "notes")
-	// An empty filter comes back empty, not as the defaults.
+	// An empty filter comes back empty, not as the setting.
 	_ = ui.field_set(&opened.filter_editor, "")
 	app.changes_filter_changed(opened)
 	app.layout_state_save(&first.state)
@@ -511,7 +508,7 @@ a_new_pane_starts_with_the_default_filters_or_takes_the_one_it_opens_from_and_ke
 	second := Fixture{directory = first.directory}
 	if !fixture_start(t, &second, "FilterB", true) {return}
 	defer app.app_destroy(&second.state)
-	testing.expect_value(t, second.state.settings.turns.saved_filters, library)
+	testing.expect_value(t, second.state.settings.turns.diff_filter, "!long")
 	if !testing.expect_value(t, len(second.state.changes_panes), 2) {return}
 	texts: [2]string
 	for pane, i in second.state.changes_panes {texts[i] = app.changes_filter_text(pane)}
@@ -592,7 +589,7 @@ turn_settings_default_to_off_two_weeks_unified_no_filter_and_4_5_contrast :: pro
 	testing.expect_value(t, s.turns.record, false)
 	testing.expect_value(t, s.turns.retention_days, 14)
 	testing.expect_value(t, s.turns.diff_view, settings.Diff_View.Unified)
-	testing.expect_value(t, s.turns.saved_filters, "")
+	testing.expect_value(t, s.turns.diff_filter, "")
 	testing.expect_value(t, s.turns.diff_minimum_contrast, 4.5)
 	side, side_diagnostics, side_error := settings.parse("turns.diff_view = side_by_side\n")
 	testing.expect_value(t, side_error, nil)
@@ -1342,266 +1339,4 @@ the_turn_list_steps_in_front_of_the_file_list_and_gives_it_back :: proc(t: ^test
 	testing.expect(t, !pane.state.turn_list_open && pane.state.panel_open)
 	tap(&f.state, w, .Escape)
 	testing.expect(t, !pane.state.panel_open)
-}
-
-@(private = "file")
-type_text :: proc(state: ^app.App, w: ^app.Window, text: string) {
-	app.handle_event(state, input.Text_Event{window = w.id, text = text})
-}
-
-@(test)
-saved_filters_are_typed_picked_toggled_and_saved_from_the_filter_field :: proc(t: ^testing.T) {
-	f: Fixture
-	defer {
-		app.app_destroy(&f.state)
-		testing.expect_value(t, os.remove_all(f.directory), nil)
-		delete(f.directory)
-	}
-	if !fixture_start(t, &f, "SavedFilters") {return}
-	w := f.state.windows[0]
-	app.window_resize(&f.state, w, 2400, 900)
-	library := "#00000001 No vendor | !^vendor/; #00000002 Odin | \\.odin$"
-	if !testing.expect(t, app.settings_save_value(&f.state, "turns.saved_filters", library, "Could not save.")) {
-		return
-	}
-	app.run_action(&f.state, w, .Agent_Changes)
-	if !testing.expect_value(t, len(f.state.changes_panes), 1) {return}
-	pane := f.state.changes_panes[0]
-	shown, found := changes_pane_of(&f.state, w)
-	if !testing.expect(t, found) {return}
-	view := &pane.model.view
-	lines := []turns.Diff_Line{{kind = .Context, old_line = 1, new_line = 1, text = "line"}}
-	hunks := []turns.Hunk{{old_start = 1, old_count = 1, new_start = 1, new_count = 1, lines = lines}}
-	files := files_named({"src/a.odin", "vendor/b.odin", "docs/c.md"}, hunks)
-	defer delete(files)
-	plain := app.Result_Plain {
-		pane = pane.id,
-		diff = {files = files},
-	}
-	app.changes_fill_plain(&f.state, pane, &plain)
-
-	g := app.changes_geometry_of(&f.state, w, pane, shown)
-	click(&f.state, w, g.filter_button)
-	if !testing.expect(t, pane.state.filter_open) {return}
-
-	// An @ offers the saved filters in the user's order; Down and Enter complete with the second.
-	type_text(&f.state, w, "@")
-	testing.expect(t, pane.filter_typing)
-	testing.expect_value(t, len(pane.filter_picks), 2)
-	testing.expect_value(t, view.hidden_count, 0)
-	tap(&f.state, w, .Arrow_Down)
-	testing.expect_value(t, pane.filter_pick_row, 1)
-	tap(&f.state, w, .Enter)
-	testing.expect_value(t, app.changes_filter_text(pane), "@00000002 ")
-	testing.expect(t, !pane.filter_typing)
-	testing.expect(t, pane.state.filter_open)
-	testing.expect_value(t, len(pane.filter_tokens), 1)
-	testing.expect_value(t, view.hidden_count, 1)
-
-	// The field's @ button lists what is left, and a click on a row inserts it at the caret; a filter in the
-	// field is not offered again, and Escape closes the list before it closes the popover.
-	g = app.changes_geometry_of(&f.state, w, pane, shown)
-	click(&f.state, w, g.filter_at)
-	testing.expect(t, pane.filter_typing)
-	testing.expect_value(t, len(pane.filter_picks), 1)
-	testing.expect_value(t, pane.filter_picks[0].label, "No vendor")
-	testing.expect_value(t, pane.filter_picks[0].id, "00000001")
-	testing.expect_value(t, pane.filter_picks[0].hides, 1)
-	g = app.changes_geometry_of(&f.state, w, pane, shown)
-	if !testing.expect_value(t, len(g.filter_picks), 1) {return}
-	click(&f.state, w, g.filter_picks[0])
-	testing.expect_value(t, app.changes_filter_text(pane), "@00000002 @00000001 ")
-	testing.expect(t, !pane.filter_typing)
-	testing.expect_value(t, view.hidden_count, 2)
-	g = app.changes_geometry_of(&f.state, w, pane, shown)
-	click(&f.state, w, g.filter_at)
-	testing.expect_value(t, len(pane.filter_picks), 0)
-	tap(&f.state, w, .Escape)
-	testing.expect(t, !pane.filter_typing && pane.state.filter_open)
-
-	// Shift and Left select the last token as a whole, and Space turns it off and keeps it selected.
-	chord(&f.state, w, .Arrow_Left, {.Shift})
-	low, high := ui.field_selection(&pane.filter_editor)
-	testing.expect_value(t, app.changes_filter_text(pane)[low:high], " ")
-	tap(&f.state, w, .Home)
-	chord(&f.state, w, .Arrow_Right, {.Shift})
-	low, high = ui.field_selection(&pane.filter_editor)
-	testing.expect_value(t, app.changes_filter_text(pane)[low:high], "@00000002")
-	app.handle_event(&f.state, input.Key_Event{window = w.id, key = .Space, pressed = true, text = " "})
-	testing.expect_value(t, app.changes_filter_text(pane), "~@00000002 @00000001 ")
-	testing.expect_value(t, pane.filter_tokens[0].off, true)
-	testing.expect_value(t, view.hidden_count, 1)
-
-	// A token is one character: Backspace after it takes it out whole.
-	tap(&f.state, w, .End)
-	tap(&f.state, w, .Backspace)
-	tap(&f.state, w, .Backspace)
-	testing.expect_value(t, app.changes_filter_text(pane), "~@00000002 ")
-	type_text(&f.state, w, "src")
-	testing.expect_value(t, app.changes_filter_text(pane), "~@00000002 src")
-	testing.expect(t, pane.filter_savable)
-
-	// Ctrl+S saves the terms as a filter without asking for a name; it shows its pattern, and its token
-	// takes their place.
-	chord(&f.state, w, .S, {.Control})
-	saved, _, saved_found := settings.saved_filters_find_pattern(f.state.settings.turns.saved_filters, "src")
-	testing.expect(t, saved_found && saved.name == "" && settings.saved_filter_id_valid(saved.id))
-	testing.expect(t, strings.has_prefix(f.state.settings.turns.saved_filters, strings.concatenate({library, "; #"}, context.temp_allocator)))
-	made := strings.concatenate({"~@00000002 @", saved.id}, context.temp_allocator)
-	testing.expect_value(t, app.changes_filter_text(pane), made)
-	testing.expect_value(t, view.hidden_count, 2)
-	testing.expect(t, !pane.filter_savable)
-
-	// A pane opened from this one copies the tokens, and Clear empties the field, tokens included.
-	app.run_action(&f.state, w, .Agent_Changes)
-	if !testing.expect_value(t, len(f.state.changes_panes), 2) {return}
-	testing.expect_value(t, app.changes_filter_text(f.state.changes_panes[1]), made)
-	testing.expect_value(t, len(f.state.changes_panes[1].filter_tokens), 2)
-	app.changes_filter_clear(&f.state, w, pane)
-	testing.expect_value(t, app.changes_filter_text(pane), "")
-	testing.expect_value(t, len(pane.filter_tokens), 0)
-	testing.expect_value(t, view.hidden_count, 0)
-}
-
-@(private = "file")
-FILTER_IDS_LIBRARY :: "#00000001 No vendor | !^vendor/; #00000002 Odin | \\.odin$; #00000003 Docs | docs/"
-
-@(private = "file")
-filter_ids_save :: proc(t: ^testing.T, state: ^app.App, library: string) -> bool {
-	return testing.expect(t, app.settings_save_value(state, "turns.saved_filters", library, "Could not save."))
-}
-
-@(test)
-a_saved_filter_keeps_its_tokens_through_rename_edit_reorder_and_delete_in_every_open_pane :: proc(t: ^testing.T) {
-	f: Fixture
-	defer {
-		app.app_destroy(&f.state)
-		testing.expect_value(t, os.remove_all(f.directory), nil)
-		delete(f.directory)
-	}
-	if !fixture_start(t, &f, "FilterIds") {return}
-	w := f.state.windows[0]
-	app.window_resize(&f.state, w, 2400, 900)
-	if !filter_ids_save(t, &f.state, FILTER_IDS_LIBRARY) {return}
-	app.run_action(&f.state, w, .Agent_Changes)
-	if !testing.expect_value(t, len(f.state.changes_panes), 1) {return}
-	pane := f.state.changes_panes[0]
-	shown, found := changes_pane_of(&f.state, w)
-	if !testing.expect(t, found) {return}
-	lines := []turns.Diff_Line{{kind = .Context, old_line = 1, new_line = 1, text = "line"}}
-	hunks := []turns.Hunk{{old_start = 1, old_count = 1, new_start = 1, new_count = 1, lines = lines}}
-	files := files_named({"src/a.odin", "vendor/b.odin", "docs/c.md"}, hunks)
-	defer delete(files)
-	plain := app.Result_Plain {
-		pane = pane.id,
-		diff = {files = files},
-	}
-	app.changes_fill_plain(&f.state, pane, &plain)
-	g := app.changes_geometry_of(&f.state, w, pane, shown)
-	click(&f.state, w, g.filter_button)
-	if !testing.expect(t, pane.state.filter_open) {return}
-
-	// A filter typed out by name is stored by its id, so a later rename cannot lose it.
-	type_text(&f.state, w, "@odin")
-	testing.expect_value(t, app.changes_filter_text(pane), "@odin")
-	type_text(&f.state, w, " ")
-	testing.expect_value(t, app.changes_filter_text(pane), "@00000002 ")
-	type_text(&f.state, w, "@00000001 ")
-	testing.expect_value(t, app.changes_filter_text(pane), "@00000002 @00000001 ")
-
-	// A pane opened from this one copies the field, ids and all.
-	app.run_action(&f.state, w, .Agent_Changes)
-	if !testing.expect_value(t, len(f.state.changes_panes), 2) {return}
-	copied := f.state.changes_panes[1]
-	testing.expect_value(t, app.changes_filter_text(copied), "@00000002 @00000001 ")
-	view := &pane.model.view
-	testing.expect_value(t, view.hidden_count, 2)
-	testing.expect_value(t, pane.filter_on_labels, "@Odin + @No vendor")
-
-	// A rename to something unlike the pattern keeps the filter applied everywhere and shows the new name.
-	renamed := "#00000001 No vendor | !^vendor/; #00000002 Not like its pattern | \\.odin$; #00000003 Docs | docs/"
-	if !filter_ids_save(t, &f.state, renamed) {return}
-	for open in f.state.changes_panes {
-		testing.expect_value(t, app.changes_filter_text(open), "@00000002 @00000001 ")
-		if !testing.expect_value(t, len(open.filter_tokens), 2) {return}
-		testing.expect_value(t, open.filter_tokens[0].name, "Not like its pattern")
-		testing.expect_value(t, open.filter_tokens[0].state, ui.Filter_Token_State.Known)
-		testing.expect_value(t, open.filter_tokens[1].name, "No vendor")
-	}
-	testing.expect_value(t, view.hidden_count, 2)
-	testing.expect_value(t, pane.filter_on_labels, "@Not like its pattern + @No vendor")
-
-	// Editing its pattern filters at once.
-	edited := "#00000001 No vendor | !^vendor/; #00000002 Not like its pattern | \\.(odin|md)$; #00000003 Docs | docs/"
-	if !filter_ids_save(t, &f.state, edited) {return}
-	testing.expect_value(t, view.hidden_count, 1)
-	// Reordering changes nothing for a token.
-	reordered := "#00000003 Docs | docs/; #00000002 Not like its pattern | \\.(odin|md)$; #00000001 No vendor | !^vendor/"
-	if !filter_ids_save(t, &f.state, reordered) {return}
-	testing.expect_value(t, app.changes_filter_text(pane), "@00000002 @00000001 ")
-	testing.expect_value(t, view.hidden_count, 1)
-
-	// Deleting a filter takes its tokens out of every pane and leaves the others.
-	without := "#00000003 Docs | docs/; #00000001 No vendor | !^vendor/"
-	if !filter_ids_save(t, &f.state, without) {return}
-	for open in f.state.changes_panes {
-		testing.expect_value(t, app.changes_filter_text(open), "@00000001 ")
-		testing.expect_value(t, len(open.filter_tokens), 1)
-	}
-	testing.expect_value(t, view.hidden_count, 1)
-	// A filter made later never takes the deleted one's id back.
-	with_new := strings.concatenate({without, "; #00000004 Odin again | \\.odin$"}, context.temp_allocator)
-	if !filter_ids_save(t, &f.state, with_new) {return}
-	testing.expect_value(t, app.changes_filter_text(pane), "@00000001 ")
-}
-
-@(test)
-a_restored_pane_follows_a_renamed_filter_and_drops_tokens_that_name_nothing :: proc(t: ^testing.T) {
-	first: Fixture
-	if !fixture_start(t, &first, "FilterRestoreA") {return}
-	defer delete(first.directory)
-	defer testing.expect_value(t, os.remove_all(first.directory), nil)
-	w := first.state.windows[0]
-	if !filter_ids_save(t, &first.state, FILTER_IDS_LIBRARY) {
-		app.app_destroy(&first.state)
-		return
-	}
-	app.run_action(&first.state, w, .Agent_Changes)
-	app.run_action(&first.state, w, .Agent_Changes)
-	if !testing.expect_value(t, len(first.state.changes_panes), 2) {
-		app.app_destroy(&first.state)
-		return
-	}
-	// One pane holds tokens by id, one a token by label as layouts did before ids, and an id that is gone.
-	_ = ui.field_set(&first.state.changes_panes[0].filter_editor, "~@00000002 notes @00000001")
-	app.changes_filter_changed(first.state.changes_panes[0])
-	_ = ui.field_set(&first.state.changes_panes[1].filter_editor, "@Documents @00000009 ui")
-	app.changes_filter_changed(first.state.changes_panes[1])
-	app.layout_state_save(&first.state)
-	renamed := "#00000001 Hide vendor | !^vendor/; #00000002 Odin files | \\.odin$; #00000003 Documents | docs/"
-	if !filter_ids_save(t, &first.state, renamed) {
-		app.app_destroy(&first.state)
-		return
-	}
-	app.app_destroy(&first.state)
-
-	second := Fixture{directory = first.directory}
-	if !fixture_start(t, &second, "FilterRestoreB", true) {return}
-	defer app.app_destroy(&second.state)
-	if !testing.expect_value(t, len(second.state.changes_panes), 2) {return}
-	for pane in second.state.changes_panes {
-		switch app.changes_filter_text(pane) {
-		case "~@00000002 notes @00000001":
-			testing.expect_value(t, len(pane.filter_tokens), 2)
-			testing.expect_value(t, pane.filter_tokens[0].name, "Odin files")
-			testing.expect_value(t, pane.filter_tokens[0].off, true)
-			testing.expect_value(t, pane.filter_tokens[1].name, "Hide vendor")
-		case "@00000003 ui":
-			testing.expect_value(t, len(pane.filter_tokens), 1)
-			testing.expect_value(t, pane.filter_tokens[0].name, "Documents")
-			testing.expect_value(t, pane.filter_tokens[0].state, ui.Filter_Token_State.Known)
-		case:
-			testing.expectf(t, false, "unexpected filter %q", app.changes_filter_text(pane))
-		}
-	}
 }

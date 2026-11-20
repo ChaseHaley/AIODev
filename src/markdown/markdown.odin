@@ -71,6 +71,11 @@ Block :: struct {
 	align:                    Align,
 	// The file range the block shows, end exclusive; only the edit view's blocks set it (live.odin).
 	source_start, source_end: int,
+	// The edit view's lines that carry on the block before with no gap, as a line after a hard break or
+	// another line of a code block does.
+	joined:                   bool,
+	// An edit view's fence line standing for the padding reading puts above or below a code block.
+	spacer:                   bool,
 }
 
 Table :: struct {
@@ -94,7 +99,7 @@ Document :: struct {
 	spans:  [dynamic]Span,
 	links:  [dynamic]Link,
 	tables: [dynamic]Table,
-	// Each file line is a block of its own and blocks sit flush, as an editor shows them (live.odin).
+	// Each file line is a block of its own, spaced as reading spaces them (live.odin).
 	live:   bool,
 }
 
