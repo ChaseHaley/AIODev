@@ -2043,6 +2043,7 @@ function aio.pane.open_markdown_default_app(fields) end
 ---@field ratio? number the new pane's share of the split pane's width (left, right) or height (up, down); default: 0.5 (half)
 ---@field focus? boolean moves focus to the new pane; default: off (focus stays where it is)
 ---@field text? string the http or https address to open; default: a blank pane
+---@field float? boolean opens a separate float; cannot be combined with --direction or --ratio; default: use pane preference
 
 ---Open web pane
 ---

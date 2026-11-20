@@ -109,7 +109,29 @@ try {
     Invoke-Ctl launch --settings $settings --keep-layout | Out-Null
     Wait-For 'web.count' '2'
     Check (((Web-Urls) -join ',') -eq ($urls -join ',')) "restored urls: $((Web-Urls) -join ', ')"
-    Write-Output "PASS web panes journey; restored $((Web-Urls).Count) web panes"
+
+    # --float is per open, and creates its own group even when the target already floats.
+    $before = Read-State
+    Check ($before['tab.1.floating'] -eq '0') 'default opens unexpectedly floated a pane'
+    Open-Web @('--float', '--focus', 'https://example.com/float')
+    Wait-For 'web.url' 'https://example.com/float'
+    Wait-For 'tab.1.floating' '1'
+    Open-Web @('--pane', 'focused', 'https://example.com/second-float', '--float')
+    Wait-For 'tab.1.floating' '2'
+    Check ((Web-Urls) -contains 'https://example.com/second-float') 'second URL did not open'
+    Check ((Read-State)['web.url'] -eq 'https://example.com/float') 'opening without --focus moved focus'
+
+    $paneCount = (Read-State)['web.count']
+    $splitOptions = @(@('--direction', 'down'), @('--ratio', '0.3'))
+    foreach ($options in $splitOptions) {
+        $refused = Invoke-Aio (@('pane.open_web', '--float', 'https://example.com/conflict') + $options)
+        Check ($refused.Code -ne 0 -and $refused.Text -match '--float') "accepted --float with $($options[0])"
+    }
+    Check ((Read-State)['web.count'] -eq $paneCount) 'a conflicting command opened a pane'
+    $preference = Invoke-Aio @('settings.get', '--name', 'pane.web_floating')
+    Check ($preference.Code -eq 0 -and $preference.Text -eq 'false') 'the flag changed the saved preference'
+
+    Write-Output "PASS web panes journey; restored $($urls.Count) web panes and opened two explicit floats"
 } finally {
     & $ctl --name $Name stop | Out-Null
 }

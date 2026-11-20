@@ -470,7 +470,7 @@ ACTIONS :: [Action]Command_Descriptor {
 	},
 	.Open_Web = {
 		"pane.open_web", "Open web pane", nil, .Local,
-		{accepted = {.Text, .Direction, .Ratio, .Focus}, control = .Pane, keywords = "browser"},
+		{accepted = {.Text, .Direction, .Ratio, .Focus, .Float}, control = .Pane, keywords = "browser"},
 	},
 	.Toggle_Web_Navigator = {
 		"pane.toggle_web_navigator", "Toggle web pane URL bar", nil, .Local, {keywords = "browser"},

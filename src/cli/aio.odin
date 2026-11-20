@@ -42,8 +42,8 @@ Panes   --pane takes a pane id, a pane name, here or focused. Inside an AIODev p
         and tab.move_workspace open their dialog without it.
 Files   aio pane.open_markdown [--direction left|right|up|down] [--focus] <file>
             Shows a Markdown file beside the pane and updates it when the file changes.
-        aio pane.open_web [--direction left|right|up|down] [--focus] [<url>]
-            Opens a web pane beside the pane, at the address when given (https is assumed).
+        aio pane.open_web [--float | --direction left|right|up|down] [--focus] [<url>]
+            Opens a web pane beside the target, or a separate float with --float.
         aio layout.apply [--focus] <file>
             Opens a tab of named panes from a JSON layout; prints their ids in order.
 Common  aio tab.new [--cwd <directory>] [--name <name>] [--tab-name <name>] [--focus] [-- <program>]
