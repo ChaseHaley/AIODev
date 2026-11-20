@@ -133,7 +133,7 @@ ui_line_text :: proc(view: ^ui.Changes_View, line: int) -> (string, bool) {
 
 @(private = "file")
 mouse_button :: proc(
-	f: ^Selecting, w: ^app.Window, at: [2]f32, pressed: bool, modifiers: input.Modifiers = {},
+	f: ^Selecting, w: ^app.Window, at: [2]f32, pressed: bool, modifiers: input.Modifiers = {}, time_ns: i64 = 0,
 ) {
 	app.handle_event(
 		&f.state,
@@ -144,6 +144,7 @@ mouse_button :: proc(
 			button = .Left,
 			pressed = pressed,
 			modifiers = modifiers,
+			time_ns = time_ns,
 		},
 	)
 }
@@ -711,6 +712,48 @@ a_selection_side_by_side_remembers_the_half_it_was_made_in :: proc(t: ^testing.T
 		testing.expect_value(t, c.selection.half, want)
 		testing.expect_value(t, c.selection.partial, false)
 	}
+}
+
+@(test)
+the_diff_divider_can_be_grabbed_off_the_line_and_double_click_centers_it :: proc(t: ^testing.T) {
+	f: Selecting
+	defer selecting_stop(t, &f)
+	if !selecting_start(t, &f, "DiffDivider") {return}
+	w, pane, ok := selecting_pane(t, &f)
+	if !ok {return}
+	app.changes_layout_toggle(&f.state, w, pane)
+	view, state := &pane.model.view, &pane.state
+	g := selecting_geometry(&f, w, pane)
+	start := ui.changes_divider_rect(g, view, state)
+	row := ui.changes_line_rect(g, view, state, 0, 0)
+	if !testing.expect(t, start.width == 1 && row.height > 0) {return}
+	y := row.y + row.height / 2
+	off_line := [2]f32{start.x - 8 * g.scale, y}
+	mouse_button(&f, w, off_line, true, time_ns = 1_000_000_000)
+	mouse_move(&f, w, off_line + {100, 0})
+	mouse_button(&f, w, off_line + {100, 0}, false, time_ns = 1_100_000_000)
+
+	g = selecting_geometry(&f, w, pane)
+	moved := ui.changes_divider_rect(g, view, state)
+	if !testing.expect(t, moved.x > start.x + 90) {return}
+	off_line = {moved.x - 8 * g.scale, y}
+	// A short drag means the presses can land within double-click distance but must not count as two taps.
+	mouse_button(&f, w, off_line, true, time_ns = 2_000_000_000)
+	mouse_move(&f, w, off_line + {2, 0})
+	mouse_button(&f, w, off_line + {2, 0}, false, time_ns = 2_050_000_000)
+	off_line += {2, 0}
+	mouse_button(&f, w, off_line, true, time_ns = 2_100_000_000)
+	mouse_button(&f, w, off_line, false, time_ns = 2_150_000_000)
+	g = selecting_geometry(&f, w, pane)
+	testing.expect_value(t, ui.changes_divider_rect(g, view, state).x, moved.x + 2)
+
+	mouse_button(&f, w, off_line, true, time_ns = 2_200_000_000)
+	mouse_button(&f, w, off_line, false, time_ns = 2_250_000_000)
+	g = selecting_geometry(&f, w, pane)
+	reset := ui.changes_divider_rect(g, view, state)
+	testing.expect_value(t, reset, start)
+	row = ui.changes_line_rect(g, view, state, 0, 0)
+	testing.expect(t, abs(2 * (reset.x - row.x) + reset.width - row.width) <= 1)
 }
 
 @(test)

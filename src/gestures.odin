@@ -251,6 +251,7 @@ gesture_button :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) {
 		if !modal {
 			if ui.armed_down(w.find.armed) {target = .Find} else if selection_active(w) {target = .Content}
 		}
+		if e.button == .Left && target != .Changes_Page {w.changes_divider_click = {}}
 		w.gesture.captures[e.button] = Gesture_Held{target}
 		if !modal {
 			w.dirty = true

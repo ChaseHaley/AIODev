@@ -336,7 +336,7 @@ Changes_State :: struct {
 	h_scroll:                 int,
 	h_bar:                    Scroll_Drag,
 	diff_scroll:              int,
-	// Fraction of the code band left of the divider; zero means centered.
+	// Fraction of the available code width given to the left cell; zero means centered.
 	split:                    f32,
 	// Strip bars hidden at the left, and the turn list's scroll in pixels.
 	strip_offset:             int,

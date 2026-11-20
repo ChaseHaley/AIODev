@@ -263,6 +263,12 @@ line_row :: proc(rows: ^Changes_Rows, file, line: int) -> int {
 @(private = "file")
 DIFF_MIN_SIDE :: f32(96)
 
+// Give the one-pixel line a larger hit target without swallowing the right line-number gutter.
+@(private = "file")
+DIFF_SPLIT_GRAB_LEFT :: f32(10)
+@(private = "file")
+DIFF_SPLIT_GRAB_RIGHT :: f32(2)
+
 @(private = "file")
 split_min :: proc(band, scale: f32) -> f32 {
 	return min(math.ceil(DIFF_MIN_SIDE * scale), math.floor(max(0, band - 1) / 2))
@@ -276,7 +282,8 @@ split_adjustable :: proc(band, scale: f32) -> bool {
 @(private)
 split_position :: proc(band, scale, fraction: f32) -> f32 {
 	minimum := split_min(band, scale)
-	return clamp(math.round(band * (fraction == 0 ? 0.5 : fraction)), minimum, max(0, band - 1 - minimum))
+	room := max(0, band - 1)
+	return clamp(math.round(room * (fraction == 0 ? 0.5 : fraction)), minimum, room - minimum)
 }
 
 // The cells of a row, either side of a one-pixel divider. Layout caches the same pixel position
@@ -677,9 +684,10 @@ changes_divider_move :: proc(state: ^Changes_State, g: Changes_Geometry, x: f32)
 	band := diff_band(g)
 	if !split_adjustable(band.width, g.scale) {return false}
 	minimum := split_min(band.width, g.scale)
-	left := clamp(math.round(x - band.x), minimum, max(minimum, band.width - 1 - minimum))
+	room := band.width - 1
+	left := clamp(math.round(x - band.x), minimum, room - minimum)
 	if left == state.rows.split_left {return false}
-	state.split = left / band.width
+	state.split = left / room
 	return true
 }
 
@@ -889,9 +897,8 @@ changes_diff_hit :: proc(
 			line, cell := int(pair.left), band
 			if rows.pairs.side_by_side {
 				left, right, divider := row_halves(band, rows.split_left)
-				// Leave the right line-number gutter clickable all the way to its edge.
-				if !view.selecting && x >= divider.x - SPACE_1 * g.scale && x < right.x &&
-				   split_adjustable(band.width, g.scale) {
+				if !view.selecting && x >= divider.x - DIFF_SPLIT_GRAB_LEFT * g.scale &&
+				   x < right.x + DIFF_SPLIT_GRAB_RIGHT * g.scale && split_adjustable(band.width, g.scale) {
 					return {.Split_Divider, 0, 0}
 				}
 				cell = left

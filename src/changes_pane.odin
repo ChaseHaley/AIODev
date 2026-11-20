@@ -1191,7 +1191,10 @@ changes_divider_held :: proc(
 		return .Ended
 	}
 	g := changes_geometry_of(app, w, pane, shown)
-	if ui.changes_divider_move(&pane.state, g, f32(e.x) - grab.offset) {w.dirty = true}
+	if ui.changes_divider_move(&pane.state, g, f32(e.x) - grab.offset) {
+		w.changes_divider_click = {}
+		w.dirty = true
+	}
 	pointer_set(app, w, .Resize_Horizontal)
 	return .Taken
 }
@@ -1316,6 +1319,8 @@ changes_press :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) {
 	if shown.content.kind != .Changes {return}
 	pane_focus(app, w, shown.node)
 	if pane == nil || e.button != .Left {return}
+	last_click := w.changes_divider_click
+	w.changes_divider_click = {}
 	w.dirty = true
 	g := changes_geometry_of(app, w, pane, shown)
 	view, state := &pane.model.view, &pane.state
@@ -1402,6 +1407,12 @@ changes_press :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) {
 	case .Worktree_Chip:
 		changes_worktree_pick(app, pane, hit.index)
 	case .Split_Divider:
+		if click_run_count(last_click, pane.id, x, y, e.time_ns) == 2 {
+			state.split = 0
+			pointer_set(app, w, .Resize_Horizontal)
+			return
+		}
+		w.changes_divider_click = Click_Run{pane.id, x, y, e.time_ns, 1, 0}
 		divider := ui.changes_divider_rect(g, view, state)
 		w.changes_divider = Changes_Divider_Drag{pane.id, x - divider.x}
 		pointer_set(app, w, .Resize_Horizontal)
@@ -1493,6 +1504,7 @@ changes_release :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) -> b
 
 // Ends whatever the pointer holds on an Agent changes pane: a press, a drag or the overview strip.
 changes_cancel :: proc(app: ^App, w: ^Window) {
+	w.changes_divider_click = {}
 	_ = changes_release(app, w, {button = .Left})
 }
 
