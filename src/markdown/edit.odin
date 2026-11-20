@@ -301,7 +301,7 @@ edit_select_unit :: proc(b: ^Edit_Buffer, from, to: int, unit: Edit_Unit, at: in
 @(require_results)
 edit_home_target :: proc(b: ^Edit_Buffer, row_start: int) -> int {
 	start := edit_line_start(b, b.caret)
-	if row_start > start && b.caret != row_start {return row_start}
+	if row_start != start && b.caret != row_start {return row_start}
 	end := edit_line_end(b, start)
 	indent := start
 	for indent < end && (b.text[indent] == ' ' || b.text[indent] == '\t') {indent += 1}
@@ -313,7 +313,7 @@ edit_home_target :: proc(b: ^Edit_Buffer, row_start: int) -> int {
 @(require_results)
 edit_end_target :: proc(b: ^Edit_Buffer, row_end: int) -> int {
 	end := edit_line_end(b, b.caret)
-	return row_end < end && b.caret != row_end ? row_end : end
+	return row_end != end && b.caret != row_end ? row_end : end
 }
 
 // Replaces from..to with `text`, recorded for undo; the caret lands after the new text. A `run` joins

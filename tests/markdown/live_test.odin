@@ -200,3 +200,65 @@ task_marks_flip_in_place :: proc(t: ^testing.T) {
 	testing.expect_value(t, string(text), "- [x] a\n- [ ] b")
 	testing.expect(t, !markdown.task_mark_flip(text, 0))
 }
+
+// The lines of one paragraph with soft line breaks between them show as one block, reading's way, each break
+// a space; a hard break, a blank line or another block ends it.
+@(test)
+soft_breaks_join_a_paragraphs_lines_and_hard_breaks_do_not :: proc(t: ^testing.T) {
+	f: Live_Fixture
+	defer live_fixture_destroy(&f)
+	source := "first line\nsecond *line*\nthird\n\nhard  \nbreak\\\nagain\n\n- item one\n  continues\n- next\n\n> quoted\n> on\n"
+	end := len(source)
+	testing.expect(t, markdown.live_build(&f.live, source, end, end, &f.doc))
+	testing.expect_value(
+		t,
+		strings.trim_right(shown_lines(&f.doc), "\n"),
+		"first line second line third\n\nhard\nbreak\nagain\n\nitem one continues\nnext\n\nquoted on",
+	)
+	testing.expect_value(t, f.doc.blocks[0].source_start, 0)
+	testing.expect_value(t, f.doc.blocks[0].source_end, strings.index(source, "\n\nhard"))
+}
+
+@(test)
+soft_break_spaces_map_to_the_newline_and_back :: proc(t: ^testing.T) {
+	for newline in ([?]string{"\n", "\r\n"}) {
+		f: Live_Fixture
+		defer live_fixture_destroy(&f)
+		source := strings.concatenate({"alpha beta", newline, "gamma delta", newline, newline, "end"}, context.temp_allocator)
+		testing.expect(t, markdown.live_build(&f.live, source, len(source), len(source), &f.doc))
+		testing.expect_value(t, string(f.doc.text[:f.doc.blocks[0].marker_start + len("alpha beta gamma delta")]), "alpha beta gamma delta")
+		wrap := strings.index(source, newline)
+		after := wrap + len(newline)
+		// The caret before the break is at the first line's end; after it, at the second line's start.
+		before_display := markdown.live_display(&f.doc, wrap)
+		after_display := markdown.live_display(&f.doc, after)
+		testing.expect_value(t, after_display, before_display + 1)
+		testing.expect_value(t, markdown.live_source(&f.doc, before_display), wrap)
+		testing.expect_value(t, markdown.live_source(&f.doc, after_display), after)
+		// Every character of both lines maps exactly.
+		for offset in 0 ..< wrap {
+			testing.expect_value(t, markdown.live_source(&f.doc, markdown.live_display(&f.doc, offset)), offset)
+		}
+		for offset in after ..< after + len("gamma delta") {
+			testing.expect_value(t, markdown.live_source(&f.doc, markdown.live_display(&f.doc, offset)), offset)
+		}
+	}
+}
+
+// Whether the caret or the selection touches a line of the group shows the whole group as source, still as
+// one paragraph: the text does not move as the caret comes and goes.
+@(test)
+a_revealed_group_shows_its_source_as_one_paragraph :: proc(t: ^testing.T) {
+	f: Live_Fixture
+	defer live_fixture_destroy(&f)
+	source := "one **two**\nthree\n\nafter"
+	caret := strings.index(source, "three")
+	testing.expect(t, markdown.live_build(&f.live, source, caret, caret, &f.doc))
+	testing.expect_value(t, shown_lines(&f.doc), "one **two** three\n\nafter")
+	testing.expect_value(t, len(f.doc.blocks), 3)
+	for span in f.doc.spans {
+		if string(f.doc.text[span.start:span.end]) == "**" {testing.expect(t, .Markup in span.style)}
+	}
+	testing.expect(t, markdown.live_build(&f.live, source, len(source), len(source), &f.doc))
+	testing.expect_value(t, shown_lines(&f.doc), "one two three\n\nafter")
+}
