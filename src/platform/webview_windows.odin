@@ -7,7 +7,7 @@ package platform
 when !AIO_HEADLESS {
 	foreign import webview_native {
 		"../../build/native/webview.lib",
-		"../../.deps/webview2/pkg/build/native/x64/WebView2LoaderStatic.lib",
+		"../../vendor/webview2/x64/WebView2LoaderStatic.lib",
 		"system:dcomp.lib",
 		"system:version.lib",
 		"system:advapi32.lib",
