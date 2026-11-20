@@ -1002,14 +1002,15 @@ try {
         'changes.total_removed' = 1
     } 'Clear on the filter bar shows every file and every line'
 
-    # Saved filters (turns.saved_filters, `name | pattern`, the name optional) are tokens in the filter field:
-    # the field's @ button or an @ typed in it lists them, a token is one unit that clicks on and off, and Ctrl+S
-    # saves the field's terms as a filter without a name. Nothing but the filter text carries them, so a pane
-    # opened from this one has them too.
+    # Saved filters (turns.saved_filters, `#id name | pattern`, the name optional) are tokens in the filter
+    # field: the field's @ button or an @ typed in it lists them, a token is one unit that clicks on and off, and
+    # Ctrl+S saves the field's terms as a filter without a name. A token names its filter by id, and nothing but
+    # the filter text carries it, so a pane opened from this one has them too. Filters written without an id get
+    # one when the file loads.
     $ini = Get-Content -LiteralPath "$data/settings.ini" -Raw
     Add-Content -LiteralPath "$data/settings.ini" -Value "`nturns.saved_filters = No long | !long; Python | py$"
     Aio command settings.reload | Out-Null
-    $s = State
+    $s = Await-Like 'changes.saved_filters' '#???????? No long | !long; #???????? Python | py$' 'filters written without ids get one on load'
     Click-Rect $s 'changes.filter_button_rect'
     $s = Await-State @{ 'changes.filter_open' = 'true' } 'the filter opens for saved filters'
     Click-Rect $s 'changes.filter_at_rect'
@@ -1070,7 +1071,7 @@ try {
     Aio capture --out "$data/agent-filter-save.png" | Out-Null
     Aio key Ctrl+S | Out-Null
     $s = Await-State @{ 'changes.filter_tokens' = 3; 'changes.filter_token.2.name' = 'live'; 'changes.filter_savable' = 'false' } 'Ctrl+S saves the terms as a token with no name asked'
-    Like $s['changes.saved_filters'] '*; | live' 'the filter is saved after the others, without a name'
+    Like $s['changes.saved_filters'] '*; #???????? | live' 'the filter is saved after the others, with an id and no name'
     Aio capture --out "$data/agent-filter-tokens.png" | Out-Null
     Aio key Esc | Out-Null
     Await-State @{ 'changes.filter_open' = 'false' } 'Esc closes the filter and keeps the tokens' | Out-Null
@@ -1078,6 +1079,49 @@ try {
     Await-State @{ 'changes.count' = 3; 'changes.filter_tokens' = 3; 'changes.filter_token.0.name' = 'Python'; 'changes.filter_token.2.name' = 'live' } 'a pane opened from this one has the tokens' | Out-Null
     Aio capture --out "$data/agent-filter-copied.png" | Out-Null
     Close-Changes 2
+
+    # A token names its filter by id, so renaming the filter in Settings to something unlike its pattern keeps it
+    # applied and shows the new name in the open pane. The popover's Manage button opens Settings on the filters.
+    $s = State
+    $homeTab, $tabs = $s['tabs.selected'], $s['tabs.count']
+    $python = $s['changes.filter_token.0.id']
+    Click-Rect $s 'changes.filter_button_rect'
+    $s = Await-State @{ 'changes.filter_open' = 'true' } 'the filter opens before the rename'
+    Aio capture --out "$data/agent-rename-before.png" | Out-Null
+    Click-Rect $s 'changes.filter_manage_rect'
+    $s = Await-State @{ 'settings.active' = 'true' } 'Manage opens Settings on the saved filters'
+    function Filter-Row($s, $key) {
+        $entry = @($s['settings.filters.rows'] -split ';' | Where-Object { $_ -like "$key@*" })
+        if ($entry.Count -ne 1) { throw "no row $key in '$($s['settings.filters.rows'])'" }
+        return @(($entry[0] -split '@')[1] -split ',' | ForEach-Object { [double]$_ })
+    }
+    if ($s['settings.filters.expanded'] -ne '2') {
+        $line = Filter-Row $s 'filter.2'
+        Aio mouse click "$([int]($line[0] + 120)),$([int]($line[1] + $line[3] / 2))" --px | Out-Null
+        $s = Await-State @{ 'settings.filters.expanded' = 2 } 'the Python filter opens its fields'
+    }
+    $nameRow = Filter-Row $s 'filter.2.name'
+    $scale = [double]$s['window.scale']
+    Aio mouse click "$([int]($nameRow[0] + [math]::Min(120 * $scale, $nameRow[2] * 0.38) + 15)),$([int]($nameRow[1] + $nameRow[3] / 2))" --px | Out-Null
+    Aio key Ctrl+A | Out-Null
+    Aio type 'Snake files' | Out-Null
+    Aio key Enter | Out-Null
+    Await-Like 'settings.filters.value' ('*#{0} Snake files | py$*' -f $python) 'Python is renamed in the table and keeps its id' | Out-Null
+    Aio capture --out "$data/settings-rename.png" | Out-Null
+    Aio command tab.close | Out-Null
+    Aio command "tab.select_$homeTab" | Out-Null
+    Await-State @{ 'tabs.count' = $tabs; 'tabs.selected' = $homeTab } 'closing Settings returns to the changes pane' | Out-Null
+    $s = Await-State @{
+        'changes.filter_tokens' = 3; 'changes.filter_token.0.name' = 'Snake files'; 'changes.filter_token.0.id' = $python
+        'changes.filter_token.0.state' = 'known'; 'changes.filter_token.0.on' = 'true'
+        'changes.hidden_files' = 3; 'changes.files' = 1; 'changes.file.0.path' = 'live.py'
+        'changes.filter_on' = '@Snake files + @No long + @live'
+    } 'the pane still filters with the renamed filter and its token shows the new name'
+    Click-Rect $s 'changes.filter_button_rect'
+    Await-State @{ 'changes.filter_open' = 'true' } 'the filter opens after the rename' | Out-Null
+    Aio capture --out "$data/agent-rename-after.png" | Out-Null
+    Aio key Esc | Out-Null
+    Await-State @{ 'changes.filter_open' = 'false' } 'Esc closes the filter' | Out-Null
     $s = State
     Click-Rect $s 'changes.filter_button_rect'
     $s = Await-State @{ 'changes.filter_open' = 'true' } 'the filter opens for Clear'
@@ -1578,7 +1622,7 @@ try {
     Aio command pane.agent_changes | Out-Null
     Await-State @{
         'changes.active' = 'true'; 'changes.scope' = 'agent'; 'changes.side_by_side' = 'true'
-        'changes.filter' = '@!long'; 'changes.filter_tokens' = 1; 'changes.filter_token.0.on' = 'true'
+        'changes.filter_tokens' = 1; 'changes.filter_token.0.name' = '!long'; 'changes.filter_token.0.on' = 'true'
         'changes.hidden_files' = 1; 'changes.files' = 3
         'changes.file.0.path' = 'live.py'; 'changes.file.1.path' = 'notes.txt'; 'changes.file.2.path' = 'zz.md'
         'changes.settled' = 'true'
@@ -1796,7 +1840,8 @@ try {
     Aio command settings.open | Out-Null
     Start-Sleep -Seconds 1
     Aio type 'saved filters' | Out-Null
-    $s = Await-State @{ 'settings.filters.value' = 'No long | !long; Python | py$; | live' } 'the saved filters table lists three filters, none on by default'
+    $s = Await-Like 'settings.filters.value' '#???????? No long | !long; #???????? Python | py$; #???????? | live' 'the saved filters table lists three filters, none on by default'
+    $ids = @($s['settings.filters.value'] -split '; ' | ForEach-Object { $_.Substring(1, 8) })
     function Filter-Default($s, $key) {
         $entry = @($s['settings.filters.defaults'] -split ';' | Where-Object { $_ -like "$key@*" })
         if ($entry.Count -ne 1) { throw "no default control for $key in '$($s['settings.filters.defaults'])'" }
@@ -1805,9 +1850,10 @@ try {
     }
     Equal (Filter-Default $s 'filter.1').On 0 'the first filter is not on by default'
     Aio mouse click (Middle (Filter-Default $s 'filter.1').Rect) --px | Out-Null
-    $s = Await-State @{ 'settings.filters.value' = '* No long | !long; Python | py$; | live' } 'its check marks it on by default'
+    $s = Await-Like 'settings.filters.value' '#???????? * No long | !long; #???????? Python | py$; #???????? | live' 'its check marks it on by default'
     Aio mouse click (Middle (Filter-Default $s 'filter.2').Rect) --px | Out-Null
-    $s = Await-State @{ 'settings.filters.value' = '* No long | !long; * Python | py$; | live' } 'a second filter can be marked too'
+    $s = Await-Like 'settings.filters.value' '#???????? * No long | !long; #???????? * Python | py$; #???????? | live' 'a second filter can be marked too'
+    Equal (@($s['settings.filters.value'] -split '; ' | ForEach-Object { $_.Substring(1, 8) }) -join ',') ($ids -join ',') 'marking filters leaves their ids alone'
     Equal (Filter-Default $s 'filter.2').On 1 'the second filter shows its mark'
     Equal (Filter-Default $s 'filter.3').On 0 'the third filter has none'
     Aio capture --out "$data/settings-saved-filters.png" | Out-Null
@@ -1815,7 +1861,8 @@ try {
     Await-State @{
         'changes.active' = 'true'; 'changes.filter_tokens' = 2; 'changes.filter_token.0.name' = 'No long'
         'changes.filter_token.1.name' = 'Python'; 'changes.filter_token.0.on' = 'true'; 'changes.filter_token.1.on' = 'true'
-    } 'a new pane starts with both default filters as on tokens' | Out-Null
+        'changes.filter_token.0.id' = $ids[0]; 'changes.filter_token.1.id' = $ids[1]
+    } 'a new pane starts with both default filters as on tokens, by id' | Out-Null
     $s = State
     Click-Rect $s 'changes.filter_button_rect'
     Await-State @{ 'changes.filter_open' = 'true' } 'the new pane opens its filter' | Out-Null
