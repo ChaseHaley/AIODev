@@ -98,6 +98,7 @@ editor_saved_filters_load :: proc(p: ^Editor, value: string) -> runtime.Allocato
 		filter_row_add(p, id, .None, settings.saved_filter_label(filter), filter.pattern, "") or_return
 		head := &p.rows[len(p.rows) - 1]
 		if filter.default {head.flags += {.Default}}
+		head.filter_id = strings.clone(filter.id) or_return
 		// Search reads the pattern too, so a filter is found by what it matches.
 		detail := strings.concatenate({settings.SAVED_FILTERS_KEY, " ", filter.pattern}) or_return
 		delete(head.detail)
@@ -146,6 +147,8 @@ editor_has_filter_row :: proc(p: ^Editor, id: int) -> bool {
 @(private)
 saved_filter_problem_text :: proc(problem: settings.Saved_Filter_Problem) -> string {
 	switch problem {
+	case .Id:
+		return "The filter has an id that is not valid."
 	case .Name:
 		return "Use a name of up to 32 characters without ; | or quotes, or leave it empty."
 	case .Duplicate:
@@ -196,7 +199,7 @@ editor_saved_filters_value :: proc(
 	drafts := make([dynamic]settings.Saved_Filter_Draft, context.temp_allocator)
 	for head in p.rows {
 		if head.kind != .Saved_Filter {continue}
-		draft := settings.Saved_Filter_Draft{default = .Default in head.flags}
+		draft := settings.Saved_Filter_Draft{id = head.filter_id, default = .Default in head.flags}
 		for row in p.rows {
 			if row.filter != head.filter || row.filter_field == .None {continue}
 			text := row.value
@@ -217,7 +220,9 @@ editor_saved_filters_value :: proc(
 	switch edit.kind {
 	case .Field:
 	case .Add:
-		append(&drafts, settings.Saved_Filter_Draft{filter_new_name(drafts[:]), SAVED_FILTER_NEW_PATTERN, false})
+		id := settings.saved_filter_id_make(drafts[:])
+		name := filter_new_name(drafts[:])
+		append(&drafts, settings.Saved_Filter_Draft{id, name, SAVED_FILTER_NEW_PATTERN, false})
 		p.filter_expanded = count + 1
 		select_key = filter_key(count + 1, ".name")
 	case .Default:

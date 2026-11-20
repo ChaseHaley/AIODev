@@ -121,6 +121,8 @@ Editor_Row :: struct {
 	// field a row edits; zero and None for every other row.
 	filter:        int,
 	filter_field:  Filter_Field,
+	// The id of the saved filter a table line stands for, which every edit writes back unchanged.
+	filter_id:     string,
 	// The Motion section part this row is, for `motion_context`. A field row is `motion_inherited`
 	// when its context leaves the field to a parent or the built-in fallback.
 	motion_part:      Motion_Part,
@@ -627,7 +629,7 @@ EDITOR_SECTION_LIMIT :: 8
 
 // Every string a row owns, in one place for editor_add's copies and editor_row_destroy's frees.
 @(private)
-row_owned_strings :: proc(row: ^Editor_Row) -> [10]^string {
+row_owned_strings :: proc(row: ^Editor_Row) -> [11]^string {
 	return {
 		&row.key,
 		&row.title,
@@ -639,6 +641,7 @@ row_owned_strings :: proc(row: ^Editor_Row) -> [10]^string {
 		&row.detail,
 		&row.note,
 		&row.opener,
+		&row.filter_id,
 	}
 }
 

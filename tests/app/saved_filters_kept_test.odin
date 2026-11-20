@@ -6,7 +6,7 @@ import app "../../src"
 import "aio:ui"
 
 @(private)
-SAVED_FILTERS_SETTINGS :: `turns.saved_filters = "One | a; Two | b c; Three | !vendor/"` + "\n"
+SAVED_FILTERS_SETTINGS :: `turns.saved_filters = "#00000001 One | a; #00000002 Two | b c; #00000003 Three | !vendor/"` + "\n"
 
 // A field the user typed into and left, which is not a filter field, is still saved when the next thing
 // they do is a filter action: the action takes only filter fields into itself.
@@ -26,8 +26,8 @@ a_filter_action_leaves_another_kept_field_to_its_own_save :: proc(t: ^testing.T)
 	app.editor_outcome(&f.state, w, .Filter_Action)
 	testing.expect(t, profile_file_has(f.path, "interface.font_size = 13"))
 	text := profile_file_text(f.path)
-	testing.expect(t, strings.contains(text, "turns.saved_filters = \"Two | b c; Three | !vendor/\""), text)
-	testing.expect_value(t, f.state.settings.turns.saved_filters, "Two | b c; Three | !vendor/")
+	testing.expect(t, strings.contains(text, "turns.saved_filters = \"#00000002 Two | b c; #00000003 Three | !vendor/\""), text)
+	testing.expect_value(t, f.state.settings.turns.saved_filters, "#00000002 Two | b c; #00000003 Three | !vendor/")
 }
 
 // A filter field typed into and left goes with its own filter through a Remove of an earlier one.
@@ -46,5 +46,5 @@ a_kept_filter_field_survives_removing_an_earlier_filter :: proc(t: ^testing.T) {
 	ui.editor_request_set(e, ui.Filter_Edit{kind = .Remove, id = 1})
 	app.editor_outcome(&f.state, w, .Filter_Action)
 	filters := f.state.settings.turns.saved_filters
-	testing.expect_value(t, filters, "Renamed | b c; Three | !vendor/")
+	testing.expect_value(t, filters, "#00000002 Renamed | b c; #00000003 Three | !vendor/")
 }

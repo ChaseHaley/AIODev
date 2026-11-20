@@ -4,35 +4,37 @@ import "aio:render"
 import "core:math"
 import "core:unicode/utf8"
 
-// A field that shows saved filters in its text as tokens: each `@name` word is a pill that is one unit for
+// A field that shows saved filters in its text as tokens: each `@id` word is a pill, showing the filter's
+// current name, that is one unit for
 // the caret, the selection and Backspace (the field's atoms), dimmed while off. The pane parses the text
 // into tokens after every edit and hands them to the draw and the hit tests here, which walk the text and
 // the tokens in the same order so a press, the caret and the pixels agree.
 
 Filter_Token_State :: enum u8 {
-	// Names a saved filter whose pattern compiles.
+	// Refers to a saved filter whose pattern compiles.
 	Known,
-	// Names no saved filter; it hides nothing.
+	// Refers to no saved filter; it hides nothing.
 	Unknown,
-	// Names a saved filter whose pattern does not compile.
+	// Refers to a saved filter whose pattern does not compile.
 	Invalid,
 }
 
-// A token of the filter text: its bytes `start` to `end` in the field (`@name`, `~@name` or the quoted
-// form), the name it refers to as a slice of those bytes, and whether it is off. The slices live until the
-// next edit.
+// A token of the filter text: its bytes `start` to `end` in the field (`@id` or `~@id`), the id it
+// refers to as a slice of those bytes, the name the pill shows (the filter's name, or its pattern while it
+// has none; the id itself when no filter has it), and whether it is off. The slices live until the next
+// edit or settings change.
 Filter_Token :: struct {
 	start, end: int,
-	name:       string,
+	id, name:   string,
 	off:        bool,
 	state:      Filter_Token_State,
 }
 
-// A saved filter offered by the `@` list: its label (name, or pattern while it has no name), its pattern, and
-// how many files it would hide on its own, as slices of the library the pane keeps.
+// A saved filter offered by the `@` list: its id, its label (name, or pattern while it has no name), its
+// pattern, and how many files it would hide on its own, as slices of the library the pane keeps.
 Filter_Pick :: struct {
-	label, pattern: string,
-	hides:          int,
+	id, label, pattern: string,
+	hides:              int,
 }
 
 @(private = "file")

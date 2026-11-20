@@ -1488,7 +1488,7 @@ when AIO_CONTROL {
 				if row.kind != .Quick_Label {continue}
 				name = row.key
 			case .Filters:
-				if row.kind != .Saved_Filter {continue}
+				if row.kind != .Saved_Filter && row.filter_field == .None {continue}
 				name = row.key
 			}
 			rect := ui.editor_row_parts(p, page, index).row

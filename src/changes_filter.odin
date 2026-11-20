@@ -8,10 +8,10 @@ import "core:strings"
 
 // The diff filter of an Agent changes pane: words separated by spaces. A plain word is a case-insensitive
 // regular expression on a file's path as the diff header shows it, matched by find's rules; a file shows
-// when it matches every plain word and no `!word`. A word `@name` is a token that names a saved filter
-// (`turns.saved_filters`), `~@name` one that is off, and `@"two words"` a name with spaces: a token that is
-// on adds the saved filter's own words to the terms, so a file must pass the text and every token that is
-// on.
+// when it matches every plain word and no `!word`. A word `@id` is a token that refers to a saved filter
+// (`turns.saved_filters`) by its id, `~@id` one that is off: a token that is on adds the saved filter's own
+// words to the terms, so a file must pass the text and every token that is on. The pill shows the filter's
+// current name, so renaming or editing a filter in Settings changes every pane at once.
 // Empty text shows every file.
 
 Changes_Filter_Term :: struct {
@@ -58,7 +58,7 @@ changes_filter_term_add :: proc(f: ^Changes_Filter, word: string) -> (ok: bool, 
 // Replaces the terms with those of `text`, resolving its tokens against `library` (the saved filters' setting
 // value) and listing them in `tokens` when it is given. A term that does not compile, in the text or in the
 // pattern of a token that is on, leaves the filter empty, so it hides nothing, and `error` names it; a token
-// naming no saved filter adds nothing. `error` is in temporary memory. The words from `pending_from` to
+// referring to no saved filter adds nothing. `error` is in temporary memory. The words from `pending_from` to
 // `pending_to` are an `@` still being typed, which is neither a token nor a term yet.
 @(require_results)
 changes_filter_set :: proc(
@@ -89,10 +89,12 @@ changes_filter_set :: proc(
 		token := ui.Filter_Token {
 			start = word.start,
 			end   = word.end,
+			id    = word.name,
 			name  = word.name,
 			off   = word.off,
 		}
-		filter, _, known := settings.saved_filters_find(library, word.name)
+		filter, _, known := settings.saved_filters_find_id(library, word.name)
+		if known {token.name = settings.saved_filter_label(filter)}
 		switch {
 		case !known:
 			token.state = .Unknown
@@ -102,7 +104,7 @@ changes_filter_set :: proc(
 				term_ok, term_error := changes_filter_term_add(f, pattern)
 				if term_ok {continue}
 				token.state = .Invalid
-				error = fmt.tprintf("%s (in saved filter %s)", term_error, word.name)
+				error = fmt.tprintf("%s (in saved filter %s)", term_error, token.name)
 				break
 			}
 		}

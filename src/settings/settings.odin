@@ -1572,8 +1572,8 @@ SCHEMA :: [?]Schema_Entry {
 		control = .Group,
 		validator = .Saved_Filters,
 		description = "Saved diff filters for Agent changes: " + SAVED_FILTERS_EXAMPLE + ". The filter field's @ " +
-			"button lists them; a filter without a name shows its pattern, and one marked with a leading * starts " +
-			"new panes as a token.",
+			"button lists them; a filter without a name shows its pattern, one marked with a * after its id starts " +
+			"new panes as a token, and the id, made for the filter, keeps its tokens through a rename.",
 	},
 	{
 		key = "shell.default_profile",
@@ -2028,7 +2028,7 @@ value_parse :: proc(
 			}
 		case .Saved_Filters:
 			if !saved_filters_valid(value) {
-				buffer: [512]u8
+				buffer: [768]u8
 				issue, err := problem(.Invalid_Value, allocator, saved_filters_rules(buffer[:]))
 				return nil, issue, err
 			}
@@ -2668,7 +2668,7 @@ migrate_settings_text :: proc(
 		delete(updated, allocator)
 		updated, changed = toggles, true
 	}
-	filters, filters_changed := migrate_diff_filter_text(updated, allocator) or_return
+	filters, filters_changed := migrate_saved_filters_text(updated, allocator) or_return
 	if filters_changed {
 		delete(updated, allocator)
 		updated, changed = filters, true

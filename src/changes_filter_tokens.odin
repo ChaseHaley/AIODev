@@ -24,13 +24,49 @@ changes_filter_library_set :: proc(pane: ^Changes_Pane, library: string) -> bool
 	return true
 }
 
-// A settings revision may have changed the saved filters: every pane resolves its tokens again.
+// A settings revision may have changed the saved filters: every pane resolves its tokens again, so a renamed
+// or edited filter shows and filters at once in every pane. A token whose filter is gone leaves the field: it
+// has nothing left to show or switch, and a filter made later has an id of its own, so the token could never
+// refer to anything again. Nothing is removed while the saved filters could not be read, since the revision
+// then holds none and the filters are back once the file is fixed.
 @(private)
 changes_settings_applied :: proc(app: ^App) {
+	readable := app.settings_read_error == nil
+	for diagnostic in app.settings_diagnostics {
+		if diagnostic.key == settings.SAVED_FILTERS_KEY {readable = false}
+	}
 	for pane in app.changes_panes {
-		if changes_filter_library_set(pane, app.settings.turns.saved_filters) {changes_filter_changed(pane)}
+		if !changes_filter_library_set(pane, app.settings.turns.saved_filters) {continue}
+		if readable {changes_filter_forget_removed(pane)}
+		changes_filter_changed(pane)
 	}
 	for w in app.windows {w.dirty = true}
+}
+
+// Takes the tokens that were resolved to a saved filter the library no longer has out of the pane's field,
+// each with one of the spaces beside it, keeping the caret and the selection with the text they were in.
+@(private = "file")
+changes_filter_forget_removed :: proc(pane: ^Changes_Pane) {
+	text := changes_filter_text(pane)
+	kept := strings.builder_make(context.temp_allocator)
+	f := &pane.filter_editor
+	before_cursor, before_anchor, from := 0, 0, 0
+	for token in pane.filter_tokens {
+		if token.state == .Unknown {continue}
+		if _, _, found := settings.saved_filters_find_id(pane.filter_library, token.id); found {continue}
+		to := token.end
+		if to < len(text) && filter_blank(text[to]) {to += 1}
+		strings.write_string(&kept, text[from:token.start])
+		from = to
+		before_cursor += clamp(f.cursor - token.start, 0, to - token.start)
+		before_anchor += clamp(f.anchor - token.start, 0, to - token.start)
+	}
+	if from == 0 {return}
+	strings.write_string(&kept, text[from:])
+	cursor, anchor := f.cursor - before_cursor, f.anchor - before_anchor
+	if ui.field_set(f, strings.to_string(kept)) != nil {return}
+	f.cursor, f.anchor = cursor, anchor
+	if pane.filter_pending >= 0 {pane.filter_typing = false}
 }
 
 @(private = "file")
@@ -64,9 +100,9 @@ changes_filter_query :: proc(pane: ^Changes_Pane) -> string {
 }
 
 @(private = "file", require_results)
-changes_filter_has_token :: proc(pane: ^Changes_Pane, label: string) -> bool {
+changes_filter_has_token :: proc(pane: ^Changes_Pane, id: string) -> bool {
 	for token in pane.filter_tokens {
-		if strings.equal_fold(token.name, label) {return true}
+		if token.id == id {return true}
 	}
 	return false
 }
@@ -95,10 +131,11 @@ changes_filter_picks_build :: proc(pane: ^Changes_Pane) {
 		cursor := settings.saved_filters_scan(pane.filter_library)
 		for filter in settings.saved_filters_next(&cursor) {
 			label := settings.saved_filter_label(filter)
-			if changes_filter_has_token(pane, label) {continue}
+			if changes_filter_has_token(pane, filter.id) {continue}
 			if query != "" && fuzzy.classify(query, label) != class {continue}
 			if query == "" && class != .Exact {continue}
 			pick := ui.Filter_Pick {
+				id      = filter.id,
 				label   = label,
 				pattern = filter.pattern,
 				hides   = changes_filter_hides(pane, filter.pattern),
@@ -219,8 +256,8 @@ changes_filter_pick_choose :: proc(app: ^App, w: ^Window, pane: ^Changes_Pane, r
 	text := changes_filter_text(pane)
 	from, to := pane.filter_editor.cursor, pane.filter_editor.cursor
 	if pane.filter_pending >= 0 {from = pane.filter_pending}
-	buffer: [settings.SAVED_FILTER_PATTERN_MAX + 8]u8
-	token := settings.filter_token_format(buffer[:], pane.filter_picks[row].label, false)
+	buffer: [settings.SAVED_FILTER_ID_LEN + 8]u8
+	token := settings.filter_token_format(buffer[:], pane.filter_picks[row].id, false)
 	lead := from > 0 && !filter_blank(text[from - 1]) ? " " : ""
 	space := to < len(text) && filter_blank(text[to]) ? "" : " "
 	with := strings.concatenate({lead, token, space}, context.temp_allocator)
@@ -297,9 +334,48 @@ changes_filter_refuse :: proc(pane: ^Changes_Pane, w: ^Window, message: string) 
 	w.dirty = true
 }
 
+// A token typed or pasted with a filter's name rather than its id (the form this field's text had before ids)
+// refers to that filter by id from then on, so a later rename cannot lose it. The `@` still being typed is
+// left alone, and the caret and the selection stay with the text they were in.
+@(private)
+changes_filter_ids_resolve :: proc(pane: ^Changes_Pane) {
+	text := changes_filter_text(pane)
+	pending_from, pending_to := -1, -1
+	if pane.filter_typing && pane.filter_pending >= 0 {
+		pending_from, pending_to = pane.filter_pending, pane.filter_editor.cursor
+	}
+	resolved := strings.builder_make(context.temp_allocator)
+	buffer: [settings.SAVED_FILTER_ID_LEN + 8]u8
+	f := &pane.filter_editor
+	grown_cursor, grown_anchor, copied, at := 0, 0, 0, 0
+	for {
+		word, more := settings.filter_word_next(text, at)
+		if !more {break}
+		at = word.end
+		if !word.token || (word.start < pending_to && word.end > pending_from) {continue}
+		if _, _, found := settings.saved_filters_find_id(pane.filter_library, word.name); found {continue}
+		filter, _, found := settings.saved_filters_find(pane.filter_library, word.name)
+		if !found {continue}
+		token := settings.filter_token_format(buffer[:], filter.id, word.off)
+		strings.write_string(&resolved, text[copied:word.start])
+		strings.write_string(&resolved, token)
+		copied = word.end
+		grown := len(token) - (word.end - word.start)
+		if f.cursor >= word.end {grown_cursor += grown}
+		if f.anchor >= word.end {grown_anchor += grown}
+	}
+	if copied == 0 {return}
+	strings.write_string(&resolved, text[copied:])
+	cursor, anchor := f.cursor + grown_cursor, f.anchor + grown_anchor
+	if ui.field_set(f, strings.to_string(resolved)) != nil {return}
+	f.cursor, f.anchor = cursor, anchor
+}
+
 @(private = "file")
 changes_filter_problem_text :: proc(problem: settings.Saved_Filter_Problem) -> string {
 	switch problem {
+	case .Id:
+		return "A saved filter has an id that is not valid."
 	case .Name:
 		return "A saved filter's name cannot hold ; | or quotes."
 	case .Duplicate:
@@ -320,16 +396,18 @@ changes_filter_save :: proc(app: ^App, w: ^Window, pane: ^Changes_Pane) {
 	if !pane.filter_savable {return}
 	changes_filter_typing_end(app, w, pane)
 	pattern := strings.clone(changes_filter_plain(pane), context.temp_allocator)
-	label := pattern
+	id := ""
 	if saved, _, found := settings.saved_filters_find_pattern(app.settings.turns.saved_filters, pattern); found {
-		label = strings.clone(settings.saved_filter_label(saved), context.temp_allocator)
+		id = strings.clone(saved.id, context.temp_allocator)
 	} else {
 		drafts := make([dynamic]settings.Saved_Filter_Draft, context.temp_allocator)
 		cursor := settings.saved_filters_scan(app.settings.turns.saved_filters)
 		for filter in settings.saved_filters_next(&cursor) {
-			_, _ = append(&drafts, settings.Saved_Filter_Draft{filter.name, filter.pattern, filter.default})
+			draft := settings.Saved_Filter_Draft{filter.id, filter.name, filter.pattern, filter.default}
+			_, _ = append(&drafts, draft)
 		}
-		_, _ = append(&drafts, settings.Saved_Filter_Draft{"", pattern, false})
+		id = settings.saved_filter_id_make(drafts[:])
+		_, _ = append(&drafts, settings.Saved_Filter_Draft{id, "", pattern, false})
 		value, problem, err := settings.saved_filters_text(drafts[:], context.temp_allocator)
 		if err != nil {
 			changes_filter_refuse(pane, w, "Could not keep the filter.")
@@ -349,10 +427,10 @@ changes_filter_save :: proc(app: ^App, w: ^Window, pane: ^Changes_Pane) {
 	words := make([dynamic]string, context.temp_allocator)
 	text := changes_filter_text(pane)
 	for token in pane.filter_tokens {
-		if !strings.equal_fold(token.name, label) {_, _ = append(&words, text[token.start:token.end])}
+		if token.id != id {_, _ = append(&words, text[token.start:token.end])}
 	}
-	buffer: [settings.SAVED_FILTER_PATTERN_MAX + 8]u8
-	_, _ = append(&words, settings.filter_token_format(buffer[:], label, false))
+	buffer: [settings.SAVED_FILTER_ID_LEN + 8]u8
+	_, _ = append(&words, settings.filter_token_format(buffer[:], id, false))
 	joined, _ := strings.join(words[:], " ", context.temp_allocator)
 	changes_filter_splice(app, w, pane, 0, len(text), joined, len(joined))
 }

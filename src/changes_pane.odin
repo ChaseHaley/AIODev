@@ -682,6 +682,7 @@ changes_filter_edited :: proc(app: ^App, w: ^Window, pane: ^Changes_Pane) {
 			top_path = strings.clone(changes_file_path(view.files[top]), context.temp_allocator)
 		}
 	}
+	changes_filter_ids_resolve(pane)
 	changes_filter_changed(pane)
 	if found {
 		g := changes_geometry_of(app, w, pane, shown)
@@ -1882,16 +1883,19 @@ when AIO_CONTROL {
 		state_value(r, "changes.filter_pick_row", pane != nil ? pane.filter_pick_row : 0)
 		state_value(r, "changes.filter_savable", pane != nil && pane.filter_savable)
 		state_text(r, "changes.filter_notice", pane != nil ? pane.filter_notice : "")
+		state_text(r, "changes.filter_on", pane != nil ? pane.filter_on_labels : "")
 		state_text(r, "changes.saved_filters", app.settings.turns.saved_filters)
 		if pane != nil {
 			for token, i in pane.filter_tokens {
 				state_text(r, changes_report_key("filter_token", i, "name"), token.name)
+				state_text(r, changes_report_key("filter_token", i, "id"), token.id)
 				state_value(r, changes_report_key("filter_token", i, "on"), !token.off)
 				state_text(r, changes_report_key("filter_token", i, "state"), changes_token_state_name(token.state))
 			}
 			for pick, i in pane.filter_picks {
 				state_text(r, changes_report_key("filter_pick", i, "name"), pick.label)
 				state_value(r, changes_report_key("filter_pick", i, "hides"), pick.hides)
+				state_text(r, changes_report_key("filter_pick", i, "id"), pick.id)
 			}
 		}
 		state_value(r, "changes.hidden_files", pane != nil ? pane.model.view.hidden_count : 0)

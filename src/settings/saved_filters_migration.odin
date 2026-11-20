@@ -3,8 +3,10 @@ package settings
 import "base:runtime"
 import "core:strings"
 
-// turns.diff_filter was the filter a new Agent changes pane started with. Saved filters took its place: each
-// carries an "on by default" mark, so the key is retired.
+// Two changes to how saved filters are stored, both folded in when the file loads. turns.diff_filter was
+// the filter a new Agent changes pane started with; saved filters took its place, each carrying an "on by
+// default" mark, so the key is retired. And a saved filter is identified by an id, which an entry written
+// before ids existed (or typed in by hand without one) is given here.
 @(private = "file")
 RETIRED_DIFF_FILTER_KEY :: "turns.diff_filter"
 
@@ -14,16 +16,17 @@ MIGRATED_FILTER_NAME :: "Default filter"
 
 @(private = "file")
 Migrated_Filter :: struct {
-	name, pattern: string,
-	default:       bool,
+	id, name, pattern: string,
+	default:           bool,
 }
 
-// Folds what the retired key held into the saved filters. Each token in it that is on and names a saved
-// filter marks that filter on by default; the plain terms become a saved filter, named by those terms and
-// marked on by default (or mark the saved filter that already has that pattern). The key is dropped with the
-// comment directly above it. A file whose saved filters cannot be read is left as it is.
+// Gives every saved filter without an id one, and folds what the retired key held into the saved filters.
+// Each token in it that is on and names a saved filter by its label marks that filter on by default; the
+// plain terms become a saved filter, named by those terms and marked on by default (or mark the saved filter
+// that already has that pattern). The key is dropped with the comment directly above it. A file whose saved
+// filters cannot be read is left as it is.
 @(require_results)
-migrate_diff_filter_text :: proc(
+migrate_saved_filters_text :: proc(
 	text: string,
 	allocator := context.allocator,
 ) -> (
@@ -47,14 +50,16 @@ migrate_diff_filter_text :: proc(
 			library, _ = text_value_decode(line.value)
 		}
 	}
-	if !found {return "", false, nil}
-	if !saved_filters_valid(library) {return "", false, nil}
+	if !saved_filters_valid(library, ids_required = false) {return "", false, nil}
 
 	filters := make([dynamic]Migrated_Filter, context.temp_allocator)
 	cursor := saved_filters_scan(library)
+	missing := false
 	for filter in saved_filters_next(&cursor) {
-		_, _ = append(&filters, Migrated_Filter{filter.name, filter.pattern, filter.default})
+		_, _ = append(&filters, Migrated_Filter{filter.id, filter.name, filter.pattern, filter.default})
+		if filter.id == "" {missing = true}
 	}
+	if !found && !missing {return "", false, nil}
 	plain := make([dynamic]string, context.temp_allocator)
 	at := 0
 	for {
@@ -87,11 +92,14 @@ migrate_diff_filter_text :: proc(
 					name = MIGRATED_FILTER_NAME
 				}
 			}
-			_, _ = append(&filters, Migrated_Filter{name, pattern, true})
+			_, _ = append(&filters, Migrated_Filter{"", name, pattern, true})
 		}
 	}
 	drafts := make([]Saved_Filter_Draft, len(filters), context.temp_allocator)
-	for filter, i in filters {drafts[i] = {filter.name, filter.pattern, filter.default}}
+	for filter, i in filters {drafts[i] = {filter.id, filter.name, filter.pattern, filter.default}}
+	for &draft in drafts {
+		if draft.id == "" {draft.id = saved_filter_id_make(drafts)}
+	}
 	value, problem, text_error := saved_filters_text(drafts, context.temp_allocator)
 	if text_error != nil {return "", false, text_error}
 	if _, refused := problem.?; refused {return "", false, nil}

@@ -6,7 +6,7 @@ import "core:strings"
 import "core:testing"
 
 @(private)
-FILTERS_THREE :: "One | a; Two | b c; Three | !vendor/"
+FILTERS_THREE :: "#00000001 One | a; #00000002 Two | b c; #00000003 Three | !vendor/"
 
 @(private)
 FILTER_NAME_REFUSAL :: "Use a name of up to 32 characters without ; | or quotes, or leave it empty."
@@ -21,6 +21,22 @@ FILTER_NAME_TOO_LONG :: "0123456789012345678901234567890123"
 filters_fixture :: proc(t: ^testing.T, p: ^ui.Editor, value: string = FILTERS_THREE) {
 	testing.expect_value(t, ui.editor_saved_filters_load(p, value), nil)
 	ui.editor_filter(p)
+}
+
+// The filter at `index` of `value`, which must hold a valid id.
+@(private)
+new_filter :: proc(t: ^testing.T, value: string, index: int) -> settings.Saved_Filter {
+	cursor := settings.saved_filters_scan(value)
+	at := 0
+	for filter in settings.saved_filters_next(&cursor) {
+		if at == index {
+			testing.expectf(t, settings.saved_filter_id_valid(filter.id), "%q is not an id", filter.id)
+			return filter
+		}
+		at += 1
+	}
+	testing.expectf(t, false, "%q has no filter %d", value, index)
+	return {}
 }
 
 @(private)
@@ -88,12 +104,12 @@ saved_filters_value_is_rebuilt_from_the_rows_and_edits :: proc(t: ^testing.T) {
 	defer ui.editor_destroy(&p)
 	filters_fixture(t, &p)
 	value, select_key := filters_value(t, &p, {kind = .Field, key = "filter.1.name", value = "  Uno "})
-	testing.expect_value(t, value, "Uno | a; Two | b c; Three | !vendor/")
+	testing.expect_value(t, value, "#00000001 Uno | a; #00000002 Two | b c; #00000003 Three | !vendor/")
 	testing.expect_value(t, select_key, "filter.1.name")
 	value, _ = filters_value(t, &p, {kind = .Field, key = "filter.3.pattern", value = "x | y"})
-	testing.expect_value(t, value, "One | a; Two | b c; Three | x | y")
+	testing.expect_value(t, value, "#00000001 One | a; #00000002 Two | b c; #00000003 Three | x | y")
 	value, _ = filters_value(t, &p, {kind = .Field, key = "filter.2.pattern", value = " .odin$ "})
-	testing.expect_value(t, value, "One | a; Two | .odin$; Three | !vendor/")
+	testing.expect_value(t, value, "#00000001 One | a; #00000002 Two | .odin$; #00000003 Three | !vendor/")
 	joined := strings.concatenate({settings.SAVED_FILTERS_KEY, " = ", value}, context.temp_allocator)
 	s, issues, err := settings.parse(joined)
 	defer settings.destroy(&s)
@@ -105,7 +121,7 @@ saved_filters_value_is_rebuilt_from_the_rows_and_edits :: proc(t: ^testing.T) {
 	testing.expect_value(t, p.rows[0].title, "One")
 	// A name may be left empty: the filter then shows its pattern.
 	value, _ = filters_value(t, &p, {kind = .Field, key = "filter.1.name", value = " "})
-	testing.expect_value(t, value, "| a; Two | b c; Three | !vendor/")
+	testing.expect_value(t, value, "#00000001 | a; #00000002 Two | b c; #00000003 Three | !vendor/")
 	filters_fixture_again := ui.Editor{}
 	defer ui.editor_destroy(&filters_fixture_again)
 	filters_fixture(t, &filters_fixture_again, value)
@@ -144,19 +160,19 @@ saved_filters_move_reorders_and_the_open_filter_follows :: proc(t: ^testing.T) {
 	filters_fixture(t, &p)
 	testing.expect(t, ui.editor_reveal(&p, ui.Reveal_Row{"filter.1.name"}))
 	value, select_key := filters_value(t, &p, {kind = .Move, id = 1, slot = 3})
-	testing.expect_value(t, value, "Two | b c; Three | !vendor/; One | a")
+	testing.expect_value(t, value, "#00000002 Two | b c; #00000003 Three | !vendor/; #00000001 One | a")
 	testing.expect_value(t, select_key, "filter.3")
 	testing.expect_value(t, p.filter_expanded, 3)
 
 	p.filter_expanded = 2
 	value, select_key = filters_value(t, &p, {kind = .Move, id = 3, slot = 0})
-	testing.expect_value(t, value, "Three | !vendor/; One | a; Two | b c")
+	testing.expect_value(t, value, "#00000003 Three | !vendor/; #00000001 One | a; #00000002 Two | b c")
 	testing.expect_value(t, select_key, "filter.1")
 	testing.expect_value(t, p.filter_expanded, 3)
 
 	p.filter_expanded = 3
 	value, _ = filters_value(t, &p, {kind = .Move, id = 1, slot = 2})
-	testing.expect_value(t, value, "Two | b c; One | a; Three | !vendor/")
+	testing.expect_value(t, value, "#00000002 Two | b c; #00000001 One | a; #00000003 Three | !vendor/")
 	testing.expect_value(t, p.filter_expanded, 3)
 
 	// A move into the filter's own place changes nothing.
@@ -182,7 +198,7 @@ saved_filters_ctrl_arrows_ask_to_move_one_place_within_the_list :: proc(t: ^test
 	edit, ok := request.(ui.Filter_Edit)
 	testing.expect(t, ok && edit.kind == .Move && edit.id == 2 && edit.slot == 3)
 	value, _ := filters_value(t, &p, edit)
-	testing.expect_value(t, value, "One | a; Three | !vendor/; Two | b c")
+	testing.expect_value(t, value, "#00000001 One | a; #00000003 Three | !vendor/; #00000002 Two | b c")
 
 	testing.expect(t, ui.editor_select_key(&p, "filter.1"))
 	testing.expect_value(
@@ -227,21 +243,25 @@ saved_filters_add_names_the_filter_uniquely_and_opens_its_fields :: proc(t: ^tes
 	defer ui.editor_destroy(&p)
 	filters_fixture(t, &p)
 	value, select_key := filters_value(t, &p, {kind = .Add})
-	testing.expect_value(t, value, strings.concatenate({FILTERS_THREE, "; New filter | ."}, context.temp_allocator))
+	testing.expect(t, strings.has_prefix(value, FILTERS_THREE + "; #"), value)
+	added := new_filter(t, value, 3)
+	testing.expect_value(t, added.name, "New filter")
+	testing.expect_value(t, added.pattern, ".")
 	testing.expect_value(t, select_key, "filter.4.name")
 	testing.expect_value(t, p.filter_expanded, 4)
 
 	taken: ui.Editor
 	defer ui.editor_destroy(&taken)
-	filters_fixture(t, &taken, "new FILTER | a; New filter 2 | b")
+	filters_fixture(t, &taken, "#00000001 new FILTER | a; #00000002 New filter 2 | b")
 	value, _ = filters_value(t, &taken, {kind = .Add})
-	testing.expect_value(t, value, "new FILTER | a; New filter 2 | b; New filter 3 | .")
+	testing.expect(t, strings.has_prefix(value, "#00000001 new FILTER | a; #00000002 New filter 2 | b; #"), value)
+	testing.expect_value(t, new_filter(t, value, 2).name, "New filter 3")
 
 	empty: ui.Editor
 	defer ui.editor_destroy(&empty)
 	filters_fixture(t, &empty, "")
 	value, select_key = filters_value(t, &empty, {kind = .Add})
-	testing.expect_value(t, value, "New filter | .")
+	testing.expect_value(t, new_filter(t, value, 0).name, "New filter")
 	testing.expect_value(t, select_key, "filter.1.name")
 }
 
@@ -252,7 +272,7 @@ saved_filters_remove_returns_the_value_a_save_needs :: proc(t: ^testing.T) {
 	filters_fixture(t, &p)
 	p.filter_expanded = 3
 	value, select_key := filters_value(t, &p, {kind = .Remove, id = 2})
-	testing.expect_value(t, value, "One | a; Three | !vendor/")
+	testing.expect_value(t, value, "#00000001 One | a; #00000003 Three | !vendor/")
 	testing.expect_value(t, select_key, ui.SAVED_FILTER_ADD_KEY)
 	testing.expect_value(t, p.filter_expanded, 2)
 	// Removing the open filter closes its fields; removing another one before it renumbers it.
@@ -263,7 +283,7 @@ saved_filters_remove_returns_the_value_a_save_needs :: proc(t: ^testing.T) {
 	testing.expect_value(t, p.filter_expanded, 2)
 	single: ui.Editor
 	defer ui.editor_destroy(&single)
-	filters_fixture(t, &single, "Only | a")
+	filters_fixture(t, &single, "#00000001 Only | a")
 	value, _ = filters_value(t, &single, {kind = .Remove, id = 1})
 	testing.expect_value(t, value, "")
 }
@@ -275,14 +295,14 @@ a_kept_filter_field_follows_its_filter_through_remove_and_move :: proc(t: ^testi
 	filters_fixture(t, &p)
 	// Typed into filter 2 and left without Enter: removing filter 1 renumbers it, but the text stays its own.
 	value := filters_value_kept(t, &p, {kind = .Remove, id = 1}, "filter.2.name", "Foo")
-	testing.expect_value(t, value, "Foo | b c; Three | !vendor/")
+	testing.expect_value(t, value, "#00000002 Foo | b c; #00000003 Three | !vendor/")
 	// Removing the filter it was typed into drops it instead of renaming the filter that takes its place.
 	value = filters_value_kept(t, &p, {kind = .Remove, id = 1}, "filter.1.name", "Foo")
-	testing.expect_value(t, value, "Two | b c; Three | !vendor/")
+	testing.expect_value(t, value, "#00000002 Two | b c; #00000003 Three | !vendor/")
 	value = filters_value_kept(t, &p, {kind = .Move, id = 3, slot = 0}, "filter.3.pattern", "later")
-	testing.expect_value(t, value, "Three | later; One | a; Two | b c")
+	testing.expect_value(t, value, "#00000003 Three | later; #00000001 One | a; #00000002 Two | b c")
 	value = filters_value_kept(t, &p, {kind = .Add}, "filter.1.name", "Uno")
-	testing.expect(t, strings.has_prefix(value, "Uno | a; Two"))
+	testing.expect(t, strings.has_prefix(value, "#00000001 Uno | a; #00000002 Two"))
 	testing.expect(t, ui.editor_kept_is_filter(&p, {"filter.2.pattern", "x"}))
 	testing.expect(t, !ui.editor_kept_is_filter(&p, {"interface.font_size", "13"}))
 }
@@ -321,7 +341,7 @@ saved_filter_fields_show_no_reset_button :: proc(t: ^testing.T) {
 saved_filters_on_by_default_is_a_mark_on_the_line_that_several_filters_may_carry :: proc(t: ^testing.T) {
 	p: ui.Editor
 	defer ui.editor_destroy(&p)
-	filters_fixture(t, &p, "* One | a; Two | b; * | c d")
+	filters_fixture(t, &p, "#00000001 * One | a; #00000002 Two | b; #00000003 * | c d")
 	heads: [3]bool
 	index := 0
 	for row in p.rows {
@@ -333,17 +353,17 @@ saved_filters_on_by_default_is_a_mark_on_the_line_that_several_filters_may_carry
 	testing.expect_value(t, p.rows[0].title, "One")
 	// Toggling one mark leaves the others, and toggling it again takes it off.
 	value, select_key := filters_value(t, &p, {kind = .Default, id = 2})
-	testing.expect_value(t, value, "* One | a; * Two | b; * | c d")
+	testing.expect_value(t, value, "#00000001 * One | a; #00000002 * Two | b; #00000003 * | c d")
 	testing.expect_value(t, select_key, "filter.2")
 	value, _ = filters_value(t, &p, {kind = .Default, id = 1})
-	testing.expect_value(t, value, "One | a; Two | b; * | c d")
+	testing.expect_value(t, value, "#00000001 One | a; #00000002 Two | b; #00000003 * | c d")
 	// A field edit, a move and a removal keep the marks with their filters.
 	value, _ = filters_value(t, &p, {kind = .Field, key = "filter.1.name", value = "Uno"})
-	testing.expect_value(t, value, "* Uno | a; Two | b; * | c d")
+	testing.expect_value(t, value, "#00000001 * Uno | a; #00000002 Two | b; #00000003 * | c d")
 	value, _ = filters_value(t, &p, {kind = .Move, id = 1, slot = 3})
-	testing.expect_value(t, value, "Two | b; * | c d; * One | a")
+	testing.expect_value(t, value, "#00000002 Two | b; #00000003 * | c d; #00000001 * One | a")
 	value, _ = filters_value(t, &p, {kind = .Remove, id = 1})
-	testing.expect_value(t, value, "Two | b; * | c d")
+	testing.expect_value(t, value, "#00000002 Two | b; #00000003 * | c d")
 	// A name starting with * would read as the mark.
 	_, _, problem := ui.editor_saved_filters_value(&p, {kind = .Field, key = "filter.2.name", value = "*x"})
 	testing.expect_value(t, problem, FILTER_NAME_REFUSAL)
@@ -354,4 +374,46 @@ saved_filters_on_by_default_is_a_mark_on_the_line_that_several_filters_may_carry
 		if item.row == 0 {p.hover_item = i}
 	}
 	testing.expect_value(t, ui.editor_filter_tooltip(&p), "On by default")
+}
+
+@(test)
+a_filters_id_stays_with_it_through_rename_edit_move_and_removing_others :: proc(t: ^testing.T) {
+	p: ui.Editor
+	defer ui.editor_destroy(&p)
+	filters_fixture(t, &p)
+	value, _ := filters_value(t, &p, {kind = .Field, key = "filter.2.name", value = "Not like its pattern"})
+	testing.expect_value(
+		t,
+		value,
+		"#00000001 One | a; #00000002 Not like its pattern | b c; #00000003 Three | !vendor/",
+	)
+	value, _ = filters_value(t, &p, {kind = .Field, key = "filter.2.pattern", value = "changed"})
+	testing.expect_value(t, value, "#00000001 One | a; #00000002 Two | changed; #00000003 Three | !vendor/")
+	value, _ = filters_value(t, &p, {kind = .Move, id = 3, slot = 0})
+	moved, _, found := settings.saved_filters_find_id(value, "00000003")
+	testing.expect(t, found)
+	testing.expect_value(t, moved.name, "Three")
+	value, _ = filters_value(t, &p, {kind = .Remove, id = 1})
+	kept, at, found_after := settings.saved_filters_find_id(value, "00000003")
+	testing.expect(t, found_after)
+	testing.expect_value(t, kept.name, "Three")
+	testing.expect_value(t, at, 1)
+	_, _, gone := settings.saved_filters_find_id(value, "00000001")
+	testing.expect(t, !gone)
+}
+
+@(test)
+a_new_filter_never_takes_the_id_of_one_removed :: proc(t: ^testing.T) {
+	p: ui.Editor
+	defer ui.editor_destroy(&p)
+	filters_fixture(t, &p)
+	removed, _ := filters_value(t, &p, {kind = .Remove, id = 3})
+	again: ui.Editor
+	defer ui.editor_destroy(&again)
+	filters_fixture(t, &again, removed)
+	for _ in 0 ..< 50 {
+		value, _ := filters_value(t, &again, {kind = .Add})
+		id := new_filter(t, value, 2).id
+		testing.expect(t, id != "00000003" && id != "00000001" && id != "00000002", id)
+	}
 }
