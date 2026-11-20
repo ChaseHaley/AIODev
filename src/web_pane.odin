@@ -121,6 +121,7 @@ Web_Pane :: struct {
 	nav_armed:       Web_Nav_Button,
 	last_click_ns:   i64,
 	last_click_pos:  [2]i32,
+	favicon:         Web_Favicon,
 }
 
 @(require_results)
