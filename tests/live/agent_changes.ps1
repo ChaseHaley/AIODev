@@ -1024,6 +1024,30 @@ try {
         'changes.filter_token.0.on' = 'true'; 'changes.filter_token.0.state' = 'known'
         'changes.hidden_files' = 3; 'changes.files' = 1; 'changes.file.0.path' = 'live.py'
     } 'clicking Python inserts it as a token that shows only live.py'
+    # The field's @ and clear buttons are the same 24 DIP icon button on one centre line, at every scale. The
+    # rects and a capture of each scale go to align-<dpi>.json and .png, for pixel measurement.
+    foreach ($dpi in 96, 120, 144, 192) {
+        Aio dpi $dpi | Out-Null
+        Start-Sleep -Milliseconds 1200
+        $s = State
+        $at, $clear, $field, $token = (Rect $s 'changes.filter_at_rect'), (Rect $s 'changes.filter_clear_rect'),
+            (Rect $s 'changes.filter_field_rect'), (Rect $s 'changes.filter_token.0.rect')
+        $scale = [double]$s['window.scale']
+        Equal ([math]::Round($at[2] / $scale)) 24 "at $dpi dpi the @ button is 24 DIP wide"
+        Equal ([math]::Round($clear[2] / $scale)) 24 "at $dpi dpi the clear button is 24 DIP wide"
+        if ([math]::Abs($at[1] - $clear[1]) -gt 0.01 -or [math]::Abs($at[3] - $clear[3]) -gt 0.01) {
+            throw "at $dpi dpi the @ button ($($at -join ',')) and the clear button ($($clear -join ',')) differ in y or height"
+        }
+        if ([math]::Abs(($at[1] + $at[3] / 2) - ($field[1] + $field[3] / 2)) -gt 0.51) {
+            throw "at $dpi dpi the @ button is not centred in the field"
+        }
+        Write-Output "PASS at $dpi dpi the @ and clear buttons share size and centre line with the field"
+        Set-Content -LiteralPath "$data/align-$dpi.json" -Value (@{ dpi = $dpi; scale = $scale; at = $at; clear = $clear; field = $field; token = $token } | ConvertTo-Json -Compress)
+        Aio capture --out "$data/align-$dpi.png" | Out-Null
+    }
+    Aio dpi 96 | Out-Null
+    Start-Sleep -Milliseconds 1200
+    $s = State
     Click-Rect $s 'changes.filter_token.0.rect'
     $s = Await-State @{
         'changes.filter_token.0.on' = 'false'; 'changes.hidden_files' = 0; 'changes.filter_active' = 'false'; 'changes.files' = 4
@@ -1547,17 +1571,18 @@ try {
     Aio wait text 'ECHO:Review comments on your changes:' | Out-Null
     Write-Output "PASS the notes reach the reviewer's prompt"
 
-    # The default view and filter settings: a pane opened from an agent pane takes them.
+    # The default view and the filters marked on by default: a pane opened from an agent pane takes them.
     $ini = Get-Content -LiteralPath "$data/settings.ini" -Raw
-    Add-Content -LiteralPath "$data/settings.ini" -Value "`nturns.diff_view = side_by_side`nturns.diff_filter = !long"
+    Add-Content -LiteralPath "$data/settings.ini" -Value "`nturns.diff_view = side_by_side`nturns.saved_filters = * | !long; Python | py$"
     Aio command settings.reload | Out-Null
     Aio command pane.agent_changes | Out-Null
     Await-State @{
         'changes.active' = 'true'; 'changes.scope' = 'agent'; 'changes.side_by_side' = 'true'
-        'changes.filter' = '!long'; 'changes.hidden_files' = 1; 'changes.files' = 3
+        'changes.filter' = '@!long'; 'changes.filter_tokens' = 1; 'changes.filter_token.0.on' = 'true'
+        'changes.hidden_files' = 1; 'changes.files' = 3
         'changes.file.0.path' = 'live.py'; 'changes.file.1.path' = 'notes.txt'; 'changes.file.2.path' = 'zz.md'
         'changes.settled' = 'true'
-    } 'a new pane opens side by side and filtered when the settings say so' | Out-Null
+    } 'a new pane opens side by side with the default filter as an on token when the settings say so' | Out-Null
     Close-Changes 2
     Set-Content -LiteralPath "$data/settings.ini" -Value $ini -NoNewline
     Aio command settings.reload | Out-Null
@@ -1765,14 +1790,36 @@ try {
     }
     Write-Output 'PASS Delete removes every recorded copy'
 
-    # Saved filters have their own table on the Settings page.
+    # Saved filters have their own table on the Settings page, where several are marked on by default.
     Add-Content -LiteralPath "$data/settings.ini" -Value "`nturns.saved_filters = No long | !long; Python | py$; | live"
     Aio command settings.reload | Out-Null
     Aio command settings.open | Out-Null
     Start-Sleep -Seconds 1
     Aio type 'saved filters' | Out-Null
-    Start-Sleep -Seconds 1
+    $s = Await-State @{ 'settings.filters.value' = 'No long | !long; Python | py$; | live' } 'the saved filters table lists three filters, none on by default'
+    function Filter-Default($s, $key) {
+        $entry = @($s['settings.filters.defaults'] -split ';' | Where-Object { $_ -like "$key@*" })
+        if ($entry.Count -ne 1) { throw "no default control for $key in '$($s['settings.filters.defaults'])'" }
+        $parts = $entry[0] -split '@'
+        return @{ On = $parts[1]; Rect = @($parts[2] -split ',' | ForEach-Object { [double]$_ }) }
+    }
+    Equal (Filter-Default $s 'filter.1').On 0 'the first filter is not on by default'
+    Aio mouse click (Middle (Filter-Default $s 'filter.1').Rect) --px | Out-Null
+    $s = Await-State @{ 'settings.filters.value' = '* No long | !long; Python | py$; | live' } 'its check marks it on by default'
+    Aio mouse click (Middle (Filter-Default $s 'filter.2').Rect) --px | Out-Null
+    $s = Await-State @{ 'settings.filters.value' = '* No long | !long; * Python | py$; | live' } 'a second filter can be marked too'
+    Equal (Filter-Default $s 'filter.2').On 1 'the second filter shows its mark'
+    Equal (Filter-Default $s 'filter.3').On 0 'the third filter has none'
     Aio capture --out "$data/settings-saved-filters.png" | Out-Null
+    Aio command pane.agent_changes | Out-Null
+    Await-State @{
+        'changes.active' = 'true'; 'changes.filter_tokens' = 2; 'changes.filter_token.0.name' = 'No long'
+        'changes.filter_token.1.name' = 'Python'; 'changes.filter_token.0.on' = 'true'; 'changes.filter_token.1.on' = 'true'
+    } 'a new pane starts with both default filters as on tokens' | Out-Null
+    $s = State
+    Click-Rect $s 'changes.filter_button_rect'
+    Await-State @{ 'changes.filter_open' = 'true' } 'the new pane opens its filter' | Out-Null
+    Aio capture --out "$data/agent-new-pane-defaults.png" | Out-Null
 } finally {
     & $ctl --name $name stop | Out-Null
     foreach ($path in @($wtA, $wtB)) { Remove-Worktree $path }
