@@ -226,9 +226,11 @@ pane_header_command :: proc(button: Pane_Header_Button) -> (Action, bool) {
 	return {}, false
 }
 
-// What a header button's tooltip says it does, which can depend on the view of the pane's container. The
-// badge and title have none.
+// What a header control's tooltip says it does, which can depend on the pane's view.
 pane_header_tooltip :: proc(w: ^Window, pane: layout.Pane_Rect, target: Pane_Header_Target) -> string {
+	if _, badge := target.(ui.Header_Badge); badge && pane_content_menu_available(pane.content.kind) {
+		return "Change pane content"
+	}
 	button, ok := target.(Pane_Header_Button)
 	if !ok {return ""}
 	switch button {
@@ -288,6 +290,7 @@ pane_header_draw :: proc(
 	title := content_pane_title(app, entry, pane.content)
 	directory := entry != nil ? entry.header.directory : content_directory(app, pane.content)
 	badge, result := content_badge(app, entry, pane.content, ui.ICON_BUTTON * w.scale)
+	change_content := pane_content_menu_available(pane.content.kind)
 	if result != .Ok {return result}
 	status: ui.Status_Mark
 	status_text: string
@@ -315,7 +318,7 @@ pane_header_draw :: proc(
 		badge.glyph,
 		pane_shows_focus(w, pane),
 		badge.atlas,
-		entry != nil && render.rect_contains(l.badge_target, w.pointer.x, w.pointer.y),
+		change_content && render.rect_contains(l.badge_target, w.pointer.x, w.pointer.y),
 		w.pointer,
 		status,
 		status_text,
@@ -359,7 +362,8 @@ pane_header_documents_open :: proc(w: ^Window, pane: layout.Pane_Rect) -> bool {
 // The surfaces that lie on a pane's card, so the pointer over one is over that pane.
 @(private = "file")
 PANE_HOVER_SURFACES :: bit_set[Pointer_Target] {
-	.Find, .Hidden_Panes, .Pane_Header, .Scrollbar, .Settings_Page, .Markdown_Page, .Changes_Page, .Content,
+	.Find, .Hidden_Panes, .Pane_Header, .Scrollbar, .Settings_Page, .Markdown_Page,
+	.Changes_Page, .Web_Page, .Content,
 }
 
 // Follows the pane under the pointer, whose header shows its buttons.
@@ -448,7 +452,7 @@ pane_header_press :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) {
 	if e.button != .Left {return}
 	pane_focus(app, w, pane.node)
 	if _, badge := target.(ui.Header_Badge); badge {
-		if workspace_session_for_content(app, pane.content) == nil {return}
+		if !pane_content_menu_available(pane.content.kind) {return}
 		profile_menu_open_pane(app, w, pane)
 		return
 	}
@@ -499,6 +503,9 @@ pane_header_pointer :: proc(w: ^Window, x, y: f32, enabled: bool) -> (bool, Pane
 	pane, target, hit := pane_header_hit(w, x, y)
 	if button, is_button := target.(Pane_Header_Button);
 	   is_button && hit && pane_header_refused(w, pane, button) != .None {target = nil}
+	if _, badge := target.(ui.Header_Badge); badge && !pane_content_menu_available(pane.content.kind) {
+		target = nil
+	}
 	for &view in w.views {
 		hover: Pane_Header_Target
 		if enabled && hit && view.content == pane.content {hover = target}

@@ -46,7 +46,10 @@ profile.order = default, cmd, windows-powershell, pwsh, hidden
 			expected += 1
 		}
 		_, swap := mode.(app.Profile_Menu_Swap_Pane)
-		testing.expect_value(t, len(w.profile_menu.items), expected + (swap ? 3 : 0))
+		testing.expect_value(t, len(w.profile_menu.items), expected + (swap ? 6 : 3))
+		if len(w.profile_menu.items) < expected + 3 {return}
+		testing.expect_value(t, w.profile_menu.items[expected + 1].label, "Markdown file…")
+		testing.expect_value(t, w.profile_menu.items[expected + 2].label, "Web pane")
 		testing.expect_value(t, w.profile_menu.count, len(w.profile_menu.items))
 	}
 }

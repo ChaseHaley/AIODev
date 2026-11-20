@@ -26,6 +26,8 @@ Profile_Menu_Swap_Pane :: struct {
 Profile_Menu_Action :: enum {
 	None,
 	Profile,
+	Markdown,
+	Web,
 	Settings,
 	Palette,
 }
@@ -49,8 +51,8 @@ Profile_Menu :: struct {
 	shortcuts:  [PROFILE_MENU_SHORTCUTS][commands.SHORTCUT_TEXT_CAP]u8,
 }
 
-// Every visible profile has a row, with Settings and the palette after a separator when swapping.
-#assert(settings.PROFILE_LIMIT + 3 <= ui.MENU_MAX_ITEMS)
+// Every visible profile, two content choices and their separator, then up to three app-action rows.
+#assert(settings.PROFILE_LIMIT + 6 <= ui.MENU_MAX_ITEMS)
 
 // Rows that can show a shortcut: one per New Tab with Profile N command, Settings and the palette.
 @(private)
@@ -124,15 +126,15 @@ profile_menu_open :: proc(app: ^App, w: ^Window, mode: Profile_Menu_Mode, x, y: 
 		indices[:],
 		visible_only = true,
 	)
-	_, swap := mode.(Profile_Menu_Swap_Pane)
-	current := ""
+	target, swap := mode.(Profile_Menu_Swap_Pane)
+	current := app.settings.profiles.default_id
 	if swap {
-		if entry := focused_session(app, w); entry != nil {current = entry.profile_id}
+		current = ""
+		if entry := workspace_session_for_content(app, target.pane); entry != nil {current = entry.profile_id}
 	}
 	for i in 0..<count {
 		profile := &app.settings.profiles.items[indices[i]]
 		checked := profile.id == current
-		if !swap {checked = profile.id == app.settings.profiles.default_id}
 		shortcut := ""
 		if action, bound := profile_action(i); bound {
 			shortcut = profile_menu_shortcut(app, menu, i, action)
@@ -150,6 +152,10 @@ profile_menu_open :: proc(app: ^App, w: ^Window, mode: Profile_Menu_Mode, x, y: 
 			profile.id,
 		)
 	}
+	if count > 0 {profile_menu_push(menu, {separator = true}, .None)}
+	profile_menu_push(menu, {label = "Markdown file…", glyph = .Markdown, enabled = true}, .Markdown)
+	in_web := swap && target.pane.kind == .Web
+	profile_menu_push(menu, {label = "Web pane", glyph = .Globe, checked = in_web, enabled = !in_web}, .Web)
 	if swap {
 		profile_menu_push(menu, {separator = true}, .None)
 		profile_menu_push(
@@ -179,7 +185,7 @@ profile_menu_open_new_tab :: proc(app: ^App, w: ^Window, x, y: f32) {
 	profile_menu_open(app, w, Profile_Menu_New_Tab{}, x, y)
 }
 
-// Opens the shell menu for a shown pane, below the start of its header.
+// Opens the content menu for a shown pane, below the start of its header.
 profile_menu_open_pane :: proc(app: ^App, w: ^Window, pane: layout.Pane_Rect) {
 	x, y := pane.rect.x + 8 * w.scale, pane.rect.y + ui.HEADER_HEIGHT * w.scale
 	profile_menu_open(app, w, Profile_Menu_Swap_Pane{pane.content}, x, y)
@@ -190,21 +196,21 @@ profile_menu_choose :: proc(app: ^App, w: ^Window) {
 	if !ok {return}
 	menu := &w.profile_menu
 	entry, listed := profile_menu_entry(menu, ui.menu_selected(&menu.menu))
-	if !listed || entry.action == .None {return}
+	if !listed || entry.action == .None || !menu.items[ui.menu_selected(&menu.menu)].enabled {return}
 	overlay_close(app, w)
 	switch entry.action {
 	case .None:
 	case .Profile:
-		switch mode in shown.mode {
-		case Profile_Menu_New_Tab:
+		if _, new_tab := shown.mode.(Profile_Menu_New_Tab); new_tab {
 			tab_new_profile_id(app, w, profile_menu_entry_id(&entry))
 			rail_overlay_dismiss(app, w)
-		case Profile_Menu_Swap_Pane:
-			// A pane that closed or left the window's tree since the menu opened is not swapped.
-			if node := layout.find_content(window_tree(w), mode.pane); node != layout.INVALID_NODE {
-				pane_shell_swap_request(app, w, node, profile_menu_entry_id(&entry))
-			}
+		} else {
+			pane_content_menu_choose(app, w, shown.mode, .Terminal, profile_menu_entry_id(&entry))
 		}
+	case .Markdown:
+		markdown_open_picker(app, w, shown.mode)
+	case .Web:
+		pane_content_menu_choose(app, w, shown.mode, .Web, "")
 	case .Settings:
 		editor_open(app, pane_link_acting_window(app, w))
 	case .Palette:
@@ -278,8 +284,14 @@ profile_menu_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 
 when AIO_CONTROL {
 	profile_menu_state_report :: proc(r: ^State_Report, w: ^Window) {
-		state_value(r, "profile_menu.open", profile_menu_shown(w))
+		shown := profile_menu_shown(w)
+		state_value(r, "profile_menu.open", shown)
 		state_value(r, "profile_menu.count", w.profile_menu.count)
+		if shown {
+			for item, i in w.profile_menu.items {
+				state_text(r, state_key("profile_menu.row.%d.label", i + 1), item.label)
+			}
+		}
 	}
 }
 

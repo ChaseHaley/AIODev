@@ -41,6 +41,8 @@ focus_leave :: proc(app: ^App, w: ^Window) {
 		target: Find_Target
 		if entered.content.kind == .Markdown {
 			if pane := markdown_find(app, entered.content.id); pane != nil {target = pane}
+		} else if entered.content.kind == .Web {
+			if pane := web_find(app, entered.content.id); pane != nil {target = pane}
 		} else if entry != nil {
 			target = entry
 		}
