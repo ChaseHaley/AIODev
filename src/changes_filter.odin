@@ -142,7 +142,7 @@ changes_filter_text :: proc(pane: ^Changes_Pane) -> string {
 @(private)
 changes_filter_parse :: proc(pane: ^Changes_Pane) {
 	from, to := -1, -1
-	if pane.filter_typing {from, to = pane.filter_pending, pane.filter_editor.cursor}
+	if pane.filter_typing && pane.filter_pending >= 0 {from, to = pane.filter_pending, pane.filter_editor.cursor}
 	ok, error := changes_filter_set(
 		&pane.filter, changes_filter_text(pane), pane.filter_library, &pane.filter_tokens, from, to,
 	)
@@ -152,6 +152,8 @@ changes_filter_parse :: proc(pane: ^Changes_Pane) {
 	delete(pane.filter_error)
 	pane.filter_error = ""
 	if error != "" {pane.filter_error, _ = strings.clone(error)}
+	delete(pane.filter_notice)
+	pane.filter_notice = ""
 	changes_filter_picks_build(pane)
 	view := &pane.model.view
 	view.filter_invalid = !ok
@@ -165,11 +167,30 @@ changes_filter_parse :: proc(pane: ^Changes_Pane) {
 		}
 	}
 	pane.filter_savable = ok && changes_filter_plain(pane) != ""
+	changes_filter_on_labels(pane)
 	changes_filter_view(pane)
 }
 
-// Points the view at the pane's token, completion and naming state, which a frame draws from. The parse
-// computes everything else.
+// What the bar under the header row names as filtering: the tokens that are on, `@one + @two`, and "filter
+// text" after them when the text holds terms too; "" while no token is on.
+@(private = "file")
+changes_filter_on_labels :: proc(pane: ^Changes_Pane) {
+	delete(pane.filter_on_labels)
+	pane.filter_on_labels = ""
+	b := strings.builder_make(context.temp_allocator)
+	for token in pane.filter_tokens {
+		if token.off || token.state == .Unknown {continue}
+		if strings.builder_len(b) > 0 {strings.write_string(&b, " + ")}
+		strings.write_byte(&b, '@')
+		strings.write_string(&b, token.name)
+	}
+	if strings.builder_len(b) == 0 {return}
+	if changes_filter_plain(pane) != "" {strings.write_string(&b, " + filter text")}
+	pane.filter_on_labels, _ = strings.clone(strings.to_string(b))
+}
+
+// Points the view at the pane's token and list state, which a frame draws from. The parse computes
+// everything else.
 @(private)
 changes_filter_view :: proc(pane: ^Changes_Pane) {
 	view := &pane.model.view
@@ -178,10 +199,9 @@ changes_filter_view :: proc(pane: ^Changes_Pane) {
 	view.filter_pick_open = pane.filter_typing
 	view.filter_picks = pane.filter_picks[:]
 	view.filter_pick_row = pane.filter_pick_row
-	view.filter_naming = pane.state.filter_naming
-	view.filter_name = &pane.filter_name
 	view.filter_notice = pane.filter_notice
 	view.filter_savable = pane.filter_savable
+	view.filter_on_labels = pane.filter_on_labels
 }
 
 // The filter text changed: files picked past the old filter hide again, and the view shows what the new
@@ -207,16 +227,16 @@ changes_filter_reveal :: proc(pane: ^Changes_Pane, path: string) {
 changes_filter_release :: proc(pane: ^Changes_Pane) {
 	changes_filter_destroy(&pane.filter)
 	delete(pane.filter_editor.bytes)
-	delete(pane.filter_name.bytes)
 	delete(pane.filter_error)
 	delete(pane.filter_notice)
 	delete(pane.filter_library)
+	delete(pane.filter_on_labels)
 	delete(pane.filter_tokens)
 	delete(pane.filter_atoms)
 	delete(pane.filter_picks)
 	for path in pane.revealed {delete(path)}
 	delete(pane.revealed)
-	pane.filter_editor, pane.filter_name, pane.revealed = {}, {}, nil
-	pane.filter_error, pane.filter_notice, pane.filter_library = "", "", ""
+	pane.filter_editor, pane.revealed = {}, nil
+	pane.filter_error, pane.filter_notice, pane.filter_library, pane.filter_on_labels = "", "", "", ""
 	pane.filter_tokens, pane.filter_atoms, pane.filter_picks = nil, nil, nil
 }

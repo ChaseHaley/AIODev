@@ -8,9 +8,10 @@ import "core:strings"
 import "core:unicode"
 import "core:unicode/utf8"
 
-// Saved filters in the diff filter's field (changes_filter.odin has the grammar): typing `@` offers the saved
-// filters, a token is clicked or toggled with Space while selected to turn it on and off, and Ctrl+S saves
-// the field's terms under a name and puts the filter in their place as a token.
+// Saved filters in the diff filter's field (changes_filter.odin has the grammar): the field's @ button, or
+// an `@` typed in it, lists the saved filters; a token is clicked, or toggled with Space while selected, to
+// turn it on and off; and one action saves the field's terms as a saved filter, named by those terms, and
+// puts the filter in their place as a token.
 
 // Sets the library the tokens are resolved against; false when it is the one the pane already has.
 @(private)
@@ -51,9 +52,11 @@ changes_filter_pending_find :: proc(text: string, cursor: int) -> int {
 	return open
 }
 
-// The text typed after the `@`, which the saved filters are matched against.
+// The text typed after the `@`, which the saved filters are matched against; none when the list was opened
+// by the button.
 @(private = "file")
 changes_filter_query :: proc(pane: ^Changes_Pane) -> string {
+	if pane.filter_pending < 0 {return ""}
 	text := changes_filter_text(pane)
 	from, to := pane.filter_pending + 1, pane.filter_editor.cursor
 	if from > to || to > len(text) {return ""}
@@ -61,15 +64,28 @@ changes_filter_query :: proc(pane: ^Changes_Pane) -> string {
 }
 
 @(private = "file", require_results)
-changes_filter_has_token :: proc(pane: ^Changes_Pane, name: string) -> bool {
+changes_filter_has_token :: proc(pane: ^Changes_Pane, label: string) -> bool {
 	for token in pane.filter_tokens {
-		if strings.equal_fold(token.name, name) {return true}
+		if strings.equal_fold(token.name, label) {return true}
 	}
 	return false
 }
 
-// Lists the saved filters an `@` being typed can complete to: those the field does not have yet whose name
-// matches what was typed, best match first and in the user's order within a class of match.
+// How many files the pane's diff would hide under `pattern` alone.
+@(private = "file", require_results)
+changes_filter_hides :: proc(pane: ^Changes_Pane, pattern: string) -> int {
+	f: Changes_Filter
+	defer changes_filter_destroy(&f)
+	if ok, _ := changes_filter_set(&f, pattern); !ok {return 0}
+	hidden := 0
+	for file in pane.model.diff.files {
+		if !changes_filter_shows(&f, changes_file_path(file), changes_file_old_path(file)) {hidden += 1}
+	}
+	return hidden
+}
+
+// Lists the saved filters the list can insert: those the field does not have yet whose label matches what
+// was typed after the `@`, best match first and in the user's order within a class of match.
 @(private)
 changes_filter_picks_build :: proc(pane: ^Changes_Pane) {
 	clear(&pane.filter_picks)
@@ -78,13 +94,19 @@ changes_filter_picks_build :: proc(pane: ^Changes_Pane) {
 	for class in fuzzy.Class.Exact ..= fuzzy.Class.Scattered {
 		cursor := settings.saved_filters_scan(pane.filter_library)
 		for filter in settings.saved_filters_next(&cursor) {
-			if changes_filter_has_token(pane, filter.name) {continue}
-			if query != "" && fuzzy.classify(query, filter.name) != class {continue}
+			label := settings.saved_filter_label(filter)
+			if changes_filter_has_token(pane, label) {continue}
+			if query != "" && fuzzy.classify(query, label) != class {continue}
 			if query == "" && class != .Exact {continue}
-			_, _ = append(&pane.filter_picks, ui.Filter_Pick{filter.name, filter.pattern})
+			pick := ui.Filter_Pick {
+				label   = label,
+				pattern = filter.pattern,
+				hides   = changes_filter_hides(pane, filter.pattern),
+			}
+			_, _ = append(&pane.filter_picks, pick)
 		}
 	}
-	pane.filter_pick_row = clamp(pane.filter_pick_row, 0, len(pane.filter_picks))
+	pane.filter_pick_row = clamp(pane.filter_pick_row, 0, max(0, len(pane.filter_picks) - 1))
 }
 
 // The words of the text that are plain terms, joined by single spaces; temporary memory.
@@ -92,7 +114,7 @@ changes_filter_picks_build :: proc(pane: ^Changes_Pane) {
 changes_filter_plain :: proc(pane: ^Changes_Pane) -> string {
 	text := changes_filter_text(pane)
 	from, to := -1, -1
-	if pane.filter_typing {from, to = pane.filter_pending, pane.filter_editor.cursor}
+	if pane.filter_typing && pane.filter_pending >= 0 {from, to = pane.filter_pending, pane.filter_editor.cursor}
 	words := make([dynamic]string, context.temp_allocator)
 	at := 0
 	for {
@@ -106,7 +128,8 @@ changes_filter_plain :: proc(pane: ^Changes_Pane) -> string {
 	return joined
 }
 
-// Ends an `@` being typed: its text stays and becomes a token, or a term when it is no token.
+// Ends the list and an `@` being typed: the typed text stays and becomes a token, or a term when it is no
+// token.
 @(private)
 changes_filter_typing_end :: proc(app: ^App, w: ^Window, pane: ^Changes_Pane) {
 	if !pane.filter_typing {return}
@@ -114,18 +137,46 @@ changes_filter_typing_end :: proc(app: ^App, w: ^Window, pane: ^Changes_Pane) {
 	changes_filter_edited(app, w, pane)
 }
 
-// An edit of the text: whether an `@` is being typed follows what the caret now ends. After typing or a paste
-// the word the caret ends starts it; while deleting, an `@` already being typed carries on.
+// Escape in the list: closes it, and takes out an `@` that was being typed rather than leaving it as a term.
+@(private)
+changes_filter_list_cancel :: proc(app: ^App, w: ^Window, pane: ^Changes_Pane) {
+	if !pane.filter_typing {return}
+	if pane.filter_pending < 0 {
+		changes_filter_typing_end(app, w, pane)
+		return
+	}
+	changes_filter_splice(app, w, pane, pane.filter_pending, pane.filter_editor.cursor, "", 0)
+}
+
+// An edit of the text: an `@` the caret ends opens the list for it. After typing or a paste the word the
+// caret ends starts it; while deleting, an `@` already being typed carries on, and a list the button opened
+// stays open.
 @(private)
 changes_filter_typing :: proc(pane: ^Changes_Pane, inserted: bool) {
 	start := changes_filter_pending_find(changes_filter_text(pane), pane.filter_editor.cursor)
-	pane.filter_typing = start >= 0 && (inserted || pane.filter_typing)
-	pane.filter_pending = pane.filter_typing ? start : 0
+	switch {
+	case start >= 0 && (inserted || (pane.filter_typing && pane.filter_pending >= 0)):
+		pane.filter_typing, pane.filter_pending = true, start
+	case pane.filter_typing && pane.filter_pending < 0:
+	case:
+		pane.filter_typing, pane.filter_pending = false, 0
+	}
 	pane.filter_pick_row = 0
 }
 
+// Opens or closes the saved filters list from the field's @ button.
+@(private)
+changes_filter_list_toggle :: proc(app: ^App, w: ^Window, pane: ^Changes_Pane) {
+	if pane.filter_typing {
+		changes_filter_typing_end(app, w, pane)
+		return
+	}
+	pane.filter_typing, pane.filter_pending, pane.filter_pick_row = true, -1, 0
+	changes_filter_edited(app, w, pane)
+}
+
 // Types `text` at the caret. A token is a word of its own, so typing against one starts a new word rather
-// than changing the token's name.
+// than changing the token.
 @(private)
 changes_filter_type :: proc(app: ^App, w: ^Window, pane: ^Changes_Pane, text: string) {
 	f := &pane.filter_editor
@@ -156,27 +207,23 @@ changes_filter_splice :: proc(
 	f := &pane.filter_editor
 	if ui.field_set(f, spliced) != nil {return}
 	f.cursor, f.anchor = from + caret, from + caret
-	pane.filter_typing = false
+	pane.filter_typing, pane.filter_pending = false, 0
 	changes_filter_edited(app, w, pane)
 }
 
-// Completes the `@` being typed with the saved filter in `row`, as an `on` token and the space after it; the
-// row past the last filter opens Settings on the saved filters and leaves the text as it was before the `@`.
+// Completes the `@` being typed, or inserts at the caret when the button opened the list, with the saved
+// filter in `row`, as an on token and the space after it.
 @(private)
 changes_filter_pick_choose :: proc(app: ^App, w: ^Window, pane: ^Changes_Pane, row: int) {
-	if !pane.filter_typing {return}
-	from, to := pane.filter_pending, pane.filter_editor.cursor
-	if row < 0 || row >= len(pane.filter_picks) {
-		changes_filter_splice(app, w, pane, from, to, "", 0)
-		changes_filter_popover_close(app, w, pane)
-		settings_reveal(app, w, {key = settings.SAVED_FILTERS_KEY, search = .Clear, focus = .Control})
-		return
-	}
-	buffer: [settings.SAVED_FILTER_NAME_MAX + 8]u8
-	token := settings.filter_token_format(buffer[:], pane.filter_picks[row].name, false)
+	if !pane.filter_typing || row < 0 || row >= len(pane.filter_picks) {return}
 	text := changes_filter_text(pane)
+	from, to := pane.filter_editor.cursor, pane.filter_editor.cursor
+	if pane.filter_pending >= 0 {from = pane.filter_pending}
+	buffer: [settings.SAVED_FILTER_PATTERN_MAX + 8]u8
+	token := settings.filter_token_format(buffer[:], pane.filter_picks[row].label, false)
+	lead := from > 0 && !filter_blank(text[from - 1]) ? " " : ""
 	space := to < len(text) && filter_blank(text[to]) ? "" : " "
-	with := strings.concatenate({token, space}, context.temp_allocator)
+	with := strings.concatenate({lead, token, space}, context.temp_allocator)
 	changes_filter_splice(app, w, pane, from, to, with, len(with))
 }
 
@@ -197,7 +244,6 @@ changes_filter_toggle :: proc(app: ^App, w: ^Window, pane: ^Changes_Pane, index:
 	if ui.field_set(f, spliced) != nil {return}
 	f.cursor = cursor > token.start ? cursor + delta : cursor
 	f.anchor = anchor > token.start ? anchor + delta : anchor
-	pane.filter_typing = false
 	changes_filter_edited(app, w, pane)
 }
 
@@ -234,40 +280,14 @@ changes_filter_point :: proc(
 	box, visible := ui.changes_filter_box(g, &pane.model.view, &w.ui_text)
 	if !visible {return}
 	if pressed {
-		if pane.state.filter_naming {changes_filter_name_end(w, pane)}
 		if index, close := ui.filter_field_token_at(box, pane.filter_tokens[:], x); index >= 0 {
 			if close {changes_filter_remove(app, w, pane, index)} else {changes_filter_toggle(app, w, pane, index)}
 			return
 		}
-		if pane.filter_typing {changes_filter_typing_end(app, w, pane)}
+		if pane.filter_typing && pane.filter_pending >= 0 {changes_filter_typing_end(app, w, pane)}
 	}
 	at := ui.filter_field_offset(box, pane.filter_tokens[:], x)
 	if ui.field_pointer(&pane.filter_editor, at, pressed, extend) != .None {w.dirty = true}
-}
-
-@(private = "file")
-changes_filter_popover_close :: proc(app: ^App, w: ^Window, pane: ^Changes_Pane) {
-	changes_filter_popover(app, w, pane, false)
-}
-
-// Starts naming the field's terms (Ctrl+S): a name field under the field takes the keys until Enter or
-// Escape.
-@(private)
-changes_filter_name_begin :: proc(app: ^App, w: ^Window, pane: ^Changes_Pane) {
-	if !pane.filter_savable {return}
-	changes_filter_typing_end(app, w, pane)
-	_ = ui.field_set(&pane.filter_name, "")
-	delete(pane.filter_notice)
-	pane.filter_notice = ""
-	pane.state.filter_naming = true
-	w.dirty = true
-}
-
-@(private)
-changes_filter_name_end :: proc(w: ^Window, pane: ^Changes_Pane) {
-	pane.state.filter_naming = false
-	_ = ui.field_release(&pane.filter_name)
-	w.dirty = true
 }
 
 @(private = "file")
@@ -281,98 +301,92 @@ changes_filter_refuse :: proc(pane: ^Changes_Pane, w: ^Window, message: string) 
 changes_filter_problem_text :: proc(problem: settings.Saved_Filter_Problem) -> string {
 	switch problem {
 	case .Name:
-		return "Use a name of up to 32 characters without ; | or quotes."
+		return "A saved filter's name cannot hold ; | or quotes."
 	case .Duplicate:
 		return "A saved filter already has that name."
 	case .Pattern:
-		return "A saved pattern cannot hold ;."
+		return "A saved filter holds up to 120 characters without ; or quotes."
 	case .Too_Long:
 		return "The saved filters are too long to store."
 	}
 	return ""
 }
 
-// Saves the field's terms under the name typed, as the last of the saved filters, and replaces them in the
-// field with the filter as a token that is on. A refusal says why under the name and keeps the field.
+// Saves the field's plain terms as a saved filter and replaces them in the field with the filter as a token
+// that is on. The filter has no name, so its token shows the terms; a filter already saved with these terms
+// is reused. A refusal says why under the field and keeps the text as it was.
 @(private)
-changes_filter_name_save :: proc(app: ^App, w: ^Window, pane: ^Changes_Pane) {
-	drafts := make([dynamic]settings.Saved_Filter_Draft, context.temp_allocator)
-	cursor := settings.saved_filters_scan(app.settings.turns.saved_filters)
-	for filter in settings.saved_filters_next(&cursor) {
-		_, _ = append(&drafts, settings.Saved_Filter_Draft{filter.name, filter.pattern})
+changes_filter_save :: proc(app: ^App, w: ^Window, pane: ^Changes_Pane) {
+	if !pane.filter_savable {return}
+	changes_filter_typing_end(app, w, pane)
+	pattern := strings.clone(changes_filter_plain(pane), context.temp_allocator)
+	label := pattern
+	if saved, _, found := settings.saved_filters_find_pattern(app.settings.turns.saved_filters, pattern); found {
+		label = strings.clone(settings.saved_filter_label(saved), context.temp_allocator)
+	} else {
+		drafts := make([dynamic]settings.Saved_Filter_Draft, context.temp_allocator)
+		cursor := settings.saved_filters_scan(app.settings.turns.saved_filters)
+		for filter in settings.saved_filters_next(&cursor) {
+			_, _ = append(&drafts, settings.Saved_Filter_Draft{filter.name, filter.pattern})
+		}
+		_, _ = append(&drafts, settings.Saved_Filter_Draft{"", pattern})
+		value, problem, err := settings.saved_filters_text(drafts[:], context.temp_allocator)
+		if err != nil {
+			changes_filter_refuse(pane, w, "Could not keep the filter.")
+			return
+		}
+		if refused, has_problem := problem.?; has_problem {
+			changes_filter_refuse(pane, w, changes_filter_problem_text(refused))
+			return
+		}
+		result := settings_change(app, Setting_Value{settings.SAVED_FILTERS_KEY, value}, Settings_Current{})
+		if result.status != .Applied {
+			changes_filter_refuse(pane, w, result.message != "" ? result.message : "Could not save the filter.")
+			return
+		}
+		_ = changes_filter_library_set(pane, app.settings.turns.saved_filters)
 	}
-	name := strings.trim_space(ui.field_string(&pane.filter_name))
-	_, _ = append(&drafts, settings.Saved_Filter_Draft{name, changes_filter_plain(pane)})
-	value, problem, err := settings.saved_filters_text(drafts[:], context.temp_allocator)
-	if err != nil {
-		changes_filter_refuse(pane, w, "Could not keep the filter.")
-		return
-	}
-	if refused, has_problem := problem.?; has_problem {
-		changes_filter_refuse(pane, w, changes_filter_problem_text(refused))
-		return
-	}
-	result := settings_change(app, Setting_Value{settings.SAVED_FILTERS_KEY, value}, Settings_Current{})
-	if result.status != .Applied {
-		changes_filter_refuse(pane, w, result.message != "" ? result.message : "Could not save the filter.")
-		return
-	}
-	_ = changes_filter_library_set(pane, app.settings.turns.saved_filters)
 	words := make([dynamic]string, context.temp_allocator)
 	text := changes_filter_text(pane)
-	for token in pane.filter_tokens {_, _ = append(&words, text[token.start:token.end])}
-	buffer: [settings.SAVED_FILTER_NAME_MAX + 8]u8
-	_, _ = append(&words, settings.filter_token_format(buffer[:], name, false))
+	for token in pane.filter_tokens {
+		if !strings.equal_fold(token.name, label) {_, _ = append(&words, text[token.start:token.end])}
+	}
+	buffer: [settings.SAVED_FILTER_PATTERN_MAX + 8]u8
+	_, _ = append(&words, settings.filter_token_format(buffer[:], label, false))
 	joined, _ := strings.join(words[:], " ", context.temp_allocator)
-	changes_filter_name_end(w, pane)
 	changes_filter_splice(app, w, pane, 0, len(text), joined, len(joined))
 }
 
-// Keys while a name is being typed: Enter saves, Escape goes back to the field, the rest edits the name.
+// Closes the popover and opens Settings on the saved filters.
 @(private)
-changes_filter_name_key :: proc(
-	app: ^App, w: ^Window, pane: ^Changes_Pane, logical, e: input.Key_Event,
-) -> bool {
-	modifiers := e.modifiers & {.Control, .Shift, .Alt, .Super}
-	#partial switch logical.key {
-	case .Enter, .Numpad_Enter:
-		if modifiers == {} {
-			changes_filter_name_save(app, w, pane)
-			return true
-		}
-	case .Escape:
-		if modifiers == {} {
-			changes_filter_name_end(w, pane)
-			return true
-		}
-	}
-	if field_edit_key(app, &pane.filter_name, logical).change != .None {
-		delete(pane.filter_notice)
-		pane.filter_notice = ""
-	}
-	w.dirty = true
+changes_filter_manage :: proc(app: ^App, w: ^Window, pane: ^Changes_Pane) {
+	changes_filter_popover(app, w, pane, false)
+	settings_reveal(app, w, {key = settings.SAVED_FILTERS_KEY, search = .Clear, focus = .Control})
+}
+
+// Down in an empty field opens the saved filters list, as the @ button does.
+@(private)
+changes_filter_open_list_by_key :: proc(app: ^App, w: ^Window, pane: ^Changes_Pane) -> bool {
+	if pane.filter_typing || changes_filter_text(pane) != "" {return false}
+	changes_filter_list_toggle(app, w, pane)
 	return true
 }
 
-// Typed text goes to the name while one is being typed, else to the field.
+// Applies an editing key to the field; false when it was none.
 @(private)
-changes_filter_text_in :: proc(app: ^App, w: ^Window, pane: ^Changes_Pane, text: string) {
-	if !pane.state.filter_naming {
-		changes_filter_type(app, w, pane, text)
-		return
+changes_filter_key_edit :: proc(
+	app: ^App, w: ^Window, pane: ^Changes_Pane, logical: input.Key_Event,
+) -> bool {
+	edit := field_edit_key(app, &pane.filter_editor, logical)
+	switch edit.change {
+	case .Edited:
+		changes_filter_typing(pane, edit.pasted)
+		changes_filter_edited(app, w, pane)
+	case .Moved:
+		if pane.filter_pending >= 0 {changes_filter_typing_end(app, w, pane)}
+		w.dirty = true
+	case .None:
+		return false
 	}
-	if ui.field_text(&pane.filter_name, text) == .Edited {
-		delete(pane.filter_notice)
-		pane.filter_notice = ""
-	}
-	w.dirty = true
-}
-
-// A press in the name field puts the caret under the pointer, or extends the selection to it.
-@(private)
-changes_filter_name_point :: proc(
-	w: ^Window, pane: ^Changes_Pane, g: ui.Changes_Geometry, x: f32, extend: bool,
-) {
-	box := ui.field_box_standard(&pane.filter_name, &w.ui_text, g.filter_name, w.scale)
-	if ui.field_pointer(&pane.filter_name, ui.field_box_offset(box, x), true, extend) != .None {w.dirty = true}
+	return true
 }

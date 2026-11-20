@@ -116,13 +116,14 @@ Changes_Pane :: struct {
 	filter_atoms: [dynamic]ui.Field_Atom,
 	filter_picks: [dynamic]ui.Filter_Pick,
 	filter_pick_row: int,
-	// An `@` is being typed from byte `filter_pending` to the caret: the text there is neither a token nor
-	// a term, and the picks complete it.
+	// The saved filters list is open (`filter_typing`). `filter_pending` is where an `@` being typed starts:
+	// the text from there to the caret is neither a token nor a term, and the list completes it; -1 when the
+	// field's @ button opened the list, which then inserts at the caret.
 	filter_typing: bool,
 	filter_pending: int,
-	// The name being typed for a filter the terms are saved as, and why it was refused; owned.
-	filter_name: ui.Text_Field,
+	// Why saving the text as a filter was refused, and what the bar names as filtering; owned.
 	filter_notice: string,
+	filter_on_labels: string,
 	filter_savable: bool,
 	// Paths picked from the file list that show despite the filter, until its text changes; owned keys.
 	revealed:   map[string]struct{},
@@ -663,7 +664,6 @@ changes_filter_popover :: proc(app: ^App, w: ^Window, pane: ^Changes_Pane, open:
 		changes_list_begin(app, pane)
 	} else {
 		_ = ui.field_release(&pane.filter_editor)
-		pane.state.filter_naming = false
 		changes_filter_typing_end(app, w, pane)
 	}
 	pane.state.filter_open = open
@@ -704,11 +704,11 @@ changes_filter_clear :: proc(app: ^App, w: ^Window, pane: ^Changes_Pane) {
 	changes_filter_edited(app, w, pane)
 }
 
-// Keys while the filter popover is open. While an `@` is being typed Up and Down move through the saved
-// filters it offers, Enter or Tab completes with the one the keys are on, and Escape only ends the `@`; while
-// a name is being typed they go to it. Otherwise Enter and Escape close the popover and keep the text, Ctrl+S
-// starts naming the field's terms, Space toggles a token that is the selection, and the field takes its
-// editing keys. Chords the field has no use for go on to the shortcuts.
+// Keys while the filter popover is open. While the saved filters list is open Up and Down move through it,
+// Enter or Tab inserts the row the keys are on, and Escape only closes the list. Otherwise Enter and Escape
+// close the popover and keep the text, Down in an empty field opens the list, Ctrl+S saves the field's terms
+// as a saved filter, Space toggles a token that is the selection, and the field takes its editing keys.
+// Chords the field has no use for go on to the shortcuts.
 @(private = "file")
 changes_filter_key :: proc(
 	app: ^App,
@@ -716,7 +716,6 @@ changes_filter_key :: proc(
 	pane: ^Changes_Pane,
 	logical, e: input.Key_Event,
 ) -> bool {
-	if pane.state.filter_naming {return changes_filter_name_key(app, w, pane, logical, e)}
 	modifiers := e.modifiers & {.Control, .Shift, .Alt, .Super}
 	#partial switch logical.key {
 	case .Enter, .Numpad_Enter, .Tab:
@@ -731,7 +730,7 @@ changes_filter_key :: proc(
 	case .Escape:
 		if modifiers == {} {
 			if pane.filter_typing {
-				changes_filter_typing_end(app, w, pane)
+				changes_filter_list_cancel(app, w, pane)
 			} else {
 				changes_filter_popover(app, w, pane, false)
 			}
@@ -740,14 +739,17 @@ changes_filter_key :: proc(
 	case .Arrow_Up, .Arrow_Down:
 		if modifiers == {} && pane.filter_typing {
 			step := logical.key == .Arrow_Down ? 1 : -1
-			pane.filter_pick_row = clamp(pane.filter_pick_row + step, 0, len(pane.filter_picks))
+			pane.filter_pick_row = clamp(pane.filter_pick_row + step, 0, max(0, len(pane.filter_picks) - 1))
 			changes_filter_view(pane)
 			w.dirty = true
 			return true
 		}
+		if modifiers == {} && logical.key == .Arrow_Down && changes_filter_open_list_by_key(app, w, pane) {
+			return true
+		}
 	case .S:
 		if modifiers == {.Control} {
-			changes_filter_name_begin(app, w, pane)
+			changes_filter_save(app, w, pane)
 			return true
 		}
 	}
@@ -756,19 +758,9 @@ changes_filter_key :: proc(
 		changes_filter_type(app, w, pane, e.text)
 		return true
 	}
-	edit := field_edit_key(app, &pane.filter_editor, logical)
-	switch edit.change {
-	case .Edited:
-		changes_filter_typing(pane, edit.pasted)
-		changes_filter_edited(app, w, pane)
-	case .Moved:
-		changes_filter_typing_end(app, w, pane)
-		w.dirty = true
-	case .None:
-		chord := clipboard_chord(logical) != .None
-		if !chord && modifiers - {.Shift} != {} && e.text == "" {return false}
-	}
-	return true
+	if changes_filter_key_edit(app, w, pane, logical) {return true}
+	chord := clipboard_chord(logical) != .None
+	return chord || modifiers - {.Shift} == {} || e.text != ""
 }
 
 // Typed or pasted text goes to the filter field or the open list's search, else to the comment being
@@ -777,7 +769,7 @@ changes_text :: proc(app: ^App, w: ^Window, text: string) -> bool {
 	pane := changes_focused(app, w)
 	if pane == nil {return false}
 	if pane.state.filter_open {
-		changes_filter_text_in(app, w, pane, text)
+		changes_filter_type(app, w, pane, text)
 		w.dirty = true
 		return true
 	}
@@ -1138,7 +1130,7 @@ changes_cursor :: proc(hit: ui.Changes_Hit, line_mode: bool) -> platform.Cursor_
 	     .Editor_Suggest, .Editor_Cancel, .Editor_Save, .Send, .Copy, .Discard, .Filter_Clear,
 	     .Filter_Bar_Clear, .Sticky_Header, .Strip_Older, .Strip_Newer, .Summary, .Files_Button, .Tools_Button,
 	     .Source_Chip, .Worktree_Chip, .Gutter, .Toolbar_Delete, .Toolbar_Comment, .Toolbar_Label, .Label_Row,
-	     .Label_Edit:
+	     .Label_Edit, .Filter_At, .Filter_Save, .Filter_Manage:
 		return .Hand
 	case .Turn_List_Row, .Tools_Row:
 		if hit.index >= 0 {return .Hand}
@@ -1146,8 +1138,6 @@ changes_cursor :: proc(hit: ui.Changes_Hit, line_mode: bool) -> platform.Cursor_
 		return .Hand
 	case .Filter_Field:
 		if hit.index >= 0 {return .Text}
-	case .Filter_Name:
-		return .Text
 	case .Comment_Editor:
 		return .Text
 	case .Line:
@@ -1343,8 +1333,12 @@ changes_press :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) {
 			changes_filter_clear(app, w, pane)
 		case .Filter_Pick:
 			changes_filter_pick_choose(app, w, pane, hit.index)
-		case .Filter_Name:
-			changes_filter_name_point(w, pane, g, x, extend)
+		case .Filter_At:
+			changes_filter_list_toggle(app, w, pane)
+		case .Filter_Save:
+			changes_filter_save(app, w, pane)
+		case .Filter_Manage:
+			changes_filter_manage(app, w, pane)
 		case:
 			changes_filter_popover(app, w, pane, false)
 		}
@@ -1452,7 +1446,6 @@ changes_release :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) -> b
 		if pane.state.press != {} {pane.state.press, cleared = {}, true}
 		if pane.dragging != .None {pane.dragging, cleared = .None, true}
 		if ui.field_release(&pane.filter_editor) {cleared = true}
-		if ui.field_release(&pane.filter_name) {cleared = true}
 		if pane.comments.dragging {cleared = true}
 		changes_comments_release(app, w, pane)
 	}
@@ -1606,6 +1599,8 @@ changes_tooltip :: proc(app: ^App, w: ^Window, x, y: f32) -> string {
 	case .File_Header, .Sticky_Header:
 		folded := hit.index >= 0 && hit.index < len(view.collapsed) && view.collapsed[hit.index]
 		return folded ? "Expand file" : "Collapse file"
+	case .Filter_At:
+		return "Saved filters"
 	case .Hunk_Select:
 		return "Select this hunk"
 	case .Toolbar_Delete:
@@ -1780,7 +1775,9 @@ when AIO_CONTROL {
 					for row, i in g.filter_picks {
 						state_rect(r, changes_report_key("filter_pick", g.filter_pick_first + i, "rect"), row)
 					}
-					state_rect(r, "changes.filter_name_rect", g.filter_name)
+					state_rect(r, "changes.filter_at_rect", g.filter_at)
+					state_rect(r, "changes.filter_save_rect", g.filter_save)
+					state_rect(r, "changes.filter_manage_rect", g.filter_manage)
 				}
 				if pane.state.files_open {
 					choices, anchor := changes_dropdown_choices(pane), changes_dropdown_anchor(pane, g)
@@ -1883,7 +1880,6 @@ when AIO_CONTROL {
 		state_value(r, "changes.filter_tokens", pane != nil ? len(pane.filter_tokens) : 0)
 		state_value(r, "changes.filter_typing", pane != nil && pane.filter_typing)
 		state_value(r, "changes.filter_pick_row", pane != nil ? pane.filter_pick_row : 0)
-		state_value(r, "changes.filter_naming", pane != nil && pane.state.filter_naming)
 		state_value(r, "changes.filter_savable", pane != nil && pane.filter_savable)
 		state_text(r, "changes.filter_notice", pane != nil ? pane.filter_notice : "")
 		state_text(r, "changes.saved_filters", app.settings.turns.saved_filters)
@@ -1894,7 +1890,8 @@ when AIO_CONTROL {
 				state_text(r, changes_report_key("filter_token", i, "state"), changes_token_state_name(token.state))
 			}
 			for pick, i in pane.filter_picks {
-				state_text(r, changes_report_key("filter_pick", i, "name"), pick.name)
+				state_text(r, changes_report_key("filter_pick", i, "name"), pick.label)
+				state_value(r, changes_report_key("filter_pick", i, "hides"), pick.hides)
 			}
 		}
 		state_value(r, "changes.hidden_files", pane != nil ? pane.model.view.hidden_count : 0)

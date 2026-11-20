@@ -102,7 +102,7 @@ a_renamed_file_matches_the_diff_filter_by_either_path :: proc(t: ^testing.T) {
 }
 
 @(private = "file")
-LIBRARY :: "No vendor | !^vendor/; Odin | \\.odin$; Bad | ["
+LIBRARY :: "No vendor | !^vendor/; Odin | \\.odin$; Bad | [; | !docs/"
 
 @(private = "file")
 TOKEN_PATHS :: [?]string{"src/a.odin", "vendor/b.odin", "docs/c.md"}
@@ -142,6 +142,8 @@ saved_filter_tokens_add_their_terms_and_combine_with_the_text_and_each_other :: 
 		{"~@Odin @\"No vendor\"", "src/a.odin docs/c.md"},
 		{"@\"No vendor\" src", "src/a.odin"},
 		{"@odin !src", "vendor/b.odin"},
+		{"@!docs/", "src/a.odin vendor/b.odin"},
+		{"@!docs/ ~@!docs/ @Odin", "src/a.odin vendor/b.odin"},
 		{"@Nope", "src/a.odin vendor/b.odin docs/c.md"},
 		{"~@Nope ~@Odin", "src/a.odin vendor/b.odin docs/c.md"},
 	}

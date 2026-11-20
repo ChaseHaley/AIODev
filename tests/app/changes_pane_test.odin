@@ -1395,12 +1395,25 @@ saved_filters_are_typed_picked_toggled_and_saved_from_the_filter_field :: proc(t
 	testing.expect_value(t, len(pane.filter_tokens), 1)
 	testing.expect_value(t, view.hidden_count, 1)
 
-	// The saved filter left is offered again by name, and a name with a space is quoted.
-	type_text(&f.state, w, "@no")
+	// The field's @ button lists what is left, and a click on a row inserts it at the caret; a filter in the
+	// field is not offered again, and Escape closes the list before it closes the popover.
+	g = app.changes_geometry_of(&f.state, w, pane, shown)
+	click(&f.state, w, g.filter_at)
+	testing.expect(t, pane.filter_typing)
 	testing.expect_value(t, len(pane.filter_picks), 1)
-	tap(&f.state, w, .Enter)
+	testing.expect_value(t, pane.filter_picks[0].label, "No vendor")
+	testing.expect_value(t, pane.filter_picks[0].hides, 1)
+	g = app.changes_geometry_of(&f.state, w, pane, shown)
+	if !testing.expect_value(t, len(g.filter_picks), 1) {return}
+	click(&f.state, w, g.filter_picks[0])
 	testing.expect_value(t, app.changes_filter_text(pane), "@Odin @\"No vendor\" ")
+	testing.expect(t, !pane.filter_typing)
 	testing.expect_value(t, view.hidden_count, 2)
+	g = app.changes_geometry_of(&f.state, w, pane, shown)
+	click(&f.state, w, g.filter_at)
+	testing.expect_value(t, len(pane.filter_picks), 0)
+	tap(&f.state, w, .Escape)
+	testing.expect(t, !pane.filter_typing && pane.state.filter_open)
 
 	// Shift and Left select the last token as a whole, and Space turns it off and keeps it selected.
 	chord(&f.state, w, .Arrow_Left, {.Shift})
@@ -1424,20 +1437,20 @@ saved_filters_are_typed_picked_toggled_and_saved_from_the_filter_field :: proc(t
 	testing.expect_value(t, app.changes_filter_text(pane), "~@Odin src")
 	testing.expect(t, pane.filter_savable)
 
-	// Ctrl+S names the terms; Enter saves them as the last saved filter and puts it in their place.
+	// Ctrl+S saves the terms as a filter without asking for a name; it shows its pattern, and its token
+	// takes their place.
 	chord(&f.state, w, .S, {.Control})
-	if !testing.expect(t, pane.state.filter_naming) {return}
-	type_text(&f.state, w, "Source")
-	tap(&f.state, w, .Enter)
-	testing.expect(t, !pane.state.filter_naming)
-	testing.expect_value(t, f.state.settings.turns.saved_filters, strings.concatenate({library, "; Source | src"}, context.temp_allocator))
-	testing.expect_value(t, app.changes_filter_text(pane), "~@Odin @Source")
+	testing.expect_value(
+		t, f.state.settings.turns.saved_filters, strings.concatenate({library, "; | src"}, context.temp_allocator),
+	)
+	testing.expect_value(t, app.changes_filter_text(pane), "~@Odin @src")
 	testing.expect_value(t, view.hidden_count, 2)
+	testing.expect(t, !pane.filter_savable)
 
 	// A pane opened from this one copies the tokens, and Clear empties the field, tokens included.
 	app.run_action(&f.state, w, .Agent_Changes)
 	if !testing.expect_value(t, len(f.state.changes_panes), 2) {return}
-	testing.expect_value(t, app.changes_filter_text(f.state.changes_panes[1]), "~@Odin @Source")
+	testing.expect_value(t, app.changes_filter_text(f.state.changes_panes[1]), "~@Odin @src")
 	testing.expect_value(t, len(f.state.changes_panes[1].filter_tokens), 2)
 	app.changes_filter_clear(&f.state, w, pane)
 	testing.expect_value(t, app.changes_filter_text(pane), "")
