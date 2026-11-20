@@ -601,8 +601,13 @@ layout_tab_restore :: proc(
 			views := settings.DIFF_VIEW_NAME
 			if node.changes_view == views[.Unified] {side_by_side = false}
 			if node.changes_view == views[.Side_By_Side] {side_by_side = true}
-			filter := app.settings.turns.diff_filter
-			if text, kept := node.changes_filter.?; kept && utf8.valid_string(text) {filter = text}
+			filter := changes_default_filter(app)
+			if text, kept := node.changes_filter.?; kept && utf8.valid_string(text) {
+				// A layout from before ids names filters by label, and one that names a filter since deleted
+				// has nothing left to show for it.
+				library := app.settings.turns.saved_filters
+				filter, _ = settings.filter_text_ids(library, text, context.temp_allocator)
+			}
 			if created := changes_pane_create(app, agent, directory, scope, side_by_side, filter); created != nil {
 				pane.content.id, restored = created.id, true
 			}

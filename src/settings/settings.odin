@@ -575,9 +575,9 @@ Turns_Settings :: struct {
 	retention_days:        int,
 	diff_view:             Diff_View,
 	diff_long_lines:       Long_Lines,
-	diff_filter:           string,
 	diff_minimum_contrast: f64,
 	quick_labels:          string,
+	saved_filters:         string,
 }
 Window_Settings :: struct {
 	columns, rows, padding: int,
@@ -728,6 +728,7 @@ Setting_Validator :: enum {
 	Padding_Groups,
 	Program_Icons,
 	Quick_Labels,
+	Saved_Filters,
 	// A motion context's value, read for the context its key names.
 	Motion,
 }
@@ -1542,16 +1543,6 @@ SCHEMA :: [?]Schema_Entry {
 			"sideways, wrap breaks the line onto more rows. Open panes follow at once.",
 	},
 	{
-		key = "turns.diff_filter",
-		title = "Default diff filter",
-		kind = .String,
-		offset = offset_of(Settings, turns) + offset_of(Turns_Settings, diff_filter),
-		default_value = "",
-		valid = {0, 256},
-		description = "The filter a new Agent changes pane starts with: space-separated regular expressions on " +
-			"file paths; a term starting with ! hides matching files. Empty shows every file.",
-	},
-	{
 		key = "turns.diff_minimum_contrast",
 		title = "Minimum diff text contrast",
 		kind = .Float,
@@ -1572,6 +1563,19 @@ SCHEMA :: [?]Schema_Entry {
 		validator = .Quick_Labels,
 		description = "Labels for annotating Agent changes: " + QUICK_LABELS_EXAMPLE + ". The first nine take " +
 			"Alt+1 to Alt+9 in order. The instruction goes to the agent with the label.",
+	},
+	{
+		key = SAVED_FILTERS_KEY,
+		title = "Saved filters",
+		kind = .String,
+		offset = offset_of(Settings, turns) + offset_of(Turns_Settings, saved_filters),
+		default_value = "",
+		valid = {0, SAVED_FILTERS_MAX},
+		control = .Group,
+		validator = .Saved_Filters,
+		description = "Saved diff filters for Agent changes: " + SAVED_FILTERS_EXAMPLE + ". The filter field's @ " +
+			"button lists them; a filter without a name shows its pattern, one marked with a * after its id starts " +
+			"new panes as a token, and the id, made for the filter, keeps its tokens through a rename.",
 	},
 	{
 		key = "shell.default_profile",
@@ -2022,6 +2026,12 @@ value_parse :: proc(
 			if !padding_groups_valid(value) {
 				buffer: [192]u8
 				issue, err := problem(.Invalid_Value, allocator, padding_groups_rules(buffer[:]))
+				return nil, issue, err
+			}
+		case .Saved_Filters:
+			if !saved_filters_valid(value) {
+				buffer: [768]u8
+				issue, err := problem(.Invalid_Value, allocator, saved_filters_rules(buffer[:]))
 				return nil, issue, err
 			}
 		case .Quick_Labels:
@@ -2661,6 +2671,11 @@ migrate_settings_text :: proc(
 	if toggles_changed {
 		delete(updated, allocator)
 		updated, changed = toggles, true
+	}
+	filters, filters_changed := migrate_saved_filters_text(updated, allocator) or_return
+	if filters_changed {
+		delete(updated, allocator)
+		updated, changed = filters, true
 	}
 	themes, themes_changed, theme_error := migrate_theme_text(updated, allocator)
 	if theme_error != nil {
