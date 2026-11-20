@@ -20,7 +20,7 @@ changes_row_has_the_summary_at_the_left_and_its_buttons_at_the_right :: proc(t: 
 
 	g := ui.changes_geometry({0, 0, 900, 600}, 1, &view, &f.text)
 	ui.changes_layout(&state, &view, &f.text, &f.mono, g.diff.width, 1)
-	// A wide pane takes no step: the summary and the four buttons show.
+	// A wide pane takes no step: the summary and all five buttons show.
 	testing.expect_value(t, g.row_steps, 0)
 	testing.expect_value(t, g.tools_button, render.Rect{})
 	// A 32 tall row across the whole pane at its top, the diff under it.
@@ -32,12 +32,13 @@ changes_row_has_the_summary_at_the_left_and_its_buttons_at_the_right :: proc(t: 
 	testing.expect_value(t, g.summary.height, f32(24))
 	testing.expect(t, g.summary.x + g.summary.width < 450)
 	// At the right end: the files button 4 from the edge, 24 tall, with the 16 DIP icon, a gap and the count
-	// in it; 8 before it select lines, filter, fold and layout 22 wide and 2 apart.
+	// in it; 8 before it wrap, select lines, filter, fold and layout 22 wide and 2 apart.
 	testing.expect_value(t, g.files_button.y, f32(4))
 	testing.expect_value(t, g.files_button.height, f32(24))
 	testing.expect_value(t, g.files_button.x + g.files_button.width, f32(896))
 	testing.expect(t, g.files_button.width > 2 * 8 + 16 + 4)
-	testing.expect_value(t, g.select_lines_button, render.Rect{g.files_button.x - 8 - 22, 5, 22, 22})
+	testing.expect_value(t, g.wrap_button, render.Rect{g.files_button.x - 8 - 22, 5, 22, 22})
+	testing.expect_value(t, g.select_lines_button, render.Rect{g.wrap_button.x - 2 - 22, 5, 22, 22})
 	testing.expect_value(t, g.filter_button, render.Rect{g.select_lines_button.x - 2 - 22, 5, 22, 22})
 	testing.expect_value(t, g.fold_button, render.Rect{g.filter_button.x - 2 - 22, 5, 22, 22})
 	testing.expect_value(t, g.layout_button, render.Rect{g.fold_button.x - 2 - 22, 5, 22, 22})
@@ -55,6 +56,8 @@ changes_row_has_the_summary_at_the_left_and_its_buttons_at_the_right :: proc(t: 
 	testing.expect_value(t, ui.changes_hit(g, &view, &state, x, y), ui.Changes_Hit{.Filter_Button, 0, 0})
 	x, y = middle(g.select_lines_button)
 	testing.expect_value(t, ui.changes_hit(g, &view, &state, x, y), ui.Changes_Hit{.Select_Lines_Button, 0, 0})
+	x, y = middle(g.wrap_button)
+	testing.expect_value(t, ui.changes_hit(g, &view, &state, x, y), ui.Changes_Hit{.Wrap_Button, 0, 0})
 	x, y = middle(g.files_button)
 	testing.expect_value(t, ui.changes_hit(g, &view, &state, x, y), ui.Changes_Hit{.Files_Button, 0, 0})
 	// Folding needs files.
@@ -75,7 +78,7 @@ changes_row_has_the_summary_at_the_left_and_its_buttons_at_the_right :: proc(t: 
 	testing.expect_value(t, git.row_steps, 0)
 	testing.expect(t, git.layout_button.x < git.fold_button.x && git.fold_button.x < git.filter_button.x)
 	testing.expect(t, git.filter_button.x < git.select_lines_button.x)
-	testing.expect(t, git.select_lines_button.x < git.files_button.x)
+	testing.expect(t, git.select_lines_button.x < git.wrap_button.x && git.wrap_button.x < git.files_button.x)
 
 	// At twice the scale every DIP doubles.
 	view.scope, view.turns = .Agent, f.rows[:]
@@ -117,13 +120,14 @@ ladder_check :: proc(t: ^testing.T, f: ^Changes_Fixture, view: ^ui.Changes_View,
 		}
 		if g.row_steps == 0 {
 			testing.expect(t, g.layout_button.width > 0 && g.fold_button.width > 0 && g.filter_button.width > 0)
-			testing.expect(t, g.select_lines_button.width > 0)
+			testing.expect(t, g.select_lines_button.width > 0 && g.wrap_button.width > 0)
 			testing.expect_value(t, g.tools_button, render.Rect{})
 		} else {
 			testing.expect_value(t, g.layout_button, render.Rect{})
 			testing.expect_value(t, g.fold_button, render.Rect{})
 			testing.expect_value(t, g.filter_button, render.Rect{})
 			testing.expect_value(t, g.select_lines_button, render.Rect{})
+			testing.expect_value(t, g.wrap_button, render.Rect{})
 			testing.expect(t, g.tools_button.width > 0)
 		}
 		testing.expect(t, g.files_button.width > 0)
@@ -211,10 +215,10 @@ changes_tools_menu_hangs_under_the_collapsed_button_and_answers_first :: proc(t:
 	ui.changes_layout(&state, &view, &f.text, &f.mono, g.diff.width, 1)
 	testing.expect_value(t, g.tools_button.width, f32(22))
 	testing.expect_value(t, g.files_button.x, g.tools_button.x + 22 + 8)
-	// Four 32 rows under the button, right-aligned to it and inside the pane.
+	// Five 32 DIP rows under the button, right-aligned to it and inside the pane.
 	menu := g.tools_menu
 	testing.expect_value(t, menu.y, g.row.y + g.row.height + 4)
-	testing.expect_value(t, menu.height, f32(4 * 32 + 8))
+	testing.expect_value(t, menu.height, f32(5 * 32 + 8))
 	testing.expect(t, menu.x >= 8 && menu.x + menu.width <= 260 - 8)
 	for row, i in g.tools_rows {
 		testing.expect_value(t, row.height, f32(32))
@@ -229,6 +233,9 @@ changes_tools_menu_hangs_under_the_collapsed_button_and_answers_first :: proc(t:
 	testing.expect_value(t, ui.changes_hit(g, &view, &state, x, y), ui.Changes_Hit{.Tools_Row, 2, 0})
 	x, y = middle(g.tools_rows[0])
 	testing.expect_value(t, ui.changes_hit(g, &view, &state, x, y), ui.Changes_Hit{.Tools_Row, 0, 0})
+	wrap_row := int(ui.Row_Button.Wrap)
+	x, y = middle(g.tools_rows[wrap_row])
+	testing.expect_value(t, ui.changes_hit(g, &view, &state, x, y), ui.Changes_Hit{.Tools_Row, wrap_row, 0})
 	padding := ui.changes_hit(g, &view, &state, menu.x + 1, menu.y + 1)
 	testing.expect_value(t, padding, ui.Changes_Hit{.Tools_Row, -1, 0})
 	// The fold row is disabled without files.
@@ -530,7 +537,7 @@ changes_draw_paints_the_row_the_panel_the_menu_and_the_overview :: proc(t: ^test
 	// "All agents".
 	testing.expect(t, on_chip >= 8)
 
-	// The ⋯ menu paints its four rows when the row is collapsed.
+	// The ⋯ menu paints every row when the header is collapsed.
 	state.panel_open, state.tools_open = false, true
 	narrow := ui.changes_geometry({0, 0, 260, 600}, 1, &view, &f.text, &state)
 	ui.changes_layout(&state, &view, &f.text, &f.mono, narrow.diff.width, 1)

@@ -260,13 +260,33 @@ line_row :: proc(rows: ^Changes_Rows, file, line: int) -> int {
 	return int(t.line_rows[at])
 }
 
-// The cells of a side-by-side row, either side of a one-pixel divider.
+@(private = "file")
+DIFF_MIN_SIDE :: f32(96)
+
+@(private = "file")
+split_min :: proc(band, scale: f32) -> f32 {
+	return min(math.ceil(DIFF_MIN_SIDE * scale), math.floor(max(0, band - 1) / 2))
+}
+
+@(private = "file")
+split_adjustable :: proc(band, scale: f32) -> bool {
+	return band >= 2 * math.ceil(DIFF_MIN_SIDE * scale) + 2
+}
+
 @(private)
-row_halves :: proc(row: render.Rect) -> (left, right, divider: render.Rect) {
-	mid := math.round(row.x + row.width / 2)
-	left = {row.x, row.y, max(0, mid - row.x), row.height}
-	divider = {mid, row.y, 1, row.height}
-	right = {mid + 1, row.y, max(0, row.x + row.width - mid - 1), row.height}
+split_position :: proc(band, scale, fraction: f32) -> f32 {
+	minimum := split_min(band, scale)
+	return clamp(math.round(band * (fraction == 0 ? 0.5 : fraction)), minimum, max(0, band - 1 - minimum))
+}
+
+// The cells of a row, either side of a one-pixel divider. Layout caches the same pixel position
+// for measuring, painting and hit testing.
+@(private)
+row_halves :: proc(row: render.Rect, left_width: f32) -> (left, right, divider: render.Rect) {
+	mid := row.x + left_width
+	left = {row.x, row.y, left_width, row.height}
+	divider = {mid, row.y, min(1, row.width), row.height}
+	right = {mid + divider.width, row.y, max(0, row.width - left_width - divider.width), row.height}
 	return
 }
 
@@ -644,6 +664,31 @@ diff_band :: proc(g: Changes_Geometry) -> render.Rect {
 	return {g.diff.x + pad, 0, max(0, g.diff.width - 2 * pad), 0}
 }
 
+// The divider's x in window pixels. Only the portions over code rows are painted and draggable.
+changes_divider_rect :: proc(g: Changes_Geometry, view: ^Changes_View, state: ^Changes_State) -> render.Rect {
+	if !view.side_by_side || view.notice != .None || len(view.files) == 0 || !state.rows.valid {return {}}
+	band := diff_band(g)
+	if !split_adjustable(band.width, g.scale) {return {}}
+	return {band.x + state.rows.split_left, g.diff.y, 1, g.diff.height}
+}
+
+// Keeps the point first grabbed on the divider under the pointer, and leaves both code cells usable.
+changes_divider_move :: proc(state: ^Changes_State, g: Changes_Geometry, x: f32) -> bool {
+	band := diff_band(g)
+	if !split_adjustable(band.width, g.scale) {return false}
+	minimum := split_min(band.width, g.scale)
+	left := clamp(math.round(x - band.x), minimum, max(minimum, band.width - 1 - minimum))
+	if left == state.rows.split_left {return false}
+	state.split = left / band.width
+	return true
+}
+
+// Which side a code cell belongs to, including either copy of a context line.
+changes_cell_half :: proc(g: Changes_Geometry, state: ^Changes_State, cell: render.Rect) -> Changes_Half {
+	if !state.rows.pairs.side_by_side {return .Both}
+	return .Left if cell.x <= diff_band(g).x else .Right
+}
+
 // The row of the stream that starts at `top`, `height` tall, across the band.
 @(private = "file")
 row_rect :: proc(g: Changes_Geometry, state: ^Changes_State, top, height: int) -> render.Rect {
@@ -666,7 +711,7 @@ line_cell :: proc(
 	rect := row_rect(g, state, top, row_height(rows, file, row))
 	if rows.pairs.side_by_side {
 		pair := row_pair(rows, file, row)
-		left, right, _ := row_halves(rect)
+		left, right, _ := row_halves(rect, rows.split_left)
 		if int(pair.right) != line {
 			rect = left
 		} else if int(pair.left) != line {
@@ -843,7 +888,12 @@ changes_diff_hit :: proc(
 			pair := row_pair(rows, file, base + i)
 			line, cell := int(pair.left), band
 			if rows.pairs.side_by_side {
-				left, right, _ := row_halves(band)
+				left, right, divider := row_halves(band, rows.split_left)
+				// Leave the right line-number gutter clickable all the way to its edge.
+				if !view.selecting && x >= divider.x - SPACE_1 * g.scale && x < right.x &&
+				   split_adjustable(band.width, g.scale) {
+					return {.Split_Divider, 0, 0}
+				}
 				cell = left
 				if x >= right.x {line, cell = int(pair.right), right}
 			}
@@ -961,9 +1011,9 @@ Diff_Paint :: struct {
 	// The text's font, and how far the current file's code is scrolled left, in pixels.
 	font:                 Code_Font,
 	scroll:               f32,
-	// Whether long lines wrap, how tall a line of text is, and how much room a wrapped line's text has.
+	// Whether long lines wrap and how tall a line of text is.
 	wrap:                 bool,
-	line_h, room:         f32,
+	line_h:               f32,
 }
 
 @(private = "file")
@@ -1398,7 +1448,7 @@ paint_code :: proc(
 	for k := max(0, int((p.top - row.y) / p.line_h)); ; k += 1 {
 		top := row.y + f32(k) * p.line_h
 		if top >= p.bottom {break}
-		start, end := wrap_row(p.mono, p.font, d.text, length, p.room, k)
+		start, end := wrap_row(p.mono, p.font, d.text, length, column.width, k)
 		line.text, line.base = d.text[start:end], start
 		line.top, line.baseline = top, baseline + f32(k) * p.line_h
 		if r := code_line_draw(p.list, p.mono, line); r != .Ok {return r}
@@ -1422,7 +1472,7 @@ paint_marker :: proc(
 	length := wrap_plain(&p.state.rows, file, flat)
 	marker := CHANGES_NO_NEWLINE
 	for k := 0; ; k += 1 {
-		start, end := wrap_row(p.mono, p.font, marker, length, p.room, k)
+		start, end := wrap_row(p.mono, p.font, marker, length, column.width, k)
 		if r := code_text_draw(
 			p.list, p.mono, p.font, marker[start:end], left, left, left + column.width,
 			baseline + f32(k) * p.line_h, p.theme.faint,
@@ -1475,11 +1525,12 @@ paint_cell :: proc(
 		return .Ok
 	}
 	d := &h.lines[at]
+	column := code_column(cell, p.number_width, p.digit, s, false)
 	// Wrapped, the row is as tall as its taller cell, and this cell's fill stops where its own text does.
 	own := cell
 	if p.wrap {
 		text := d.kind == .No_Newline ? CHANGES_NO_NEWLINE : d.text
-		lines := wrap_line_rows(p.mono, p.font, text, wrap_plain(&p.state.rows, file, line), p.room)
+		lines := wrap_line_rows(p.mono, p.font, text, wrap_plain(&p.state.rows, file, line), column.width)
 		own.height = f32(lines) * p.line_h
 		if own.height < cell.height {
 			rest := render.Rect{cell.x, cell.y + own.height, cell.width, cell.height - own.height}
@@ -1498,7 +1549,6 @@ paint_cell :: proc(
 	marks_draw(p, marks, own)
 	row_pick_draw(p, file, line, picked, own)
 	baseline := baseline_in(cell.y, p.line_h, p.mono)
-	column := code_column(cell, p.number_width, p.digit, s, false)
 	if d.kind == .No_Newline {return paint_marker(p, file, line, column, baseline)}
 	if r := number_draw(p, old ? d.old_line : d.new_line, column.old_x, baseline); r != .Ok {return r}
 	return paint_code(p, d, file, line, picked, &marks, column, cell, baseline, edit_ranges(h, at, d.kind))
@@ -1555,16 +1605,18 @@ paint_hunk :: proc(
 	}
 	top := y + header.height
 	base, count := hunk_rows(rows, file, index)
+	divider_ink := t.border
+	if p.state.hover.part == .Split_Divider || p.state.press.part == .Split_Divider {divider_ink = t.accent}
 	for i := hunk_row_at(rows, p.view, file, base, count, int(p.top - top)); i < count; i += 1 {
 		row := top + f32(row_offset(rows, p.view, file, base, i))
 		if row >= p.bottom {break}
 		height := f32(row_height(rows, file, base + i))
 		pair := row_pair(rows, file, base + i)
 		if rows.pairs.side_by_side {
-			left, right, divider := row_halves({p.card_x, row, p.card_width, height})
+			left, right, divider := row_halves({p.card_x, row, p.card_width, height}, rows.split_left)
 			if r := paint_cell(p, h, file, flat, int(pair.left), true, left); r != .Ok {return r}
 			if r := paint_cell(p, h, file, flat, int(pair.right), false, right); r != .Ok {return r}
-			draw_rect(p.list, {rect = divider, color = t.border})
+			draw_rect(p.list, {rect = divider, color = divider_ink})
 		} else if at := int(pair.left) - flat; at >= 0 && at < len(h.lines) {
 			if r := paint_line(p, h, at, file, int(pair.left), row, height); r != .Ok {return r}
 		}
@@ -1657,7 +1709,6 @@ paint_file :: proc(p: ^Diff_Paint, rows: ^Changes_Rows, i: int, y: f32) -> rende
 	}
 	p.number_width = code_number_width(f, p.digit)
 	p.scroll = f32(changes_h_columns(p.state, view, i, p.card_width)) * p.digit
-	p.room = code_room(rows, f, p.card_width)
 	flat := 0
 	for &hunk, h in f.hunks {
 		height := f32(hunk_height(rows, view, i, h))

@@ -33,7 +33,8 @@ Changes_Widths :: struct {
 	files:      int,
 	size:       f32,
 	family:     font.Family,
-	code, head: [dynamic]f32,
+	code:       [dynamic][2]f32,
+	head:       [dynamic]f32,
 }
 
 @(private)
@@ -46,15 +47,20 @@ changes_widths_build :: proc(w: ^Changes_Widths, view: ^Changes_View, mono: ^Tex
 	clear(&w.head)
 	f := code_font(mono)
 	for &file in view.files {
-		code, head: f32
+		code: [2]f32
+		head: f32
 		for &hunk in file.hunks {
 			buf: [CHANGES_HUNK_LABEL_BYTES]u8
 			width := code_width(mono, f, hunk_label(buf[:], &hunk))
 			if hunk.section != "" {width += f.cell + code_width(mono, f, hunk.section)}
 			head = max(head, width)
+			side := tr.Line_Kind.Context
 			for &line in hunk.lines {
 				text := line.kind == .No_Newline ? CHANGES_NO_NEWLINE : line.text
-				code = max(code, code_width(mono, f, text))
+				line_width := code_width(mono, f, text)
+				if line.kind != .No_Newline {side = line.kind}
+				if side != .Added {code[0] = max(code[0], line_width)}
+				if side != .Removed {code[1] = max(code[1], line_width)}
 			}
 		}
 		_, code_error := append(&w.code, code)
@@ -68,17 +74,18 @@ changes_widths_build :: proc(w: ^Changes_Widths, view: ^Changes_View, mono: ^Tex
 	}
 }
 
-// The room a file's code text has: from its sign column to the edge of its cell, the narrower cell side by
-// side. `band` is the width every row fills.
+// The room each side has for code text, or the unified row's room in the first slot.
 @(private)
-code_room :: proc(rows: ^Changes_Rows, f: ^tr.Diff_File, band: f32) -> f32 {
-	cell := band
-	if rows.pairs.side_by_side {
-		left, right, _ := row_halves({0, 0, band, 0})
-		cell = min(left.width, right.width)
-	}
+code_rooms :: proc(rows: ^Changes_Rows, f: ^tr.Diff_File, band: f32) -> [2]f32 {
 	number := code_number_width(f, rows.digit)
-	return code_column({0, 0, cell, 0}, number, rows.digit, rows.scale, !rows.pairs.side_by_side).width
+	if !rows.pairs.side_by_side {
+		return {code_column({0, 0, band, 0}, number, rows.digit, rows.scale, true).width, 0}
+	}
+	left, right, _ := row_halves({0, 0, band, 0}, rows.split_left)
+	return {
+		code_column(left, number, rows.digit, rows.scale, false).width,
+		code_column(right, number, rows.digit, rows.scale, false).width,
+	}
 }
 
 // What a hunk header row's text has room for: the band less its padding at both ends and the room the
@@ -91,21 +98,34 @@ head_room :: proc(rows: ^Changes_Rows, band: f32) -> f32 {
 // How many text columns file `file` can scroll: how far its widest code line and hunk header row run past
 // the room each has.
 @(private)
-file_scroll_limit :: proc(rows: ^Changes_Rows, view: ^Changes_View, file: int, band: f32) -> int {
+file_scroll_extent :: proc(
+	rows: ^Changes_Rows, view: ^Changes_View, file: int, band: f32,
+) -> (limit, shown: int) {
 	w := &rows.widths
 	if file < 0 || file >= len(w.code) || file >= len(w.head) || file >= len(view.files) || rows.digit <= 0 {
-		return 0
+		return
 	}
-	over := max(w.code[file] - code_room(rows, &view.files[file], band), w.head[file] - head_room(rows, band))
-	if over <= CODE_EDGE {return 0}
-	return int(math.ceil(over / rows.digit - CODE_EDGE))
+	rooms := code_rooms(rows, &view.files[file], band)
+	width := w.code[file]
+	room := rooms[0]
+	over := width[0] - room
+	if rows.pairs.side_by_side {
+		if right := width[1] - rooms[1]; right > over {over, room = right, rooms[1]}
+	} else {
+		over = max(width[0], width[1]) - room
+	}
+	head := head_room(rows, band)
+	if extra := w.head[file] - head; extra > over {over, room = extra, head}
+	if over <= CODE_EDGE {return}
+	return int(math.ceil(over / rows.digit - CODE_EDGE)), int(room / rows.digit)
 }
 
 // How many text columns file `file`'s rows are scrolled by: the pane's offset, held at the file's limit.
 @(private)
 changes_h_columns :: proc(state: ^Changes_State, view: ^Changes_View, file: int, band: f32) -> int {
 	if view.wrap {return 0}
-	return min(state.h_scroll, file_scroll_limit(&state.rows, view, file, band))
+	limit, _ := file_scroll_extent(&state.rows, view, file, band)
+	return min(state.h_scroll, limit)
 }
 
 // The most columns any shown file scrolls, and how many columns of text the room of the file that scrolls
@@ -123,9 +143,7 @@ changes_h_extent :: proc(
 	band := diff_band(g).width
 	for &file, i in view.files {
 		if changes_collapsed(view, i) || file.binary || len(file.hunks) == 0 {continue}
-		if more := file_scroll_limit(rows, view, i, band); more > limit {
-			limit, shown = more, int(code_room(rows, &file, band) / rows.digit)
-		}
+		if more, room := file_scroll_extent(rows, view, i, band); more > limit {limit, shown = more, room}
 	}
 	return
 }

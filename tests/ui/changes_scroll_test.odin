@@ -407,12 +407,12 @@ side_by_side_wrapped_pairs_take_the_taller_side :: proc(t: ^testing.T) {
 	line := f32(state.rows.line)
 	_, left, _ := ui.changes_line_code(g, &view, &state, &f.mono, 1, 1)
 	_, right, _ := ui.changes_line_code(g, &view, &state, &f.mono, 1, 2)
-	columns := wrap_columns(min(left.width, right.width), digit)
+	want := max(wrap_rows_of(250, wrap_columns(left.width, digit)), wrap_rows_of(300, wrap_columns(right.width, digit)))
 	removed := ui.changes_line_rect(g, &view, &state, 1, 1)
 	added := ui.changes_line_rect(g, &view, &state, 1, 2)
 	testing.expect_value(t, removed.y, added.y)
 	testing.expect_value(t, removed.height, added.height)
-	testing.expect_value(t, added.height, f32(wrap_rows_of(300, columns)) * line)
+	testing.expect_value(t, added.height, f32(want) * line)
 
 	// Each half draws all of its own text, inside its own cell.
 	scroll_draw(t, &f, &view, &state, g, &list)
@@ -428,6 +428,47 @@ side_by_side_wrapped_pairs_take_the_taller_side :: proc(t: ^testing.T) {
 	}
 	testing.expect_value(t, in_left, 250)
 	testing.expect_value(t, in_right, 300)
+}
+
+@(test)
+dragging_the_diff_divider_reflows_and_scrolls_each_side_at_its_own_width :: proc(t: ^testing.T) {
+	f: Scroll_Fixture
+	view: ui.Changes_View
+	if !scroll_make(t, &f, &view) {return}
+	defer scroll_destroy(&f)
+	view.wrap, view.side_by_side = true, true
+	// Fit the old line at any width in this test so the height is driven by the right cell.
+	f.long[1].text = "old value"
+	state: ui.Changes_State
+	defer ui.changes_state_destroy(&state)
+	g := scroll_lay_out(&f, &view, &state)
+	before := ui.changes_line_rect(g, &view, &state, 1, 2)
+	handle := ui.changes_divider_rect(g, &view, &state)
+	if !testing.expect_value(t, ui.changes_hit(g, &view, &state, handle.x, before.y + 3).part,
+		ui.Changes_Part.Split_Divider) {return}
+	testing.expect(t, ui.changes_divider_move(&state, g, handle.x + 180))
+	g = scroll_lay_out(&f, &view, &state)
+	removed := ui.changes_line_rect(g, &view, &state, 1, 1)
+	added, right, ok := ui.changes_line_code(g, &view, &state, &f.mono, 1, 2)
+	if !testing.expect(t, ok) {return}
+	testing.expect_value(t, removed.y, added.y)
+	testing.expect_value(t, removed.height, added.height)
+	testing.expect(t, added.height > before.height && removed.width > added.width)
+
+	digit := ui.text_width(&f.mono, "0")
+	columns := wrap_columns(right.width, digit)
+	line := f32(state.rows.line)
+	testing.expect_value(t, added.height, f32(wrap_rows_of(300, columns)) * line)
+	at, _, mapped := ui.changes_text_point(g, &view, &state, &f.mono, 1, 2,
+		right.text_x + 6 * digit, added.y + line + 2)
+	testing.expect(t, mapped)
+	testing.expect_value(t, at, columns + 6)
+
+	view.wrap = false
+	g = scroll_lay_out(&f, &view, &state)
+	testing.expect(t, ui.changes_scroll_columns(&state, g, &view, 99_999))
+	_, end, _ := ui.changes_line_visible(g, &view, &state, &f.mono, 1, 2)
+	testing.expect_value(t, end, len(f.added))
 }
 
 @(test)

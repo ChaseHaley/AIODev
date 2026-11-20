@@ -242,6 +242,8 @@ Changes_Part :: enum u8 {
 	Filter_Bar_Clear,
 	Fold_Button,
 	Select_Lines_Button,
+	Wrap_Button,
+	Split_Divider,
 	Sticky_Header,
 	Strip_Older,
 	Strip_Newer,
@@ -320,6 +322,8 @@ Changes_Rows :: struct {
 	pairs:                                  Changes_Pairs,
 	// The widest line of every file, for the sideways scroll.
 	widths:                                 Changes_Widths,
+	// Left cell's width in pixels. Zero in unified view.
+	split_left:                             f32,
 	// Whether long lines wrap (the view's `wrap` as of the last layout), and where they break.
 	wrapped:                                bool,
 	wrap:                                   Changes_Wrap,
@@ -332,6 +336,8 @@ Changes_State :: struct {
 	h_scroll:                 int,
 	h_bar:                    Scroll_Drag,
 	diff_scroll:              int,
+	// Fraction of the code band left of the divider; zero means centered.
+	split:                    f32,
 	// Strip bars hidden at the left, and the turn list's scroll in pixels.
 	strip_offset:             int,
 	// The strip's room, turn count and selection at the last draw: when any changes, the draw reveals the
@@ -635,13 +641,20 @@ changes_layout :: proc(state: ^Changes_State, view: ^Changes_View, text, mono: ^
 	key := collapsed_key(view)
 	comments := changes_comments_key(view)
 	digit := text_width(mono, "0")
-	if rows.valid && rows.revision == view.revision && rows.collapsed_key == key &&
+	split_left := f32(0)
+	if view.side_by_side {
+		band := max(0, width - 2 * SPACE_2 * scale)
+		split_left = split_position(band, scale, state.split)
+	}
+	same := rows.valid && rows.revision == view.revision && rows.collapsed_key == key &&
 	   rows.notice == view.notice && rows.files == len(view.files) && rows.omitted == view.omitted &&
 	   rows.line_height == mono.line_height && rows.digit == digit && rows.scale == scale &&
 	   rows.width == width && rows.body_line == text.line_height && rows.comments_key == comments &&
 	   rows.body_size == text.size_px && rows.body_family == text.family &&
 	   rows.pairs.side_by_side == view.side_by_side && rows.wrapped == view.wrap &&
-	   !editor_stale(rows, view, text) {
+	   !editor_stale(rows, view, text)
+	if same && (!view.wrap || rows.split_left == split_left) {
+		rows.split_left = split_left
 		return
 	}
 	// A change of width, scale, font or mode that rewraps the rows keeps the row at the top of the diff there.
@@ -650,7 +663,7 @@ changes_layout :: proc(state: ^Changes_State, view: ^Changes_View, text, mono: ^
 	   rows.collapsed_key == key && rows.notice == view.notice && rows.files == len(view.files) &&
 	   view.notice == .None && (rows.width != width || rows.scale != scale || rows.digit != digit ||
 	   rows.line_height != mono.line_height || rows.wrapped != view.wrap ||
-	   rows.pairs.side_by_side != view.side_by_side) {
+	   rows.pairs.side_by_side != view.side_by_side || rows.split_left != split_left) {
 		anchor = changes_anchor_find(rows, view, state.diff_scroll)
 	}
 	rows.built += 1
@@ -667,8 +680,9 @@ changes_layout :: proc(state: ^Changes_State, view: ^Changes_View, text, mono: ^
 	rows.footer = int(math.round(HEIGHT_STANDARD * scale))
 	changes_pairs_build(&rows.pairs, view)
 	rows.wrapped = view.wrap
+	rows.split_left = split_left
 	changes_wrap_build(rows, view, mono, max(0, width - 2 * SPACE_2 * scale))
-	changes_cards_measure(rows, view, text, mono)
+	if !same {changes_cards_measure(rows, view, text, mono)}
 	clear(&rows.tops)
 	y := 0
 	if view.notice == .None {

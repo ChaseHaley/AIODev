@@ -88,6 +88,11 @@ Changes_Drag :: enum u8 {
 	Turn_List,
 }
 
+Changes_Divider_Drag :: struct {
+	pane:   u32,
+	offset: f32,
+}
+
 // Owned by App.changes_panes; windows refer to it by id and the poll frees it once none does.
 Changes_Pane :: struct {
 	id:         u32,
@@ -519,6 +524,9 @@ changes_row_button_run :: proc(app: ^App, w: ^Window, pane: ^Changes_Pane, butto
 	case .Select_Lines:
 		pane.comments.select_lines = !pane.comments.select_lines
 		w.dirty = true
+	case .Wrap:
+		value := "scroll" if app.settings.turns.diff_long_lines == .Wrap else "wrap"
+		_ = settings_save_value(app, "turns.diff_long_lines", value, "Could not save the long line setting.")
 	}
 }
 
@@ -1141,6 +1149,8 @@ changes_cursor :: proc(hit: ui.Changes_Hit, line_mode: bool) -> platform.Cursor_
 		if hit.index >= 0 {return .Text}
 	case .Comment_Editor:
 		return .Text
+	case .Split_Divider:
+		return .Resize_Horizontal
 	case .Line:
 		// The code text selects characters, unless a press picks whole lines.
 		return line_mode ? .Arrow : .Text
@@ -1165,9 +1175,25 @@ changes_text_at :: proc(
 	if hit.part != .Line && hit.part != .Gutter {return {}}
 	mono := ui.text_mono(&w.ui_text, app.family)
 	offset, cell, _ := ui.changes_text_point(g, &pane.model.view, &pane.state, &mono, hit.index, hit.line, x, y)
-	half := ui.Changes_Half.Both
-	if pane.state.rows.pairs.side_by_side {half = cell.x < g.diff.x + g.diff.width / 2 ? .Left : .Right}
-	return {offset, cell, half}
+	return {offset, cell, ui.changes_cell_half(g, &pane.state, cell)}
+}
+
+// Follow the grabbed divider even when the pointer leaves the diff or crosses another pane.
+changes_divider_held :: proc(
+	app: ^App, w: ^Window, under: Pointer_Target, e: input.Mouse_Move_Event,
+) -> Pointer_Held {
+	grab, active := w.changes_divider.?
+	if !active || pointer_modal(under) {return .Free}
+	pane := changes_find(app, grab.pane)
+	shown, visible := changes_pane_rect(w, grab.pane)
+	if .Left not_in e.buttons || pane == nil || !visible || !pane.side_by_side {
+		changes_cancel(app, w)
+		return .Ended
+	}
+	g := changes_geometry_of(app, w, pane, shown)
+	if ui.changes_divider_move(&pane.state, g, f32(e.x) - grab.offset) {w.dirty = true}
+	pointer_set(app, w, .Resize_Horizontal)
+	return .Taken
 }
 
 changes_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: input.Mouse_Move_Event) {
@@ -1375,6 +1401,10 @@ changes_press :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) {
 		changes_source_pick(app, pane, hit.index)
 	case .Worktree_Chip:
 		changes_worktree_pick(app, pane, hit.index)
+	case .Split_Divider:
+		divider := ui.changes_divider_rect(g, view, state)
+		w.changes_divider = Changes_Divider_Drag{pane.id, x - divider.x}
+		pointer_set(app, w, .Resize_Horizontal)
 	case .H_Scroll:
 		if bar, visible := ui.changes_h_scrollbar(g, view, state); visible {
 			side := ui.scrollbar_side(bar, x)
@@ -1437,6 +1467,13 @@ changes_press :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) {
 changes_release :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) -> bool {
 	if e.button != .Left {return false}
 	cleared := false
+	if grab, active := w.changes_divider.?; active {
+		w.changes_divider = nil
+		if pane := changes_find(app, grab.pane); pane != nil {
+			pane.state.press, pane.state.hover = {}, {}
+		}
+		cleared = true
+	}
 	for shown in w.panes {
 		if shown.content.kind != .Changes {continue}
 		pane := changes_find(app, shown.content.id)
@@ -1720,6 +1757,7 @@ when AIO_CONTROL {
 		notice_rect, hooks_rect: render.Rect
 		step_back_rect, step_forward_rect, range_label_rect: render.Rect
 		layout_button_rect, fold_button_rect, filter_button_rect: render.Rect
+		wrap_button_rect, divider_rect: render.Rect
 		filter_field_rect, filter_clear_rect, filter_bar_clear_rect: render.Rect
 		regex_rect, sticky_rect, strip_older_rect, strip_newer_rect: render.Rect
 		row_rect, summary_rect, panel_rect, files_button_rect, tools_button_rect: render.Rect
@@ -1742,6 +1780,8 @@ when AIO_CONTROL {
 				row_rect, summary_rect, row_steps = g.row, g.summary, g.row_steps
 				files_button_rect, tools_button_rect = g.files_button, g.tools_button
 				layout_button_rect, fold_button_rect, filter_button_rect = g.layout_button, g.fold_button, g.filter_button
+				wrap_button_rect = g.wrap_button
+				divider_rect = ui.changes_divider_rect(g, view, &pane.state)
 				filter_bar_clear_rect = g.filter_bar_clear
 				overview_rect, overview_thumb_rect = g.overview, ui.changes_overview_thumb(&pane.state, g)
 				overview_state = ui.changes_overview_state(&pane.state, g, w.pointer)
@@ -1936,6 +1976,8 @@ when AIO_CONTROL {
 		state_rect(r, "changes.step_forward_rect", step_forward_rect)
 		state_rect(r, "changes.range_label_rect", range_label_rect)
 		state_rect(r, "changes.layout_button_rect", layout_button_rect)
+		state_rect(r, "changes.wrap_button_rect", wrap_button_rect)
+		state_rect(r, "changes.divider_rect", divider_rect)
 		state_rect(r, "changes.filter_button_rect", filter_button_rect)
 		state_rect(r, "changes.filter_field_rect", filter_field_rect)
 		state_rect(r, "changes.filter_clear_rect", filter_clear_rect)

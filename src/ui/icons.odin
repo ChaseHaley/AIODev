@@ -94,6 +94,8 @@ Icon :: enum {
 	Code,
 	// Two angle brackets in a box: a block of code.
 	Code_Block,
+	// A long line turning onto its next visual row.
+	Wrap_Lines,
 }
 
 ICON_STROKE :: f32(1.25)
@@ -251,6 +253,11 @@ icon_draw :: proc(
 		pen_box(p, 1.5, 5.5, 13, 5, 1)
 		pen_path(p, {4.5, 8}, {11.5, 8})
 		pen_path(p, {3, 13.5}, {10, 13.5})
+	case .Wrap_Lines:
+		pen_path(p, {2, 3}, {14, 3})
+		pen_path(p, {2, 7}, {12, 7}, {14, 8.5}, {14, 11}, {12, 12.5}, {7, 12.5})
+		pen_path(p, {9, 10.5}, {7, 12.5}, {9, 14.5})
+		pen_path(p, {2, 12.5}, {4, 12.5})
 	case .Code:
 		pen_path(p, {5.5, 4}, {1.5, 8}, {5.5, 12})
 		pen_path(p, {10.5, 4}, {14.5, 8}, {10.5, 12})

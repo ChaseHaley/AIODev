@@ -25,7 +25,7 @@ Changes_Wrap :: struct {
 	built, side_by_side:           bool,
 	revision:                      u64,
 	files:                         int,
-	band, scale, size:             f32,
+	band, left, scale, size:       f32,
 	family:                        font.Family,
 	// The lines of text each pair row takes, as running totals: before[k] is how many lines the rows
 	// before pair k of every file in order take, one entry longer than the pairs.
@@ -162,10 +162,11 @@ changes_wrap_build :: proc(rows: ^Changes_Rows, view: ^Changes_View, mono: ^Text
 		}
 	}
 	if w.built && w.revision == view.revision && w.files == len(view.files) &&
-	   w.side_by_side == t.side_by_side && w.band == band && w.scale == rows.scale && w.size == mono.size_px &&
+	   w.side_by_side == t.side_by_side && w.band == band && w.left == rows.split_left &&
+	   w.scale == rows.scale && w.size == mono.size_px &&
 	   w.family == mono.family {return}
 	w.built, w.revision, w.files, w.side_by_side = true, view.revision, len(view.files), t.side_by_side
-	w.band, w.scale, w.size, w.family = band, rows.scale, mono.size_px, mono.family
+	w.band, w.left, w.scale, w.size, w.family = band, rows.split_left, rows.scale, mono.size_px, mono.family
 	clear(&w.before)
 	clear(&w.head)
 	w.valid = false
@@ -173,7 +174,7 @@ changes_wrap_build :: proc(rows: ^Changes_Rows, view: ^Changes_View, mono: ^Text
 	f := code_font(mono)
 	if _, err := append(&w.before, 0); err != nil {return}
 	for &file, i in view.files {
-		room, head := code_room(rows, &file, band), head_room(rows, band)
+		rooms, head := code_rooms(rows, &file, band), head_room(rows, band)
 		pair, line0, flat := t.file_pairs[i], t.file_lines[i], 0
 		for &hunk, h in file.hunks {
 			if _, err := append(&w.head, i32(head_rows(mono, f, &hunk, head) - 1)); err != nil {return}
@@ -181,12 +182,13 @@ changes_wrap_build :: proc(rows: ^Changes_Rows, view: ^Changes_View, mono: ^Text
 			for ; pair < stop; pair += 1 {
 				p := t.pairs[pair]
 				n := 1
-				for side in ([2]i32{p.left, p.right}) {
+				for side, half in ([2]i32{p.left, p.right}) {
+					if half == 1 && !t.side_by_side {break}
 					at := int(side) - flat
 					if side < 0 || at < 0 || at >= len(hunk.lines) {continue}
 					text := hunk.lines[at].kind == .No_Newline ? CHANGES_NO_NEWLINE : hunk.lines[at].text
 					plain := line0 + int(side) < len(w.plain) ? int(w.plain[line0 + int(side)]) : -1
-					n = max(n, wrap_line_rows(mono, f, text, plain, room))
+					n = max(n, wrap_line_rows(mono, f, text, plain, rooms[half]))
 				}
 				if _, err := append(&w.before, w.before[len(w.before) - 1] + i32(n)); err != nil {return}
 			}

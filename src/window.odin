@@ -102,6 +102,8 @@ Window :: struct {
 	autoscroll: Autoscroll,
 	// A track press held on a scrollbar, repeating its page; see scroll_hold.odin.
 	scroll_hold: Scroll_Hold,
+	// A divider grabbed in the side-by-side diff.
+	changes_divider: Maybe(Changes_Divider_Drag),
 	// The terminal link under the pointer; see term_links.odin.
 	link_hover: Maybe(Link_Hover),
 	pointer: [2]f32,

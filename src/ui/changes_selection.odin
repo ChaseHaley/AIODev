@@ -103,7 +103,7 @@ changes_text_point :: proc(
 		return code_offset_at(mono, text, column.width, x - column.text_x, column.scroll), cell, true
 	}
 	f := code_font(mono)
-	room := code_room(rows, &view.files[file], diff_band(g).width)
+	room := column.width
 	plain := wrap_plain(rows, file, line)
 	k := y >= 0 ? int((y - cell.y) / f32(rows.line)) : 0
 	k = clamp(k, 0, wrap_line_rows(mono, f, text, plain, room) - 1)
@@ -132,7 +132,7 @@ changes_selection_place :: proc(
 	// A context line side by side is in both halves; the toolbar centres over the one the selection is in.
 	half := f32(-1)
 	if rows.pairs.side_by_side {
-		left, right, _ := row_halves(diff_band(g))
+		left, right, _ := row_halves(diff_band(g), rows.split_left)
 		half = s.half == .Right ? right.x : left.x
 	}
 	_, column, found := changes_line_code(g, view, state, mono, s.file, s.first, half)
@@ -152,7 +152,7 @@ changes_selection_place :: proc(
 	start, span := column.text_x, column.width
 	if s.partial && wrap_valid(rows) {
 		f := code_font(mono)
-		room := code_room(rows, &view.files[s.file], diff_band(g).width)
+		room := column.width
 		k, from, to := wrap_row_of(mono, f, line, wrap_plain(rows, s.file, s.first), room, s.first_offset)
 		first_y += f32(k * rows.line)
 		stop := s.first == s.last ? clamp(s.last_offset, from, to) : to

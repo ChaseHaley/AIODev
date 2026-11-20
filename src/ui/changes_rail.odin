@@ -6,8 +6,8 @@ import "core:math"
 
 // The header row: the first row of the Agent changes pane, `HEIGHT_STANDARD` tall and as wide as the pane,
 // with a hairline under it. A ghost summary button at the left names what the pane shows (source, turns,
-// totals, file count) and opens the panel, as does the chevron button at the right end; beside that sit the
-// layout, fold, filter and select lines icon buttons, as small as the pane header's. The row gives things
+// totals, file count) and opens the panel. At the right are the layout, fold, filter, select lines and
+// wrap icon buttons, as small as the pane header's, followed by the files button. The row gives things
 // up only when it runs out of room, one step at a time, measured with the text: nothing collapses on a
 // fixed width. The ⋯ menu holds the buttons' actions once they have become one button.
 
@@ -20,6 +20,7 @@ Row_Button :: enum u8 {
 	Fold,
 	Filter,
 	Select_Lines,
+	Wrap,
 }
 
 @(private)
@@ -31,12 +32,14 @@ CHANGES_ROW_BUTTON_PARTS :: [Row_Button]Changes_Part {
 	.Fold         = .Fold_Button,
 	.Filter       = .Filter_Button,
 	.Select_Lines = .Select_Lines_Button,
+	.Wrap         = .Wrap_Button,
 }
 
 // The buttons' rects, by name and by button. Both views are the same memory, so a button added to the list
 // needs its name here, which the assert below checks.
 Row_Button_Names :: struct {
 	layout_button, fold_button, filter_button, select_lines_button: render.Rect,
+	wrap_button: render.Rect,
 }
 
 Row_Button_Rects :: struct #raw_union {
@@ -105,6 +108,15 @@ changes_row_button_entry :: proc(view: ^Changes_View, button: Row_Button) -> Row
 			enabled = true,
 			lit     = view.select_lines,
 			checked = view.select_lines,
+		}
+	case .Wrap:
+		return {
+			icon    = .Wrap_Lines,
+			label   = "Wrap lines",
+			tooltip = view.wrap ? "Scroll long lines horizontally" : "Wrap long lines",
+			enabled = true,
+			lit     = view.wrap,
+			checked = view.wrap,
 		}
 	}
 	return {}
@@ -593,7 +605,7 @@ row_draw :: proc(
 	return summary_draw(list, text, theme, g, view, phase)
 }
 
-// The open ⋯ menu: Side-by-side and Select lines (each checked while on), the fold row and Filter files….
+// The open ⋯ menu, with a row for every view button.
 @(private)
 tools_menu_draw :: proc(
 	list: ^render.Draw_List,
