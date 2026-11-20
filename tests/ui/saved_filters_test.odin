@@ -9,7 +9,10 @@ import "core:testing"
 FILTERS_THREE :: "One | a; Two | b c; Three | !vendor/"
 
 @(private)
-FILTER_NAME_REFUSAL :: "Enter a name of up to 32 characters without ; | or quotes."
+FILTER_NAME_REFUSAL :: "Use a name of up to 32 characters without ; | or quotes, or leave it empty."
+
+@(private)
+FILTER_PATTERN_REFUSAL :: "Enter a pattern of up to 120 characters without ; or quotes."
 
 @(private)
 FILTER_NAME_TOO_LONG :: "0123456789012345678901234567890123"
@@ -100,6 +103,14 @@ saved_filters_value_is_rebuilt_from_the_rows_and_edits :: proc(t: ^testing.T) {
 	testing.expect_value(t, s.turns.saved_filters, value)
 	// The rows are untouched until the saved value reloads the page.
 	testing.expect_value(t, p.rows[0].title, "One")
+	// A name may be left empty: the filter then shows its pattern.
+	value, _ = filters_value(t, &p, {kind = .Field, key = "filter.1.name", value = " "})
+	testing.expect_value(t, value, "| a; Two | b c; Three | !vendor/")
+	filters_fixture_again := ui.Editor{}
+	defer ui.editor_destroy(&filters_fixture_again)
+	filters_fixture(t, &filters_fixture_again, value)
+	testing.expect_value(t, filters_fixture_again.rows[0].title, "a")
+	testing.expect_value(t, filters_fixture_again.rows[0].value, "a")
 }
 
 @(test)
@@ -110,16 +121,16 @@ saved_filters_refuse_fields_the_setting_cannot_hold_with_a_message :: proc(t: ^t
 	for c in ([?]struct {
 			key, value, message: string,
 		}{
-			{"filter.1.name", "", FILTER_NAME_REFUSAL},
 			{"filter.1.name", "a;b", FILTER_NAME_REFUSAL},
 			{"filter.1.name", "a|b", FILTER_NAME_REFUSAL},
 			{"filter.1.name", "say \"hi\"", FILTER_NAME_REFUSAL},
 			{"filter.1.name", FILTER_NAME_TOO_LONG, FILTER_NAME_REFUSAL},
 			{"filter.2.name", " one ", "Another filter already has that name."},
 			{"filter.3.name", "TWO", "Another filter already has that name."},
-			{"filter.1.pattern", "", "Enter a pattern without ;."},
-			{"filter.2.pattern", "a;b", "Enter a pattern without ;."},
-			{"filter.2.pattern", "a\nb", "Enter a pattern without ;."},
+			{"filter.1.pattern", "", FILTER_PATTERN_REFUSAL},
+			{"filter.2.pattern", "a;b", FILTER_PATTERN_REFUSAL},
+			{"filter.2.pattern", "a\nb", FILTER_PATTERN_REFUSAL},
+			{"filter.2.pattern", "a\"b", FILTER_PATTERN_REFUSAL},
 		}) {
 		value, _, problem := ui.editor_saved_filters_value(&p, {kind = .Field, key = c.key, value = c.value})
 		testing.expectf(t, value == "" && problem == c.message, "%s = %q: %q", c.key, c.value, problem)

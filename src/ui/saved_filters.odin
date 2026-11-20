@@ -91,7 +91,7 @@ editor_saved_filters_load :: proc(p: ^Editor, value: string) -> runtime.Allocato
 	next := settings.saved_filters_next
 	for filter, more := next(&cursor); more; filter, more = next(&cursor) {
 		id += 1
-		filter_row_add(p, id, .None, filter.name, filter.pattern, "") or_return
+		filter_row_add(p, id, .None, settings.saved_filter_label(filter), filter.pattern, "") or_return
 		head := &p.rows[len(p.rows) - 1]
 		// Search reads the pattern too, so a filter is found by what it matches.
 		detail := strings.concatenate({settings.SAVED_FILTERS_KEY, " ", filter.pattern}) or_return
@@ -103,7 +103,7 @@ editor_saved_filters_load :: proc(p: ^Editor, value: string) -> runtime.Allocato
 			.Name,
 			"Name",
 			filter.name,
-			"What the filter field's @ inserts it by. Up to 32 characters.",
+			"Shown on the filter's token. Leave it empty to show the pattern. Up to 32 characters.",
 		) or_return
 		filter_row_add(
 			p,
@@ -119,7 +119,7 @@ editor_saved_filters_load :: proc(p: ^Editor, value: string) -> runtime.Allocato
 		{
 			key = SAVED_FILTER_ADD_KEY,
 			title = "Add filter",
-			description = "The filter field's @ inserts one by name.",
+			description = "The filter field's @ button lists them.",
 			value = "Add filter",
 			kind = .Action,
 			action = .Filter_Add,
@@ -142,11 +142,11 @@ editor_has_filter_row :: proc(p: ^Editor, id: int) -> bool {
 saved_filter_problem_text :: proc(problem: settings.Saved_Filter_Problem) -> string {
 	switch problem {
 	case .Name:
-		return "Enter a name of up to 32 characters without ; | or quotes."
+		return "Use a name of up to 32 characters without ; | or quotes, or leave it empty."
 	case .Duplicate:
 		return "Another filter already has that name."
 	case .Pattern:
-		return "Enter a pattern without ;."
+		return "Enter a pattern of up to 120 characters without ; or quotes."
 	case .Too_Long:
 		return "The filters are too long to store."
 	}
@@ -370,8 +370,8 @@ editor_filter_press :: proc(
 	return .Changed
 }
 
-// A filter's table line: the grip, its name, its pattern in detail text beside the name, the chevron of
-// its fields and remove.
+// A filter's table line: the grip, its label (the name, or the pattern while it has no name), its pattern in
+// detail text beside a name, the chevron of its fields and remove.
 @(private)
 editor_filter_draw :: proc(
 	p: ^Editor,
@@ -402,6 +402,7 @@ editor_filter_draw :: proc(
 	if result := draw_fading_text(text, list, row.title, x, baseline, theme.text, name_width); result != .Ok {
 		return result
 	}
+	if row.title == row.value {return .Ok}
 	detail_x := x + name_width + SPACE_3 * s
 	detail_baseline := r.y + (r.height - small.line_height) / 2 + small.ascent
 	return draw_fading_text(&small, list, row.value, detail_x, detail_baseline, theme.faint, right - detail_x)

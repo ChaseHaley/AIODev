@@ -36,7 +36,7 @@ editor_filters_edit :: proc(
 	switch edit.kind {
 	case .Field:
 	case .Add:
-		message, focus = "Filter added. Name it and write its pattern.", .Control
+		message, focus = "Filter added. Write its pattern; a name is optional.", .Control
 	case .Remove:
 		message = "Filter removed."
 	case .Move:
