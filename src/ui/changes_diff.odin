@@ -125,21 +125,22 @@ changes_pairs_destroy :: proc(t: ^Changes_Pairs) {
 	t^ = {}
 }
 
-// The end of the run of `kind` lines from `start`, taking the No_Newline marker that follows the run, so
-// a marker stays on its side.
-@(private = "file")
-run_end :: proc(lines: []tr.Diff_Line, start: int, kind: tr.Line_Kind) -> int {
-	end := start
-	for end < len(lines) && lines[end].kind == kind {end += 1}
-	if end > start && end < len(lines) && lines[end].kind == .No_Newline {end += 1}
-	return end
+// Emits a gap between matched replacements, padding the shorter side. The order of the lines
+// on each side stays the same for scrolling, selection and comments.
+@(private = "file", require_results)
+append_gap :: proc(t: ^Changes_Pairs, base, left, old_end, right, new_end: int) -> bool {
+	for k in 0 ..< max(old_end - left, new_end - right) {
+		pair := Changes_Pair{-1, -1}
+		if left + k < old_end {pair.left = i32(base + left + k)}
+		if right + k < new_end {pair.right = i32(base + right + k)}
+		if _, err := append(&t.pairs, pair); err != nil {return false}
+	}
+	return true
 }
 
-// Appends a hunk's rows. Side by side, a context line fills both cells, and a removed run shares rows with
-// the added run right after it (row k is the k-th removed and the k-th added line), blank cells padding
-// the shorter side.
 @(private = "file", require_results)
-hunk_pairs_append :: proc(t: ^Changes_Pairs, lines: []tr.Diff_Line, base: int) -> bool {
+hunk_pairs_append :: proc(t: ^Changes_Pairs, h: ^tr.Hunk, base: int) -> bool {
+	lines := h.lines
 	if !t.side_by_side {
 		for i in 0 ..< len(lines) {
 			line := i32(base + i)
@@ -148,19 +149,23 @@ hunk_pairs_append :: proc(t: ^Changes_Pairs, lines: []tr.Diff_Line, base: int) -
 		return true
 	}
 	i := 0
+	edit_at := 0
 	for i < len(lines) {
 		#partial switch lines[i].kind {
 		case .Removed, .Added:
-			removed := run_end(lines, i, .Removed)
-			added := run_end(lines, removed, .Added)
-			left, right := removed - i, added - removed
-			for k in 0 ..< max(left, right) {
-				pair := Changes_Pair{-1, -1}
-				if k < left {pair.left = i32(base + i + k)}
-				if k < right {pair.right = i32(base + removed + k)}
+			old_end, added, new_end, next := tr.diff_change_block(lines, i)
+			left, right := i, added
+			for edit_at < len(h.edits) && h.edits[edit_at].left < old_end {
+				edit := h.edits[edit_at]
+				append_gap(t, base, left, edit.left, right, edit.right) or_return
+				pair := Changes_Pair{i32(base + edit.left), i32(base + edit.right)}
 				if _, err := append(&t.pairs, pair); err != nil {return false}
+				left, right = edit.left + 1, edit.right + 1
+				edit_at += 1
 			}
-			i = added
+			append_gap(t, base, left, old_end, right, new_end) or_return
+			append_gap(t, base, old_end, added, new_end, next) or_return
+			i = next
 		case:
 			line := i32(base + i)
 			if _, err := append(&t.pairs, Changes_Pair{line, line}); err != nil {return false}
@@ -203,7 +208,7 @@ pairs_fill :: proc(t: ^Changes_Pairs, view: ^Changes_View) -> bool {
 		count := 0
 		for &hunk in f.hunks {
 			if _, err := append(&t.hunk_pairs, len(t.pairs)); err != nil {return false}
-			hunk_pairs_append(t, hunk.lines, count) or_return
+			hunk_pairs_append(t, &hunk, count) or_return
 			count += len(hunk.lines)
 		}
 		if resize(&t.line_rows, lines + count) != nil {return false}
@@ -978,6 +983,8 @@ Changes_Background :: enum u8 {
 	Context_Selected,
 	Added_Selected,
 	Removed_Selected,
+	Added_Edit,
+	Removed_Edit,
 }
 
 // A row's inks: the 16 palette colours, then the text, the muted context text and the two signs.
@@ -1008,6 +1015,14 @@ Changes_Inks :: struct {
 colour_over :: proc(top, bottom: render.Color) -> render.Color {
 	a := top.a
 	return {top.r * a + bottom.r * (1 - a), top.g * a + bottom.g * (1 - a), top.b * a + bottom.b * (1 - a), 1}
+}
+
+// A stronger pass of the row's own theme colour, only on changed text.
+@(private = "file")
+edit_tint :: proc(tint: render.Color) -> render.Color {
+	out := tint
+	out.a = min(0.65, tint.a * 2.5)
+	return out
 }
 
 // Rebuilds the table when the theme's colours or the ratio changed since the last build.
@@ -1043,6 +1058,8 @@ changes_inks_refresh :: proc(inks: ^Changes_Inks, theme: Theme, ratio: f32) {
 		.Context_Selected = colour_over(theme.selection, pane),
 		.Added_Selected   = colour_over(theme.selection, added),
 		.Removed_Selected = colour_over(theme.selection, removed),
+		.Added_Edit       = colour_over(edit_tint(theme.diff_added), added),
+		.Removed_Edit     = colour_over(edit_tint(theme.diff_removed), removed),
 	}
 	for back, kind in backgrounds {
 		for source, i in sources {inks.table[kind][i] = colour.minimum_contrast(source, back, ratio)}
@@ -1150,6 +1167,8 @@ CHANGES_LINE_HOVER :: f32(0.55)
 CHANGES_LINE_NOTES :: 5
 @(private = "file")
 CHANGES_LINE_EDGES :: 2 * (CHANGES_LINE_NOTES + 1)
+@(private = "file")
+CHANGES_RUNS :: CHANGES_LINE_EDGES + 2 * tr.DIFF_EDIT_RANGE_LIMIT
 
 @(private = "file")
 Line_Marks :: struct {
@@ -1221,12 +1240,13 @@ line_marks :: proc(
 	return
 }
 
-// The runs a line of `length` bytes draws: the marks' ranges cut at every edge, each piece taking the first
-// tint, underline and strike that reach it, and the selected inks when a selected range does. Ranges are
-// held inside the line, and a piece no range reaches is left out.
+// Cuts at the edges of notes, selections and diff ranges. Selection and notes take precedence
+// over a diff tint; their underline and strike stay independent of the background.
 @(private = "file")
-line_runs :: proc(marks: ^Line_Marks, length: int, out: ^[CHANGES_LINE_EDGES + 1]Code_Run) -> []Code_Run {
-	edges: [CHANGES_LINE_EDGES]int
+line_runs :: proc(
+	marks: ^Line_Marks, length: int, changes: []tr.Diff_Range, tint: render.Color, out: ^[CHANGES_RUNS]Code_Run,
+) -> []Code_Run {
+	edges: [CHANGES_RUNS]int = ---
 	count := 0
 	for &seg in marks.segs[:marks.count] {
 		seg.start, seg.end = clamp(seg.start, 0, length), clamp(seg.end, 0, length)
@@ -1237,8 +1257,22 @@ line_runs :: proc(marks: ^Line_Marks, length: int, out: ^[CHANGES_LINE_EDGES + 1
 	for i in 1 ..< count {
 		for j := i; j > 0 && edges[j] < edges[j - 1]; j -= 1 {edges[j], edges[j - 1] = edges[j - 1], edges[j]}
 	}
+	// Merge the already sorted diff edges into the note edges, from right to left.
+	total := count + 2 * len(changes)
+	for edge, at := 2 * len(changes) - 1, total - 1; edge >= 0; at -= 1 {
+		change := changes[edge / 2]
+		x := change.start if edge % 2 == 0 else change.end
+		if count > 0 && edges[count - 1] > x {
+			count -= 1
+			edges[at] = edges[count]
+		} else {
+			edges[at] = x
+			edge -= 1
+		}
+	}
+	change_at := 0
 	runs := 0
-	for i in 1 ..< count {
+	for i in 1 ..< total {
 		start, end := edges[i - 1], edges[i]
 		if start == end {continue}
 		run := Code_Run {
@@ -1253,6 +1287,12 @@ line_runs :: proc(marks: ^Line_Marks, length: int, out: ^[CHANGES_LINE_EDGES + 1
 			if run.underline.a == 0 {run.underline = seg.underline}
 			if run.strike.a == 0 {run.strike = seg.strike}
 			run.selected ||= seg.selected
+		}
+		for change_at < len(changes) && changes[change_at].end <= start {change_at += 1}
+		if run.tint.a == 0 && !run.selected && change_at < len(changes) && changes[change_at].start <= start {
+			run.tint = tint
+			run.changed = true
+			reached = true
 		}
 		if reached {
 			out[runs] = run
@@ -1287,12 +1327,30 @@ row_pick_draw :: proc(p: ^Diff_Paint, file, line: int, picked: bool, row: render
 	}
 }
 
+// Both sides of the match table are ordered, so look up only the visible changed lines.
+@(private = "file")
+edit_ranges :: proc(h: ^tr.Hunk, at: int, kind: tr.Line_Kind) -> []tr.Diff_Range {
+	if kind != .Added && kind != .Removed {return nil}
+	lo, hi := 0, len(h.edits)
+	for lo < hi {
+		mid := lo + (hi - lo) / 2
+		edit := h.edits[mid]
+		line := edit.left if kind == .Removed else edit.right
+		if line == at {
+			if kind == .Removed {return h.edit_ranges[edit.first:edit.split]}
+			return h.edit_ranges[edit.split:edit.end]
+		}
+		if line < at {lo = mid + 1} else {hi = mid}
+	}
+	return nil
+}
+
 // A line's sign and text in `column`: the sign inked for the row it is picked on, the text by runs of
 // `marks`. The numbers are the caller's, for they differ by layout.
 @(private = "file")
 paint_code :: proc(
 	p: ^Diff_Paint, d: ^tr.Diff_Line, file, flat: int, picked: bool, marks: ^Line_Marks, column: Code_Column,
-	row: render.Rect, baseline: f32,
+	row: render.Rect, baseline: f32, changes: []tr.Diff_Range,
 ) -> render.Build_Status {
 	spans, highlighted := line_spans(p.view, file, flat)
 	inks := row_inks(p, d.kind, picked)
@@ -1309,11 +1367,18 @@ paint_code :: proc(
 		}
 		plain = CHANGES_INK_TEXT
 	}
-	runs: [CHANGES_LINE_EDGES + 1]Code_Run
+	runs: [CHANGES_RUNS]Code_Run = ---
+	tint: render.Color
+	changed_inks: ^[CHANGES_INKS]render.Color
+	if len(changes) > 0 {
+		add := d.kind == .Added
+		tint = edit_tint(p.theme.diff_added if add else p.theme.diff_removed)
+		changed_inks = &p.state.inks.table[.Added_Edit if add else .Removed_Edit]
+	}
 	line := Code_Line {
 		text          = d.text,
 		spans         = spans,
-		runs          = line_runs(marks, len(d.text), &runs),
+		runs          = line_runs(marks, len(d.text), changes, tint, &runs),
 		font          = p.font,
 		x             = column.text_x,
 		width         = column.width,
@@ -1324,6 +1389,7 @@ paint_code :: proc(
 		scale         = p.scale,
 		inks          = row_inks(p, d.kind, false),
 		selected_inks = row_inks(p, d.kind, true),
+		changed_inks  = changed_inks,
 		plain         = plain,
 	}
 	if !p.wrap {return code_line_draw(p.list, p.mono, line)}
@@ -1368,8 +1434,9 @@ paint_marker :: proc(
 
 @(private = "file")
 paint_line :: proc(
-	p: ^Diff_Paint, line: ^tr.Diff_Line, file, flat: int, y, height: f32,
+	p: ^Diff_Paint, h: ^tr.Hunk, at, file, flat: int, y, height: f32,
 ) -> render.Build_Status {
+	line := &h.lines[at]
 	t := p.theme
 	baseline := baseline_in(y, p.line_h, p.mono)
 	row := render.Rect{p.card_x, y, p.card_width, height}
@@ -1392,7 +1459,7 @@ paint_line :: proc(
 	if line.kind != .Removed {
 		if r := number_draw(p, line.new_line, column.new_x, baseline); r != .Ok {return r}
 	}
-	return paint_code(p, line, file, flat, picked, &marks, column, row, baseline)
+	return paint_code(p, line, file, flat, picked, &marks, column, row, baseline, edit_ranges(h, at, line.kind))
 }
 
 // One cell of a side-by-side row: flat line `line` of the hunk whose first line is flat line `flat`, with
@@ -1434,7 +1501,7 @@ paint_cell :: proc(
 	column := code_column(cell, p.number_width, p.digit, s, false)
 	if d.kind == .No_Newline {return paint_marker(p, file, line, column, baseline)}
 	if r := number_draw(p, old ? d.old_line : d.new_line, column.old_x, baseline); r != .Ok {return r}
-	return paint_code(p, d, file, line, picked, &marks, column, cell, baseline)
+	return paint_code(p, d, file, line, picked, &marks, column, cell, baseline, edit_ranges(h, at, d.kind))
 }
 
 // Hunk `index` of `file`, whose first line is flat line `flat`: its header row, then its rows.
@@ -1499,7 +1566,7 @@ paint_hunk :: proc(
 			if r := paint_cell(p, h, file, flat, int(pair.right), false, right); r != .Ok {return r}
 			draw_rect(p.list, {rect = divider, color = t.border})
 		} else if at := int(pair.left) - flat; at >= 0 && at < len(h.lines) {
-			if r := paint_line(p, &h.lines[at], file, int(pair.left), row, height); r != .Ok {return r}
+			if r := paint_line(p, h, at, file, int(pair.left), row, height); r != .Ok {return r}
 		}
 	}
 	return .Ok

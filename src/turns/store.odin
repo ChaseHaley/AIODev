@@ -601,6 +601,7 @@ diff_entries :: proc(
 		"--full-index",
 		"--no-color",
 		"--no-ext-diff",
+		"--histogram",
 		"-U3",
 		"--src-prefix=a/",
 		"--dst-prefix=b/",
@@ -874,11 +875,11 @@ plain_diff :: proc(
 	Git_Output,
 	Error,
 ) {
-	args := make([dynamic]string, 0, 16 + len(revisions) + len(tail), context.allocator)
+	args := make([dynamic]string, 0, 17 + len(revisions) + len(tail), context.allocator)
 	defer delete(args)
 	append(&args, "-c", "diff.autoRefreshIndex=false", "-c", "core.quotePath=false", "diff")
 	append(&args, ..revisions)
-	append(&args, "--no-color", "--no-ext-diff", "--full-index", "-U3")
+	append(&args, "--no-color", "--no-ext-diff", "--full-index", "--histogram", "-U3")
 	append(&args, "--src-prefix=a/", "--dst-prefix=b/")
 	append(&args, ..tail)
 	// Without a path list a file named like the revision would make the argument ambiguous.

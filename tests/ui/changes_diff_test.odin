@@ -803,6 +803,79 @@ changes_code_text_keeps_the_minimum_contrast :: proc(t: ^testing.T) {
 	testing.expect_value(t, count_colour(&list, added_row, theme.palette[8]), 2)
 }
 
+@(test)
+changes_diff_aligns_replacements_and_tints_only_edited_tokens :: proc(t: ^testing.T) {
+	device, device_error := render.device_create(.Warp)
+	if !testing.expect_value(t, device_error, render.Error.None) {return}
+	defer render.device_destroy(device)
+	f: Diff_Fixture
+	view: ui.Changes_View
+	if !diff_fixture_make(t, &f, &view) {return}
+	defer diff_fixture_destroy(&f)
+	cache: glyphs.Cache
+	glyphs.init(&cache, f.fonts, device)
+	defer glyphs.destroy(&cache)
+	if !testing.expect(t, ui.text_init(&f.text, f.fonts, &cache, 13)) {return}
+	f.mono = ui.text_mono(&f.text, f.text.family)
+	patch := `diff --git a/sample.odin b/sample.odin
+@@ -1,2 +1,3 @@
+-set_theme(blue, 15)
+-render_title("left")
++enable_logging()
++set_theme(green, 82)
++render_title("right")
+`
+	d, ok := turns.diff_parse(patch)
+	if !testing.expect(t, ok) {return}
+	defer turns.diff_destroy(&d)
+	turns.diff_refine(&d)
+	view.files = d.files
+	theme := ui.Theme {
+		pane = hex(0x222436), text = hex(0xc8d3f5), diff_added = hex(0xc3e88d, 0x24),
+		diff_removed = hex(0xff757f, 0x24),
+	}
+	state: ui.Changes_State
+	defer ui.changes_state_destroy(&state)
+	list := render.draw_list_init()
+	defer render.draw_list_destroy(&list)
+	layouts := [?]bool{false, true}
+	for side_by_side in layouts {
+		view.side_by_side = side_by_side
+		g := lay_out(&f, &view, &state)
+		old := ui.changes_line_rect(g, &view, &state, 0, 0)
+		inserted := ui.changes_line_rect(g, &view, &state, 0, 2)
+		row, column, found := ui.changes_line_code(g, &view, &state, &f.mono, 0, 3)
+		if !testing.expect(t, found) {return}
+		if side_by_side {
+			testing.expect_value(t, row.y, old.y)
+			testing.expect(t, row.x > old.x && inserted.y < row.y)
+		} else {
+			testing.expect(t, old.y < inserted.y && inserted.y < row.y)
+		}
+
+		render.draw_list_reset(&list)
+		testing.expect_value(t, render.push_layer(&list, g.area), render.Error.None)
+		status, _ := ui.changes_draw(&list, &f.text, &f.mono, &theme, g, &view, &state, 1, {-1, -1}, 0)
+		testing.expect_value(t, status, render.Build_Status.Ok)
+		starts := [?]string{"set_theme(", "set_theme(green, "}
+		words := [?]string{"green", "82"}
+		seen := 0
+		for item in list.rects {
+			c := item.color
+			if c.r != theme.diff_added.r || c.g != theme.diff_added.g || c.b != theme.diff_added.b ||
+			   c.a <= theme.diff_added.a {continue}
+			testing.expect(t, item.rect.y != inserted.y, "an inserted line should get only the row tint")
+			if item.rect.y != row.y {continue}
+			if !testing.expect(t, seen < len(words)) {return}
+			x := column.text_x + ui.text_width(&f.mono, starts[seen])
+			testing.expect(t, abs(item.rect.x - x) < 0.05)
+			testing.expect(t, abs(item.rect.width - ui.text_width(&f.mono, words[seen])) < 0.05)
+			seen += 1
+		}
+		testing.expect_value(t, seen, len(words))
+	}
+}
+
 // The offset and x mappings follow what paint_text draws: a tab is four spaces from the pen, a rune with no
 // glyph takes no room, and only the runes that start inside the room count.
 @(test)

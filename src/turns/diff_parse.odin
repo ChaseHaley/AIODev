@@ -20,6 +20,17 @@ Diff_Line :: struct {
 	text:     string,
 }
 
+// A changed byte range inside a diff line; end is exclusive.
+Diff_Range :: struct {
+	start, end: int,
+}
+
+// Similar lines in a hunk, with their changed byte ranges on either side of `split`.
+Diff_Edit :: struct {
+	left, right:       int,
+	first, split, end: int,
+}
+
 Hunk :: struct {
 	old_start: i32,
 	old_count: i32,
@@ -28,6 +39,8 @@ Hunk :: struct {
 	// What git prints after the second @@, usually the enclosing function.
 	section:   string,
 	lines:     []Diff_Line,
+	edits:       []Diff_Edit,
+	edit_ranges: []Diff_Range,
 }
 
 File_Status :: enum u8 {
@@ -144,6 +157,10 @@ diff_destroy :: proc(d: ^Diff) {
 		delete(s, d.allocator)
 	}
 	delete(d.owned)
+	for &h in d.hunk_slab {
+		delete(h.edits, d.allocator)
+		delete(h.edit_ranges, d.allocator)
+	}
 	delete(d.files, d.allocator)
 	delete(d.hunk_slab, d.allocator)
 	delete(d.line_slab, d.allocator)

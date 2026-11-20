@@ -3132,6 +3132,7 @@ tw_query_fill :: proc(
 	result.patch = turns.diff_entries(store.store, entries, arena, state.cancel) or_return
 	diff, parsed := turns.diff_parse(result.patch, arena)
 	if !parsed {return .Failed}
+	turns.diff_refine(&diff)
 	result.diff = diff
 	// A file is marked when the entry of either of its paths is, which a rename pairs up.
 	marks := make(map[string]bool, len(entries), temp)
@@ -3687,6 +3688,7 @@ tw_plain_fill :: proc(
 	result.omitted = omitted
 	diff, parsed := turns.diff_parse(patch, arena)
 	if !parsed {return .Failed}
+	turns.diff_refine(&diff)
 	result.diff = diff
 	// The index and HEAD sides are blobs of the user's repository; a work tree side is the file on disk.
 	source := Tw_Source {

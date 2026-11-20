@@ -265,6 +265,38 @@ copy_names_both_paths :: proc(t: ^testing.T) {
 }
 
 @(test)
+diff_refines_replacements_without_highlighting_their_shared_text :: proc(t: ^testing.T) {
+	defer free_all(context.temp_allocator)
+	d := parse(t, unified(
+		"diff --git a/a.txt b/a.txt",
+		"@@ -1,2 +1,3 @@",
+		"-set_theme(blue, 15)",
+		"-render_title(café)",
+		"\\ No newline at end of file",
+		"+absolutely unrelated",
+		"+set_theme(green, 82)",
+		"+render_title(茶)",
+	))
+	defer turns.diff_destroy(&d)
+	turns.diff_refine(&d)
+	if !testing.expect_value(t, len(d.hunk_slab), 1) {return}
+	h := &d.hunk_slab[0]
+	if !testing.expect_value(t, len(h.edits), 2) {return}
+	left := [?][2]string{{"blue", "15"}, {"café", ""}}
+	right := [?][2]string{{"green", "82"}, {"茶", ""}}
+	for edit, i in h.edits {
+		testing.expect_value(t, edit.left, i)
+		testing.expect_value(t, edit.right, i + 4)
+		old, new := h.lines[edit.left].text, h.lines[edit.right].text
+		old_ranges, new_ranges := h.edit_ranges[edit.first:edit.split], h.edit_ranges[edit.split:edit.end]
+		if !testing.expect_value(t, len(old_ranges), 2 - i) {return}
+		if !testing.expect_value(t, len(new_ranges), 2 - i) {return}
+		for span, j in old_ranges {testing.expect_value(t, old[span.start:span.end], left[i][j])}
+		for span, j in new_ranges {testing.expect_value(t, new[span.start:span.end], right[i][j])}
+	}
+}
+
+@(test)
 binary_files_are_marked_and_have_no_hunks :: proc(t: ^testing.T) {
 	defer free_all(context.temp_allocator)
 	d := parse(

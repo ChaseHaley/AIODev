@@ -202,13 +202,13 @@ code_x_of :: proc(t: ^Text, s: string, width: f32, offset: int, scroll: f32 = 0)
 Code_Run :: struct {
 	start, end:              int,
 	tint, underline, strike: render.Color,
-	selected:                bool,
+	selected, changed:       bool,
 }
 
 // One line of code to draw. `spans` and `runs` are byte offsets into the line, and `text` is the line from
 // byte `base` on (a whole line has base 0; a row of a wrapped block starts mid-line); text outside the spans
-// takes ink `plain`. `inks` colours the text, and runs marked `selected` take `selected_inks` instead
-// (`inks` again when it is nil). The text starts at `x`, scrolled left by `scroll` pixels, and shows the
+// takes ink `plain`. Runs with their own background take `selected_inks` or `changed_inks` when set.
+// The text starts at `x`, scrolled left by `scroll` pixels, and shows the
 // runes that fit whole in `width`; the tints and lines fill the row `top` and `height` give, from `x` to the
 // room's end.
 Code_Line :: struct {
@@ -220,7 +220,7 @@ Code_Line :: struct {
 	x, width, scroll:      f32,
 	top, height, baseline: f32,
 	scale:                 f32,
-	inks, selected_inks:   ^[CHANGES_INKS]render.Color,
+	inks, selected_inks, changed_inks: ^[CHANGES_INKS]render.Color,
 	plain:                 int,
 }
 
@@ -277,7 +277,13 @@ code_line_draw :: proc(list: ^render.Draw_List, t: ^Text, line: Code_Line) -> re
 		}
 		for next < len(line.spans) && int(line.spans[next].end) <= at {next += 1}
 		inks := line.inks
-		if open && line.runs[run_at].selected && line.selected_inks != nil {inks = line.selected_inks}
+		if open {
+			if line.runs[run_at].selected && line.selected_inks != nil {
+				inks = line.selected_inks
+			} else if line.runs[run_at].changed && line.changed_inks != nil {
+				inks = line.changed_inks
+			}
+		}
 		c := inks[line.plain]
 		if next < len(line.spans) && int(line.spans[next].start) <= at {
 			index := palette[line.spans[next].kind]
