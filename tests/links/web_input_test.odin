@@ -24,6 +24,13 @@ normalize_web_input_adds_schemes_and_refuses_others :: proc(t: ^testing.T) {
 		{"http://[::1]:8080/x", "http://[::1]:8080/x"},
 		{"\texample.com\n", "https://example.com"},
 		{"JavaScript:alert(1)", ""},
+		// A scheme with no slashes is not a host and port.
+		{"about:blank", ""},
+		{"data:text/html,hi", ""},
+		{"file:relative.html", ""},
+		{"mailto:someone@example.com", ""},
+		{"localhost:", ""},
+		{"example.com:443/a", "https://example.com:443/a"},
 	}
 	for c in cases {
 		got, ok := links.normalize_web_input(c.raw, context.temp_allocator)

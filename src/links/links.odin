@@ -250,7 +250,7 @@ normalize_web_input :: proc(raw: string, allocator := context.temp_allocator) ->
 		cloned, err := strings.clone(trimmed, allocator)
 		return cloned, err == nil
 	}
-	if strings.contains(trimmed, "://") {return "", false}
+	if strings.contains(trimmed, "://") || !bare_authority_valid(trimmed) {return "", false}
 	prefix := "https://"
 	if strings.has_prefix(trimmed, "localhost") ||
 	   strings.has_prefix(trimmed, "127.0.0.1") ||
@@ -261,4 +261,28 @@ normalize_web_input :: proc(raw: string, allocator := context.temp_allocator) ->
 	if err != nil {return "", false}
 	if !allowed(candidate) {return "", false}
 	return candidate, true
+}
+
+// Whether the host part of a bare address is a host with at most a numeric port, so `about:blank`,
+// `data:text/html,…` and `file:name` are not read as a host named after their scheme.
+@(private, require_results)
+bare_authority_valid :: proc(text: string) -> bool {
+	authority := text
+	if end := strings.index_any(authority, "/?#"); end >= 0 {authority = authority[:end]}
+	port := ""
+	if strings.has_prefix(authority, "[") {
+		close := strings.index_byte(authority, ']')
+		if close < 0 {return false}
+		rest := authority[close + 1:]
+		if rest == "" {return true}
+		if rest[0] != ':' {return false}
+		port = rest[1:]
+	} else if colon := strings.index_byte(authority, ':'); colon >= 0 {
+		port = authority[colon + 1:]
+	} else {
+		return true
+	}
+	if port == "" {return false}
+	for c in transmute([]u8)port {if c < '0' || c > '9' {return false}}
+	return true
 }
