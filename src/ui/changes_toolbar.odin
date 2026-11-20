@@ -824,36 +824,23 @@ filter_picks_draw :: proc(
 	return .Ok
 }
 
-// The field's @ button: the @ in the muted ink, as an icon button's, lighting under the pointer or while the
-// list is open.
+// The field's @ button: the clear ×'s own icon button, lit under the pointer or while the list is open.
 @(private = "file")
 filter_at_draw :: proc(
 	list: ^render.Draw_List,
-	text: ^Text,
 	theme: Theme,
 	g: Changes_Geometry,
 	view: ^Changes_View,
 	state: ^Changes_State,
 	pointer: [2]f32,
 ) -> render.Build_Status {
-	rect := g.filter_at
-	if rect.width <= 0 {return .Ok}
+	if g.filter_at.width <= 0 {return .Ok}
 	hover, press := changes_lit(state, {.Filter_At, 0, 0})
-	b := Button {
-		rect     = rect,
-		hover    = hover,
-		press    = press,
-		radius   = RADIUS_CONTROL,
-		surface  = .Flat_Unfilled,
-		selected = view.filter_pick_open,
-	}
-	face, ink, err := button_draw(list, theme, b, g.scale, pointer)
-	if err != .None {return .Ok}
-	body := text_styled(text, .Body)
-	width := text_width(&body, "@")
-	return draw_text(
-		&body, list, "@", face.x + (face.width - width) / 2, baseline_in(face.y, face.height, &body), ink,
+	if view.filter_pick_open {hover = 1}
+	err := icon_button_draw(
+		list, theme, g.filter_at, .At, hover, press, g.scale, pointer, ICON_INDICATOR, RADIUS_CONTROL,
 	)
+	return err == .None ? .Ok : .Ok
 }
 
 // The open filter popover: the field (outlined in the error colour while the filter is invalid) with the
@@ -888,7 +875,7 @@ filter_popover_draw :: proc(
 		)
 		if status != .Ok {return status}
 	}
-	if status := filter_at_draw(list, text, theme, g, view, state, pointer); status != .Ok {return status}
+	if status := filter_at_draw(list, theme, g, view, state, pointer); status != .Ok {return status}
 	if g.filter_clear.width > 0 {
 		hover, press := changes_lit(state, {.Filter_Clear, 0, 0})
 		err := icon_button_draw(
