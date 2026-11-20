@@ -8,7 +8,7 @@ Before project work, read these files from the vault:
 
 - `AIODev/AIODev.md`: project home and current position.
 - `AIODev/System/Organization.md`: note types, statuses, linking, and maintenance.
-- `AIODev/System/Idea capture.md`: required conversational idea capture procedure.
+- `AIODev/System/Idea capture.md`: when to start owner requests and how to track them.
 - `AIODev/Work/Work.md`: work dashboard; follow links to relevant individual records.
 - `AIODev/Engineering Standards.md`: follow its links to applicable engineering rules.
 - `AIODev/Validation Tooling/Recipes/Feature map.md`: current user-facing features
@@ -16,18 +16,8 @@ Before project work, read these files from the vault:
   verifying a feature, follow its entry to the relevant feature note and recipes.
   Update affected entries when user paths, prerequisites, or proof change.
 
-When the owner expresses an actionable idea, wish, improvement, or deferred request,
-catalogue it in the vault during that turn. Search existing work first. Extend a
-matching record or create a separate work item with a stable ID, faithful request,
-date/origin, status idea or proposed, tentative area/stage, and precise related links.
-Use Work/Intake/Intake.md when placement is uncertain. Set area to the matching area
-note link (or unassigned); native Bases views update automatically. Tell the owner
-briefly where the idea was saved. A session log or
-chat summary is not the idea's only home. Capture is not approval to implement.
-
-Keep the original authorized task moving while capturing new ideas. Do not silently
-discard, implement, prioritize, or mark an idea approved. If the vault is inaccessible,
-state that capture failed and preserve the proposed entry in the response.
+Follow `AIODev/System/Idea capture.md#Purpose` for owner requests. Track the
+request in a work item while carrying out the requested work.
 
 Work items own status, dependencies, progress, and evidence. Update item properties,
 dated progress, and evidence when status changes; maintain narrative navigation as
