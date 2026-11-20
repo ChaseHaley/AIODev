@@ -118,7 +118,7 @@ control_commands_target_panes_without_moving_focus :: proc(t: ^testing.T) {
 	testing.expect(t, shown.zoomed)
 
 	// A targeted minimize command restores a minimized float instead of focusing and hiding it again.
-	floating := invoke(&state, first, "pane.new_floating", "--pane", id)
+	floating := invoke(&state, first, "pane.split", "--float", "--pane", id)
 	testing.expect_value(t, floating.status, cli_protocol.Status.Ok)
 	float_id := strings.clone(fmt.tprintf("%d", floating.payload.(app.Outcome_Created).pane))
 	defer delete(float_id)
@@ -198,8 +198,8 @@ control_commands_target_panes_without_moving_focus :: proc(t: ^testing.T) {
 		testing.expectf(t, split_system.ok, "pane.split --cwd System32: %s", split_system.text)
 		testing.expect_value(t, state.sessions[len(state.sessions) - 1].header.launch_directory, system)
 		// A float otherwise starts in its target's directory; aio's working directory comes first.
-		float_root := app.control_cli_answer(&state, {"", "text", root, "pane.new_floating"})
-		testing.expectf(t, float_root.ok, "pane.new_floating from %s: %s", root, float_root.text)
+		float_root := app.control_cli_answer(&state, {"", "text", root, "pane.split", "--float"})
+		testing.expectf(t, float_root.ok, "pane.split --float from %s: %s", root, float_root.text)
 		testing.expect_value(t, state.sessions[len(state.sessions) - 1].header.launch_directory, root)
 
 		// A key split still starts in its pane's directory, whatever the last request named.

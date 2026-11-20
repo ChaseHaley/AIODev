@@ -1456,6 +1456,7 @@ aio.pane = {}
 ---The fields of pane.agent_changes.
 ---@class aio.fields.pane.agent_changes
 ---@field pane? string|integer the pane to act on: a pane id, a pane name, here or focused; default: here (the pane aio runs in), or the focused pane outside AIODev
+---@field float? boolean opens a separate float; cannot be combined with --direction or --ratio; default: the command's usual placement
 
 ---Open agent changes
 ---
@@ -1988,18 +1989,10 @@ function aio.pane.move_workspace(fields) end
 ---The fields of pane.new_floating.
 ---@class aio.fields.pane.new_floating
 ---@field pane? string|integer the pane to act on: a pane id, a pane name, here or focused; default: here (the pane aio runs in), or the focused pane outside AIODev
----@field focus? boolean moves focus to the new pane; default: off (focus stays where it is)
----@field cwd? string the directory the new pane starts in (a relative path is from aio's working directory); default: aio's working directory
----@field name? string names the new pane, not its tab (--pane then accepts the name); default: none (the pane shows its program's title)
----@field profile? string the shell profile the new pane runs, by id; default: the default profile (shell.default_profile)
----@field command? string[] runs this program in the new pane instead of the profile's shell (only .exe names resolve: run .cmd and .ps1 through a shell); default: the profile's shell
----@field command_file? string reads the program and its arguments from a UTF-8 JSON array of strings, program first, so no shell quotes them; at most 64 KiB, relative to aio's working directory; not with --; default: none (the profile's shell)
----@field bounds? number[] the float's position and size in the chosen unit; default: a centered float
----@field unit? "share"|"cells" the bounds' unit, fractions of the float area or terminal cells; default: share
 
 ---New shell float
 ---
----Opens a shell or program floating above the pane's tab and prints its id; focus stays where it is unless --focus.
+---Opens a shell float from the keyboard or palette. In scripts use pane.split --float.
 ---@param fields? aio.fields.pane.new_floating
 ---@return aio.Reply? reply
 ---@return string? message
@@ -2013,6 +2006,7 @@ function aio.pane.new_floating(fields) end
 ---@field ratio? number the new pane's share of the split pane's width (left, right) or height (up, down); default: 0.5 (half)
 ---@field focus? boolean moves focus to the new pane; default: off (focus stays where it is)
 ---@field file? string the file to open (a relative path is from aio's working directory); default: none (required)
+---@field float? boolean opens a separate float; cannot be combined with --direction or --ratio; default: the command's usual placement
 
 ---Open Markdown file…
 ---
@@ -2043,6 +2037,7 @@ function aio.pane.open_markdown_default_app(fields) end
 ---@field ratio? number the new pane's share of the split pane's width (left, right) or height (up, down); default: 0.5 (half)
 ---@field focus? boolean moves focus to the new pane; default: off (focus stays where it is)
 ---@field text? string the http or https address to open; default: a blank pane
+---@field float? boolean opens a separate float; cannot be combined with --direction or --ratio; default: the command's usual placement
 
 ---Open web pane
 ---
@@ -2289,10 +2284,13 @@ function aio.pane.set_ratio(fields) end
 ---@field profile? string the shell profile the new pane runs, by id; default: the default profile (shell.default_profile)
 ---@field command? string[] runs this program in the new pane instead of the profile's shell (only .exe names resolve: run .cmd and .ps1 through a shell); default: the profile's shell
 ---@field command_file? string reads the program and its arguments from a UTF-8 JSON array of strings, program first, so no shell quotes them; at most 64 KiB, relative to aio's working directory; not with --; default: none (the profile's shell)
+---@field bounds? number[] the float's position and size in the chosen unit; default: a centered float
+---@field unit? "share"|"cells" the bounds' unit, fractions of the float area or terminal cells; default: share
+---@field float? boolean opens a separate float; cannot be combined with --direction or --ratio; default: the command's usual placement
 
 ---Split pane
 ---
----Splits the pane, runs the profile's shell or a program in the new pane and prints its id; focus stays where it is unless --focus.
+---Runs a shell or program in a split, or above the tab with --float, and prints its pane id; focus stays where it is unless --focus.
 ---@param fields? aio.fields.pane.split
 ---@return aio.Reply? reply
 ---@return string? message
@@ -2601,6 +2599,7 @@ function aio.settings.lua_path(fields) end
 ---The fields of settings.open.
 ---@class aio.fields.settings.open
 ---@field pane? string|integer the pane to act on: a pane id, a pane name, here or focused; default: here (the pane aio runs in), or the focused pane outside AIODev
+---@field float? boolean opens a separate float; cannot be combined with --direction or --ratio; default: the command's usual placement
 
 ---Settings
 ---@param fields? aio.fields.settings.open

@@ -543,6 +543,15 @@ control_markdown_open :: proc(
 	if !ok {return outcome_failure(.Failed, "that file is not available; use a local, absolute path")}
 	defer localpath.open_file_destroy(&file)
 	if file.confirm {return outcome_failure(.Failed, "that file type is not shown as Markdown")}
+	if .Float in invocation.given {
+		pane := markdown_pane_create(app, file.target, true)
+		if pane == nil ||
+		   !pane_place(app, w, target.workspace, target.pane.tab, target.pane.node,
+		               {.Markdown, pane.id}, .Float, invocation.focus) {
+			return outcome_failure(.Failed, "could not open the file")
+		}
+		return {}
+	}
 	// A requested direction asks for a split, whatever the floating preference.
 	floating := app.settings.pane.markdown_floating && .Direction not_in invocation.given
 	if !markdown_open_at(

@@ -114,7 +114,7 @@ layout_view_round_trips_trees_floats_and_targeted_edits :: proc(t: ^testing.T) {
 	changed := layout_view_invoke(&state, original, "float.set_bounds", "--pane", float_id, "--bounds",
 		"0.2,0.1,0.5,0.4")
 	testing.expect_value(t, changed.status, cli_protocol.Status.Ok)
-	extra := layout_view_invoke(&state, panes[0].id, "pane.new_floating", "--bounds", "0.3,0.3,0.3,0.3")
+	extra := layout_view_invoke(&state, panes[0].id, "pane.split", "--float", "--bounds", "0.3,0.3,0.3,0.3")
 	if !testing.expect_value(t, extra.status, cli_protocol.Status.Ok) {return}
 	extra_pane := extra.payload.(app.Outcome_Created).pane
 	restack_commands := [2]string{"float.raise", "float.lower"}

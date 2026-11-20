@@ -178,14 +178,20 @@ settings_focus :: proc(app: ^App, w: ^Window, workspace: ^Workspace) -> ^Window 
 	return owner
 }
 
-// Focuses the settings tab wherever it is, or creates one here and loads the settings file. The app keeps a
-// single settings tab. Returns the window showing it, which may not be w, or nil if it could not be shown.
-editor_open :: proc(app: ^App, w: ^Window) -> ^Window {
+// Focuses the existing Settings pane, or creates one here in a new tab or an explicitly requested float.
+// Returns the window showing it, or nil on failure.
+editor_open :: proc(app: ^App, w: ^Window, floating := false) -> ^Window {
 	if !gesture_cancel(app, w) {return nil}
 	palette_close(app, w)
 	find_close(app, w, find_target(app, w))
 	if workspace := settings_workspace(app, w); workspace != nil {return settings_focus(app, w, workspace)}
 	if !settings_load(app, &w.editor) {return nil}
+	if floating {
+		if pane_place(app, w, w.workspace, w.workspace.selected, window_tree(w).focus,
+		              {.Settings, 0}, .Float, true) {return w}
+		ui.editor_destroy(&w.editor)
+		return nil
+	}
 	tab, reserved := tab_record_reserve(w.workspace)
 	if !reserved {
 		ui.editor_destroy(&w.editor)

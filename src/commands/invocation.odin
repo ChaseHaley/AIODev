@@ -40,6 +40,7 @@ Argument :: enum u8 {
 	Beside,
 	Cells,
 	Layout,
+	Float,
 }
 Arguments :: bit_set[Argument;u32]
 
@@ -257,6 +258,14 @@ argument_grammar := [Argument]struct {
 			`--layout '{"root":{}}'`,
 		},
 	},
+	.Float = {
+		"--float", "",
+		{
+			"opens a separate float; cannot be combined with --direction or --ratio",
+			"the command's usual placement",
+			"--float",
+		},
+	},
 }
 #assert(layout.SPLIT_SHARE_MIN == 0.05 && layout.SPLIT_SHARE_MAX == 0.95)
 #assert(SPLIT_DEFAULT.direction == .Right && SPLIT_DEFAULT.ratio == 0.5)
@@ -292,6 +301,7 @@ ARGUMENT_LUA_TYPES :: [Argument]string {
 	.Beside       = "string|integer",
 	.Cells        = "integer",
 	.Layout       = "table|string",
+	.Float        = "boolean",
 }
 
 // Each argument with the option that reads it from a file instead, so no shell's quoting touches it.
@@ -464,6 +474,7 @@ parse_invocation :: proc(
 			continue
 		}
 		if argument == .Once {result.once = true; continue}
+		if argument == .Float {continue}
 		if i + 1 == len(args) {return {}, {option, "supply a value after this option"}}
 		i += 1
 		value := args[i]
@@ -535,6 +546,14 @@ parse_invocation :: proc(
 			case:
 				result.workspace = value
 			}
+		}
+	}
+	if .Float in command.arguments {
+		if .Float in result.given && result.given & {.Direction, .Ratio} != {} {
+			return {}, {"--float", "cannot be combined with --direction or --ratio"}
+		}
+		if .Float not_in result.given && result.given & {.Bounds, .Unit} != {} {
+			return {}, {"--float", "use --float with --bounds or --unit"}
 		}
 	}
 	missing := command.required - result.given

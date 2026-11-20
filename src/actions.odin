@@ -409,11 +409,12 @@ ACTIONS :: [Action]Command_Descriptor {
 	},
 	.Last_Tab = {"tab.last", "Select last tab", nil, .Host, {}},
 	.Close_Tab = {"tab.close", "Close selected tabs", {{.W, {.Control, .Shift}}}, .Host, {}},
-	.Settings_UI = {"settings.open", "Settings", {{.Comma, {.Control}}}, .Host, {}},
+	.Settings_UI = {"settings.open", "Settings", {{.Comma, {.Control}}}, .Host, {accepted = {.Float}}},
 	.Split = {
 		"pane.split", "Split pane", nil, .Local,
 		{
-			accepted = {.Direction, .Ratio, .Focus, .Directory, .Name, .Profile, .Program, .Command_File},
+			accepted = {.Direction, .Ratio, .Focus, .Directory, .Name, .Profile, .Program, .Command_File} +
+				{.Float, .Bounds, .Unit},
 			control = .Pane,
 		},
 	},
@@ -462,7 +463,7 @@ ACTIONS :: [Action]Command_Descriptor {
 	.Change_Pane_Shell = {"pane.change_shell", "Change pane shell…", nil, .Local, {}},
 	.Open_Markdown = {
 		"pane.open_markdown", "Open Markdown file…", nil, .Host,
-		{accepted = {.File, .Direction, .Ratio, .Focus}, control = .Pane},
+		{accepted = {.File, .Direction, .Ratio, .Focus, .Float}, control = .Pane},
 	},
 	.Edit_Markdown = {"pane.edit_markdown", "Toggle Markdown editing", nil, .Local, {}},
 	.Open_Markdown_Default_App = {
@@ -470,12 +471,12 @@ ACTIONS :: [Action]Command_Descriptor {
 	},
 	.Open_Web = {
 		"pane.open_web", "Open web pane", nil, .Local,
-		{accepted = {.Text, .Direction, .Ratio, .Focus}, control = .Pane, keywords = "browser"},
+		{accepted = {.Text, .Direction, .Ratio, .Focus, .Float}, control = .Pane, keywords = "browser"},
 	},
 	.Toggle_Web_Navigator = {
 		"pane.toggle_web_navigator", "Toggle web pane URL bar", nil, .Local, {keywords = "browser"},
 	},
-	.Agent_Changes = {"pane.agent_changes", "Open agent changes", nil, .Local, {}},
+	.Agent_Changes = {"pane.agent_changes", "Open agent changes", nil, .Local, {accepted = {.Float}}},
 	.Duplicate_Tab = {"tab.duplicate", "Duplicate tab", nil, .Host, {}},
 	.Move_Tab_Left = {"tab.move_left", "Move tab left", nil, .Host, {}},
 	.Move_Tab_Right = {"tab.move_right", "Move tab right", nil, .Host, {}},
@@ -661,10 +662,7 @@ ACTIONS :: [Action]Command_Descriptor {
 	.Show_Commands = {"pane.commands", "Show saved commands", nil, .Local, {}},
 	.New_Floating = {
 		"pane.new_floating", "New shell float", {{.Backquote, {.Control, .Shift}}}, .Host,
-		{
-			accepted = {.Focus, .Directory, .Name, .Profile, .Program, .Command_File, .Bounds, .Unit},
-			control = .Pane,
-		},
+		{},
 	},
 	.Float_Pane = {"pane.float", "Float or dock pane", {{.Enter, {.Control, .Alt}}}, .Refuse, {}},
 	.Minimize_Floating = {
@@ -899,13 +897,12 @@ COMMAND_HELP :: #partial [Action]Command_Help {
 		nil,
 	},
 	.Split = {
-		"Splits the pane, runs the profile's shell or a program in the new pane and prints its id; focus " +
-		"stays where it is unless --focus.",
+		"Runs a shell or program in a split, or above the tab with --float, and prints its pane id; " +
+		"focus stays where it is unless --focus.",
 		nil,
 	},
 	.New_Floating = {
-		"Opens a shell or program floating above the pane's tab and prints its id; focus stays where it " +
-		"is unless --focus.",
+		"Opens a shell float from the keyboard or palette. In scripts use pane.split --float.",
 		nil,
 	},
 	.New_Workspace = {
@@ -1368,6 +1365,7 @@ command_execute :: proc(app: ^App, ctx: Command_Context, invocation: commands.In
 		if t, named := target.?; named {
 			return control_split(app, window_for_workspace(app, t.workspace), t, invocation)
 		}
+		if .Float in invocation.given {floating_new(app, pane_link_acting_window(app, w)); break}
 		pane_split(app, w, invocation.direction, invocation.ratio, invocation.focus)
 	case .Open_Markdown:
 		if t, named := target.?; named {
@@ -1386,11 +1384,8 @@ command_execute :: proc(app: ^App, ctx: Command_Context, invocation: commands.In
 	case .Toggle_Web_Navigator:
 		web_toggle_navigator(app, w)
 	case .Agent_Changes:
-		changes_open(app, w)
+		changes_open(app, w, .Float in invocation.given ? .Float : .Split_Right)
 	case .New_Floating:
-		if t, named := target.?; named {
-			return control_floating_new(app, window_for_workspace(app, t.workspace), t, invocation)
-		}
 		floating_new(app, w)
 	case .Layout_Apply:
 		t := target.?
@@ -1524,7 +1519,10 @@ command_execute :: proc(app: ^App, ctx: Command_Context, invocation: commands.In
 		}
 	case .Settings_UI:
 		pane_header_cancel(w)
-		editor_open(app, w)
+		shown := editor_open(app, w, .Float in invocation.given)
+		if shown == nil && .Float in invocation.given {
+			return outcome_failure(.Failed, "could not open Settings in a float")
+		}
 	case .Change_Shortcut:
 		settings_reveal(app, w, {section = .Shortcuts})
 	case .Reload_Settings:
