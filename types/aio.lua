@@ -2036,7 +2036,7 @@ function aio.pane.open_markdown_default_app(fields) end
 ---@field direction? "left"|"right"|"up"|"down" the side of the pane the new pane opens on; default: right, or a float when pane.web_floating is on
 ---@field ratio? number the new pane's share of the split pane's width (left, right) or height (up, down); default: 0.5 (half)
 ---@field focus? boolean moves focus to the new pane; default: off (focus stays where it is)
----@field text? string the http or https address to open; default: a blank pane
+---@field text? string the HTTP, HTTPS, or local file:/// address to open; default: a blank pane
 ---@field float? boolean opens a separate float; cannot be combined with --direction or --ratio; default: the command's usual placement
 
 ---Open web pane

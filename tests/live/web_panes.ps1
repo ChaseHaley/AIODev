@@ -116,16 +116,17 @@ try {
     Wait-For 'web.count' '3'
     Check (((Web-Urls) -join ',') -eq ($urls -join ',')) "restored urls: $((Web-Urls) -join ', ')"
 
-    # --float is per open, and creates its own group even when the target already floats.
+    # Float a local page, then open a separate float from it without changing focus.
+    $preview = "$localUrl#floating-preview"
     $before = Read-State
     Check ($before['tab.1.floating'] -eq '0') 'default opens unexpectedly floated a pane'
-    Open-Web @('--float', '--focus', 'https://example.com/float')
-    Wait-For 'web.url' 'https://example.com/float'
+    Open-Web @('--float', '--focus', $preview)
+    Wait-For 'web.url' $preview
     Wait-For 'tab.1.floating' '1'
     Open-Web @('--pane', 'focused', 'https://example.com/second-float', '--float')
     Wait-For 'tab.1.floating' '2'
     Check ((Web-Urls) -contains 'https://example.com/second-float') 'second URL did not open'
-    Check ((Read-State)['web.url'] -eq 'https://example.com/float') 'opening without --focus moved focus'
+    Check ((Read-State)['web.url'] -eq $preview) 'opening without --focus moved focus'
 
     $paneCount = (Read-State)['web.count']
     $splitOptions = @(@('--direction', 'down'), @('--ratio', '0.3'))
