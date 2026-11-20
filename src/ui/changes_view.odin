@@ -179,18 +179,19 @@ Changes_View :: struct {
 	// Lines added and removed in the files shown, and in every file of the result.
 	shown_added, shown_removed, total_added, total_removed: int,
 	filter_editor: ^Text_Field,
-	// The saved filters the filter text names, in order, as the field draws them; `filter_unknown` is the
-	// name of the first that names no saved filter, "" when there is none.
+	// The saved filters the filter text holds as tokens, in order, as the field draws them; `filter_unknown`
+	// is the label of the first that names no saved filter, "" when there is none.
 	filter_tokens: []Filter_Token,
 	filter_unknown: string,
-	// An `@` is being typed: the saved filters it can complete to, the row the keys are on, and whether the
-	// text holds terms to save under a name (Ctrl+S) or a name is being typed for them, with why not.
+	// The saved filters list is open: what it offers, and the row the keys are on. `filter_savable` is
+	// whether the text holds terms to save, `filter_notice` why saving was refused, and `filter_on_labels`
+	// what the bar names as filtering ("@one + @two"), "" while no token is on.
 	filter_pick_open: bool,
 	filter_picks: []Filter_Pick,
 	filter_pick_row: int,
-	filter_savable, filter_naming: bool,
-	filter_name: ^Text_Field,
+	filter_savable: bool,
 	filter_notice: string,
+	filter_on_labels: string,
 	// Some shown file is expanded, so the fold button collapses every file rather than expanding them.
 	any_expanded: bool,
 	// Bumps whenever the content changes, so the cached row layout refreshes.
@@ -232,10 +233,12 @@ Changes_Part :: enum u8 {
 	Filter_Button,
 	Filter_Field,
 	Filter_Clear,
-	// The name field of a filter being saved, and a row of the saved filters offered for `@` (the row past the
-	// last filter is Edit filters…).
-	Filter_Name,
+	// The field's @ button, a row of the saved filters list, and the buttons that save the text as a filter and
+	// open Settings on the saved filters.
+	Filter_At,
 	Filter_Pick,
+	Filter_Save,
+	Filter_Manage,
 	Filter_Bar_Clear,
 	Fold_Button,
 	Select_Lines_Button,
@@ -350,8 +353,6 @@ Changes_State :: struct {
 	tools_open:               bool,
 	// The filter popover is open, so its button stays outlined.
 	filter_open:              bool,
-	// A name is being typed for the filter text's terms, under the field of the open filter popover.
-	filter_naming:            bool,
 	motion:                   Control_Motion,
 	rows:                     Changes_Rows,
 	// Code text colours raised to `minimum_contrast` per row background, kept while the theme and ratio hold.
@@ -411,12 +412,14 @@ Changes_Geometry :: struct {
 	// and the field's clear button; where it goes whenever there is such a button, and shown only while
 	// state.filter_open.
 	filter_popover, filter_field, filter_clear:     render.Rect,
-	// The name field while a filter is being named, empty otherwise; the rows of the saved filters offered
-	// for an `@` being typed (the last is Edit filters…), in temporary memory, and the index the first one
-	// stands for.
-	filter_name:                                    render.Rect,
+	// The field's @ button; the list of saved filters under the field while it is open (its header, rows and
+	// empty message) and the rows themselves, in temporary memory, with the index the first one stands for;
+	// and the Save and Manage buttons at the popover's foot.
+	filter_at:                                      render.Rect,
+	filter_list:                                    render.Rect,
 	filter_picks:                                   []render.Rect,
 	filter_pick_first:                              int,
+	filter_save, filter_manage:                     render.Rect,
 	// The row under the header row while the filter hides files, and its Clear button.
 	filter_bar, filter_bar_clear:                   render.Rect,
 	// The overview strip at the diff's right edge; empty under a notice.
@@ -704,8 +707,10 @@ changes_hit :: proc(
 ) -> Changes_Hit {
 	if state.filter_open && render.rect_contains(g.filter_popover, x, y) {
 		if render.rect_contains(g.filter_clear, x, y) {return {.Filter_Clear, 0, 0}}
+		if render.rect_contains(g.filter_at, x, y) {return {.Filter_At, 0, 0}}
 		if render.rect_contains(g.filter_field, x, y) {return {.Filter_Field, 0, 0}}
-		if render.rect_contains(g.filter_name, x, y) {return {.Filter_Name, 0, 0}}
+		if render.rect_contains(g.filter_save, x, y) {return {.Filter_Save, 0, 0}}
+		if render.rect_contains(g.filter_manage, x, y) {return {.Filter_Manage, 0, 0}}
 		for row, i in g.filter_picks {
 			if render.rect_contains(row, x, y) {return {.Filter_Pick, g.filter_pick_first + i, 0}}
 		}
@@ -747,7 +752,7 @@ changes_animated :: proc(hit: Changes_Hit) -> bool {
 	     .Editor_Suggest, .Editor_Cancel, .Editor_Save, .Send, .Copy, .Discard, .Filter_Clear,
 	     .Filter_Bar_Clear, .Sticky_Header, .Strip_Older, .Strip_Newer, .Summary, .Files_Button, .Tools_Button,
 	     .Source_Chip, .Worktree_Chip, .Toolbar_Delete, .Toolbar_Comment, .Toolbar_Label, .Label_Row,
-	     .Label_Edit:
+	     .Label_Edit, .Filter_At, .Filter_Save, .Filter_Manage:
 		return true
 	}
 	return false

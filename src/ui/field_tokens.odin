@@ -28,13 +28,18 @@ Filter_Token :: struct {
 	state:      Filter_Token_State,
 }
 
-// A saved filter offered for an `@` being typed, as slices of the library the pane keeps.
+// A saved filter offered by the `@` list: its label (name, or pattern while it has no name), its pattern, and
+// how many files it would hide on its own, as slices of the library the pane keeps.
 Filter_Pick :: struct {
-	name, pattern: string,
+	label, pattern: string,
+	hides:          int,
 }
 
 @(private = "file")
 TOKEN_CLOSE :: f32(16)
+
+@(private = "file")
+TOKEN_LABEL_MAX :: f32(180)
 
 @(private = "file")
 token_label :: proc(token: Filter_Token) -> string {
@@ -43,7 +48,8 @@ token_label :: proc(token: Filter_Token) -> string {
 
 @(private = "file")
 token_width :: proc(text: ^Text, token: Filter_Token, s: f32) -> f32 {
-	return math.ceil(text_width(text, token_label(token)) + (SPACE_2 + SPACE_1 + SPACE_1 + TOKEN_CLOSE) * s)
+	label := min(text_width(text, token_label(token)), TOKEN_LABEL_MAX * s)
+	return math.ceil(text_width(text, "@") + label + (SPACE_2 + 2 * SPACE_1 + SPACE_1 + TOKEN_CLOSE) * s)
 }
 
 // Where byte `at` sits, in pixels from the left edge of the text before any scrolling.
@@ -163,8 +169,12 @@ token_draw :: proc(
 		draw_rect(list, {rect = rect, color = theme.warning, radius = radius, stroke = s})
 	}
 	label := token_label(token)
+	at := text_width(text, "@")
 	x := rect.x + SPACE_2 * s
 	close := render.Rect{rect.x + rect.width - (SPACE_1 + TOKEN_CLOSE) * s, rect.y, TOKEN_CLOSE * s, rect.height}
+	mark := token.off ? theme.faint : theme.accent
+	if result := draw_text(text, list, "@", x, baseline, mark, at); result != .Ok {return result}
+	x += at + SPACE_1 * s
 	room := max(1, close.x - x)
 	if result := draw_text(text, list, label, x, baseline, ink, room); result != .Ok {return result}
 	if token.off {

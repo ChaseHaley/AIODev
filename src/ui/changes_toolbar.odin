@@ -44,15 +44,17 @@ FILTER_POPOVER_WIDTH :: f32(360)
 @(private = "file")
 FILTER_PLACEHOLDER :: "Show files matching…"
 @(private = "file")
-FILTER_HINT :: "Space-separated regular expressions; !term hides; @ for saved"
+FILTER_HINT :: "Type @ for saved filters · regular expressions; !term hides"
 @(private = "file")
-FILTER_SAVE_HINT :: "Ctrl+S saves these terms as a filter"
+FILTER_SAVE_LABEL :: "Save text as filter"
 @(private = "file")
-FILTER_NAME_PLACEHOLDER :: "Name this filter"
+FILTER_MANAGE_LABEL :: "Manage…"
 @(private = "file")
-FILTER_NAME_HINT :: "Enter saves, Escape cancels"
+FILTER_LIST_TITLE :: "Saved filters"
 @(private = "file")
-FILTER_MANAGE_LABEL :: "Edit filters…"
+FILTER_LIST_KEYS :: "↑↓ Enter inserts · Esc closes"
+@(private = "file")
+FILTER_LIST_EMPTY :: "No saved filters to add"
 @(private = "file")
 FILTER_PICK_ROWS :: 6
 @(private = "file")
@@ -575,8 +577,8 @@ filter_bar_place :: proc(g: ^Changes_Geometry, text: ^Text, y: f32) {
 }
 
 // The filter popover under the filter circle, or under ⋯ while the circles are collapsed, right-aligned
-// to it inside the pane: the field, with its clear button while it has text, and below it a hint line, the
-// rows of the saved filters an `@` can complete to, or the name field of a filter being saved.
+// to it inside the pane: the field with its @ button and its clear button while it has text, below it a hint
+// line, then the saved filters list while it is open, then the Save and Manage buttons.
 @(private)
 filter_popover_place :: proc(g: ^Changes_Geometry, view: ^Changes_View, text: ^Text) {
 	s := g.scale
@@ -588,46 +590,52 @@ filter_popover_place :: proc(g: ^Changes_Geometry, view: ^Changes_View, text: ^T
 	right := anchor.x + anchor.width
 	x := clamp(right - width, area.x + pad, max(area.x + pad, area.x + area.width - pad - width))
 	y := g.row.y + g.row.height + SPACE_1 * s
-	small := text_styled(text, .Detail)
+	small, body := text_styled(text, .Detail), text_styled(text, .Body)
 	field := math.round(HEIGHT_STANDARD * s)
 	g.filter_field = {x + inset, y + inset, width - 2 * inset, field}
-	height := 2 * inset + field + SPACE_2 * s + small.line_height
-	below := g.filter_field.y + field
-	switch {
-	case view.filter_naming:
-		g.filter_name = {g.filter_field.x, below + SPACE_2 * s, g.filter_field.width, field}
-		height += field + SPACE_2 * s
-	case view.filter_pick_open:
-		place_picks(g, view, x, below + SPACE_1 * s, width)
-		height = inset + field + SPACE_1 * s + f32(len(g.filter_picks)) * math.round(HEIGHT_STANDARD * s) +
-			OVERLAY_PADDING * s
-	}
-	g.filter_popover = {x, y, width, math.round(height)}
+	size := HEIGHT_COMPACT * s
+	f := g.filter_field
+	edge := f.x + f.width - SPACE_1 * s
 	if view.filter_editor != nil && len(view.filter_editor.bytes) > 0 {
-		size := HEIGHT_COMPACT * s
-		f := g.filter_field
-		g.filter_clear = {f.x + f.width - SPACE_1 * s - size, f.y + (f.height - size) / 2, size, size}
+		g.filter_clear = {edge - size, f.y + (f.height - size) / 2, size, size}
+		edge -= size
 	}
+	g.filter_at = {edge - size, f.y + (f.height - size) / 2, size, size}
+	cursor := f.y + field + SPACE_2 * s + small.line_height
+	if view.filter_pick_open {
+		cursor += SPACE_2 * s
+		list_top := cursor
+		cursor += small.line_height + SPACE_1 * s
+		rows := math.round(HEIGHT_STANDARD * s)
+		if len(view.filter_picks) == 0 {
+			cursor += small.line_height + SPACE_2 * s
+		} else {
+			count := min(len(view.filter_picks), FILTER_PICK_ROWS)
+			rects, err := make([]render.Rect, count, context.temp_allocator)
+			if err == nil {
+				g.filter_pick_first = clamp(view.filter_pick_row - count + 1, 0, len(view.filter_picks) - count)
+				for i in 0 ..< count {
+					rects[i] = {f.x, cursor + f32(i) * rows, f.width, rows}
+				}
+				g.filter_picks = rects
+			}
+			cursor += f32(count) * rows
+		}
+		g.filter_list = {f.x, list_top, f.width, cursor - list_top}
+	}
+	cursor += SPACE_2 * s
+	foot := math.round(HEIGHT_TOOLBAR * s)
+	save := math.ceil(
+		text_width(&body, FILTER_SAVE_LABEL) + (SPACE_3 + SPACE_1) * s + 2 * SPACE_2 * s + SPACE_2 * s +
+		keycap_width(&small, "Ctrl+S", s),
+	)
+	manage := math.ceil(text_width(&body, FILTER_MANAGE_LABEL) + 2 * SPACE_2 * s)
+	g.filter_save = {f.x, cursor, min(save, f.width), foot}
+	g.filter_manage = {f.x + g.filter_save.width + SPACE_1 * s, cursor, min(manage, f.width), foot}
+	g.filter_popover = {x, y, width, math.round(cursor + foot + inset - y)}
 }
 
-// Lays out the rows of the saved filters an `@` can complete to under the field, at most
-// FILTER_PICK_ROWS of them, scrolled so the row the keys are on shows; the last row is Edit filters….
-@(private = "file")
-place_picks :: proc(g: ^Changes_Geometry, view: ^Changes_View, x, top, width: f32) {
-	s := g.scale
-	total := len(view.filter_picks) + 1
-	count := min(total, FILTER_PICK_ROWS)
-	rects, err := make([]render.Rect, count, context.temp_allocator)
-	if err != nil {return}
-	g.filter_pick_first = clamp(view.filter_pick_row - count + 1, 0, total - count)
-	height := math.round(HEIGHT_STANDARD * s)
-	for i in 0 ..< count {
-		rects[i] = {x + OVERLAY_PADDING * s, top + f32(i) * height, width - 2 * OVERLAY_PADDING * s, height}
-	}
-	g.filter_picks = rects
-}
-
-// The filter field's editing box, short of the clear button; false without an editor or a field.
+// The filter field's editing box, short of its @ button and clear button; false without an editor or a field.
 changes_filter_box :: proc(
 	g: Changes_Geometry, view: ^Changes_View, text: ^Text,
 ) -> (
@@ -636,7 +644,7 @@ changes_filter_box :: proc(
 ) {
 	if view.filter_editor == nil || g.filter_field.width <= 0 {return}
 	rect := g.filter_field
-	if g.filter_clear.width > 0 {rect.width = max(0, g.filter_clear.x - rect.x)}
+	if g.filter_at.width > 0 {rect.width = max(0, g.filter_at.x - rect.x)}
 	return field_box_standard(view.filter_editor, text, rect, g.scale), true
 }
 
@@ -664,7 +672,7 @@ filter_bar_draw :: proc(
 		s:     string,
 		color: render.Color,
 	}
-	runs: [8]Run
+	runs: [10]Run
 	count := 1
 	stats := view.total_added > 0 || view.total_removed > 0
 	head := stats ? "%d of %d %s hidden · showing " : "%d of %d %s hidden"
@@ -677,12 +685,17 @@ filter_bar_draw :: proc(
 		runs[5] = {fmt.bprintf(count_bufs[2][:], "+%d", view.total_added), theme.success}
 		runs[6] = {" ", theme.muted}
 		runs[7] = {fmt.bprintf(count_bufs[3][:], "−%d", view.total_removed), theme.error}
-		count = len(runs)
+		count = 8
 	}
 	clear := g.filter_bar_clear
 	x := bar.x + SPACE_3 * s
 	limit := clear.width > 0 ? clear.x - SPACE_2 * s : bar.x + bar.width - SPACE_3 * s
 	baseline := baseline_in(bar.y, bar.height, &small)
+	if view.filter_on_labels != "" {
+		runs[count] = {" · ", theme.muted}
+		runs[count + 1] = {view.filter_on_labels, theme.text}
+		count += 2
+	}
 	for run in runs[:count] {
 		if x >= limit {break}
 		if status := draw_fading_text(&small, list, run.s, x, baseline, run.color, limit - x); status != .Ok {
@@ -708,43 +721,144 @@ filter_bar_draw :: proc(
 	)
 }
 
-// The rows of the saved filters offered for an `@` being typed: the highlighted one has the hover fill, each
-// shows its name and, fading, its pattern; the row past the last filter opens Settings on them.
+// A button at the popover's foot: its label (and keycap), on the hover fill that deepens under the pointer; a
+// button that cannot act is faint and does not light.
+@(private = "file")
+filter_foot_draw :: proc(
+	list: ^render.Draw_List,
+	text: ^Text,
+	theme: Theme,
+	rect: render.Rect,
+	label, key: string,
+	enabled: bool,
+	hit: Changes_Hit,
+	state: ^Changes_State,
+	scale: f32,
+	pointer: [2]f32,
+) -> render.Build_Status {
+	if rect.width <= 0 {return .Ok}
+	hover, press := changes_lit(state, hit)
+	radius := RADIUS_CONTROL * scale
+	draw_rect(list, {rect = rect, color = theme.hover, radius = radius})
+	b := Button {
+		rect     = rect,
+		hover    = enabled ? hover : 0,
+		press    = enabled ? press : 0,
+		radius   = RADIUS_CONTROL,
+		surface  = .Flat_Unfilled,
+		disabled = !enabled,
+	}
+	face, ink, err := button_draw(list, theme, b, scale, pointer)
+	if err != .None {return .Ok}
+	body := text_styled(text, .Body)
+	baseline := baseline_in(face.y, face.height, &body)
+	x := face.x + SPACE_2 * scale
+	if !enabled {ink = theme.faint}
+	if label == FILTER_SAVE_LABEL {
+		icon_draw(list, .Add, {x, face.y, SPACE_3 * scale, face.height}, ink, ICON_INDICATOR, scale)
+		x += (SPACE_3 + SPACE_1) * scale
+	}
+	if status := draw_text(&body, list, label, x, baseline, ink); status != .Ok {return status}
+	if key == "" {return .Ok}
+	small := text_styled(text, .Detail)
+	x += text_width(&body, label) + SPACE_2 * scale
+	return keycap_draw(list, &small, theme, key, x, face.y, face.height, scale)
+}
+
+// The rows of the saved filters the list offers: a header, then each as `@label`, its pattern when the filter
+// has a name, and how many files it would hide on its own; the row the keys are on has the hover fill and an
+// accent bar. With nothing to offer the list says so.
 @(private = "file")
 filter_picks_draw :: proc(
 	list: ^render.Draw_List, text: ^Text, theme: Theme, g: Changes_Geometry, view: ^Changes_View,
 ) -> render.Build_Status {
 	s := g.scale
 	body, small := text_styled(text, .Body), text_styled(text, .Detail)
+	head := g.filter_list
+	x, right := head.x + SPACE_2 * s, head.x + head.width - SPACE_2 * s
+	head_baseline := head.y + small.ascent
+	if status := draw_text(&small, list, FILTER_LIST_TITLE, x, head_baseline, theme.faint); status != .Ok {
+		return status
+	}
+	hint_width := text_width(&small, FILTER_LIST_KEYS)
+	if status := draw_text(&small, list, FILTER_LIST_KEYS, right - hint_width, head_baseline, theme.faint);
+	   status != .Ok {
+		return status
+	}
+	if len(g.filter_picks) == 0 {
+		return draw_fading_text(
+			&small, list, FILTER_LIST_EMPTY, x, head_baseline + small.line_height + SPACE_2 * s, theme.faint,
+			right - x,
+		)
+	}
 	for rect, i in g.filter_picks {
 		index := g.filter_pick_first + i
+		pick := view.filter_picks[index]
 		if index == view.filter_pick_row {
 			draw_rect(list, {rect = rect, color = theme.hover, radius = RADIUS_CONTROL * s})
+			bar := render.Rect{rect.x, rect.y + SPACE_1 * s, 2 * s, rect.height - 2 * SPACE_1 * s}
+			draw_rect(list, {rect = bar, color = theme.accent, radius = pill_radius(bar)})
 		}
-		x, right := rect.x + SPACE_2 * s, rect.x + rect.width - SPACE_2 * s
+		px, pright := rect.x + SPACE_2 * s, rect.x + rect.width - SPACE_2 * s
 		baseline := baseline_in(rect.y, rect.height, &body)
-		if index >= len(view.filter_picks) {
-			status := draw_fading_text(&body, list, FILTER_MANAGE_LABEL, x, baseline, theme.muted, right - x)
-			if status != .Ok {return status}
-			continue
+		counts: [16]u8
+		hides := fmt.bprintf(counts[:], "hides %d", pick.hides)
+		hides_width := text_width(&small, hides)
+		small_baseline := baseline_in(rect.y, rect.height, &small)
+		status := draw_text(&small, list, hides, pright - hides_width, small_baseline, theme.faint)
+		if status != .Ok {return status}
+		room := pright - hides_width - SPACE_2 * s - px
+		label := fmt.tprintf("@%s", clip_bytes(pick.label, CHANGES_CLIP_BYTES))
+		label_width := min(text_width(&body, label), room)
+		if status = draw_fading_text(&body, list, label, px, baseline, theme.text, label_width); status != .Ok {
+			return status
 		}
-		pick := view.filter_picks[index]
-		name := min(text_width(&body, pick.name), right - x)
-		if status := draw_text(&body, list, pick.name, x, baseline, theme.text, name); status != .Ok {return status}
-		pattern := x + name + SPACE_2 * s
-		if pattern >= right {continue}
-		pattern_baseline := baseline_in(rect.y, rect.height, &small)
-		status := draw_fading_text(
-			&small, list, pick.pattern, pattern, pattern_baseline, theme.faint, right - pattern,
+		if pick.label == pick.pattern {continue}
+		pattern := px + label_width + SPACE_2 * s
+		if pattern >= px + room {continue}
+		status = draw_fading_text(
+			&small, list, pick.pattern, pattern, small_baseline, theme.faint, px + room - pattern,
 		)
 		if status != .Ok {return status}
 	}
 	return .Ok
 }
 
+// The field's @ button: the @ in the muted ink, as an icon button's, lighting under the pointer or while the
+// list is open.
+@(private = "file")
+filter_at_draw :: proc(
+	list: ^render.Draw_List,
+	text: ^Text,
+	theme: Theme,
+	g: Changes_Geometry,
+	view: ^Changes_View,
+	state: ^Changes_State,
+	pointer: [2]f32,
+) -> render.Build_Status {
+	rect := g.filter_at
+	if rect.width <= 0 {return .Ok}
+	hover, press := changes_lit(state, {.Filter_At, 0, 0})
+	b := Button {
+		rect     = rect,
+		hover    = hover,
+		press    = press,
+		radius   = RADIUS_CONTROL,
+		surface  = .Flat_Unfilled,
+		selected = view.filter_pick_open,
+	}
+	face, ink, err := button_draw(list, theme, b, g.scale, pointer)
+	if err != .None {return .Ok}
+	body := text_styled(text, .Body)
+	width := text_width(&body, "@")
+	return draw_text(
+		&body, list, "@", face.x + (face.width - width) / 2, baseline_in(face.y, face.height, &body), ink,
+	)
+}
+
 // The open filter popover: the field (outlined in the error colour while the filter is invalid) with the
-// saved filters in it as tokens, its clear button, and below it the hint or the error, the saved filters an
-// `@` can complete to, or the name field of a filter being saved.
+// saved filters in it as tokens, its @ and clear buttons, below it the hint, the error or why saving was
+// refused, the saved filters list while it is open, and the Save and Manage buttons.
 @(private)
 filter_popover_draw :: proc(
 	list: ^render.Draw_List,
@@ -762,7 +876,7 @@ filter_popover_draw :: proc(
 	defer clip_scope_close(list, scope)
 	if panel_draw(list, popover_panel(g.filter_popover, s), theme) != .None {return .Ok}
 	field := g.filter_field
-	box_draw(list, field, theme, !view.filter_invalid && !view.filter_naming, s)
+	box_draw(list, field, theme, !view.filter_invalid, s)
 	if view.filter_invalid {
 		ring := render.Rect{field.x - 2 * s, field.y - 2 * s, field.width + 4 * s, field.height + 4 * s}
 		draw_rect(list, {rect = ring, color = theme.error, radius = (RADIUS_CONTROL + 2) * s, stroke = 2 * s})
@@ -770,10 +884,11 @@ filter_popover_draw :: proc(
 	if box, shown := changes_filter_box(g, view, text); shown {
 		baseline := field_box_baseline(box)
 		status := filter_field_draw(
-			box, view.filter_tokens, list, theme, baseline, !view.filter_naming, FILTER_PLACEHOLDER, pointer,
+			box, view.filter_tokens, list, theme, baseline, true, FILTER_PLACEHOLDER, pointer,
 		)
 		if status != .Ok {return status}
 	}
+	if status := filter_at_draw(list, text, theme, g, view, state, pointer); status != .Ok {return status}
 	if g.filter_clear.width > 0 {
 		hover, press := changes_lit(state, {.Filter_Clear, 0, 0})
 		err := icon_button_draw(
@@ -781,29 +896,32 @@ filter_popover_draw :: proc(
 		)
 		if err != .None {return .Ok}
 	}
-	if len(g.filter_picks) > 0 {return filter_picks_draw(list, text, theme, g, view)}
 	small := text_styled(text, .Detail)
 	hint, ink := FILTER_HINT, theme.muted
-	hint_y := field.y + field.height + SPACE_2 * s
 	notice: [96]u8
 	switch {
-	case view.filter_naming:
-		name := g.filter_name
-		box_draw(list, name, theme, view.filter_notice == "", s)
-		box := field_box_standard(view.filter_name, text, name, s)
-		status := field_box_draw(box, list, theme, field_box_baseline(box), true, FILTER_NAME_PLACEHOLDER)
-		if status != .Ok {return status}
-		hint, ink = FILTER_NAME_HINT, theme.muted
-		if view.filter_notice != "" {hint, ink = clip_bytes(view.filter_notice, CHANGES_CLIP_BYTES), theme.error}
-		hint_y = name.y + name.height + SPACE_2 * s
 	case view.filter_invalid:
 		hint, ink = clip_bytes(view.filter_error, CHANGES_CLIP_BYTES), theme.error
+	case view.filter_notice != "":
+		hint, ink = clip_bytes(view.filter_notice, CHANGES_CLIP_BYTES), theme.error
 	case view.filter_unknown != "":
 		hint, ink = fmt.bprintf(notice[:], "No saved filter named %s", view.filter_unknown), theme.warning
-	case view.filter_savable:
-		hint = FILTER_SAVE_HINT
 	}
-	return draw_fading_text(&small, list, hint, field.x, hint_y + small.ascent, ink, field.width)
+	hint_y := field.y + field.height + SPACE_2 * s
+	status := draw_fading_text(&small, list, hint, field.x, hint_y + small.ascent, ink, field.width)
+	if status != .Ok {return status}
+	if view.filter_pick_open {
+		if status = filter_picks_draw(list, text, theme, g, view); status != .Ok {return status}
+	}
+	status = filter_foot_draw(
+		list, text, theme, g.filter_save, FILTER_SAVE_LABEL, "Ctrl+S", view.filter_savable,
+		{.Filter_Save, 0, 0}, state, s, pointer,
+	)
+	if status != .Ok {return status}
+	return filter_foot_draw(
+		list, text, theme, g.filter_manage, FILTER_MANAGE_LABEL, "", true, {.Filter_Manage, 0, 0}, state, s,
+		pointer,
+	)
 }
 
 // A "+N" marker beside the strip for the `hidden` turns it can't show on that side; nothing when none.
