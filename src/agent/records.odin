@@ -84,6 +84,8 @@ stem_harness :: proc(stem: string) -> Harness {
 	for harness in Harness {
 		name := names[harness]
 		if harness == .None || len(stem) < len(name) || !strings.equal_fold(stem[:len(name)], name) {continue}
+		// agy-ide is Antigravity IDE's launcher, not the agent.
+		if harness == .Agy && len(stem) != len(name) {continue}
 		if len(stem) == len(name) || stem[len(name)] == '-' {return harness}
 	}
 	return .None

@@ -4,7 +4,8 @@ import "core:strings"
 
 // What a resume keeps of how a harness was launched: its options, without the prompt or anything that
 // chose a session. The option tables follow each harness's --help (Claude Code 2.1.318, codex-cli
-// 0.166.0, omp 18.18.2). An option missing from a table cannot be told from a prompt, so it keeps
+// 0.166.0, omp 18.18.2; agy follows its CLI reference, https://antigravity.google/docs/cli/reference/,
+// as of CLI 1.5.13). An option missing from a table cannot be told from a prompt, so it keeps
 // nothing but the session id.
 Launch :: struct {
 	harness:   Harness,
@@ -257,6 +258,42 @@ omp_commands := [?]string {
 	"python", "notebook", "browser", "computer", "task", "todo", "web_search", "ask",
 }
 
+// Antigravity CLI. Print mode, remote agents and the hub backend that Antigravity IDE and the app
+// start as `agy --hub --hub-port=N --app_data_dir=antigravity --csrf_token=T` (observed in
+// https://github.com/Henrik-3/AntigravityQuota/issues/32) are not interactive sessions to resume.
+// --conversation and -c choose the session; -i's value is a prompt.
+@(private, rodata)
+agy_options := [?]Option {
+	{"--mode", .Keep_Value},
+	{"--model", .Keep_Value},
+	{"--effort", .Keep_Value},
+	{"--agent", .Keep_Value},
+	{"--add-dir", .Keep_Value},
+	{"-c", .Drop},
+	{"--continue", .Drop},
+	{"--conversation", .Drop_Value},
+	{"-i", .Drop_Value},
+	{"--prompt-interactive", .Drop_Value},
+	{"-p", .Stop},
+	{"--print", .Stop},
+	{"--prompt", .Stop},
+	{"--sandbox", .Keep},
+	{"--dangerously-skip-permissions", .Keep},
+	{"--remote-control", .Keep},
+	{"--remote-agent", .Stop},
+	{"--log-file", .Keep_Value},
+	{"--hub", .Stop},
+	{"--hub-port", .Stop},
+	{"--app_data_dir", .Stop},
+	{"--csrf_token", .Stop},
+	{"--help", .Stop},
+	{"--version", .Stop},
+}
+
+// agy subcommands; any other word is the prompt.
+@(private, rodata)
+agy_commands := [?]string{"acp", "agents", "install", "models", "plugin", "remote-control", "update"}
+
 // Reads a harness's arguments, those after its name, into what a resume keeps; flags are in
 // `allocator`, other strings borrow from `arguments`.
 launch_parse :: proc(harness: Harness, arguments: []string, allocator := context.allocator) -> Launch {
@@ -274,6 +311,8 @@ launch_parse :: proc(harness: Harness, arguments: []string, allocator := context
 		options, commands = codex_options[:], codex_commands[:]
 	case .Omp:
 		options, commands = omp_options[:], omp_commands[:]
+	case .Agy:
+		options, commands = agy_options[:], agy_commands[:]
 	case .None:
 	}
 	kept := make([dynamic]string, 0, len(arguments), allocator)
@@ -329,7 +368,8 @@ launch_parse :: proc(harness: Harness, arguments: []string, allocator := context
 			if !attached && i + 1 < len(arguments) && !option_like(arguments[i + 1]) {i += 1}
 		}
 		if !launch.resumable {break}
-		if harness != .Codex && (name == "-r" || name == "--resume" || name == "--session-id") {
+		if harness == .Agy && name == "--conversation" || harness != .Codex && harness != .Agy &&
+		   (name == "-r" || name == "--resume" || name == "--session-id") {
 			named := attached ? value : (i > start ? arguments[i] : "")
 			if session_id_valid(named) {launch.session = named}
 		}

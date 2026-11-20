@@ -65,7 +65,7 @@ turn_payload :: proc(
 				}
 			case .Codex:
 				patch_paths(payload_string(tool_input, "command"), &raw)
-			case .None, .Omp:
+			case .None, .Omp, .Agy:
 			}
 		}
 		paths := make([dynamic]string, 0, len(raw), allocator)

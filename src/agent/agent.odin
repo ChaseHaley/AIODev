@@ -11,6 +11,8 @@ Harness :: enum u8 {
 	Claude,
 	Codex,
 	Omp,
+	// Antigravity CLI, run as agy.
+	Agy,
 }
 
 HARNESS_NAMES :: [Harness]string {
@@ -18,6 +20,7 @@ HARNESS_NAMES :: [Harness]string {
 	.Claude = "claude",
 	.Codex  = "codex",
 	.Omp    = "omp",
+	.Agy    = "agy",
 }
 
 // The harness a program's canonical name names; None for any other program.
@@ -27,6 +30,19 @@ harness_named :: proc(name: string) -> Harness {
 		if harness != .None && strings.equal_fold(name, names[harness]) {return harness}
 	}
 	return .None
+}
+
+// The option that names the session a harness resumes, written just before the session; Codex takes
+// its session after a resume subcommand instead, so it has none.
+@(private)
+resume_flag :: proc(harness: Harness) -> string {
+	#partial switch harness {
+	case .Codex:
+		return ""
+	case .Agy:
+		return "--conversation"
+	}
+	return "--resume"
 }
 
 SESSION_ID_LIMIT :: 128
@@ -63,7 +79,11 @@ resume_line :: proc(launch: Launch, session: string, allocator := context.alloca
 			strings.write_byte(&b, ' ')
 			token_write(&b, flag)
 		}
-		strings.write_string(&b, launch.harness == .Codex ? " " : " --resume ")
+		strings.write_byte(&b, ' ')
+		if flag := resume_flag(launch.harness); flag != "" {
+			strings.write_string(&b, flag)
+			strings.write_byte(&b, ' ')
+		}
 		strings.write_string(&b, session)
 		if strings.builder_len(b) <= RESUME_LINE_LIMIT {break}
 	}
@@ -89,7 +109,7 @@ resume_line_valid :: proc(line: string) -> bool {
 	harness := harness_named(tokens[0])
 	if harness == .None || tokens[0] != names[harness] {return false}
 	if harness == .Codex && tokens[1] != "resume" {return false}
-	if harness != .Codex && tokens[len(tokens) - 2] != "--resume" {return false}
+	if flag := resume_flag(harness); flag != "" && tokens[len(tokens) - 2] != flag {return false}
 	for token in tokens[1:len(tokens) - 1] {
 		if !token_safe(token) {return false}
 	}

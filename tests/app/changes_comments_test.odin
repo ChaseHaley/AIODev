@@ -565,6 +565,12 @@ comments_send_verdict_trusts_only_the_reporting_agent_and_never_answers_a_prompt
 	// With the pane's harness unknown, any agent harness counts.
 	can_send, _ = app.changes_send_verdict(true, "node", .Codex, nil, {}, false, "")
 	testing.expect(t, can_send)
+	// Antigravity CLI: its arguments start the harness whatever its status says.
+	can_send, _ = app.changes_send_verdict(true, "agy", .Agy, nil, {}, false, "")
+	testing.expect(t, can_send)
+	can_send, reason = app.changes_send_verdict(true, "agy", .Agy, nil, {}, false, "claude")
+	testing.expect(t, !can_send)
+	testing.expect_value(t, reason, not_running)
 }
 
 // A partial selection names the text it covers after its line range, whitespace collapsed and clipped to
