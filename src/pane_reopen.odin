@@ -292,7 +292,9 @@ closed_pane_restore :: proc(
 ) {
 	#partial switch record.tab.nodes[0].content {
 	case .Web:
-		if created := web_pane_create(app, record.tab.nodes[0].url); created != nil {
+		saved := record.tab.nodes[0]
+		zoom := saved.web_zoom > 0 ? clamp(saved.web_zoom, 0.25, 5) : 1
+		if created := web_pane_create(app, saved.url, zoom); created != nil {
 			documents_restore(&created.documents, record.tab.nodes[0].documents)
 			node, placed := closed_place(tree, place, record, {.Web, created.id}, join_slot)
 			// A pane that stayed out of the tree is swept by web_tick.

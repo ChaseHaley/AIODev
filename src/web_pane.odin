@@ -213,29 +213,6 @@ web_pane_set_title_text :: proc(pane: ^Web_Pane, raw_title: string) {
 	pane.title = owned
 }
 
-// Normalizes user-typed address bar input into an allowed http(s) URL: a bare host gets https, a
-// loopback host http, and any other scheme is refused.
-@(require_results)
-web_normalize_input_url :: proc(raw: string, allocator := context.temp_allocator) -> (string, bool) {
-	trimmed := strings.trim_space(raw)
-	if trimmed == "" {return "", false}
-	if links.allowed(trimmed) {
-		cloned, err := strings.clone(trimmed, allocator)
-		return cloned, err == nil
-	}
-	if strings.contains(trimmed, "://") {return "", false}
-	prefix := "https://"
-	if strings.has_prefix(trimmed, "localhost") ||
-	   strings.has_prefix(trimmed, "127.0.0.1") ||
-	   strings.has_prefix(trimmed, "[::1]") {
-		prefix = "http://"
-	}
-	candidate, err := strings.concatenate({prefix, trimmed}, allocator)
-	if err != nil {return "", false}
-	if !links.allowed(candidate) {return "", false}
-	return candidate, true
-}
-
 @(private = "file")
 web_bg_argb :: proc(app: ^App) -> u32 {
 	c := app.theme.pane
@@ -1587,7 +1564,7 @@ web_key :: proc(app: ^App, w: ^Window, e: input.Key_Event) {
 		if e.key == .Enter || e.key == .Numpad_Enter {
 			key_suppress(w, e)
 			raw := ui.field_string(&pane.url_field)
-			if normalized, valid := web_normalize_input_url(raw); valid {
+			if normalized, valid := links.normalize_web_input(raw); valid {
 				pane.url_editing = false
 				web_pane_set_url_text(pane, normalized)
 				if pane.view != nil {
