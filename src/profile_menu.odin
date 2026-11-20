@@ -9,18 +9,23 @@ import "aio:ui"
 import "core:log"
 import "aio:platform"
 
-// What choosing a profile does.
+// Where a choice from the shared content list goes.
 Profile_Menu_Mode :: union #no_nil {
 	Profile_Menu_New_Tab,
 	Profile_Menu_Swap_Pane,
+	Profile_Menu_Split,
 }
 
 Profile_Menu_New_Tab :: struct {}
 
-// The pane whose shell a profile replaces, held by its content rather than its node: the pane can close,
-// or its tab give way to another, while the menu is open, and a node id would then name another pane.
+// Holds the target by content, so an open menu cannot act on a node another pane has reused.
 Profile_Menu_Swap_Pane :: struct {
 	pane: layout.Content,
+}
+
+Profile_Menu_Split :: struct {
+	pane:      layout.Content,
+	direction: layout.Direction,
 }
 
 Profile_Menu_Action :: enum {
@@ -28,8 +33,6 @@ Profile_Menu_Action :: enum {
 	Profile,
 	Markdown,
 	Web,
-	Settings,
-	Palette,
 }
 
 // What a row does. A profile row keeps its own copy of the profile's id: a settings reload frees the
@@ -40,7 +43,7 @@ Profile_Menu_Entry :: struct {
 	id_length: int,
 }
 
-// The same menu surface serves the tab rail's new-tab button and a pane's shell badge. Whether it shows,
+// The same content list serves New tab, the pane badge and the split buttons. Whether it shows,
 // and for which, is w.overlay.
 Profile_Menu :: struct {
 	using menu: ui.Menu,
@@ -48,17 +51,15 @@ Profile_Menu :: struct {
 	entries:    [ui.MENU_MAX_ITEMS]Profile_Menu_Entry,
 	count:      int,
 	// The shortcut labels the rows show, as bound when the menu opened.
-	shortcuts:  [PROFILE_MENU_SHORTCUTS][commands.SHORTCUT_TEXT_CAP]u8,
+	shortcuts:  [PROFILE_ACTION_COUNT][commands.SHORTCUT_TEXT_CAP]u8,
 }
 
-// Every visible profile, two content choices and their separator, then up to three app-action rows.
-#assert(settings.PROFILE_LIMIT + 6 <= ui.MENU_MAX_ITEMS)
+// Every visible profile, two content choices and their separator.
+#assert(settings.PROFILE_LIMIT + 3 <= ui.MENU_MAX_ITEMS)
 
-// Rows that can show a shortcut: one per New Tab with Profile N command, Settings and the palette.
+// The New Tab with Profile N commands label their rows only in the New tab menu.
 @(private)
 PROFILE_ACTION_COUNT :: int(Action.Profile_9) - int(Action.Profile_1) + 1
-@(private)
-PROFILE_MENU_SHORTCUTS :: PROFILE_ACTION_COUNT + 2
 
 profile_menu_init :: proc(menu: ^Profile_Menu) {
 	ui.menu_init(&menu.menu)
@@ -127,16 +128,17 @@ profile_menu_open :: proc(app: ^App, w: ^Window, mode: Profile_Menu_Mode, x, y: 
 		visible_only = true,
 	)
 	target, swap := mode.(Profile_Menu_Swap_Pane)
-	current := app.settings.profiles.default_id
+	_, new_tab := mode.(Profile_Menu_New_Tab)
+	current := ""
+	if new_tab {current = app.settings.profiles.default_id}
 	if swap {
-		current = ""
 		if entry := workspace_session_for_content(app, target.pane); entry != nil {current = entry.profile_id}
 	}
 	for i in 0..<count {
 		profile := &app.settings.profiles.items[indices[i]]
 		checked := profile.id == current
 		shortcut := ""
-		if action, bound := profile_action(i); bound {
+		if action, bound := profile_action(i); new_tab && bound {
 			shortcut = profile_menu_shortcut(app, menu, i, action)
 		}
 		profile_menu_push(
@@ -156,27 +158,6 @@ profile_menu_open :: proc(app: ^App, w: ^Window, mode: Profile_Menu_Mode, x, y: 
 	profile_menu_push(menu, {label = "Markdown file…", glyph = .Markdown, enabled = true}, .Markdown)
 	in_web := swap && target.pane.kind == .Web
 	profile_menu_push(menu, {label = "Web pane", glyph = .Globe, checked = in_web, enabled = !in_web}, .Web)
-	if swap {
-		profile_menu_push(menu, {separator = true}, .None)
-		profile_menu_push(
-			menu,
-			{
-				label = "Settings",
-				shortcut = profile_menu_shortcut(app, menu, PROFILE_MENU_SHORTCUTS - 2, .Settings_UI),
-				enabled = true,
-			},
-			.Settings,
-		)
-		profile_menu_push(
-			menu,
-			{
-				label = "Everything palette",
-				shortcut = profile_menu_shortcut(app, menu, PROFILE_MENU_SHORTCUTS - 1, .Command_Palette),
-				enabled = true,
-			},
-			.Palette,
-		)
-	}
 	ui.menu_anchor(&menu.menu, x, y)
 	ui.menu_select_edge(&menu.menu, false)
 }
@@ -211,10 +192,6 @@ profile_menu_choose :: proc(app: ^App, w: ^Window) {
 		markdown_open_picker(app, w, shown.mode)
 	case .Web:
 		pane_content_menu_choose(app, w, shown.mode, .Web, "")
-	case .Settings:
-		editor_open(app, pane_link_acting_window(app, w))
-	case .Palette:
-		palette_open(app, w)
 	}
 }
 

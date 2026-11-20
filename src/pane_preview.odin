@@ -79,9 +79,9 @@ pane_header_card :: proc(
 	case .Default_App:
 		return {description = "Open the file in the program Windows opens Markdown files with."}
 	case .Split_Right:
-		return pane_preview_split(app, w, pane.node, .Right, "A new pane to the right of this one.")
+		return pane_preview_split(app, w, pane.node, .Right, "Right-click to choose what opens to the right.")
 	case .Split_Down:
-		return pane_preview_split(app, w, pane.node, .Down, "A new pane below this one.")
+		return pane_preview_split(app, w, pane.node, .Down, "Right-click to choose what opens below.")
 	case .Zoom:
 		return pane_preview_view(app, w, pane.node, .Toggle_Zoom)
 	case .Fill_Window:

@@ -406,7 +406,7 @@ web_toggle_navigator :: proc(app: ^App, w: ^Window) {
 	w.dirty = true
 }
 
-@(private = "file")
+@(private)
 web_pane_remove :: proc(app: ^App, id: u32) {
 	for pane, i in app.web_panes {
 		if pane.id != id {continue}

@@ -449,6 +449,15 @@ pane_header_press :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) {
 	pane, target, hit := pane_header_hit(w, f32(e.x), f32(e.y))
 	if !hit || selection_active(w) {return}
 	gesture_swallow(w, e.button, .Pane_Header)
+	if e.button == .Right {
+		button, is_button := target.(Pane_Header_Button)
+		if !is_button || (button != .Split_Right && button != .Split_Down) {return}
+		if pane_header_refused(w, pane, button) != .None {return}
+		direction: layout.Direction = button == .Split_Right ? .Right : .Down
+		anchor := pane_header_menu_anchor(w, pane, button)
+		profile_menu_open(app, w, Profile_Menu_Split{pane.content, direction}, anchor.x, anchor.y)
+		return
+	}
 	if e.button != .Left {return}
 	pane_focus(app, w, pane.node)
 	if _, badge := target.(ui.Header_Badge); badge {

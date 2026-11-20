@@ -1,5 +1,6 @@
 package main
 
+import "aio:commands"
 import "aio:layout"
 import "aio:localpath"
 import "aio:settings"
@@ -42,10 +43,15 @@ pane_content_menu_choose :: proc(
 		pane_content_replace(app, w, target.pane, kind, value)
 		return
 	}
+	if split, split_menu := mode.(Profile_Menu_Split); split_menu {
+		pane_content_menu_split(app, w, split, kind, value)
+		return
+	}
 	if !pane_minimum_single(app, w) {return}
 	content, made := pane_content_make(app, kind, value)
 	if !made {return}
 	if !pane_new_tab(app, w, w.workspace, content, true) {
+		pane_content_discard(app, content)
 		notify(app, .Error, "Could not create a tab.")
 		return
 	}
@@ -53,7 +59,43 @@ pane_content_menu_choose :: proc(
 	rail_overlay_dismiss(app, w)
 }
 
-// Creates the replacement before closing anything. A bad file or missing profile leaves the old pane alone.
+@(private)
+pane_content_menu_split :: proc(
+	app: ^App, w: ^Window, split: Profile_Menu_Split, kind: layout.Content_Kind, value: string,
+) {
+	node := pane_content_menu_node(w, split.pane)
+	if node == layout.INVALID_NODE {return}
+	workspace := w.workspace
+	tab := selected_tab(workspace)
+	ratio := commands.SPLIT_DEFAULT.ratio
+	switch pane_split_check(app, w, tab, node, split.direction, ratio, true) {
+	case .None:
+	case .Minimum:
+		return
+	case .Check, .Session, .Layout:
+		notify(app, .Error, "Could not check the new pane size.")
+		return
+	}
+	content, made := pane_content_make(app, kind, value)
+	if !made {return}
+	if pane_split_attach(app, w, workspace, workspace.selected, node, split.direction, ratio, true, content) {
+		layout_state_touch(app)
+		return
+	}
+	pane_content_discard(app, content)
+	notify(app, .Error, "Could not split the pane.")
+}
+
+// Markdown's poll already releases panes that no layout references.
+@(private)
+pane_content_discard :: proc(app: ^App, content: layout.Content) {
+	#partial switch content.kind {
+	case .Terminal: session_close(app, content.id)
+	case .Web: web_pane_remove(app, content.id)
+	}
+}
+
+// A bad file or missing profile leaves the layout unchanged.
 @(private, require_results)
 pane_content_make :: proc(app: ^App, kind: layout.Content_Kind, value: string) -> (layout.Content, bool) {
 	#partial switch kind {
