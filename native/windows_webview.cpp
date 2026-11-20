@@ -207,6 +207,7 @@ struct Aio_Webview {
     bool visible = false;
     bool floating = false;
     int vis_x = 0, vis_y = 0, vis_w = 0, vis_h = 0;
+    float clip_l = 0.0f, clip_t = 0.0f, clip_r = 0.0f, clip_b = 0.0f;
     int bounds_w = 0, bounds_h = 0;
     int applied_bounds_w = -1, applied_bounds_h = -1;
     float radius_bl = 0.0f, radius_br = 0.0f;
@@ -280,10 +281,10 @@ static void apply_placement(Aio_Webview *v) {
     v->visual->SetOffsetX(static_cast<float>(v->vis_x));
     v->visual->SetOffsetY(static_cast<float>(v->vis_y));
     if (v->clip) {
-        v->clip->SetLeft(0.0f);
-        v->clip->SetTop(0.0f);
-        v->clip->SetRight(static_cast<float>(v->vis_w));
-        v->clip->SetBottom(static_cast<float>(v->vis_h));
+        v->clip->SetLeft(v->clip_l);
+        v->clip->SetTop(v->clip_t);
+        v->clip->SetRight(v->clip_r);
+        v->clip->SetBottom(v->clip_b);
         v->clip->SetTopLeftRadiusX(0.0f);
         v->clip->SetTopLeftRadiusY(0.0f);
         v->clip->SetTopRightRadiusX(0.0f);
@@ -806,8 +807,9 @@ void aio_webview_destroy(void *raw) noexcept {
 }
 
 void aio_webview_set_placement(void *raw, void *raw_host, int visible, int floating, int vis_x, int vis_y,
-                               int vis_w, int vis_h, int bounds_w, int bounds_h, float radius_bl,
-                               float radius_br, float raster_scale) noexcept {
+                               int vis_w, int vis_h, float clip_l, float clip_t, float clip_r, float clip_b,
+                               int bounds_w, int bounds_h, float radius_bl, float radius_br,
+                               float raster_scale) noexcept {
     if (!raw) return;
     auto *v = static_cast<Aio_Webview *>(raw);
     auto *host = static_cast<Aio_Webview_Host *>(raw_host);
@@ -819,6 +821,10 @@ void aio_webview_set_placement(void *raw, void *raw_host, int visible, int float
     v->vis_y = vis_y;
     v->vis_w = vis_w;
     v->vis_h = vis_h;
+    v->clip_l = clip_l;
+    v->clip_t = clip_t;
+    v->clip_r = clip_r;
+    v->clip_b = clip_b;
     v->bounds_w = bounds_w;
     v->bounds_h = bounds_h;
     v->radius_bl = radius_bl;

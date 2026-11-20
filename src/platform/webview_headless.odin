@@ -65,6 +65,7 @@ when AIO_HEADLESS {
 		host: Webview_Host,
 		visible, floating: bool,
 		vis_x, vis_y, vis_w, vis_h: i32,
+		clip_l, clip_t, clip_r, clip_b: f32,
 		bounds_w, bounds_h: i32,
 		radius_bl, radius_br, raster_scale: f32,
 	) {}

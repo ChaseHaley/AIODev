@@ -115,7 +115,9 @@ web_window_destroy :: proc(app: ^App, w: ^Window) {
 	if w.web.host == nil {return}
 	for pane in app.web_panes {
 		if pane.host_window == w.id && pane.view != nil {
-			platform.webview_set_placement(pane.view, nil, false, false, 0, 0, 0, 0, 0, 0, 0, 0, 1)
+			platform.webview_set_placement(
+				pane.view, nil, false, false, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1,
+			)
 			pane.host_window = 0
 		}
 	}
@@ -230,6 +232,9 @@ web_accel_callback :: proc "c"(
 		_ = platform.wake(&app.platform)
 		return true
 	}
+	// Never steal plain typing, Enter, Escape, Tab or navigation keys from web page inputs.
+	has_chord := .Control in e.modifiers || .Alt in e.modifiers || .Super in e.modifiers
+	if !has_chord && e.key != .F11 {return false}
 	// Let standard web editing and page navigation chords stay inside the page.
 	if e.modifiers == {.Control} {
 		#partial switch logical {
@@ -244,7 +249,12 @@ web_accel_callback :: proc "c"(
 		}
 	}
 	// Steal bound AIODev shortcuts (palette, splits, focus moves, fullscreen, close pane, tabs).
-	if commands.find_by_key(&app.registry, e.key, e.modifiers, e.unshifted) != nil {
+	if command := commands.find_by_key(&app.registry, e.key, e.modifiers, e.unshifted); command != nil {
+		if action, builtin := action_builtin(command.id); builtin {
+			if w := window_find(app, pane.host_window); w == nil || !action_available(app, w, action) {
+				return false
+			}
+		}
 		append(&app.web_accel_queue, Web_Accel_Pending{pane.host_window, e})
 		_ = platform.wake(&app.platform)
 		return true
@@ -767,7 +777,9 @@ web_window_present :: proc(app: ^App, w: ^Window, background: render.Color) -> r
 web_window_hide_all_visuals :: proc(app: ^App, w: ^Window) {
 	for pane in app.web_panes {
 		if pane.host_window == w.id && pane.view != nil {
-			platform.webview_set_placement(pane.view, w.web.host, false, false, 0, 0, 0, 0, 0, 0, 0, 0, w.scale)
+			platform.webview_set_placement(
+				pane.view, w.web.host, false, false, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, w.scale,
+			)
 		}
 	}
 }
@@ -778,6 +790,9 @@ web_window_sync_visuals :: proc(app: ^App, w: ^Window, host: platform.Webview_Ho
 	env_ready := web_env_ensure(app)
 	radius := window_pane_radius(app, w)
 	animating := pane_motion_animating(w)
+	stage, sliding := w.pane_motion.slide.?
+	over_chrome := pane_motion_over_chrome(w)
+	content_area := window_content_area_in(app, w, w.pane_fill)
 
 	for pane in app.web_panes {
 		shown_rect: layout.Pane_Rect
@@ -791,7 +806,9 @@ web_window_sync_visuals :: proc(app: ^App, w: ^Window, host: platform.Webview_Ho
 		}
 		if !found {
 			if pane.host_window == w.id && pane.view != nil {
-				platform.webview_set_placement(pane.view, host, false, false, 0, 0, 0, 0, 0, 0, 0, 0, w.scale)
+				platform.webview_set_placement(
+					pane.view, host, false, false, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, w.scale,
+				)
 			}
 			continue
 		}
@@ -805,6 +822,24 @@ web_window_sync_visuals :: proc(app: ^App, w: ^Window, host: platform.Webview_Ho
 		vis_body := web_body_rect(app, w, pane, f.shown)
 		logical_body := web_body_rect(app, w, pane, shown_rect.rect)
 		inset := web_body_inset(app, w)
+		// Clip the visual to its own body AND to the slide stage / content area so sliding panes never
+		// paint over the Activity panel, tab rail or title bar.
+		clip_l, clip_t := f32(0), f32(0)
+		clip_r, clip_b := vis_body.width, vis_body.height
+		apply_clip :: proc(
+			vis: render.Rect, bound: render.Rect, cl, ct, cr, cb: ^f32,
+		) {
+			cl^ = max(cl^, bound.x - vis.x)
+			ct^ = max(ct^, bound.y - vis.y)
+			cr^ = min(cr^, bound.x + bound.width - vis.x)
+			cb^ = min(cb^, bound.y + bound.height - vis.y)
+		}
+		if sliding && animating {
+			apply_clip(vis_body, stage, &clip_l, &clip_t, &clip_r, &clip_b)
+		} else if !shown_rect.floating && !over_chrome {
+			bound := render.Rect{content_area.x, content_area.y, content_area.width, content_area.height}
+			apply_clip(vis_body, bound, &clip_l, &clip_t, &clip_r, &clip_b)
+		}
 		// During 160 ms animated pane motion, keep Chromium's viewport at its settled target size while
 		// DirectComposition smoothly clips and positions the visual at full display refresh rate.
 		bounds := animating ? logical_body : vis_body
@@ -814,8 +849,10 @@ web_window_sync_visuals :: proc(app: ^App, w: ^Window, host: platform.Webview_Ho
 			covered = raised_key != pane_motion_key(shown_rect.content)
 		}
 		visible := !hide_for_overview && !covered &&
-			vis_body.width >= 2 && vis_body.height >= 2 && pane.url != ""
+			(clip_r - clip_l) >= 2 && (clip_b - clip_t) >= 2 && pane.url != ""
 		inner_radius := max(f32(0), radius - inset)
+		rad_bl := clip_l <= 0.5 && clip_b >= vis_body.height - 0.5 ? inner_radius : 0
+		rad_br := clip_r >= vis_body.width - 0.5 && clip_b >= vis_body.height - 0.5 ? inner_radius : 0
 		platform.webview_set_placement(
 			pane.view,
 			host,
@@ -825,10 +862,14 @@ web_window_sync_visuals :: proc(app: ^App, w: ^Window, host: platform.Webview_Ho
 			i32(math.round(vis_body.y)),
 			i32(math.round(vis_body.width)),
 			i32(math.round(vis_body.height)),
+			clip_l,
+			clip_t,
+			clip_r,
+			clip_b,
 			max(1, i32(math.round(bounds.width))),
 			max(1, i32(math.round(bounds.height))),
-			inner_radius,
-			inner_radius,
+			rad_bl,
+			rad_br,
 			w.scale,
 		)
 	}
@@ -931,6 +972,15 @@ web_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: input.Mouse_M
 		}
 	}
 	nav := web_nav_layout(w, pane, pr.rect)
+	if pane.url_field.dragging && .Left in e.buttons {
+		pad_x := math.round(8 * w.scale)
+		avail := max(0, nav.url_box.width - 2 * pad_x)
+		start := ui.field_view_start(&pane.url_field, &w.ui_text, avail)
+		at := ui.field_offset_at(&pane.url_field, &w.ui_text, start, nav.url_box.x + pad_x, x)
+		if ui.field_pointer(&pane.url_field, at, false, true) != .None {w.dirty = true}
+		pointer_set(app, w, .Text)
+		return
+	}
 	if nav.shown && render.rect_contains(nav.bar, x, y) {
 		hit := web_nav_hit(nav, x, y)
 		if pane.nav_hover != hit {
@@ -978,9 +1028,18 @@ web_press :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) {
 		hit := web_nav_hit(nav, x, y)
 		pane.nav_armed = hit
 		if hit == .Url {
+			was_editing := pane.url_editing
 			pane.url_editing = true
-			ui.field_select_all(&pane.url_field)
 			platform.window_reclaim_focus(&app.platform, w.id)
+			if !was_editing {
+				ui.field_select_all(&pane.url_field)
+			} else {
+				pad_x := math.round(8 * w.scale)
+				avail := max(0, nav.url_box.width - 2 * pad_x)
+				start := ui.field_view_start(&pane.url_field, &w.ui_text, avail)
+				at := ui.field_offset_at(&pane.url_field, &w.ui_text, start, nav.url_box.x + pad_x, x)
+				_ = ui.field_pointer(&pane.url_field, at, true, .Shift in e.modifiers)
+			}
 		} else {
 			pane.url_editing = false
 			platform.window_reclaim_focus(&app.platform, w.id)
@@ -1035,6 +1094,11 @@ web_release :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) -> bool 
 		}
 	}
 	if !found {pane.nav_armed = .None; return true}
+	if pane.url_field.dragging {
+		_ = ui.field_release(&pane.url_field)
+		pane.nav_armed = .None
+		return true
+	}
 	if pane.nav_armed != .None {
 		armed := pane.nav_armed
 		pane.nav_armed = .None

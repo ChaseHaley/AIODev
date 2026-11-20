@@ -3,6 +3,7 @@ package ui
 import "aio:input"
 import "aio:render"
 import "base:runtime"
+import "core:unicode"
 import "core:unicode/utf8"
 
 // One line of editable text. The selection runs between anchor and cursor; they are equal when
@@ -98,20 +99,51 @@ rune_right :: proc(f: ^Text_Field, at: int) -> int {
 	return at + n
 }
 
-// Word motion skips spaces, then the run of nonspace text beyond them.
+@(private)
+field_word_rune :: proc(r: rune) -> bool {
+	return unicode.is_letter(r) || unicode.is_digit(r) || r == '_'
+}
+
+// Back over spaces, then over a word or a run of punctuation, matching markdown edit_word_left.
 @(private)
 word_left :: proc(f: ^Text_Field, at: int) -> int {
 	i := at
-	for i > 0 && f.bytes[i - 1] == ' ' {i -= 1}
-	for i > 0 && f.bytes[i - 1] != ' ' {i = rune_left(f, i)}
+	for i > 0 {
+		r, _ := utf8.decode_last_rune(f.bytes[:i])
+		if !unicode.is_space(r) {break}
+		i = rune_left(f, i)
+	}
+	if i <= 0 {return 0}
+	r, _ := utf8.decode_last_rune(f.bytes[:i])
+	word := field_word_rune(r)
+	for i > 0 {
+		previous, _ := utf8.decode_last_rune(f.bytes[:i])
+		if unicode.is_space(previous) || field_word_rune(previous) != word {break}
+		i = rune_left(f, i)
+	}
 	return i
 }
 
+// Forward over a word or a run of punctuation, then the spaces after it, matching markdown edit_word_right.
 @(private)
 word_right :: proc(f: ^Text_Field, at: int) -> int {
 	i := at
-	for i < len(f.bytes) && f.bytes[i] == ' ' {i += 1}
-	for i < len(f.bytes) && f.bytes[i] != ' ' {i = rune_right(f, i)}
+	if i < len(f.bytes) {
+		r, _ := utf8.decode_rune(f.bytes[i:])
+		if !unicode.is_space(r) {
+			word := field_word_rune(r)
+			for i < len(f.bytes) {
+				next, _ := utf8.decode_rune(f.bytes[i:])
+				if unicode.is_space(next) || field_word_rune(next) != word {break}
+				i = rune_right(f, i)
+			}
+		}
+	}
+	for i < len(f.bytes) {
+		next, _ := utf8.decode_rune(f.bytes[i:])
+		if !unicode.is_space(next) {break}
+		i = rune_right(f, i)
+	}
 	return i
 }
 

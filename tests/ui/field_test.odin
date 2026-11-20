@@ -31,6 +31,14 @@ field_selection_replaces_moves_and_deletes_by_word :: proc(t: ^testing.T) {
 	testing.expect_value(t, ui.field_key(&f, key({key = .Backspace})), ui.Field_Change.None)
 	testing.expect_value(t, ui.field_text(&f, "\x1b\x7f"), ui.Field_Change.None)
 	testing.expect_value(t, ui.field_text(&f, "\xff"), ui.Field_Change.None)
+	// Punctuation separates words in URLs and paths.
+	ui.field_set(&f, "https://google.com")
+	ui.field_key(&f, key({key = .Arrow_Left, modifiers = {.Control, .Shift}}))
+	testing.expect_value(t, ui.field_selected_text(&f), "com")
+	ui.field_key(&f, key({key = .Arrow_Left, modifiers = {.Control, .Shift}}))
+	testing.expect_value(t, ui.field_selected_text(&f), ".com")
+	ui.field_key(&f, key({key = .Arrow_Left, modifiers = {.Control, .Shift}}))
+	testing.expect_value(t, ui.field_selected_text(&f), "google.com")
 }
 
 @(test)

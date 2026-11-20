@@ -451,6 +451,8 @@ when !AIO_HEADLESS {
 				}
 				pump_key(p, state, &message)
 			} else {
+				// Child windows such as WebView2 rely on TranslateMessage to receive WM_CHAR.
+				w.TranslateMessage(&message)
 				// DispatchMessage's result belongs to the window procedure, not GetLastError.
 				w.DispatchMessageW(&message)
 			}
