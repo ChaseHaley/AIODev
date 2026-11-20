@@ -44,14 +44,24 @@ closed_destroy :: proc(app: ^App) {
 	app.closed = nil
 }
 
-// Remembers the tab at `index` before it closes. Tabs without a terminal are not kept.
+// Terminals and navigated web panes are remembered; a blank web pane holds nothing to bring back.
+@(private)
+closed_remembers :: proc(app: ^App, content: layout.Content) -> bool {
+	if content.kind == .Web {
+		pane := web_find(app, content.id)
+		return pane != nil && pane.url != ""
+	}
+	return pane_owns_session(content.kind)
+}
+
+// Remembers the tab at `index` before it closes. Tabs without a terminal or navigated web pane are not kept.
 closed_record_tab :: proc(app: ^App, workspace: ^Workspace, index: int) {
 	if index < 0 || index >= len(workspace.tabs) {return}
 	tab := workspace.tabs[index]
 	terminal := false
 	for _, id in tab.tree.nodes {
 		content, is_pane := layout.pane_content(&tab.tree, layout.Node_Id(id))
-		if is_pane {terminal ||= pane_owns_session(content.kind)}
+		if is_pane {terminal ||= closed_remembers(app, content)}
 	}
 	if !terminal {return}
 	saved, encoded := layout_tab_encode(app, tab, pane_processes(app))
@@ -64,7 +74,7 @@ closed_record_pane :: proc(app: ^App, workspace: ^Workspace, tab_index: int, nod
 	if tab_index < 0 || tab_index >= len(workspace.tabs) {return}
 	tab := workspace.tabs[tab_index]
 	content, is_pane := layout.pane_content(&tab.tree, node)
-	if !is_pane || !pane_owns_session(content.kind) {return}
+	if !is_pane || !closed_remembers(app, content) {return}
 	sibling, axis, before, share, split := layout.placement(&tab.tree, node)
 	if !split {
 		closed_record_tab(app, workspace, tab_index)
@@ -280,10 +290,20 @@ closed_pane_restore :: proc(
 	layout.Node_Id,
 	bool,
 ) {
-	if id, restored := layout_session_restore(app, &record.tab.nodes[0]); restored {
-		node, placed := closed_place(tree, place, record, {.Terminal, id}, join_slot)
-		if placed {return node, true}
-		session_close(app, id)
+	#partial switch record.tab.nodes[0].content {
+	case .Web:
+		if created := web_pane_create(app, record.tab.nodes[0].url); created != nil {
+			documents_restore(&created.documents, record.tab.nodes[0].documents)
+			node, placed := closed_place(tree, place, record, {.Web, created.id}, join_slot)
+			// A pane that stayed out of the tree is swept by web_tick.
+			if placed {return node, true}
+		}
+	case:
+		if id, ok := layout_session_restore(app, &record.tab.nodes[0]); ok {
+			node, placed := closed_place(tree, place, record, {.Terminal, id}, join_slot)
+			if placed {return node, true}
+			session_close(app, id)
+		}
 	}
 	notify(app, .Error, "Could not reopen the pane.")
 	return layout.INVALID_NODE, false
