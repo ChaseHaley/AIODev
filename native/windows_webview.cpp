@@ -174,10 +174,27 @@ static std::string wide_to_utf8(const wchar_t *text) {
     return out;
 }
 
-static bool url_allowed(const wchar_t *uri) {
+// Match the app's explicit drive-path form. Never interpret a file authority as a local path.
+static bool local_file_url(const wchar_t *uri) {
+    if (!uri || _wcsnicmp(uri, L"file:///", 8) != 0) return false;
+    const wchar_t *path = uri + 8;
+    const wchar_t drive = path[0];
+    if (!((drive >= L'A' && drive <= L'Z') || (drive >= L'a' && drive <= L'z')) ||
+        path[1] != L':' || path[2] != L'/') return false;
+    for (const wchar_t *c = path + 3; *c; ++c) {
+        if (*c < 0x20 || *c == 0x7f || *c == L'\\') return false;
+    }
+    return true;
+}
+
+static bool web_url_allowed(const wchar_t *uri) {
     if (!uri) return false;
     return _wcsnicmp(uri, L"http://", 7) == 0 || _wcsnicmp(uri, L"https://", 8) == 0 ||
            _wcsicmp(uri, L"about:blank") == 0;
+}
+
+static bool url_allowed(const wchar_t *uri) {
+    return web_url_allowed(uri) || local_file_url(uri);
 }
 
 static COREWEBVIEW2_COLOR color_from_argb(uint32_t argb) {
@@ -551,7 +568,10 @@ static void register_events(Aio_Webview *v) {
             if (!alive->load() || !args) return S_OK;
             LPWSTR uri = nullptr;
             if (SUCCEEDED(args->get_Uri(&uri)) && uri) {
-                if (!url_allowed(uri)) {
+                BOOL redirected = FALSE;
+                const bool local = local_file_url(uri) &&
+                                   SUCCEEDED(args->get_IsRedirected(&redirected)) && !redirected;
+                if (!web_url_allowed(uri) && !local) {
                     args->put_Cancel(TRUE);
                 } else {
                     v->loading = true;
@@ -609,7 +629,8 @@ static void register_events(Aio_Webview *v) {
             if (FAILED(args->get_IsUserInitiated(&initiated)) || !initiated) return S_OK;
             LPWSTR uri = nullptr;
             if (SUCCEEDED(args->get_Uri(&uri)) && uri) {
-                if (url_allowed(uri)) {
+                // Replaying a popup as a host navigation bypasses Chromium's renderer-origin checks.
+                if (web_url_allowed(uri)) {
                     v->new_window_url_utf8 = wide_to_utf8(uri);
                     v->changed();
                 }

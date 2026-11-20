@@ -47,9 +47,9 @@ open_web_command_opens_a_normalized_pane_and_refuses_other_schemes :: proc(t: ^t
 	if !testing.expect_value(t, len(state.web_panes), 2) {return}
 	testing.expect_value(t, state.web_panes[1].url, "http://localhost:3000")
 
-	refused := web_open(&state, "file:///C:/Windows/win.ini")
+	refused := web_open(&state, "file://server/share/report.html")
 	testing.expect_value(t, refused.status, cli_protocol.Status.Usage)
-	testing.expect(t, strings.contains(refused.message, "http"))
+	testing.expect(t, strings.contains(refused.message, "local file:///"))
 	testing.expect_value(t, len(state.web_panes), 2)
 
 	state.settings.pane.web_navigator = false
