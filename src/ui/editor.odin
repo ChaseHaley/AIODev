@@ -3688,6 +3688,7 @@ editor_hover :: proc(p: ^Editor, l: Editor_Layout, x, y: f32, text: ^Text = nil)
 	}
 	item, reset, outline, description := -1, -1, -1, -1
 	browse := false
+	filter_default := false
 	profile_item, profile_control := -1, Profile_Control.Radio
 	strip_item := -1
 	if popup_open == .None && !editor_order_dragging(p, .Profiles) && !color_board_shown(p) &&
@@ -3705,6 +3706,9 @@ editor_hover :: proc(p: ^Editor, l: Editor_Layout, x, y: f32, text: ^Text = nil)
 			}
 			browse = render.rect_contains(parts.browse, x, y)
 			row := &p.rows[p.items[index].row]
+			if row.kind == .Saved_Filter {
+				filter_default = render.rect_contains(filter_default_rect(parts.row, l.scale), x, y)
+			}
 			if row.kind == .Profile {
 				table := profile_row_parts(row.kind, parts.row, l.scale)
 				profile_item = index
@@ -3748,6 +3752,7 @@ editor_hover :: proc(p: ^Editor, l: Editor_Layout, x, y: f32, text: ^Text = nil)
 	   section == p.hover_section &&
 	   over_page_bar == p.page_bar_hover &&
 	   profile_item == p.hover_profile_item &&
+	   filter_default == p.filter_default_hover &&
 	   profile_control == p.hover_profile_control {
 		return bar_changed || strip_changed || board_changed
 	}
@@ -3757,6 +3762,7 @@ editor_hover :: proc(p: ^Editor, l: Editor_Layout, x, y: f32, text: ^Text = nil)
 	p.keys_hover = keys
 	p.hover_section, p.page_bar_hover = section, over_page_bar
 	p.hover_profile_item, p.hover_profile_control = profile_item, profile_control
+	p.filter_default_hover = filter_default
 	return true
 }
 
@@ -3764,7 +3770,8 @@ editor_hover :: proc(p: ^Editor, l: Editor_Layout, x, y: f32, text: ^Text = nil)
 editor_hover_clear :: proc(p: ^Editor) -> (changed: bool) {
 	changed =
 		p.hover_item >= 0 || p.hover_reset >= 0 || p.hover_outline >= 0 || p.hover_clear || p.hover_browse ||
-		p.hover_profile_item >= 0 || p.dropdown.bar_hover || p.keys_hover || p.hover_section >= 0 ||
+		p.hover_profile_item >= 0 || p.filter_default_hover || p.dropdown.bar_hover || p.keys_hover ||
+		p.hover_section >= 0 ||
 		p.page_bar_hover
 	p.hover_item, p.hover_reset, p.hover_outline, p.hover_clear = -1, -1, -1, false
 	p.hover_description = -1
@@ -3773,6 +3780,7 @@ editor_hover_clear :: proc(p: ^Editor) -> (changed: bool) {
 	p.dropdown.bar_hover = false
 	p.hover_section, p.page_bar_hover = -1, false
 	p.hover_profile_item, p.hover_profile_control = -1, .Radio
+	p.filter_default_hover = false
 	changed = shortcut_chain_hover(&p.chain, {}) || changed
 	changed = editor_strip_hover_clear(p) || changed
 	changed = board_hover_set(p, {}) || changed

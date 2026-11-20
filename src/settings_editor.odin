@@ -1344,6 +1344,7 @@ when AIO_CONTROL {
 		state_value(r, "settings.labels.drag_target", ui.editor_order_target(p))
 		state_text(r, "settings.labels.value", app.settings.turns.quick_labels)
 		state_text(r, "settings.filters.rows", settings_page_row_rects(p, page, .Filters))
+		state_text(r, "settings.filters.defaults", settings_filter_defaults(p, page))
 		state_value(r, "settings.filters.expanded", p.filter_expanded)
 		state_value(r, "settings.filters.dragging", ui.editor_order_dragging(p, .Saved_Filters))
 		state_value(r, "settings.filters.drag_target", ui.editor_order_target(p))
@@ -1440,6 +1441,23 @@ when AIO_CONTROL {
 		Opener,
 		Labels,
 		Filters,
+	}
+
+	// "filter.N@on@x,y,w,h;...": each saved filter's on by default control, on being 1 or 0.
+	@(private = "file")
+	settings_filter_defaults :: proc(p: ^ui.Editor, page: ui.Editor_Layout) -> string {
+		builder := strings.builder_make(context.temp_allocator)
+		first := true
+		for item, index in p.items {
+			if item.row < 0 || p.rows[item.row].kind != .Saved_Filter {continue}
+			row := &p.rows[item.row]
+			rect := ui.filter_default_rect(ui.editor_row_parts(p, page, index).row, page.scale)
+			if !first {strings.write_byte(&builder, ';')}
+			first = false
+			on := int(.Default in row.flags ? 1 : 0)
+			fmt.sbprintf(&builder, "%s@%d@%g,%g,%g,%g", row.key, on, rect.x, rect.y, rect.width, rect.height)
+		}
+		return strings.to_string(builder)
 	}
 
 	// A table's rows as key@x,y,w,h (process) or id@x,y,w,h (profile, link program), joined by ';',

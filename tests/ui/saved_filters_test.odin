@@ -316,3 +316,42 @@ saved_filter_fields_show_no_reset_button :: proc(t: ^testing.T) {
 	}
 	testing.expect(t, found)
 }
+
+@(test)
+saved_filters_on_by_default_is_a_mark_on_the_line_that_several_filters_may_carry :: proc(t: ^testing.T) {
+	p: ui.Editor
+	defer ui.editor_destroy(&p)
+	filters_fixture(t, &p, "* One | a; Two | b; * | c d")
+	heads: [3]bool
+	index := 0
+	for row in p.rows {
+		if row.kind != .Saved_Filter {continue}
+		heads[index] = .Default in row.flags
+		index += 1
+	}
+	testing.expect_value(t, heads, [3]bool{true, false, true})
+	testing.expect_value(t, p.rows[0].title, "One")
+	// Toggling one mark leaves the others, and toggling it again takes it off.
+	value, select_key := filters_value(t, &p, {kind = .Default, id = 2})
+	testing.expect_value(t, value, "* One | a; * Two | b; * | c d")
+	testing.expect_value(t, select_key, "filter.2")
+	value, _ = filters_value(t, &p, {kind = .Default, id = 1})
+	testing.expect_value(t, value, "One | a; Two | b; * | c d")
+	// A field edit, a move and a removal keep the marks with their filters.
+	value, _ = filters_value(t, &p, {kind = .Field, key = "filter.1.name", value = "Uno"})
+	testing.expect_value(t, value, "* Uno | a; Two | b; * | c d")
+	value, _ = filters_value(t, &p, {kind = .Move, id = 1, slot = 3})
+	testing.expect_value(t, value, "Two | b; * | c d; * One | a")
+	value, _ = filters_value(t, &p, {kind = .Remove, id = 1})
+	testing.expect_value(t, value, "Two | b; * | c d")
+	// A name starting with * would read as the mark.
+	_, _, problem := ui.editor_saved_filters_value(&p, {kind = .Field, key = "filter.2.name", value = "*x"})
+	testing.expect_value(t, problem, FILTER_NAME_REFUSAL)
+	testing.expect_value(t, ui.editor_filter_tooltip(&p), "")
+	p.filter_default_hover = true
+	p.hover_item = 0
+	for item, i in p.items {
+		if item.row == 0 {p.hover_item = i}
+	}
+	testing.expect_value(t, ui.editor_filter_tooltip(&p), "On by default")
+}

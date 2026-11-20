@@ -26,6 +26,8 @@ Filter_Field :: enum u8 {
 // whole setting from them, so the table keeps no draft.
 Saved_Filter_State :: struct {
 	filter_expanded: int,
+	// The pointer is over the on by default control of the hovered filter line.
+	filter_default_hover: bool,
 }
 
 // A change to the filter list the page owner saves as the whole setting.
@@ -36,6 +38,8 @@ Filter_Edit_Kind :: enum u8 {
 	Remove,
 	// Moves filter `id` into the gap before `slot`, counted among the filters before the move.
 	Move,
+	// Turns filter `id` on by default, or off again.
+	Default,
 }
 
 Filter_Edit :: struct {
@@ -93,6 +97,7 @@ editor_saved_filters_load :: proc(p: ^Editor, value: string) -> runtime.Allocato
 		id += 1
 		filter_row_add(p, id, .None, settings.saved_filter_label(filter), filter.pattern, "") or_return
 		head := &p.rows[len(p.rows) - 1]
+		if filter.default {head.flags += {.Default}}
 		// Search reads the pattern too, so a filter is found by what it matches.
 		detail := strings.concatenate({settings.SAVED_FILTERS_KEY, " ", filter.pattern}) or_return
 		delete(head.detail)
@@ -191,7 +196,7 @@ editor_saved_filters_value :: proc(
 	drafts := make([dynamic]settings.Saved_Filter_Draft, context.temp_allocator)
 	for head in p.rows {
 		if head.kind != .Saved_Filter {continue}
-		draft: settings.Saved_Filter_Draft
+		draft := settings.Saved_Filter_Draft{default = .Default in head.flags}
 		for row in p.rows {
 			if row.filter != head.filter || row.filter_field == .None {continue}
 			text := row.value
@@ -212,9 +217,12 @@ editor_saved_filters_value :: proc(
 	switch edit.kind {
 	case .Field:
 	case .Add:
-		append(&drafts, settings.Saved_Filter_Draft{filter_new_name(drafts[:]), SAVED_FILTER_NEW_PATTERN})
+		append(&drafts, settings.Saved_Filter_Draft{filter_new_name(drafts[:]), SAVED_FILTER_NEW_PATTERN, false})
 		p.filter_expanded = count + 1
 		select_key = filter_key(count + 1, ".name")
+	case .Default:
+		if edit.id >= 1 && edit.id <= count {drafts[edit.id - 1].default = !drafts[edit.id - 1].default}
+		select_key = filter_key(edit.id)
 	case .Remove:
 		if edit.id >= 1 && edit.id <= count {
 			ordered_remove(&drafts, edit.id - 1)
@@ -310,8 +318,8 @@ editor_filter_toggle :: proc(p: ^Editor, id: int) {
 	}
 }
 
-// Keys on a filter's table line: Enter or Right and Left open and close its fields, Delete from the
-// line's controls removes it, and Ctrl+Up or Down moves it one place.
+// Keys on a filter's table line: Enter or Right and Left open and close its fields, Space turns it on by
+// default or off again, Delete from the line's controls removes it, and Ctrl+Up or Down moves it one place.
 editor_filter_key :: proc(p: ^Editor, row: ^Editor_Row, e: input.Key_Event) -> (Editor_Outcome, bool) {
 	if row == nil || row.kind != .Saved_Filter {return .None, false}
 	if .Control in e.modifiers && (e.key == .Arrow_Up || e.key == .Arrow_Down) {
@@ -326,6 +334,9 @@ editor_filter_key :: proc(p: ^Editor, row: ^Editor_Row, e: input.Key_Event) -> (
 		return .Filter_Action, true
 	}
 	#partial switch e.key {
+	case .Space:
+		editor_request_set(p, Filter_Edit{kind = .Default, id = row.filter})
+		return .Filter_Action, true
 	case .Enter, .Numpad_Enter:
 		editor_filter_toggle(p, row.filter)
 		return .Changed, true
@@ -344,8 +355,8 @@ editor_filter_key :: proc(p: ^Editor, row: ^Editor_Row, e: input.Key_Event) -> (
 	return .None, false
 }
 
-// A press on a filter's table line: the grip starts a reorder drag, the trash removes it, and the
-// rest opens or closes its fields.
+// A press on a filter's table line: the grip starts a reorder drag, the trash removes it, the check turns it
+// on by default or off again, and the rest opens or closes its fields.
 @(private)
 editor_filter_press :: proc(
 	p: ^Editor,
@@ -364,6 +375,11 @@ editor_filter_press :: proc(
 	if render.rect_contains(cells.remove, x, y) {
 		editor_mode_set(p, Editor_Editing{})
 		editor_request_set(p, Filter_Edit{kind = .Remove, id = row.filter})
+		return .Filter_Action
+	}
+	if render.rect_contains(filter_default_rect(parts.row, scale), x, y) {
+		editor_mode_set(p, Editor_Editing{})
+		editor_request_set(p, Filter_Edit{kind = .Default, id = row.filter})
 		return .Filter_Action
 	}
 	editor_filter_toggle(p, row.filter)
@@ -395,7 +411,20 @@ editor_filter_draw :: proc(
 	chevron := render.Rect{cells.remove.x - HEIGHT_COMPACT * s, r.y, HEIGHT_COMPACT * s, r.height}
 	expanded := p.filter_expanded == row.filter
 	icon_draw(list, expanded ? .Chevron_Down : .Chevron_Right, chevron, theme.muted, ICON_INDICATOR, s)
-	right := chevron.x - SPACE_2 * s
+	default := filter_default_rect(r, s)
+	default_on := .Default in row.flags
+	b := Button {
+		rect    = default,
+		hover   = editor_row_control_hovered(p, row, default, pointer) ? 1 : 0,
+		radius  = RADIUS_CONTROL,
+		on_tint = selected,
+	}
+	face, _, err := button_draw(list, theme, b, s, pointer)
+	if err != .None {return .Ok}
+	mark := HEIGHT_COMPACT * s - 8 * s
+	box := render.Rect{face.x + (face.width - mark) / 2, face.y + (face.height - mark) / 2, mark, mark}
+	checkbox_draw(list, box, default_on, theme, s)
+	right := default.x - SPACE_2 * s
 	x := cells.expand.x
 	baseline := r.y + (r.height - text.line_height) / 2 + text.ascent
 	name_width := min(text_width(text, row.title), max(1, (right - x) * 0.6))
@@ -406,4 +435,21 @@ editor_filter_draw :: proc(
 	detail_x := x + name_width + SPACE_3 * s
 	detail_baseline := r.y + (r.height - small.line_height) / 2 + small.ascent
 	return draw_fading_text(&small, list, row.value, detail_x, detail_baseline, theme.faint, right - detail_x)
+}
+
+// The on by default control of a filter's table line, left of the chevron: the app's checkbox, since several
+// filters may be on by default where one profile is the default.
+filter_default_rect :: proc(row: render.Rect, scale: f32) -> render.Rect {
+	cells := editor_block_parts(row, scale)
+	size := HEIGHT_COMPACT * scale
+	return {cells.remove.x - 2 * size, row.y + (row.height - size) / 2, size, size}
+}
+
+// What the on by default control under the pointer does, for its tooltip; empty when none is. The words
+// follow the profile table's ("Default profile", "Use as default").
+editor_filter_tooltip :: proc(p: ^Editor) -> string {
+	if !p.filter_default_hover || p.hover_item < 0 || p.hover_item >= len(p.items) {return ""}
+	item := p.items[p.hover_item]
+	if item.row < 0 || item.row >= len(p.rows) || p.rows[item.row].kind != .Saved_Filter {return ""}
+	return .Default in p.rows[item.row].flags ? "On by default" : "Use by default"
 }

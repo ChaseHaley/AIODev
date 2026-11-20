@@ -41,6 +41,8 @@ editor_filters_edit :: proc(
 		message = "Filter removed."
 	case .Move:
 		message, focus = "Filter order saved.", .Control
+	case .Default:
+		message, focus = "Default filters saved. New Agent changes panes start with them on.", .Control
 	}
 	editor_table_saved(w, result, .Setting, select_key, message, focus, edit.kind == .Field)
 	return result.status == .Applied
