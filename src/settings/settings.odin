@@ -1547,7 +1547,7 @@ SCHEMA :: [?]Schema_Entry {
 		kind = .String,
 		offset = offset_of(Settings, turns) + offset_of(Turns_Settings, diff_filter),
 		default_value = "",
-		valid = {0, 256},
+		valid = {0, 1024},
 		description = "The filter a new Agent changes pane starts with: space-separated regular expressions on " +
 			"file paths; a term starting with ! hides matching files; @name uses a saved filter and ~@name " +
 			"keeps it off. Empty shows every file.",
@@ -1583,8 +1583,8 @@ SCHEMA :: [?]Schema_Entry {
 		valid = {0, SAVED_FILTERS_MAX},
 		control = .Group,
 		validator = .Saved_Filters,
-		description = "Named diff filters for Agent changes: " + SAVED_FILTERS_EXAMPLE + ". Type @ in the " +
-			"filter field to use one; a filter's pattern takes the field's own terms.",
+		description = "Saved diff filters for Agent changes: " + SAVED_FILTERS_EXAMPLE + ". The filter field's @ " +
+			"button lists them; a filter without a name shows its pattern.",
 	},
 	{
 		key = "shell.default_profile",
@@ -2039,7 +2039,7 @@ value_parse :: proc(
 			}
 		case .Saved_Filters:
 			if !saved_filters_valid(value) {
-				buffer: [384]u8
+				buffer: [512]u8
 				issue, err := problem(.Invalid_Value, allocator, saved_filters_rules(buffer[:]))
 				return nil, issue, err
 			}

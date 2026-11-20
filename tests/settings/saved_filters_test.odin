@@ -16,15 +16,17 @@ saved_filters_parse :: proc(t: ^testing.T, value: string) -> (filters: string, d
 
 @(test)
 saved_filters_cursor_yields_entries_in_order_and_a_pattern_keeps_its_bars :: proc(t: ^testing.T) {
-	cursor := settings.saved_filters_scan("No vendor | !^vendor/; Docs | \\.(md|txt)$ !changelog")
+	cursor := settings.saved_filters_scan("| !^vendor/; Docs | \\.(md|txt)$ !changelog")
 	first, ok := settings.saved_filters_next(&cursor)
 	testing.expect(t, ok)
-	testing.expect_value(t, first.name, "No vendor")
+	testing.expect_value(t, first.name, "")
 	testing.expect_value(t, first.pattern, "!^vendor/")
+	testing.expect_value(t, settings.saved_filter_label(first), "!^vendor/")
 	second, more := settings.saved_filters_next(&cursor)
 	testing.expect(t, more)
 	testing.expect_value(t, second.name, "Docs")
 	testing.expect_value(t, second.pattern, "\\.(md|txt)$ !changelog")
+	testing.expect_value(t, settings.saved_filter_label(second), "Docs")
 	_, ended := settings.saved_filters_next(&cursor)
 	testing.expect(t, !ended)
 	blank := settings.saved_filters_scan("  ")
@@ -33,37 +35,56 @@ saved_filters_cursor_yields_entries_in_order_and_a_pattern_keeps_its_bars :: pro
 }
 
 @(test)
-saved_filters_find_ignores_case :: proc(t: ^testing.T) {
-	value := "No vendor | !^vendor/; Odin | \\.odin$"
+saved_filters_are_found_by_label_or_pattern_ignoring_case_in_the_label :: proc(t: ^testing.T) {
+	value := "| !^vendor/; Odin | \\.odin$"
 	filter, index, found := settings.saved_filters_find(value, "odin")
 	testing.expect(t, found)
 	testing.expect_value(t, index, 1)
 	testing.expect_value(t, filter.pattern, "\\.odin$")
+	filter, index, found = settings.saved_filters_find(value, "!^VENDOR/")
+	testing.expect(t, found)
+	testing.expect_value(t, index, 0)
 	_, _, missing := settings.saved_filters_find(value, "Docs")
 	testing.expect(t, !missing)
+	_, at, by_pattern := settings.saved_filters_find_pattern(value, "\\.odin$")
+	testing.expect(t, by_pattern)
+	testing.expect_value(t, at, 1)
+	_, _, none := settings.saved_filters_find_pattern(value, "odin")
+	testing.expect(t, !none)
 }
 
 @(test)
 saved_filters_text_round_trips_and_names_the_first_problem :: proc(t: ^testing.T) {
-	drafts := [?]settings.Saved_Filter_Draft{{" No vendor ", " !^vendor/ "}, {"Docs", "\\.md$"}}
+	drafts := [?]settings.Saved_Filter_Draft{{" ", " !^vendor/ "}, {"Docs", "\\.md$"}, {"", "a|b c"}}
 	text, problem, err := settings.saved_filters_text(drafts[:], context.temp_allocator)
 	testing.expect_value(t, err, nil)
 	_, has_problem := problem.?
 	testing.expect(t, !has_problem)
-	testing.expect_value(t, text, "No vendor | !^vendor/; Docs | \\.md$")
+	testing.expect_value(t, text, "| !^vendor/; Docs | \\.md$; | a|b c")
+	cursor := settings.saved_filters_scan(text)
+	index := 0
+	for filter in settings.saved_filters_next(&cursor) {
+		testing.expect_value(t, filter.name, strings.trim_space(drafts[index].name))
+		testing.expect_value(t, filter.pattern, strings.trim_space(drafts[index].pattern))
+		index += 1
+	}
+	testing.expect_value(t, index, 3)
 
 	Case :: struct {
 		drafts:  []settings.Saved_Filter_Draft,
 		problem: settings.Saved_Filter_Problem,
 	}
 	cases := [?]Case {
-		{{{"", "x"}}, .Name},
 		{{{"a;b", "x"}}, .Name},
 		{{{"a|b", "x"}}, .Name},
 		{{{"say \"hi\"", "x"}}, .Name},
 		{{{"Docs", "\\.md$"}, {"docs", "x"}}, .Duplicate},
+		{{{"", "x"}, {"X", "y"}}, .Duplicate},
+		{{{"x", "a"}, {"", "x"}}, .Duplicate},
+		{{{"", "x"}, {"", "x"}}, .Duplicate},
 		{{{"Docs", ""}}, .Pattern},
 		{{{"Docs", "a;b"}}, .Pattern},
+		{{{"", "a\"b"}}, .Pattern},
 	}
 	for c in cases {
 		_, got, _ := settings.saved_filters_text(c.drafts, context.temp_allocator)
@@ -71,6 +92,11 @@ saved_filters_text_round_trips_and_names_the_first_problem :: proc(t: ^testing.T
 		testing.expect(t, refused)
 		testing.expect_value(t, value, c.problem)
 	}
+	long := strings.repeat("a", settings.SAVED_FILTER_PATTERN_MAX + 1, context.temp_allocator)
+	_, got, _ := settings.saved_filters_text([]settings.Saved_Filter_Draft{{"", long}}, context.temp_allocator)
+	value, refused := got.?
+	testing.expect(t, refused)
+	testing.expect_value(t, value, settings.Saved_Filter_Problem.Pattern)
 }
 
 @(test)
@@ -78,10 +104,10 @@ saved_filters_setting_defaults_to_none_and_refuses_malformed_values :: proc(t: ^
 	value, issues := saved_filters_parse(t, "")
 	testing.expect_value(t, value, "")
 	testing.expect_value(t, issues, 0)
-	value, issues = saved_filters_parse(t, "No vendor | !^vendor/; Odin | \\.odin$")
-	testing.expect_value(t, value, "No vendor | !^vendor/; Odin | \\.odin$")
+	value, issues = saved_filters_parse(t, "| !^vendor/; Odin | \\.odin$")
+	testing.expect_value(t, value, "| !^vendor/; Odin | \\.odin$")
 	testing.expect_value(t, issues, 0)
-	for bad in ([?]string{"no pattern", "Odin | ", "A | x; a | y", "A | x;", "| x"}) {
+	for bad in ([?]string{"no pattern", "Odin | ", "A | x; a | y", "| x; X | y", "A | x;"}) {
 		value, issues = saved_filters_parse(t, bad)
 		testing.expect_value(t, value, "")
 		testing.expect_value(t, issues, 1)
@@ -90,15 +116,15 @@ saved_filters_setting_defaults_to_none_and_refuses_malformed_values :: proc(t: ^
 
 @(test)
 filter_words_find_tokens_and_leave_the_rest_plain :: proc(t: ^testing.T) {
-	text := `~@"No vendor" @Odin ui !json  @"half @ "a b"c @`
+	text := `~@"!tests/ !_test" @\.odin$ ui !json  @"half @ "a b"c @`
 	Expected :: struct {
-		text:        string,
-		token, off:  bool,
-		name:        string,
+		text:       string,
+		token, off: bool,
+		name:       string,
 	}
 	expected := [?]Expected {
-		{`~@"No vendor"`, true, true, "No vendor"},
-		{"@Odin", true, false, "Odin"},
+		{`~@"!tests/ !_test"`, true, true, "!tests/ !_test"},
+		{`@\.odin$`, true, false, "\\.odin$"},
 		{"ui", false, false, ""},
 		{"!json", false, false, ""},
 		{`@"half`, false, false, ""},
@@ -122,20 +148,27 @@ filter_words_find_tokens_and_leave_the_rest_plain :: proc(t: ^testing.T) {
 }
 
 @(test)
-filter_token_format_quotes_only_names_with_spaces_and_parses_back :: proc(t: ^testing.T) {
-	buffer: [64]u8
+filter_token_format_quotes_only_labels_with_spaces_and_parses_back :: proc(t: ^testing.T) {
+	buffer: [160]u8
 	Case :: struct {
-		name: string,
-		off:  bool,
-		text: string,
+		label: string,
+		off:   bool,
+		text:  string,
 	}
-	cases := [?]Case{{"Odin", false, "@Odin"}, {"Odin", true, "~@Odin"}, {"No vendor", false, `@"No vendor"`}, {"No vendor", true, `~@"No vendor"`}}
+	cases := [?]Case {
+		{"Odin", false, "@Odin"},
+		{"Odin", true, "~@Odin"},
+		{"!^vendor/", false, "@!^vendor/"},
+		{"\\.(md|txt)$", true, "~@\\.(md|txt)$"},
+		{"!tests/ !_test", false, `@"!tests/ !_test"`},
+		{"No vendor", true, `~@"No vendor"`},
+	}
 	for c in cases {
-		text := settings.filter_token_format(buffer[:], c.name, c.off)
+		text := settings.filter_token_format(buffer[:], c.label, c.off)
 		testing.expect_value(t, text, c.text)
 		word, ok := settings.filter_word_next(text, 0)
 		testing.expect(t, ok && word.token)
-		testing.expect_value(t, word.name, c.name)
+		testing.expect_value(t, word.name, c.label)
 		testing.expect_value(t, word.off, c.off)
 		testing.expect_value(t, word.end, len(text))
 	}

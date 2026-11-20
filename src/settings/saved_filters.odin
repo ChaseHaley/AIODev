@@ -10,21 +10,23 @@ SAVED_FILTERS_KEY :: "turns.saved_filters"
 
 // The documented shape of a saved-filters value. The settings description and the diagnostic for a
 // malformed value both show it, so a grammar change updates the example with the parser.
-SAVED_FILTERS_EXAMPLE :: "No vendor | !^vendor/; Odin | \\.odin$ !_test"
+SAVED_FILTERS_EXAMPLE :: "| !^vendor/; Source | src/ !_test"
 
 SAVED_FILTERS_MAX :: 4096
 SAVED_FILTER_NAME_MAX :: 32
+SAVED_FILTER_PATTERN_MAX :: 120
 
 // `;` ends a filter, `|` ends the name, `"` is the token's quote and a line break ends the setting, so
-// no name can hold any of them. A pattern may hold `|`, which regular expressions use; it cannot hold
-// `;`, and `\x3b` stands for one.
+// no name can hold any of them. A pattern may hold `|`, which regular expressions use, but not `;` or a
+// quote, since a filter without a name is labelled by its pattern.
 @(private)
 SAVED_FILTER_NAME_FORBIDDEN :: ";|\"\r\n\x00"
 @(private)
-SAVED_FILTER_PATTERN_FORBIDDEN :: ";\r\n\x00"
+SAVED_FILTER_PATTERN_FORBIDDEN :: ";\"\r\n\x00"
 
-// One `name | pattern` entry, as slices of the value. The pattern is the diff filter's grammar:
-// space-separated regular expressions on a path, a term starting with `!` hiding what it matches.
+// One `name | pattern` entry, as slices of the value; `| pattern` has no name and shows its pattern. The
+// pattern is the diff filter's grammar: space-separated regular expressions on a path, a term starting with
+// `!` hiding what it matches.
 Saved_Filter :: struct {
 	name, pattern: string,
 }
@@ -70,10 +72,12 @@ saved_filter_parse :: proc(text: string) -> (filter: Saved_Filter, valid: bool) 
 	if bar < 0 {return {name = strings.trim_space(text)}, false}
 	filter.name = strings.trim_space(text[:bar])
 	filter.pattern = strings.trim_space(text[bar + 1:])
-	valid = saved_filter_name_valid(filter.name) && saved_filter_pattern_valid(filter.pattern)
+	valid = saved_filter_pattern_valid(filter.pattern)
+	if filter.name != "" && !saved_filter_name_valid(filter.name) {valid = false}
 	return
 }
 
+// A name is optional: up to SAVED_FILTER_NAME_MAX characters of one-line text without `;`, `|` or quotes.
 @(require_results)
 saved_filter_name_valid :: proc(name: string) -> bool {
 	if name == "" || len(name) > SAVED_FILTER_NAME_MAX {return false}
@@ -84,24 +88,48 @@ saved_filter_name_valid :: proc(name: string) -> bool {
 	return true
 }
 
-@(private, require_results)
+@(require_results)
 saved_filter_pattern_valid :: proc(pattern: string) -> bool {
-	return pattern != "" && !strings.contains_any(pattern, SAVED_FILTER_PATTERN_FORBIDDEN)
+	if pattern == "" || len(pattern) > SAVED_FILTER_PATTERN_MAX {return false}
+	return !strings.contains_any(pattern, SAVED_FILTER_PATTERN_FORBIDDEN)
 }
 
-// The filter named `name`, compared without case, and its position; false when none has it.
+// The text a token for `filter` carries and the field shows: its name, or its pattern while it has none.
 @(require_results)
-saved_filters_find :: proc(value, name: string) -> (filter: Saved_Filter, index: int, found: bool) {
+saved_filter_label :: proc(filter: Saved_Filter) -> string {
+	return filter.name == "" ? filter.pattern : filter.name
+}
+
+// The filter a token labelled `label` names, compared without case, and its position; false when none.
+@(require_results)
+saved_filters_find :: proc(value, label: string) -> (filter: Saved_Filter, index: int, found: bool) {
 	cursor := saved_filters_scan(value)
 	for next in saved_filters_next(&cursor) {
-		if strings.equal_fold(next.name, name) {return next, index, true}
+		if strings.equal_fold(saved_filter_label(next), label) {return next, index, true}
 		index += 1
 	}
 	return {}, -1, false
 }
 
-// What an edited filter cannot store, reported for the first filter that has one: its name, a name an
-// earlier filter has, then its pattern.
+// The filter whose pattern is exactly `pattern`, and its position; false when none.
+@(require_results)
+saved_filters_find_pattern :: proc(
+	value, pattern: string,
+) -> (
+	filter: Saved_Filter,
+	index: int,
+	found: bool,
+) {
+	cursor := saved_filters_scan(value)
+	for next in saved_filters_next(&cursor) {
+		if next.pattern == pattern {return next, index, true}
+		index += 1
+	}
+	return {}, -1, false
+}
+
+// What an edited filter cannot store, reported for the first filter that has one: its name, its pattern, or
+// a label (its name, else its pattern) that an earlier filter has.
 Saved_Filter_Problem :: enum u8 {
 	Name,
 	Duplicate,
@@ -131,8 +159,11 @@ saved_filters_text :: proc(
 	builder := strings.builder_make(allocator) or_return
 	for filter, index in filters {
 		if index > 0 {strings.write_string(&builder, "; ")}
-		strings.write_string(&builder, strings.trim_space(filter.name))
-		strings.write_string(&builder, " | ")
+		if name := strings.trim_space(filter.name); name != "" {
+			strings.write_string(&builder, name)
+			strings.write_byte(&builder, ' ')
+		}
+		strings.write_string(&builder, "| ")
 		strings.write_string(&builder, strings.trim_space(filter.pattern))
 	}
 	if strings.builder_len(builder) > SAVED_FILTERS_MAX {
@@ -146,12 +177,15 @@ saved_filters_text :: proc(
 saved_filter_check :: proc(
 	filter: Saved_Filter_Draft, before: []Saved_Filter_Draft,
 ) -> Maybe(Saved_Filter_Problem) {
-	name := strings.trim_space(filter.name)
-	if !saved_filter_name_valid(name) {return Saved_Filter_Problem.Name}
+	name, pattern := strings.trim_space(filter.name), strings.trim_space(filter.pattern)
+	if name != "" && !saved_filter_name_valid(name) {return Saved_Filter_Problem.Name}
+	if !saved_filter_pattern_valid(pattern) {return Saved_Filter_Problem.Pattern}
+	label := name == "" ? pattern : name
 	for earlier in before {
-		if strings.equal_fold(strings.trim_space(earlier.name), name) {return Saved_Filter_Problem.Duplicate}
+		earlier_name := strings.trim_space(earlier.name)
+		if earlier_name == "" {earlier_name = strings.trim_space(earlier.pattern)}
+		if strings.equal_fold(earlier_name, label) {return Saved_Filter_Problem.Duplicate}
 	}
-	if !saved_filter_pattern_valid(strings.trim_space(filter.pattern)) {return Saved_Filter_Problem.Pattern}
 	return nil
 }
 
@@ -164,7 +198,8 @@ saved_filters_valid :: proc(value: string) -> bool {
 		filter, valid, more := saved_filters_step(&cursor)
 		if !more {break}
 		if !valid {return false}
-		if _, earlier, found := saved_filters_find(value, filter.name); found && earlier != index {return false}
+		label := saved_filter_label(filter)
+		if _, earlier, found := saved_filters_find(value, label); found && earlier != index {return false}
 		index += 1
 	}
 	return true
@@ -176,10 +211,12 @@ saved_filters_valid :: proc(value: string) -> bool {
 saved_filters_rules :: proc(buffer: []u8) -> string {
 	return fmt.bprintf(
 		buffer,
-		"Each filter is name | pattern; a name is up to %d characters without ; | or quotes and is used once, " +
-		"and a pattern is regular expressions on a path, a term starting with ! hiding what it matches, " +
-		"without ;. A value looks like %s.",
+		"Each filter is name | pattern, and the name may be left out. A name is up to %d characters without " +
+		"; | or quotes. A pattern is regular expressions on a path, a term starting with ! hiding what it " +
+		"matches, up to %d characters without ; or quotes. A filter's name, or its pattern when it has no " +
+		"name, is used once. A value looks like %s.",
 		SAVED_FILTER_NAME_MAX,
+		SAVED_FILTER_PATTERN_MAX,
 		SAVED_FILTERS_EXAMPLE,
 	)
 }
