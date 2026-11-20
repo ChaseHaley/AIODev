@@ -113,6 +113,7 @@ aio = {}
 ---@overload fun(name: "pane.new_floating", fields?: aio.fields.pane.new_floating): aio.Reply?, string?, integer?
 ---@overload fun(name: "pane.open_markdown", fields?: aio.fields.pane.open_markdown): aio.Reply?, string?, integer?
 ---@overload fun(name: "pane.open_markdown_default_app", fields?: aio.fields.pane.open_markdown_default_app): aio.Reply?, string?, integer?
+---@overload fun(name: "pane.open_web", fields?: aio.fields.pane.open_web): aio.Reply?, string?, integer?
 ---@overload fun(name: "pane.process", fields?: aio.fields.pane.process): aio.Reply?, string?, integer?
 ---@overload fun(name: "pane.read", fields?: aio.fields.pane.read): aio.Reply?, string?, integer?
 ---@overload fun(name: "pane.rename", fields?: aio.fields.pane.rename): aio.Reply?, string?, integer?
@@ -143,6 +144,7 @@ aio = {}
 ---@overload fun(name: "pane.swap_previous", fields?: aio.fields.pane.swap_previous): aio.Reply?, string?, integer?
 ---@overload fun(name: "pane.swap_right", fields?: aio.fields.pane.swap_right): aio.Reply?, string?, integer?
 ---@overload fun(name: "pane.swap_up", fields?: aio.fields.pane.swap_up): aio.Reply?, string?, integer?
+---@overload fun(name: "pane.toggle_web_navigator", fields?: aio.fields.pane.toggle_web_navigator): aio.Reply?, string?, integer?
 ---@overload fun(name: "pane.zoom", fields?: aio.fields.pane.zoom): aio.Reply?, string?, integer?
 ---@overload fun(name: "profile.open_1", fields?: aio.fields.profile.open_1): aio.Reply?, string?, integer?
 ---@overload fun(name: "profile.open_2", fields?: aio.fields.profile.open_2): aio.Reply?, string?, integer?
@@ -2034,6 +2036,23 @@ function aio.pane.open_markdown(fields) end
 ---@return integer? status
 function aio.pane.open_markdown_default_app(fields) end
 
+---The fields of pane.open_web.
+---@class aio.fields.pane.open_web
+---@field pane? string|integer the pane to act on: a pane id, a pane name, here or focused; default: here (the pane aio runs in), or the focused pane outside AIODev
+---@field direction? "left"|"right"|"up"|"down" the side of the pane the new pane opens on; default: right, or a float when pane.web_floating is on
+---@field ratio? number the new pane's share of the split pane's width (left, right) or height (up, down); default: 0.5 (half)
+---@field focus? boolean moves focus to the new pane; default: off (focus stays where it is)
+---@field text? string the http or https address to open; default: a blank pane
+
+---Open web pane
+---
+---Opens a new embedded web pane beside the pane; with an address it loads it (https is assumed when no scheme is given), else the URL bar is ready for one.
+---@param fields? aio.fields.pane.open_web
+---@return aio.Reply? reply
+---@return string? message
+---@return integer? status
+function aio.pane.open_web(fields) end
+
 ---The fields of pane.process.
 ---@class aio.fields.pane.process
 ---@field pane? string|integer the pane to act on: a pane id, a pane name, here or focused; default: here (the pane aio runs in), or the focused pane outside AIODev
@@ -2401,6 +2420,19 @@ function aio.pane.swap_right(fields) end
 ---@return string? message
 ---@return integer? status
 function aio.pane.swap_up(fields) end
+
+---The fields of pane.toggle_web_navigator.
+---@class aio.fields.pane.toggle_web_navigator
+---@field pane? string|integer the pane to act on: a pane id, a pane name, here or focused; default: here (the pane aio runs in), or the focused pane outside AIODev
+
+---Toggle web pane URL bar
+---
+---Shows or hides the URL navigator bar below the focused web pane's header.
+---@param fields? aio.fields.pane.toggle_web_navigator
+---@return aio.Reply? reply
+---@return string? message
+---@return integer? status
+function aio.pane.toggle_web_navigator(fields) end
 
 ---The fields of pane.zoom.
 ---@class aio.fields.pane.zoom

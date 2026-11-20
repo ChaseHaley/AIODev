@@ -238,3 +238,27 @@ trim_prose :: proc(text: string, start, end: int) -> int {
 	}
 	return trim
 }
+
+// Normalize_web_input turns text typed or scripted as a web address into one allowed() accepts: an http or
+// https URL passes as is, a bare host gets https (http for localhost, 127.0.0.1 and [::1]), and any other
+// scheme is refused. The result is allocated with `allocator`.
+@(require_results)
+normalize_web_input :: proc(raw: string, allocator := context.temp_allocator) -> (string, bool) {
+	trimmed := strings.trim_space(raw)
+	if trimmed == "" {return "", false}
+	if allowed(trimmed) {
+		cloned, err := strings.clone(trimmed, allocator)
+		return cloned, err == nil
+	}
+	if strings.contains(trimmed, "://") {return "", false}
+	prefix := "https://"
+	if strings.has_prefix(trimmed, "localhost") ||
+	   strings.has_prefix(trimmed, "127.0.0.1") ||
+	   strings.has_prefix(trimmed, "[::1]") {
+		prefix = "http://"
+	}
+	candidate, err := strings.concatenate({prefix, trimmed}, allocator)
+	if err != nil {return "", false}
+	if !allowed(candidate) {return "", false}
+	return candidate, true
+}

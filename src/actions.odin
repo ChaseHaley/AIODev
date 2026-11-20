@@ -467,7 +467,10 @@ ACTIONS :: [Action]Command_Descriptor {
 	.Open_Markdown_Default_App = {
 		"pane.open_markdown_default_app", "Open Markdown in default app", nil, .Local, {},
 	},
-	.Open_Web = {"pane.open_web", "Open web pane", nil, .Local, {}},
+	.Open_Web = {
+		"pane.open_web", "Open web pane", nil, .Local,
+		{accepted = {.Text, .Direction, .Ratio, .Focus}, control = .Pane},
+	},
 	.Toggle_Web_Navigator = {"pane.toggle_web_navigator", "Toggle web pane URL bar", nil, .Local, {}},
 	.Agent_Changes = {"pane.agent_changes", "Open agent changes", nil, .Local, {}},
 	.Duplicate_Tab = {"tab.duplicate", "Duplicate tab", nil, .Host, {}},
@@ -941,8 +944,15 @@ COMMAND_HELP :: #partial [Action]Command_Help {
 		nil,
 	},
 	.Open_Web = {
-		"Opens a new embedded web pane beside the focused pane with the URL bar ready.",
-		nil,
+		"Opens a new embedded web pane beside the pane; with an address it loads it (https is assumed when no " +
+		"scheme is given), else the URL bar is ready for one.",
+		{
+			{
+				.Text,
+				{description = "the http or https address to open", default = "a blank pane", example = "example.com"},
+			},
+			{.Direction, {default = "right, or a float when pane.web_floating is on"}},
+		},
 	},
 	.Toggle_Web_Navigator = {
 		"Shows or hides the URL navigator bar below the focused web pane's header.",
@@ -1365,6 +1375,9 @@ command_execute :: proc(app: ^App, ctx: Command_Context, invocation: commands.In
 	case .Open_Markdown_Default_App:
 		markdown_open_external(app, w)
 	case .Open_Web:
+		if t, named := target.?; named {
+			return control_web_open(app, window_for_workspace(app, t.workspace), t, invocation)
+		}
 		web_open_blank(app, w)
 	case .Toggle_Web_Navigator:
 		web_toggle_navigator(app, w)
