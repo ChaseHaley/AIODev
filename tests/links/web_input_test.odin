@@ -21,6 +21,9 @@ normalize_web_input_adds_schemes_and_refuses_others :: proc(t: ^testing.T) {
 		{"javascript:alert(1)", ""},
 		{"ftp://example.com", ""},
 		{"two words", ""},
+		{"http://[::1]:8080/x", "http://[::1]:8080/x"},
+		{"\texample.com\n", "https://example.com"},
+		{"JavaScript:alert(1)", ""},
 	}
 	for c in cases {
 		got, ok := links.normalize_web_input(c.raw, context.temp_allocator)
