@@ -29,6 +29,7 @@ control_web_open :: proc(
 	placement: Pane_Placement = floating && !layout.is_floating(tree, node) ? .Float : .Split_Right
 	pane := web_pane_create(app, url)
 	if pane == nil {return outcome_failure(.Failed, "could not open a web pane")}
+	if url == "" {pane.nav_bar, pane.url_editing = true, true}
 	// An unplaced pane is dropped by the next web poll.
 	if !pane_place(
 		app,

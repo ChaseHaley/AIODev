@@ -250,39 +250,36 @@ normalize_web_input :: proc(raw: string, allocator := context.temp_allocator) ->
 		cloned, err := strings.clone(trimmed, allocator)
 		return cloned, err == nil
 	}
-	if strings.contains(trimmed, "://") || !bare_authority_valid(trimmed) {return "", false}
+	if strings.contains(trimmed, "://") {return "", false}
+	host, valid := bare_authority_host(trimmed)
+	if !valid {return "", false}
 	prefix := "https://"
-	if strings.has_prefix(trimmed, "localhost") ||
-	   strings.has_prefix(trimmed, "127.0.0.1") ||
-	   strings.has_prefix(trimmed, "[::1]") {
+	if strings.equal_fold(host, "localhost") || host == "127.0.0.1" || host == "[::1]" {
 		prefix = "http://"
 	}
 	candidate, err := strings.concatenate({prefix, trimmed}, allocator)
 	if err != nil {return "", false}
-	if !allowed(candidate) {return "", false}
+	if !allowed(candidate) {delete(candidate, allocator); return "", false}
 	return candidate, true
 }
 
-// Whether the host part of a bare address is a host with at most a numeric port, so `about:blank`,
-// `data:text/html,…` and `file:name` are not read as a host named after their scheme.
+// The host in a bare address with at most a numeric port. A scheme without slashes (such as
+// `about:blank` or `file:name`) is not a host and port.
 @(private, require_results)
-bare_authority_valid :: proc(text: string) -> bool {
+bare_authority_host :: proc(text: string) -> (string, bool) {
 	authority := text
 	if end := strings.index_any(authority, "/?#"); end >= 0 {authority = authority[:end]}
-	port := ""
+	port_at := strings.index_byte(authority, ':')
 	if strings.has_prefix(authority, "[") {
 		close := strings.index_byte(authority, ']')
-		if close < 0 {return false}
-		rest := authority[close + 1:]
-		if rest == "" {return true}
-		if rest[0] != ':' {return false}
-		port = rest[1:]
-	} else if colon := strings.index_byte(authority, ':'); colon >= 0 {
-		port = authority[colon + 1:]
-	} else {
-		return true
+		if close < 0 {return "", false}
+		if close + 1 == len(authority) {return authority, true}
+		port_at = close + 1
+		if authority[port_at] != ':' {return "", false}
 	}
-	if port == "" {return false}
-	for c in transmute([]u8)port {if c < '0' || c > '9' {return false}}
-	return true
+	if port_at < 0 {return authority, true}
+	port := authority[port_at + 1:]
+	if port == "" {return "", false}
+	for c in transmute([]u8)port {if c < '0' || c > '9' {return "", false}}
+	return authority[:port_at], true
 }

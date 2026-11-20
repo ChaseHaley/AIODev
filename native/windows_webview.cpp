@@ -404,12 +404,13 @@ static void apply_color_scheme(Aio_Webview *v) {
 
 static void apply_placement(Aio_Webview *v) {
     if (!v || !v->ready || !v->controller || !v->comp) return;
+    // Hidden views still need to leave their old host before that window can be destroyed.
+    if (v->host) ensure_visual_for_host(v, v->host);
     if (!v->host || !v->visible || v->vis_w <= 0 || v->vis_h <= 0) {
         detach_visual(v);
         v->controller->put_IsVisible(FALSE);
         return;
     }
-    ensure_visual_for_host(v, v->host);
     if (!v->visual) return;
     if (!host_ensure_levels(v->host, static_cast<size_t>(v->level) + 1)) return;
 
@@ -604,6 +605,8 @@ static void register_events(Aio_Webview *v) {
             ICoreWebView2 *, ICoreWebView2NewWindowRequestedEventArgs *args) -> HRESULT {
             if (!alive->load() || !args) return S_OK;
             args->put_Handled(TRUE);
+            BOOL initiated = FALSE;
+            if (FAILED(args->get_IsUserInitiated(&initiated)) || !initiated) return S_OK;
             LPWSTR uri = nullptr;
             if (SUCCEEDED(args->get_Uri(&uri)) && uri) {
                 if (url_allowed(uri)) {
@@ -843,7 +846,8 @@ static void start_controller_creation(Aio_Webview *v) {
         return S_OK;
     });
 
-    HRESULT hr = v->env->env3->CreateCoreWebView2CompositionController(v->host->hwnd, handler.get());
+    // Creation is asynchronous: a pane can leave its original window before the callback.
+    HRESULT hr = v->env->env3->CreateCoreWebView2CompositionController(v->env->wake_hwnd, handler.get());
     if (FAILED(hr)) {
         v->creating = false;
         v->failed = true;

@@ -285,6 +285,7 @@ link_choice_item :: proc(
 link_choice_default :: proc(app: ^App, choice: Link_Choice, in_float, web: bool) -> Link_Placement {
 	#partial switch choice.action {
 	case .Open:
+		if web && (!app.settings.pane.web_links || !platform.webview_supported()) {return .Default}
 		floating := web ? app.settings.pane.web_floating : app.settings.pane.markdown_floating
 		return floating && !in_float ? .Float : .Split_Right
 	case .Open_Shell:

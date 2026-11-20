@@ -508,7 +508,9 @@ web_note_show :: proc(app: ^App, pane: ^Web_Pane, note: platform.Webview_Note) {
 // Polls WebView2 state updates and dispatches any queued accelerator shortcuts.
 web_events_process :: proc(app: ^App) {
 	browser_lost := false
-	for pane in app.web_panes {
+	// Opening a user-triggered popup can append to the pane list and move its storage.
+	for i in 0 ..< len(app.web_panes) {
+		pane := app.web_panes[i]
 		if pane.view == nil {continue}
 		snap := platform.webview_poll(pane.view)
 		changed := snap.dirty
@@ -524,7 +526,7 @@ web_events_process :: proc(app: ^App) {
 			pane.find_count, pane.find_index = snap.find_count, snap.find_index
 			changed = true
 		}
-		if snap.crashed != pane.crashed && snap.crashed != .None {
+		if snap.crashed != pane.crashed {
 			pane.crashed = snap.crashed
 			browser_lost ||= snap.crashed == .Browser
 			changed = true
@@ -533,9 +535,8 @@ web_events_process :: proc(app: ^App) {
 			web_pane_set_url_text(pane, snap.url)
 			changed = true
 		}
-		if snap.title != pane.title {
+		if snap.dirty && snap.title != pane.title {
 			web_pane_set_title_text(pane, snap.title)
-			changed = true
 		}
 		if snap.favicon_serial != pane.favicon_serial {
 			pane.favicon_serial = snap.favicon_serial
@@ -588,6 +589,8 @@ web_tick :: proc(app: ^App) {
 		app.web_deadline = {}
 		return
 	}
+	// Overlay dismissal and native reactivation can leave the app HWND holding the keyboard.
+	for w in app.windows {if w.focused {web_page_refocus(app, w)}}
 	now := clock_now(&app.clock)
 	if app.web_deadline != {} && time.tick_diff(now, app.web_deadline) <= 0 {
 		for i := len(app.web_panes) - 1; i >= 0; i -= 1 {
@@ -1046,7 +1049,8 @@ web_window_present :: proc(app: ^App, w: ^Window, background: render.Color) -> r
 		}
 		rtv := platform.webview_host_overlay_begin(host, i32(i), w.width, w.height)
 		if rtv == nil {continue}
-		_ = render.frame_render_overlay(app.device, rtv, w.width, w.height, &w.list, from, to)
+		if err := render.frame_render_overlay(app.device, rtv, w.width, w.height, &w.list, from, to);
+		   err != .None {return err}
 		platform.webview_host_overlay_present(host, i32(i))
 	}
 	platform.webview_host_trim(host, i32(count))
@@ -1191,9 +1195,16 @@ web_focus_url_bar :: proc(app: ^App, w: ^Window) {
 @(private = "file")
 web_page_refocus :: proc(app: ^App, w: ^Window) {
 	pane := web_focused_pane(app, w)
-	if pane == nil || pane.url_editing || pane.view == nil || !pane.ready || pane.crashed != .None {return}
-	if !w.focused || overlay_kind(app, w) != .None || leader_armed(w) || w.bindings.count > 0 {return}
+	if pane == nil || pane.url_editing || pane.url == "" || pane.view == nil ||
+	   !pane.ready || pane.crashed != .None {return}
+	if !w.focused {return}
+	if w.bindings.count > 0 || len(w.bindings.modes) > 0 || leader_armed(w) {
+		if pane.webview_focused {platform.window_reclaim_focus(&app.platform, w.id)}
+		return
+	}
+	if overlay_kind(app, w) != .None {return}
 	if ui.find_has_keyboard(&w.find) || arrange_active(w) {return}
+	if pane.webview_focused {return}
 	platform.webview_focus(pane.view)
 }
 
@@ -1216,9 +1227,7 @@ web_focus_enter :: proc(app: ^App, w: ^Window, content: layout.Content) {
 		platform.window_reclaim_focus(&app.platform, w.id)
 		return
 	}
-	if pane.view != nil && pane.ready {
-		platform.webview_focus(pane.view)
-	}
+	web_page_refocus(app, w)
 }
 
 @(private = "file")
@@ -1378,7 +1387,7 @@ web_press :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) {
 	}
 	body := web_body_rect(app, w, pane, pr.rect)
 	if pane.view == nil || !pane.ready || pane.crashed != .None || !render.rect_contains(body, x, y) {return}
-	platform.webview_focus(pane.view)
+	web_page_refocus(app, w)
 	lx := i32(math.round(x - body.x))
 	ly := i32(math.round(y - body.y))
 	kind: platform.Webview_Mouse_Kind

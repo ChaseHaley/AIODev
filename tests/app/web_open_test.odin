@@ -2,6 +2,7 @@ package app_test
 
 import "aio:cli_protocol"
 import "aio:commands"
+import "aio:input"
 import "aio:platform"
 import "core:fmt"
 import "core:os"
@@ -29,12 +30,11 @@ open_web_command_opens_a_normalized_pane_and_refuses_other_schemes :: proc(t: ^t
 	if !testing.expect_value(t, os.write_entire_file(strings.concatenate({directory, "/settings.ini"}, context.temp_allocator), settings), nil) {return}
 	state := app.App{options = {data_dir = directory, inactive = true}}
 	state.app_id = fmt.aprintf("AIODev.Test.WebOpen.%d", os.get_pid())
-	defer delete(state.app_id)
+	defer app.app_destroy(&state)
 	app.layout_state_enable(&state, strings.concatenate({directory, "/layout.json"}))
 	if !testing.expect_value(t, platform.init(&state.platform, state.app_id), platform.Init_Result.Primary) {return}
 	state.platform_ready = true
 	if !testing.expect(t, app.app_init(&state)) {return}
-	defer app.app_destroy(&state)
 	w := state.windows[0]
 
 	testing.expect_value(t, web_open(&state, "example.com").status, cli_protocol.Status.Ok)
@@ -52,7 +52,10 @@ open_web_command_opens_a_normalized_pane_and_refuses_other_schemes :: proc(t: ^t
 	testing.expect(t, strings.contains(refused.message, "http"))
 	testing.expect_value(t, len(state.web_panes), 2)
 
-	testing.expect_value(t, web_open(&state).status, cli_protocol.Status.Ok)
-	testing.expect_value(t, len(state.web_panes), 3)
-	testing.expect_value(t, state.web_panes[2].url, "")
+	state.settings.pane.web_navigator = false
+	testing.expect_value(t, web_open(&state, "--focus").status, cli_protocol.Status.Ok)
+	if !testing.expect_value(t, len(state.web_panes), 3) {return}
+	app.handle_event(&state, input.Key_Event{window = w.id, key = .E, text = "e", pressed = true})
+	app.handle_event(&state, input.Key_Event{window = w.id, key = .Enter, pressed = true})
+	testing.expect_value(t, state.web_panes[2].url, "https://e")
 }
