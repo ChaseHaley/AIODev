@@ -327,9 +327,9 @@ changes_filter_save :: proc(app: ^App, w: ^Window, pane: ^Changes_Pane) {
 		drafts := make([dynamic]settings.Saved_Filter_Draft, context.temp_allocator)
 		cursor := settings.saved_filters_scan(app.settings.turns.saved_filters)
 		for filter in settings.saved_filters_next(&cursor) {
-			_, _ = append(&drafts, settings.Saved_Filter_Draft{filter.name, filter.pattern})
+			_, _ = append(&drafts, settings.Saved_Filter_Draft{filter.name, filter.pattern, filter.default})
 		}
-		_, _ = append(&drafts, settings.Saved_Filter_Draft{"", pattern})
+		_, _ = append(&drafts, settings.Saved_Filter_Draft{"", pattern, false})
 		value, problem, err := settings.saved_filters_text(drafts[:], context.temp_allocator)
 		if err != nil {
 			changes_filter_refuse(pane, w, "Could not keep the filter.")
@@ -389,4 +389,12 @@ changes_filter_key_edit :: proc(
 		return false
 	}
 	return true
+}
+
+// The filter a new Agent changes pane starts with: every saved filter marked on by default, as on tokens, in
+// the library's order; temporary memory.
+@(private)
+changes_default_filter :: proc(app: ^App) -> string {
+	text, _ := settings.saved_filters_default_text(app.settings.turns.saved_filters, context.temp_allocator)
+	return text
 }

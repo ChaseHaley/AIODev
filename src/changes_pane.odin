@@ -278,7 +278,7 @@ changes_open :: proc(app: ^App, w: ^Window) {
 	directory := ""
 	scope := ui.Changes_Scope.Uncommitted
 	side_by_side := app.settings.turns.diff_view == .Side_By_Side
-	filter := app.settings.turns.diff_filter
+	filter := changes_default_filter(app)
 	if from := changes_focused(app, acting); from != nil {
 		agent, directory, scope, side_by_side = from.agent, from.directory, from.scope, from.side_by_side
 		filter = changes_filter_text(from)

@@ -472,13 +472,14 @@ the_file_list_regex_search_matches_paths_not_labels :: proc(t: ^testing.T) {
 }
 
 @(test)
-a_new_pane_takes_the_default_filter_or_the_one_it_opens_from_and_keeps_it :: proc(t: ^testing.T) {
+a_new_pane_starts_with_the_default_filters_or_takes_the_one_it_opens_from_and_keeps_it :: proc(t: ^testing.T) {
 	first: Fixture
 	if !fixture_start(t, &first, "FilterA") {return}
 	defer delete(first.directory)
 	defer testing.expect_value(t, os.remove_all(first.directory), nil)
 	w := first.state.windows[0]
-	saved := app.settings_save_value(&first.state, "turns.diff_filter", "!long", "Could not save.")
+	library := "* | !long; Odin | \\.odin$; * Docs | docs/"
+	saved := app.settings_save_value(&first.state, "turns.saved_filters", library, "Could not save.")
 	testing.expect(t, saved)
 	app.run_action(&first.state, w, .Agent_Changes)
 	if !testing.expect_value(t, len(first.state.changes_panes), 1) {
@@ -486,10 +487,12 @@ a_new_pane_takes_the_default_filter_or_the_one_it_opens_from_and_keeps_it :: pro
 		return
 	}
 	from := first.state.changes_panes[0]
-	testing.expect_value(t, app.changes_filter_text(from), "!long")
+	// Every filter marked on by default is an on token, in the library's order.
+	testing.expect_value(t, app.changes_filter_text(from), "@!long @Docs")
+	testing.expect_value(t, len(from.filter_tokens), 2)
 	testing.expect(t, from.model.view.filter_active)
 
-	// A pane opened from an Agent changes pane copies its filter, not the setting.
+	// A pane opened from an Agent changes pane copies its filter, not the defaults.
 	_ = ui.field_set(&from.filter_editor, "notes")
 	app.changes_filter_changed(from)
 	app.run_action(&first.state, w, .Agent_Changes)
@@ -499,7 +502,7 @@ a_new_pane_takes_the_default_filter_or_the_one_it_opens_from_and_keeps_it :: pro
 	}
 	opened := first.state.changes_panes[1]
 	testing.expect_value(t, app.changes_filter_text(opened), "notes")
-	// An empty filter comes back empty, not as the setting.
+	// An empty filter comes back empty, not as the defaults.
 	_ = ui.field_set(&opened.filter_editor, "")
 	app.changes_filter_changed(opened)
 	app.layout_state_save(&first.state)
@@ -508,7 +511,7 @@ a_new_pane_takes_the_default_filter_or_the_one_it_opens_from_and_keeps_it :: pro
 	second := Fixture{directory = first.directory}
 	if !fixture_start(t, &second, "FilterB", true) {return}
 	defer app.app_destroy(&second.state)
-	testing.expect_value(t, second.state.settings.turns.diff_filter, "!long")
+	testing.expect_value(t, second.state.settings.turns.saved_filters, library)
 	if !testing.expect_value(t, len(second.state.changes_panes), 2) {return}
 	texts: [2]string
 	for pane, i in second.state.changes_panes {texts[i] = app.changes_filter_text(pane)}
@@ -589,7 +592,7 @@ turn_settings_default_to_off_two_weeks_unified_no_filter_and_4_5_contrast :: pro
 	testing.expect_value(t, s.turns.record, false)
 	testing.expect_value(t, s.turns.retention_days, 14)
 	testing.expect_value(t, s.turns.diff_view, settings.Diff_View.Unified)
-	testing.expect_value(t, s.turns.diff_filter, "")
+	testing.expect_value(t, s.turns.saved_filters, "")
 	testing.expect_value(t, s.turns.diff_minimum_contrast, 4.5)
 	side, side_diagnostics, side_error := settings.parse("turns.diff_view = side_by_side\n")
 	testing.expect_value(t, side_error, nil)
