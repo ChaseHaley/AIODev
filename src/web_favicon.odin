@@ -25,7 +25,6 @@ Web_Favicon :: struct {
 // Replaces the favicon with the image in `data`, a PNG. Empty `data` clears it. False when the bytes
 // are not a PNG icon, are too large, or cannot be kept; the pane then has no favicon and its badge is
 // the globe, rather than the previous page's icon.
-@(require)
 web_favicon_set :: proc(app: ^App, favicon: ^Web_Favicon, data: []u8) -> bool {
 	web_favicon_destroy(favicon)
 	mark_all_dirty(app)

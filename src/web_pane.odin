@@ -138,6 +138,7 @@ web_pane_destroy :: proc(pane: ^Web_Pane) {
 	delete(pane.title)
 	delete(pane.host_label)
 	delete(pane.url_field.bytes)
+	web_favicon_destroy(&pane.favicon)
 	free(pane)
 }
 
@@ -561,6 +562,7 @@ web_events_process :: proc(app: ^App) {
 		}
 		if snap.favicon_serial != pane.favicon_serial {
 			pane.favicon_serial = snap.favicon_serial
+			_ = web_favicon_set(app, &pane.favicon, snap.favicon)
 			changed = true
 		}
 		if snap.note.kind != .None {
