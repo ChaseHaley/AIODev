@@ -180,15 +180,6 @@ static bool url_allowed(const wchar_t *uri) {
            _wcsicmp(uri, L"about:blank") == 0;
 }
 
-static COREWEBVIEW2_COLOR color_from_argb(uint32_t argb) {
-    COREWEBVIEW2_COLOR c{};
-    c.A = static_cast<BYTE>((argb >> 24) & 0xFF);
-    c.R = static_cast<BYTE>((argb >> 16) & 0xFF);
-    c.G = static_cast<BYTE>((argb >> 8) & 0xFF);
-    c.B = static_cast<BYTE>(argb & 0xFF);
-    return c;
-}
-
 // The most favicon bytes kept; a larger icon is dropped and the pane shows its globe.
 constexpr size_t FAVICON_MAX_BYTES = 256 * 1024;
 
@@ -303,7 +294,6 @@ struct Aio_Webview {
 
     Com_Ptr<ICoreWebView2CompositionController> comp;
     Com_Ptr<ICoreWebView2Controller> controller;
-    Com_Ptr<ICoreWebView2Controller2> controller2;
     Com_Ptr<ICoreWebView2Controller3> controller3;
     Com_Ptr<ICoreWebView2> webview;
     Com_Ptr<ICoreWebView2_13> webview13;
@@ -324,7 +314,6 @@ struct Aio_Webview {
     float radius_bl = 0.0f, radius_br = 0.0f;
     float raster_scale = 1.0f;
     float applied_scale = 0.0f;
-    COREWEBVIEW2_COLOR bg_color{255, 24, 24, 28};
     COREWEBVIEW2_PREFERRED_COLOR_SCHEME color_scheme = COREWEBVIEW2_PREFERRED_COLOR_SCHEME_AUTO;
     double zoom = 1.0;
 
@@ -798,7 +787,6 @@ static void start_controller_creation(Aio_Webview *v) {
             v->changed();
             return S_OK;
         }
-        v->controller->QueryInterface(IID_PPV_ARGS(v->controller2.put()));
         v->controller->QueryInterface(IID_PPV_ARGS(v->controller3.put()));
         if (FAILED(v->controller->get_CoreWebView2(v->webview.put())) || !v->webview) {
             v->failed = true;
@@ -808,9 +796,6 @@ static void start_controller_creation(Aio_Webview *v) {
         v->webview->QueryInterface(IID_PPV_ARGS(v->webview13.put()));
         v->webview->QueryInterface(IID_PPV_ARGS(v->webview15.put()));
 
-        if (v->controller2) {
-            v->controller2->put_DefaultBackgroundColor(v->bg_color);
-        }
         if (v->controller3) {
             v->controller3->put_BoundsMode(COREWEBVIEW2_BOUNDS_MODE_USE_RAW_PIXELS);
             v->controller3->put_ShouldDetectMonitorScaleChanges(FALSE);
@@ -1118,7 +1103,7 @@ void aio_webview_env_destroy(void *raw) noexcept {
 }
 
 void *aio_webview_create(void *raw_env, void *raw_host, uint32_t pane_id, const wchar_t *initial_url,
-                         uint32_t bg_argb, int color_scheme, double zoom) noexcept {
+                         int color_scheme, double zoom) noexcept {
     if (!raw_env || !raw_host) return nullptr;
     auto *env = static_cast<Aio_Webview_Env *>(raw_env);
     auto *host = static_cast<Aio_Webview_Host *>(raw_host);
@@ -1126,7 +1111,6 @@ void *aio_webview_create(void *raw_env, void *raw_host, uint32_t pane_id, const 
     v->env = env;
     v->host = host;
     v->pane_id = pane_id;
-    v->bg_color = color_from_argb(bg_argb);
     v->color_scheme = static_cast<COREWEBVIEW2_PREFERRED_COLOR_SCHEME>(color_scheme);
     v->zoom = zoom > 0.0 ? zoom : 1.0;
     if (initial_url && initial_url[0]) {
@@ -1219,13 +1203,6 @@ void aio_webview_set_placement(void *raw, void *raw_host, int visible, int level
         detach_visual(v);
     }
     apply_placement(v);
-}
-
-void aio_webview_set_bg(void *raw, uint32_t bg_argb) noexcept {
-    if (!raw) return;
-    auto *v = static_cast<Aio_Webview *>(raw);
-    v->bg_color = color_from_argb(bg_argb);
-    if (v->controller2) v->controller2->put_DefaultBackgroundColor(v->bg_color);
 }
 
 // 0 follows the system, 1 asks pages for their light look, 2 for their dark look.

@@ -213,15 +213,6 @@ web_pane_set_title_text :: proc(pane: ^Web_Pane, raw_title: string) {
 	pane.title = owned
 }
 
-@(private = "file")
-web_bg_argb :: proc(app: ^App) -> u32 {
-	c := app.theme.pane
-	r := u32(clamp(int(math.round(c.r * 255)), 0, 255))
-	g := u32(clamp(int(math.round(c.g * 255)), 0, 255))
-	b := u32(clamp(int(math.round(c.b * 255)), 0, 255))
-	return (u32(0xff) << 24) | (r << 16) | (g << 8) | b
-}
-
 // Pages are asked for the look that matches the window: light on a light theme, dark on a dark one.
 @(private = "file")
 web_color_scheme :: proc(app: ^App) -> platform.Webview_Color_Scheme {
@@ -612,11 +603,9 @@ web_window_moved :: proc(app: ^App, w: ^Window) {
 }
 
 web_theme_apply :: proc(app: ^App) {
-	bg := web_bg_argb(app)
 	scheme := web_color_scheme(app)
 	for pane in app.web_panes {
 		if pane.view == nil {continue}
-		platform.webview_set_bg(pane.view, bg)
 		platform.webview_set_color_scheme(pane.view, scheme)
 	}
 }
@@ -1100,7 +1089,7 @@ web_window_sync_visuals :: proc(app: ^App, w: ^Window, host: platform.Webview_Ho
 		pane.host_window = w.id
 		if pane.view == nil && env_ready && !pane.failed && pane.crashed == .None {
 			pane.view = platform.webview_create(
-				app.web_env, host, pane.id, pane.url, web_bg_argb(app), web_color_scheme(app), pane.zoom,
+				app.web_env, host, pane.id, pane.url, web_color_scheme(app), pane.zoom,
 			)
 		}
 		if pane.view == nil {continue}

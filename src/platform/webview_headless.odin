@@ -54,7 +54,6 @@ when AIO_HEADLESS {
 		host: Webview_Host,
 		pane_id: u32,
 		initial_url: string,
-		bg_argb: u32,
 		scheme: Webview_Color_Scheme,
 		zoom: f64,
 	) -> Webview {
@@ -75,7 +74,6 @@ when AIO_HEADLESS {
 		radius_bl, radius_br, raster_scale: f32,
 	) {}
 
-	webview_set_bg :: proc(view: Webview, bg_argb: u32) {}
 	webview_set_color_scheme :: proc(view: Webview, scheme: Webview_Color_Scheme) {}
 	webview_set_zoom :: proc(view: Webview, zoom: f64) {}
 	webview_navigate :: proc(view: Webview, url: string) {}
