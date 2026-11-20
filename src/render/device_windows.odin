@@ -510,6 +510,12 @@ device_adapter :: proc(d: ^Device) -> string {
 	return string(d.adapter_name[:d.adapter_length])
 }
 
+// Raw D3D11 device and DXGI factory pointers for platform compositors (e.g. DirectComposition).
+device_native_handles :: proc(d: ^Device) -> (device, factory: rawptr) {
+	if d == nil {return nil, nil}
+	return d.native, d.factory
+}
+
 set_text_gamma :: proc(d: ^Device, gamma: Text_Gamma) {
 	d.gamma = {
 		gamma             = clamp(gamma.gamma, MIN_TEXT_GAMMA, MAX_TEXT_GAMMA),

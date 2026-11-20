@@ -99,6 +99,7 @@ palette_claim :: proc(app: ^App, w: ^Window) -> bool {
 		palette_release(app, previous)
 	}
 	window_overlays_cancel(app, w)
+	platform.window_reclaim_focus(&app.platform, w.id)
 	app.palette_owner = w.id
 	app.palette.leader = app.leader
 	return true

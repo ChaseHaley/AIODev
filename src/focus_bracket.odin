@@ -34,6 +34,7 @@ focus_leave :: proc(app: ^App, w: ^Window) {
 	window_overlays_cancel(app, w)
 	entry := workspace_session_for_content(app, entered.content)
 	if entry != nil {status_focus_leave(app, w, entry)}
+	web_focus_leave(app, w, entered.content)
 	leader_cancel(w)
 	if entry != nil {term.send_focus(entry.session, false)}
 	if ui.find_is_open(&w.find) {
@@ -64,6 +65,7 @@ focus_enter :: proc(app: ^App, w: ^Window) {
 		if entry := workspace_session_for_content(app, content); entry != nil {
 			term.send_focus(entry.session, w.focused)
 		}
+		web_focus_enter(app, w, content)
 	}
 	cursor_blink_reset(w, clock_now(&app.clock))
 	status_focus_enter(app, w)

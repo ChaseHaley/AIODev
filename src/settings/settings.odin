@@ -119,6 +119,8 @@ CONFIRM_PROMPT_LABELS :: []string {
 Pane_Settings :: struct {
 	gap, corner_radius:            int,
 	markdown_floating:             bool,
+	web_links:                     bool,
+	web_navigator:                 bool,
 	drop_limit:                    int,
 	resume_agents:                 bool,
 	minimum_columns, minimum_rows: int,
@@ -896,6 +898,23 @@ SCHEMA :: [?]Schema_Entry {
 		default_value = "false",
 		description = "Open a Markdown file from a terminal link or \"Open Markdown file\" in a float above the " +
 			"tab, so the panes already there keep their size.",
+	},
+	{
+		key = "pane.web_links",
+		title = "Open web links in a web pane",
+		kind = .Bool,
+		offset = offset_of(Settings, pane) + offset_of(Pane_Settings, web_links),
+		default_value = "true",
+		description = "Open clicked http and https links in an embedded web pane instead of the default " +
+			"browser. Right-click any link to choose either.",
+	},
+	{
+		key = "pane.web_navigator",
+		title = "Show web pane URL bar",
+		kind = .Bool,
+		offset = offset_of(Settings, pane) + offset_of(Pane_Settings, web_navigator),
+		default_value = "true",
+		description = "Show Back, Forward, Reload and an editable address bar beneath a web pane's header.",
 	},
 	{
 		key = "pane.drop_limit",

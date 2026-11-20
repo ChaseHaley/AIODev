@@ -20,6 +20,8 @@ when !AIO_HEADLESS {
 	@(private)
 	NOTIFICATION_FAILED_MESSAGE :: NOTIFICATION_MESSAGE + 1
 	@(private)
+	WEBVIEW_MESSAGE :: w.WM_APP + 5
+	@(private)
 	EVENT_CAPACITY :: 2048
 	@(private)
 	TEXT_CAPACITY :: 65536
@@ -62,6 +64,8 @@ when !AIO_HEADLESS {
 		title_height, title_controls_end: i32,
 		screen:                           Maybe(Screen_Full),
 		drop_target:                      Drop_Target,
+		// True while keyboard focus lives in an embedded child window (e.g. WebView2).
+		child_focused:                    bool,
 	}
 	Platform :: struct {
 		allocator:                  runtime.Allocator,
@@ -1329,10 +1333,36 @@ when !AIO_HEADLESS {
 		case w.WM_PAINT:
 			record_os(p, w.ValidateRect(hwnd, nil), "ValidateRect")
 			return 0
-		case w.WM_SETFOCUS, w.WM_KILLFOCUS:
+		case w.WM_SETFOCUS:
+			window.child_focused = false
 			if window.id != 0 {
-				enqueue(p, Focus_Event{window.id, message == w.WM_SETFOCUS})
+				enqueue(p, Focus_Event{window.id, true})
 			}
+			return 0
+		case w.WM_KILLFOCUS:
+			if wp != 0 && bool(IsChild(hwnd, w.HWND(wp))) {
+				window.child_focused = true
+				return 0
+			}
+			window.child_focused = false
+			if window.id != 0 {
+				enqueue(p, Focus_Event{window.id, false})
+			}
+			return 0
+		case w.WM_ACTIVATE:
+			active := (uintptr(wp) & 0xffff) != 0
+			if !active && window.child_focused && window.id != 0 {
+				window.child_focused = false
+				enqueue(p, Focus_Event{window.id, false})
+			}
+			return w.DefWindowProcW(hwnd, message, wp, lp)
+		case w.WM_MOVE:
+			if window.id != 0 {
+				enqueue(p, Window_Moved_Event{window.id})
+			}
+			return 0
+		case WEBVIEW_MESSAGE:
+			enqueue(p, Webview_Event{})
 			return 0
 		case w.WM_SIZE:
 			// Resizing beneath a stationary cursor can synthesize WM_MOUSEMOVE after WM_MOUSELEAVE.

@@ -126,6 +126,10 @@ Files_Drop_Event :: struct {
 Activate_Request_Event :: struct {}
 Settings_Event :: struct {}
 Wake_Event :: struct {}
+Webview_Event :: struct {}
+Window_Moved_Event :: struct {
+	window: input.Window_Id,
+}
 Event :: union {
 	input.Key_Event,
 	input.Text_Event,
@@ -147,6 +151,52 @@ Event :: union {
 	Files_Drag_Event,
 	Files_Drop_Event,
 	Wake_Event,
+	Webview_Event,
+	Window_Moved_Event,
+}
+
+// Embedded web view handles (DirectComposition visual hosting on Windows; stubbed headless).
+Webview_Host :: distinct rawptr
+Webview_Env :: distinct rawptr
+Webview :: distinct rawptr
+
+// Matches COREWEBVIEW2_MOUSE_EVENT_KIND values in WebView2.h.
+Webview_Mouse_Kind :: enum i32 {
+	Horizontal_Wheel    = 0x020E,
+	Left_Button_Double  = 0x0203,
+	Left_Button_Down    = 0x0201,
+	Left_Button_Up      = 0x0202,
+	Leave               = 0x02A3,
+	Middle_Button_Double = 0x0209,
+	Middle_Button_Down  = 0x0207,
+	Middle_Button_Up    = 0x0208,
+	Move                = 0x0200,
+	Right_Button_Double = 0x0206,
+	Right_Button_Down   = 0x0204,
+	Right_Button_Up     = 0x0205,
+	Wheel               = 0x020A,
+}
+
+Webview_Accel_Proc :: proc "c"(
+	user: rawptr,
+	pane_id: u32,
+	vk: u32,
+	kind: u32,
+	lparam: i32,
+) -> bool
+
+Webview_Snapshot :: struct {
+	url:            string,
+	title:          string,
+	new_window_url: string,
+	cursor:         Cursor_Shape,
+	ready:          bool,
+	failed:         bool,
+	loading:        bool,
+	can_back:       bool,
+	can_forward:    bool,
+	focused:        bool,
+	dirty:          bool,
 }
 
 @(require_results)

@@ -68,6 +68,8 @@ Saved_Node :: struct {
 	name:      string `json:"name,omitempty"`,
 	// The file a Markdown pane shows.
 	path:      string `json:"path,omitempty"`,
+	// The address a Web pane shows.
+	url:       string `json:"url,omitempty"`,
 	// A Changes pane's agent (the key of the pane it ran in, its harness and session), scope name and diff
 	// view ("unified" or "side_by_side"; missing is the setting's default); its directory is `directory`.
 	changes_agent_pane:    string `json:"changes_agent_pane,omitempty"`,
@@ -330,6 +332,11 @@ layout_pane_encode :: proc(
 	if content.kind == .Markdown {
 		if pane := markdown_find(app, content.id); pane != nil {
 			saved.path, saved.documents = pane.path, pane.documents[:]
+		}
+	}
+	if content.kind == .Web {
+		if pane := web_find(app, content.id); pane != nil {
+			saved.url, saved.documents = pane.url, pane.documents[:]
 		}
 	}
 	if content.kind == .Changes {
@@ -605,6 +612,13 @@ layout_tab_restore :: proc(
 			if text, kept := node.changes_filter.?; kept && utf8.valid_string(text) {filter = text}
 			if created := changes_pane_create(app, agent, directory, scope, side_by_side, filter); created != nil {
 				pane.content.id, restored = created.id, true
+			}
+		case .Web:
+			url := saved.nodes[i].url
+			if url != "" && !utf8.valid_string(url) {url = ""}
+			if created := web_pane_create(app, url); created != nil {
+				pane.content.id, restored = created.id, true
+				documents_restore(&created.documents, saved.nodes[i].documents)
 			}
 		}
 		if restored && CONTENT_POLICY[kind].one_per_workspace {

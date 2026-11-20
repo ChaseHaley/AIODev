@@ -100,6 +100,10 @@ handle_event :: proc(app: ^App, event: platform.Event) {
 		if app_tray_only(app) {show_window(app)} else {workspace_new(app, nil, true, name_it = false)}
 	case platform.Settings_Event:
 		refresh_animations(app)
+	case platform.Webview_Event:
+		web_events_process(app)
+	case platform.Window_Moved_Event:
+		if w := window_find(app, e.window); w != nil {web_window_moved(app, w)}
 	case platform.Wake_Event:
 	}
 }
@@ -314,6 +318,10 @@ on_key :: proc(app: ^App, w: ^Window, e: input.Key_Event) {
 		changes_key(app, w, e)
 		return
 	}
+	if web_active(w) {
+		web_key(app, w, e)
+		return
+	}
 	terminal_key(app, w, e)
 }
 
@@ -340,6 +348,10 @@ on_text :: proc(app: ^App, w: ^Window, text: string) {
 		return
 	}
 	if changes_active(w) && changes_text(app, w, text) {return}
+	if web_active(w) {
+		web_text(app, w, text)
+		return
+	}
 	if entry := focused_session(app, w); entry != nil && entry.status == .Running {
 		term.send_text(entry.session, text)
 		cursor_blink_reset(w, clock_now(&app.clock))
@@ -471,6 +483,7 @@ on_wheel :: proc(app: ^App, w: ^Window, e: input.Mouse_Wheel_Event) {
 		rail_wheel(app, w, e.delta_y)
 		return
 	}
+	if kind == .None && web_wheel(app, w, e) {return}
 	w.wheel_remainder += e.delta_y * WHEEL_LINES
 	rows := int(w.wheel_remainder)
 	w.wheel_remainder -= f32(rows)

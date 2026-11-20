@@ -234,7 +234,9 @@ link_choices :: proc(app: ^App, document: Document) -> []Maybe(Link_Choice) {
 			append(&rows, Link_Choice{action = .Program, program = u8(i)})
 		}
 	}
-	if markdown || document.folder {append(&rows, Link_Choice{action = .Open_External})}
+	if markdown || document.folder || (web && platform.webview_supported()) {
+		append(&rows, Link_Choice{action = .Open_External})
+	}
 	append(&rows, nil, Link_Choice{action = .Copy})
 	if file {append(&rows, Link_Choice{action = .Open_Folder})}
 	return rows[:]
@@ -255,7 +257,13 @@ link_choice_item :: proc(
 	#partial switch choice.action {
 	case .Open:
 		item.glyph = document_icon(document)
-		item.submenu = markdown_is_path(document.target) && !document_is_web(document.target)
+		web := document_is_web(document.target)
+		item.submenu = (markdown_is_path(document.target) && !web) || (web && platform.webview_supported())
+	case .Open_External:
+		if document_is_web(document.target) {
+			item.label = "Open in default browser"
+			item.glyph = .Launch
+		}
 	case .Open_Shell:
 		item.submenu = true
 	case .Program:
@@ -346,7 +354,9 @@ link_choice_run :: proc(
 	case .Program:
 		link_program_run(app, w, content, document, choice)
 	case .Open_External:
-		if document.folder {
+		if document_is_web(document.target) {
+			if !target_open_url(app, document.target) {notify(app, .Error, "Could not open the link.")}
+		} else if document.folder {
 			target_open(app, w, File_Target{document.target})
 		} else {
 			document_link_open_external(app, w, document.target)
@@ -883,6 +893,12 @@ document_link_open_in :: proc(
 	if tree == nil {return}
 	node := layout.find_content(tree, content)
 	if node == layout.INVALID_NODE {node = tree.focus}
+	if document_is_web(document.target) {
+		if !web_open_placed(app, w, node, document.target, placement) {
+			notify(app, .Error, "Could not open the web pane.")
+		}
+		return
+	}
 	if document.folder {
 		if !os.is_dir(document.target) {
 			target_unavailable(app)

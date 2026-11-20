@@ -145,6 +145,8 @@ Window :: struct {
 	// The dock edges shown beside the layout's dividers, refreshed with them by window_dividers.
 	dock_edges: Dock_Edges_Shown,
 	script_prompt: Script_Prompt,
+	// Embedded WebView2 DirectComposition host and layer split marks; zero until a web pane shows.
+	web: Web_Window_State,
 }
 
 // What the last frame drew that asks for another frame. build_frame clears it and drawing fills it in,
@@ -326,6 +328,7 @@ window_close :: proc(app: ^App, w: ^Window) {
 	window_overlays_cancel(app, w)
 	// A file dialog belongs to its native window, so it closes before the window does.
 	file_dialogs_window_closed(app, w.id)
+	web_window_destroy(app, w)
 	view, id := window_linked(w) ? w.workspace : nil, w.id
 	for i in 0 ..< len(app.windows) {
 		if app.windows[i] == w {
@@ -702,6 +705,7 @@ window_build_frame :: proc(app: ^App, w: ^Window) -> bool {
 build_frame :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 	blinking := false
 	w.frame_wakes = {}
+	web_window_prepare_frame(w)
 	pane_motion_drawn_reset(w)
 	cursor_crossing_prepare(app, w)
 	// While a workspace switch plays, all of this shrinks into its card; see workspace_overview.odin.
@@ -729,6 +733,10 @@ build_frame :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 	if !over {
 		if result := window_chrome_layers_draw(app, w); result != .Ok {return result}
 	}
+	if web_window_has_visible(w) {
+		w.web.floats_split = len(w.list.layers)
+		_ = render.push_layer(&w.list, {0, 0, f32(w.width), f32(w.height)})
+	}
 	group := layout.INVALID_NODE
 	tree := window_tree(w)
 	for pane in w.panes {
@@ -741,6 +749,10 @@ build_frame :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 			pane_motion_region_drawn(w, PANE_MOTION_FRAME | pane.group, frame, from)
 		}
 		if result := pane_draw_noted(app, w, pane, &blinking); result != .Ok {return result}
+	}
+	if web_window_has_visible(w) {
+		w.web.overlay_split = len(w.list.layers)
+		_ = render.push_layer(&w.list, {0, 0, f32(w.width), f32(w.height)})
 	}
 	// Floats shrinking into their capsules draw above the others.
 	if !over {pane_ghosts_draw_alone(app, w, false)}
@@ -887,6 +899,9 @@ pane_draw :: proc(app: ^App, w: ^Window, pane: layout.Pane_Rect, blinking: ^bool
 		drawn, result := changes_pane_draw(app, w, pane)
 		if result != .Ok {return result}
 		scrollbar = drawn
+	case .Web:
+		if result := web_pane_draw(app, w, pane); result != .Ok {return result}
+		scrollbar = false
 	}
 	pane_frame_content(w, f, content)
 	if card < len(w.list.rects) {w.list.rects[card].color = background}

@@ -82,6 +82,8 @@ Action :: enum u32 {
 	Open_Markdown,
 	Edit_Markdown,
 	Open_Markdown_Default_App,
+	Open_Web,
+	Toggle_Web_Navigator,
 	Agent_Changes,
 	Duplicate_Tab,
 	Move_Tab_Left,
@@ -465,6 +467,8 @@ ACTIONS :: [Action]Command_Descriptor {
 	.Open_Markdown_Default_App = {
 		"pane.open_markdown_default_app", "Open Markdown in default app", nil, .Local, {},
 	},
+	.Open_Web = {"pane.open_web", "Open web pane", nil, .Local, {}},
+	.Toggle_Web_Navigator = {"pane.toggle_web_navigator", "Toggle web pane URL bar", nil, .Local, {}},
 	.Agent_Changes = {"pane.agent_changes", "Open agent changes", nil, .Local, {}},
 	.Duplicate_Tab = {"tab.duplicate", "Duplicate tab", nil, .Host, {}},
 	.Move_Tab_Left = {"tab.move_left", "Move tab left", nil, .Host, {}},
@@ -936,6 +940,14 @@ COMMAND_HELP :: #partial [Action]Command_Help {
 		"Opens the focused Markdown pane's file in the program Windows opens Markdown files with.",
 		nil,
 	},
+	.Open_Web = {
+		"Opens a new embedded web pane beside the focused pane with the URL bar ready.",
+		nil,
+	},
+	.Toggle_Web_Navigator = {
+		"Shows or hides the URL navigator bar below the focused web pane's header.",
+		nil,
+	},
 	.Agent_Changes = {
 		"Opens Agent changes beside the focused pane, for that pane's agent. Each run opens another pane.",
 		nil,
@@ -1352,6 +1364,10 @@ command_execute :: proc(app: ^App, ctx: Command_Context, invocation: commands.In
 		markdown_edit_toggle(app, w)
 	case .Open_Markdown_Default_App:
 		markdown_open_external(app, w)
+	case .Open_Web:
+		web_open_blank(app, w)
+	case .Toggle_Web_Navigator:
+		web_toggle_navigator(app, w)
 	case .Agent_Changes:
 		changes_open(app, w)
 	case .New_Floating:

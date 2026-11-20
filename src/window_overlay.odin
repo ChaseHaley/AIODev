@@ -1,6 +1,7 @@
 package main
 
 import "aio:layout"
+import "aio:platform"
 import "aio:render"
 import "aio:ui"
 
@@ -188,6 +189,7 @@ Overlay_Exit :: enum u8 {
 // Callers that cancel the pointer gesture do so first.
 overlay_open :: proc(app: ^App, w: ^Window, next: Window_Overlay) {
 	overlay_close_all(app, w)
+	platform.window_reclaim_focus(&app.platform, w.id)
 	w.overlay = next
 }
 

@@ -35,6 +35,7 @@ CONTENT_POLICY := [layout.Content_Kind]Content_Policy {
 	.Settings = {one_per_workspace = true, icon = .Settings, display_name = "Settings"},
 	.Markdown = {linkable = true, documents = true, file = true, icon = .Markdown, display_name = "Markdown"},
 	.Changes = {linkable = true, icon = .Changes, display_name = "Agent changes"},
+	.Web = {linkable = true, documents = true, icon = .Globe, display_name = "Web"},
 }
 
 // The title of content that does not title itself through a session.
@@ -48,6 +49,13 @@ content_title :: proc(app: ^App, content: layout.Content) -> string {
 		if pane := markdown_find(app, content.id); pane != nil {return pane.title}
 	case .Changes:
 		return CONTENT_POLICY[.Changes].display_name
+	case .Web:
+		if pane := web_find(app, content.id); pane != nil {
+			if pane.title != "" {return pane.title}
+			if pane.host_label != "" {return pane.host_label}
+			if pane.url != "" {return pane.url}
+		}
+		return CONTENT_POLICY[.Web].display_name
 	}
 	return ""
 }
@@ -95,6 +103,8 @@ content_directory :: proc(app: ^App, content: layout.Content) -> string {
 		if pane := markdown_find(app, content.id); pane != nil {return pane.directory}
 	case .Changes:
 		if pane := changes_find(app, content.id); pane != nil {return pane.directory}
+	case .Web:
+		if pane := web_find(app, content.id); pane != nil && pane.title != "" {return pane.host_label}
 	}
 	return ""
 }
@@ -111,6 +121,8 @@ content_documents :: proc(app: ^App, content: layout.Content) -> ^Document_List 
 		if entry := session_find(app, content.id); entry != nil {return &entry.documents}
 	case .Markdown:
 		if pane := markdown_find(app, content.id); pane != nil {return &pane.documents}
+	case .Web:
+		if pane := web_find(app, content.id); pane != nil {return &pane.documents}
 	case .Settings:
 	case .Changes:
 	}
