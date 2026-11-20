@@ -26,6 +26,7 @@ $manifest = @(
     ,@('claude,claude-code', 'lobe:claudecode', 'D97757')
     ,@('codex,codex-x86_64-pc-windows-msvc,codex-aarch64-pc-windows-msvc', 'lobe:codex', '7A9DFF')
     ,@('gemini', 'si:googlegemini', '')
+    ,@('antigravity,agy,agy-ide,antigravity-ide', 'lobe:antigravity', '3186FF')
     ,@('copilot,github-copilot', 'si:githubcopilot', '')
     ,@('opencode', 'lobe:opencode', '')
     ,@('amp', 'lobe:amp', 'F34E3F')

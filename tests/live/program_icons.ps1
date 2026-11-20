@@ -51,6 +51,7 @@ New-Item -ItemType Directory -Force $programs | Out-Null
 $ping = Join-Path $env:SystemRoot 'System32/PING.EXE'
 Copy-Item $ping (Join-Path $programs 'codex.exe') -Force
 Copy-Item $ping (Join-Path $programs 'ssh.exe') -Force
+Copy-Item $ping (Join-Path $programs 'agy.exe') -Force
 $script = Join-Path $programs 'node_modules/@openai/codex/bin/codex.js'
 New-Item -ItemType Directory -Force (Split-Path $script) | Out-Null
 Set-Content -LiteralPath $script -Value 'setTimeout(() => {}, 4000)'
@@ -85,6 +86,11 @@ try {
     Invoke-Aio run "& '$programs/codex.exe' -n 5 127.0.0.1"
     Await-Name 'codex' 'artwork'
     & "$repo/tools/win32.ps1" -Name $name -Shot "$data/codex.png" -Frame | Out-Null
+    Await-Program '' $false
+    # Antigravity's CLI, agy, has no icon resource either, so bundled artwork names it.
+    Invoke-Aio run "& '$programs/agy.exe' -n 5 127.0.0.1"
+    Await-Name 'agy' 'artwork'
+    & "$repo/tools/win32.ps1" -Name $name -Shot "$data/antigravity.png" -Frame | Out-Null
     Await-Program '' $false
     # Through its Node launcher, the script's package names it rather than Node.
     Invoke-Aio run "& '$node' '$script'"

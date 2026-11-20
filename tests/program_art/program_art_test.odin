@@ -24,6 +24,9 @@ names_match_without_case_or_exe_and_resolve_to_their_canonical_entry :: proc(t: 
 		{"Codex.EXE", "codex"},
 		{"codex-x86_64-pc-windows-msvc.exe", "codex"},
 		{"claude-code", "claude"},
+		{"agy.exe", "antigravity"},
+		{"Antigravity.EXE", "antigravity"},
+		{"agy-ide", "antigravity"},
 		{"nvim", "nvim"},
 		{"python3", "python"},
 	}) {
@@ -46,6 +49,8 @@ brand_colours_parse_and_entries_without_one_use_the_theme :: proc(t: ^testing.T)
 	testing.expect_value(t, claude.layers[0].colour, [3]u8{0xD9, 0x77, 0x57})
 	opencode, _ := program_art.find(&c, "opencode")
 	testing.expect(t, !opencode.layers[0].branded)
+	antigravity, _ := program_art.find(&c, "agy")
+	testing.expect_value(t, antigravity.layers[0].colour, [3]u8{0x31, 0x86, 0xFF})
 }
 
 // Neovim's flat mark: a blue left stroke under green right and diagonal strokes (WORK-290).
