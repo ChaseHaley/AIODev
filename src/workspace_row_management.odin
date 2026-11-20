@@ -321,7 +321,7 @@ workspace_row_menu_hit :: proc(w: ^Window, x, y: f32) -> int {
 	return -1
 }
 
-workspace_row_click :: proc(app: ^App, w: ^Window, x, y: f32, extend: bool) -> bool {
+workspace_row_click :: proc(app: ^App, w: ^Window, x, y: f32, extend: bool, time_ns := i64(0)) -> bool {
 	p := &w.workspace_picker
 	#partial switch _ in p.state {
 	case Workspace_Picker_Menu:
@@ -333,7 +333,7 @@ workspace_row_click :: proc(app: ^App, w: ^Window, x, y: f32, extend: bool) -> b
 	case Workspace_Picker_Rename:
 		row := workspace_picker_row_rect(w, workspace_row_index(w, workspace_picker_rename_id(p)))
 		if y >= row.y + row.height && render.rect_contains(workspace_row_rename_field_rect(w), x, y) {
-			workspace_picker_pointer(w, x, true, extend)
+			workspace_picker_pointer(w, x, true, extend, time_ns)
 			return true
 		}
 		workspace_row_rename_finish(app, w, false)

@@ -1343,6 +1343,10 @@ web_press :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) {
 	nav := web_nav_layout(w, pane, pr.rect)
 	hit := web_button_at(app, w, pane, pr.rect, x, y)
 	if hit != .None || (nav.shown && render.rect_contains(nav.bar, x, y)) {
+		if e.button == .Right {
+			if hit == .Url {edit_menu_open_web_url(app, w, pane.id, x, y)}
+			return
+		}
 		if e.button != .Left {return}
 		pane.nav_armed = hit
 		if hit == .Url {
@@ -1350,13 +1354,15 @@ web_press :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) {
 			pane.url_editing = true
 			platform.window_reclaim_focus(&app.platform, w.id)
 			if !was_editing {
+				// The first click selects the address; it still counts, so a double click selects a word.
+				_ = click_mark_press(&pane.url_field.clicks, x, e.time_ns, false)
 				ui.field_select_all(&pane.url_field)
 			} else {
 				pad_x := math.round(8 * w.scale)
 				avail := max(0, nav.url_box.width - 2 * pad_x)
 				start := ui.field_view_start(&pane.url_field, &w.ui_text, avail)
 				at := ui.field_offset_at(&pane.url_field, &w.ui_text, start, nav.url_box.x + pad_x, x)
-				_ = ui.field_pointer(&pane.url_field, at, true, .Shift in e.modifiers)
+				_ = field_press(&pane.url_field, at, x, .Shift in e.modifiers, e.time_ns)
 			}
 		} else {
 			pane.url_editing = false

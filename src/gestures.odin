@@ -32,6 +32,22 @@ click_run_count :: proc(run: Click_Run, owner: u32, x, y: f32, time_ns: i64) -> 
 	return run.count > 0 && run.owner == owner && near && soon ? run.count % 3 + 1 : 1
 }
 
+// Counts a press at `x` in the run of clicks `mark` holds, and records it. A press that extends the
+// selection (Shift) never joins a run. The surface is one line tall, so only x tells presses apart.
+@(require_results)
+click_mark_press :: proc(mark: ^ui.Click_Mark, x: f32, time_ns: i64, extend: bool) -> int {
+	last := Click_Run{x = mark.x, time_ns = mark.time_ns, count = mark.count}
+	count := extend ? 1 : click_run_count(last, 0, x, 0, time_ns)
+	mark^ = extend ? {} : {x, time_ns, count}
+	return count
+}
+
+// A Left press in a text field at offset `at`, drawn at pointer column `x`: moves the caret there, or
+// selects the word or the whole field on a double or triple click. Its drag goes through `ui.field_pointer`.
+field_press :: proc(f: ^ui.Text_Field, at: int, x: f32, extend: bool, time_ns: i64) -> ui.Field_Change {
+	return ui.field_pointer(f, at, true, extend, click_mark_press(&f.clicks, x, time_ns, extend))
+}
+
 // What each mouse button is doing between its press and its release; nil is a free button. The procs
 // in this file are the only writers. Every press records its surface before reaching it, so a release
 // and the moves before it go to the surface recorded at the press.
