@@ -23,7 +23,17 @@ when !AIO_HEADLESS {
 		title_len:          i32,
 		new_window_url:     [^]u8,
 		new_window_url_len: i32,
+		favicon:            [^]u8,
+		favicon_len:        i32,
+		note_text:          [^]u8,
+		note_text_len:      i32,
+		zoom:               f64,
 		cursor_id:          u32,
+		favicon_serial:     u32,
+		find_count:         i32,
+		find_index:         i32,
+		note_kind:          i32,
+		note_detail:        i32,
 		ready:              u8,
 		failed:             u8,
 		loading:            u8,
@@ -31,6 +41,7 @@ when !AIO_HEADLESS {
 		can_forward:        u8,
 		focused:            u8,
 		dirty:              u8,
+		crashed:            u8,
 	}
 
 	@(default_calling_convention = "c")
@@ -42,7 +53,9 @@ when !AIO_HEADLESS {
 		aio_webview_host_overlay_begin :: proc(host: rawptr, layer, width, height: i32) -> rawptr ---
 		aio_webview_host_overlay_present :: proc(host: rawptr, layer: i32) ---
 		aio_webview_host_overlay_hide :: proc(host: rawptr, layer: i32) ---
+		aio_webview_host_trim :: proc(host: rawptr, count: i32) ---
 		aio_webview_host_commit :: proc(host: rawptr) ---
+		aio_webview_process_elevated :: proc() -> i32 ---
 
 		aio_webview_env_create :: proc(
 			user_data_dir: cstring16,
@@ -59,23 +72,29 @@ when !AIO_HEADLESS {
 			pane_id: u32,
 			initial_url: cstring16,
 			bg_argb: u32,
+			color_scheme: i32,
+			zoom: f64,
 		) -> rawptr ---
 		aio_webview_destroy :: proc(view: rawptr) ---
 		aio_webview_detach_host :: proc(view: rawptr, fallback_hwnd: w.HWND) ---
 		aio_webview_set_placement :: proc(
 			view, host: rawptr,
-			visible, floating: i32,
+			visible, level: i32,
 			vis_x, vis_y, vis_w, vis_h: i32,
 			clip_l, clip_t, clip_r, clip_b: f32,
 			bounds_w, bounds_h: i32,
 			radius_bl, radius_br, raster_scale: f32,
 		) ---
 		aio_webview_set_bg :: proc(view: rawptr, bg_argb: u32) ---
+		aio_webview_set_color_scheme :: proc(view: rawptr, scheme: i32) ---
+		aio_webview_set_zoom :: proc(view: rawptr, zoom: f64) ---
 		aio_webview_navigate :: proc(view: rawptr, url: cstring16) ---
 		aio_webview_go_back :: proc(view: rawptr) ---
 		aio_webview_go_forward :: proc(view: rawptr) ---
 		aio_webview_reload :: proc(view: rawptr) ---
 		aio_webview_stop :: proc(view: rawptr) ---
+		aio_webview_find_start :: proc(view: rawptr, term: cstring16, case_sensitive, whole_word: i32) -> i32 ---
+		aio_webview_find_step :: proc(view: rawptr, backward: i32) ---
 		aio_webview_mouse :: proc(
 			view: rawptr,
 			kind: i32,
@@ -86,10 +105,17 @@ when !AIO_HEADLESS {
 		aio_webview_parent_moved :: proc(view: rawptr) ---
 		aio_webview_poll :: proc(view: rawptr, out: ^C_Webview_Snapshot) ---
 		aio_webview_clear_new_window :: proc(view: rawptr) ---
+		aio_webview_pop_note :: proc(view: rawptr) ---
 	}
 
+	// 0 not asked yet, 1 not elevated, 2 elevated.
+	@(private = "file")
+	process_elevation: u8
+
+	// WebView2 runs as the app does, so an elevated app shows web pages in the default browser instead.
 	webview_supported :: proc() -> bool {
-		return true
+		if process_elevation == 0 {process_elevation = aio_webview_process_elevated() != 0 ? 2 : 1}
+		return process_elevation == 1
 	}
 
 	// Returns Win32 keyboard focus to `id`'s top-level window when an embedded webview holds it.
@@ -140,6 +166,11 @@ when !AIO_HEADLESS {
 		if host != nil {aio_webview_host_overlay_hide(rawptr(host), layer)}
 	}
 
+	// Releases the overlays at `count` and above, which the window's frame no longer draws.
+	webview_host_trim :: proc(host: Webview_Host, count: i32) {
+		if host != nil {aio_webview_host_trim(rawptr(host), count)}
+	}
+
 	webview_host_commit :: proc(host: Webview_Host) {
 		if host != nil {aio_webview_host_commit(rawptr(host))}
 	}
@@ -179,10 +210,13 @@ when !AIO_HEADLESS {
 		pane_id: u32,
 		initial_url: string,
 		bg_argb: u32,
+		scheme: Webview_Color_Scheme,
+		zoom: f64,
 	) -> Webview {
 		if env == nil || host == nil {return nil}
 		url_w := initial_url != "" ? w.utf8_to_wstring(initial_url, context.temp_allocator) : nil
-		return Webview(aio_webview_create(rawptr(env), rawptr(host), pane_id, url_w, bg_argb))
+		view := aio_webview_create(rawptr(env), rawptr(host), pane_id, url_w, bg_argb, i32(scheme), zoom)
+		return Webview(view)
 	}
 
 	webview_destroy :: proc(view: Webview) {
@@ -197,10 +231,13 @@ when !AIO_HEADLESS {
 		aio_webview_detach_host(rawptr(view), fallback)
 	}
 
+	// Places the view's visual at DirectComposition `level`: 0 for tiled panes, above it one per floating
+	// group that shows a web pane, so later floats cover it.
 	webview_set_placement :: proc(
 		view: Webview,
 		host: Webview_Host,
-		visible, floating: bool,
+		visible: bool,
+		level: i32,
 		vis_x, vis_y, vis_w, vis_h: i32,
 		clip_l, clip_t, clip_r, clip_b: f32,
 		bounds_w, bounds_h: i32,
@@ -211,7 +248,7 @@ when !AIO_HEADLESS {
 			rawptr(view),
 			rawptr(host),
 			visible ? 1 : 0,
-			floating ? 1 : 0,
+			level,
 			vis_x,
 			vis_y,
 			vis_w,
@@ -230,6 +267,14 @@ when !AIO_HEADLESS {
 
 	webview_set_bg :: proc(view: Webview, bg_argb: u32) {
 		if view != nil {aio_webview_set_bg(rawptr(view), bg_argb)}
+	}
+
+	webview_set_color_scheme :: proc(view: Webview, scheme: Webview_Color_Scheme) {
+		if view != nil {aio_webview_set_color_scheme(rawptr(view), i32(scheme))}
+	}
+
+	webview_set_zoom :: proc(view: Webview, zoom: f64) {
+		if view != nil {aio_webview_set_zoom(rawptr(view), zoom)}
 	}
 
 	webview_navigate :: proc(view: Webview, url: string) {
@@ -253,6 +298,18 @@ when !AIO_HEADLESS {
 
 	webview_stop :: proc(view: Webview) {
 		if view != nil {aio_webview_stop(rawptr(view))}
+	}
+
+	// Starts a find for `term`, or ends it when empty; false when the runtime has no find API.
+	webview_find_start :: proc(view: Webview, term: string, case_sensitive, whole_word: bool) -> bool {
+		if view == nil {return false}
+		term_w := w.utf8_to_wstring(term, context.temp_allocator)
+		if term != "" && term_w == nil {return false}
+		return aio_webview_find_start(rawptr(view), term_w, i32(case_sensitive), i32(whole_word)) != 0
+	}
+
+	webview_find_step :: proc(view: Webview, backward: bool) {
+		if view != nil {aio_webview_find_step(rawptr(view), i32(backward))}
 	}
 
 	webview_mouse :: proc(
@@ -286,15 +343,27 @@ when !AIO_HEADLESS {
 		if view == nil {return {}}
 		raw: C_Webview_Snapshot
 		aio_webview_poll(rawptr(view), &raw)
-		new_window_url := ""
-		if raw.new_window_url != nil && raw.new_window_url_len > 0 {
-			new_window_url = string(raw.new_window_url[:raw.new_window_url_len])
+		text :: proc(bytes: [^]u8, count: i32) -> string {
+			return bytes != nil && count > 0 ? string(bytes[:count]) : ""
 		}
+		favicon: []u8
+		if raw.favicon != nil && raw.favicon_len > 0 {favicon = raw.favicon[:raw.favicon_len]}
 		return {
-			url            = raw.url != nil && raw.url_len > 0 ? string(raw.url[:raw.url_len]) : "",
-			title          = raw.title != nil && raw.title_len > 0 ? string(raw.title[:raw.title_len]) : "",
-			new_window_url = new_window_url,
+			url            = text(raw.url, raw.url_len),
+			title          = text(raw.title, raw.title_len),
+			new_window_url = text(raw.new_window_url, raw.new_window_url_len),
+			favicon        = favicon,
+			favicon_serial = raw.favicon_serial,
+			note           = {
+				kind = Webview_Note_Kind(raw.note_kind),
+				detail = raw.note_detail,
+				text = text(raw.note_text, raw.note_text_len),
+			},
+			zoom           = raw.zoom,
+			find_count     = raw.find_count,
+			find_index     = raw.find_index,
 			cursor         = cursor_from_system_id(raw.cursor_id),
+			crashed        = Webview_Crash(raw.crashed),
 			ready          = raw.ready != 0,
 			failed         = raw.failed != 0,
 			loading        = raw.loading != 0,
@@ -307,6 +376,11 @@ when !AIO_HEADLESS {
 
 	webview_clear_new_window :: proc(view: Webview) {
 		if view != nil {aio_webview_clear_new_window(rawptr(view))}
+	}
+
+	// Drops the note the last poll reported, so the next poll reports the one after it.
+	webview_pop_note :: proc(view: Webview) {
+		if view != nil {aio_webview_pop_note(rawptr(view))}
 	}
 
 	@(private = "file")

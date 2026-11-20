@@ -1491,11 +1491,15 @@ command_execute :: proc(app: ^App, ctx: Command_Context, invocation: commands.In
 			length := app.settings.terminal.scroll_page_length
 			markdown_page(app, w, action == .Scroll_Partial_Up ? -length : length)
 		}
+	// A focused web pane zooms its page instead, as a browser would.
 	case .Font_Size_Increase:
+		if w != nil && web_zoom_focused(app, w, 1) {break}
 		set_font_points(app, app.font_points + 1)
 	case .Font_Size_Decrease:
+		if w != nil && web_zoom_focused(app, w, -1) {break}
 		set_font_points(app, app.font_points - 1)
 	case .Font_Size_Reset:
+		if w != nil && web_zoom_focused(app, w, 0) {break}
 		set_font_points(app, f32(app.settings.font.size))
 	case .Open_Settings:
 		if !platform.open_path(app.settings_path) {

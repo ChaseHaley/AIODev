@@ -408,6 +408,25 @@ feed :: proc(keymap: ^Keymap, state: ^Key_State, registry: ^Registry, physical: 
 	return Pass{}
 }
 
+// Whether feed would take this key rather than pass it on, without changing `state`: a sequence in
+// progress takes every key, and otherwise a binding or blocked sequence of an active layer must start
+// with it. An embedded page asks this before the key reaches the app.
+@(require_results)
+keymap_claims :: proc(keymap: ^Keymap, state: ^Key_State, registry: ^Registry, physical: input.Key,
+                      modifiers: input.Modifiers, unshifted: rune) -> bool {
+	if input.is_modifier_key(physical) {return false}
+	if state.count > 0 {return true}
+	// feed_layer leaves a mode on Escape, the one change it makes beyond the probe's own fields.
+	if len(state.modes) > 0 && physical == .Escape {return true}
+	probe := state^
+	probe.pending[0] = {physical, modifiers, unshifted}
+	probe.count = 1
+	for layer := len(probe.modes) - 1; layer >= -1; layer -= 1 {
+		if _, pass := feed_layer(keymap, &probe, registry, layer).(Pass); !pass {return true}
+	}
+	return false
+}
+
 // Each normal-layer binding whose first chord a registry command also holds: the keymap beats defaults,
 // and a shortcut set in Settings beats the keymap. Strings borrow the keymap and registry; the list
 // belongs to allocator.

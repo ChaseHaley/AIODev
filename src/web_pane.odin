@@ -6,15 +6,17 @@ import "aio:layout"
 import "aio:links"
 import "aio:platform"
 import "aio:render"
+import "aio:search"
 import "aio:ui"
 import "base:runtime"
+import "core:fmt"
 import "core:math"
 import "core:path/filepath"
 import "core:strings"
 import "core:time"
 
-// Embedded web panes hosted with WebView2 DirectComposition visual hosting (WORK-315 spike).
-// Zero DirectComposition or WebView2 objects are created until a web pane is opened.
+// Embedded web panes, hosted with WebView2 DirectComposition visual hosting (WORK-315, D-106). No
+// DirectComposition or WebView2 object exists until a web pane is opened.
 
 @(private)
 WEB_POLL :: 500 * time.Millisecond
@@ -26,6 +28,20 @@ WEB_NAV_BUTTON_SIZE :: f32(24)
 WEB_NAV_PAD :: f32(6)
 @(private)
 WEB_NAV_GAP :: f32(4)
+// The loading line along the bottom of the URL bar, or of the header when the bar is hidden: a segment
+// that sweeps across in the notices' sweep timing while the page loads.
+@(private)
+WEB_LOAD_LINE :: f32(2)
+@(private)
+WEB_LOAD_SWEEP :: 1200 * time.Millisecond
+@(private)
+WEB_LOAD_SHARE :: f32(0.3)
+@(private)
+WEB_RELOAD_BUTTON :: [2]f32{96, 28}
+// DirectComposition levels a window stacks: tiled web views, then one per floating group with a web
+// view. Further groups share the top level.
+@(private)
+WEB_LEVELS_MAX :: 8
 
 Web_Nav_Button :: enum u8 {
 	None,
@@ -33,7 +49,11 @@ Web_Nav_Button :: enum u8 {
 	Forward,
 	Reload,
 	Url,
+	Zoom,
+	Copy_Link,
 	Open_External,
+	// The Reload button a crashed page shows in its body.
+	Recover,
 }
 
 Web_Accel_Pending :: struct {
@@ -41,25 +61,29 @@ Web_Accel_Pending :: struct {
 	event:  input.Key_Event,
 }
 
-// Per-window DirectComposition host and draw-list split indices. Embedded in Window.
+// Per-window DirectComposition host and the draw-list splits around its web views. Embedded in Window.
 Web_Window_State :: struct {
-	host:          platform.Webview_Host,
-	host_failed:   bool,
-	has_tiled_web: bool,
-	has_float_web: bool,
-	floats_split:  int,
-	overlay_split: int,
+	host:        platform.Webview_Host,
+	host_failed: bool,
+	// The frame shows a web pane, so its draw list splits into overlays around the web views.
+	shown:       bool,
+	// Draw-list layers where each overlay starts: the first after the tiled panes and chrome, then one
+	// after each floating group that shows a web pane. Overlay i covers web level i.
+	splits:      [WEB_LEVELS_MAX]int,
+	split_count: int,
+	// The floating group being drawn shows a web pane.
+	group_web:   bool,
 }
 
 // App-wide WebView2 environment and pane registry. Embedded in App.
 Web_App :: struct {
-	web_panes:        [dynamic]^Web_Pane,
-	next_web_id:      u32,
-	web_env:          platform.Webview_Env,
-	web_env_failed:   bool,
-	web_deadline:     time.Tick,
-	web_accel_queue:  [dynamic]Web_Accel_Pending,
-	web_accel_ctx:    runtime.Context,
+	web_panes:       [dynamic]^Web_Pane,
+	next_web_id:     u32,
+	web_env:         platform.Webview_Env,
+	web_env_failed:  bool,
+	web_deadline:    time.Tick,
+	web_accel_queue: [dynamic]Web_Accel_Pending,
+	web_accel_ctx:   runtime.Context,
 }
 
 Web_Pane :: struct {
@@ -78,8 +102,21 @@ Web_Pane :: struct {
 	loading:         bool,
 	ready:           bool,
 	failed:          bool,
+	crashed:         platform.Webview_Crash,
 	webview_focused: bool,
 	cursor:          platform.Cursor_Shape,
+	// The page zoom, 1 at 100%; kept with the layout.
+	zoom:            f64,
+	// The find session's matches and its 1-based selected match (-1 for none); find_failed when the
+	// WebView2 runtime has no find API.
+	find_count:      i32,
+	find_index:      i32,
+	find_failed:     bool,
+	favicon_serial:  u32,
+	// The DirectComposition level the last frame drew the pane at; 0 while tiled.
+	level:           i32,
+	// Permissions already reported as blocked, so a page that keeps asking raises one notice each.
+	denied:          bit_set[platform.Webview_Permission],
 	nav_hover:       Web_Nav_Button,
 	nav_armed:       Web_Nav_Button,
 	last_click_ns:   i64,
@@ -134,7 +171,8 @@ web_poll_deadline :: proc(app: ^App) -> (next: time.Tick, pending: bool) {
 	return app.web_deadline, true
 }
 
-@(private = "file")
+// The host of an http(s) address: "github.com" for "https://github.com/odin-lang".
+@(require_results)
 web_host_from_url :: proc(url: string) -> string {
 	rest := url
 	if strings.has_prefix(rest, "https://") {
@@ -173,8 +211,9 @@ web_pane_set_title_text :: proc(pane: ^Web_Pane, raw_title: string) {
 	pane.title = owned
 }
 
-// Normalizes user-typed address bar input into an allowed http(s) URL.
-@(private = "file")
+// Normalizes user-typed address bar input into an allowed http(s) URL: a bare host gets https, a
+// loopback host http, and any other scheme is refused.
+@(require_results)
 web_normalize_input_url :: proc(raw: string, allocator := context.temp_allocator) -> (string, bool) {
 	trimmed := strings.trim_space(raw)
 	if trimmed == "" {return "", false}
@@ -204,16 +243,23 @@ web_bg_argb :: proc(app: ^App) -> u32 {
 	return (u32(0xff) << 24) | (r << 16) | (g << 8) | b
 }
 
+// Pages are asked for the look that matches the window: light on a light theme, dark on a dark one.
+@(private = "file")
+web_color_scheme :: proc(app: ^App) -> platform.Webview_Color_Scheme {
+	return app.settings.active_theme.light ? .Light : .Dark
+}
+
+@(private = "file")
+web_accel_queue :: proc(app: ^App, window: input.Window_Id, e: input.Key_Event) -> bool {
+	append(&app.web_accel_queue, Web_Accel_Pending{window, e})
+	_ = platform.wake(&app.platform)
+	return true
+}
+
 // Called synchronously by WebView2 AcceleratorKeyPressed. Never mutates UI directly; only decides
 // whether AIODev should claim the chord and queues it for the next tick.
 @(private = "file")
-web_accel_callback :: proc "c"(
-	user: rawptr,
-	pane_id: u32,
-	vk: u32,
-	kind: u32,
-	lparam: i32,
-) -> bool {
+web_accel_callback :: proc "c" (user: rawptr, pane_id: u32, vk: u32, kind: u32, lparam: i32) -> bool {
 	if user == nil {return false}
 	app := (^App)(user)
 	context = app.web_accel_ctx
@@ -221,22 +267,30 @@ web_accel_callback :: proc "c"(
 	if kind != 0 && kind != 2 {return false}
 	pane := web_find(app, pane_id)
 	if pane == nil || pane.host_window == 0 {return false}
+	w := window_find(app, pane.host_window)
+	if w == nil {return false}
 	e, ok := platform.webview_accel_key_event(&app.platform, pane.host_window, vk, kind, lparam)
-	if !ok {return false}
-	logical := commands.logical_key(e.key, e.unshifted)
-	// Ctrl+L focuses the URL bar.
-	if logical == .L && e.modifiers == {.Control} {
-		append(&app.web_accel_queue, Web_Accel_Pending{pane.host_window, e})
-		_ = platform.wake(&app.platform)
-		return true
+	if !ok || input.is_modifier_key(e.key) {return false}
+	// An armed leader chord or a key sequence in progress takes every key until it resolves, as it does
+	// in a terminal.
+	if leader_armed(w) || w.bindings.count > 0 {return web_accel_queue(app, w.id, e)}
+	if leader, enabled := app.leader.?;
+	   enabled && commands.shortcut_matches(leader, e.key, e.modifiers, e.unshifted) {
+		return web_accel_queue(app, w.id, e)
 	}
+	if commands.keymap_claims(&app.keymap, &w.bindings, &app.registry, e.key, e.modifiers, e.unshifted) {
+		return web_accel_queue(app, w.id, e)
+	}
+	logical := commands.logical_key(e.key, e.unshifted)
+	// Ctrl+L focuses the URL bar and Ctrl+F opens the app's find bar in place of Edge's.
+	if e.modifiers == {.Control} && (logical == .L || logical == .F) {return web_accel_queue(app, w.id, e)}
 	// Never steal plain typing, Enter, Escape, Tab or navigation keys from web page inputs.
 	has_chord := .Control in e.modifiers || .Alt in e.modifiers || .Super in e.modifiers
 	if !has_chord && e.key != .F11 {return false}
-	// Let standard web editing and page navigation chords stay inside the page.
+	// Let standard web editing, reload and zoom chords stay inside the page.
 	if e.modifiers == {.Control} {
 		#partial switch logical {
-		case .C, .V, .X, .A, .Z, .Y, .F, .R, .Equal, .Minus, .Digit_0:
+		case .C, .V, .X, .A, .Z, .Y, .R, .Equal, .Minus, .Digit_0:
 			return false
 		}
 	}
@@ -248,14 +302,10 @@ web_accel_callback :: proc "c"(
 	}
 	// Steal bound AIODev shortcuts (palette, splits, focus moves, fullscreen, close pane, tabs).
 	if command := commands.find_by_key(&app.registry, e.key, e.modifiers, e.unshifted); command != nil {
-		if action, builtin := action_builtin(command.id); builtin {
-			if w := window_find(app, pane.host_window); w == nil || !action_available(app, w, action) {
-				return false
-			}
+		if action, builtin := action_builtin(command.id); builtin && !action_available(app, w, action) {
+			return false
 		}
-		append(&app.web_accel_queue, Web_Accel_Pending{pane.host_window, e})
-		_ = platform.wake(&app.platform)
-		return true
+		return web_accel_queue(app, w.id, e)
 	}
 	return false
 }
@@ -298,11 +348,13 @@ web_host_ensure :: proc(app: ^App, w: ^Window) -> platform.Webview_Host {
 }
 
 @(require_results)
-web_pane_create :: proc(app: ^App, url: string) -> ^Web_Pane {
+web_pane_create :: proc(app: ^App, url: string, zoom := f64(1)) -> ^Web_Pane {
 	pane, err := new(Web_Pane)
 	if err != nil {return nil}
 	pane.nav_bar = app.settings.pane.web_navigator
 	pane.cursor = .Arrow
+	pane.zoom = zoom > 0 ? zoom : 1
+	pane.find_index = -1
 	if url != "" {web_pane_set_url_text(pane, url)}
 	if _, append_err := append(&app.web_panes, pane); append_err != nil {
 		web_pane_destroy(pane)
@@ -396,8 +448,87 @@ web_content_used :: proc(app: ^App, id: u32) -> bool {
 	return false
 }
 
+// The browser process exited, taking every view and the environment with it. Each pane shows its crash
+// state until its Reload makes a new view, and a new environment with it.
+@(private = "file")
+web_browser_lost :: proc(app: ^App) {
+	for pane in app.web_panes {
+		if pane.view == nil {continue}
+		platform.webview_destroy(pane.view)
+		pane.view = nil
+		pane.ready, pane.loading, pane.webview_focused = false, false, false
+		pane.crashed = .Browser
+		pane.find_count, pane.find_index = 0, -1
+	}
+	if app.web_env != nil {
+		platform.webview_env_destroy(app.web_env)
+		app.web_env = nil
+	}
+	mark_all_dirty(app)
+}
+
+// Reloads a crashed page; a page whose browser process exited gets a new view.
+@(private = "file")
+web_recover :: proc(app: ^App, w: ^Window, pane: ^Web_Pane) {
+	switch pane.crashed {
+	case .None:
+		return
+	case .Browser:
+		if pane.view != nil {
+			platform.webview_destroy(pane.view)
+			pane.view = nil
+		}
+		pane.ready, pane.failed = false, false
+	case .Renderer, .Unresponsive:
+		platform.webview_reload(pane.view)
+	}
+	pane.crashed = .None
+	w.dirty = true
+}
+
+@(private = "file")
+WEB_PERMISSION_NAMES := [platform.Webview_Permission]string {
+	.Unknown                        = "a permission",
+	.Microphone                     = "the microphone",
+	.Camera                         = "the camera",
+	.Geolocation                    = "your location",
+	.Notifications                  = "notifications",
+	.Other_Sensors                  = "motion sensors",
+	.Clipboard_Read                 = "clipboard reading",
+	.Multiple_Automatic_Downloads   = "repeated downloads",
+	.File_Read_Write                = "file access",
+	.Autoplay                       = "autoplay",
+	.Local_Fonts                    = "local fonts",
+	.Midi_System_Exclusive_Messages = "MIDI devices",
+	.Window_Management              = "window management",
+	.Persistent_Storage             = "persistent storage",
+}
+
+// Reports a download or a blocked permission as a notice.
+@(private = "file")
+web_note_show :: proc(app: ^App, pane: ^Web_Pane, note: platform.Webview_Note) {
+	name := filepath.base(note.text)
+	#partial switch note.kind {
+	case .Download_Started:
+		notify(app, .Info, fmt.tprintf("Downloading %s…", name))
+	case .Download_Done:
+		notify(app, .Success, fmt.tprintf("Saved %s to %s.", name, filepath.dir(note.text)))
+	case .Download_Failed:
+		notify(app, .Warning, fmt.tprintf("Could not download %s.", name))
+	case .Permission_Denied:
+		permission := platform.Webview_Permission(note.detail)
+		if note.detail < 0 || note.detail > i32(max(platform.Webview_Permission)) {permission = .Unknown}
+		if permission in pane.denied {return}
+		pane.denied += {permission}
+		host := web_host_from_url(note.text)
+		if host == "" {host = "this page"}
+		notify(app, .Info, fmt.tprintf("Blocked %s for %s.", WEB_PERMISSION_NAMES[permission], host))
+	}
+}
+
 // Polls WebView2 state updates and dispatches any queued accelerator shortcuts.
 web_events_process :: proc(app: ^App) {
+	browser_lost := false
 	for pane in app.web_panes {
 		if pane.view == nil {continue}
 		snap := platform.webview_poll(pane.view)
@@ -409,6 +540,16 @@ web_events_process :: proc(app: ^App) {
 		if snap.can_forward != pane.can_forward {pane.can_forward = snap.can_forward; changed = true}
 		if snap.focused != pane.webview_focused {pane.webview_focused = snap.focused; changed = true}
 		if snap.cursor != pane.cursor {pane.cursor = snap.cursor}
+		if snap.zoom > 0 && snap.zoom != pane.zoom {pane.zoom = snap.zoom; changed = true}
+		if snap.find_count != pane.find_count || snap.find_index != pane.find_index {
+			pane.find_count, pane.find_index = snap.find_count, snap.find_index
+			changed = true
+		}
+		if snap.crashed != pane.crashed && snap.crashed != .None {
+			pane.crashed = snap.crashed
+			browser_lost ||= snap.crashed == .Browser
+			changed = true
+		}
 		if snap.url != "" && snap.url != pane.url {
 			web_pane_set_url_text(pane, snap.url)
 			changed = true
@@ -416,6 +557,14 @@ web_events_process :: proc(app: ^App) {
 		if snap.title != pane.title {
 			web_pane_set_title_text(pane, snap.title)
 			changed = true
+		}
+		if snap.favicon_serial != pane.favicon_serial {
+			pane.favicon_serial = snap.favicon_serial
+			changed = true
+		}
+		if snap.note.kind != .None {
+			web_note_show(app, pane, snap.note)
+			platform.webview_pop_note(pane.view)
 		}
 		if snap.new_window_url != "" {
 			new_url := strings.clone(snap.new_window_url, context.temp_allocator)
@@ -432,6 +581,7 @@ web_events_process :: proc(app: ^App) {
 			}
 		}
 	}
+	if browser_lost {web_browser_lost(app)}
 	if len(app.web_accel_queue) > 0 {
 		// Copy out so dispatching a command cannot alias a growing queue.
 		pending := make([]Web_Accel_Pending, len(app.web_accel_queue), context.temp_allocator)
@@ -441,12 +591,13 @@ web_events_process :: proc(app: ^App) {
 			w := window_find(app, item.window)
 			if w == nil {continue}
 			logical := commands.logical_key(item.event.key, item.event.unshifted)
-			if logical == .L && item.event.modifiers == {.Control} {
+			if item.event.modifiers == {.Control} && logical == .L {
 				web_focus_url_bar(app, w)
 				continue
 			}
 			platform.window_reclaim_focus(&app.platform, w.id)
 			on_key(app, w, item.event)
+			web_page_refocus(app, w)
 		}
 	}
 }
@@ -479,9 +630,67 @@ web_window_moved :: proc(app: ^App, w: ^Window) {
 
 web_theme_apply :: proc(app: ^App) {
 	bg := web_bg_argb(app)
+	scheme := web_color_scheme(app)
 	for pane in app.web_panes {
-		if pane.view != nil {platform.webview_set_bg(pane.view, bg)}
+		if pane.view == nil {continue}
+		platform.webview_set_bg(pane.view, bg)
+		platform.webview_set_color_scheme(pane.view, scheme)
 	}
+}
+
+// --- Find, through the window's find bar ---
+
+web_find_set :: proc(pane: ^Web_Pane, needle: string, options: search.Options) {
+	if needle == "" {pane.find_count, pane.find_index = 0, -1}
+	if pane.view == nil || !pane.ready {return}
+	// WebView2 matches plain text, so a regular expression is searched for as written.
+	pane.find_failed = !platform.webview_find_start(pane.view, needle, options.case_sensitive, false)
+}
+
+web_find_select :: proc(pane: ^Web_Pane, up: bool) {
+	if pane.view != nil {platform.webview_find_step(pane.view, up)}
+}
+
+@(require_results)
+web_find_summary :: proc(pane: ^Web_Pane) -> search.Summary {
+	if pane.find_failed {return {progress = .Failed, selected = -1, order = .Document_Order}}
+	selected := pane.find_index > 0 ? int(pane.find_index) - 1 : -1
+	return {progress = .Complete, total = int(pane.find_count), selected = selected, order = .Document_Order}
+}
+
+// --- Zoom ---
+
+// Chrome's zoom steps, so the buttons, Ctrl+wheel and Ctrl+= agree on where 100% is.
+@(private = "file", rodata)
+WEB_ZOOM_STEPS := [?]f64{0.25, 0.33, 0.5, 0.67, 0.75, 0.8, 0.9, 1, 1.1, 1.25, 1.5, 1.75, 2, 2.5, 3, 4, 5}
+
+// The zoom one step in from `zoom` (`direction` 1 larger, -1 smaller, 0 back to 100%).
+@(require_results)
+web_zoom_step :: proc(zoom: f64, direction: int) -> f64 {
+	if direction == 0 {return 1}
+	if direction > 0 {
+		for step in WEB_ZOOM_STEPS {if step > zoom + 0.001 {return step}}
+		return WEB_ZOOM_STEPS[len(WEB_ZOOM_STEPS) - 1]
+	}
+	#reverse for step in WEB_ZOOM_STEPS {if step < zoom - 0.001 {return step}}
+	return WEB_ZOOM_STEPS[0]
+}
+
+// The font size commands zoom the focused web pane's page instead, as a browser's would.
+@(require_results)
+web_zoom_focused :: proc(app: ^App, w: ^Window, direction: int) -> bool {
+	pane := web_focused_pane(app, w)
+	if pane == nil {return false}
+	pane.zoom = web_zoom_step(pane.zoom, direction)
+	platform.webview_set_zoom(pane.view, pane.zoom)
+	w.dirty = true
+	return true
+}
+
+@(private = "file")
+web_zoom_label :: proc(pane: ^Web_Pane) -> string {
+	if abs(pane.zoom - 1) < 0.001 {return ""}
+	return fmt.tprintf("%d%%", int(math.round(pane.zoom * 100)))
 }
 
 // --- Geometry for header, URL navigator bar, and WebView2 body ---
@@ -492,6 +701,8 @@ Web_Nav_Layout :: struct {
 	forward:       render.Rect,
 	reload:        render.Rect,
 	url_box:       render.Rect,
+	zoom:          render.Rect,
+	copy_link:     render.Rect,
 	open_external: render.Rect,
 	shown:         bool,
 }
@@ -514,18 +725,27 @@ web_nav_layout :: proc(w: ^Window, pane: ^Web_Pane, card: layout.Rect) -> Web_Na
 	x += btn + gap
 	reload := render.Rect{x, by, btn, btn}
 	x += btn + gap
-	right_x := bar.x + bar.width - pad - btn
-	open_ext := render.Rect{right_x, by, btn, btn}
-	url_w := max(0, right_x - gap - x)
-	url_box := render.Rect{x, by, url_w, btn}
+	right := bar.x + bar.width - pad - btn
+	open_ext := render.Rect{right, by, btn, btn}
+	right -= gap + btn
+	copy_link := render.Rect{right, by, btn, btn}
+	zoom: render.Rect
+	if label := web_zoom_label(pane); label != "" {
+		width := math.round(ui.text_width(&w.ui_text, label) + 2 * WEB_NAV_PAD * w.scale)
+		right -= gap + width
+		zoom = {right, by, width, btn}
+	}
+	url_box := render.Rect{x, by, max(0, right - gap - x), btn}
 	return {
-		bar           = bar,
-		back          = back,
-		forward       = forward,
-		reload        = reload,
-		url_box       = url_box,
+		bar = bar,
+		back = back,
+		forward = forward,
+		reload = reload,
+		url_box = url_box,
+		zoom = zoom,
+		copy_link = copy_link,
 		open_external = open_ext,
-		shown         = true,
+		shown = true,
 	}
 }
 
@@ -549,6 +769,44 @@ web_body_rect :: proc(app: ^App, w: ^Window, pane: ^Web_Pane, card: layout.Rect)
 	}
 }
 
+// What the body shows while no page is drawn over it, and whether it offers Reload.
+@(private = "file")
+web_body_message :: proc(app: ^App, pane: ^Web_Pane) -> (message: string, recover: bool) {
+	switch {
+	case !platform.webview_supported():
+		when platform.AIO_HEADLESS {
+			return "Web panes are unavailable in headless mode.", false
+		} else {
+			return "Web panes are off while AIODev runs as administrator. Use Open in default browser above.", false
+		}
+	case pane.crashed == .Renderer:
+		return "This page crashed.", true
+	case pane.crashed == .Unresponsive:
+		return "This page is not responding.", true
+	case pane.crashed == .Browser:
+		return "The web view stopped.", true
+	case pane.failed || app.web_env_failed:
+		return "The WebView2 runtime could not start. Use Open in default browser above.", false
+	case pane.url == "":
+		return "Type a URL above and press Enter.", false
+	case !pane.ready:
+		return "Loading web view…", false
+	}
+	return "", false
+}
+
+@(private = "file")
+web_recover_rect :: proc(w: ^Window, body: render.Rect) -> render.Rect {
+	size := WEB_RELOAD_BUTTON * w.scale
+	gap := 12 * w.scale
+	return {
+		math.round(body.x + (body.width - size.x) * 0.5),
+		math.round(body.y + body.height * 0.5 + gap),
+		size.x,
+		size.y,
+	}
+}
+
 // --- Drawing (nav bar + status fallback when initializing / unsupported) ---
 
 web_pane_draw :: proc(app: ^App, w: ^Window, pane_rect: layout.Pane_Rect) -> render.Build_Status {
@@ -561,19 +819,13 @@ web_pane_draw :: proc(app: ^App, w: ^Window, pane_rect: layout.Pane_Rect) -> ren
 	if nav.shown {
 		if result := web_nav_draw(app, w, pane, nav, f.offset); result != .Ok {return result}
 	}
+	web_loading_draw(app, w, pane, pane_rect.rect, nav)
 	body := web_body_rect(app, w, pane, pane_rect.rect)
-	if body.width > 0 && body.height > 0 && (!pane.ready || pane.failed || !platform.webview_supported()) {
-		message := "Loading web view…"
-		if !platform.webview_supported() {
-			message = "Web panes are unavailable in headless mode."
-		} else if pane.failed || app.web_env_failed {
-			message = "WebView2 runtime could not start. Click Open in browser above."
-		} else if pane.url == "" {
-			message = "Type a URL above and press Enter."
-		}
+	message, recover := web_body_message(app, pane)
+	if body.width > 0 && body.height > 0 && message != "" {
 		text_w := ui.text_width(&w.ui_text, message)
 		tx := body.x + max(12 * w.scale, (body.width - text_w) * 0.5)
-		ty := body.y + body.height * 0.5 + w.ui_text.ascent * 0.5
+		ty := body.y + body.height * 0.5 - (recover ? w.ui_text.line_height : 0) + w.ui_text.ascent * 0.5
 		if result := ui.draw_text(
 			&w.ui_text,
 			&w.list,
@@ -583,8 +835,36 @@ web_pane_draw :: proc(app: ^App, w: ^Window, pane_rect: layout.Pane_Rect) -> ren
 			app.theme.muted,
 			max(0, body.width - 24 * w.scale),
 		); result != .Ok {return result}
+		if recover {
+			button := web_recover_rect(w, body)
+			if result := ui.text_button_draw(
+				&w.list, &w.ui_text, app.theme, button, "Reload", false, w.scale, w.pointer,
+			); result != .Ok {return result}
+		}
 	}
 	return .Ok
+}
+
+// The loading line: a segment sweeping along the bottom of the URL bar (or the header) while the page
+// loads. It asks for frames as the working spinner does, and holds still without system animations.
+@(private = "file")
+web_loading_draw :: proc(app: ^App, w: ^Window, pane: ^Web_Pane, card: layout.Rect, nav: Web_Nav_Layout) {
+	if !pane.loading || pane.crashed != .None {return}
+	thickness := math.round(WEB_LOAD_LINE * w.scale)
+	track := render.Rect{card.x, card.y + pane_header_height(w.scale) - thickness, card.width, thickness}
+	if nav.shown {track.y = nav.bar.y + nav.bar.height - thickness}
+	phase := f32(0.5)
+	if app.animations {
+		w.status_spinning = true
+		period := i64(WEB_LOAD_SWEEP)
+		phase = f32(f64(w.frame.display._nsec % period) / f64(period))
+	}
+	segment := track.width * WEB_LOAD_SHARE
+	start := track.x - segment + (track.width + segment) * phase
+	left, right := max(start, track.x), min(start + segment, track.x + track.width)
+	if right > left {
+		_ = render.push_rect(&w.list, {rect = {left, track.y, right - left, thickness}, color = app.theme.accent})
+	}
 }
 
 @(private = "file")
@@ -643,9 +923,32 @@ web_nav_draw :: proc(
 		pane.nav_hover == .Reload, pane.nav_armed == .Reload,
 	)
 	_ = web_nav_button_draw(
+		app, w, nav.copy_link, .Link, pane.url != "",
+		pane.nav_hover == .Copy_Link, pane.nav_armed == .Copy_Link,
+	)
+	_ = web_nav_button_draw(
 		app, w, nav.open_external, .Launch, pane.url != "",
 		pane.nav_hover == .Open_External, pane.nav_armed == .Open_External,
 	)
+	if label := web_zoom_label(pane); label != "" && nav.zoom.width > 0 {
+		hovered, pressed := pane.nav_hover == .Zoom, pane.nav_armed == .Zoom
+		radius := ui.RADIUS_CONTROL * w.scale
+		if hovered || pressed {
+			fill := pressed ? web_alpha(app.theme.accent, 0.22) : app.theme.hover
+			_ = render.push_rect(&w.list, {rect = nav.zoom, color = fill, radius = radius})
+		}
+		width := ui.text_width(&w.ui_text, label)
+		baseline := nav.zoom.y + math.round((nav.zoom.height - w.ui_text.line_height) * 0.5) + w.ui_text.ascent
+		if result := ui.draw_text(
+			&w.ui_text,
+			&w.list,
+			label,
+			nav.zoom.x + (nav.zoom.width - width) * 0.5,
+			baseline,
+			hovered ? app.theme.text : app.theme.muted,
+			nav.zoom.width,
+		); result != .Ok {return result}
+	}
 	if nav.url_box.width > 16 * w.scale {
 		focused := pane.url_editing && web_is_focused_pane(w, pane.id) && overlay_kind(app, w) == .None
 		radius := ui.RADIUS_CONTROL * w.scale
@@ -673,24 +976,49 @@ web_nav_draw :: proc(
 	return .Ok
 }
 
-// --- DirectComposition Visual Sync + Split-Layer Presentation ---
+// --- DirectComposition levels and split-layer presentation ---
 
-// Called by build_frame to know whether this window currently displays any web panes and should mark
-// split boundaries for DirectComposition overlay compositing.
+// Starts a frame: whether this window shows any web pane, so build_frame splits its draw list around
+// the web views.
 web_window_prepare_frame :: proc(w: ^Window) {
-	w.web.has_tiled_web = false
-	w.web.has_float_web = false
-	w.web.floats_split = 0
-	w.web.overlay_split = 0
+	w.web.shown = false
+	w.web.split_count = 0
+	w.web.group_web = false
 	if !platform.webview_supported() {return}
 	for pane in w.panes {
-		if pane.content.kind != .Web {continue}
-		if pane.floating {w.web.has_float_web = true} else {w.web.has_tiled_web = true}
+		if pane.content.kind == .Web {
+			w.web.shown = true
+			return
+		}
 	}
 }
 
 web_window_has_visible :: proc(w: ^Window) -> bool {
-	return w.web.has_tiled_web || w.web.has_float_web
+	return w.web.shown
+}
+
+// Starts the next overlay at the end of the draw list. build_frame calls it once the tiled panes and
+// chrome are drawn, and web_float_group_end after each floating group that shows a web pane.
+web_overlay_split :: proc(w: ^Window) {
+	if !w.web.shown || w.web.split_count == WEB_LEVELS_MAX {return}
+	w.web.splits[w.web.split_count] = len(w.list.layers)
+	w.web.split_count += 1
+	_ = render.push_layer(&w.list, {0, 0, f32(w.width), f32(w.height)})
+}
+
+// Notes a floating pane about to draw: a web pane takes the level above the overlay its group's frame
+// draws in, so the frame sits under the page and every later float over it.
+web_float_pane :: proc(app: ^App, w: ^Window, rect: layout.Pane_Rect) {
+	if !w.web.shown || rect.content.kind != .Web {return}
+	if pane := web_find(app, rect.content.id); pane != nil {pane.level = i32(w.web.split_count)}
+	w.web.group_web = true
+}
+
+// Ends a floating group: one that showed a web pane starts a new overlay above it.
+web_float_group_end :: proc(w: ^Window) {
+	if !w.web.group_web {return}
+	w.web.group_web = false
+	web_overlay_split(w)
 }
 
 @(private = "file")
@@ -703,71 +1031,45 @@ web_layers_have_content :: proc(list: ^render.Draw_List, from, to: int) -> bool 
 	return false
 }
 
-// Updates every web pane's DirectComposition visual placement, rounded bottom corners, and Chromium
-// viewport bounds, then presents the base HWND swap chain + on-demand transparent overlay swap chains.
+// Places every web view, then presents the base swap chain and each overlay: layers before the first
+// split go to the window's swap chain under every web view, and overlay i (to the next split) sits
+// above web level i.
 web_window_present :: proc(app: ^App, w: ^Window, background: render.Color) -> render.Error {
 	surface := window_surface(w)
 	if !web_window_has_visible(w) {
 		if w.web.host != nil {
 			web_window_hide_all_visuals(app, w)
 			platform.webview_host_overlay_hide(w.web.host, 0)
-			platform.webview_host_overlay_hide(w.web.host, 1)
+			platform.webview_host_trim(w.web.host, 1)
 			platform.webview_host_commit(w.web.host)
 		}
 		return render.frame_render(app.device, surface, &w.list, background)
 	}
 	host := web_host_ensure(app, w)
-	if host == nil {
+	if host == nil || w.web.split_count == 0 {
 		return render.frame_render(app.device, surface, &w.list, background)
 	}
 	web_window_sync_visuals(app, w, host)
 
 	total := len(w.list.layers)
-	floats_split := clamp(w.web.floats_split, 0, total)
-	overlay_split := clamp(w.web.overlay_split, floats_split, total)
-
-	if err := render.frame_render_base(app.device, surface, &w.list, floats_split, background); err != .None {
+	count := w.web.split_count
+	base := clamp(w.web.splits[0], 0, total)
+	if err := render.frame_render_base(app.device, surface, &w.list, base, background); err != .None {
 		return err
 	}
-
-	if w.web.has_float_web {
-		// Layer 0 (between tiled web views and floating web views): floating pane frames/headers/non-web floats.
-		if web_layers_have_content(&w.list, floats_split, overlay_split) {
-			if rtv := platform.webview_host_overlay_begin(host, 0, w.width, w.height); rtv != nil {
-				_ = render.frame_render_overlay(
-					app.device, rtv, w.width, w.height, &w.list, floats_split, overlay_split,
-				)
-				platform.webview_host_overlay_present(host, 0)
-			}
-		} else {
-			platform.webview_host_overlay_hide(host, 0)
+	for i in 0 ..< count {
+		from := clamp(w.web.splits[i], 0, total)
+		to := i + 1 < count ? clamp(w.web.splits[i + 1], from, total) : total
+		if !web_layers_have_content(&w.list, from, to) {
+			platform.webview_host_overlay_hide(host, i32(i))
+			continue
 		}
-		// Layer 1 (topmost, above floating web views): palette, menus, tooltips, notices, drag outlines.
-		if web_layers_have_content(&w.list, overlay_split, total) {
-			if rtv := platform.webview_host_overlay_begin(host, 1, w.width, w.height); rtv != nil {
-				_ = render.frame_render_overlay(
-					app.device, rtv, w.width, w.height, &w.list, overlay_split, total,
-				)
-				platform.webview_host_overlay_present(host, 1)
-			}
-		} else {
-			platform.webview_host_overlay_hide(host, 1)
-		}
-	} else {
-		// Tiled web views only: combine floats + top overlays into Layer 1 above tiled web views.
-		platform.webview_host_overlay_hide(host, 0)
-		if web_layers_have_content(&w.list, floats_split, total) {
-			if rtv := platform.webview_host_overlay_begin(host, 1, w.width, w.height); rtv != nil {
-				_ = render.frame_render_overlay(
-					app.device, rtv, w.width, w.height, &w.list, floats_split, total,
-				)
-				platform.webview_host_overlay_present(host, 1)
-			}
-		} else {
-			platform.webview_host_overlay_hide(host, 1)
-		}
+		rtv := platform.webview_host_overlay_begin(host, i32(i), w.width, w.height)
+		if rtv == nil {continue}
+		_ = render.frame_render_overlay(app.device, rtv, w.width, w.height, &w.list, from, to)
+		platform.webview_host_overlay_present(host, i32(i))
 	}
-
+	platform.webview_host_trim(host, i32(count))
 	platform.webview_host_commit(host)
 	return render.frame_present(app.device, surface)
 }
@@ -777,7 +1079,7 @@ web_window_hide_all_visuals :: proc(app: ^App, w: ^Window) {
 	for pane in app.web_panes {
 		if pane.host_window == w.id && pane.view != nil {
 			platform.webview_set_placement(
-				pane.view, w.web.host, false, false, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, w.scale,
+				pane.view, w.web.host, false, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, w.scale,
 			)
 		}
 	}
@@ -806,14 +1108,16 @@ web_window_sync_visuals :: proc(app: ^App, w: ^Window, host: platform.Webview_Ho
 		if !found {
 			if pane.host_window == w.id && pane.view != nil {
 				platform.webview_set_placement(
-					pane.view, host, false, false, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, w.scale,
+					pane.view, host, false, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, w.scale,
 				)
 			}
 			continue
 		}
 		pane.host_window = w.id
-		if pane.view == nil && env_ready && !pane.failed {
-			pane.view = platform.webview_create(app.web_env, host, pane.id, pane.url, web_bg_argb(app))
+		if pane.view == nil && env_ready && !pane.failed && pane.crashed == .None {
+			pane.view = platform.webview_create(
+				app.web_env, host, pane.id, pane.url, web_bg_argb(app), web_color_scheme(app), pane.zoom,
+			)
 		}
 		if pane.view == nil {continue}
 
@@ -825,9 +1129,7 @@ web_window_sync_visuals :: proc(app: ^App, w: ^Window, host: platform.Webview_Ho
 		// paint over the Activity panel, tab rail or title bar.
 		clip_l, clip_t := f32(0), f32(0)
 		clip_r, clip_b := vis_body.width, vis_body.height
-		apply_clip :: proc(
-			vis: render.Rect, bound: render.Rect, cl, ct, cr, cb: ^f32,
-		) {
+		apply_clip :: proc(vis: render.Rect, bound: render.Rect, cl, ct, cr, cb: ^f32) {
 			cl^ = max(cl^, bound.x - vis.x)
 			ct^ = max(ct^, bound.y - vis.y)
 			cr^ = min(cr^, bound.x + bound.width - vis.x)
@@ -847,7 +1149,7 @@ web_window_sync_visuals :: proc(app: ^App, w: ^Window, host: platform.Webview_Ho
 		   has_raised && animating && !shown_rect.floating {
 			covered = raised_key != pane_motion_key(shown_rect.content)
 		}
-		visible := !hide_for_overview && !covered &&
+		visible := !hide_for_overview && !covered && pane.crashed == .None &&
 			(clip_r - clip_l) >= 2 && (clip_b - clip_t) >= 2 && pane.url != ""
 		inner_radius := max(f32(0), radius - inset)
 		rad_bl := clip_l <= 0.5 && clip_b >= vis_body.height - 0.5 ? inner_radius : 0
@@ -856,7 +1158,7 @@ web_window_sync_visuals :: proc(app: ^App, w: ^Window, host: platform.Webview_Ho
 			pane.view,
 			host,
 			visible,
-			shown_rect.floating,
+			shown_rect.floating ? pane.level : 0,
 			i32(math.round(vis_body.x)),
 			i32(math.round(vis_body.y)),
 			i32(math.round(vis_body.width)),
@@ -904,6 +1206,17 @@ web_focus_url_bar :: proc(app: ^App, w: ^Window) {
 	w.dirty = true
 }
 
+// Gives the keyboard back to the focused page once nothing of the app's still wants keys: a leader
+// chord, key sequence or mode, the URL bar, the find bar or an overlay.
+@(private = "file")
+web_page_refocus :: proc(app: ^App, w: ^Window) {
+	pane := web_focused_pane(app, w)
+	if pane == nil || pane.url_editing || pane.view == nil || !pane.ready || pane.crashed != .None {return}
+	if !w.focused || overlay_kind(app, w) != .None || leader_armed(w) || w.bindings.count > 0 {return}
+	if ui.find_has_keyboard(&w.find) || arrange_active(w) {return}
+	platform.webview_focus(pane.view)
+}
+
 web_focus_leave :: proc(app: ^App, w: ^Window, content: layout.Content) {
 	if content.kind != .Web {return}
 	if pane := web_find(app, content.id); pane != nil {
@@ -943,9 +1256,45 @@ web_nav_hit :: proc(nav: Web_Nav_Layout, x, y: f32) -> Web_Nav_Button {
 	if render.rect_contains(nav.back, x, y) {return .Back}
 	if render.rect_contains(nav.forward, x, y) {return .Forward}
 	if render.rect_contains(nav.reload, x, y) {return .Reload}
+	if render.rect_contains(nav.zoom, x, y) {return .Zoom}
+	if render.rect_contains(nav.copy_link, x, y) {return .Copy_Link}
 	if render.rect_contains(nav.open_external, x, y) {return .Open_External}
 	if render.rect_contains(nav.url_box, x, y) {return .Url}
 	return .None
+}
+
+// The nav bar button, or the body's Reload on a crashed page, under (x, y).
+@(private = "file")
+web_button_at :: proc(
+	app: ^App,
+	w: ^Window,
+	pane: ^Web_Pane,
+	card: layout.Rect,
+	x, y: f32,
+) -> Web_Nav_Button {
+	if hit := web_nav_hit(web_nav_layout(w, pane, card), x, y); hit != .None {return hit}
+	if _, recover := web_body_message(app, pane); recover {
+		body := web_body_rect(app, w, pane, card)
+		if render.rect_contains(web_recover_rect(w, body), x, y) {return .Recover}
+	}
+	return .None
+}
+
+@(private = "file")
+web_button_enabled :: proc(pane: ^Web_Pane, button: Web_Nav_Button) -> bool {
+	switch button {
+	case .None, .Url:
+		return false
+	case .Back:
+		return pane.can_back
+	case .Forward:
+		return pane.can_forward
+	case .Reload, .Copy_Link, .Open_External:
+		return pane.url != ""
+	case .Zoom, .Recover:
+		return true
+	}
+	return false
 }
 
 web_claims :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {
@@ -980,33 +1329,23 @@ web_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: input.Mouse_M
 		pointer_set(app, w, .Text)
 		return
 	}
-	if nav.shown && render.rect_contains(nav.bar, x, y) {
-		hit := web_nav_hit(nav, x, y)
-		if pane.nav_hover != hit {
-			pane.nav_hover = hit
-			w.dirty = true
-		}
+	hit := web_button_at(app, w, pane, pr.rect, x, y)
+	if pane.nav_hover != hit {
+		pane.nav_hover = hit
+		w.dirty = true
+	}
+	if hit != .None || (nav.shown && render.rect_contains(nav.bar, x, y)) {
 		shape: platform.Cursor_Shape = .Arrow
-		switch hit {
-		case .None:
-		case .Back:
-			if pane.can_back {shape = .Hand}
-		case .Forward:
-			if pane.can_forward {shape = .Hand}
-		case .Reload, .Open_External:
-			if pane.url != "" {shape = .Hand}
-		case .Url:
+		if hit == .Url {
 			shape = .Text
+		} else if web_button_enabled(pane, hit) {
+			shape = .Hand
 		}
 		pointer_set(app, w, shape)
 		return
 	}
-	if pane.nav_hover != .None {
-		pane.nav_hover = .None
-		w.dirty = true
-	}
 	body := web_body_rect(app, w, pane, pr.rect)
-	if pane.view != nil && pane.ready && render.rect_contains(body, x, y) {
+	if pane.view != nil && pane.ready && pane.crashed == .None && render.rect_contains(body, x, y) {
 		lx := i32(math.round(x - body.x))
 		ly := i32(math.round(y - body.y))
 		platform.webview_mouse(pane.view, .Move, e.buttons, e.modifiers, 0, lx, ly)
@@ -1022,9 +1361,9 @@ web_press :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) {
 	if !ok {return}
 	pane_focus(app, w, pr.node)
 	nav := web_nav_layout(w, pane, pr.rect)
-	if nav.shown && render.rect_contains(nav.bar, x, y) {
+	hit := web_button_at(app, w, pane, pr.rect, x, y)
+	if hit != .None || (nav.shown && render.rect_contains(nav.bar, x, y)) {
 		if e.button != .Left {return}
-		hit := web_nav_hit(nav, x, y)
 		pane.nav_armed = hit
 		if hit == .Url {
 			was_editing := pane.url_editing
@@ -1052,7 +1391,7 @@ web_press :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) {
 		w.dirty = true
 	}
 	body := web_body_rect(app, w, pane, pr.rect)
-	if pane.view == nil || !pane.ready || !render.rect_contains(body, x, y) {return}
+	if pane.view == nil || !pane.ready || pane.crashed != .None || !render.rect_contains(body, x, y) {return}
 	platform.webview_focus(pane.view)
 	lx := i32(math.round(x - body.x))
 	ly := i32(math.round(y - body.y))
@@ -1080,6 +1419,32 @@ web_press :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) {
 	platform.webview_mouse(pane.view, kind, {e.button}, e.modifiers, 0, lx, ly)
 }
 
+// Runs a nav bar or body button released over the button it was pressed on.
+@(private = "file")
+web_button_run :: proc(app: ^App, w: ^Window, pane: ^Web_Pane, button: Web_Nav_Button) {
+	if !web_button_enabled(pane, button) {return}
+	switch button {
+	case .None, .Url:
+	case .Back:
+		platform.webview_go_back(pane.view)
+	case .Forward:
+		platform.webview_go_forward(pane.view)
+	case .Reload:
+		if pane.loading {platform.webview_stop(pane.view)} else {platform.webview_reload(pane.view)}
+	case .Zoom:
+		pane.zoom = 1
+		platform.webview_set_zoom(pane.view, 1)
+	case .Copy_Link:
+		_ = clipboard_copy(app, pane.url)
+	case .Open_External:
+		if !target_open_url(app, pane.url) {
+			notify(app, .Error, "Could not open the link in the default browser.")
+		}
+	case .Recover:
+		web_recover(app, w, pane)
+	}
+}
+
 web_release :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) -> bool {
 	x, y := f32(e.x), f32(e.y)
 	pane := web_focused_pane(app, w)
@@ -1101,27 +1466,14 @@ web_release :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) -> bool 
 	if pane.nav_armed != .None {
 		armed := pane.nav_armed
 		pane.nav_armed = .None
-		nav := web_nav_layout(w, pane, pr.rect)
-		if e.button == .Left && web_nav_hit(nav, x, y) == armed {
-			switch armed {
-			case .None, .Url:
-			case .Back:
-				platform.webview_go_back(pane.view)
-			case .Forward:
-				platform.webview_go_forward(pane.view)
-			case .Reload:
-				if pane.loading {platform.webview_stop(pane.view)} else {platform.webview_reload(pane.view)}
-			case .Open_External:
-				if pane.url != "" && !target_open_url(app, pane.url) {
-					notify(app, .Error, "Could not open the link in the default browser.")
-				}
-			}
+		if e.button == .Left && web_button_at(app, w, pane, pr.rect, x, y) == armed {
+			web_button_run(app, w, pane, armed)
 		}
 		w.dirty = true
 		return true
 	}
 	body := web_body_rect(app, w, pane, pr.rect)
-	if pane.view != nil && pane.ready {
+	if pane.view != nil && pane.ready && pane.crashed == .None {
 		lx := i32(math.round(x - body.x))
 		ly := i32(math.round(y - body.y))
 		kind: platform.Webview_Mouse_Kind
@@ -1139,13 +1491,14 @@ web_release :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) -> bool 
 web_tooltip :: proc(app: ^App, w: ^Window, x, y: f32) -> string {
 	pane, pr, ok := web_pane_at(app, w, x, y)
 	if !ok {return ""}
-	nav := web_nav_layout(w, pane, pr.rect)
-	switch web_nav_hit(nav, x, y) {
+	switch web_button_at(app, w, pane, pr.rect, x, y) {
 	case .Back: return "Back"
 	case .Forward: return "Forward"
 	case .Reload: return pane.loading ? "Stop loading" : "Reload"
+	case .Zoom: return "Reset zoom"
+	case .Copy_Link: return "Copy link"
 	case .Open_External: return "Open in default browser"
-	case .None, .Url:
+	case .None, .Url, .Recover:
 	}
 	return ""
 }
@@ -1181,7 +1534,7 @@ web_wheel :: proc(app: ^App, w: ^Window, e: input.Mouse_Wheel_Event) -> bool {
 	if !ok {return false}
 	body := web_body_rect(app, w, pane, pr.rect)
 	if !render.rect_contains(body, x, y) {return true}
-	if pane.view == nil || !pane.ready {return true}
+	if pane.view == nil || !pane.ready || pane.crashed != .None {return true}
 	lx := i32(math.round(x - body.x))
 	ly := i32(math.round(y - body.y))
 	if e.delta_y != 0 {
@@ -1195,26 +1548,40 @@ web_wheel :: proc(app: ^App, w: ^Window, e: input.Mouse_Wheel_Event) -> bool {
 	return true
 }
 
+// Keys reach here while the app's window, not the page, has the keyboard: the URL bar or find bar is
+// focused, or a key the page passed up (a shortcut, the leader) is being resolved.
 web_key :: proc(app: ^App, w: ^Window, e: input.Key_Event) {
 	pane := web_focused_pane(app, w)
 	if pane == nil {return}
-	key, consumed := content_key_prelude(app, w, e, false)
-	if consumed {return}
-	if e.pressed && key.logical.key == .L && e.modifiers == {.Control} {
+	key, consumed := content_key_prelude(app, w, e, true)
+	if consumed {
+		web_page_refocus(app, w)
+		return
+	}
+	if !e.pressed {return}
+	has_find := ui.find_has_keyboard(&w.find)
+	modifiers := e.modifiers & {.Control, .Shift, .Alt, .Super}
+	if modifiers == {.Control} && key.logical.key == .L {
 		key_suppress(w, e)
 		web_focus_url_bar(app, w)
 		return
 	}
-	if pane.url_editing {
-		if e.pressed && e.key == .Escape {
+	if !has_find && modifiers == {.Control} && key.logical.key == .F {
+		key_suppress(w, e)
+		pane_header_cancel(w)
+		find_toggle(app, w, pane)
+		return
+	}
+	if pane.url_editing && !has_find {
+		if e.key == .Escape {
 			key_suppress(w, e)
 			pane.url_editing = false
 			ui.field_set(&pane.url_field, pane.url)
-			if pane.view != nil && pane.ready {platform.webview_focus(pane.view)}
+			web_page_refocus(app, w)
 			w.dirty = true
 			return
 		}
-		if e.pressed && (e.key == .Enter || e.key == .Numpad_Enter) {
+		if e.key == .Enter || e.key == .Numpad_Enter {
 			key_suppress(w, e)
 			raw := ui.field_string(&pane.url_field)
 			if normalized, valid := web_normalize_input_url(raw); valid {
@@ -1222,7 +1589,7 @@ web_key :: proc(app: ^App, w: ^Window, e: input.Key_Event) {
 				web_pane_set_url_text(pane, normalized)
 				if pane.view != nil {
 					platform.webview_navigate(pane.view, normalized)
-					if pane.ready {platform.webview_focus(pane.view)}
+					web_page_refocus(app, w)
 				}
 			} else {
 				notify(app, .Warning, "Enter an http or https address.")
@@ -1230,19 +1597,24 @@ web_key :: proc(app: ^App, w: ^Window, e: input.Key_Event) {
 			w.dirty = true
 			return
 		}
-		if e.pressed {
-			edit := field_edit_key(app, &pane.url_field, e)
-			if edit.change != .None || edit.pasted {
-				key_suppress(w, e)
-				w.dirty = true
-				return
-			}
+		edit := field_edit_key(app, &pane.url_field, e)
+		if edit.change != .None || edit.pasted {
+			key_suppress(w, e)
+			w.dirty = true
+			return
 		}
 	}
 	if key.found && (key.runtime || action_available(app, w, key.action)) {
 		key_suppress(w, e)
 		run_window_command(app, w, key.command, .Key)
+		web_page_refocus(app, w)
+		return
 	}
+	if has_find {
+		find_bar_key(app, w, e, key.logical)
+		return
+	}
+	web_page_refocus(app, w)
 }
 
 web_text :: proc(app: ^App, w: ^Window, text: string) {

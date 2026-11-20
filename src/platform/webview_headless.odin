@@ -30,6 +30,7 @@ when AIO_HEADLESS {
 
 	webview_host_overlay_present :: proc(host: Webview_Host, layer: i32) {}
 	webview_host_overlay_hide :: proc(host: Webview_Host, layer: i32) {}
+	webview_host_trim :: proc(host: Webview_Host, count: i32) {}
 	webview_host_commit :: proc(host: Webview_Host) {}
 
 	@(require_results)
@@ -54,6 +55,8 @@ when AIO_HEADLESS {
 		pane_id: u32,
 		initial_url: string,
 		bg_argb: u32,
+		scheme: Webview_Color_Scheme,
+		zoom: f64,
 	) -> Webview {
 		return nil
 	}
@@ -64,7 +67,8 @@ when AIO_HEADLESS {
 	webview_set_placement :: proc(
 		view: Webview,
 		host: Webview_Host,
-		visible, floating: bool,
+		visible: bool,
+		level: i32,
 		vis_x, vis_y, vis_w, vis_h: i32,
 		clip_l, clip_t, clip_r, clip_b: f32,
 		bounds_w, bounds_h: i32,
@@ -72,11 +76,19 @@ when AIO_HEADLESS {
 	) {}
 
 	webview_set_bg :: proc(view: Webview, bg_argb: u32) {}
+	webview_set_color_scheme :: proc(view: Webview, scheme: Webview_Color_Scheme) {}
+	webview_set_zoom :: proc(view: Webview, zoom: f64) {}
 	webview_navigate :: proc(view: Webview, url: string) {}
 	webview_go_back :: proc(view: Webview) {}
 	webview_go_forward :: proc(view: Webview) {}
 	webview_reload :: proc(view: Webview) {}
 	webview_stop :: proc(view: Webview) {}
+
+	webview_find_start :: proc(view: Webview, term: string, case_sensitive, whole_word: bool) -> bool {
+		return false
+	}
+
+	webview_find_step :: proc(view: Webview, backward: bool) {}
 
 	webview_mouse :: proc(
 		view: Webview,
@@ -96,6 +108,7 @@ when AIO_HEADLESS {
 	}
 
 	webview_clear_new_window :: proc(view: Webview) {}
+	webview_pop_note :: proc(view: Webview) {}
 
 	webview_accel_key_event :: proc(
 		p: ^Platform,

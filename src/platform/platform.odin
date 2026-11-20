@@ -185,11 +185,72 @@ Webview_Accel_Proc :: proc "c"(
 	lparam: i32,
 ) -> bool
 
+// Why a page stopped: its renderer exited, the browser process exited (the view must be made again), or
+// the renderer stopped responding.
+Webview_Crash :: enum u8 {
+	None,
+	Renderer,
+	Browser,
+	Unresponsive,
+}
+
+// Something a page did that the app reports as a notice; the snapshot carries the oldest one.
+Webview_Note_Kind :: enum i32 {
+	None,
+	Download_Started,
+	Download_Done,
+	Download_Failed,
+	Permission_Denied,
+}
+
+// Matches COREWEBVIEW2_PERMISSION_KIND in WebView2.h.
+Webview_Permission :: enum i32 {
+	Unknown,
+	Microphone,
+	Camera,
+	Geolocation,
+	Notifications,
+	Other_Sensors,
+	Clipboard_Read,
+	Multiple_Automatic_Downloads,
+	File_Read_Write,
+	Autoplay,
+	Local_Fonts,
+	Midi_System_Exclusive_Messages,
+	Window_Management,
+	Persistent_Storage,
+}
+
+Webview_Note :: struct {
+	kind:   Webview_Note_Kind,
+	// The permission for Permission_Denied, the interrupt reason for Download_Failed.
+	detail: i32,
+	// The file for downloads, the asking page for permissions.
+	text:   string,
+}
+
+// Matches COREWEBVIEW2_PREFERRED_COLOR_SCHEME.
+Webview_Color_Scheme :: enum i32 {
+	Auto,
+	Light,
+	Dark,
+}
+
+// A view's state; the strings and favicon bytes are borrowed from the view until its next poll.
 Webview_Snapshot :: struct {
 	url:            string,
 	title:          string,
 	new_window_url: string,
+	// PNG bytes, empty when the page has none; favicon_serial changes whenever they do.
+	favicon:        []u8,
+	favicon_serial: u32,
+	note:           Webview_Note,
+	zoom:           f64,
+	// Matches found by the find session and the 1-based selected one (-1 for none).
+	find_count:     i32,
+	find_index:     i32,
 	cursor:         Cursor_Shape,
+	crashed:        Webview_Crash,
 	ready:          bool,
 	failed:         bool,
 	loading:        bool,

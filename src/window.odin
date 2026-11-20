@@ -733,27 +733,25 @@ build_frame :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 	if !over {
 		if result := window_chrome_layers_draw(app, w); result != .Ok {return result}
 	}
-	if web_window_has_visible(w) {
-		w.web.floats_split = len(w.list.layers)
-		_ = render.push_layer(&w.list, {0, 0, f32(w.width), f32(w.height)})
-	}
+	// With a web pane shown, what follows draws into overlays above the web views: one after the tiled
+	// panes and chrome, and another after each floating group that shows a web pane.
+	web_overlay_split(w)
 	group := layout.INVALID_NODE
 	tree := window_tree(w)
 	for pane in w.panes {
 		if !pane.floating {continue}
 		// Each float's frame and header draw with it, so a higher float covers a lower one's.
 		if root := layout.float_root(tree, pane.node); root != group {
+			web_float_group_end(w)
 			group = root
 			from := render.draw_mark(&w.list)
 			frame := floating_header_draw(app, w, root)
 			pane_motion_region_drawn(w, PANE_MOTION_FRAME | pane.group, frame, from)
 		}
+		web_float_pane(app, w, pane)
 		if result := pane_draw_noted(app, w, pane, &blinking); result != .Ok {return result}
 	}
-	if web_window_has_visible(w) {
-		w.web.overlay_split = len(w.list.layers)
-		_ = render.push_layer(&w.list, {0, 0, f32(w.width), f32(w.height)})
-	}
+	web_float_group_end(w)
 	// Floats shrinking into their capsules draw above the others.
 	if !over {pane_ghosts_draw_alone(app, w, false)}
 	if over {pane_motion_slide_clip(w, panes)}
