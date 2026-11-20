@@ -1,6 +1,7 @@
 package links_test
 
 import "aio:links"
+import "core:encoding/json"
 import "core:os"
 import "core:strings"
 import "core:testing"
@@ -125,5 +126,47 @@ markdown_hrefs_decode_escapes_once :: proc(t: ^testing.T) {
 		path, ok := links.resolve_href(c.href, `C:\vault`, {}, buffer[:])
 		testing.expectf(t, ok == (c.path != ""), "%s resolved %v", c.href, ok)
 		testing.expect_value(t, path, c.path)
+	}
+}
+
+@(test)
+obsidian_urls_resolve_only_notes_in_the_named_vault :: proc(t: ^testing.T) {
+	root, ok := tree_make(t, {
+		"Main Vault/notes/Plan + v1.2.md",
+		"Main Vault/notes/100%20.md",
+		"Outside.md",
+		"obsidian/",
+	})
+	defer if root != "" {tree_destroy(t, root)}
+	if !ok {return}
+	vault := strings.concatenate({root, `\Main Vault`}, context.temp_allocator)
+	encoded, err := json.marshal(vault, {}, context.temp_allocator)
+	if !testing.expect_value(t, err, nil) {return}
+	registry := strings.concatenate({`{"vaults":{"abcd1234":{"path":`, string(encoded), `,"open":true}}}`},
+		context.temp_allocator)
+	registry_path := strings.concatenate({root, `\obsidian\obsidian.json`}, context.temp_allocator)
+	if !testing.expect_value(t, os.write_entire_file(registry_path, registry), nil) {return}
+
+	cases := [?]struct {query, relative: string} {
+		{"vault=Main%20Vault&file=notes%2FPlan%20%2B%20v1.2", `notes\Plan + v1.2.md`},
+		{"file=notes/Plan+%2B+v1.2.md&vault=abcd1234", `notes\Plan + v1.2.md`},
+		{"vault=Main%20Vault&file=notes/100%2520", `notes\100%20.md`},
+		{"vault=Unknown&file=notes/100%2520", ""},
+		{"vault=abcd1234&file=notes/none", ""},
+		{"vault=abcd1234&file=%2e%2e%2FOutside", ""},
+		{"vault=abcd1234&file=notes%5c..%5c..%5cOutside", ""},
+		{"vault=abcd1234&file=%2FOutside", ""},
+		{"vault=abcd1234&file=C%3A%2FOutside", ""},
+		{"vault=abcd1234&file=notes/100%2", ""},
+		{"vault=abcd1234&file=notes/100%2520&file=Outside", ""},
+	}
+	for c in cases {
+		uri := strings.concatenate({"obsidian://open?", c.query}, context.temp_allocator)
+		path, found := links.resolve_obsidian(uri, root)
+		testing.expectf(t, found == (c.relative != ""), "%s resolved to %q", uri, path)
+		if found && c.relative != "" {
+			want := strings.concatenate({vault, `\`, c.relative}, context.temp_allocator)
+			testing.expectf(t, strings.equal_fold(path, want), "resolved %q, want %q", path, want)
+		}
 	}
 }

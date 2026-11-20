@@ -96,24 +96,17 @@ scheme_is :: proc(value, expected: string) -> bool {
 	return true
 }
 
-// Find appends the http and https URLs in one line of text, with prose punctuation removed.
+// Find appends terminal URLs in one line of text, with prose punctuation removed.
 // It does not join lines: the caller decides which physical rows are one logical line.
 @(require_results)
 find :: proc(text: string, out: ^[dynamic]Range) -> bool {
 	at := 0
 	for at < len(text) {
-		start := -1
-		if scheme_starts(text, at, "https") || scheme_starts(text, at, "http") {
-			start = at
-		}
-		if start < 0 {
+		if !terminal_scheme_starts(text, at) || (at > 0 && word_byte(text[at - 1])) {
 			at += 1
 			continue
 		}
-		if start > 0 && word_byte(text[start - 1]) {
-			at = start + 1
-			continue
-		}
+		start := at
 		end := start
 		for end < len(text) {
 			c := text[end]
@@ -121,14 +114,13 @@ find :: proc(text: string, out: ^[dynamic]Range) -> bool {
 			   c == '`' || c == '|' {
 				break
 			}
-			if (c == ',' || c == ';') &&
-			   (scheme_starts(text, end + 1, "https") || scheme_starts(text, end + 1, "http")) {
+			if (c == ',' || c == ';') && terminal_scheme_starts(text, end + 1) {
 				break
 			}
 			end += 1
 		}
 		trimmed := trim_prose(text, start, end)
-		if trimmed > start && allowed(text[start:trimmed]) {
+		if trimmed > start && terminal_uri(text[start:trimmed]) {
 			if _, err := append(out, Range{start, trimmed}); err != nil {
 				return false
 			}
@@ -136,6 +128,24 @@ find :: proc(text: string, out: ^[dynamic]Range) -> bool {
 		at = end > start ? end : start + 1
 	}
 	return true
+}
+
+@(private, require_results)
+terminal_scheme_starts :: proc(text: string, at: int) -> bool {
+	if at >= len(text) {return false}
+	switch text[at] {
+	case 'h', 'H':
+		return scheme_starts(text, at, "https") || scheme_starts(text, at, "http")
+	case 'o', 'O':
+		return scheme_starts(text, at, "obsidian")
+	}
+	return false
+}
+
+// The terminal also detects local Obsidian note links. They are not web targets.
+@(require_results)
+terminal_uri :: proc(uri: string) -> bool {
+	return obsidian_open(uri) || allowed(uri)
 }
 
 @(private, require_results)

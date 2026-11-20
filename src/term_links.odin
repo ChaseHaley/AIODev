@@ -4,6 +4,7 @@ import "aio:layout"
 import "aio:links"
 import "aio:localpath"
 import "aio:term"
+import "core:os"
 
 // The terminal link under the pointer: the pane content showing it and the cells the renderer
 // underlines. Window.link_hover holds at most one; nil is None. This file is the only writer. Hover is
@@ -93,8 +94,8 @@ link_resolve :: proc(app: ^App, w: ^Window, x, y: f32, buffer: []u8) -> Target {
 	cwd := term.working_directory(hit.entry.session, context.temp_allocator)
 	selection, selected := term.link_selection_at(&hit.pane.links, hit.column, hit.row)
 	if selected {
-		// Every web reading wins over every file reading, not just the matching mask.
-		if uri, web := link_selection_web(selection, buffer); web {return Web_Target{uri}}
+		// Every URI reading wins over every file reading, not just the matching mask.
+		if uri, found := link_selection_uri(selection, buffer); found {return link_uri_target(uri)}
 		if path, exists := link_selection_file(selection, cwd, buffer); exists {return File_Target{path}}
 	}
 	target, detected := term.link_detected_at(&hit.pane.links, hit.column, hit.row)
@@ -102,11 +103,20 @@ link_resolve :: proc(app: ^App, w: ^Window, x, y: f32, buffer: []u8) -> Target {
 		if selected {return Missing_Target{}}
 		return nil
 	}
-	if !links.allowed(target.uri) {
-		if path, exists := link_detected_file(target, cwd, buffer); exists {return File_Target{path}}
+	if uri_target := link_uri_target(target.uri); uri_target != nil {return uri_target}
+	if path, exists := link_detected_file(target, cwd, buffer); exists {return File_Target{path}}
+	return Missing_Target{}
+}
+
+@(private = "file", require_results)
+link_uri_target :: proc(uri: string) -> Target {
+	if links.obsidian_open(uri) {
+		app_data := os.get_env("APPDATA", context.temp_allocator)
+		if path, ok := links.resolve_obsidian(uri, app_data); ok {return Vault_Note_Target{path}}
 		return Missing_Target{}
 	}
-	return Web_Target{target.uri}
+	if links.allowed(uri) {return Web_Target{uri}}
+	return nil
 }
 
 @(private, require_results)
@@ -167,11 +177,11 @@ link_selection_file :: proc(selection: term.Link_Target, cwd: string, buffer: []
 }
 
 @(private, require_results)
-link_selection_web :: proc(selection: term.Link_Target, buffer: []u8) -> (string, bool) {
+link_selection_uri :: proc(selection: term.Link_Target, buffer: []u8) -> (string, bool) {
 	text := selection.line[selection.start:selection.end]
 	readings := links.break_readings(text, buffer)
 	for reading in links.break_readings_next(&readings) {
-		if links.allowed(reading) {return reading, true}
+		if links.terminal_uri(reading) {return reading, true}
 	}
 	return "", false
 }

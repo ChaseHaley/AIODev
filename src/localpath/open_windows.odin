@@ -83,6 +83,20 @@ canonical_path :: proc(path: string) -> (string, bool) {
 	return converted, true
 }
 
+// An existing file within a local directory, using the same reparse and drive rules as file
+// links. Both paths are canonicalized so alternate Windows spellings cannot bypass containment.
+// The result borrows the temporary allocator.
+@(require_results)
+canonical_file_below :: proc(path, directory: string) -> (string, bool) {
+	root, root_ok := canonical_path(directory)
+	if !root_ok || !os.is_dir(root) {return "", false}
+	root = strings.trim_right(root, `\`)
+	file, file_ok := canonical_path(path)
+	if !file_ok || len(file) <= len(root) || file[len(root)] != '\\' ||
+	   !strings.equal_fold(file[:len(root)], root) || !os.is_file(file) {return "", false}
+	return file, true
+}
+
 @(private)
 Shell_Link :: struct #raw_union {
 	#subtype unknown: w.IUnknown,

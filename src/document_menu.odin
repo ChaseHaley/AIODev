@@ -1050,6 +1050,8 @@ document_menu_open_target :: proc(app: ^App, w: ^Window, content: layout.Content
 		spelling = t.uri
 	case File_Target:
 		spelling, folder = t.path, os.is_dir(t.path)
+	case Vault_Note_Target:
+		spelling = t.path
 	}
 	owned, err := strings.clone(spelling)
 	if err != nil {return}

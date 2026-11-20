@@ -573,7 +573,7 @@ scan_text :: proc(m: ^Link_Map, terminal: ghostty.Terminal, columns, rows: int) 
 				run_last = x
 				continue
 			}
-			usable := uri != "" && links.allowed(uri)
+			usable := uri != "" && links.terminal_uri(uri)
 			if uri != "" && !usable {
 				file_buffer: [links.TARGET_BYTES]u8 = ---
 				_, usable = links.resolve_file(uri, "", hosts, file_buffer[:])
@@ -788,7 +788,7 @@ scan_lines :: proc(m: ^Link_Map, terminal: ghostty.Terminal, columns, rows: int)
 				uri_start  = uri_start,
 				uri_length = url.end - url.start,
 			}
-			if !links.allowed(string(m.text[uri_start:])) {
+			if !links.terminal_uri(string(m.text[uri_start:])) {
 				if line_start < 0 {
 					line_start, line_length = len(m.text), len(m.line_text)
 					cuts_start = len(m.cuts)

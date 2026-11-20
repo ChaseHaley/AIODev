@@ -27,6 +27,7 @@ Target_Opener :: struct {
 Target :: union {
 	Web_Target,
 	File_Target,
+	Vault_Note_Target,
 	Missing_Target,
 }
 
@@ -37,6 +38,11 @@ Web_Target :: struct {
 
 // A local path; opening prepares it again, so a file that went away is reported then.
 File_Target :: struct {
+	path: string,
+}
+
+// An admitted local Markdown note; never dispatched to a system handler.
+Vault_Note_Target :: struct {
 	path: string,
 }
 
@@ -111,6 +117,8 @@ target_open :: proc(app: ^App, w: ^Window, target: Target) {
 		if !target_open_url(app, t.uri) {notify(app, .Error, "Could not open the link.")}
 	case File_Target:
 		target_open_file(app, w, t.path, "")
+	case Vault_Note_Target:
+		markdown_open_focused(app, w, t.path, "")
 	case Missing_Target:
 		target_unavailable(app)
 	}
