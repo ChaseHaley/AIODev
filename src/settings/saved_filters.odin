@@ -10,7 +10,7 @@ SAVED_FILTERS_KEY :: "turns.saved_filters"
 
 // The documented shape of a saved-filters value. The settings description and the diagnostic for a
 // malformed value both show it, so a grammar change updates the example with the parser.
-SAVED_FILTERS_EXAMPLE :: "| !^vendor/; Source | src/ !_test"
+SAVED_FILTERS_EXAMPLE :: "* | !^vendor/; Source | src/ !_test"
 
 SAVED_FILTERS_MAX :: 4096
 SAVED_FILTER_NAME_MAX :: 32
@@ -24,11 +24,13 @@ SAVED_FILTER_NAME_FORBIDDEN :: ";|\"\r\n\x00"
 @(private)
 SAVED_FILTER_PATTERN_FORBIDDEN :: ";\"\r\n\x00"
 
-// One `name | pattern` entry, as slices of the value; `| pattern` has no name and shows its pattern. The
-// pattern is the diff filter's grammar: space-separated regular expressions on a path, a term starting with
-// `!` hiding what it matches.
+// One `[* ]name | pattern` entry, as slices of the value; `| pattern` has no name and shows its pattern, and
+// a leading `*` marks a filter on by default, which new Agent changes panes start with. The pattern is the
+// diff filter's grammar: space-separated regular expressions on a path, a term starting with `!` hiding what
+// it matches.
 Saved_Filter :: struct {
 	name, pattern: string,
+	default:       bool,
 }
 
 // A cursor over the `;`-separated filters. A blank value has no filters; anywhere else an empty item is
@@ -68,19 +70,25 @@ saved_filters_step :: proc(c: ^Saved_Filters_Cursor) -> (filter: Saved_Filter, v
 
 @(private, require_results)
 saved_filter_parse :: proc(text: string) -> (filter: Saved_Filter, valid: bool) {
-	bar := strings.index_byte(text, '|')
-	if bar < 0 {return {name = strings.trim_space(text)}, false}
-	filter.name = strings.trim_space(text[:bar])
-	filter.pattern = strings.trim_space(text[bar + 1:])
+	entry := strings.trim_space(text)
+	if strings.has_prefix(entry, "*") {
+		filter.default = true
+		entry = entry[1:]
+	}
+	bar := strings.index_byte(entry, '|')
+	if bar < 0 {return {name = strings.trim_space(entry), default = filter.default}, false}
+	filter.name = strings.trim_space(entry[:bar])
+	filter.pattern = strings.trim_space(entry[bar + 1:])
 	valid = saved_filter_pattern_valid(filter.pattern)
 	if filter.name != "" && !saved_filter_name_valid(filter.name) {valid = false}
 	return
 }
 
-// A name is optional: up to SAVED_FILTER_NAME_MAX characters of one-line text without `;`, `|` or quotes.
+// A name is optional: up to SAVED_FILTER_NAME_MAX characters of one-line text without `;`, `|` or quotes, and
+// not starting with `*`, which marks a filter on by default.
 @(require_results)
 saved_filter_name_valid :: proc(name: string) -> bool {
-	if name == "" || len(name) > SAVED_FILTER_NAME_MAX {return false}
+	if name == "" || len(name) > SAVED_FILTER_NAME_MAX || name[0] == '*' {return false}
 	if strings.contains_any(name, SAVED_FILTER_NAME_FORBIDDEN) {return false}
 	for r in name {
 		if unicode.is_space(r) && r != ' ' {return false}
@@ -140,6 +148,7 @@ Saved_Filter_Problem :: enum u8 {
 // One edited filter; each field is the raw text typed for it.
 Saved_Filter_Draft :: struct {
 	name, pattern: string,
+	default:       bool,
 }
 
 // Encodes edited filters in the grammar saved_filters_next reads back, or reports the first field of the
@@ -159,6 +168,7 @@ saved_filters_text :: proc(
 	builder := strings.builder_make(allocator) or_return
 	for filter, index in filters {
 		if index > 0 {strings.write_string(&builder, "; ")}
+		if filter.default {strings.write_string(&builder, "* ")}
 		if name := strings.trim_space(filter.name); name != "" {
 			strings.write_string(&builder, name)
 			strings.write_byte(&builder, ' ')
@@ -211,7 +221,8 @@ saved_filters_valid :: proc(value: string) -> bool {
 saved_filters_rules :: proc(buffer: []u8) -> string {
 	return fmt.bprintf(
 		buffer,
-		"Each filter is name | pattern, and the name may be left out. A name is up to %d characters without " +
+		"Each filter is name | pattern, and the name may be left out; a leading * marks a filter new Agent " +
+		"changes panes start with. A name is up to %d characters without " +
 		"; | or quotes. A pattern is regular expressions on a path, a term starting with ! hiding what it " +
 		"matches, up to %d characters without ; or quotes. A filter's name, or its pattern when it has no " +
 		"name, is used once. A value looks like %s.",
@@ -296,4 +307,24 @@ filter_token_format :: proc(buffer: []u8, name: string, off: bool) -> string {
 	put(buffer, &n, name)
 	if quoted {put(buffer, &n, "\"")}
 	return string(buffer[:n])
+}
+
+// The text a new Agent changes pane starts with: every filter marked on by default as an on token, in order.
+@(require_results)
+saved_filters_default_text :: proc(
+	value: string,
+	allocator := context.allocator,
+) -> (
+	text: string,
+	err: runtime.Allocator_Error,
+) {
+	builder := strings.builder_make(allocator) or_return
+	buffer: [SAVED_FILTER_PATTERN_MAX + 8]u8
+	cursor := saved_filters_scan(value)
+	for filter in saved_filters_next(&cursor) {
+		if !filter.default {continue}
+		if strings.builder_len(builder) > 0 {strings.write_byte(&builder, ' ')}
+		strings.write_string(&builder, filter_token_format(buffer[:], saved_filter_label(filter), false))
+	}
+	return strings.to_string(builder), nil
 }

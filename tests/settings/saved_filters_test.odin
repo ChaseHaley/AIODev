@@ -55,12 +55,16 @@ saved_filters_are_found_by_label_or_pattern_ignoring_case_in_the_label :: proc(t
 
 @(test)
 saved_filters_text_round_trips_and_names_the_first_problem :: proc(t: ^testing.T) {
-	drafts := [?]settings.Saved_Filter_Draft{{" ", " !^vendor/ "}, {"Docs", "\\.md$"}, {"", "a|b c"}}
+	drafts := [?]settings.Saved_Filter_Draft{
+		{" ", " !^vendor/ ", true},
+		{"Docs", "\\.md$", false},
+		{"", "a|b c", true},
+	}
 	text, problem, err := settings.saved_filters_text(drafts[:], context.temp_allocator)
 	testing.expect_value(t, err, nil)
 	_, has_problem := problem.?
 	testing.expect(t, !has_problem)
-	testing.expect_value(t, text, "| !^vendor/; Docs | \\.md$; | a|b c")
+	testing.expect_value(t, text, "* | !^vendor/; Docs | \\.md$; * | a|b c")
 	cursor := settings.saved_filters_scan(text)
 	index := 0
 	for filter in settings.saved_filters_next(&cursor) {
@@ -69,22 +73,30 @@ saved_filters_text_round_trips_and_names_the_first_problem :: proc(t: ^testing.T
 		index += 1
 	}
 	testing.expect_value(t, index, 3)
+	cursor = settings.saved_filters_scan(text)
+	defaults := [3]bool{true, false, true}
+	index = 0
+	for filter in settings.saved_filters_next(&cursor) {
+		testing.expect_value(t, filter.default, defaults[index])
+		index += 1
+	}
 
 	Case :: struct {
 		drafts:  []settings.Saved_Filter_Draft,
 		problem: settings.Saved_Filter_Problem,
 	}
 	cases := [?]Case {
-		{{{"a;b", "x"}}, .Name},
-		{{{"a|b", "x"}}, .Name},
-		{{{"say \"hi\"", "x"}}, .Name},
-		{{{"Docs", "\\.md$"}, {"docs", "x"}}, .Duplicate},
-		{{{"", "x"}, {"X", "y"}}, .Duplicate},
-		{{{"x", "a"}, {"", "x"}}, .Duplicate},
-		{{{"", "x"}, {"", "x"}}, .Duplicate},
-		{{{"Docs", ""}}, .Pattern},
-		{{{"Docs", "a;b"}}, .Pattern},
-		{{{"", "a\"b"}}, .Pattern},
+		{{{"a;b", "x", false}}, .Name},
+		{{{"a|b", "x", false}}, .Name},
+		{{{"say \"hi\"", "x", false}}, .Name},
+		{{{"Docs", "\\.md$", false}, {"docs", "x", false}}, .Duplicate},
+		{{{"", "x", false}, {"X", "y", false}}, .Duplicate},
+		{{{"x", "a", false}, {"", "x", false}}, .Duplicate},
+		{{{"", "x", false}, {"", "x", false}}, .Duplicate},
+		{{{"Docs", "", false}}, .Pattern},
+		{{{"Docs", "a;b", false}}, .Pattern},
+		{{{"", "a\"b", false}}, .Pattern},
+		{{{"*x", "y", false}}, .Name},
 	}
 	for c in cases {
 		_, got, _ := settings.saved_filters_text(c.drafts, context.temp_allocator)
@@ -93,7 +105,7 @@ saved_filters_text_round_trips_and_names_the_first_problem :: proc(t: ^testing.T
 		testing.expect_value(t, value, c.problem)
 	}
 	long := strings.repeat("a", settings.SAVED_FILTER_PATTERN_MAX + 1, context.temp_allocator)
-	_, got, _ := settings.saved_filters_text([]settings.Saved_Filter_Draft{{"", long}}, context.temp_allocator)
+	_, got, _ := settings.saved_filters_text([]settings.Saved_Filter_Draft{{"", long, false}}, context.temp_allocator)
 	value, refused := got.?
 	testing.expect(t, refused)
 	testing.expect_value(t, value, settings.Saved_Filter_Problem.Pattern)
@@ -172,4 +184,18 @@ filter_token_format_quotes_only_labels_with_spaces_and_parses_back :: proc(t: ^t
 		testing.expect_value(t, word.off, c.off)
 		testing.expect_value(t, word.end, len(text))
 	}
+}
+
+@(test)
+new_panes_start_with_every_default_filter_as_an_on_token_in_order :: proc(t: ^testing.T) {
+	text, err := settings.saved_filters_default_text(
+		"* | !^vendor/; Odin | \\.odin$; * Source | src/ !_test; * Two words | a",
+		context.temp_allocator,
+	)
+	testing.expect_value(t, err, nil)
+	testing.expect_value(t, text, `@!^vendor/ @Source @"Two words"`)
+	none, _ := settings.saved_filters_default_text("Odin | b", context.temp_allocator)
+	testing.expect_value(t, none, "")
+	nothing, _ := settings.saved_filters_default_text("", context.temp_allocator)
+	testing.expect_value(t, nothing, "")
 }

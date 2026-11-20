@@ -575,7 +575,6 @@ Turns_Settings :: struct {
 	retention_days:        int,
 	diff_view:             Diff_View,
 	diff_long_lines:       Long_Lines,
-	diff_filter:           string,
 	diff_minimum_contrast: f64,
 	quick_labels:          string,
 	saved_filters:         string,
@@ -1542,17 +1541,6 @@ SCHEMA :: [?]Schema_Entry {
 			"sideways, wrap breaks the line onto more rows. Open panes follow at once.",
 	},
 	{
-		key = "turns.diff_filter",
-		title = "Default diff filter",
-		kind = .String,
-		offset = offset_of(Settings, turns) + offset_of(Turns_Settings, diff_filter),
-		default_value = "",
-		valid = {0, 1024},
-		description = "The filter a new Agent changes pane starts with: space-separated regular expressions on " +
-			"file paths; a term starting with ! hides matching files; @name uses a saved filter and ~@name " +
-			"keeps it off. Empty shows every file.",
-	},
-	{
 		key = "turns.diff_minimum_contrast",
 		title = "Minimum diff text contrast",
 		kind = .Float,
@@ -1584,7 +1572,8 @@ SCHEMA :: [?]Schema_Entry {
 		control = .Group,
 		validator = .Saved_Filters,
 		description = "Saved diff filters for Agent changes: " + SAVED_FILTERS_EXAMPLE + ". The filter field's @ " +
-			"button lists them; a filter without a name shows its pattern.",
+			"button lists them; a filter without a name shows its pattern, and one marked with a leading * starts " +
+			"new panes as a token.",
 	},
 	{
 		key = "shell.default_profile",
@@ -2678,6 +2667,11 @@ migrate_settings_text :: proc(
 	if toggles_changed {
 		delete(updated, allocator)
 		updated, changed = toggles, true
+	}
+	filters, filters_changed := migrate_diff_filter_text(updated, allocator) or_return
+	if filters_changed {
+		delete(updated, allocator)
+		updated, changed = filters, true
 	}
 	themes, themes_changed, theme_error := migrate_theme_text(updated, allocator)
 	if theme_error != nil {
