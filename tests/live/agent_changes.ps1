@@ -1002,52 +1002,56 @@ try {
         'changes.total_removed' = 1
     } 'Clear on the filter bar shows every file and every line'
 
-    # Saved filters (turns.saved_filters, `name | pattern`) are tokens in the filter field: an @ offers them, a
-    # token is one unit that clicks on and off, and Ctrl+S saves the field's terms as a new filter. Nothing
-    # but the filter text carries them, so a pane opened from this one has them too.
+    # Saved filters (turns.saved_filters, `name | pattern`, the name optional) are tokens in the filter field:
+    # the field's @ button or an @ typed in it lists them, a token is one unit that clicks on and off, and Ctrl+S
+    # saves the field's terms as a filter without a name. Nothing but the filter text carries them, so a pane
+    # opened from this one has them too.
     $ini = Get-Content -LiteralPath "$data/settings.ini" -Raw
     Add-Content -LiteralPath "$data/settings.ini" -Value "`nturns.saved_filters = No long | !long; Python | py$"
     Aio command settings.reload | Out-Null
     $s = State
     Click-Rect $s 'changes.filter_button_rect'
-    Await-State @{ 'changes.filter_open' = 'true' } 'the filter opens for saved filters' | Out-Null
-    Aio type '@' | Out-Null
+    $s = Await-State @{ 'changes.filter_open' = 'true' } 'the filter opens for saved filters'
+    Click-Rect $s 'changes.filter_at_rect'
     $s = Await-State @{
         'changes.filter_typing' = 'true'; 'changes.filter_pick.0.name' = 'No long'; 'changes.filter_pick.1.name' = 'Python'
-        'changes.hidden_files' = 0
-    } 'an @ offers the saved filters in the user''s order and filters nothing yet'
+        'changes.filter_pick.0.hides' = 1; 'changes.filter_pick.1.hides' = 3; 'changes.hidden_files' = 0
+    } 'the field''s @ button lists the saved filters in the user''s order, each with what it hides, and filters nothing yet'
     Aio capture --out "$data/agent-filter-pick.png" | Out-Null
-    Aio key Down Enter | Out-Null
+    Click-Rect $s 'changes.filter_pick.1.rect'
     $s = Await-State @{
         'changes.filter_typing' = 'false'; 'changes.filter_tokens' = 1; 'changes.filter_token.0.name' = 'Python'
         'changes.filter_token.0.on' = 'true'; 'changes.filter_token.0.state' = 'known'
         'changes.hidden_files' = 3; 'changes.files' = 1; 'changes.file.0.path' = 'live.py'
-    } 'picking Python completes the @ as a token that shows only live.py'
+    } 'clicking Python inserts it as a token that shows only live.py'
     Click-Rect $s 'changes.filter_token.0.rect'
     $s = Await-State @{
         'changes.filter_token.0.on' = 'false'; 'changes.hidden_files' = 0; 'changes.filter_active' = 'false'; 'changes.files' = 4
     } 'a click dims the token and shows every file'
     Aio capture --out "$data/agent-filter-token-off.png" | Out-Null
     Click-Rect $s 'changes.filter_token.0.rect'
-    Await-State @{ 'changes.filter_token.0.on' = 'true'; 'changes.hidden_files' = 3 } 'a second click turns it on again' | Out-Null
+    $s = Await-State @{ 'changes.filter_token.0.on' = 'true'; 'changes.hidden_files' = 3 } 'a second click turns it on again'
+    Click-Rect $s 'changes.filter_at_rect'
+    Await-State @{ 'changes.filter_typing' = 'true'; 'changes.filter_pick.0.name' = 'No long'; 'changes.filter_pick.1.name' = '' } 'the @ button lists what is left beside a token' | Out-Null
+    Aio capture --out "$data/agent-filter-list.png" | Out-Null
+    Aio key Esc | Out-Null
+    Await-State @{ 'changes.filter_typing' = 'false'; 'changes.filter_open' = 'true'; 'changes.filter_tokens' = 1 } 'Escape closes the list and keeps the popover and the token' | Out-Null
     Aio type '@' | Out-Null
-    Await-State @{ 'changes.filter_typing' = 'true'; 'changes.filter_pick.0.name' = 'No long' } 'the saved filter already in the field is not offered again' | Out-Null
+    Await-State @{ 'changes.filter_typing' = 'true'; 'changes.filter_pick.0.name' = 'No long'; 'changes.filter_pick.1.name' = '' } 'a typed @ lists what is left: the saved filter already in the field is not offered again' | Out-Null
     Aio key Enter | Out-Null
     Await-State @{ 'changes.filter_tokens' = 2; 'changes.filter_token.1.name' = 'No long'; 'changes.hidden_files' = 3 } 'two tokens both apply' | Out-Null
+    Aio capture --out "$data/agent-filter-two.png" | Out-Null
     Aio type 'live' | Out-Null
     Await-State @{ 'changes.filter_savable' = 'true'; 'changes.hidden_files' = 3 } 'terms typed beside the tokens can be saved' | Out-Null
+    Aio capture --out "$data/agent-filter-save.png" | Out-Null
     Aio key Ctrl+S | Out-Null
-    Await-State @{ 'changes.filter_naming' = 'true' } 'Ctrl+S asks for a name' | Out-Null
-    Aio type 'Live' | Out-Null
-    Aio capture --out "$data/agent-filter-name.png" | Out-Null
-    Aio key Enter | Out-Null
-    $s = Await-State @{ 'changes.filter_naming' = 'false'; 'changes.filter_tokens' = 3; 'changes.filter_token.2.name' = 'Live' } 'Enter saves the terms as a token'
-    Like $s['changes.saved_filters'] '*; Live | live' 'the filter is saved after the others'
+    $s = Await-State @{ 'changes.filter_tokens' = 3; 'changes.filter_token.2.name' = 'live'; 'changes.filter_savable' = 'false' } 'Ctrl+S saves the terms as a token with no name asked'
+    Like $s['changes.saved_filters'] '*; | live' 'the filter is saved after the others, without a name'
     Aio capture --out "$data/agent-filter-tokens.png" | Out-Null
     Aio key Esc | Out-Null
     Await-State @{ 'changes.filter_open' = 'false' } 'Esc closes the filter and keeps the tokens' | Out-Null
     Aio command pane.agent_changes | Out-Null
-    Await-State @{ 'changes.count' = 3; 'changes.filter_tokens' = 3; 'changes.filter_token.0.name' = 'Python'; 'changes.filter_token.2.name' = 'Live' } 'a pane opened from this one has the tokens' | Out-Null
+    Await-State @{ 'changes.count' = 3; 'changes.filter_tokens' = 3; 'changes.filter_token.0.name' = 'Python'; 'changes.filter_token.2.name' = 'live' } 'a pane opened from this one has the tokens' | Out-Null
     Aio capture --out "$data/agent-filter-copied.png" | Out-Null
     Close-Changes 2
     $s = State
@@ -1762,7 +1766,7 @@ try {
     Write-Output 'PASS Delete removes every recorded copy'
 
     # Saved filters have their own table on the Settings page.
-    Add-Content -LiteralPath "$data/settings.ini" -Value "`nturns.saved_filters = No long | !long; Python | py$; Live | live"
+    Add-Content -LiteralPath "$data/settings.ini" -Value "`nturns.saved_filters = No long | !long; Python | py$; | live"
     Aio command settings.reload | Out-Null
     Aio command settings.open | Out-Null
     Start-Sleep -Seconds 1
