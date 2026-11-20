@@ -1576,7 +1576,7 @@ web_key :: proc(app: ^App, w: ^Window, e: input.Key_Event) {
 					web_page_refocus(app, w)
 				}
 			} else {
-				notify(app, .Warning, "Enter an http or https address.")
+				notify(app, .Warning, "Enter an HTTP, HTTPS, or local file:/// address.")
 			}
 			w.dirty = true
 			return

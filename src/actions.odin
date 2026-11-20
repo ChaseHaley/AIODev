@@ -949,7 +949,11 @@ COMMAND_HELP :: #partial [Action]Command_Help {
 		{
 			{
 				.Text,
-				{description = "the http or https address to open", default = "a blank pane", example = "example.com"},
+				{
+					description = "the HTTP, HTTPS, or local file:/// address to open",
+					default = "a blank pane",
+					example = "example.com",
+				},
 			},
 			{.Direction, {default = "right, or a float when pane.web_floating is on"}},
 		},

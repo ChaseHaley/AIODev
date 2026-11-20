@@ -249,14 +249,13 @@ trim_prose :: proc(text: string, start, end: int) -> int {
 	return trim
 }
 
-// Normalize_web_input turns text typed or scripted as a web address into one allowed() accepts: an http or
-// https URL passes as is, a bare host gets https (http for localhost, 127.0.0.1 and [::1]), and any other
-// scheme is refused. The result is allocated with `allocator`.
+// Normalize_web_input accepts HTTP(S) and local Windows file URLs for web panes only. A bare host
+// gets HTTPS (HTTP for localhost, 127.0.0.1 and [::1]). The result is allocated with `allocator`.
 @(require_results)
 normalize_web_input :: proc(raw: string, allocator := context.temp_allocator) -> (string, bool) {
 	trimmed := strings.trim_space(raw)
 	if trimmed == "" {return "", false}
-	if allowed(trimmed) {
+	if web_file_url(trimmed) || allowed(trimmed) {
 		cloned, err := strings.clone(trimmed, allocator)
 		return cloned, err == nil
 	}
@@ -271,6 +270,19 @@ normalize_web_input :: proc(raw: string, allocator := context.temp_allocator) ->
 	if err != nil {return "", false}
 	if !allowed(candidate) {delete(candidate, allocator); return "", false}
 	return candidate, true
+}
+
+// Require a drive path, not a file authority (which could name a network share).
+@(private, require_results)
+web_file_url :: proc(uri: string) -> bool {
+	if len(uri) < 11 || !scheme_is(uri[:8], "file:///") {return false}
+	drive := uri[8]
+	if !(drive >= 'A' && drive <= 'Z' || drive >= 'a' && drive <= 'z') {return false}
+	if uri[9:11] != ":/" {return false}
+	for c in uri[11:] {
+		if c < 0x20 || c == 0x7f || c == '\\' {return false}
+	}
+	return true
 }
 
 // The host in a bare address with at most a numeric port. A scheme without slashes (such as

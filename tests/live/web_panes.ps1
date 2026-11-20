@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param([string] $Name = 'web-panes')
-# WORK-315: web panes through the CLI. aio pane.open_web opens normalised addresses beside the terminal,
-# refuses other schemes, a closed web pane comes back with its address, and the panes survive a restart.
+# Web panes through the CLI and URL bar: normalised web addresses, a local HTML file, and refused schemes.
+# Closing a pane preserves its address on reopen; open panes survive a restart.
 # Runs headless, where a web pane is placed, listed and saved but shows a message instead of a page.
 $ErrorActionPreference = 'Stop'
 $repo = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
@@ -50,6 +50,9 @@ function Web-Urls {
 
 Remove-Item -LiteralPath $work -Recurse -Force -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Force $work | Out-Null
+$localFile = Join-Path $work 'local preview.html'
+Set-Content -LiteralPath $localFile -Encoding utf8 '<!doctype html><title>Local preview</title><h1 id="preview">Preview</h1>'
+$localUrl = [Uri]::new($localFile).AbsoluteUri
 @"
 control.enabled = true
 shell.command = pwsh.exe -NoLogo -NoProfile -NoExit
@@ -82,32 +85,35 @@ try {
     Check ($state["$first.crashed"] -eq 'none') "web crash state: $($state["$first.crashed"])"
     Check ($state["$first.find_count"] -eq '0') "web find count: $($state["$first.find_count"])"
 
-    # Other schemes are a usage error and open nothing.
-    $refused = Invoke-Aio @('pane.open_web', 'file:///x')
-    Check ($refused.Code -ne 0) 'file:///x was accepted'
-    Check ($refused.Text -match 'http') "the refusal does not name http: $($refused.Text)"
-    Check ((Read-State)['web.count'] -eq '2') 'a refused address opened a pane'
+    # Explicit local HTML works through both the CLI and the focused pane's URL bar.
+    Open-Web @('--focus', $localUrl)
+    Wait-For 'web.url' $localUrl
+    Invoke-Ctl key Ctrl+L | Out-Null
+    Invoke-Ctl type "$localUrl#preview" | Out-Null
+    Invoke-Ctl key Enter | Out-Null
+    Wait-For 'web.url' "$localUrl#preview"
+    $urls = Web-Urls
+    Check ($urls.Count -eq 3) "expected three web panes, saw $($urls -join ', ')"
+
+    # Disallowed addresses must not open a pane.
+    $refused = Invoke-Aio @('pane.open_web', 'file://server/share/preview.html')
+    Check ($refused.Code -ne 0) 'a file URL with an authority was accepted'
+    Check ((Read-State)['web.count'] -eq '3') 'a refused address opened a pane'
 
     # Close the focused web pane, then bring it back.
-    $focus = $null
-    for ($i = 0; $i -lt 6 -and -not $focus; $i++) {
-        $s = Read-State
-        if ($s['web.active'] -eq 'true') { $focus = $s['web.url']; break }
-        Invoke-Ctl command pane.focus_next | Out-Null
-    }
-    Check ($null -ne $focus) 'no web pane took focus'
+    $focus = "$localUrl#preview"
     Invoke-Ctl command pane.close | Out-Null
-    Wait-For 'web.count' '1'
+    Wait-For 'web.count' '2'
     Check (-not ((Web-Urls) -contains $focus)) "$focus is still open"
     Invoke-Ctl command pane.reopen_closed | Out-Null
-    Wait-For 'web.count' '2'
+    Wait-For 'web.count' '3'
     Check (((Web-Urls) -join ',') -eq ($urls -join ',')) "reopened urls: $((Web-Urls) -join ', ')"
 
     # The panes survive a restart with their addresses.
     Invoke-Ctl command pane.focus_next | Out-Null
     Invoke-Ctl stop | Out-Null
     Invoke-Ctl launch --settings $settings --keep-layout | Out-Null
-    Wait-For 'web.count' '2'
+    Wait-For 'web.count' '3'
     Check (((Web-Urls) -join ',') -eq ($urls -join ',')) "restored urls: $((Web-Urls) -join ', ')"
 
     # --float is per open, and creates its own group even when the target already floats.
