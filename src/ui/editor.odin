@@ -79,6 +79,8 @@ Editor_Row_Flag :: enum {
 // own `opener`, the ID of the program they belong to.
 Editor_Row :: struct {
 	key, title, description, value, default_value: string,
+	// Search terms that do not change the displayed title or description.
+	keywords:                                      string,
 	// A color row: the key other colors name it by, the key of the color it follows ("" when it holds its
 	// own color) and the same for its base theme. `value` is the color it shows either way.
 	ref, link, default_link:                       string,
@@ -619,11 +621,12 @@ EDITOR_SECTION_LIMIT :: 8
 
 // Every string a row owns, in one place for editor_add's copies and editor_row_destroy's frees.
 @(private)
-row_owned_strings :: proc(row: ^Editor_Row) -> [13]^string {
+row_owned_strings :: proc(row: ^Editor_Row) -> [14]^string {
 	return {
 		&row.key,
 		&row.title,
 		&row.description,
+		&row.keywords,
 		&row.value,
 		&row.default_value,
 		&row.profile,
@@ -1403,7 +1406,7 @@ editor_reveal :: proc(p: ^Editor, target: Reveal_Target) -> bool {
 }
 
 // How a search answers a row, best last; the page lists only the rows of the best tier any row reaches.
-// A query word matches the row's own text (key, title, group, description, detail, badge, shortcut)
+// A query word matches the row's own text (key, title, group, description, keywords, detail, badge, shortcut)
 // as written or, for plurals such as "panes", without its final s; a recorded or typed chord its
 // shortcut holds counts the same. Then a shortcut label's letters; then words the row's text lacks
 // found in the labels of its schema choices, up to word starts, so "comfy" finds Activity panel view;
@@ -1478,7 +1481,7 @@ choice_words_match :: proc(
 // The row's own text a search reads. A query in the shortcut grammar leaves out shortcut values, which
 // it compares by the grammar only.
 @(private)
-row_search_fields :: proc(p: ^Editor, row: ^Editor_Row, chord: bool) -> [7]string {
+row_search_fields :: proc(p: ^Editor, row: ^Editor_Row, chord: bool) -> [8]string {
 	return {
 		row.key,
 		row.title,
@@ -1487,6 +1490,7 @@ row_search_fields :: proc(p: ^Editor, row: ^Editor_Row, chord: bool) -> [7]strin
 		row.detail,
 		row.badge,
 		row.kind == .Shortcut && !chord ? row.value : "",
+		row.keywords,
 	}
 }
 

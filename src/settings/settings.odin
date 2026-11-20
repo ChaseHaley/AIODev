@@ -763,6 +763,7 @@ Schema_Entry :: struct {
 	// The file comment; Settings shows `page_description` instead when it is set.
 	description:       string,
 	page_description:  string,
+	keywords:          string,
 	control:           Setting_Control,
 	validator:         Setting_Validator,
 	live_choices:      Live_Choices,
@@ -903,6 +904,7 @@ SCHEMA :: [?]Schema_Entry {
 	{
 		key = "pane.web_links",
 		title = "Open web links in a web pane",
+		keywords = "browser",
 		kind = .Bool,
 		offset = offset_of(Settings, pane) + offset_of(Pane_Settings, web_links),
 		default_value = "true",
@@ -912,6 +914,7 @@ SCHEMA :: [?]Schema_Entry {
 	{
 		key = "pane.web_navigator",
 		title = "Show web pane URL bar",
+		keywords = "browser",
 		kind = .Bool,
 		offset = offset_of(Settings, pane) + offset_of(Pane_Settings, web_navigator),
 		default_value = "true",
@@ -920,6 +923,7 @@ SCHEMA :: [?]Schema_Entry {
 	{
 		key = "pane.web_floating",
 		title = "Open web panes floating",
+		keywords = "browser",
 		kind = .Bool,
 		offset = offset_of(Settings, pane) + offset_of(Pane_Settings, web_floating),
 		default_value = "false",
