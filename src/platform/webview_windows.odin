@@ -61,6 +61,7 @@ when !AIO_HEADLESS {
 			bg_argb: u32,
 		) -> rawptr ---
 		aio_webview_destroy :: proc(view: rawptr) ---
+		aio_webview_detach_host :: proc(view: rawptr, fallback_hwnd: w.HWND) ---
 		aio_webview_set_placement :: proc(
 			view, host: rawptr,
 			visible, floating: i32,
@@ -186,6 +187,14 @@ when !AIO_HEADLESS {
 
 	webview_destroy :: proc(view: Webview) {
 		if view != nil {aio_webview_destroy(rawptr(view))}
+	}
+
+	// Parks `view` on the app's persistent host HWND before its current window is destroyed,
+	// keeping the WebView2 controller and page state alive across linked-window returns.
+	webview_detach_host :: proc(p: ^Platform, view: Webview) {
+		if view == nil {return}
+		fallback := p != nil ? p.host.hwnd : nil
+		aio_webview_detach_host(rawptr(view), fallback)
 	}
 
 	webview_set_placement :: proc(

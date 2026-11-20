@@ -59,6 +59,7 @@ when AIO_HEADLESS {
 	}
 
 	webview_destroy :: proc(view: Webview) {}
+	webview_detach_host :: proc(p: ^Platform, view: Webview) {}
 
 	webview_set_placement :: proc(
 		view: Webview,

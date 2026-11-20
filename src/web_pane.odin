@@ -112,15 +112,13 @@ web_app_destroy :: proc(state: ^Web_App) {
 }
 
 web_window_destroy :: proc(app: ^App, w: ^Window) {
-	if w.web.host == nil {return}
 	for pane in app.web_panes {
-		if pane.host_window == w.id && pane.view != nil {
-			platform.webview_set_placement(
-				pane.view, nil, false, false, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1,
-			)
+		if pane.host_window == w.id {
+			if pane.view != nil {platform.webview_detach_host(&app.platform, pane.view)}
 			pane.host_window = 0
 		}
 	}
+	if w.web.host == nil {return}
 	platform.webview_host_destroy(w.web.host)
 	w.web.host = nil
 	w.web.host_failed = false

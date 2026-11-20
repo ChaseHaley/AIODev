@@ -241,13 +241,20 @@ static void detach_visual(Aio_Webview *v) {
 static void ensure_visual_for_host(Aio_Webview *v, Aio_Webview_Host *host) {
     if (!v || !host || !v->comp) return;
     if (v->visual_host != host) {
+        auto *old_host = v->visual_host;
         detach_visual(v);
         v->comp->put_RootVisualTarget(nullptr);
         v->visual.reset();
         v->clip.reset();
+        if (old_host && old_host->dcomp) old_host->dcomp->Commit();
         v->visual_host = host;
+        // Force bounds and scale reapplication so Chromium commits a fresh frame to the new visual.
+        v->applied_bounds_w = -1;
+        v->applied_bounds_h = -1;
+        v->applied_scale = 0.0f;
         if (v->controller) {
             v->controller->put_ParentWindow(host->hwnd);
+            v->controller->NotifyParentWindowPositionChanged();
         }
         host->dcomp->CreateVisual(v->visual.put());
         host->dcomp->CreateRectangleClip(v->clip.put());
@@ -804,6 +811,29 @@ void aio_webview_destroy(void *raw) noexcept {
     v->visual.reset();
     if (host && host->dcomp) host->dcomp->Commit();
     delete v;
+}
+
+void aio_webview_detach_host(void *raw, HWND fallback_hwnd) noexcept {
+    if (!raw) return;
+    auto *v = static_cast<Aio_Webview *>(raw);
+    auto *old_host = v->visual_host;
+    detach_visual(v);
+    if (v->comp) v->comp->put_RootVisualTarget(nullptr);
+    v->clip.reset();
+    v->visual.reset();
+    v->visual_host = nullptr;
+    v->host = nullptr;
+    v->visible = false;
+    v->applied_bounds_w = -1;
+    v->applied_bounds_h = -1;
+    v->applied_scale = 0.0f;
+    if (v->controller) {
+        v->controller->put_IsVisible(FALSE);
+        if (fallback_hwnd) {
+            v->controller->put_ParentWindow(fallback_hwnd);
+        }
+    }
+    if (old_host && old_host->dcomp) old_host->dcomp->Commit();
 }
 
 void aio_webview_set_placement(void *raw, void *raw_host, int visible, int floating, int vis_x, int vis_y,
