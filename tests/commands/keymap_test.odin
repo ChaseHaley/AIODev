@@ -286,3 +286,65 @@ keymap_script_targets_bind_unbind_by_ref_and_format_their_sequence :: proc(t: ^t
 		testing.expect_value(t, run.binding.target.(commands.Script_Target).ref, 9)
 	}
 }
+
+@(private = "file")
+map_claims :: proc(keymap: ^commands.Keymap, state: ^commands.Key_State, registry: ^commands.Registry,
+                   text: string) -> bool {
+	chord, ok := commands.parse_shortcut(text)
+	assert(ok)
+	return commands.keymap_claims(keymap, state, registry, chord.key, chord.modifiers, 0)
+}
+
+// An embedded page asks before a key reaches the app; the answer must not move the key state.
+@(test)
+keymap_claims_probes_without_changing_the_key_state :: proc(t: ^testing.T) {
+	keymap: commands.Keymap
+	commands.keymap_init(&keymap)
+	defer commands.keymap_destroy(&keymap)
+	state: commands.Key_State
+	defer commands.key_state_destroy(&state)
+	registry := commands.create()
+	defer commands.destroy(&registry)
+	map_binding(t, &keymap, "Ctrl+B>C", 1)
+	map_binding(t, &keymap, "Ctrl+K", 2)
+	for mode in ([?]commands.Mode{{"resize", false}, {"strict", true}}) {
+		testing.expect_value(t, commands.mode_declare(&keymap, mode), commands.Error.None)
+	}
+	map_binding(t, &keymap, "resize/Left", 3)
+
+	// The normal layer claims the first chord of a sequence or a binding, and passes anything else.
+	testing.expect(t, map_claims(&keymap, &state, &registry, "Ctrl+B"))
+	testing.expect(t, map_claims(&keymap, &state, &registry, "Ctrl+K"))
+	testing.expect(t, !map_claims(&keymap, &state, &registry, "Ctrl+M"))
+	testing.expect(t, !map_claims(&keymap, &state, &registry, "A"))
+	// A modifier alone is never a claim.
+	testing.expect(t, !commands.keymap_claims(&keymap, &state, &registry, .Control_Left, {.Control}, 0))
+	testing.expect_value(t, state.count, 0)
+	testing.expect_value(t, len(state.modes), 0)
+
+	// A sequence in progress takes every key, bound or not.
+	_ = map_feed(&keymap, &state, &registry, "Ctrl+B")
+	testing.expect_value(t, state.count, 1)
+	testing.expect(t, map_claims(&keymap, &state, &registry, "X"))
+	testing.expect(t, map_claims(&keymap, &state, &registry, "C"))
+	testing.expect_value(t, state.count, 1)
+	map_expect_run(t, map_feed(&keymap, &state, &registry, "C"), 1)
+	testing.expect_value(t, state.count, 0)
+
+	// A mode that is not exclusive claims its own bindings and falls through for the rest.
+	testing.expect(t, commands.mode_enter(&keymap, &state, "resize"))
+	testing.expect(t, map_claims(&keymap, &state, &registry, "Left"))
+	testing.expect(t, map_claims(&keymap, &state, &registry, "Ctrl+K"))
+	testing.expect(t, !map_claims(&keymap, &state, &registry, "A"))
+	testing.expect(t, map_claims(&keymap, &state, &registry, "Esc"), "Escape leaves a mode")
+	testing.expect_value(t, len(state.modes), 1)
+	testing.expect_value(t, state.count, 0)
+
+	// An exclusive mode takes every key.
+	testing.expect(t, commands.mode_enter(&keymap, &state, "strict"))
+	testing.expect(t, map_claims(&keymap, &state, &registry, "A"))
+	testing.expect(t, map_claims(&keymap, &state, &registry, "Ctrl+M"))
+	testing.expect_value(t, len(state.modes), 2)
+	testing.expect_value(t, state.modes[1].name, "strict")
+	testing.expect_value(t, state.count, 0)
+}
