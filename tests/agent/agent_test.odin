@@ -12,6 +12,11 @@ harnesses_are_named_by_canonical_program_name :: proc(t: ^testing.T) {
 	testing.expect_value(t, agent.harness_named("claude"), agent.Harness.Claude)
 	testing.expect_value(t, agent.harness_named("Codex"), agent.Harness.Codex)
 	testing.expect_value(t, agent.harness_named("omp"), agent.Harness.Omp)
+	testing.expect_value(t, agent.harness_named("agy"), agent.Harness.Agy)
+	// Antigravity IDE and its launcher are not the agent CLI.
+	for name in ([?]string{"antigravity", "antigravity ide", "agy-ide"}) {
+		testing.expectf(t, agent.harness_named(name) == .None, "%q", name)
+	}
 	testing.expect_value(t, agent.harness_named("pwsh"), agent.Harness.None)
 	testing.expect_value(t, agent.harness_named(""), agent.Harness.None)
 }
@@ -56,6 +61,14 @@ launches_keep_their_options_and_drop_prompts_and_session_choices :: proc(t: ^tes
 		{.Omp, {"--model", "opus", "--thinking", "high", "explain this"}, true,
 			{"--model", "opus", "--thinking", "high"}},
 		{.Omp, {"--resume", "01a1bd8b"}, true, nil},
+		{.Agy, {"--model", "gemini-4-neon", "--mode", "auto", "fix the tests"}, true,
+			{"--model", "gemini-4-neon", "--mode", "auto"}},
+		{.Agy, {"-c", "--sandbox"}, true, {"--sandbox"}},
+		{.Agy, {"--conversation", "ec33ebf9-0cba-4100-8142-c61503f6c587", "--add-dir", `C:\work`}, true,
+			{"--add-dir", `C:\work`}},
+		{.Agy, {"-i", "run the suite", "--effort", "high"}, true, {"--effort", "high"}},
+		{.Agy, {"--dangerously-skip-permissions", "--agent", "reviewer"}, true,
+			{"--dangerously-skip-permissions", "--agent", "reviewer"}},
 	}
 	for c in cases {
 		launch := agent.launch_parse(c.harness, c.arguments, context.temp_allocator)
@@ -83,6 +96,10 @@ launches_remember_the_session_they_named :: proc(t: ^testing.T) {
 		{.Codex, {"resume", "--last"}, ""},
 		{.Omp, {"--resume", "01a1bd8b"}, "01a1bd8b"},
 		{.Omp, {"-c"}, ""},
+		{.Agy, {"--conversation", "ec33ebf9-0cba-4100-8142-c61503f6c587"}, "ec33ebf9-0cba-4100-8142-c61503f6c587"},
+		{.Agy, {"--conversation=ec33", "--model", "x"}, "ec33"},
+		{.Agy, {"-c"}, ""},
+		{.Agy, {"--resume", "ec33"}, ""},
 	}
 	for c in cases {
 		launch := agent.launch_parse(c.harness, c.arguments, context.temp_allocator)
@@ -107,6 +124,15 @@ launches_without_an_interactive_session_are_not_resumed :: proc(t: ^testing.T) {
 		{.Omp, {"--no-session"}},
 		{.Omp, {"config", "list"}},
 		{.Omp, {"--mode", "rpc"}},
+		{.Agy, {"-p", "summarize"}},
+		{.Agy, {"--model", "x", "--print", "y"}},
+		{.Agy, {"--remote-agent"}},
+		{.Agy, {"--version"}},
+		{.Agy, {"plugin", "list"}},
+		{.Agy, {"update"}},
+		{.Agy, {"acp", "--login"}},
+		// The backend Antigravity IDE and the app start, as observed in the field.
+		{.Agy, {"--hub", "--hub-port=56148", "--app_data_dir=antigravity", "--csrf_token=6a1e"}},
 		{.None, {}},
 	}
 	for c in cases {
@@ -130,6 +156,8 @@ unclassified_or_unsafe_arguments_fall_back_to_the_session_alone :: proc(t: ^test
 		{.Claude, {"--add-dir", `C:\trailing\`}},
 		{.Codex, {"--full-auto"}},
 		{.Codex, {"-c", `model="o3"`}},
+		{.Agy, {"--model", "x", "--brand-new-option", "value"}},
+		{.Agy, {"--add-dir", `C:\trailing\`}},
 		{.Omp, {"--verbose=yes"}},
 		{.Claude, {"--add-dir", "C:\\Users\\Zoë"}},
 	}
@@ -179,6 +207,22 @@ resume_lines_follow_each_harness :: proc(t: ^testing.T) {
 		resumable = true,
 	}
 	testing.expect_value(t, agent.resume_line(omp, "01a1", context.temp_allocator), "omp --resume 01a1")
+	agy := agent.Launch {
+		harness   = .Agy,
+		resumable = true,
+		flags     = {"--model", "gemini-4-neon", "--add-dir", `C:\My Work`},
+	}
+	conversation := "ec33ebf9-0cba-4100-8142-c61503f6c587"
+	testing.expect_value(
+		t,
+		agent.resume_line(agy, conversation, context.temp_allocator),
+		`agy --model gemini-4-neon --add-dir "C:\My Work" --conversation ec33ebf9-0cba-4100-8142-c61503f6c587`,
+	)
+	testing.expect_value(
+		t,
+		agent.resume_line({harness = .Agy, resumable = true}, conversation, context.temp_allocator),
+		"agy --conversation ec33ebf9-0cba-4100-8142-c61503f6c587",
+	)
 	// A line that would pass the saved-line limit keeps only the session.
 	long := agent.Launch {
 		harness   = .Claude,
@@ -197,6 +241,8 @@ saved_resume_lines_must_be_ones_resume_line_writes :: proc(t: ^testing.T) {
 		"codex resume -m gpt-5 01a1",
 		"codex resume 01a1",
 		"omp --resume 01a1",
+		"agy --conversation ec33ebf9-0cba-4100-8142-c61503f6c587",
+		"agy --model gemini-4-neon --conversation ec33",
 	}) {
 		testing.expectf(t, agent.resume_line_valid(line), "%q should be accepted", line)
 	}
@@ -211,6 +257,11 @@ saved_resume_lines_must_be_ones_resume_line_writes :: proc(t: ^testing.T) {
 		`claude --model "unterminated --resume 81b3`,
 		"claude --append-system-prompt $env:x --resume 81b3",
 		"omp --resume 01a1 --model x",
+		"agy --resume ec33",
+		"agy --conversation",
+		"agy --conversation ec33; del x",
+		"claude --conversation ec33",
+		"agy-ide --conversation ec33",
 	}) {
 		testing.expectf(t, !agent.resume_line_valid(line), "%q should be refused", line)
 	}
@@ -267,6 +318,10 @@ nested_agents_are_told_from_launcher_chains :: proc(t: ^testing.T) {
 	testing.expect(t, agent.ancestry_nested(other))
 	testing.expect(t, !agent.ancestry_nested([]agent.Ancestor{{1, "codexx"}, {2, "pwsh"}, {3, "codexx"}}))
 	testing.expect(t, !agent.ancestry_nested(nil))
+	// Antigravity's agy counts as an agent, its IDE launcher agy-ide does not.
+	agy := []agent.Ancestor{{1, "pwsh"}, {2, "agy"}, {3, "pwsh"}, {4, "claude"}, {5, "pwsh"}}
+	testing.expect(t, agent.ancestry_nested(agy))
+	testing.expect(t, !agent.ancestry_nested([]agent.Ancestor{{1, "pwsh"}, {2, "agy-ide"}, {3, "claude"}, {4, "pwsh"}}))
 }
 
 @(test)

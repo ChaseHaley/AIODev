@@ -169,6 +169,7 @@ Action :: enum u32 {
 	Install_Agent_Hooks,
 	Install_Turn_Hooks,
 	Update,
+	Restart,
 	Pane_Send_Keys,
 	Pane_Process,
 	App_Notify,
@@ -681,6 +682,7 @@ ACTIONS :: [Action]Command_Descriptor {
 	.Install_Agent_Hooks = {"app.install_agent_hooks", "Install agent session hooks", nil, .Local, {}},
 	.Install_Turn_Hooks = {"app.install_turn_hooks", "Install agent turn hooks", nil, .Local, {}},
 	.Update = {"app.update", "Update AIODev", nil, .Local, {}},
+	.Restart = {"app.restart", "Restart AIODev", nil, .Local, {control = .Unnamed}},
 	.Pane_Send_Keys = {
 		"pane.send_keys", "Send keys to pane", nil, .Host,
 		{accepted = {.Keys}, required = {.Keys}, hidden = true, control = .Pane},
@@ -1550,6 +1552,8 @@ command_execute :: proc(app: ^App, ctx: Command_Context, invocation: commands.In
 		hide_to_tray(app, w)
 	case .Quit:
 		app_quit(app)
+	case .Restart:
+		app_restart(app)
 	case .Profile_1, .Profile_2, .Profile_3, .Profile_4, .Profile_5, .Profile_6, .Profile_7, .Profile_8,
 	     .Profile_9:
 		tab_new_profile(app, w, param.index)

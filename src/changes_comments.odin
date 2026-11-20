@@ -81,6 +81,8 @@ Changes_Comments :: struct {
 	// which the tag's × turns into a plain comment.
 	buffer:    markdown.Edit_Buffer,
 	area:      ui.Text_Area,
+	// The editor's presses, which count double and triple clicks.
+	clicks:    Click_Run,
 	draft:     ui.Changes_Note_Kind,
 	// -1 none; an index into `items` edits that note; len(items) writes a new one at the selection.
 	editing:   int,
@@ -673,15 +675,20 @@ changes_comments_copy :: proc(app: ^App, pane: ^Changes_Pane) {
 	}
 }
 
-// Places the editor's caret where the pointer pressed, or extends its selection there with Shift.
+// Places the editor's caret where the pointer pressed, or extends its selection there with Shift; the
+// second and third press of a run of clicks select the word and the line.
 @(private = "file")
-changes_editor_point :: proc(app: ^App, w: ^Window, pane: ^Changes_Pane, x, y: f32, extend: bool) {
+changes_editor_point :: proc(app: ^App, w: ^Window, pane: ^Changes_Pane, e: input.Mouse_Button_Event) {
 	shown, found := changes_pane_rect(w, pane.id)
 	if !found {return}
 	g := changes_geometry_of(app, w, pane, shown)
 	box, visible := ui.changes_editor_box(g, &pane.model.view, &pane.state, &w.ui_text)
 	if !visible {return}
-	_ = ui.text_area_pointer(box, x, y, true, extend)
+	c := &pane.comments
+	x, y, extend := f32(e.x), f32(e.y), .Shift in e.modifiers
+	count := extend ? 1 : click_run_count(c.clicks, pane.id, x, y, e.time_ns)
+	_ = ui.text_area_pointer(box, x, y, true, extend, count)
+	c.clicks = extend ? Click_Run{} : Click_Run{pane.id, x, y, e.time_ns, count, 0}
 }
 
 // Starts picking whole lines at flat line `line` of `file`, pressed in `half` of a side-by-side row; Shift
@@ -996,7 +1003,7 @@ changes_comments_press :: proc(
 	case .Comment_Remove:
 		changes_comment_delete(pane, hit.index)
 	case .Comment_Editor:
-		changes_editor_point(app, w, pane, f32(e.x), f32(e.y), extend)
+		changes_editor_point(app, w, pane, e)
 	case .Editor_Untag:
 		c.draft = .Comment
 	case .Editor_Bold, .Editor_Code, .Editor_Block, .Editor_Suggest:
@@ -1122,12 +1129,16 @@ changes_editor_edit :: proc(app: ^App, w: ^Window, pane: ^Changes_Pane, key: Con
 	case .Ignored:
 		return key.logical.modifiers & {.Control, .Alt, .Super} == {}
 	case .Handled, .Moved, .Edited:
-	case .Vertical:
+	case .Vertical, .Row_Edge, .Scroll:
 		shown, found := changes_pane_rect(w, pane.id)
 		if !found {break}
 		g := changes_geometry_of(app, w, pane, shown)
-		if box, visible := ui.changes_editor_box(g, &pane.model.view, &pane.state, &w.ui_text); visible {
-			ui.text_area_vertical(box, result.lines, result.pages, result.extend)
+		box, visible := ui.changes_editor_box(g, &pane.model.view, &pane.state, &w.ui_text)
+		if !visible {break}
+		#partial switch result.kind {
+		case .Vertical: ui.text_area_vertical(box, result.lines, result.pages, result.extend)
+		case .Row_Edge: ui.text_area_row_edge(box, result.end, result.extend)
+		case .Scroll: _ = ui.text_area_scroll_lines(box, result.lines)
 		}
 	}
 	return true

@@ -59,6 +59,9 @@ Live_Builder :: struct {
 	fence:    Fence,
 	// The block of `parsed` the previous line's text belonged to, or -1.
 	previous: int,
+	// Where a paragraph's lines, which one block took together, end: the offset of the newline after the
+	// last, or the file's end. Zero when the line was its own block.
+	group_end: int,
 }
 
 // Builds `doc` from `source`, showing the lines the range from..to touches as source. False only when
@@ -132,7 +135,12 @@ live_build_into :: proc(l: ^Live, source: string, from, to: int, doc: ^Document)
 			continue
 		}
 		if !live_line(&b, at, end) {return false}
-		if newline < 0 {break}
+		if b.group_end > 0 {
+			end, b.group_end = b.group_end, 0
+			if end >= len(source) {break}
+		} else if newline < 0 {
+			break
+		}
 		at = end + 1
 	}
 	return true
@@ -205,7 +213,12 @@ live_owner :: proc(b: ^Live_Builder, index: int) -> Block {
 @(private = "file", require_results)
 live_raw :: proc(b: ^Live_Builder, block: Block, first, last: int, plain: bool) -> bool {
 	if !live_block_begin(b, block) {return false}
-	at, end := block.source_start, block.source_end
+	return live_raw_text(b, block.source_start, block.source_end, first, last, plain)
+}
+
+// The source of the file's text at..end, which the spans first..last cover, in the block being filled.
+@(private = "file", require_results)
+live_raw_text :: proc(b: ^Live_Builder, at, end, first, last: int, plain: bool) -> bool {
 	if plain {return live_text(b, b.source[at:end], at, end, {}, NO_LINK)}
 	pen := at
 	for i in first ..< last {
@@ -235,6 +248,13 @@ live_rendered :: proc(b: ^Live_Builder, at, end, first, last: int, indent: int) 
 		live_list_seen(b, indent, owner.list_depth)
 	}
 	if !live_block_begin(b, block, marker) {return false}
+	return live_rendered_spans(b, end, first, last)
+}
+
+// The text of the spans first..last of a line that ends at `end`, in the block being filled.
+@(private = "file", require_results)
+live_rendered_spans :: proc(b: ^Live_Builder, end, first, last: int) -> bool {
+	parsed := &b.l.parsed
 	for i in first ..< last {
 		span := live_span(b, i)
 		text := string(parsed.text[span.start:span.end])
@@ -247,6 +267,84 @@ live_rendered :: proc(b: ^Live_Builder, at, end, first, last: int, indent: int) 
 		if !live_text(b, text, span.source, source_end, span.style, span.link) {return false}
 	}
 	return true
+}
+
+// Whether the paragraph whose line ends at `line_end` carries on, after a soft break, on the next line,
+// and so on for the lines after it: a hard break, a blank line or another block ends it. `first` and
+// `last` are the spans of the first line. The offset of the newline after the paragraph's last line (or
+// the file's end) comes back when it has more than one.
+@(private = "file")
+live_group_extent :: proc(b: ^Live_Builder, first, last, line_end: int) -> (group_end: int, grouped: bool) {
+	order, parsed := b.l.order[:], &b.l.parsed
+	owner := b.l.owner[order[first].span]
+	first, last, stop := first, last, line_end
+	for {
+		soft := order[last - 1].span + 1
+		if soft >= len(parsed.spans) || b.l.owner[soft] != owner {return}
+		mark := parsed.spans[soft]
+		if mark.source != NO_SOURCE || string(parsed.text[mark.start:mark.end]) != " " {return}
+		if stop >= len(b.source) {return}
+		at := stop + 1
+		newline := strings.index_byte(b.source[at:], '\n')
+		next := newline < 0 ? len(b.source) : at + newline
+		end := next
+		if end > at && b.source[end - 1] == '\r' {end -= 1}
+		first = last
+		for first < len(order) && order[first].source < at {first += 1}
+		last = first
+		for last < len(order) && order[last].source < end {last += 1}
+		if first == last || b.l.owner[order[first].span] != owner {return}
+		stop, group_end, grouped = next, next, true
+	}
+}
+
+// A paragraph, or list item or quote, whose source lines at..stop its soft breaks join into one block, as
+// reading shows it: the text flows over the lines and each break is a space the caret can stand on, which
+// maps to the newline in the file. Like any lines, the group shows its source while the caret or the
+// selection touches one of them, and rendered otherwise; either way it stays one paragraph, so the text
+// does not move when the caret comes or goes.
+@(private = "file", require_results)
+live_group :: proc(
+	b: ^Live_Builder,
+	at, stop, first, last: int,
+	owner: Block,
+	indent: int,
+) -> bool {
+	parsed := &b.l.parsed
+	group_end := stop
+	if group_end > at && b.source[group_end - 1] == '\r' {group_end -= 1}
+	revealed := at <= b.to && group_end >= b.from
+	block := live_line_block(.Paragraph, at, group_end)
+	marker := ""
+	if !revealed {
+		block.quote_depth, block.list_depth = owner.quote_depth, owner.list_depth
+		if owner.marker_end > owner.marker_start && owner.span_count > 0 &&
+		   parsed.spans[owner.first_span].source >= at {
+			marker = string(parsed.text[owner.marker_start:owner.marker_end])
+			block.task, block.task_source = owner.task, owner.task_source
+			live_list_seen(b, indent, owner.list_depth)
+		}
+	}
+	if !live_block_begin(b, block, marker) {return false}
+	first, last, line := first, last, at
+	for {
+		newline := strings.index_byte(b.source[line:], '\n')
+		line_stop := newline < 0 ? len(b.source) : line + newline
+		end := line_stop
+		if end > line && b.source[end - 1] == '\r' {end -= 1}
+		if revealed {
+			if !live_raw_text(b, line, end, first, last, false) {return false}
+		} else if !live_rendered_spans(b, end, first, last) {
+			return false
+		}
+		if line_stop >= stop {return true}
+		if !live_text(b, " ", end, line_stop + 1, {}, NO_LINK) {return false}
+		line = line_stop + 1
+		next := strings.index_byte(b.source[line:], '\n')
+		next_end := next < 0 ? len(b.source) : line + next
+		if next_end > line && b.source[next_end - 1] == '\r' {next_end -= 1}
+		first, last = live_spans_in(b, line, next_end)
+	}
 }
 
 @(private = "file")
@@ -366,6 +464,12 @@ live_line :: proc(b: ^Live_Builder, at, line_end: int) -> bool {
 	if owner.kind == .Code {
 		block.kind = .Code
 		return live_raw(b, block, first, last, true)
+	}
+	if first < last && owner.kind == .Paragraph {
+		if stop, grouped := live_group_extent(b, first, last, line_end); grouped {
+			b.group_end = stop
+			return live_group(b, at, stop, first, last, owner, live_indent(line, p))
+		}
 	}
 	if revealed {
 		if owner.kind == .Heading {

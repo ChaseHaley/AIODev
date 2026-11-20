@@ -115,10 +115,29 @@ Face_Metrics :: struct {
 	baseline:       f32,
 }
 
-Markdown_Color :: enum u8 {
-	Text,
-	Muted,
-	Accent,
+// What a run's text is, for the colours its element asks: the block it belongs to.
+Markdown_Role :: enum u8 {
+	Paragraph,
+	H1,
+	H2,
+	H3,
+	H4,
+	H5,
+	H6,
+	Code_Block,
+	Table_Header,
+	Table_Cell,
+	Property_Key,
+	Property_Value,
+	List_Marker,
+}
+
+// How a block's text is coloured: its role, and whether a quote holds it, which a paragraph or heading
+// then takes its text colour from when its own is none.
+@(private = "file")
+Text_Context :: struct {
+	role:   Markdown_Role,
+	quoted: bool,
 }
 
 @(private = "file")
@@ -128,6 +147,15 @@ Run_Flag :: enum u8 {
 	Task_Done,
 	// A list item's marker, which hangs before the text.
 	Marker,
+	// The block of the run sits in a quote.
+	Quoted,
+	// The styles of the run's text that its element colours ask for.
+	Strong,
+	Emphasis,
+	Code,
+	Link,
+	Wiki,
+	Markup,
 }
 
 @(private = "file")
@@ -136,8 +164,8 @@ Run :: struct {
 	start, end: i32,
 	link:       i32,
 	face:       Markdown_Face,
-	color:      Markdown_Color,
-	flags:      bit_set[Run_Flag;u8],
+	role:       Markdown_Role,
+	flags:      bit_set[Run_Flag;u16],
 }
 
 // Bands never overlap and always increase, even though the cells of a table row share one, so both
@@ -152,17 +180,33 @@ Line :: struct {
 	left:                   f32,
 }
 
+// What a box is, which says which colour fills it: the fills behind blocks, each theme colour of their
+// own, and the lines (bars, rules, table borders).
 @(private = "file")
-Box_Kind :: enum u8 {
-	Fill,
-	Line,
+Box_Element :: enum u8 {
+	Quote_Band,
+	List_Band,
+	Paragraph_Band,
+	H1_Band,
+	H2_Band,
+	H3_Band,
+	H4_Band,
+	H5_Band,
+	H6_Band,
+	Code_Block,
+	Properties,
+	Table_Header_Band,
+	Table_Cell_Band,
+	Quote_Bar,
+	Rule,
+	Table_Border,
 }
 
 @(private = "file")
 Box :: struct {
-	rect:   render.Rect,
-	kind:   Box_Kind,
-	radius: f32,
+	rect:    render.Rect,
+	element: Box_Element,
+	radius:  f32,
 }
 
 @(private = "file")
@@ -416,7 +460,7 @@ flow :: proc(
 	doc: ^markdown.Document,
 	index: int,
 	x, width, y: f32,
-	color: Markdown_Color,
+	ctx: Text_Context,
 ) -> f32 {
 	y := y
 	items_collect(v, doc, doc.blocks[index])
@@ -426,7 +470,7 @@ flow :: proc(
 		index: int,
 		from, to: int,
 		x, width, y: f32,
-		color: Markdown_Color,
+		ctx: Text_Context,
 		first: bool,
 	) -> f32 {
 		block := doc.blocks[index]
@@ -468,7 +512,7 @@ flow :: proc(
 		if first && block.marker_end > block.marker_start {
 			text := string(doc.text[block.marker_start:block.marker_end])
 			marker_width := string_advance(v, .Body, text)
-			flags: bit_set[Run_Flag;u8] = {.Marker}
+			flags: bit_set[Run_Flag;u16] = {.Marker}
 			if block.task != .None {
 				marker_width = CHECKBOX_SIZE * v.scale
 				flags += block.task == .Open ? {.Task_Open} : {.Task_Done}
@@ -483,7 +527,7 @@ flow :: proc(
 					end = i32(block.marker_end),
 					link = -1,
 					face = .Body,
-					color = .Muted,
+					role = .List_Marker,
 					flags = flags,
 				},
 			)
@@ -499,22 +543,20 @@ flow :: proc(
 			}
 			end := item < len(v.items) ? int(v.items[item].offset) : int(doc.spans[span].end)
 			style := doc.spans[span].style
-			run := Run {
-				x = pen,
-				width = run_width,
-				start = v.items[start].offset,
-				end = i32(end),
-				link = i32(doc.spans[span].link),
-				face = face_of(block, style),
-				color = .Link in style ? .Accent : .Markup in style ? .Muted : color,
-			}
-			if .Strike in style {run.flags += {.Strike}}
-			layout_append(v, &v.runs, run)
-			if .Code in style && block.kind != .Code {
-				pad := 3 * v.scale
-				rect := render.Rect{pen - pad, y + v.scale, run_width + 2 * pad, height - 2 * v.scale}
-				layout_append(v, &v.boxes, Box{rect, .Fill, RADIUS_CONTROL * v.scale})
-			}
+			layout_append(
+				v,
+				&v.runs,
+				Run {
+					x = pen,
+					width = run_width,
+					start = v.items[start].offset,
+					end = i32(end),
+					link = i32(doc.spans[span].link),
+					face = face_of(block, style),
+					role = ctx.role,
+					flags = run_flags(doc, block, doc.spans[span], ctx),
+				},
+			)
 			pen += run_width
 		}
 		line.run_count = i32(len(v.runs)) - line.first_run
@@ -527,7 +569,7 @@ flow :: proc(
 	for i < len(v.items) {
 		item := v.items[i]
 		if item.r == '\n' {
-			y = emit(v, doc, index, start, i, x, width, y, color, first)
+			y = emit(v, doc, index, start, i, x, width, y, ctx, first)
 			first, start, pen, last_break = false, i + 1, 0, -1
 			i += 1
 			ended_on_break = true
@@ -536,7 +578,7 @@ flow :: proc(
 		ended_on_break = false
 		if pen + item.advance > width && i > start && item.r != ' ' {
 			split := last_break > start ? last_break : i
-			y = emit(v, doc, index, start, split, x, width, y, color, first)
+			y = emit(v, doc, index, start, split, x, width, y, ctx, first)
 			first, start, pen, last_break, i = false, split, 0, -1, split
 			continue
 		}
@@ -545,9 +587,69 @@ flow :: proc(
 		i += 1
 	}
 	if start < len(v.items) || first || ended_on_break {
-		y = emit(v, doc, index, start, len(v.items), x, width, y, color, first)
+		y = emit(v, doc, index, start, len(v.items), x, width, y, ctx, first)
 	}
 	return y
+}
+
+// The styles of a span that its element colours look at. A code block's text has none but its markup.
+@(private = "file")
+run_flags :: proc(
+	doc: ^markdown.Document,
+	block: markdown.Block,
+	span: markdown.Span,
+	ctx: Text_Context,
+) -> bit_set[Run_Flag;u16] {
+	flags: bit_set[Run_Flag;u16]
+	style := span.style
+	if ctx.quoted {flags += {.Quoted}}
+	if .Strike in style {flags += {.Strike}}
+	if .Markup in style {flags += {.Markup}}
+	if .Link in style {
+		flags += {.Link}
+		if span.link >= 0 && doc.links[span.link].wiki {flags += {.Wiki}}
+	}
+	if block.kind != .Code {
+		if .Code in style {flags += {.Code}}
+		if .Strong in style {flags += {.Strong}}
+		if .Emphasis in style {flags += {.Emphasis}}
+	}
+	return flags
+}
+
+@(private = "file")
+heading_role :: proc(level: int) -> Markdown_Role {
+	return Markdown_Role(int(Markdown_Role.H1) + clamp(level, 1, 6) - 1)
+}
+
+// Starts the fills that sit under a block's text, from `top` and with no height yet: the band of a quote
+// and of a list item, then the block's own. A band reaches the one above it where blocks follow each
+// other with a gap, so a quote or tight list reads as one. Bands run a little past the text, into the
+// column's margin, so the text keeps room; an editor's flush lines keep square, touching bands.
+@(private = "file")
+layout_bands :: proc(v: ^Markdown_View, doc: ^markdown.Document, index: int, x, top, gap: f32) {
+	block := doc.blocks[index]
+	s := v.scale
+	outset, radius := SPACE_2 * s, RADIUS_CONTROL * s
+	if doc.live {outset, radius = 0, 0}
+	previous := index > 0 ? doc.blocks[index - 1] : markdown.Block{}
+	right := v.width + outset
+	if block.quote_depth > 0 {
+		reach := previous.quote_depth > 0 ? gap : 0
+		layout_append(v, &v.boxes, Box{{-outset, top - reach, right + outset, 0}, .Quote_Band, radius})
+	}
+	if block.list_depth > 0 {
+		reach := block.tight && previous.list_depth > 0 ? gap : 0
+		left := max(x - SPACE_6 * s, 0) - outset
+		layout_append(v, &v.boxes, Box{{left, top - reach, right - left, 0}, .List_Band, radius})
+	}
+	#partial switch block.kind {
+	case .Paragraph:
+		layout_append(v, &v.boxes, Box{{x - outset, top, right - x + outset, 0}, .Paragraph_Band, radius})
+	case .Heading:
+		element := Box_Element(int(Box_Element.H1_Band) + clamp(block.level, 1, 6) - 1)
+		layout_append(v, &v.boxes, Box{{x - outset, top, right - x + outset, 0}, element, radius})
+	}
 }
 
 @(private = "file")
@@ -579,27 +681,35 @@ layout_block :: proc(
 	x := f32(quotes) * quote_step + f32(min(block.list_depth, MARKDOWN_VISUAL_DEPTH)) * list_step
 	x = min(x, v.width / 2)
 	width := v.width - x
-	color: Markdown_Color = quotes > 0 ? .Muted : .Text
+	ctx := Text_Context {
+		role   = .Paragraph,
+		quoted = quotes > 0,
+	}
+	if block.kind == .Heading {ctx.role = heading_role(block.level)}
 	top := y
 	next = index + 1
+	// The fills behind the block take its height once the block is laid out.
+	bands := len(v.boxes)
+	if block.kind != .Rule && block.kind != .Table_Cell {layout_bands(v, doc, index, x, top, gap)}
+	band_count := len(v.boxes) - bands
 	switch block.kind {
 	case .Paragraph, .Heading:
-		y = flow(v, doc, index, x, width, y, color)
+		y = flow(v, doc, index, x, width, y, ctx)
 	case .Code:
 		// An editor's code lines are blocks of their own, so each draws a flush band of the box.
 		pad := SPACE_3 * s
 		inset, radius := pad, RADIUS_CONTROL * s
 		if doc.live {inset, radius = 0, 0}
 		box := len(v.boxes)
-		layout_append(v, &v.boxes, Box{{x, y, width, 0}, .Fill, radius})
-		y = flow(v, doc, index, x + pad, max(width - 2 * pad, 1), y + inset, .Text) + inset
+		layout_append(v, &v.boxes, Box{{x, y, width, 0}, .Code_Block, radius})
+		y = flow(v, doc, index, x + pad, max(width - 2 * pad, 1), y + inset, {role = .Code_Block}) + inset
 		if box < len(v.boxes) {v.boxes[box].rect.height = y - top}
 	case .Rule:
 		height := max(1, math.round(s))
 		// An editor's rule is a line of the file, so it takes a line's height.
 		room := doc.live ? v.faces[.Body].line_height : height
 		rule := y + math.round((room - height) / 2)
-		layout_append(v, &v.boxes, Box{{x, rule, width, height}, .Line, 0})
+		layout_append(v, &v.boxes, Box{{x, rule, width, height}, .Rule, 0})
 		if doc.live {
 			// A line with no text, so a click on it still finds its block.
 			line := Line{top = y, height = room, baseline = y, band_top = y, band_bottom = y + room}
@@ -610,12 +720,13 @@ layout_block :: proc(
 	case .Table_Cell:
 		next, y = layout_table(v, doc, index, x, width, y)
 	}
+	for &box in v.boxes[bands:bands + band_count] {box.rect.height = y - box.rect.y}
 	for depth in 0 ..< quotes {
 		bar := SPACE_4 * s * f32(depth)
 		joined := index > 0 && doc.blocks[index - 1].quote_depth > depth
 		reach := joined ? gap : 0
 		rect := render.Rect{bar, top - reach, math.round(2 * s), y - top + reach}
-		layout_append(v, &v.boxes, Box{rect, .Line, 0})
+		layout_append(v, &v.boxes, Box{rect, .Quote_Bar, 0})
 	}
 	return next, y
 }
@@ -687,7 +798,7 @@ layout_table :: proc(
 	background := len(v.boxes)
 	if properties {
 		row_pad = math.round(3 * s)
-		layout_append(v, &v.boxes, Box{{x, y, width, 0}, .Fill, RADIUS_CONTROL * s})
+		layout_append(v, &v.boxes, Box{{x, y, width, 0}, .Properties, RADIUS_CONTROL * s})
 		y += row_pad
 	}
 	for i < end {
@@ -697,17 +808,25 @@ layout_table :: proc(
 		bottom := y + row_pad
 		cell_x := x
 		column := 0
+		header := doc.blocks[i].header
 		for i < end && doc.blocks[i].row == row {
 			block := doc.blocks[i]
 			for column < block.column {cell_x += sizes[column] + 2 * pad; column += 1}
-			color: Markdown_Color = properties && block.column == 0 ? .Muted : .Text
-			bottom = max(bottom, flow(v, doc, i, cell_x + pad, sizes[column], row_top + row_pad / 2, color))
+			ctx := Text_Context {
+				role = header ? .Table_Header : .Table_Cell,
+			}
+			if properties {ctx.role = block.column == 0 ? .Property_Key : .Property_Value}
+			bottom = max(bottom, flow(v, doc, i, cell_x + pad, sizes[column], row_top + row_pad / 2, ctx))
 			i += 1
 		}
 		y = bottom + row_pad / 2
 		for &line in v.lines[first_line:] {line.band_top, line.band_bottom = row_top, y}
+		if !properties {
+			element := header ? Box_Element.Table_Header_Band : Box_Element.Table_Cell_Band
+			layout_append(v, &v.boxes, Box{{x, row_top, table_width, y - row_top}, element, 0})
+		}
 		if properties {continue}
-		layout_append(v, &v.boxes, Box{{x, y, table_width, rule}, .Line, 0})
+		layout_append(v, &v.boxes, Box{{x, y, table_width, rule}, .Table_Border, 0})
 		y += rule
 	}
 	if properties {
@@ -952,6 +1071,37 @@ markdown_caret_cell :: proc(
 	return cell, true
 }
 
+// The text offsets where the row holding offset `offset` starts and where its caret stops, for Home and
+// End on a soft-wrapped line. A row that wraps hands its end to the next row's start, so its caret
+// stops before the last character, as it does in a text area. False when the offset shows on no row.
+markdown_row_edges :: proc(
+	v: ^Markdown_View,
+	doc: ^markdown.Document,
+	offset: int,
+) -> (
+	start, end: int,
+	found: bool,
+) {
+	_, index, shown := markdown_caret_at(v, doc, offset)
+	if !shown {return}
+	line := v.lines[index]
+	start, end = -1, -1
+	for i in 0 ..< line.run_count {
+		run := v.runs[line.first_run + i]
+		if .Marker in run.flags {continue}
+		if start < 0 {start = int(run.start)}
+		end = int(run.end)
+	}
+	if start < 0 {return}
+	next := index + 1
+	if next < len(v.lines) && v.lines[next].block == line.block && v.lines[next].run_count > 0 &&
+	   int(v.runs[v.lines[next].first_run].start) == end && end > start {
+		_, size := utf8.decode_last_rune_in_string(string(doc.text[start:end]))
+		end -= size
+	}
+	return start, end, true
+}
+
 // The text offset nearest a point in the view's own coordinates, as markdown_caret_at gives them, for
 // moving a caret up and down lines.
 markdown_offset_near :: proc(v: ^Markdown_View, doc: ^markdown.Document, lx, ly: f32) -> int {
@@ -1104,6 +1254,57 @@ draw_run :: proc(
 	return .Ok
 }
 
+// The colour a run's text takes: the first of its styles that sets one, markup first, then its block's
+// own colour, then the quote it sits in, then the paragraph's.
+@(private = "file")
+run_text_color :: proc(c: ^Markdown_Colors, run: Run) -> render.Color {
+	flags := run.flags
+	if .Marker in flags && c.list.text.a > 0 {return c.list.text}
+	if .Markup in flags && c.markup.text.a > 0 {return c.markup.text}
+	if .Link in flags {
+		if pair := .Wiki in flags ? c.wikilink : c.link; pair.text.a > 0 {return pair.text}
+	}
+	if .Code in flags && c.inline_code.text.a > 0 {return c.inline_code.text}
+	if .Strong in flags && c.strong.text.a > 0 {return c.strong.text}
+	if .Emphasis in flags && c.emphasis.text.a > 0 {return c.emphasis.text}
+	if .Strike in flags && c.strike.text.a > 0 {return c.strike.text}
+	own: render.Color
+	switch run.role {
+	case .Paragraph, .List_Marker:
+	case .H1, .H2, .H3, .H4, .H5, .H6:
+		own = c.headings[int(run.role) - int(Markdown_Role.H1)].text
+	case .Code_Block:
+		own = c.code_block.text
+	case .Table_Header:
+		own = c.table_header.text
+	case .Table_Cell:
+		own = c.table_cell.text
+	case .Property_Key:
+		own = c.property_key.text
+	case .Property_Value:
+		own = c.properties.text
+	}
+	if own.a > 0 {return own}
+	if .Quoted in flags && c.quote.text.a > 0 {return c.quote.text}
+	if c.paragraph.text.a > 0 {return c.paragraph.text}
+	return c.fallback
+}
+
+// The fill behind a run's text, if its styles set one: the first that does, in the order of its text.
+@(private = "file")
+run_background :: proc(c: ^Markdown_Colors, run: Run) -> (fill: render.Color, filled: bool) {
+	flags := run.flags
+	if .Markup in flags && c.markup.background.a > 0 {return c.markup.background, true}
+	if .Link in flags {
+		if pair := .Wiki in flags ? c.wikilink : c.link; pair.background.a > 0 {return pair.background, true}
+	}
+	if .Code in flags && c.inline_code.background.a > 0 {return c.inline_code.background, true}
+	if .Strong in flags && c.strong.background.a > 0 {return c.strong.background, true}
+	if .Emphasis in flags && c.emphasis.background.a > 0 {return c.emphasis.background, true}
+	if .Strike in flags && c.strike.background.a > 0 {return c.strike.background, true}
+	return
+}
+
 // Draws what the viewport shows, clipped to the pane's content.
 markdown_draw :: proc(
 	v: ^Markdown_View,
@@ -1122,17 +1323,34 @@ markdown_draw :: proc(
 	origin_y := g.top - f32(v.scroll)
 	visible_top := g.area.y - origin_y
 	visible_bottom := visible_top + g.area.height
+	// One copy of the element colours per draw, so the per-run lookups take a pointer to it.
+	element_colors := theme.markdown
+	c := &element_colors
+	fills := [Box_Element]render.Color {
+		.Quote_Band        = c.quote.background,
+		.List_Band         = c.list.background,
+		.Paragraph_Band    = c.paragraph.background,
+		.H1_Band           = c.headings[0].background,
+		.H2_Band           = c.headings[1].background,
+		.H3_Band           = c.headings[2].background,
+		.H4_Band           = c.headings[3].background,
+		.H5_Band           = c.headings[4].background,
+		.H6_Band           = c.headings[5].background,
+		.Code_Block        = c.code_block.background,
+		.Properties        = c.properties.background,
+		.Table_Header_Band = c.table_header.background,
+		.Table_Cell_Band   = c.table_cell.background,
+		.Quote_Bar         = c.quote_bar,
+		.Rule              = c.rule,
+		.Table_Border      = c.table_border,
+	}
 	for box in v.boxes {
 		if box.rect.y >= visible_bottom || box.rect.y + box.rect.height <= visible_top {continue}
+		color := fills[box.element]
+		if color.a <= 0 {continue}
 		rect := box.rect
 		rect.x, rect.y = rect.x + g.left, rect.y + origin_y
-		color := box.kind == .Fill ? theme.code_background : theme.border
 		draw_rect(list, {rect = rect, color = color, radius = box.radius})
-	}
-	colors := [Markdown_Color]render.Color {
-		.Text   = theme.text,
-		.Muted  = theme.muted,
-		.Accent = theme.accent,
 	}
 	from, to := markdown_selection(v)
 	for index := line_at(v, visible_top);
@@ -1149,12 +1367,28 @@ markdown_draw :: proc(
 				icon_draw(list, folded ? .Chevron_Right : .Chevron_Down, box, theme.muted, ICON_INDICATOR, v.scale)
 			}
 		}
+		// A run's fill goes under every run of its line, which its padding would otherwise cover.
+		for i in 0 ..< line.run_count {
+			run := v.runs[line.first_run + i]
+			if run.flags & {.Task_Open, .Task_Done, .Marker} != {} {continue}
+			fill, filled := run_background(c, run)
+			if !filled {continue}
+			pad := 3 * v.scale
+			rect := render.Rect {
+				run.x + g.left - pad,
+				line.top + origin_y + v.scale,
+				run.width + 2 * pad,
+				line.height - 2 * v.scale,
+			}
+			draw_rect(list, {rect = rect, color = fill, radius = RADIUS_CONTROL * v.scale})
+		}
 		for i in 0 ..< line.run_count {
 			run := v.runs[line.first_run + i]
 			x := run.x + g.left
 			if run.flags & {.Task_Open, .Task_Done} != {} {
 				box := checkbox_rect(x, line.top + origin_y, line.height, v.scale)
-				checkbox_draw(list, box, .Task_Done in run.flags, theme, v.scale)
+				done := .Task_Done in run.flags
+				checkbox_paint(list, box, done, done ? c.task_done : c.task_open, c.task_check, v.scale)
 				continue
 			}
 			draw_matches(v, doc, list, find, run, x, line.top + origin_y, line.height)
@@ -1165,7 +1399,7 @@ markdown_draw :: proc(
 				rect := render.Rect{x + left, line.top + origin_y, middle, line.height}
 				draw_rect(list, {rect = rect, color = theme.text_selection})
 			}
-			color := colors[run.color]
+			color := run_text_color(c, run)
 			result := draw_run(
 				v, doc, text, list, run, x, baseline, color, find, from, to, theme.text_selection_text,
 			)

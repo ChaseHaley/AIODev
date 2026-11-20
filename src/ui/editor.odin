@@ -82,6 +82,11 @@ Editor_Row_Flag :: enum {
 // own `opener`, the ID of the program they belong to.
 Editor_Row :: struct {
 	key, title, description, value, default_value: string,
+	// A color row: the key other colors name it by, the key of the color it follows ("" when it holds its
+	// own color) and the same for its base theme. `value` is the color it shows either way.
+	ref, link, default_link:                       string,
+	// A color row whose empty value is a color of its own, none, so other colors may follow it.
+	clear:                                         bool,
 	group:                                         int,
 	kind:                                          Row_Kind,
 	minimum, maximum:                              f64,
@@ -223,7 +228,10 @@ Editor_Page :: struct {}
 Editor_Shortcut :: struct {}
 
 // The selected row's dropdown is open; `dropdown` keeps what it shows.
-Editor_Choice_Popup :: struct {}
+Editor_Choice_Popup :: struct {
+	// The color board's source dropdown, whose options belong to the board rather than the row.
+	link: bool,
+}
 
 Editor_Color_Popup :: struct {
 	drag: Color_Drag,
@@ -629,7 +637,7 @@ EDITOR_SECTION_LIMIT :: 8
 
 // Every string a row owns, in one place for editor_add's copies and editor_row_destroy's frees.
 @(private)
-row_owned_strings :: proc(row: ^Editor_Row) -> [11]^string {
+row_owned_strings :: proc(row: ^Editor_Row) -> [14]^string {
 	return {
 		&row.key,
 		&row.title,
@@ -642,6 +650,9 @@ row_owned_strings :: proc(row: ^Editor_Row) -> [11]^string {
 		&row.note,
 		&row.opener,
 		&row.filter_id,
+		&row.ref,
+		&row.link,
+		&row.default_link,
 	}
 }
 
@@ -2320,6 +2331,9 @@ choice_text :: proc(p: ^Editor, row: ^Editor_Row, selected: bool, value: string)
 
 @(private)
 choose :: proc(p: ^Editor, row: ^Editor_Row, index: int) -> Editor_Outcome {
+	if popup, open := p.mode.(Editor_Choice_Popup); open && popup.link {
+		return board_link_choose(p, row, index)
+	}
 	if len(row.choices) == 0 {return .None}
 	next := clamp(index, 0, len(row.choices) - 1)
 	if row.multiple {return choice_set_toggle(p, next)}
@@ -3674,7 +3688,7 @@ editor_hover :: proc(p: ^Editor, l: Editor_Layout, x, y: f32, text: ^Text = nil)
 	popup_open := editor_popup(p)
 	// The board's picker is part of the page, not a popup over it.
 	board_changed := color_board_hover(p, l, x, y)
-	if color_board_shown(p) {popup_open = .None}
+	if color_board_shown(p) && popup_open == .Color {popup_open = .None}
 	if popup_open != .None {
 		if c, a, open := editor_dropdown(p, l); open {
 			bar_changed = dropdown_hover(&p.dropdown, c, a, x, y, l.scale)
@@ -3803,7 +3817,9 @@ editor_row_control_hovered :: proc(p: ^Editor, row: ^Editor_Row, rect: render.Re
 // Whether the pointer is over editable text, which shows a text cursor.
 editor_over_text :: proc(p: ^Editor, l: Editor_Layout, x, y: f32) -> bool {
 	if profile_menu_shown(p) || editor_chained(p) {return false}
-	if color_board_shown(p) && render.rect_contains(l.list, x, y) {return color_board_over_text(p, l, x, y)}
+	if color_board_shown(p) && !board_link_open(p) && render.rect_contains(l.list, x, y) {
+		return color_board_over_text(p, l, x, y)
+	}
 	if render.rect_contains(editor_popup_rect(p, l), x, y) {return false}
 	if render.rect_contains(filter_text_rect(p, l), x, y) {return true}
 	if !render.rect_contains(l.list, x, y) {return false}
@@ -4831,7 +4847,7 @@ editor_draw :: proc(
 		}
 		if render.push_layer(list, l.list) != .None {return .Ok}
 		if row.kind == .Action {continue}
-		modified := row.value != row.default_value
+		modified := row.value != row.default_value || row.link != row.default_link
 		if reset_button_draw(list, theme, parts.reset, modified, index == p.hover_reset, selected, pointer, s) !=
 		   .None {return .Ok}
 	}

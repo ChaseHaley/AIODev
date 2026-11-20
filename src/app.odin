@@ -63,6 +63,7 @@ App :: struct {
 	// Theme files and machine shells the running revision was read with; saves and pages reuse them.
 	settings_inputs:       settings.Inputs,
 	settings:              settings.Settings,
+	theme_record:          Theme_Record,
 	using markdown_state:  Markdown_App,
 	using changes_state:   Changes_App,
 	dialogs:               File_Dialogs,
@@ -341,6 +342,7 @@ app_destroy :: proc(app: ^App) {
 	settings.inputs_destroy(&app.settings_inputs)
 	settings_notice_state_destroy(&app.settings_notices)
 	delete(app.settings_path)
+	theme_record_remove(app)
 	instance.paths_destroy(&app.paths)
 	delete(app.log_path)
 	layout_state_destroy(app)
@@ -595,6 +597,7 @@ Window_Timer :: enum u8 {
 	Cursor_Blink,
 	Capture_Hold,
 	Selection_Autoscroll,
+	Markdown_Autoscroll,
 	Scroll_Hold,
 	Tooltip,
 	Hidden_Panes,
@@ -616,6 +619,8 @@ window_timer_advance :: proc(app: ^App, w: ^Window, timer: Window_Timer, now: ti
 		capture_hold_tick(w, now)
 	case .Selection_Autoscroll:
 		selection_autoscroll_tick(app, w, now)
+	case .Markdown_Autoscroll:
+		markdown_autoscroll_tick(app, w, now)
 	case .Scroll_Hold:
 		scroll_hold_tick(app, w, now)
 	case .Tooltip:
@@ -644,6 +649,8 @@ window_timer_deadline :: proc(w: ^Window, timer: Window_Timer) -> (time.Tick, bo
 		return capture_hold_deadline(w)
 	case .Selection_Autoscroll:
 		return selection_autoscroll_deadline(w)
+	case .Markdown_Autoscroll:
+		return markdown_autoscroll_deadline(w)
 	case .Scroll_Hold:
 		return scroll_hold_deadline(w)
 	case .Tooltip:
@@ -764,6 +771,7 @@ apply_fonts :: proc(app: ^App) {
 
 apply_theme :: proc(app: ^App) {
 	app.theme = ui.theme_from(app.settings.active_theme, app.settings.interface)
+	theme_record_publish(app)
 }
 
 @(private)
@@ -772,6 +780,7 @@ terminal_colors :: proc(c: settings.Color_Settings) -> term.Colors {
 		foreground = c.foreground,
 		background = c.background,
 		cursor     = c.cursor,
+		light      = c.light,
 	}
 	for value, i in c.palette {
 		colors.palette[i] = value

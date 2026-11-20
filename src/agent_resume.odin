@@ -208,6 +208,10 @@ agent_session :: proc(app: ^App, entry: ^Session_Entry, running: Pane_Agent) -> 
 	case .Codex:
 		session, found = hooked_session(app, entry.key, running)
 		if !found && launch.session == "" {session, found = codex_fallback_session(entry, running)}
+	case .Agy:
+		// agy runs hooks only from its hooks.json, and nothing here is known to reach a hook with the
+		// pane's variables, so only a launch that named its conversation (agy --conversation <id>)
+		// carries a session over.
 	case .None:
 	}
 	if !found && launch.session != "" {return launch.session, true}

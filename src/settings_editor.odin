@@ -1094,10 +1094,13 @@ editor_theme_color :: proc(app: ^App, w: ^Window, row: ^ui.Editor_Row, reset: bo
 	token_key := strings.clone(row.key[len(SETTINGS_COLOR_PREFIX):], context.temp_allocator)
 	value := reset ? "" : strings.clone(ui.field_string(&w.editor.value), context.temp_allocator)
 	alpha_dropped := false
-	if token, found := settings.token_find(token_key); found && value != "" {
-		tokens := settings.THEME_TOKENS
-		_, _, alpha := colour.parse(value, .Permissive)
-		alpha_dropped = alpha && tokens[token].kind != .Translucent
+	// Empty is no color, not the reset an empty value asks of the edit, so a Clear color says so.
+	if !reset && value == "" && row.clear {value = settings.NONE_COLOR_TEXT}
+	if token, found := settings.token_find(token_key); found {
+		if value != "" {
+			_, _, alpha := colour.parse(value, .Permissive)
+			alpha_dropped = alpha && !settings.token_alpha(token)
+		}
 	}
 	result, applied := editor_theme_change(app, w, Theme_Color{token_key, value})
 	if result.status == .Unchanged {

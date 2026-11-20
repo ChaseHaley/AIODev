@@ -4,6 +4,10 @@
   "id": "tokyonight-night",
   "name": "Tokyo Night",
   "description": "Terminal palette from folke/tokyonight.nvim extras/kitty (MIT).",
+  "neovim": {
+    "plugin": "folke/tokyonight.nvim",
+    "colorscheme": "tokyonight-night"
+  },
   "colors": {
     "window": "#15161e",
     "tab_bar": "#15161e",

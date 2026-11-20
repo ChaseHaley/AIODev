@@ -126,6 +126,9 @@
     "notices_call_sites": {
       "lane": "headless"
     },
+    "nvim_theme": {
+      "lane": "headless"
+    },
     "palette_controls": {
       "lane": "headless"
     },

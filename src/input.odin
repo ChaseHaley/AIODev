@@ -144,6 +144,7 @@ OVERLAY_FIRST :: bit_set[Overlay_Kind] {
 	.Divider_Menu,
 	.Activity_Menu,
 	.Activity_Row_Menu,
+	.Edit_Menu,
 	.Profile_Menu,
 	.Document_Menu,
 	.Command_Menu,
@@ -204,6 +205,14 @@ overlay_input :: proc(app: ^App, w: ^Window, kind: Overlay_Kind, event: Overlay_
 			activity_row_menu_key(app, w, e.logical)
 		case Overlay_Text:
 		case Overlay_Wheel: activity_row_menu_wheel(w, int(math.sign(e.delta)))
+		}
+	case .Edit_Menu:
+		switch e in event {
+		case Overlay_Key:
+			key_suppress(w, e.event)
+			edit_menu_key(app, w, e.logical)
+		case Overlay_Text:
+		case Overlay_Wheel: edit_menu_wheel(w, int(math.sign(e.delta)))
 		}
 	case .Profile_Menu:
 		switch e in event {

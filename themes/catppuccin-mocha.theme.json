@@ -5,6 +5,10 @@
   "name": "Catppuccin Mocha",
   "author": "Catppuccin",
   "description": "Adapted from https://github.com/catppuccin/kitty/blob/main/themes/mocha.conf (MIT). Interface roles follow the scheme's VS Code theme; a color changes only as far as the contrast contracts need. Terminal palette preserves the scheme.",
+  "neovim": {
+    "plugin": "catppuccin/nvim",
+    "colorscheme": "catppuccin-mocha"
+  },
   "colors": {
     "window": "#11111b",
     "tab_bar": "#11111b",

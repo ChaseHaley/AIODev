@@ -4,6 +4,10 @@
   "id": "tokyonight-storm",
   "name": "Tokyo Night Storm",
   "description": "Terminal palette from folke/tokyonight.nvim extras/kitty (MIT).",
+  "neovim": {
+    "plugin": "folke/tokyonight.nvim",
+    "colorscheme": "tokyonight-storm"
+  },
   "colors": {
     "window": "#1d202f",
     "tab_bar": "#1d202f",

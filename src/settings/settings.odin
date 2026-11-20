@@ -643,6 +643,8 @@ Color_Settings :: struct {
 	selection_foreground:                                              Maybe(Color),
 	search_foreground, search_background, search_selected_background:  Color,
 	palette:                                                           [16]Color,
+	// Whether the shell background is light, which programs hear as the terminal's color scheme.
+	light:                                                             bool,
 }
 Settings :: struct {
 	keys:            [dynamic]Key_Binding,
@@ -2253,6 +2255,7 @@ destroy :: proc(s: ^Settings) {
 		delete(theme.id, s.allocator)
 		delete(theme.base, s.allocator)
 		delete(theme.name, s.allocator)
+		neovim_theme_destroy(theme.neovim, s.allocator)
 	}
 	delete(s.themes)
 	s^ = {}
@@ -2546,7 +2549,8 @@ default_text :: proc(
 		"# saved_command.build.level = folder\n",
 		"# saved_command.build.folder = \"C:\\Projects\\App\"\n\n",
 		"# Custom themes: theme.custom.ID.base names another theme such as studio-dark, and\n",
-		"# theme.custom.ID.COLOR = #rrggbb overrides one color. Changing a color in Settings saves one.\n\n",
+		"# theme.custom.ID.COLOR = #rrggbb overrides one color; a color's key such as accent makes it follow\n",
+		"# that color instead. Changing a color in Settings saves one.\n\n",
 		"# Motion curves: motion.curve.NAME = x1, y1, x2, y2 is a cubic Bezier whose y may leave 0..1\n",
 		"# to overshoot, and motion.curve.NAME = spring BOUNCE a spring that bounces 0 to 0.9.\n\n",
 		"# Motion presets: motion.preset.NAME = panes: on 160ms decelerate; split: popin. Applying one in\n",

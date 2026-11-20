@@ -510,3 +510,511 @@ markdown_style_changes_keep_the_caret_and_folds_mapped :: proc(t: ^testing.T) {
 	chevron_click(t, &f.state, w, pane, strings.index(string(app.markdown_document(pane).text[:]), "Next"))
 	testing.expect_value(t, len(pane.folds.folds), 1)
 }
+
+@(private = "file")
+Click_Step :: struct {
+	x, y:      f32,
+	time_ns:   i64,
+	button:    input.Mouse_Button,
+	modifiers: input.Modifiers,
+}
+
+// A press and release of a mouse button at the window point, `time_ns` after the clock's start.
+@(private = "file")
+mouse_click :: proc(state: ^app.App, w: ^app.Window, step: Click_Step, release := true) {
+	for pressed in ([?]bool{true, false}) {
+		if !pressed && !release {break}
+		app.handle_event(state, input.Mouse_Button_Event{window = w.id, x = i32(math.round(step.x)),
+			y = i32(math.round(step.y)), button = step.button, pressed = pressed,
+			modifiers = step.modifiers, time_ns = step.time_ns})
+	}
+}
+
+// The window point just inside the left edge of the character at source offset `source`, which a click
+// takes as the boundary before it, with the pane laid out as its draw lays it out now.
+@(private = "file")
+char_point :: proc(
+	t: ^testing.T,
+	state: ^app.App,
+	w: ^app.Window,
+	pane: ^app.Markdown_Pane,
+	source: int,
+) -> (x, y: f32, ok: bool) {
+	g := edit_fitted(state, w, pane)
+	document := app.markdown_document(pane)
+	display := markdown.live_display(document, source)
+	rect, _, found := ui.markdown_caret_at(&pane.view, document, display)
+	if !testing.expect(t, found, "the character is not on screen") {return}
+	return g.left + rect.x + 1, g.top - f32(pane.view.scroll) + rect.y + rect.height / 2, true
+}
+
+@(private = "file")
+selected :: proc(pane: ^app.Markdown_Pane) -> string {
+	return markdown.edit_selected_text(&pane.editor.buffer)
+}
+
+// The first click of a double click moves the caret onto a rendered line, which then shows its markup and
+// shifts the text under the pointer. The second click still selects the word the first one hit, the third
+// the line, a drag after either grows by words or lines, and the keys then adjust the selection from the
+// anchor.
+@(test)
+a_double_click_selects_the_word_the_first_click_hit_and_shift_arrows_adjust_it :: proc(t: ^testing.T) {
+	f: Edit_Fixture
+	defer edit_fixture_destroy(t, &f)
+	source := "# Title\n\nalpha **bold** gamma\n\nlast line here\n"
+	w, pane := edit_fixture_start(t, &f, "Words", source)
+	if pane == nil {return}
+	app.run_action(&f.state, w, .Edit_Markdown)
+	if !testing.expect(t, app.markdown_editing(pane)) {return}
+	b := &pane.editor.buffer
+	gamma := strings.index(source, "gamma")
+	line := strings.index(source, "alpha")
+	line_end := strings.index(source[line:], "\n") + line
+
+	// The line is rendered, so its words sit where the markup is hidden.
+	x, y, found := char_point(t, &f.state, w, pane, gamma + 2)
+	if !found {return}
+	mouse_click(&f.state, w, {x, y, 1_000_000, .Left, {}})
+	testing.expect_value(t, b.caret, gamma + 2)
+	// The caret's line now shows its markup, which moves the word right: the same point is on other text.
+	shifted, _, _ := char_point(t, &f.state, w, pane, gamma + 2)
+	testing.expect(t, shifted > x + 1, "the first click should have shifted the line")
+
+	mouse_click(&f.state, w, {x, y, 101_000_000, .Left, {}}, release = false)
+	testing.expect_value(t, selected(pane), "gamma")
+	// Dragging with the button held keeps the word and grows by words.
+	ax, ay, _ := char_point(t, &f.state, w, pane, line + 2)
+	app.handle_event(&f.state, input.Mouse_Move_Event{window = w.id, x = i32(ax), y = i32(ay), buttons = {.Left}})
+	testing.expect_value(t, selected(pane), source[line:line_end])
+	testing.expect_value(t, b.anchor, line_end)
+	bx, by, _ := char_point(t, &f.state, w, pane, gamma + 2)
+	app.handle_event(&f.state, input.Mouse_Move_Event{window = w.id, x = i32(bx), y = i32(by), buttons = {.Left}})
+	testing.expect_value(t, selected(pane), "gamma")
+	app.handle_event(&f.state, input.Mouse_Button_Event{window = w.id, x = i32(bx), y = i32(by),
+		button = .Left, time_ns = 102_000_000})
+
+	// Shift+arrows adjust the word from its anchor, at its start.
+	edit_press(&f.state, w, .Arrow_Left, {.Shift})
+	testing.expect_value(t, selected(pane), "gamm")
+	edit_press(&f.state, w, .Arrow_Right, {.Shift, .Control})
+	testing.expect_value(t, selected(pane), "gamma")
+	edit_press(&f.state, w, .Home, {.Shift})
+	testing.expect_value(t, selected(pane), source[line:gamma])
+	testing.expect_value(t, b.anchor, gamma)
+	edit_press(&f.state, w, .End, {.Shift})
+	testing.expect_value(t, selected(pane), "gamma")
+	edit_press(&f.state, w, .Arrow_Down, {.Shift})
+	testing.expect_value(t, selected(pane), "gamma\n")
+	testing.expect_value(t, b.anchor, gamma)
+
+	// Leave the line so it renders again; then three clicks in a run on it, the layout redrawn between.
+	edit_press(&f.state, w, .End, {.Control})
+	x, y, _ = char_point(t, &f.state, w, pane, gamma + 2)
+	mouse_click(&f.state, w, {x, y, 2_000_000_000, .Left, {}})
+	_ = edit_fitted(&f.state, w, pane)
+	mouse_click(&f.state, w, {x, y, 2_100_000_000, .Left, {}})
+	testing.expect_value(t, selected(pane), "gamma")
+	_ = edit_fitted(&f.state, w, pane)
+	mouse_click(&f.state, w, {x, y, 2_200_000_000, .Left, {}})
+	testing.expect_value(t, selected(pane), "alpha **bold** gamma\n")
+	// A click too late for the run starts over.
+	mouse_click(&f.state, w, {x, y, 3_000_000_000, .Left, {}})
+	testing.expect_value(t, selected(pane), "")
+
+	// Shift+click extends from the anchor instead of counting.
+	edit_press(&f.state, w, .Home)
+	anchor := b.anchor
+	lx, ly, _ := char_point(t, &f.state, w, pane, strings.index(source, "last") + 2)
+	mouse_click(&f.state, w, {lx, ly, 4_000_000_000, .Left, {.Shift}})
+	testing.expect_value(t, b.anchor, anchor)
+	testing.expect_value(t, b.caret, strings.index(source, "last") + 2)
+}
+
+// A right-click on the editor's text opens the edit menu: the caret goes under the pointer unless it is
+// inside the selection, and rows that would do nothing are disabled.
+@(test)
+a_right_click_opens_the_edit_menu_with_what_it_can_do :: proc(t: ^testing.T) {
+	f: Edit_Fixture
+	defer edit_fixture_destroy(t, &f)
+	source := "alpha beta\n\ngamma\n"
+	w, pane := edit_fixture_start(t, &f, "Menu", source)
+	if pane == nil {return}
+	app.run_action(&f.state, w, .Edit_Markdown)
+	if !testing.expect(t, app.markdown_editing(pane)) {return}
+	b := &pane.editor.buffer
+	testing.expect(t, platform.clipboard_set_text(&f.state.platform, "pasted"))
+	beta := strings.index(source, "beta")
+
+	x, y, found := char_point(t, &f.state, w, pane, beta + 1)
+	if !found {return}
+	mouse_click(&f.state, w, {x, y, 1_000_000, .Right, {}})
+	_, shown := w.overlay.(app.Overlay_Edit_Menu)
+	if !testing.expect(t, shown, "the edit menu should be open") {return}
+	testing.expect_value(t, b.caret, beta + 1)
+	rows := map[string]bool{}
+	defer delete(rows)
+	for item in w.edit_menu.items {if !item.separator {rows[item.label] = item.enabled}}
+	testing.expect_value(t, len(rows), 6)
+	testing.expect(t, !rows["Undo"] && !rows["Redo"] && !rows["Cut"] && !rows["Copy"], "nothing to do yet")
+	testing.expect(t, rows["Paste"] && rows["Select all"])
+	app.overlay_close(&f.state, w)
+
+	// Inside a selection the right-click keeps it, and Cut and Copy are on.
+	edit_press(&f.state, w, .Home, {.Control})
+	edit_press(&f.state, w, .Arrow_Right, {.Control})
+	edit_press(&f.state, w, .Arrow_Right, {.Control, .Shift})
+	x, y, _ = char_point(t, &f.state, w, pane, beta + 2)
+	mouse_click(&f.state, w, {x, y, 2_000_000, .Right, {}})
+	testing.expect_value(t, selected(pane), "beta")
+	for item in w.edit_menu.items {
+		if item.label == "Cut" || item.label == "Copy" {testing.expect(t, item.enabled, item.label)}
+	}
+	for item, index in w.edit_menu.items {
+		if item.label != "Copy" {continue}
+		ui.menu_select(&w.edit_menu, index)
+		app.edit_menu_choose(&f.state, w)
+	}
+	copied, ok := platform.clipboard_get_text(&f.state.platform, context.temp_allocator)
+	testing.expect(t, ok && copied == "beta", copied)
+	_, still := w.overlay.(app.Overlay_Edit_Menu)
+	testing.expect(t, !still, "choosing a row closes the menu")
+
+	// Outside it the caret moves first, and Paste then goes in there.
+	gamma := strings.index(source, "gamma")
+	x, y, _ = char_point(t, &f.state, w, pane, gamma + 1)
+	mouse_click(&f.state, w, {x, y, 3_000_000, .Right, {}})
+	testing.expect_value(t, b.caret, gamma + 1)
+	testing.expect_value(t, selected(pane), "")
+	for item, index in w.edit_menu.items {
+		if item.label != "Paste" {continue}
+		ui.menu_select(&w.edit_menu, index)
+		app.edit_menu_choose(&f.state, w)
+	}
+	testing.expect_value(t, string(b.text[:]), "alpha beta\n\ngbetaamma\n")
+}
+
+// How a pane lays the paragraph `from`..`to` (found in the text it shows) out: the rows it takes, the
+// left edge of its first character and the right edge of its widest row's last.
+@(private = "file")
+Paragraph_Layout :: struct {
+	rows:  int,
+	left:  f32,
+	right: f32,
+}
+
+@(private = "file")
+paragraph_layout :: proc(
+	t: ^testing.T,
+	state: ^app.App,
+	w: ^app.Window,
+	pane: ^app.Markdown_Pane,
+	first, last: string,
+) -> (out: Paragraph_Layout, ok: bool) {
+	g := edit_fitted(state, w, pane)
+	document := app.markdown_document(pane)
+	shown := string(document.text[:])
+	from := strings.index(shown, first)
+	to := strings.index(shown, last)
+	if !testing.expect(t, from >= 0 && to > from, "the paragraph is not shown") {return}
+	to += len(last)
+	row_y: f32 = -1
+	out.left, out.right = max(f32), 0
+	for offset in from ..< to {
+		rect, _, found := ui.markdown_caret_at(&pane.view, document, offset)
+		if !testing.expect(t, found, "a character is not laid out") {return}
+		if rect.y != row_y {row_y, out.rows = rect.y, out.rows + 1}
+		out.left = min(out.left, g.left + rect.x)
+		out.right = max(out.right, g.left + rect.x)
+	}
+	return out, true
+}
+
+// The style settings lay a pane out the same while it edits as while it reads: the same column, centred the
+// same, with the same face sizes and the same wrapping. Only the caret's line shows its markup, and block
+// spacing stays flush while editing, where the file's blank lines are the spacing (WORK-480).
+@(test)
+edit_mode_lays_out_with_the_reading_modes_style :: proc(t: ^testing.T) {
+	f: Edit_Fixture
+	defer edit_fixture_destroy(t, &f)
+	words := "WRAPSTART the quick brown fox jumps over the lazy dog again and again until it wraps WRAPEND"
+	source := strings.concatenate({"# Title\n\n", words, "\n\nlast\n"}, context.temp_allocator)
+	w, pane := edit_fixture_start(t, &f, "StyleParity", source)
+	if pane == nil {return}
+	// A narrow column, a roomy line and big headings, none of them the defaults.
+	changes := [?][2]string {
+		{"markdown.text_width", "300"},
+		{"markdown.line_height", "2"},
+		{"markdown.h1_size", "2.5"},
+		{"markdown.font_size", "17"},
+	}
+	for change in changes {
+		if !testing.expect(t, app.settings_save_value(&f.state, change[0], change[1], "set")) {return}
+	}
+	g := edit_fitted(&f.state, w, pane)
+	testing.expect(t, g.width <= 300 * w.scale, "the column is the narrow one")
+	reading_layout, reading_ok := paragraph_layout(t, &f.state, w, pane, "WRAPSTART", "WRAPEND")
+	reading_faces := pane.view.faces
+	reading_width := pane.view.width
+	if !reading_ok {return}
+	testing.expect(t, reading_layout.rows > 2, "the paragraph wraps in the narrow column")
+
+	app.run_action(&f.state, w, .Edit_Markdown)
+	if !testing.expect(t, app.markdown_editing(pane)) {return}
+	editing, editing_ok := paragraph_layout(t, &f.state, w, pane, "WRAPSTART", "WRAPEND")
+	if !editing_ok {return}
+	testing.expect_value(t, pane.view.width, reading_width)
+	testing.expect_value(t, editing.rows, reading_layout.rows)
+	testing.expect_value(t, editing.left, reading_layout.left)
+	testing.expect_value(t, editing.right, reading_layout.right)
+	for face in ui.Markdown_Face {
+		testing.expect_value(t, pane.view.faces[face].size_px, reading_faces[face].size_px)
+		testing.expect_value(t, pane.view.faces[face].line_height, reading_faces[face].line_height)
+	}
+	// The caret's line shows its markup but keeps the column.
+	edit_press(&f.state, w, .Home, {.Control})
+	g = edit_fitted(&f.state, w, pane)
+	rect, _, found := ui.markdown_caret_at(&pane.view, app.markdown_document(pane),
+		markdown.live_display(app.markdown_document(pane), 0))
+	testing.expect(t, found && g.left + rect.x == reading_layout.left, "the caret's line starts at the column's edge")
+}
+
+// Two panes on one file, one reading and one editing, take every style change together: both lay the same
+// paragraph out in the same column, whichever setting changed and whichever pane was open first.
+@(test)
+a_reading_and_an_editing_pane_of_one_file_restyle_together :: proc(t: ^testing.T) {
+	f: Edit_Fixture
+	defer edit_fixture_destroy(t, &f)
+	words := "WRAPSTART the quick brown fox jumps over the lazy dog again and again until it wraps WRAPEND"
+	source := strings.concatenate({"# Title\n\n", words, "\n\nlast\n"}, context.temp_allocator)
+	w, reader := edit_fixture_start(t, &f, "TwoPanes", source)
+	if reader == nil {return}
+	node := app.window_tree(w).focus
+	if !testing.expect(t, app.markdown_open_placed(&f.state, w, node, f.file, .Split_Down)) {return}
+	if !testing.expect_value(t, len(f.state.markdown_panes), 2) {return}
+	editor := f.state.markdown_panes[1]
+	app.run_action(&f.state, w, .Edit_Markdown)
+	if !testing.expect(t, app.markdown_editing(editor) && !app.markdown_editing(reader)) {return}
+
+	changes := [?][2]string {
+		{"markdown.text_width", "300"},
+		{"markdown.font_size", "18"},
+		{"markdown.text_width", "420"},
+		{"markdown.line_height", "2"},
+	}
+	for change in changes {
+		if !testing.expect(t, app.settings_save_value(&f.state, change[0], change[1], "set")) {return}
+		read, read_ok := paragraph_layout(t, &f.state, w, reader, "WRAPSTART", "WRAPEND")
+		edit, edit_ok := paragraph_layout(t, &f.state, w, editor, "WRAPSTART", "WRAPEND")
+		if !read_ok || !edit_ok {return}
+		testing.expect_value(t, edit.rows, read.rows)
+		testing.expect_value(t, edit.right - edit.left, read.right - read.left)
+		testing.expect_value(t, editor.view.width, reader.view.width)
+		testing.expect_value(t, editor.view.faces[.Body].line_height, reader.view.faces[.Body].line_height)
+		testing.expect_value(t, editor.view.faces[.Body].size_px, reader.view.faces[.Body].size_px)
+	}
+}
+
+// The furthest right any laid-out character reaches, in window pixels, for the document the pane shows now.
+@(private = "file")
+reach_right :: proc(
+	t: ^testing.T,
+	state: ^app.App,
+	w: ^app.Window,
+	pane: ^app.Markdown_Pane,
+) -> (reach, column_right: f32, ok: bool) {
+	g := edit_fitted(state, w, pane)
+	document := app.markdown_document(pane)
+	for offset in 0 ..= len(document.text) {
+		rect, _, found := ui.markdown_caret_at(&pane.view, document, offset)
+		if !found {continue}
+		reach = max(reach, g.left + rect.x)
+	}
+	return reach, g.left + g.width, true
+}
+
+// Whichever line the caret is on, nothing of a document runs past the text column, as when reading:
+// frontmatter, a table, a fenced block and long unbroken words, links and list items included. (Spaces at a
+// line's end hang past the column while the caret is on it, as spaces hang in a wrapped line; they show nothing.)
+@(test)
+no_line_runs_past_the_column_wherever_the_caret_is :: proc(t: ^testing.T) {
+	f: Edit_Fixture
+	defer edit_fixture_destroy(t, &f)
+	source := strings.concatenate(
+		{
+			"---\ntitle: A frontmatter value that is far longer than the narrow column and goes on and on\n",
+			"tags: [alpha, beta, gamma, delta, epsilon, zeta, eta, theta, iota, kappa, lambda]\n---\n\n",
+			"# Heading with a [[Some Note#A Heading|a long alias that keeps going]] and a link\n\n",
+			"https://example.com/a/very/long/url/without/any/breaks/that/keeps/going/and/going/forever/and/ever\n\n",
+			"| Table | A header with a long label |\n|:--|:--|\n",
+			"| cell one with quite long text that wraps | `inline code that is long and unbreakable_______________` |\n\n",
+			"```text\nfenced code line that is far longer than the narrow column allows and must wrap somehow\n```\n\n",
+			"- item with a long line that goes on past the column and wraps around again and again\n",
+			"  - nested item with a long line that goes on past the column and wraps around again\n",
+			"> a quote with long text that goes on past the column and wraps around again and again\n",
+		},
+		context.temp_allocator,
+	)
+	w, pane := edit_fixture_start(t, &f, "Column", source)
+	if pane == nil {return}
+	if !testing.expect(t, app.settings_save_value(&f.state, "markdown.text_width", "300", "set")) {return}
+	slack := f32(2)
+	reading, column, ok := reach_right(t, &f.state, w, pane)
+	if !ok {return}
+	testing.expect(t, reading <= column + slack, fmt.tprintf("reading reaches %v past column %v", reading, column))
+	app.run_action(&f.state, w, .Edit_Markdown)
+	if !testing.expect(t, app.markdown_editing(pane)) {return}
+	edit_press(&f.state, w, .Home, {.Control})
+	worst: f32
+	line := 0
+	for ; line < 80; line += 1 {
+		reach, right, reached := reach_right(t, &f.state, w, pane)
+		if !reached {return}
+		if reach > right + slack && reach - right > worst {
+			worst = reach - right
+			testing.expect(t, false, fmt.tprintf("caret at %v: text reaches %v, column ends %v", pane.editor.buffer.caret, reach, right))
+		}
+		before := pane.editor.buffer.caret
+		edit_press(&f.state, w, .Arrow_Down)
+		if pane.editor.buffer.caret == before {break}
+	}
+	testing.expect(t, line > 10, "the caret walked the document")
+}
+
+// A paragraph the file wraps by hand, as AGENTS.md's is, lays out while editing as reading lays it out: the
+// source lines' soft breaks are spaces, so the text fills the column instead of keeping the file's breaks.
+@(test)
+a_hand_wrapped_paragraph_wraps_at_the_column_while_editing :: proc(t: ^testing.T) {
+	f: Edit_Fixture
+	defer edit_fixture_destroy(t, &f)
+	paragraph := "When the owner expresses an actionable idea, wish, improvement, or deferred request,\n" +
+		"catalogue it in the vault during that turn. Search existing work first. Extend a\n" +
+		"matching record or create a separate work item with a stable ID, faithful request,\n" +
+		"date/origin, status idea or proposed, tentative area/stage, and precise related links.\n" +
+		"Use Work/Intake/Intake.md when placement is uncertain. Set area to the matching area\n" +
+		"note link (or unassigned); native Bases views update automatically. Tell the owner\n" +
+		"briefly where the idea was saved. A session log or\n" +
+		"chat summary is not the idea's only home. Capture is not approval to implement."
+	source := strings.concatenate({"# Title\n\n", paragraph, "\n\nlast\n"}, context.temp_allocator)
+	w, pane := edit_fixture_start(t, &f, "HandWrapped", source)
+	if pane == nil {return}
+	testing.expect(t, app.settings_save_value(&f.state, "markdown.text_width", "400", "set"))
+	reading, reading_ok := paragraph_layout(t, &f.state, w, pane, "When the owner", "approval to implement.")
+	if !reading_ok {return}
+	testing.expect(t, reading.rows > 2, fmt.tprint(reading.rows))
+
+	app.run_action(&f.state, w, .Edit_Markdown)
+	if !testing.expect(t, app.markdown_editing(pane)) {return}
+	// With the caret away from the paragraph, and with it inside, the paragraph is the same rows.
+	for key in ([?]input.Key{.End, .Home}) {
+		edit_press(&f.state, w, key, {.Control})
+		editing, ok := paragraph_layout(t, &f.state, w, pane, "When the owner", "approval to implement.")
+		if !ok {return}
+		testing.expect_value(t, editing.rows, reading.rows)
+		testing.expect_value(t, editing.left, reading.left)
+		testing.expect_value(t, editing.right, reading.right)
+	}
+	edit_press(&f.state, w, .Arrow_Down)
+	edit_press(&f.state, w, .Arrow_Down)
+	edit_press(&f.state, w, .Arrow_Down)
+	inside, inside_ok := paragraph_layout(t, &f.state, w, pane, "When the owner", "approval to implement.")
+	if !inside_ok {return}
+	testing.expect_value(t, inside.rows, reading.rows)
+}
+
+@(private = "file")
+caret_row :: proc(state: ^app.App, w: ^app.Window, pane: ^app.Markdown_Pane, source: int) -> (x, y: f32) {
+	g := edit_fitted(state, w, pane)
+	document := app.markdown_document(pane)
+	rect, _, _ := ui.markdown_caret_at(&pane.view, document, markdown.live_display(document, source))
+	return g.left + rect.x, g.top + rect.y
+}
+
+// The caret, Backspace, Delete, undo, Home, End and a double click treat a soft break as the one space it
+// shows as, over the newline it is in the file.
+@(test)
+the_caret_crosses_a_soft_break_as_a_space :: proc(t: ^testing.T) {
+	f: Edit_Fixture
+	defer edit_fixture_destroy(t, &f)
+	source := "alpha beta\ngamma delta\nepsilon\n\nhard  \nbreak\n"
+	w, pane := edit_fixture_start(t, &f, "SoftCaret", source)
+	if pane == nil {return}
+	app.run_action(&f.state, w, .Edit_Markdown)
+	if !testing.expect(t, app.markdown_editing(pane)) {return}
+	b := &pane.editor.buffer
+	edit_press(&f.state, w, .Home, {.Control})
+	for _ in 0 ..< 10 {edit_press(&f.state, w, .Arrow_Right)}
+	testing.expect_value(t, b.caret, 10)
+	x_before, y_before := caret_row(&f.state, w, pane, 10)
+	edit_press(&f.state, w, .Arrow_Right)
+	testing.expect_value(t, b.caret, 11)
+	x_after, y_after := caret_row(&f.state, w, pane, 11)
+	testing.expect_value(t, y_after, y_before)
+	testing.expect(t, x_after > x_before, "the break is a space the caret passes")
+
+	// Home goes to the row's start, which is before this source line's; End to the row's end, which is past it.
+	edit_press(&f.state, w, .Home)
+	testing.expect_value(t, b.caret, 0)
+	edit_press(&f.state, w, .End)
+	testing.expect_value(t, b.caret, strings.index(source, "\n\nhard"))
+	edit_press(&f.state, w, .Home, {.Control})
+
+	// Backspace after the break and Delete before it both take the newline, and undo gives it back.
+	for _ in 0 ..< 11 {edit_press(&f.state, w, .Arrow_Right)}
+	edit_press(&f.state, w, .Backspace)
+	testing.expect_value(t, string(b.text[:11]), "alpha betag")
+	edit_press(&f.state, w, .Z, {.Control})
+	testing.expect_value(t, string(b.text[:]), source)
+	edit_press(&f.state, w, .Arrow_Left)
+	edit_press(&f.state, w, .Delete)
+	testing.expect_value(t, string(b.text[:11]), "alpha betag")
+	edit_press(&f.state, w, .Z, {.Control})
+	testing.expect_value(t, string(b.text[:]), source)
+
+	// A double click on the first word after the break selects just that word.
+	x, y := caret_row(&f.state, w, pane, 11)
+	for time_ns in ([?]i64{1_000_000, 101_000_000}) {
+		mouse_click(&f.state, w, {x + 1, y + 4, time_ns, .Left, {}})
+	}
+	testing.expect_value(t, markdown.edit_selected_text(b), "gamma")
+
+	// A hard break still breaks the line.
+	hard := strings.index(source, "hard")
+	_, hard_y := caret_row(&f.state, w, pane, hard)
+	_, break_y := caret_row(&f.state, w, pane, strings.index(source, "break"))
+	testing.expect(t, break_y > hard_y, "a hard break starts a row")
+}
+
+// Up and Down move by the rows a soft-wrapped paragraph shows, across the file's line breaks, and Home and End
+// go to a row's ends first.
+@(test)
+rows_of_a_hand_wrapped_paragraph_move_the_caret_by_row :: proc(t: ^testing.T) {
+	f: Edit_Fixture
+	defer edit_fixture_destroy(t, &f)
+	source := "one two three four five six seven\neight nine ten eleven twelve thirteen\nfourteen fifteen sixteen\n\nend\n"
+	w, pane := edit_fixture_start(t, &f, "SoftRows", source)
+	if pane == nil {return}
+	testing.expect(t, app.settings_save_value(&f.state, "markdown.text_width", "170", "set"))
+	app.run_action(&f.state, w, .Edit_Markdown)
+	b := &pane.editor.buffer
+	edit_press(&f.state, w, .Home, {.Control})
+	_, y0 := caret_row(&f.state, w, pane, b.caret)
+	edit_press(&f.state, w, .Arrow_Down)
+	first_down := b.caret
+	_, y1 := caret_row(&f.state, w, pane, b.caret)
+	testing.expect(t, y1 > y0 && first_down > 0, "Down goes to the next row")
+	edit_press(&f.state, w, .Arrow_Down)
+	edit_press(&f.state, w, .Arrow_Down)
+	edit_press(&f.state, w, .Arrow_Up)
+	edit_press(&f.state, w, .Arrow_Up)
+	testing.expect_value(t, b.caret, first_down)
+	edit_press(&f.state, w, .Arrow_Right)
+	edit_press(&f.state, w, .Arrow_Right)
+	edit_press(&f.state, w, .Home)
+	row_start := b.caret
+	testing.expect_value(t, row_start, first_down)
+	edit_press(&f.state, w, .End)
+	row_end := b.caret
+	testing.expect(t, row_start <= first_down && first_down <= row_end, "the row's ends hold the caret")
+	// The row is shorter than the file line it began in: End stops short of that line's end.
+	testing.expect(t, row_end - row_start < len("one two three four five six seven"), fmt.tprint(row_start, row_end))
+}
