@@ -82,6 +82,8 @@ Editor_Row_Flag :: enum {
 // own `opener`, the ID of the program they belong to.
 Editor_Row :: struct {
 	key, title, description, value, default_value: string,
+	// Search terms that do not change the displayed title or description.
+	keywords:                                      string,
 	// A color row: the key other colors name it by, the key of the color it follows ("" when it holds its
 	// own color) and the same for its base theme. `value` is the color it shows either way.
 	ref, link, default_link:                       string,
@@ -476,6 +478,8 @@ Editor :: struct {
 	hover_clear:                                                       bool,
 	// The pointer is over the Browse button of the hovered row.
 	hover_browse:                                                      bool,
+	// The page's run of presses, which its owner counts for the search and value fields' double clicks.
+	clicks:                                                            Click_Mark,
 	// The shortcut field's capture, alternatives list and key-positions choice.
 	capture:                                                           Shortcut_Capture,
 	// A conflict chain the page shows instead of its rows, and where the page returns once it ends.
@@ -642,6 +646,7 @@ row_owned_strings :: proc(row: ^Editor_Row) -> [14]^string {
 		&row.key,
 		&row.title,
 		&row.description,
+		&row.keywords,
 		&row.value,
 		&row.default_value,
 		&row.profile,
@@ -1437,7 +1442,7 @@ editor_reveal :: proc(p: ^Editor, target: Reveal_Target) -> bool {
 }
 
 // How a search answers a row, best last; the page lists only the rows of the best tier any row reaches.
-// A query word matches the row's own text (key, title, group, description, detail, badge, shortcut)
+// A query word matches the row's own text (key, title, group, description, keywords, detail, badge, shortcut)
 // as written or, for plurals such as "panes", without its final s; a recorded or typed chord its
 // shortcut holds counts the same. Then a shortcut label's letters; then words the row's text lacks
 // found in the labels of its schema choices, up to word starts, so "comfy" finds Activity panel view;
@@ -1512,7 +1517,7 @@ choice_words_match :: proc(
 // The row's own text a search reads. A query in the shortcut grammar leaves out shortcut values, which
 // it compares by the grammar only.
 @(private)
-row_search_fields :: proc(p: ^Editor, row: ^Editor_Row, chord: bool) -> [7]string {
+row_search_fields :: proc(p: ^Editor, row: ^Editor_Row, chord: bool) -> [8]string {
 	return {
 		row.key,
 		row.title,
@@ -1521,6 +1526,7 @@ row_search_fields :: proc(p: ^Editor, row: ^Editor_Row, chord: bool) -> [7]strin
 		row.detail,
 		row.badge,
 		row.kind == .Shortcut && !chord ? row.value : "",
+		row.keywords,
 	}
 }
 
@@ -3299,13 +3305,15 @@ slide :: proc(p: ^Editor, row: ^Editor_Row, slider: render.Rect, x: f32) {
 	field_set(&p.value, number_text(row_step(row), number))
 }
 
-// A press inside the page; `extend` (Shift) grows a text selection instead of moving the caret.
+// A press inside the page; `extend` (Shift) grows a text selection instead of moving the caret, and
+// `clicks` is the press's count in its run, so a double click selects a word and a triple the field.
 editor_press :: proc(
 	p: ^Editor,
 	l: Editor_Layout,
 	text: ^Text,
 	x, y: f32,
 	extend: bool,
+	clicks := 1,
 ) -> Editor_Outcome {
 	s := l.scale
 	p.profile_menu.bounds = l.page
@@ -3319,7 +3327,7 @@ editor_press :: proc(
 		editor_mode_set(p, Editor_Editing{})
 		return .Changed
 	}
-	if result, handled := color_board_press(p, l, text, x, y, extend); handled {return result}
+	if result, handled := color_board_press(p, l, text, x, y, extend, clicks); handled {return result}
 	popup := editor_popup(p)
 	if popup == .None && render.rect_contains(editor_reset_all_rect(l), x, y) {
 		editor_blur(p)
@@ -3405,7 +3413,7 @@ editor_press :: proc(
 	}
 	if render.rect_contains(l.filter, x, y) {
 		if editor_focus(p) != .Search {editor_keep(p); stop_editing(p)}
-		field_pointer(&p.filter, field_box_offset(filter_box(p, l, text), x), true, extend)
+		field_pointer(&p.filter, field_box_offset(filter_box(p, l, text), x), true, extend, clicks)
 		editor_mode_set(p, Editor_Browsing{selecting = true})
 		return .Changed
 	}
@@ -3530,7 +3538,7 @@ editor_press :: proc(
 			return .Save
 		}
 		if editor_capturing(p) {stop_editing(p)}
-		field_pointer(&p.value, field_box_offset(value_box(p, parts, text, s), x), true, extend)
+		field_pointer(&p.value, field_box_offset(value_box(p, parts, text, s), x), true, extend, clicks)
 		editor_mode_set(p, Editor_Editing{drag = .Value})
 		return .Changed
 	}

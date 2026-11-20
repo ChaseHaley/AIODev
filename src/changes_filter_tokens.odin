@@ -313,6 +313,7 @@ changes_filter_toggle_selected :: proc(app: ^App, w: ^Window, pane: ^Changes_Pan
 @(private)
 changes_filter_point :: proc(
 	app: ^App, w: ^Window, pane: ^Changes_Pane, g: ui.Changes_Geometry, x: f32, pressed, extend: bool,
+	time_ns := i64(0),
 ) {
 	box, visible := ui.changes_filter_box(g, &pane.model.view, &w.ui_text)
 	if !visible {return}
@@ -324,7 +325,9 @@ changes_filter_point :: proc(
 		if pane.filter_typing && pane.filter_pending >= 0 {changes_filter_typing_end(app, w, pane)}
 	}
 	at := ui.filter_field_offset(box, pane.filter_tokens[:], x)
-	if ui.field_pointer(&pane.filter_editor, at, pressed, extend) != .None {w.dirty = true}
+	change := pressed ? field_press(&pane.filter_editor, at, x, extend, time_ns) :
+		ui.field_pointer(&pane.filter_editor, at, false, extend)
+	if change != .None {w.dirty = true}
 }
 
 @(private = "file")

@@ -626,10 +626,10 @@ board_hex_focused :: proc(p: ^Editor) -> bool {
 }
 
 @(private)
-board_field_press :: proc(p: ^Editor, text: ^Text, rect: render.Rect, x, s: f32, extend: bool) {
+board_field_press :: proc(p: ^Editor, text: ^Text, rect: render.Rect, x, s: f32, extend: bool, clicks: int) {
 	if text != nil {
 		box := field_box_standard(&p.value, text, rect, s)
-		field_pointer(&p.value, field_box_offset(box, x), true, extend)
+		field_pointer(&p.value, field_box_offset(box, x), true, extend, clicks)
 	} else {
 		field_select_all(&p.value)
 	}
@@ -645,6 +645,7 @@ color_board_press :: proc(
 	text: ^Text,
 	x, y: f32,
 	extend: bool,
+	clicks: int,
 ) -> (
 	Editor_Outcome,
 	bool,
@@ -668,7 +669,7 @@ color_board_press :: proc(
 	case .Field:
 		board_choose(p, hit.item, .Tile)
 		for place in b.inspector.fields[:b.inspector.field_count] {
-			if place.item == hit.item {board_field_press(p, text, place.rect, x, s, extend)}
+			if place.item == hit.item {board_field_press(p, text, place.rect, x, s, extend, clicks)}
 		}
 	case .Button:
 		board_choose(p, hit.item, .Tile)
@@ -680,7 +681,7 @@ color_board_press :: proc(
 		pick_color(p, color_parts(b.inspector.picker, board_optional(p, &b.inspector), s), drag, x, y)
 	case .Hex:
 		board_choose(p, hit.item, .Hex)
-		board_field_press(p, text, b.inspector.hex, x, s, extend)
+		board_field_press(p, text, b.inspector.hex, x, s, extend, clicks)
 	case .No_Color:
 		board_choose(p, hit.item, .No_Color)
 		field_set(&p.value, "")

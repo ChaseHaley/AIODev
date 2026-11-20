@@ -1,0 +1,4 @@
+version=1.0.4314.35
+source=https://www.nuget.org/api/v2/package/Microsoft.Web.WebView2/1.0.4314.35
+nupkg_sha256=90778deb1b77e36292828b4b5833c9255c27533f40e0ddd55891ae718944edc4
+loader_static_sha256=6d03a1fcc7cd3d34f221d77e7630f436c64fdbdc6ce77ec714dce7bcdb37731f

@@ -66,6 +66,7 @@ App :: struct {
 	theme_record:          Theme_Record,
 	using markdown_state:  Markdown_App,
 	using changes_state:   Changes_App,
+	using web_state:       Web_App,
 	dialogs:               File_Dialogs,
 	// The settings file this app reads and saves; app_init takes it from paths.
 	settings_path:         string,
@@ -321,6 +322,7 @@ app_destroy :: proc(app: ^App) {
 	program_art.catalogue_destroy(&app.program_art)
 	shell_icons_destroy(&app.shell_icons)
 	link_programs_destroy(&app.link_programs)
+	web_app_destroy(&app.web_state)
 	glyphs.destroy(&app.cache)
 	if app.device != nil {
 		render.device_destroy(app.device)
@@ -487,6 +489,7 @@ App_Timer :: enum u8 {
 	File_Dialogs,
 	Markdown,
 	Changes,
+	Web,
 	Turns,
 	Update,
 	// init.lua's timers, process polls and the step after any Lua code ran.
@@ -506,7 +509,7 @@ app_timer_phase :: proc(timer: App_Timer) -> Timer_Phase {
 	switch timer {
 	case .Processes, .Notices, .Drag_Hover, .Turns, .Lua:
 		return .Before_Draw
-	case .Verify, .Layout_Save, .Palette_Usage_Save, .File_Dialogs, .Markdown, .Changes, .Update:
+	case .Verify, .Layout_Save, .Palette_Usage_Save, .File_Dialogs, .Markdown, .Changes, .Web, .Update:
 		return .After_Draw
 	}
 	return .Before_Draw
@@ -545,6 +548,8 @@ app_timers_advance :: proc(app: ^App, phase: Timer_Phase) {
 			markdown_tick(app)
 		case .Changes:
 			changes_tick(app)
+		case .Web:
+			web_tick(app)
 		case .Update:
 			app_update_tick(app)
 		case .Turns:
@@ -579,6 +584,8 @@ app_timer_deadline :: proc(app: ^App, timer: App_Timer) -> (next: time.Tick, pen
 		return markdown_poll_deadline(app)
 	case .Changes:
 		return changes_poll_deadline(app)
+	case .Web:
+		return web_poll_deadline(app)
 	case .Turns:
 		return turns_deadline(app)
 	case .Update:
@@ -772,6 +779,7 @@ apply_fonts :: proc(app: ^App) {
 apply_theme :: proc(app: ^App) {
 	app.theme = ui.theme_from(app.settings.active_theme, app.settings.interface)
 	theme_record_publish(app)
+	web_theme_apply(app)
 }
 
 @(private)

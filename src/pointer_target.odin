@@ -52,6 +52,8 @@ Pointer_Target :: enum u8 {
 	Markdown_Page,
 	// An Agent changes pane.
 	Changes_Page,
+	// An embedded web pane (URL bar and WebView2 body).
+	Web_Page,
 	// Terminal content, including its links, and anything uncovered.
 	Content,
 }
@@ -247,6 +249,10 @@ pointer_surfaces := [Pointer_Target]Pointer_Surface {
 		claims = changes_claims, hover = changes_hover, press = changes_press, release = changes_release,
 		cancel = changes_cancel, leave = changes_leave, tooltip = changes_tooltip, shortcut = changes_shortcut,
 		holds = true, blurs_find = true,
+	},
+	.Web_Page         = {
+		claims = web_claims, hover = web_hover, press = web_press, release = web_release,
+		tooltip = web_tooltip, cancel = web_cancel, leave = web_leave, holds = true, blurs_find = true,
 	},
 	.Content          = {
 		claims = content_claims, hover = content_hover, press = content_press, release = content_release,

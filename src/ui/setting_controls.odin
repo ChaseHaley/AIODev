@@ -19,6 +19,7 @@ schema_row :: proc(entry: settings.Schema_Entry) -> Editor_Row {
 		key           = entry.key,
 		title         = entry.title,
 		description   = entry.description,
+		keywords      = entry.keywords,
 		default_value = entry.default_value,
 		minimum       = entry.valid.minimum,
 		maximum       = entry.valid.maximum,

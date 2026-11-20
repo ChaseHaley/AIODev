@@ -3,6 +3,7 @@ package main
 import "aio:links"
 import "aio:localpath"
 import "aio:markdown"
+import "aio:platform"
 import "core:log"
 import "core:path/filepath"
 import "core:strings"
@@ -104,6 +105,9 @@ target_from_link :: proc(
 target_open :: proc(app: ^App, w: ^Window, target: Target) {
 	switch t in target {
 	case Web_Target:
+		if app.settings.pane.web_links && platform.webview_supported() && w != nil {
+			if web_open_focused(app, w, t.uri) {return}
+		}
 		if !target_open_url(app, t.uri) {notify(app, .Error, "Could not open the link.")}
 	case File_Target:
 		target_open_file(app, w, t.path, "")

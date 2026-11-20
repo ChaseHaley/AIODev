@@ -33,7 +33,9 @@ profile.order = default, cmd, windows-powershell, pwsh, hidden
 	w: app.Window
 	app.profile_menu_init(&w.profile_menu)
 	defer app.profile_menu_destroy(&w.profile_menu)
-	for mode in ([?]app.Profile_Menu_Mode{app.Profile_Menu_New_Tab{}, app.Profile_Menu_Swap_Pane{}}) {
+	for mode in ([?]app.Profile_Menu_Mode{
+		app.Profile_Menu_New_Tab{}, app.Profile_Menu_Swap_Pane{}, app.Profile_Menu_Split{},
+	}) {
 		app.profile_menu_open(&s, &w, mode, 0, 0)
 		expected := 0
 		for row in table.rows {
@@ -45,8 +47,10 @@ profile.order = default, cmd, windows-powershell, pwsh, hidden
 			testing.expect_value(t, w.profile_menu.items[expected].label, row.name)
 			expected += 1
 		}
-		_, swap := mode.(app.Profile_Menu_Swap_Pane)
-		testing.expect_value(t, len(w.profile_menu.items), expected + (swap ? 3 : 0))
+		testing.expect_value(t, len(w.profile_menu.items), expected + 3)
+		if len(w.profile_menu.items) < expected + 3 {return}
+		testing.expect_value(t, w.profile_menu.items[expected + 1].label, "Markdown file…")
+		testing.expect_value(t, w.profile_menu.items[expected + 2].label, "Web pane")
 		testing.expect_value(t, w.profile_menu.count, len(w.profile_menu.items))
 	}
 }

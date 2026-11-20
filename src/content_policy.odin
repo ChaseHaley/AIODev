@@ -35,6 +35,7 @@ CONTENT_POLICY := [layout.Content_Kind]Content_Policy {
 	.Settings = {one_per_workspace = true, icon = .Settings, display_name = "Settings"},
 	.Markdown = {linkable = true, documents = true, file = true, icon = .Markdown, display_name = "Markdown"},
 	.Changes = {linkable = true, icon = .Changes, display_name = "Agent changes"},
+	.Web = {linkable = true, documents = true, icon = .Globe, display_name = "Web"},
 }
 
 // The title of content that does not title itself through a session.
@@ -48,6 +49,13 @@ content_title :: proc(app: ^App, content: layout.Content) -> string {
 		if pane := markdown_find(app, content.id); pane != nil {return pane.title}
 	case .Changes:
 		return CONTENT_POLICY[.Changes].display_name
+	case .Web:
+		if pane := web_find(app, content.id); pane != nil {
+			if pane.title != "" {return pane.title}
+			if pane.host_label != "" {return pane.host_label}
+			if pane.url != "" {return pane.url}
+		}
+		return CONTENT_POLICY[.Web].display_name
 	}
 	return ""
 }
@@ -66,23 +74,31 @@ Content_Badge :: struct {
 	atlas: render.Rect,
 }
 
-// A session's program icon or shell badge `size` pixels square, else the kind's icon: the badge the
-// tab strip shows, so pane headers and float capsules show the same one.
+// A session's program icon or shell badge `size` pixels square, else a web page's favicon once it has
+// one, else the kind's icon: the badge the tab strip shows, so pane headers, the rail and float capsules
+// show the same one.
 @(require_results)
 content_badge :: proc(
 	app: ^App,
 	entry: ^Session_Entry,
-	kind: layout.Content_Kind,
+	content: layout.Content,
 	size: f32,
 ) -> (
 	badge: Content_Badge,
 	result: render.Build_Status,
 ) {
-	policy := CONTENT_POLICY[kind]
+	policy := CONTENT_POLICY[content.kind]
 	if policy.owns_session {
 		badge.glyph, badge.atlas, result = pane_icon(app, entry, size)
-	} else {
-		badge.icon = policy.icon
+		return
+	}
+	badge.icon = policy.icon
+	#partial switch content.kind {
+	case .Web:
+		if pane := web_find(app, content.id); pane != nil {
+			badge.atlas, result = web_favicon_atlas(app, &pane.favicon)
+			if badge.atlas.width > 0 {badge.icon = .None}
+		}
 	}
 	return
 }
@@ -95,6 +111,8 @@ content_directory :: proc(app: ^App, content: layout.Content) -> string {
 		if pane := markdown_find(app, content.id); pane != nil {return pane.directory}
 	case .Changes:
 		if pane := changes_find(app, content.id); pane != nil {return pane.directory}
+	case .Web:
+		if pane := web_find(app, content.id); pane != nil && pane.title != "" {return pane.host_label}
 	}
 	return ""
 }
@@ -111,6 +129,8 @@ content_documents :: proc(app: ^App, content: layout.Content) -> ^Document_List 
 		if entry := session_find(app, content.id); entry != nil {return &entry.documents}
 	case .Markdown:
 		if pane := markdown_find(app, content.id); pane != nil {return &pane.documents}
+	case .Web:
+		if pane := web_find(app, content.id); pane != nil {return &pane.documents}
 	case .Settings:
 	case .Changes:
 	}

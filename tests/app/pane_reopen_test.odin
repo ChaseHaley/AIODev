@@ -137,6 +137,86 @@ panes_closed_before_their_tab_rejoin_it :: proc(t: ^testing.T) {
 	testing.expect_value(t, reopen_describe(&state, &workspace.tabs[1].tree), original)
 }
 
+// Counts the web panes in a tree and returns the first one's address.
+@(private = "file")
+reopen_web_url :: proc(state: ^app.App, tree: ^layout.Layout) -> (url: string, count: int) {
+	panes := make([dynamic]layout.Content, context.temp_allocator)
+	layout.contents(tree, tree.root, &panes)
+	for content in panes {
+		if content.kind != .Web {continue}
+		if count == 0 {url = app.web_find(state, content.id).url}
+		count += 1
+	}
+	return
+}
+
+// A closed web pane comes back with its address beside the pane it was split from; a blank one is not kept.
+@(test)
+closed_web_pane_reopens_beside_its_neighbour :: proc(t: ^testing.T) {
+	state: app.App
+	w, directory, ready := reopen_app(t, &state)
+	defer delete(directory)
+	defer testing.expect_value(t, os.remove_all(directory), nil)
+	defer app.app_destroy(&state)
+	if !ready {return}
+	workspace := w.workspace
+	tree := &workspace.tabs[1].tree
+	neighbour := tree.focus
+	if !testing.expect(t, app.web_open_placed(&state, w, neighbour, "https://example.com/docs", .Split_Right)) {return}
+	node: layout.Node_Id
+	for candidate, id in tree.nodes {
+		pane, is_pane := candidate.(layout.Pane)
+		if is_pane && pane.content.kind == .Web {node = layout.Node_Id(id)}
+	}
+	app.pane_close_at(&state, workspace, 1, node)
+	testing.expect_value(t, len(state.closed), 1)
+	_, count := reopen_web_url(&state, tree)
+	testing.expect_value(t, count, 0)
+
+	app.closed_reopen(&state, w)
+	url, reopened := reopen_web_url(&state, tree)
+	if !testing.expect_value(t, reopened, 1) {return}
+	testing.expect_value(t, url, "https://example.com/docs")
+	root, is_split := tree.nodes[tree.root].(layout.Split)
+	if !testing.expect(t, is_split) {return}
+	first, _ := tree.nodes[root.first].(layout.Pane)
+	second, _ := tree.nodes[root.second].(layout.Pane)
+	testing.expect_value(t, first.content.kind, layout.Content_Kind.Terminal)
+	testing.expect_value(t, second.content.kind, layout.Content_Kind.Web)
+
+	// A pane that never went anywhere has nothing to bring back.
+	app.web_open_blank(&state, w)
+	for candidate, id in tree.nodes {
+		pane, is_pane := candidate.(layout.Pane)
+		if is_pane && pane.content.kind == .Web && app.web_find(&state, pane.content.id).url == "" {
+			app.pane_close_at(&state, workspace, 1, layout.Node_Id(id))
+			break
+		}
+	}
+	testing.expect_value(t, len(state.closed), 0)
+}
+
+// A tab closed with a web pane in it returns with the pane.
+@(test)
+closed_tab_with_web_pane_reopens_it :: proc(t: ^testing.T) {
+	state: app.App
+	w, directory, ready := reopen_app(t, &state)
+	defer delete(directory)
+	defer testing.expect_value(t, os.remove_all(directory), nil)
+	defer app.app_destroy(&state)
+	if !ready {return}
+	workspace := w.workspace
+	tree := &workspace.tabs[1].tree
+	if !testing.expect(t, app.web_open_placed(&state, w, tree.focus, "https://example.com/docs", .Split_Right)) {return}
+	app.tab_close(&state, w, 1)
+	testing.expect_value(t, len(workspace.tabs), 2)
+	app.closed_reopen(&state, w)
+	if !testing.expect_value(t, len(workspace.tabs), 3) {return}
+	url, count := reopen_web_url(&state, &workspace.tabs[1].tree)
+	testing.expect_value(t, count, 1)
+	testing.expect_value(t, url, "https://example.com/docs")
+}
+
 // An app with three tabs, the middle one shown, whose shells idle.
 @(private = "file")
 reopen_app :: proc(t: ^testing.T, state: ^app.App) -> (w: ^app.Window, directory: string, ok: bool) {

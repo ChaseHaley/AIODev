@@ -1329,7 +1329,7 @@ changes_press :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) {
 	if state.filter_open {
 		#partial switch hit.part {
 		case .Filter_Field:
-			if hit.index >= 0 {changes_filter_point(app, w, pane, g, x, true, extend)}
+			if hit.index >= 0 {changes_filter_point(app, w, pane, g, x, true, extend, e.time_ns)}
 		case .Filter_Clear:
 			changes_filter_clear(app, w, pane)
 		case .Filter_Pick:

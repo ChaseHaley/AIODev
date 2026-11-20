@@ -46,8 +46,11 @@ profile.cmd.directory = ~
 profile.hidden.name = Hidden
 profile.hidden.command = cmd.exe
 profile.hidden.hidden = true
+profile.powershell.hidden = true
+profile.pwsh.hidden = true
 profile.order = cmd, default, hidden
 shell.default_profile = default
+status.panel = false
 cursor.blink = false
 '@ | Set-Content -LiteralPath $source -Encoding utf8
 
@@ -61,7 +64,7 @@ try {
         $dropdown = if ($orientation -eq 'vertical') { 'rail.profile' } else { 'tabs.chevron' }
         Click $s[$dropdown]
         Equal (State)['profile_menu.open'] true "$orientation has a visible profile dropdown"
-        Equal (State)['profile_menu.count'] 2 "$orientation lists only the two configured visible profiles without app action rows"
+        Equal (State)['profile_menu.count'] 5 "$orientation lists two profiles, a divider, Markdown and Web"
         Equal (State)['tabs.count'] $count 'opening the profile dropdown creates no tab'
         Aio key Home Enter
         Equal (State)['tabs.count'] ($count + 1) "$orientation profile menu creates one tab"
@@ -133,7 +136,8 @@ try {
         Shot "overflow-$dpi"
     }
 
-    Aio resize 60x20
+    # Grid resize includes the docked rail. Leave enough room below its 720 DIP breakpoint.
+    Aio resize 40x20
     Equal (State)['rail.visible'] false 'narrow windows hide the rail'
     Aio key Ctrl+Shift+B
     $s = State

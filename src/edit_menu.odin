@@ -2,13 +2,15 @@ package main
 
 import "aio:input"
 import "aio:markdown"
+import "aio:platform"
 import "aio:render"
 import "aio:ui"
 import "core:log"
 
-// The menu a right click on an editor's text opens: Undo, Redo, Cut, Copy, Paste and Select all, with the
-// keys that do the same. Its rows are w.edit_menu; the Markdown pane whose text they act on is the
-// overlay's. Rows that would do nothing show disabled.
+// The menu a right click on editable text opens: Undo, Redo, Cut, Copy, Paste and Select all, with the
+// keys that do the same. Its rows are w.edit_menu; the Markdown pane or web address field whose text they
+// act on is the overlay's target. A single-line field keeps no undo history, so its menu has no Undo or
+// Redo. Rows that would do nothing show disabled.
 
 @(private = "file", rodata)
 EDIT_MENU_LABELS := [Text_Edit_Command]string {
@@ -37,6 +39,10 @@ EDIT_MENU_GROUP_STARTS := bit_set[Text_Edit_Command]{.Cut, .Select_All}
 @(private = "file")
 EDIT_MENU_WIDTH :: f32(220)
 
+// The rows of a web address field's menu.
+@(private = "file", rodata)
+EDIT_MENU_FIELD_ROWS := bit_set[Text_Edit_Command]{.Cut, .Copy, .Paste, .Select_All}
+
 edit_menu_shown :: proc(w: ^Window) -> bool {
 	_, shown := w.overlay.(Overlay_Edit_Menu)
 	return shown
@@ -44,14 +50,43 @@ edit_menu_shown :: proc(w: ^Window) -> bool {
 
 // Opens the menu at a point for the Markdown pane `pane`, whose text is `b`.
 edit_menu_open :: proc(app: ^App, w: ^Window, pane: u32, b: ^markdown.Edit_Buffer, x, y: f32) {
+	enabled: [Text_Edit_Command]bool
+	for command in Text_Edit_Command {enabled[command] = text_edit_enabled(app, b, command)}
+	edit_menu_show(app, w, Edit_Menu_Markdown{pane = pane}, ~bit_set[Text_Edit_Command]{}, enabled, x, y)
+}
+
+// Opens the menu at a point for the address field of the web pane `pane_id`. A field that is not being
+// edited starts being, with its text selected, so the menu acts on what a click there would have; one
+// that is keeps its caret and selection, which the caller places first.
+edit_menu_open_web_url :: proc(app: ^App, w: ^Window, pane_id: u32, x, y: f32) {
+	pane := web_find(app, pane_id)
+	if pane == nil {return}
+	if !pane.url_editing {
+		pane.url_editing = true
+		ui.field_select_all(&pane.url_field)
+	}
+	enabled: [Text_Edit_Command]bool
+	for command in EDIT_MENU_FIELD_ROWS {enabled[command] = field_edit_enabled(app, &pane.url_field, command)}
+	edit_menu_show(app, w, Edit_Menu_Web_Url{pane = pane_id}, EDIT_MENU_FIELD_ROWS, enabled, x, y)
+}
+
+@(private = "file")
+edit_menu_show :: proc(
+	app: ^App,
+	w: ^Window,
+	target: Edit_Menu_Target,
+	rows: bit_set[Text_Edit_Command],
+	enabled: [Text_Edit_Command]bool,
+	x, y: f32,
+) {
 	if !gesture_cancel(app, w) {return}
-	overlay_open(app, w, Overlay_Edit_Menu{pane = pane})
+	overlay_open(app, w, Overlay_Edit_Menu{target = target})
 	menu := &w.edit_menu
 	ui.menu_clear(menu)
 	ui.menu_anchor(menu, x, y)
 	menu.width = EDIT_MENU_WIDTH
-	for command in Text_Edit_Command {
-		if command in EDIT_MENU_GROUP_STARTS {
+	for command in rows {
+		if command in EDIT_MENU_GROUP_STARTS && len(menu.items) > 0 {
 			if added, err := ui.menu_add(menu, {separator = true}); !added {
 				log.errorf("adding an edit menu separator failed: %v", err)
 				overlay_close(app, w)
@@ -61,7 +96,7 @@ edit_menu_open :: proc(app: ^App, w: ^Window, pane: u32, b: ^markdown.Edit_Buffe
 		row := ui.Menu_Item {
 			label    = EDIT_MENU_LABELS[command],
 			shortcut = EDIT_MENU_SHORTCUTS[command],
-			enabled  = text_edit_enabled(app, b, command),
+			enabled  = enabled[command],
 			payload  = u32(command),
 		}
 		if added, err := ui.menu_add(menu, row); !added {
@@ -73,6 +108,18 @@ edit_menu_open :: proc(app: ^App, w: ^Window, pane: u32, b: ^markdown.Edit_Buffe
 	ui.menu_select_edge(menu, false)
 }
 
+// A choice from the web address field's menu, applied to the field of the pane it was opened for. The
+// field stays in edit mode and the window takes the keyboard back from the closed menu.
+@(private = "file")
+web_url_edit_command :: proc(app: ^App, w: ^Window, id: u32, command: Text_Edit_Command) {
+	pane := web_find(app, id)
+	if pane == nil {return}
+	pane.url_editing = true
+	field_edit_command(app, &pane.url_field, command)
+	platform.window_reclaim_focus(&app.platform, w.id)
+	w.dirty = true
+}
+
 edit_menu_choose :: proc(app: ^App, w: ^Window) {
 	shown, ok := w.overlay.(Overlay_Edit_Menu)
 	index := ui.menu_selected(&w.edit_menu)
@@ -80,7 +127,10 @@ edit_menu_choose :: proc(app: ^App, w: ^Window) {
 	item := w.edit_menu.items[index]
 	if !item.enabled || item.separator {return}
 	overlay_close(app, w)
-	markdown_edit_command(app, w, shown.pane, Text_Edit_Command(item.payload))
+	switch target in shown.target {
+	case Edit_Menu_Markdown: markdown_edit_command(app, w, target.pane, Text_Edit_Command(item.payload))
+	case Edit_Menu_Web_Url: web_url_edit_command(app, w, target.pane, Text_Edit_Command(item.payload))
+	}
 }
 
 edit_menu_key :: proc(app: ^App, w: ^Window, e: input.Key_Event) {

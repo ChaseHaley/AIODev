@@ -103,7 +103,7 @@ hidden_panes_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 	if !ok {return .Ok}
 	for &pane, i in h.panes {
 		entry := workspace_session_for_content(app, h.contents[i])
-		badge, result := content_badge(app, entry, h.contents[i].kind, ui.ICON_INDICATOR * w.scale)
+		badge, result := content_badge(app, entry, h.contents[i], ui.ICON_INDICATOR * w.scale)
 		if result != .Ok {return result}
 		pane.icon, pane.glyph, pane.atlas = badge.icon, badge.glyph, badge.atlas
 	}

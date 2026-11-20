@@ -892,7 +892,7 @@ floating_capsules_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 			ui.ICON_BUTTON * s,
 		}
 		entry := workspace_session_for_content(app, capsule.content)
-		badge, found := content_badge(app, entry, capsule.content.kind, ui.ICON_BUTTON * s)
+		badge, found := content_badge(app, entry, capsule.content, ui.ICON_BUTTON * s)
 		if found != .Ok {return found}
 		if badge.icon != .None {
 			ui.icon_draw(&w.list, badge.icon, icon, ink, ui.ICON_BUTTON, s)

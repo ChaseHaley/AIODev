@@ -150,6 +150,9 @@ function Build-LuaJIT {
 function Build-NativeLibraries {
     # C++/WinRT keeps the notification ABI and COM event ownership out of the Odin UI code.
     Build-NativeLibrary 'notifications' 'native/windows_notifications.cpp' '/std:c++20 /EHsc /MT /O2 /W4 /WX'
+    # The WebView2 SDK is pinned in vendor/webview2 (D-106); its loader links statically.
+    $webviewInclude = Join-Path $PSScriptRoot 'vendor/webview2/include'
+    Build-NativeLibrary 'webview' 'native/windows_webview.cpp' "/std:c++20 /EHsc /MT /O2 /W4 /WX /I`"$webviewInclude`""
     Build-NativeLibrary 'md4c' 'vendor/md4c/md4c.c' '/MT /O2 /W3'
     Build-LuaJIT
 }

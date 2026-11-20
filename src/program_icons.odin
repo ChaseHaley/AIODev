@@ -413,28 +413,10 @@ program_icon_png :: proc(path: string, size: int, pixels: []u8) -> bool {
 	image, load_error := icon_png_load(path)
 	defer png.destroy(image)
 	if load_error != .None {return false}
-	source := image.pixels.buf[:]
 	longest := max(image.width, image.height)
 	width, height := max(1, image.width * size / longest), max(1, image.height * size / longest)
 	left, top := (size - width) / 2, (size - height) / 2
 	slice.fill(pixels[:size * size * 4], 0)
-	for y in 0 ..< height {
-		y0 := y * image.height / height
-		y1 := max(y0 + 1, (y + 1) * image.height / height)
-		for x in 0 ..< width {
-			x0 := x * image.width / width
-			x1 := max(x0 + 1, (x + 1) * image.width / width)
-			sum: [4]u32
-			for sy in y0 ..< y1 {
-				for sx in x0 ..< x1 {
-					from := (sy * image.width + sx) * 4
-					for c in 0 ..< 4 {sum[c] += u32(source[from + c])}
-				}
-			}
-			count := u32((x1 - x0) * (y1 - y0))
-			to := ((top + y) * size + left + x) * 4
-			for c in 0 ..< 4 {pixels[to + c] = u8((sum[c] + count / 2) / count)}
-		}
-	}
+	icon_png_sample(image, width, height, pixels, size, left, top)
 	return true
 }

@@ -11,6 +11,11 @@ File_Dialog :: struct {
 	window: input.Window_Id,
 }
 
+Markdown_Pick :: struct {
+	using dialog: File_Dialog,
+	menu:         Maybe(Profile_Menu_Mode),
+}
+
 // Add File and Add Folder choose for the document scope of `content`.
 Document_Pick :: struct {
 	using dialog: File_Dialog,
@@ -26,7 +31,7 @@ Icon_Pick :: struct {
 // The open dialogs: Open Markdown File, Add File/Add Folder with the pane it is choosing for, and a
 // Settings icon.
 File_Dialogs :: struct {
-	markdown: Maybe(File_Dialog),
+	markdown: Maybe(Markdown_Pick),
 	document: Maybe(Document_Pick),
 	icon:     Maybe(Icon_Pick),
 }
@@ -60,7 +65,11 @@ markdown_dialog_tick :: proc(app: ^App) {
 	path, finished := platform.file_pick_finished(dialog.pick)
 	if !finished {return}
 	if w := window_find(app, dialog.window); w != nil && path != "" {
-		target_open(app, w, File_Target{path})
+		if mode, menu := dialog.menu.?; menu {
+			pane_content_menu_choose(app, w, mode, .Markdown, path)
+		} else {
+			target_open(app, w, File_Target{path})
+		}
 	}
 	markdown_dialog_close(app)
 }
