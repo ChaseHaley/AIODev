@@ -641,7 +641,7 @@ EDITOR_SECTION_LIMIT :: 8
 
 // Every string a row owns, in one place for editor_add's copies and editor_row_destroy's frees.
 @(private)
-row_owned_strings :: proc(row: ^Editor_Row) -> [14]^string {
+row_owned_strings :: proc(row: ^Editor_Row) -> [15]^string {
 	return {
 		&row.key,
 		&row.title,
