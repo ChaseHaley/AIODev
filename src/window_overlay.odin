@@ -118,8 +118,26 @@ Overlay_Activity_Row_Menu :: struct {
 	session: u32,
 }
 
-// The edit menu of a Markdown pane's text, which acts on that pane. Its rows are w.edit_menu.
+// The edit menu of a text surface, which acts on the text of the pane `target` names. Its rows are
+// w.edit_menu.
 Overlay_Edit_Menu :: struct {
+	target: Edit_Menu_Target,
+}
+
+// What an edit menu edits. Each names its pane by id, never by pointer, so a pane closed while the menu
+// is open is simply not found.
+Edit_Menu_Target :: union #no_nil {
+	Edit_Menu_Markdown,
+	Edit_Menu_Web_Url,
+}
+
+// A Markdown pane's edit buffer.
+Edit_Menu_Markdown :: struct {
+	pane: u32,
+}
+
+// A web pane's address field.
+Edit_Menu_Web_Url :: struct {
 	pane: u32,
 }
 

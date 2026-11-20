@@ -713,8 +713,8 @@ changes_filter_key :: proc(
 	return true
 }
 
-// A press in the filter field puts the caret under the pointer, or extends the selection to it; a drag
-// that press started extends it.
+// A press in the filter field puts the caret under the pointer, or extends the selection to it, and a
+// double or triple click selects a word or the whole field; a drag that press started extends it.
 @(private = "file")
 changes_filter_point :: proc(
 	w: ^Window,
@@ -722,11 +722,18 @@ changes_filter_point :: proc(
 	g: ui.Changes_Geometry,
 	x: f32,
 	pressed, extend: bool,
+	time_ns := i64(0),
 ) {
 	box, visible := ui.changes_filter_box(g, &pane.model.view, &w.ui_text)
 	if !visible {return}
 	at := ui.field_box_offset(box, x)
-	if ui.field_pointer(&pane.filter_editor, at, pressed, extend) != .None {w.dirty = true}
+	change: ui.Field_Change
+	if pressed {
+		change = field_press(&pane.filter_editor, at, x, extend, time_ns)
+	} else {
+		change = ui.field_pointer(&pane.filter_editor, at, false, true)
+	}
+	if change != .None {w.dirty = true}
 }
 
 // Typed or pasted text goes to the filter field or the open list's search, else to the comment being
@@ -1283,7 +1290,7 @@ changes_press :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) {
 	if state.filter_open {
 		#partial switch hit.part {
 		case .Filter_Field:
-			if hit.index >= 0 {changes_filter_point(w, pane, g, x, true, extend)}
+			if hit.index >= 0 {changes_filter_point(w, pane, g, x, true, extend, e.time_ns)}
 		case .Filter_Clear:
 			changes_filter_clear(app, w, pane)
 		case:

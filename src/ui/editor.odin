@@ -459,6 +459,8 @@ Editor :: struct {
 	hover_clear:                                                       bool,
 	// The pointer is over the Browse button of the hovered row.
 	hover_browse:                                                      bool,
+	// The page's run of presses, which its owner counts for the search and value fields' double clicks.
+	clicks:                                                            Click_Mark,
 	// The shortcut field's capture, alternatives list and key-positions choice.
 	capture:                                                           Shortcut_Capture,
 	// A conflict chain the page shows instead of its rows, and where the page returns once it ends.
@@ -3242,13 +3244,15 @@ slide :: proc(p: ^Editor, row: ^Editor_Row, slider: render.Rect, x: f32) {
 	field_set(&p.value, number_text(row_step(row), number))
 }
 
-// A press inside the page; `extend` (Shift) grows a text selection instead of moving the caret.
+// A press inside the page; `extend` (Shift) grows a text selection instead of moving the caret, and
+// `clicks` is the press's count in its run, so a double click selects a word and a triple the field.
 editor_press :: proc(
 	p: ^Editor,
 	l: Editor_Layout,
 	text: ^Text,
 	x, y: f32,
 	extend: bool,
+	clicks := 1,
 ) -> Editor_Outcome {
 	s := l.scale
 	p.profile_menu.bounds = l.page
@@ -3262,7 +3266,7 @@ editor_press :: proc(
 		editor_mode_set(p, Editor_Editing{})
 		return .Changed
 	}
-	if result, handled := color_board_press(p, l, text, x, y, extend); handled {return result}
+	if result, handled := color_board_press(p, l, text, x, y, extend, clicks); handled {return result}
 	popup := editor_popup(p)
 	if popup == .None && render.rect_contains(editor_reset_all_rect(l), x, y) {
 		editor_blur(p)
@@ -3348,7 +3352,7 @@ editor_press :: proc(
 	}
 	if render.rect_contains(l.filter, x, y) {
 		if editor_focus(p) != .Search {editor_keep(p); stop_editing(p)}
-		field_pointer(&p.filter, field_box_offset(filter_box(p, l, text), x), true, extend)
+		field_pointer(&p.filter, field_box_offset(filter_box(p, l, text), x), true, extend, clicks)
 		editor_mode_set(p, Editor_Browsing{selecting = true})
 		return .Changed
 	}
@@ -3472,7 +3476,7 @@ editor_press :: proc(
 			return .Save
 		}
 		if editor_capturing(p) {stop_editing(p)}
-		field_pointer(&p.value, field_box_offset(value_box(p, parts, text, s), x), true, extend)
+		field_pointer(&p.value, field_box_offset(value_box(p, parts, text, s), x), true, extend, clicks)
 		editor_mode_set(p, Editor_Editing{drag = .Value})
 		return .Changed
 	}

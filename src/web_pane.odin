@@ -1023,6 +1023,10 @@ web_press :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) {
 	pane_focus(app, w, pr.node)
 	nav := web_nav_layout(w, pane, pr.rect)
 	if nav.shown && render.rect_contains(nav.bar, x, y) {
+		if e.button == .Right {
+			if web_nav_hit(nav, x, y) == .Url {edit_menu_open_web_url(app, w, pane.id, x, y)}
+			return
+		}
 		if e.button != .Left {return}
 		hit := web_nav_hit(nav, x, y)
 		pane.nav_armed = hit

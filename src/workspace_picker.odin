@@ -414,7 +414,7 @@ workspace_picker_button :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Eve
 		}
 	}
 	if _, menu := p.state.(Workspace_Picker_Menu); menu && e.button == .Left {
-		workspace_picker_click(app, w, x, y, .Shift in e.modifiers)
+		workspace_picker_click(app, w, x, y, .Shift in e.modifiers, e.time_ns)
 	} else if !render.rect_contains(r, x, y) {
 		workspace_picker_cancel(w)
 	} else if e.button == .Left {
@@ -429,7 +429,7 @@ workspace_picker_button :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Eve
 				return
 			}
 		}
-		workspace_picker_click(app, w, x, y, .Shift in e.modifiers)
+		workspace_picker_click(app, w, x, y, .Shift in e.modifiers, e.time_ns)
 	}
 }
 
