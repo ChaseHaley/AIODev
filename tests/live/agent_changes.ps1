@@ -1033,6 +1033,7 @@ try {
         $s = State
         $at, $clear, $field, $token = (Rect $s 'changes.filter_at_rect'), (Rect $s 'changes.filter_clear_rect'),
             (Rect $s 'changes.filter_field_rect'), (Rect $s 'changes.filter_token.0.rect')
+        $tokenAt, $tokenClose = (Rect $s 'changes.filter_token.0.at_rect'), (Rect $s 'changes.filter_token.0.close_rect')
         $scale = [double]$s['window.scale']
         Equal ([math]::Round($at[2] / $scale)) 24 "at $dpi dpi the @ button is 24 DIP wide"
         Equal ([math]::Round($clear[2] / $scale)) 24 "at $dpi dpi the clear button is 24 DIP wide"
@@ -1043,7 +1044,15 @@ try {
             throw "at $dpi dpi the @ button is not centred in the field"
         }
         Write-Output "PASS at $dpi dpi the @ and clear buttons share size and centre line with the field"
-        Set-Content -LiteralPath "$data/align-$dpi.json" -Value (@{ dpi = $dpi; scale = $scale; at = $at; clear = $clear; field = $field; token = $token } | ConvertTo-Json -Compress)
+        # A token pill's @ and × are boxes as tall as the pill, so the icons in them share the pill's centre line.
+        foreach ($part in @(@('@', $tokenAt), @('x', $tokenClose))) {
+            $box = $part[1]
+            if ([math]::Abs(($box[1] + $box[3] / 2) - ($token[1] + $token[3] / 2)) -gt 1) {
+                throw "at $dpi dpi the token's $($part[0]) is not centred on its pill"
+            }
+        }
+        Write-Output "PASS at $dpi dpi the token's @ and x share the pill's centre line"
+        Set-Content -LiteralPath "$data/align-$dpi.json" -Value (@{ dpi = $dpi; scale = $scale; at = $at; clear = $clear; field = $field; token = $token; token_at = $tokenAt; token_close = $tokenClose } | ConvertTo-Json -Compress)
         Aio capture --out "$data/align-$dpi.png" | Out-Null
     }
     Aio dpi 96 | Out-Null

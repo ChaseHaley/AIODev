@@ -800,7 +800,6 @@ filter_picks_draw :: proc(
 			draw_rect(list, {rect = bar, color = theme.accent, radius = pill_radius(bar)})
 		}
 		px, pright := rect.x + SPACE_2 * s, rect.x + rect.width - SPACE_2 * s
-		baseline := baseline_in(rect.y, rect.height, &body)
 		counts: [16]u8
 		hides := fmt.bprintf(counts[:], "hides %d", pick.hides)
 		hides_width := text_width(&small, hides)
@@ -808,13 +807,17 @@ filter_picks_draw :: proc(
 		status := draw_text(&small, list, hides, pright - hides_width, small_baseline, theme.faint)
 		if status != .Ok {return status}
 		room := pright - hides_width - SPACE_2 * s - px
-		label := fmt.tprintf("@%s", clip_bytes(pick.label, CHANGES_CLIP_BYTES))
-		label_width := min(text_width(&body, label), room)
-		if status = draw_fading_text(&body, list, label, px, baseline, theme.text, label_width); status != .Ok {
+		label := clip_bytes(pick.label, CHANGES_CLIP_BYTES)
+		at := text_width(&body, "@")
+		name := px + at + SPACE_1 * s
+		icon_draw(list, .At, {px, rect.y, at, rect.height}, theme.accent, TOKEN_AT_ICON, s)
+		label_width := min(text_width(&body, label), max(1, room - at - SPACE_1 * s))
+		line := baseline_caps(rect.y, rect.height, &body)
+		if status = draw_fading_text(&body, list, label, name, line, theme.text, label_width); status != .Ok {
 			return status
 		}
 		if pick.label == pick.pattern {continue}
-		pattern := px + label_width + SPACE_2 * s
+		pattern := name + label_width + SPACE_2 * s
 		if pattern >= px + room {continue}
 		status = draw_fading_text(
 			&small, list, pick.pattern, pattern, small_baseline, theme.faint, px + room - pattern,

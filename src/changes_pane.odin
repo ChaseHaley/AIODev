@@ -1771,6 +1771,9 @@ when AIO_CONTROL {
 						for _, i in pane.filter_tokens {
 							rect := ui.filter_field_token_rect(box, pane.filter_tokens[:], i)
 							state_rect(r, changes_report_key("filter_token", i, "rect"), rect)
+							at, close := ui.filter_field_token_marks(box, pane.filter_tokens[:], i)
+							state_rect(r, changes_report_key("filter_token", i, "at_rect"), at)
+							state_rect(r, changes_report_key("filter_token", i, "close_rect"), close)
 						}
 					}
 					for row, i in g.filter_picks {

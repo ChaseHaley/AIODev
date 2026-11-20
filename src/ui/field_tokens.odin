@@ -40,6 +40,9 @@ Filter_Pick :: struct {
 @(private = "file")
 TOKEN_CLOSE :: f32(16)
 
+// The @ icon of a pill or a list row, sized so its ink is as tall as the name's capitals.
+TOKEN_AT_ICON :: f32(10)
+
 @(private = "file")
 TOKEN_LABEL_MAX :: f32(180)
 
@@ -152,6 +155,26 @@ filter_field_token_rect :: proc(box: Field_Box, tokens: []Filter_Token, index: i
 	return {x, box.rect.y + (box.rect.height - pill) / 2, token_width(&text, token, s), pill}
 }
 
+// The boxes of a pill's @ and ×, each as tall as the pill so an icon centred in one is centred on the pill.
+@(private = "file")
+token_parts :: proc(text: ^Text, pill: render.Rect, s: f32) -> (at, close: render.Rect) {
+	at = {pill.x + SPACE_2 * s, pill.y, text_width(text, "@"), pill.height}
+	close = {pill.x + pill.width - (SPACE_1 + TOKEN_CLOSE) * s, pill.y, TOKEN_CLOSE * s, pill.height}
+	return
+}
+
+// Where token `index` draws its @ and its ×, for the verification state.
+filter_field_token_marks :: proc(
+	box: Field_Box, tokens: []Filter_Token, index: int,
+) -> (
+	at, close: render.Rect,
+) {
+	pill := filter_field_token_rect(box, tokens, index)
+	if pill.width <= 0 {return}
+	text := text_styled(box.text, box.style)
+	return token_parts(&text, pill, box.scale)
+}
+
 // One pill: a fill that dims while the token is off, its name (struck through while off) and the ×.
 @(private = "file")
 token_draw :: proc(
@@ -160,7 +183,6 @@ token_draw :: proc(
 	theme: Theme,
 	token: Filter_Token,
 	rect: render.Rect,
-	baseline: f32,
 	pointer: [2]f32,
 	s: f32,
 ) -> render.Build_Status {
@@ -171,18 +193,19 @@ token_draw :: proc(
 		draw_rect(list, {rect = rect, color = theme.warning, radius = radius, stroke = s})
 	}
 	label := token_label(token)
-	at := text_width(text, "@")
-	x := rect.x + SPACE_2 * s
-	close := render.Rect{rect.x + rect.width - (SPACE_1 + TOKEN_CLOSE) * s, rect.y, TOKEN_CLOSE * s, rect.height}
+	at_box, close := token_parts(text, rect, s)
+	x := at_box.x
 	mark := token.off ? theme.faint : theme.accent
-	if result := draw_text(text, list, "@", x, baseline, mark, at); result != .Ok {return result}
-	x += at + SPACE_1 * s
+	// The @ is the field's @ button icon, centred on the pill like the ×; the name's capitals share that line.
+	icon_draw(list, .At, at_box, mark, TOKEN_AT_ICON, s)
+	x += at_box.width + SPACE_1 * s
 	room := max(1, close.x - x)
-	if result := draw_text(text, list, label, x, baseline, ink, room); result != .Ok {return result}
+	line := baseline_caps(rect.y, rect.height, text)
+	if result := draw_text(text, list, label, x, line, ink, room); result != .Ok {return result}
 	if token.off {
 		width := min(text_width(text, label), room)
-		line := render.Rect{x, baseline - text.ascent / 3, width, max(1, math.round(s))}
-		draw_rect(list, {rect = line, color = ink})
+		strike := render.Rect{x, line - text.ascent / 3, width, max(1, math.round(s))}
+		draw_rect(list, {rect = strike, color = ink})
 	}
 	hover := f32(render.rect_contains(close, pointer.x, pointer.y) ? 1 : 0)
 	err := icon_button_draw(list, theme, close, .Close, hover, 0, s, pointer, ICON_INDICATOR, RADIUS_CONTROL)
@@ -218,7 +241,7 @@ token_content :: proc(
 		width := token_width(text, token, s)
 		if pills && pen < limit && pen + width > frame.x {
 			rect := render.Rect{pen, top, width, pill}
-			if status := token_draw(list, text, theme, token, rect, baseline, pointer, s); status != .Ok {
+			if status := token_draw(list, text, theme, token, rect, pointer, s); status != .Ok {
 				return status
 			}
 		}
