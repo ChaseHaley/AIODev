@@ -74,23 +74,31 @@ Content_Badge :: struct {
 	atlas: render.Rect,
 }
 
-// A session's program icon or shell badge `size` pixels square, else the kind's icon: the badge the
-// tab strip shows, so pane headers and float capsules show the same one.
+// A session's program icon or shell badge `size` pixels square, else a web page's favicon once it has
+// one, else the kind's icon: the badge the tab strip shows, so pane headers, the rail and float capsules
+// show the same one.
 @(require_results)
 content_badge :: proc(
 	app: ^App,
 	entry: ^Session_Entry,
-	kind: layout.Content_Kind,
+	content: layout.Content,
 	size: f32,
 ) -> (
 	badge: Content_Badge,
 	result: render.Build_Status,
 ) {
-	policy := CONTENT_POLICY[kind]
+	policy := CONTENT_POLICY[content.kind]
 	if policy.owns_session {
 		badge.glyph, badge.atlas, result = pane_icon(app, entry, size)
-	} else {
-		badge.icon = policy.icon
+		return
+	}
+	badge.icon = policy.icon
+	#partial switch content.kind {
+	case .Web:
+		if pane := web_find(app, content.id); pane != nil {
+			badge.atlas, result = web_favicon_atlas(app, &pane.favicon)
+			if badge.atlas.width > 0 {badge.icon = .None}
+		}
 	}
 	return
 }
