@@ -121,6 +121,7 @@ Pane_Settings :: struct {
 	markdown_floating:             bool,
 	web_links:                     bool,
 	web_navigator:                 bool,
+	web_floating:                  bool,
 	drop_limit:                    int,
 	resume_agents:                 bool,
 	minimum_columns, minimum_rows: int,
@@ -915,6 +916,15 @@ SCHEMA :: [?]Schema_Entry {
 		offset = offset_of(Settings, pane) + offset_of(Pane_Settings, web_navigator),
 		default_value = "true",
 		description = "Show Back, Forward, Reload and an editable address bar beneath a web pane's header.",
+	},
+	{
+		key = "pane.web_floating",
+		title = "Open web panes floating",
+		kind = .Bool,
+		offset = offset_of(Settings, pane) + offset_of(Pane_Settings, web_floating),
+		default_value = "false",
+		description = "Open a clicked web link in a float above the tab, so the panes already there keep " +
+			"their size.",
 	},
 	{
 		key = "pane.drop_limit",
