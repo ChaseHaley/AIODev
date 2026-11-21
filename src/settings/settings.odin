@@ -615,11 +615,13 @@ Turns_Settings :: struct {
 	quick_labels:          string,
 	saved_filters:         string,
 }
-// Neovim panes: how their windows scroll, how see-through floats that take no input are, and what a
-// pane shows once Neovim quits.
+// Neovim panes: how their windows scroll and move, how see-through floats that take no input are, and
+// what a pane shows once Neovim quits.
 Neovim_Settings :: struct {
 	smooth_scroll:   bool,
 	scroll_duration: int,
+	animate_moves:   bool,
+	move_duration:   int,
 	overlay_opacity: int,
 	exit_to_shell:   bool,
 }
@@ -1684,6 +1686,25 @@ SCHEMA :: [?]Schema_Entry {
 		default_value = "250",
 		valid = {50, 1000},
 		description = "About how long a scroll takes to settle, in milliseconds.",
+	},
+	{
+		key = "neovim.animate_moves",
+		title = "Animate window moves",
+		kind = .Bool,
+		offset = offset_of(Settings, neovim) + offset_of(Neovim_Settings, animate_moves),
+		default_value = "true",
+		description = "A Neovim window or float that Neovim moves, as when a split opens or closes or the " +
+			"completion menu follows the cursor, slides to its new place instead of jumping. Off when " +
+			"Windows animations are off.",
+	},
+	{
+		key = "neovim.move_duration",
+		title = "Window move duration (ms)",
+		kind = .Int,
+		offset = offset_of(Settings, neovim) + offset_of(Neovim_Settings, move_duration),
+		default_value = "150",
+		valid = {50, 1000},
+		description = "How long a window or float takes to slide to its new place, in milliseconds.",
 	},
 	{
 		key = "neovim.overlay_opacity",

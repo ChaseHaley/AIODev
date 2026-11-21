@@ -380,6 +380,7 @@ neovim_pane_draw :: proc(
 		minimum_contrast = minimum_contrast,
 		cursor_effects   = cursor_effects(app),
 		smooth_scroll    = app.animations && app.settings.neovim.smooth_scroll,
+		animate_moves    = app.animations && app.settings.neovim.animate_moves,
 		overlay_opacity  = f32(app.settings.neovim.overlay_opacity) / 100,
 	}
 	box := pane_box(w.metrics, rect.rect, neovim_insets(app, w))
@@ -387,7 +388,8 @@ neovim_pane_draw :: proc(
 	if render.push_layer(&w.list, clip, window_pane_radius(app, w)) != .None {return}
 	frame, result = term_view.neovim_build(&pane.view, &pane.client, app.fonts, &app.cache, &w.list,
 		box.origin, w.metrics, style, w.frame)
-	moving := term_view.neovim_cursor_animating(&pane.view) || term_view.neovim_scroll_animating(&pane.view)
+	moving := term_view.neovim_cursor_animating(&pane.view) || term_view.neovim_scroll_animating(&pane.view) ||
+		term_view.neovim_moves_animating(&pane.view)
 	if moving && !w.frame.resuming {w.frame_moved = true}
 	return
 }
@@ -745,6 +747,32 @@ neovim_scrolls_animating :: proc(app: ^App, w: ^Window) -> bool {
 	return false
 }
 
+// Advances the slide of every window and float of every Neovim pane w shows; true while one still
+// moves.
+neovim_move_motion :: proc(app: ^App, w: ^Window, frame: render.Frame_Time) -> bool {
+	duration := time.Duration(app.settings.neovim.move_duration) * time.Millisecond
+	enabled := app.animations && app.settings.neovim.animate_moves && window_drawable(w)
+	moved := false
+	for pane in w.panes {
+		if pane.content.kind != .Neovim {continue}
+		if np := neovim_find(app, pane.content.id); np != nil {
+			moved ||= term_view.neovim_moves_animate(&np.view, frame, duration, enabled)
+		}
+	}
+	return moved
+}
+
+neovim_moves_animating :: proc(app: ^App, w: ^Window) -> bool {
+	if !window_drawable(w) {return false}
+	for pane in w.panes {
+		if pane.content.kind != .Neovim {continue}
+		if np := neovim_find(app, pane.content.id); np != nil && term_view.neovim_moves_animating(&np.view) {
+			return true
+		}
+	}
+	return false
+}
+
 when AIO_CONTROL {
 	// The verification keys of the Neovim panes: the focused one under neovim.*, with the text of each grid
 	// row, and every pane under neovim.pane.<id>.*.
@@ -793,6 +821,7 @@ when AIO_CONTROL {
 		state_value(r, state_key("%s.cursor_column", prefix), s.cursor_screen_column)
 		state_word(r, state_key("%s.cursor_shape", prefix), s.mode.shape)
 		state_value(r, state_key("%s.scrolling", prefix), term_view.neovim_scroll_animating(&p.view))
+		state_value(r, state_key("%s.sliding", prefix), term_view.neovim_moves_animating(&p.view))
 		state_value(r, state_key("%s.generation", prefix), s.generation)
 	}
 
