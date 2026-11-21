@@ -116,12 +116,45 @@ CONFIRM_PROMPT_LABELS :: []string {
 	CONFIRM_PROMPT_LABEL[Confirm_Prompt(1)],
 	CONFIRM_PROMPT_LABEL[Confirm_Prompt(2)],
 }
+// Where a shell's reported Vim/input mode badge (OSC 7502) is shown on a terminal pane.
+Shell_Mode_Badge :: enum int {
+	Header,
+	Footer,
+	Corner,
+	Off,
+}
+SHELL_MODE_BADGE_NAME :: [Shell_Mode_Badge]string {
+	.Header = "header",
+	.Footer = "footer",
+	.Corner = "corner",
+	.Off    = "off",
+}
+SHELL_MODE_BADGE_LABEL :: [Shell_Mode_Badge]string {
+	.Header = "Pane header",
+	.Footer = "Bottom strip",
+	.Corner = "Floating corner",
+	.Off    = "Off",
+}
+#assert(len(Shell_Mode_Badge) == 4)
+SHELL_MODE_BADGE_NAMES :: []string {
+	SHELL_MODE_BADGE_NAME[Shell_Mode_Badge(0)],
+	SHELL_MODE_BADGE_NAME[Shell_Mode_Badge(1)],
+	SHELL_MODE_BADGE_NAME[Shell_Mode_Badge(2)],
+	SHELL_MODE_BADGE_NAME[Shell_Mode_Badge(3)],
+}
+SHELL_MODE_BADGE_LABELS :: []string {
+	SHELL_MODE_BADGE_LABEL[Shell_Mode_Badge(0)],
+	SHELL_MODE_BADGE_LABEL[Shell_Mode_Badge(1)],
+	SHELL_MODE_BADGE_LABEL[Shell_Mode_Badge(2)],
+	SHELL_MODE_BADGE_LABEL[Shell_Mode_Badge(3)],
+}
 Pane_Settings :: struct {
 	gap, corner_radius:            int,
 	markdown_floating:             bool,
 	web_links:                     bool,
 	web_navigator:                 bool,
 	web_floating:                  bool,
+	shell_mode_badge:              Shell_Mode_Badge,
 	drop_limit:                    int,
 	resume_agents:                 bool,
 	minimum_columns, minimum_rows: int,
@@ -941,6 +974,19 @@ SCHEMA :: [?]Schema_Entry {
 		default_value = "false",
 		description = "Open a clicked web link in a float above the tab, so the panes already there keep " +
 			"their size.",
+	},
+	{
+		key = "pane.shell_mode_badge",
+		title = "Shell mode badge",
+		keywords = "vim vi mode indicator osc 7502 psvim",
+		kind = .Enum,
+		offset = offset_of(Settings, pane) + offset_of(Pane_Settings, shell_mode_badge),
+		default_value = "header",
+		names = SHELL_MODE_BADGE_NAMES,
+		labels = SHELL_MODE_BADGE_LABELS,
+		description = "Where to show the active Vim or input mode reported by the shell (OSC 7502): in " +
+			"the pane header, in a slim strip beneath the terminal, as a floating corner pill, or off. " +
+			"Automatically hidden on the alternate screen.",
 	},
 	{
 		key = "pane.drop_limit",

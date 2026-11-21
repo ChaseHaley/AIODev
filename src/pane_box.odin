@@ -10,6 +10,7 @@ import "core:math"
 Pane_Insets :: struct {
 	padding: f32,
 	header:  f32,
+	footer:  f32,
 }
 
 // One pane's grid geometry: rectangle, insets, fitting grid and draw origin.
@@ -17,6 +18,7 @@ Pane_Box :: struct {
 	rect:    layout.Rect,
 	padding: f32,
 	header:  f32,
+	footer:  f32,
 	columns: u16,
 	rows:    u16,
 	origin:  [2]f32,
@@ -28,9 +30,13 @@ pane_header_height :: proc(scale: f32) -> f32 {
 	return math.round(ui.HEADER_HEIGHT * scale)
 }
 
-// A shown pane's padding and header.
+// A shown pane's padding, header and optional shell-mode footer strip.
 pane_insets :: proc(app: ^App, w: ^Window, entry: ^Session_Entry) -> Pane_Insets {
-	return {padding = pane_padding(app, w.scale, entry), header = pane_header_height(w.scale)}
+	return {
+		padding = pane_padding(app, w.scale, entry),
+		header = pane_header_height(w.scale),
+		footer = pane_footer_height(app, w.scale, entry),
+	}
 }
 
 // The pane below its header; a pane shorter than its header has no body.
@@ -43,13 +49,14 @@ pane_box :: proc(metrics: term_view.Metrics, rect: layout.Rect, insets: Pane_Ins
 	columns, rows := term_view.grid_size(
 		metrics,
 		rect.width,
-		max(0, rect.height - insets.header),
+		max(0, rect.height - insets.header - insets.footer),
 		insets.padding,
 	)
 	return {
 		rect = rect,
 		padding = insets.padding,
 		header = insets.header,
+		footer = insets.footer,
 		columns = columns,
 		rows = rows,
 		origin = {
@@ -93,7 +100,7 @@ pane_box_for_grid :: proc(
 	solved: bool,
 ) {
 	want_width := f32(columns) * w.metrics.cell_width + 2 * insets.padding
-	want_height := f32(rows) * w.metrics.cell_height + 2 * insets.padding + insets.header
+	want_height := f32(rows) * w.metrics.cell_height + 2 * insets.padding + insets.header + insets.footer
 	candidate := w
 	area := window_content_area_in(app, &candidate, candidate.pane_fill)
 	for _ in 0 ..< PANE_BOX_SOLVE_STEPS {
