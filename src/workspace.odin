@@ -264,10 +264,10 @@ tab_close_has_work :: proc(app: ^App, workspace: ^Workspace, index: int) -> bool
 	if index < 0 || index >= len(workspace.tabs) {return false}
 	for tab, i in workspace.tabs {
 		if !tab_close_covers(workspace, index, i) {continue}
-		walk := tab_session_panes(app, &tab.tree, i)
+		walk := tab_status_panes(app, &tab.tree, i)
 		for pane, ok := workspace_pane_next(&walk); ok; pane, ok = workspace_pane_next(&walk) {
-			if pane.session == nil {continue}
-			for record in pane.session.statuses {
+			if pane.status == nil {continue}
+			for record in pane.status.statuses {
 				if record.state == .Working || record.state == .Blocked {return true}
 			}
 		}

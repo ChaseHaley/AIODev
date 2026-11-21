@@ -10,6 +10,8 @@ import "core:fmt"
 Content_Policy :: struct {
 	// A live runtime in app.sessions, keyed by the content id.
 	owns_session:      bool,
+	// Reports program status (OSC 7501) that status surfaces show: content_status.
+	reports_status:    bool,
 	// One page per workspace, so the content id is always 0.
 	one_per_workspace: bool,
 	// May have a linked window.
@@ -30,13 +32,14 @@ Content_Policy :: struct {
 @(rodata)
 CONTENT_POLICY := [layout.Content_Kind]Content_Policy {
 	.Terminal = {
-		owns_session = true, linkable = true, documents = true, commands = true, display_name = "Terminal",
+		owns_session = true, reports_status = true, linkable = true, documents = true, commands = true,
+		display_name = "Terminal",
 	},
 	.Settings = {one_per_workspace = true, icon = .Settings, display_name = "Settings"},
 	.Markdown = {linkable = true, documents = true, file = true, icon = .Markdown, display_name = "Markdown"},
 	.Changes = {linkable = true, icon = .Changes, display_name = "Agent changes"},
 	.Web = {linkable = true, documents = true, icon = .Globe, display_name = "Web"},
-	.Neovim = {linkable = true, icon = .Code, display_name = "Neovim"},
+	.Neovim = {reports_status = true, linkable = true, icon = .Code, display_name = "Neovim"},
 }
 
 // The title of content that does not title itself through a session.
@@ -129,6 +132,24 @@ content_directory :: proc(app: ^App, content: layout.Content) -> string {
 
 pane_owns_session :: proc(kind: layout.Content_Kind) -> bool {
 	return CONTENT_POLICY[kind].owns_session
+}
+
+content_reports_status :: proc(kind: layout.Content_Kind) -> bool {
+	return CONTENT_POLICY[kind].reports_status
+}
+
+// The program status content reports: a Terminal pane's session, `session`, which the caller found; a
+// Neovim pane's own status entry (WORK-548); nil for content that reports none.
+@(require_results)
+content_status :: proc(app: ^App, content: layout.Content, session: ^Session_Entry) -> ^Session_Entry {
+	#partial switch content.kind {
+	case .Terminal:
+		return session
+	case .Neovim:
+		if app == nil {return nil}
+		if pane := neovim_find(app, content.id); pane != nil {return &pane.status}
+	}
+	return nil
 }
 
 // The content's own pinned documents, or nil for a kind without them or content no longer running.

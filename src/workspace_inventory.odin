@@ -8,6 +8,9 @@ Workspace_Pane :: struct {
 	node:    layout.Node_Id,
 	content: layout.Content,
 	session: ^Session_Entry,
+	// The program status the pane reports (content_status): its session for a Terminal pane, a Neovim
+	// pane's own; nil for other content.
+	status:  ^Session_Entry,
 }
 
 // Every pane a workspace shows, and the subset that owns a runtime.
@@ -21,6 +24,8 @@ Workspace_Pane_Scope :: enum {
 	All,
 	Sessions,
 	Other,
+	// The panes that report program status: content_reports_status.
+	Status,
 }
 
 // Walks a workspace's tabs in order, then each tab's nodes in order. A walk over one tab has
@@ -43,6 +48,8 @@ pane_scope_includes :: proc(scope: Workspace_Pane_Scope, kind: layout.Content_Ki
 		return pane_owns_session(kind)
 	case .Other:
 		return !pane_owns_session(kind)
+	case .Status:
+		return content_reports_status(kind)
 	}
 	return false
 }
@@ -61,6 +68,16 @@ workspace_panes :: proc(app: ^App, workspace: ^Workspace) -> Workspace_Pane_Walk
 // Every Terminal pane, the content that owns a runtime.
 workspace_session_panes :: proc(app: ^App, workspace: ^Workspace) -> Workspace_Pane_Walk {
 	return {app = app, workspace = workspace, scope = .Sessions}
+}
+
+// Every pane that reports program status, in tab order.
+workspace_status_panes :: proc(app: ^App, workspace: ^Workspace) -> Workspace_Pane_Walk {
+	return {app = app, workspace = workspace, scope = .Status}
+}
+
+// Every pane in one tab tree that reports program status.
+tab_status_panes :: proc(app: ^App, tree: ^layout.Layout, tab: int) -> Workspace_Pane_Walk {
+	return {app = app, tree = tree, tab = tab, scope = .Status}
 }
 
 // Every Terminal pane in one tab tree.
@@ -104,11 +121,13 @@ workspace_pane_next :: proc(walk: ^Workspace_Pane_Walk) -> (pane: Workspace_Pane
 			walk.node += 1
 			content, is_pane := layout.pane_content(walk.tree, node_id)
 			if !is_pane || !pane_scope_includes(walk.scope, content.kind) {continue}
+			session := workspace_session_for_content(walk.app, content)
 			return Workspace_Pane{
 				tab = walk.tab,
 				node = node_id,
 				content = content,
-				session = workspace_session_for_content(walk.app, content),
+				session = session,
+				status = content_status(walk.app, content, session),
 			}, true
 		}
 		if walk.workspace == nil {return {}, false}
@@ -160,11 +179,13 @@ workspace_pane_at :: proc(
 	if workspace == nil || tab < 0 || tab >= len(workspace.tabs) {return {}, false}
 	content, ok := layout.pane_content(&workspace.tabs[tab].tree, node)
 	if !ok {return {}, false}
+	session := workspace_session_for_content(app, content)
 	return Workspace_Pane{
 		tab = tab,
 		node = node,
 		content = content,
-		session = workspace_session_for_content(app, content),
+		session = session,
+		status = content_status(app, content, session),
 	}, true
 }
 

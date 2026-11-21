@@ -4,13 +4,26 @@ import "core:fmt"
 import "aio:layout"
 
 // Finding and showing the pane a session runs in, wherever it is. Status lists and notices, focus
-// jumps and notification clicks name panes by session.
+// jumps and notification clicks name panes by session, or by a Neovim pane's status id (WORK-548).
 
-// Finds the owning pane, never a tear-off preview borrowing the same session runtime.
+// Finds the owning pane, never a tear-off preview borrowing the same session runtime. An id no session
+// has may be a Neovim pane's status entry, found as the pane that shows that Neovim.
 session_pane_find :: proc(app: ^App, id: u32) -> (^Workspace, Workspace_Pane, bool) {
 	for workspace in app.workspaces {
 		if workspace.provisional {continue}
 		if pane, found := workspace_first_session(app, workspace, id); found {return workspace, pane, true}
+	}
+	for neovim in app.neovim_panes {
+		if neovim.status.id != id {continue}
+		content := layout.Content{.Neovim, neovim.id}
+		for workspace in app.workspaces {
+			if workspace.provisional {continue}
+			for &tab, index in workspace.tabs {
+				node := layout.find_content(&tab.tree, content)
+				if node == layout.INVALID_NODE {continue}
+				return workspace, {tab = index, node = node, content = content, status = &neovim.status}, true
+			}
+		}
 	}
 	return nil, {}, false
 }

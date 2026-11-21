@@ -33,7 +33,9 @@ focus_leave :: proc(app: ^App, w: ^Window) {
 	ui.editor_theme_delete_disarm(&w.editor)
 	window_overlays_cancel(app, w)
 	entry := workspace_session_for_content(app, entered.content)
-	if entry != nil {status_focus_leave(app, w, entry)}
+	if reporter := content_status(app, entered.content, entry); reporter != nil {
+		status_focus_leave(app, w, reporter)
+	}
 	web_focus_leave(app, w, entered.content)
 	neovim_focus_changed(app, entered.content, false)
 	leader_cancel(w)
@@ -82,6 +84,13 @@ focus_enter :: proc(app: ^App, w: ^Window) {
 focus_session :: proc(app: ^App, w: ^Window) -> ^Session_Entry {
 	entered, ok := w.focus_bracket.(Focus_Entered)
 	return ok ? workspace_session_for_content(app, entered.content) : nil
+}
+
+// The program status of the entered pane, which the window losing focus has read up to then.
+focus_status :: proc(app: ^App, w: ^Window) -> ^Session_Entry {
+	entered, ok := w.focus_bracket.(Focus_Entered)
+	if !ok {return nil}
+	return content_status(app, entered.content, workspace_session_for_content(app, entered.content))
 }
 
 // What the window's focused pane shows; false while it shows no tab or its focus is not a pane.

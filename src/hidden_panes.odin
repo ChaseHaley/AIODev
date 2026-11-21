@@ -67,7 +67,7 @@ hidden_panes_of :: proc(app: ^App, w: ^Window) -> (h: Hidden_Panes, ok: bool) {
 		for placed, i in rects {
 			r := placed.rect
 			entry := workspace_session_for_content(app, placed.content)
-			status, _ := pane_status_line(app, entry)
+			status, _ := pane_status_line(app, content_status(app, placed.content, entry))
 			h.panes[i] = {
 				rect   = {(r.x - area.x) / area.width, (r.y - area.y) / area.height,
 					r.width / area.width, r.height / area.height},

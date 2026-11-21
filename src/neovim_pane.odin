@@ -9,6 +9,7 @@ import platform_api "aio:platform"
 import "aio:render"
 import "aio:settings"
 import "aio:spawn"
+import "aio:term"
 import "aio:term_view"
 import "aio:ui"
 import "base:runtime"
@@ -75,6 +76,10 @@ Neovim_Pane :: struct {
 	// the pane at its first screen, so the pane never shows an empty grid in between (NEOVIM_TAKE_WAIT).
 	pending:   bool,
 	opened:    time.Tick,
+	// The program status Neovim reports (WORK-548), in an entry no terminal pane shows: its session is a
+	// headless terminal that parses only the OSC 7501 reports Neovim's Progress events become, and its
+	// id is a session id of its own, by which status lists, notifications and jumps name the pane.
+	status:    Session_Entry,
 }
 
 @(require_results)
@@ -87,6 +92,7 @@ neovim_find :: proc(app: ^App, id: u32) -> ^Neovim_Pane {
 neovim_pane_destroy :: proc(pane: ^Neovim_Pane) {
 	neovim.destroy(&pane.client)
 	term_view.neovim_view_destroy(&pane.view)
+	if pane.status.session != nil {session_entry_destroy(&pane.status)}
 	delete(pane.file)
 	delete(pane.directory)
 	free(pane)
@@ -120,12 +126,24 @@ neovim_pane_create :: proc(app: ^App, file, directory: string, line := 0) -> ^Ne
 		neovim_pane_destroy(pane)
 		return nil
 	}
+	store, store_error := term.create_headless({columns = 1, rows = 1}, 0)
+	if store_error != .None {
+		neovim_pane_destroy(pane)
+		return nil
+	}
+	store.wall_clock = clock_wall_source(&app.clock)
+	term.configure(store, neovim_status_options(app))
+	pane.status.session = store
+	pane.status.header.executable = header_clone(NEOVIM_PROGRAM)
+	neovim_status_name(pane)
 	if _, append_error := append(&app.neovim_panes, pane); append_error != nil {
 		neovim_pane_destroy(pane)
 		return nil
 	}
 	app.next_neovim_id += 1
 	pane.id = app.next_neovim_id
+	app.next_session_id += 1
+	pane.status.id = app.next_session_id
 	if app.neovim_deadline == {} {app.neovim_deadline = time.tick_add(clock_now(&app.clock), NEOVIM_SWEEP)}
 	return pane
 }
@@ -268,7 +286,13 @@ neovim_pane_poll :: proc(app: ^App, pane: ^Neovim_Pane) {
 	}
 	if polled.title_changed || polled.directory_changed || polled.buffer_changed {
 		layout_state_touch(app)
+		neovim_status_name(pane)
 		neovim_titles_changed(app, content)
+	}
+	if polled.status {
+		term.replay_write(pane.status.session, pane.client.status[:])
+		clear(&pane.client.status)
+		neovim_status_changed(app, pane)
 	}
 	if polled.bell {
 		for w in app.windows {
@@ -281,9 +305,42 @@ neovim_pane_poll :: proc(app: ^App, pane: ^Neovim_Pane) {
 	if polled.exited {
 		pane.exited = true
 		pane.message = "Neovim exited."
+		// Neovim's work ends with it, as a program's does when its shell's prompt returns.
+		term.program_status_program_ended(pane.status.session)
+		neovim_status_changed(app, pane)
 		mark_all_dirty(app)
 		neovim_exited(app, pane)
 	}
+}
+
+// The term.Options of a Neovim pane's status store: it only listens for reports, while Activity is on.
+neovim_status_options :: proc(app: ^App) -> term.Options {
+	return {program_status_enabled = app.settings.status.enabled}
+}
+
+// Names the pane's status entry as the pane is named, for the lists and notices that show its reports.
+@(private = "file")
+neovim_status_name :: proc(pane: ^Neovim_Pane) {
+	header := &pane.status.header
+	if title := neovim_title(pane); header.title != title {
+		delete(header.title)
+		header.title = header_clone(title)
+	}
+	if directory := neovim_directory(pane); header.directory != directory {
+		delete(header.directory)
+		header.directory = header_clone(directory)
+	}
+}
+
+// Shows what changed in the pane's status store wherever program status shows, as a terminal pane's.
+@(private = "file")
+neovim_status_changed :: proc(app: ^App, pane: ^Neovim_Pane) {
+	if !term.take_program_status_change(pane.status.session) {return}
+	status_refresh(app, &pane.status)
+	status_settle(app, &pane.status)
+	workspace_picker_status_changed(app)
+	for w in app.windows {status_taskbar_update(app, w)}
+	mark_all_dirty(app)
 }
 
 @(private = "file")

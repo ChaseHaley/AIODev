@@ -547,10 +547,8 @@ on_focus :: proc(app: ^App, w: ^Window, focused: bool) {
 		if !gesture_cancel(app, w) {return}
 		window_overlays_cancel(app, w, true)
 	}
-	if entry := focus_session(app, w); entry != nil {
-		term.send_focus(entry.session, focused)
-		if !focused {status_focus_lost(app, entry)}
-	}
+	if entry := focus_session(app, w); entry != nil {term.send_focus(entry.session, focused)}
+	if reporter := focus_status(app, w); reporter != nil && !focused {status_focus_lost(app, reporter)}
 	if entered, ok := w.focus_bracket.(Focus_Entered); ok {neovim_focus_changed(app, entered.content, focused)}
 	if focused {status_focus_enter(app, w)}
 }

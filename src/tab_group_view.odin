@@ -112,9 +112,9 @@ tab_chip :: proc(app: ^App, w: ^Window, group: ^Tab_Group, folded: bool) -> ui.T
 		if tab.group != group.id {continue}
 		chip.count += 1
 		if !app.settings.status.enabled || .Tabs not_in app.settings.status.surfaces {continue}
-		walk := tab_session_panes(app, &tab.tree, i)
+		walk := tab_status_panes(app, &tab.tree, i)
 		for pane, ok := workspace_pane_next(&walk); ok; pane, ok = workspace_pane_next(&walk) {
-			status_summary_add(app, &summary, pane.session)
+			status_summary_add(app, &summary, pane.status)
 		}
 	}
 	chip.status, _ = status_indicator(summary)

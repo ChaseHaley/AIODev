@@ -2,9 +2,10 @@
 param([string] $Name = 'neovim-panes')
 # Neovim panes (WORK-542): AIODev starts `nvim --embed` and draws its grids. Opens a file through aio, types
 # and saves it, clicks and scrolls with the mouse, opens a float that takes no input and clicks through it,
-# follows a resize, closes with :q, reopens the closed pane, restores it after a restart, and edits a file
-# Agent changes shows a diff of. Needs nvim and git on PATH. Neovim runs with XDG folders inside this
-# journey's work folder, so the owner's Neovim config, plugins and state are neither read nor written.
+# captures a see-through float with its shadow and blur, reports a Progress message in Activity, follows a
+# resize, closes with :q, reopens the closed pane, restores it after a restart, and edits a file Agent
+# changes shows a diff of. Needs nvim and git on PATH. Neovim runs with XDG folders inside this journey's
+# work folder, so the owner's Neovim config, plugins and state are neither read nor written.
 $ErrorActionPreference = 'Stop'
 $repo = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
 $ctl = Join-Path $repo 'build/aioctl.exe'
@@ -51,6 +52,16 @@ function Wait-Until([scriptblock] $Condition, [string] $Message) {
 function Send-Command([string] $Command) {
     Invoke-Ctl type ":$Command" | Out-Null
     Invoke-Ctl key Enter | Out-Null
+}
+# The Activity row whose report mentions `Text`, or $null.
+function Find-Row([string] $Text) {
+    $state = Read-State
+    for ($i = 0; $state.ContainsKey("activity.row.$i.rect"); $i++) {
+        if ($state["activity.row.$i.report"] -eq 'true' -and $state["activity.row.$i.terms"] -like "*$Text*") {
+            return $state["activity.row.$i.terms"]
+        }
+    }
+    return $null
 }
 
 if (-not (Get-Command nvim -ErrorAction SilentlyContinue)) { throw 'This journey needs nvim on PATH.' }
@@ -144,6 +155,35 @@ try {
     Check ((Read-State)['neovim.row.0'] -eq 'context line') 'the float moved with the window'
     Send-Command 'lua vim.api.nvim_win_close(vim.g.ctx, true)'
     Wait-For 'neovim.floats' '0'
+
+    # A see-through float (WORK-547) casts a shadow and blurs the text that shows through it; the capture
+    # is the evidence, as the harness reads text, not pixels. Lines of text under it, and Neovim's light
+    # background, which a shadow shows on, make both plain.
+    Send-Command 'set background=light | 1,12s/^/the quick brown fox jumps over /'
+    Send-Command ("lua local b = vim.api.nvim_create_buf(false, true); " +
+        "vim.api.nvim_buf_set_lines(b, 0, -1, false, {'see-through float', 'with winblend 40'}); " +
+        "vim.g.glass = vim.api.nvim_open_win(b, false, {relative='win', row=2, col=4, width=24, height=2, " +
+        "border='rounded'}); vim.wo[vim.g.glass].winblend = 40")
+    Wait-For 'neovim.floats' '1'
+    Invoke-Ctl capture --out (Join-Path $work 'float-shadow-blur.png') | Out-Null
+    Send-Command 'lua vim.api.nvim_win_close(vim.g.glass, true)'
+    Wait-For 'neovim.floats' '0'
+    Send-Command 'set background=dark | undo | nohlsearch'
+
+    # Neovim's Progress messages report through OSC 7501 (WORK-548): a running vim.pack message shows in
+    # Activity as the Neovim pane's row, and finishing it replaces the row's report.
+    Send-Command ("lua vim.g.job = vim.api.nvim_echo({{'Fetching 2 of 5'}}, false, {kind='progress', " +
+        "status='running', percent=40, title='vim.pack', source='vim.pack'})")
+    Wait-Until { $null -ne (Find-Row 'Fetching 2 of 5') } 'no Activity row for the progress message'
+    Invoke-Ctl capture --out (Join-Path $work 'progress-working.png') | Out-Null
+    Send-Command ("lua vim.api.nvim_echo({{'Updated'}}, false, {id=vim.g.job, kind='progress', " +
+        "status='success', percent=100, title='vim.pack', source='vim.pack'})")
+    Wait-Until { $null -ne (Find-Row 'Updated') } 'the progress row did not finish'
+    Check ($null -eq (Find-Row 'Fetching 2 of 5')) 'the running report stayed beside the finished one'
+    Invoke-Ctl capture --out (Join-Path $work 'progress-done.png') | Out-Null
+    Check ($null -eq (Find-Row 'written')) "the :w above left a report"
+    # Two messages ask Neovim's hit-enter question, which holds a resize back until answered.
+    Invoke-Ctl key Enter | Out-Null
 
     # The grid follows the window; aioctl's resize waits on a terminal grid, so only the pane is checked.
     $columns = (Read-State)['neovim.columns']

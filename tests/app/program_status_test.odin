@@ -264,3 +264,51 @@ program_status_scope_records_share_filtering_and_borrow_no_sortable_snapshot :: 
 	_, more = app.status_scope_records_next(&walk)
 	testing.expect(t, !more)
 }
+
+// A Neovim pane's Progress reports (WORK-548) count where a terminal pane's program status does: its tab's
+// mark, a tab close with work in progress, Activity's rows, and the jump from a row to the pane.
+@(test)
+program_status_neovim_pane_reports_like_a_terminal_pane :: proc(t: ^testing.T) {
+	f: Status_Fixture
+	defer status_fixture_destroy(&f)
+	if !status_fixture_init(t, &f) {return}
+	records := [1]term.Program_Status{
+		{id = "nvim-1", app = "nvim", state = .Working, progress = 40, updated_at = time.now()},
+	}
+	neovim, neovim_error := new(app.Neovim_Pane)
+	if !testing.expect_value(t, neovim_error, nil) {return}
+	defer free(neovim)
+	neovim.id = 1
+	neovim.status = {id = 3, statuses = records[:]}
+	defer delete(f.state.neovim_panes)
+	if _, append_error := append(&f.state.neovim_panes, neovim); !testing.expect_value(t, append_error, nil) {return}
+	tab, tab_error := new(app.Tab)
+	if !testing.expect_value(t, tab_error, nil) {return}
+	if !testing.expect_value(t, layout.init(&tab.tree, {.Neovim, 1}), nil) {
+		free(tab)
+		return
+	}
+	if _, append_error := append(&f.workspace.tabs, tab); append_error != nil {
+		app.tab_record_free(tab)
+		return
+	}
+
+	summary := app.status_tab_summary(&f.state, f.workspace, 2)
+	testing.expect_value(t, summary.counts[.Working], 1)
+	testing.expect_value(t, summary.session, u32(3))
+	testing.expect(t, app.tab_close_has_work(&f.state, f.workspace, 2))
+
+	w := app.Window{workspace = f.workspace}
+	walk := app.status_scope_records(&f.state, &w)
+	shown: app.Status_Scope_Records
+	for next, ok := app.status_scope_records_next(&walk); ok; next, ok = app.status_scope_records_next(&walk) {
+		shown = next
+	}
+	testing.expect_value(t, shown.session, u32(3))
+	testing.expect_value(t, len(shown.records), 1)
+	testing.expect(t, app.status_find(&f.state, 3) == &neovim.status)
+	workspace, pane, found := app.session_pane_find(&f.state, 3)
+	testing.expect(t, found && workspace == f.workspace)
+	testing.expect_value(t, pane.tab, 2)
+	testing.expect_value(t, pane.content, layout.Content{.Neovim, 1})
+}

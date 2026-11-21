@@ -129,6 +129,8 @@ Poll :: struct {
 	exited: bool,
 	// Neovim stays after quit_confirm: the user cancelled its question, or the quit failed.
 	quit_cancelled: bool,
+	// Neovim sent program status reports, which Client.status holds.
+	status: bool,
 }
 
 Mouse_Button :: enum u8 {
@@ -168,10 +170,14 @@ MAX_MESSAGE :: 1 << 26
 // autocmd on this channel instead; special buffers (help, terminals, pickers) are not files, and keep
 // the name before them. The count of changed buffers `:qa` would refuse to drop (Neovim's bt_dontwrite
 // leaves nofile, terminal and prompt buffers out) is reported the same way, after the change settles.
-// nvim_get_api_info is not callable from Lua, so the channel is found by the client name
-// nvim_set_client_info registered just before.
+// Each Progress message (Neovim 0.12's nvim_echo with kind 'progress', from vim.pack, :checkhealth or
+// plugins) becomes an OSC 7501 program status report (WORK-548): running is working with its percent,
+// success done, failed error, and cancel clears it. Neovim's own messages (source 'nvim': each file read
+// and write) are left out, or every :w would leave a finished report. Older Neovim has no Progress event,
+// so the autocmd is made under pcall. nvim_get_api_info is not callable from Lua, so the channel is found
+// by the client name nvim_set_client_info registered just before.
 @(private)
-BUFFER_WATCH :: `local channel
+ATTACH_LUA :: `local channel
 for _, chan in ipairs(vim.api.nvim_list_chans()) do
 	if chan.client and chan.client.name == 'aiodev' then channel = chan.id end
 end
@@ -196,7 +202,34 @@ vim.api.nvim_create_autocmd({'BufModifiedSet', 'BufWritePost', 'BufReadPost', 'B
 	callback = later,
 })
 vim.api.nvim_create_autocmd('OptionSet', {group = group, pattern = 'modified', callback = later})
-report()`
+report()
+local states = {running = 'working', success = 'done', failed = 'error', cancel = 'clear'}
+-- A field of base64 text, or nil for none; the message's text comes as its chunks' strings.
+local function text(field, value, limit)
+	if type(value) == 'table' then
+		local parts = {}
+		for _, part in ipairs(value) do if type(part) == 'string' then parts[#parts + 1] = part end end
+		value = table.concat(parts)
+	end
+	if type(value) ~= 'string' then return end
+	value = value:gsub('%c', ' ')
+	if #value > limit then value = value:sub(1, limit):gsub('[\192-\255][\128-\191]*$', '') end
+	if value ~= '' then return field .. '=' .. vim.base64.encode(value) end
+end
+pcall(vim.api.nvim_create_autocmd, 'Progress', {group = group, callback = function(event)
+	local data = event.data
+	if type(data) ~= 'table' or data.id == nil or not states[data.status] or data.source == 'nvim' then return end
+	local fields = {'state=' .. states[data.status], 'id=nvim-' .. tostring(data.id):gsub('[^%w_%.%+%-]', ''):sub(1, 27)}
+	if data.status ~= 'cancel' then
+		fields[#fields + 1] = 'app=nvim'
+		if data.status == 'running' and type(data.percent) == 'number' then
+			fields[#fields + 1] = 'progress=' .. math.max(0, math.min(100, math.floor(data.percent)))
+		end
+		fields[#fields + 1] = text('title', data.title, 192)
+		fields[#fields + 1] = text('msg', data.text, 2048)
+	end
+	vim.rpcnotify(channel, 'aiodev_status', '\27]7501;' .. table.concat(fields, ':') .. '\27\\')
+end})`
 
 @(private)
 Request :: struct {
@@ -234,6 +267,8 @@ Client :: struct {
 	// The cells of every published grid, back to back; the views in screen.grids slice it.
 	pool: []Cell,
 	views: []Grid_View,
+	// OSC 7501 reports Neovim sent since the caller last cleared this, back to back (WORK-548).
+	status: [dynamic]u8,
 	// Redraw handlers set these; receive resets them and returns them.
 	events: Poll,
 	fault: Error,
@@ -296,7 +331,7 @@ start :: proc(c: ^Client, options: Start, wake: spawn.Wake, allocator := context
 	}
 	if failure == .None {
 		notification_begin(c, "nvim_exec_lua", 2)
-		msgpack_write_str(&c.sent, BUFFER_WATCH)
+		msgpack_write_str(&c.sent, ATTACH_LUA)
 		msgpack_write_array(&c.sent, 0)
 		failure = transmit(c)
 	}
@@ -315,6 +350,7 @@ destroy :: proc(c: ^Client) {
 	delete(c.title, c.allocator)
 	delete(c.directory, c.allocator)
 	delete(c.buffer, c.allocator)
+	delete(c.status)
 	delete(c.pool, c.allocator)
 	delete(c.views, c.allocator)
 	delete(c.screen.highlights, c.allocator)
@@ -483,6 +519,19 @@ notification_handle :: proc(c: ^Client, r: ^Msgpack_Reader) {
 		count, count_error := msgpack_read(r)
 		if count_error != .None || count.kind != .Integer {return}
 		c.unsaved = int(clamp(count.integer, 0, i64(max(i32))))
+	case "aiodev_status":
+		params, params_error := msgpack_read(r)
+		if params_error != .None || params.kind != .Array || params.count != 1 {return}
+		report, report_error := msgpack_read(r)
+		if report_error != .None || report.kind != .String {return}
+		// Only program status reports reach the pane's status store.
+		PREFIX :: "\x1b]7501;"
+		if len(report.bytes) < len(PREFIX) || string(report.bytes[:len(PREFIX)]) != PREFIX {return}
+		if _, err := append(&c.status, ..report.bytes); err != nil {
+			c.fault = .Out_Of_Memory
+			return
+		}
+		c.events.status = true
 	case "nvim_error_event":
 		params, params_error := msgpack_read(r)
 		if params_error != .None || params.kind != .Array || params.count != 2 {return}

@@ -45,7 +45,8 @@ status_refresh :: proc(app: ^App, entry: ^Session_Entry) {
 	if err != nil {return}
 	previous := entry.statuses
 	entry.statuses = next
-	if events.wants(&app.events, .Pane_Status_Changed) {
+	// Scripts know panes by session; a Neovim pane's status entry is not one.
+	if events.wants(&app.events, .Pane_Status_Changed) && session_find(app, entry.id) == entry {
 		words := EVENT_STATUS_WORDS
 		for record in next {
 			changed := true
@@ -69,14 +70,31 @@ status_release :: proc(entry: ^Session_Entry) {
 	entry.statuses = nil
 }
 
-// Turning the protocol on or off reaches every live session at once.
+// Turning the protocol on or off reaches every live session, and every Neovim pane's store, at once.
 status_apply_settings :: proc(app: ^App) {
 	for &entry in app.sessions {
 		term.configure(entry.session, session_options(app))
 		status_refresh(app, &entry)
 	}
+	for pane in app.neovim_panes {
+		term.configure(pane.status.session, neovim_status_options(app))
+		status_refresh(app, &pane.status)
+	}
 	for w in app.windows {status_taskbar_update(app, w, true)}
 	mark_all_dirty(app)
+}
+
+// The pane reporting program status as `id`: a session, or a Neovim pane's status entry.
+status_find :: proc(app: ^App, id: u32) -> ^Session_Entry {
+	if entry := session_find(app, id); entry != nil {return entry}
+	for pane in app.neovim_panes {if pane.status.id == id {return &pane.status}}
+	return nil
+}
+
+// The program status the window's focused pane reports, if any.
+focused_status :: proc(app: ^App, w: ^Window) -> ^Session_Entry {
+	content, is_pane := window_focused_content(w)
+	return is_pane ? content_status(app, content, workspace_session_for_content(app, content)) : nil
 }
 
 status_summary_add :: proc(app: ^App, summary: ^Status_Summary, entry: ^Session_Entry) {
@@ -97,9 +115,9 @@ status_tab_summary :: proc(app: ^App, workspace: ^Workspace, tab: int) -> Status
 	if !app.settings.status.enabled || workspace == nil || tab < 0 || tab >= len(workspace.tabs) {
 		return summary
 	}
-	walk := tab_session_panes(app, &workspace.tabs[tab].tree, tab)
+	walk := tab_status_panes(app, &workspace.tabs[tab].tree, tab)
 	for pane, ok := workspace_pane_next(&walk); ok; pane, ok = workspace_pane_next(&walk) {
-		status_summary_add(app, &summary, pane.session)
+		status_summary_add(app, &summary, pane.status)
 	}
 	return summary
 }
@@ -107,9 +125,9 @@ status_tab_summary :: proc(app: ^App, workspace: ^Workspace, tab: int) -> Status
 status_workspace_summary :: proc(app: ^App, workspace: ^Workspace) -> Status_Summary {
 	summary: Status_Summary
 	if !app.settings.status.enabled || workspace == nil {return summary}
-	walk := workspace_session_panes(app, workspace)
+	walk := workspace_status_panes(app, workspace)
 	for pane, ok := workspace_pane_next(&walk); ok; pane, ok = workspace_pane_next(&walk) {
-		status_summary_add(app, &summary, pane.session)
+		status_summary_add(app, &summary, pane.status)
 	}
 	return summary
 }
@@ -170,7 +188,7 @@ status_record_name :: proc(entry: ^Session_Entry, record: term.Program_Status) -
 
 status_watched :: proc(app: ^App, entry: ^Session_Entry) -> bool {
 	for w in app.windows {
-		if w.focused && focused_session(app, w) == entry {return true}
+		if w.focused && focused_status(app, w) == entry {return true}
 	}
 	return false
 }
@@ -189,7 +207,7 @@ status_read_stamp :: proc(app: ^App, entry: ^Session_Entry, mark := false) {
 // Looking at a pane reads it, as choosing to read it does.
 status_focus_enter :: proc(app: ^App, w: ^Window) {
 	if !w.focused {return}
-	if entry := focused_session(app, w); entry != nil {status_read_stamp(app, entry, mark = true)}
+	if entry := focused_status(app, w); entry != nil {status_read_stamp(app, entry, mark = true)}
 }
 
 // Leaving a pane the user was looking at reads it up to then; read finished work then leaves as
@@ -229,7 +247,7 @@ status_sweep :: proc(app: ^App, entry: ^Session_Entry) {
 
 // Marks a pane read or unread from an overview without going to it.
 status_mark :: proc(app: ^App, session: u32, read: bool) {
-	entry := session_find(app, session)
+	entry := status_find(app, session)
 	if entry == nil {return}
 	if !read {
 		term.program_status_mark_unread(entry.session)
@@ -336,8 +354,8 @@ status_in_scope :: proc(app: ^App, w: ^Window, workspace: ^Workspace) -> bool {
 	return app.settings.status.scope == .All || workspace == w.workspace
 }
 
-// The panes with a session in every workspace of a window's status scope, in workspace and tab
-// order. Each caller states whether workspaces workspace_eligible refuses are skipped.
+// The panes reporting program status in every workspace of a window's status scope, in workspace and
+// tab order. Each caller states whether workspaces workspace_eligible refuses are skipped.
 Status_Scope_Walk :: struct {
 	app:           ^App,
 	w:             ^Window,
@@ -361,7 +379,7 @@ status_scope_next :: proc(
 	for {
 		if walk.panes.workspace != nil {
 			for p, more := workspace_pane_next(&walk.panes); more; p, more = workspace_pane_next(&walk.panes) {
-				if p.session != nil {return p, walk.panes.workspace, true}
+				if p.status != nil {return p, walk.panes.workspace, true}
 			}
 		}
 		if walk.next >= len(walk.app.workspaces) {return}
@@ -370,7 +388,7 @@ status_scope_next :: proc(
 		walk.panes = {}
 		if walk.eligible_only && !workspace_eligible(walk.app, candidate) {continue}
 		if !status_in_scope(walk.app, walk.w, candidate) {continue}
-		walk.panes = workspace_session_panes(walk.app, candidate)
+		walk.panes = workspace_status_panes(walk.app, candidate)
 	}
 }
 
@@ -455,7 +473,7 @@ status_scope_records_next :: proc(
 	for pane, workspace, more := status_scope_next(&walk.scope);
 	    more;
 	    pane, workspace, more = status_scope_next(&walk.scope) {
-		entry := pane.session
+		entry := pane.status
 		if len(entry.statuses) == 0 {continue}
 		records := make([dynamic]term.Program_Status, 0, len(entry.statuses), context.temp_allocator)
 		for record in entry.statuses {
@@ -477,13 +495,13 @@ status_scope_records_next :: proc(
 // Moves to the most urgent record that needs the user, skipping the pane already in view so
 // repeating the command walks the queue.
 status_next_attention :: proc(app: ^App, w: ^Window) {
-	current := focused_session(app, w)
+	current := focused_status(app, w)
 	best: term.Program_Status
 	session: u32
 	found := false
 	walk := status_scope_walk(app, w, eligible_only = true)
 	for pane, _, ok := status_scope_next(&walk); ok; pane, _, ok = status_scope_next(&walk) {
-		entry := pane.session
+		entry := pane.status
 		if entry == current {continue}
 		for record in entry.statuses {
 			if !status_shown(app, record) || !status_presentation(record).attention {continue}
@@ -504,7 +522,7 @@ status_next_attention :: proc(app: ^App, w: ^Window) {
 status_dismiss_finished :: proc(app: ^App, w: ^Window) {
 	walk := status_scope_walk(app, w, eligible_only = false)
 	for pane, _, ok := status_scope_next(&walk); ok; pane, _, ok = status_scope_next(&walk) {
-		term.program_status_dismiss_finished(pane.session.session)
+		term.program_status_dismiss_finished(pane.status.session)
 	}
 }
 
@@ -525,10 +543,10 @@ status_taskbar_update :: proc(app: ^App, w: ^Window, force := false) {
 	if s.enabled && s.taskbar != {} && w.workspace != nil {
 		failed, blocked, working, indeterminate := false, false, false, false
 		least := 101
-		walk := workspace_session_panes(app, w.workspace)
+		walk := workspace_status_panes(app, w.workspace)
 		for pane, ok := workspace_pane_next(&walk); ok; pane, ok = workspace_pane_next(&walk) {
-			if pane.session == nil {continue}
-			for record in pane.session.statuses {
+			if pane.status == nil {continue}
+			for record in pane.status.statuses {
 				if !status_shown(app, record) {continue}
 				if !status_state_settings(s, record.state).taskbar {continue}
 				switch status_presentation(record).taskbar {

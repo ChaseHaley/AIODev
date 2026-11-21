@@ -2,6 +2,7 @@ package neovim_test
 
 import "aio:neovim"
 import "aio:spawn"
+import "aio:term"
 import "core:fmt"
 import "core:log"
 import "core:os"
@@ -2287,4 +2288,62 @@ real_neovim_reports_unsaved_buffers_and_confirms_quit :: proc(t: ^testing.T) {
 		time.sleep(2 * time.Millisecond)
 	}
 	testing.expect(t, exited, "Neovim did not quit at once with nothing unsaved")
+}
+
+reports_status :: proc(c: ^neovim.Client, _: rawptr) -> bool {
+	return len(c.status) > 0
+}
+
+// Takes what Neovim reported into a terminal's program status, as a Neovim pane's store does.
+take_status :: proc(t: ^testing.T, c: ^neovim.Client, store: ^term.Session) -> []term.Program_Status {
+	term.replay_write(store, c.status[:])
+	clear(&c.status)
+	records, err := term.program_status(store, context.temp_allocator)
+	testing.expect_value(t, err, nil)
+	return records
+}
+
+// The owner asked for Neovim's Progress event to report through OSC 7501 (WORK-548): a progress message
+// reaches AIODev as a report a terminal's parser takes as program status, working with its percent and
+// then done under the same id.
+@(test)
+real_neovim_progress_is_reported_as_program_status :: proc(t: ^testing.T) {
+	c: neovim.Client
+	defer neovim.destroy(&c)
+	error := start_nvim(&c, 60, 20)
+	if error == .Not_Found {
+		log.info("nvim is not on PATH; skipping the real Neovim progress test")
+		return
+	}
+	if !testing.expect_value(t, error, neovim.Error.None) {return}
+	if !testing.expect(t, wait_until(&c, nil, one_window_at_60x20), "no window grid at 60x20") {return}
+	store, store_error := term.create_headless({columns = 1, rows = 1}, 0)
+	if !testing.expect_value(t, store_error, term.Error.None) {return}
+	defer term.destroy(store)
+
+	// Neovim's own progress for a file write is not reported, or every :w would leave a finished row.
+	testing.expect_value(t, neovim.input(&c, ":lua vim.cmd.write(vim.fn.tempname())<CR>"), neovim.Error.None)
+	// Neovim 0.12 requires a source on a progress message; the message's text arrives as its chunks.
+	running :: ":lua vim.g.job = vim.api.nvim_echo({{'Fetching '}, {'2 of 5'}}, false, {kind = 'progress', " +
+		"status = 'running', percent = 40, title = 'vim.pack', source = 'vim.pack'})<CR>"
+	testing.expect_value(t, neovim.input(&c, running), neovim.Error.None)
+	if !testing.expect(t, wait_until(&c, nil, reports_status), "no status report arrived") {return}
+	records := take_status(t, &c, store)
+	if !testing.expectf(t, len(records) == 1, "the write was reported: %v", records) {return}
+	working := records[0]
+	testing.expect_value(t, working.state, term.Program_Status_State.Working)
+	testing.expect_value(t, working.progress, i8(40))
+	testing.expect_value(t, working.app, "nvim")
+	testing.expect_value(t, working.title, "vim.pack")
+	testing.expect_value(t, working.message, "Fetching 2 of 5")
+
+	done :: ":lua vim.api.nvim_echo({{'Updated'}}, false, {id = vim.g.job, kind = 'progress', " +
+		"status = 'success', percent = 100, title = 'vim.pack', source = 'vim.pack'})<CR>"
+	testing.expect_value(t, neovim.input(&c, done), neovim.Error.None)
+	if !testing.expect(t, wait_until(&c, nil, reports_status), "no finishing report arrived") {return}
+	records = take_status(t, &c, store)
+	if !testing.expect_value(t, len(records), 1) {return}
+	testing.expect_value(t, records[0].state, term.Program_Status_State.Done)
+	testing.expect_value(t, records[0].id, working.id)
+	testing.expect_value(t, records[0].message, "Updated")
 }

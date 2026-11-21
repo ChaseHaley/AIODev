@@ -214,7 +214,7 @@ status_panel_rows :: proc(app: ^App, w: ^Window) -> (rows: []Status_Row, total: 
 // A pane several rows report from counts once, at its first row.
 status_panel_step :: proc(app: ^App, w: ^Window, step: int) {
 	rows, _, _ := status_panel_layout(app, w)
-	focused := focused_session(app, w)
+	focused := focused_status(app, w)
 	sessions := make([dynamic]u32, 0, len(rows), context.temp_allocator)
 	current := -1
 	for row in rows {
@@ -287,7 +287,7 @@ status_panel_mark_follow :: proc(app: ^App, w: ^Window, rows: []Status_Row, focu
 
 // Starts the marks' slide when focus moves between frames, then advances it; true when it moved.
 status_panel_mark_animate :: proc(app: ^App, w: ^Window, frame: ui.Frame_Time) -> bool {
-	focused := status_panel_visible(app, w) ? focused_session(app, w) : nil
+	focused := status_panel_visible(app, w) ? focused_status(app, w) : nil
 	if (focused != nil ? focused.id : 0) != w.status.panel_mark_session {
 		rows: []Status_Row
 		if focused != nil {rows, _ = status_panel_rows(app, w)}
@@ -347,7 +347,7 @@ status_panel_logo_draw :: proc(
 	s := w.scale
 	extent := math.round(size * s)
 	area := render.Rect{math.round(x), math.round(middle - extent / 2), extent, extent}
-	atlas, pending, result := report_icon(app, session_find(app, item.session), item.record.app, extent)
+	atlas, pending, result := report_icon(app, status_find(app, item.session), item.record.app, extent)
 	if result != .Ok {return result}
 	if atlas.width > 0 {return ui.shell_badge_draw(&w.list, &w.ui_text, app.theme, area, "", s, atlas)}
 	if !pending {ui.icon_draw(&w.list, .Terminal, area, app.theme.muted, ui.ICON_BUTTON, s)}
@@ -530,7 +530,7 @@ status_panel_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 	pane_motion_region_content(w, &region)
 	rows, _ := status_panel_rows(app, w)
 	// Rows from the focused pane take the selected tab's look, so Next and Previous have a visible start.
-	focused := focused_session(app, w)
+	focused := focused_status(app, w)
 	status_panel_mark_follow(app, w, rows, focused)
 	small := ui.text_styled(&w.ui_text, .Detail)
 	strong := ui.text_styled(&w.ui_text, .Strong)
@@ -820,7 +820,7 @@ when AIO_CONTROL {
 		rows, _, scroll := status_panel_layout(app, w)
 		list := status_panel_list(w, area)
 		status_rows_state_report(r, app, "activity.row", rows, list, scroll)
-		focused := focused_session(app, w)
+		focused := focused_status(app, w)
 		for row, i in rows {
 			if !row.report {continue}
 			rect := render.Rect{list.x, list.y + row.y - scroll, list.width, row.height}

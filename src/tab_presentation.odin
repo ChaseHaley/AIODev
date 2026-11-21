@@ -72,10 +72,12 @@ Pane_Interest :: enum u8 {
 
 @(private = "file")
 pane_interest :: proc(app: ^App, pane: Workspace_Pane) -> Pane_Interest {
-	entry := pane.session
+	if pane.status != nil {
+		for record in pane.status.statuses {if status_shown(app, record) {return .Agent}}
+	}
 	if !pane_owns_session(pane.content.kind) {return .Document}
+	entry := pane.session
 	if entry == nil {return .Shell}
-	for record in entry.statuses {if status_shown(app, record) {return .Agent}}
 	program := program_adopted(entry)
 	if program == nil {return .Shell}
 	return program.launch.harness != .None ? .Agent : .Program
@@ -91,7 +93,7 @@ tab_pane_behind :: proc(app: ^App, tab: ^Tab, index: int) -> (best: Workspace_Pa
 		if pane.node == tab.tree.focus {continue}
 		interest := pane_interest(app, pane)
 		status: Status_Summary
-		status_summary_add(app, &status, pane.session)
+		status_summary_add(app, &status, pane.status)
 		if found {
 			if interest < best_interest {continue}
 			if interest == best_interest &&

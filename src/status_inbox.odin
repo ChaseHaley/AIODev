@@ -271,7 +271,7 @@ status_row_draw :: proc(
 
 @(private)
 status_dismiss_item :: proc(app: ^App, item: Status_Item) {
-	if entry := session_find(app, item.session); entry != nil {
+	if entry := status_find(app, item.session); entry != nil {
 		term.program_status_dismiss(entry.session, item.record.id)
 	}
 }
@@ -335,7 +335,7 @@ status_pill_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 	walk := status_scope_walk(app, w, eligible_only = true)
 	for pane, _, ok := status_scope_next(&walk); ok; pane, _, ok = status_scope_next(&walk) {
 		summary: Status_Summary
-		status_summary_add(app, &summary, pane.session)
+		status_summary_add(app, &summary, pane.status)
 		mark, shown := status_indicator(summary)
 		if !shown || mark.glyph == .Idle {continue}
 		append(&arcs, Status_Donut_Arc{status_presentation(summary.top).rank, mark.glyph})
