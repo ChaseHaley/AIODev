@@ -116,6 +116,9 @@
     "neovim_panes": {
       "lane": "headless"
     },
+    "neovim_shell": {
+      "lane": "headless"
+    },
     "notice_dismiss": {
       "lane": "headless"
     },
