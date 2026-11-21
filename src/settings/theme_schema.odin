@@ -69,9 +69,9 @@ theme_field_schema :: proc(builder: ^strings.Builder, field: Theme_Field) -> boo
 			builder,
 			`{
       "type": "object",
-      "description": "The Neovim colorscheme this theme matches, applied by the AIODev Neovim plugin when it is installed.",
+      "description": "The Neovim colorscheme this theme matches, applied by the AIODev Neovim plugin when it is installed. Without one, the colorscheme of the base theme applies; aiodev is the one generated from this theme's colors.",
       "additionalProperties": false,
-      "required": ["plugin", "colorscheme"],
+      "required": ["colorscheme"],
       "properties": {
         "plugin": {"type": "string", "description": "The plugin repository that provides the colorscheme.", "pattern": "`,
 			NEOVIM_PLUGIN_PATTERN,

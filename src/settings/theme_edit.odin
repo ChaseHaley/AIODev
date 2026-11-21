@@ -101,6 +101,14 @@ theme_duplicate :: proc(
 				allocator,
 			); error != .None {return}
 		}
+		if custom.neovim.colorscheme != "" {
+			if _, error = theme_edit_line(
+				&revision,
+				custom_theme_field_key(id, "neovim"),
+				custom.neovim.colorscheme,
+				allocator,
+			); error != .None {return}
+		}
 		tokens := THEME_TOKENS
 		for token in custom.overrides {
 			key := custom_theme_field_key(id, tokens[token].key)

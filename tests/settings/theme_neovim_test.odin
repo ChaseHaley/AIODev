@@ -42,6 +42,12 @@ neovim_object_parses_and_validates :: proc(t: ^testing.T) {
 	plain, plain_issue := settings.theme_file_parse(`{"version":1,"id":"plain","colors":{}}`)
 	testing.expect_value(t, plain_issue, "")
 	testing.expect_value(t, plain.neovim, settings.Neovim_Theme{})
+	// The plugin only documents where the colorscheme comes from, so a theme may leave it out.
+	unnamed, unnamed_issue := settings.theme_file_parse(
+		fixture_replace(NEOVIM_FIXTURE, `"plugin":"folke/tokyonight.nvim",`, ``),
+	)
+	testing.expect_value(t, unnamed_issue, "")
+	testing.expect_value(t, unnamed.neovim, settings.Neovim_Theme{"", "tokyonight-moon", .Dark})
 	for invalid in ([?]string {
 		fixture_replace(NEOVIM_FIXTURE, `"folke/tokyonight.nvim"`, `"tokyonight"`),
 		fixture_replace(NEOVIM_FIXTURE, `"folke/tokyonight.nvim"`, `"a/b/c"`),
@@ -53,7 +59,6 @@ neovim_object_parses_and_validates :: proc(t: ^testing.T) {
 		fixture_replace(NEOVIM_FIXTURE, `"tokyonight-moon"`, `""`),
 		fixture_replace(NEOVIM_FIXTURE, `"dark"`, `"grey"`),
 		fixture_replace(NEOVIM_FIXTURE, `"background":"dark"`, `"background":"dark","lua":"os.exit()"`),
-		fixture_replace(NEOVIM_FIXTURE, `"plugin":"folke/tokyonight.nvim",`, ``),
 		fixture_replace(NEOVIM_FIXTURE, `{"plugin"`, `[{"plugin"`),
 		`{"version":1,"id":"vim","neovim":"tokyonight","colors":{}}`,
 	}) {
@@ -183,11 +188,12 @@ neovim_record_holds_the_theme_and_its_colors :: proc(t: ^testing.T) {
 }
 
 @(test)
-neovim_record_leaves_out_neovim_for_custom_themes :: proc(t: ^testing.T) {
+neovim_record_leaves_out_neovim_for_unmapped_themes :: proc(t: ^testing.T) {
 	for source in ([?]string {
 		"theme.name = studio-dark\n",
 		"theme.name = tide-light\n",
-		"theme.name = mine\ntheme.custom.mine.base = tokyonight-storm\ntheme.custom.mine.accent = #123456\n",
+		"theme.name = mine\ntheme.custom.mine.base = tide-dark\ntheme.custom.mine.accent = #123456\n",
+		"theme.name = mine\ntheme.custom.mine.accent = #123456\n",
 	}) {
 		record := record_object(t, source, 1)
 		_, has_neovim := record["neovim"]
@@ -196,6 +202,118 @@ neovim_record_leaves_out_neovim_for_custom_themes :: proc(t: ^testing.T) {
 	record := record_object(t, "theme.name = mine\ntheme.custom.mine.base = tide-dark\ntheme.custom.mine.name = Mine\n", 1)
 	testing.expect_value(t, json_text(record["theme"]), "mine")
 	testing.expect_value(t, json_text(record["name"]), "Mine")
+}
+
+// The record's neovim object, or nil when it has none.
+@(private)
+record_neovim :: proc(t: ^testing.T, source: string) -> json.Object {
+	record := record_object(t, source, 1)
+	neovim, _ := record["neovim"].(json.Object)
+	return neovim
+}
+
+@(test)
+customizing_a_mapped_theme_keeps_its_neovim_colorscheme :: proc(t: ^testing.T) {
+	// The first color edit on a bundled theme makes a custom theme based on it.
+	updated, created, issue, edit_error := edit_color("theme.name = tokyonight-day\n", "accent", "#123456", THEMES)
+	defer delete(updated)
+	defer delete(created)
+	testing.expect_value(t, edit_error, settings.Theme_Edit_Error.None)
+	testing.expect_value(t, issue, "")
+	testing.expect_value(t, created, "tokyonight-day-custom")
+	neovim := record_neovim(t, updated)
+	testing.expect_value(t, json_text(neovim["colorscheme"]), "tokyonight-day")
+	testing.expect_value(t, json_text(neovim["plugin"]), "folke/tokyonight.nvim")
+
+	// Through a chain of bases, with the background the mapped theme needs.
+	chained := record_neovim(t, "theme.name = b\ntheme.custom.a.base = gruvbox-light\ntheme.custom.b.base = a\n")
+	testing.expect_value(t, json_text(chained["colorscheme"]), "gruvbox")
+	testing.expect_value(t, json_text(chained["background"]), "light")
+
+	// A theme file based on a mapped theme inherits it as a settings theme does.
+	directory, temp_error := os.mkdir_temp("tests/settings", "theme-neovim-base-", context.allocator)
+	if !testing.expect_value(t, temp_error, nil) {return}
+	defer delete(directory)
+	defer os.remove_all(directory)
+	storm, read_error := os.read_entire_file(fmt.tprintf("%s/tokyonight-storm.theme.json", THEMES), context.allocator)
+	if !testing.expect_value(t, read_error, nil) {return}
+	defer delete(storm)
+	testing.expect_value(t, os.write_entire_file(fmt.tprintf("%s/tokyonight-storm.theme.json", directory), storm), nil)
+	file := `{"version":1,"id":"storm-file","base":"tokyonight-storm","colors":{"accent":"#123456"}}`
+	testing.expect_value(t, os.write_entire_file(fmt.tprintf("%s/storm-file.theme.json", directory), file), nil)
+	s, d, error := parse_themes("theme.name = storm-file\n", directory)
+	testing.expect_value(t, error, nil)
+	defer settings.destroy(&s)
+	defer settings.diagnostics_destroy(&d)
+	testing.expect_value(t, len(d), 0)
+	testing.expect_value(t, settings.theme_neovim(&s, "storm-file").colorscheme, "tokyonight-storm")
+}
+
+@(test)
+a_custom_theme_can_name_its_own_neovim_colorscheme :: proc(t: ^testing.T) {
+	base := "theme.name = mine\ntheme.custom.mine.base = tokyonight-day\n"
+	generated := record_neovim(t, fmt.tprintf("%stheme.custom.mine.neovim = aiodev\n", base))
+	testing.expect_value(t, json_text(generated["colorscheme"]), "aiodev")
+	_, has_plugin := generated["plugin"]
+	testing.expect(t, !has_plugin)
+	other := record_neovim(t, "theme.name = mine\ntheme.custom.mine.neovim = kanagawa-wave\n")
+	testing.expect_value(t, json_text(other["colorscheme"]), "kanagawa-wave")
+	// A theme based on one that opted out keeps the opt-out.
+	child := record_neovim(
+		t,
+		"theme.name = kid\ntheme.custom.mine.base = tokyonight-day\ntheme.custom.mine.neovim = aiodev\ntheme.custom.kid.base = mine\n",
+	)
+	testing.expect_value(t, json_text(child["colorscheme"]), "aiodev")
+
+	for value in ([?]string{"two words", "a|b", ""}) {
+		s, d, error := parse_themes(fmt.tprintf("%stheme.custom.mine.neovim = %s\n", base, value), THEMES)
+		testing.expect_value(t, error, nil)
+		testing.expectf(t, len(d) == 1, "neovim = %q gave %d diagnostics", value, len(d))
+		testing.expect_value(t, settings.theme_neovim(&s, "mine").colorscheme, "tokyonight-day")
+		settings.destroy(&s)
+		settings.diagnostics_destroy(&d)
+	}
+	_, issue := settings.custom_theme_value("theme.custom.mine.neovim", "a|b", .Strict)
+	testing.expect(t, issue != "")
+	serialized, accepted := settings.custom_theme_value("theme.custom.mine.neovim", "aiodev", .Strict)
+	testing.expect_value(t, accepted, "")
+	testing.expect_value(t, serialized, "aiodev")
+}
+
+@(test)
+copies_and_exports_keep_the_neovim_colorscheme_a_theme_uses :: proc(t: ^testing.T) {
+	source := "theme.name = mine\ntheme.custom.mine.base = tokyonight-day\ntheme.custom.mine.neovim = aiodev\n"
+	updated, created, error := edit_duplicate(source, THEMES)
+	defer delete(updated)
+	defer delete(created)
+	testing.expect_value(t, error, settings.Theme_Edit_Error.None)
+	testing.expect_value(t, created, "mine-copy")
+	testing.expect_value(t, json_text(record_neovim(t, updated)["colorscheme"]), "aiodev")
+
+	directory, temp_error := os.mkdir_temp("tests/settings", "theme-neovim-export-", context.allocator)
+	if !testing.expect_value(t, temp_error, nil) {return}
+	defer delete(directory)
+	defer os.remove_all(directory)
+	for entry in ([?]struct {
+		source, plugin, colorscheme: string,
+	} {
+		{"theme.name = mine\ntheme.custom.mine.base = tokyonight-storm\n", "folke/tokyonight.nvim", "tokyonight-storm"},
+		{source, "", "aiodev"},
+	}) {
+		s, d, parse_error := parse_themes(entry.source, THEMES)
+		testing.expect_value(t, parse_error, nil)
+		path, export_error := settings.theme_export(&s, directory)
+		settings.destroy(&s)
+		settings.diagnostics_destroy(&d)
+		if !testing.expect_value(t, export_error, nil) {continue}
+		data, read_error := os.read_entire_file(path, context.allocator)
+		testing.expect_value(t, read_error, nil)
+		theme, issue := settings.theme_file_parse(string(data))
+		delete(data)
+		testing.expect_value(t, issue, "")
+		testing.expect_value(t, theme.neovim.plugin, entry.plugin)
+		testing.expect_value(t, theme.neovim.colorscheme, entry.colorscheme)
+	}
 }
 
 @(test)

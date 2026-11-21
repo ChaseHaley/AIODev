@@ -107,7 +107,10 @@ try {
     Invoke-Aio expect text "THEME_FILE=$record" | Out-Null
     Write-Output 'PASS the pane environment names the theme record'
 
-    Add-Content -LiteralPath $settings -Value "`ntheme.custom.mine.base = tide-dark`n"
+    # Customizing a mapped theme keeps its colorscheme (WORK-529); naming aiodev asks for the generated one.
+    Add-Content -LiteralPath $settings -Value ("`ntheme.custom.mine.base = tide-dark`n" +
+        "theme.custom.daymine.base = tokyonight-day`ntheme.custom.daymine.accent = #123456`n" +
+        "theme.custom.dayown.base = tokyonight-day`ntheme.custom.dayown.neovim = aiodev`n")
     Set-Theme 'tokyonight-day'
     $day = Get-Content -LiteralPath $record -Raw | ConvertFrom-Json
     if ($day.neovim.colorscheme -ne 'tokyonight-day' -or -not $day.light -or $day.generation -lt 2) {
@@ -121,6 +124,10 @@ try {
     Wait-Log $followLog 'colors=aiodev background=light normal=#eff1f5' 'plugin: community theme not installed'
     Set-Theme 'mine'
     Wait-Log $followLog 'colors=aiodev background=dark normal=#151e26' 'plugin: custom theme'
+    Set-Theme 'daymine'
+    Wait-Log $followLog 'colors=tokyonight-day background=light normal=*' 'plugin: customized community theme'
+    Set-Theme 'dayown'
+    Wait-Log $followLog 'colors=aiodev background=light normal=#e1e2e7' 'plugin: customized theme naming aiodev'
     Set-Theme 'tokyonight-day'
     Wait-Log $followLog 'colors=tokyonight-day background=light normal=*' 'plugin: back to the community theme'
     Stop-Nvim

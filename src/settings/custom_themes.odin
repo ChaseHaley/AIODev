@@ -62,6 +62,9 @@ custom_theme_key_split :: proc(key: string) -> (id, field: string, ok: bool) {
 Custom_Theme_Field :: enum {
 	Base,
 	Name,
+	// The Neovim colorscheme, without a plugin or background: the settings file's form of a theme
+	// file's neovim object.
+	Neovim,
 	Color,
 }
 
@@ -90,6 +93,8 @@ custom_theme_key :: proc(key: string) -> (parsed: Custom_Theme_Key, problem: Cus
 		parsed.kind = .Base
 	case "name":
 		parsed.kind = .Name
+	case "neovim":
+		parsed.kind = .Neovim
 	case:
 		token, found := token_find(field)
 		if !found {return {}, .Unknown_Color}
@@ -123,6 +128,11 @@ custom_theme_value :: proc(
 	case .Name:
 		if !text_valid(value) {return "", "Expected UTF-8 text without NUL bytes."}
 		return fmt.tprintf("\"%s\"", value), ""
+	case .Neovim:
+		if !neovim_colorscheme_valid(value) {
+			return "", "Expected a Neovim colorscheme such as tokyonight-day, or aiodev for the generated one."
+		}
+		return value, ""
 	case .Color:
 		v, link := theme_value_parse(parsed.token, value, policy)
 		if link == .None {return theme_value_text(parsed.token, v), ""}
@@ -196,6 +206,8 @@ parse_custom_theme_key :: proc(
 		duplicate = theme.base_set
 	case .Name:
 		duplicate = theme.name_set
+	case .Neovim:
+		duplicate = theme.neovim.colorscheme != ""
 	case .Color:
 		duplicate = parsed.token in theme.overrides
 	}
@@ -223,6 +235,19 @@ parse_custom_theme_key :: proc(
 		if clone_error != nil {return clone_error}
 		delete(theme.name, s.allocator)
 		theme.name, theme.name_set = name, true
+	case .Neovim:
+		if !neovim_colorscheme_valid(value) {
+			return diagnostic_append(
+				diagnostics,
+				line,
+				key,
+				"expected a Neovim colorscheme such as tokyonight-day, or aiodev for the generated one",
+			)
+		}
+		colorscheme, clone_error := strings.clone(value, s.allocator)
+		if clone_error != nil {return clone_error}
+		neovim_theme_destroy(theme.neovim, s.allocator)
+		theme.neovim = {colorscheme = colorscheme}
 	case .Color:
 		token := parsed.token
 		v, problem := theme_value_parse(token, value, .Strict)
