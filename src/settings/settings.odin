@@ -615,12 +615,14 @@ Turns_Settings :: struct {
 	quick_labels:          string,
 	saved_filters:         string,
 }
-// Neovim panes: how their windows scroll, how see-through floats that take no input are, and what a
-// pane shows once Neovim quits.
+// Neovim panes: how their windows scroll, how floats sit over the text under them, and what a pane
+// shows once Neovim quits.
 Neovim_Settings :: struct {
 	smooth_scroll:   bool,
 	scroll_duration: int,
 	overlay_opacity: int,
+	float_shadow:    bool,
+	float_blur:      int,
 	exit_to_shell:   bool,
 }
 Window_Settings :: struct {
@@ -1695,6 +1697,26 @@ SCHEMA :: [?]Schema_Entry {
 		description = "How opaque the background of a Neovim float that takes no input is, such as " +
 			"treesitter-context's code context, so the text under it shows through. Its own text stays " +
 			"solid. A highlight's blend or 'winblend' makes any float see-through as well.",
+	},
+	{
+		key = "neovim.float_shadow",
+		title = "Float shadows",
+		kind = .Bool,
+		offset = offset_of(Settings, neovim) + offset_of(Neovim_Settings, float_shadow),
+		default_value = "true",
+		description = "Neovim floats, such as completion menus, pickers and treesitter-context, cast a soft " +
+			"shadow on the text under them, as AIODev's own menus do.",
+	},
+	{
+		key = "neovim.float_blur",
+		title = "Float background blur",
+		kind = .Int,
+		offset = offset_of(Settings, neovim) + offset_of(Neovim_Settings, float_blur),
+		default_value = "3",
+		valid = {0, 12},
+		description = "How much a see-through Neovim float blurs the text that shows through it, in pixels " +
+			"at 100% scale; 0 leaves it sharp. A float is see-through by Overlay float opacity, 'winblend', " +
+			"'pumblend' or a highlight's blend.",
 	},
 	{
 		key = "neovim.exit_to_shell",

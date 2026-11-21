@@ -381,6 +381,16 @@ neovim_pane_draw :: proc(
 		cursor_effects   = cursor_effects(app),
 		smooth_scroll    = app.animations && app.settings.neovim.smooth_scroll,
 		overlay_opacity  = f32(app.settings.neovim.overlay_opacity) / 100,
+		float_blur       = f32(app.settings.neovim.float_blur) * w.scale,
+	}
+	if app.settings.neovim.float_shadow {
+		// The shadow AIODev's own popovers cast.
+		popover := ui.popover_panel({}, w.scale)
+		style.float_shadow = {
+			color    = app.theme.shadow,
+			offset   = {popover.shadow_x * w.scale, popover.shadow_y * w.scale},
+			softness = popover.softness * w.scale,
+		}
 	}
 	box := pane_box(w.metrics, rect.rect, neovim_insets(app, w))
 	clip := render.Rect{rect.rect.x, rect.rect.y, rect.rect.width, rect.rect.height}

@@ -199,6 +199,9 @@ list_draw_range :: proc(
 	stop := clamp(to_layer, start, len(list.layers))
 	for layer in list.layers[start:stop] {
 		clip := scissor(layer.clip, f32(width), f32(height))
+		if layer.blur > 0 {
+			if err := backdrop_blur(d, target, width, height, layer, constants); err != .None {return err}
+		}
 		if clip.right <= clip.left || clip.bottom <= clip.top {
 			continue
 		}

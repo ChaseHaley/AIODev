@@ -15,6 +15,8 @@ cbuffer Frame : register(b0) {
     float4 dust;
     float4 dust_ash;
     uint4 dust_grid;
+    float4 blur;
+    float4 blur_limit;
 };
 
 struct RectInstance {
@@ -141,6 +143,10 @@ float4 rect_ps(Vertex i) : SV_Target {
         float band = saturate(1 - abs((distance + half_width) / half_width));
         band = band * band * (3 - 2 * band);
         alpha *= band * reach + glow;
+    } else if (i.flags == RECT_FILL_SHADOW) {
+        // Nothing under the caster, sheen's rect, with its edge antialiased.
+        float2 h = abs(i.local - i.sheen.xy - i.sheen.zw * 0.5) - i.sheen.zw * 0.5;
+        alpha *= saturate(length(max(h, 0)) + min(max(h.x, h.y), 0) + 0.5);
     }
     return float4(rgb * alpha, alpha);
 }
@@ -230,6 +236,22 @@ Vertex dust_vs(uint vertex : SV_VertexID, uint instance : SV_InstanceID) {
 
 float4 dust_ps(Vertex i) : SV_Target {
     return i.color * clip_coverage(i.position.xy);
+}
+
+// One pass of a backdrop blur (backdrop_windows.odin): a gaussian of standard deviation blur.z texels
+// along blur.xy, one texel's step in uv, its samples kept inside blur_limit, the region copied.
+float4 blur_ps(Vertex i) : SV_Target {
+    float sigma = blur.z;
+    int reach = (int)ceil(3 * sigma);
+    float4 sum = 0;
+    float total = 0;
+    [loop] for (int k = -reach; k <= reach; k++) {
+        float w = exp(-0.5 * k * k / (sigma * sigma));
+        float2 uv = clamp(i.texel + blur.xy * k, blur_limit.xy, blur_limit.xy + blur_limit.zw);
+        sum += image_texture.SampleLevel(image_sampler, uv, 0) * w;
+        total += w;
+    }
+    return sum / total * clip_coverage(i.position.xy);
 }
 
 // DirectWrite grayscale correction, after microsoft/terminal src/renderer/atlas/dwrite.hlsl (MIT).

@@ -378,3 +378,72 @@ neovim_windows_hide_the_separators_a_split_drag_leaves_on_the_base_grid :: proc(
 	}
 	testing.expect(t, cell_has_ink(&f, pixels, 0, 3), "the base grid's own row draws")
 }
+
+// Floats cast a shadow on what is under them, cut out under the float itself, so a see-through float
+// shows what is under it undarkened (WORK-547).
+@(test)
+neovim_floats_cast_a_shadow_that_stays_out_from_under_them :: proc(t: ^testing.T) {
+	f, ok := headless_create(t)
+	defer fixture_destroy(&f)
+	if !ok {return}
+	c: neovim.Client
+	defer neovim.destroy(&c)
+	v: term_view.Neovim_View
+	defer term_view.neovim_view_destroy(&v)
+	style := term_view.Neovim_Style {
+		family = f.family, cursor_color = {1, 1, 1, 1}, cursor_effects = {preset = .Off}, overlay_opacity = 0.5,
+	}
+	if !testing.expect(t, neovim_floats(&c)) {return}
+	_, plain := neovim_render(t, &f, &v, &c, style, frame_at(0))
+	see_through := cell_pixel(&f, plain, 1, 0, 1, 1)
+	style.float_shadow = {color = {0, 0, 0, 0.5}, offset = {0, f.metrics.cell_height / 2}}
+	_, shadowed := neovim_render(t, &f, &v, &c, style, frame_at(0))
+	h := f.metrics.cell_height
+	under := cell_pixel(&f, shadowed, 1, 3, 1, 1)
+	testing.expectf(t, under[0] == 0 && under[1] > 120 && under[1] < 136, "the last float's shadow darkens the window: %v", under)
+	testing.expect_value(t, cell_pixel(&f, shadowed, 1, 3, 1, h * 0.75), [4]u8{0, 255, 0, 255})
+	testing.expect_value(t, cell_pixel(&f, shadowed, 6, 3, 1, 1), [4]u8{0, 255, 0, 255})
+	testing.expect_value(t, cell_pixel(&f, shadowed, 1, 0, 1, 1), see_through)
+}
+
+// A see-through float blurs what shows through it (WORK-547): a red cell under it bleeds into its
+// neighbour, which stays sharp without the blur and outside the float.
+@(test)
+neovim_see_through_floats_blur_what_shows_through :: proc(t: ^testing.T) {
+	f, ok := headless_create(t)
+	defer fixture_destroy(&f)
+	if !ok {return}
+	c: neovim.Client
+	defer neovim.destroy(&c)
+	v: term_view.Neovim_View
+	defer term_view.neovim_view_destroy(&v)
+	style := term_view.Neovim_Style {
+		family = f.family, cursor_color = {1, 1, 1, 1}, cursor_effects = {preset = .Off}, overlay_opacity = 0.5,
+	}
+	if !testing.expect(t, neovim_floats(&c)) {return}
+	// A red cell in column 2 of the window, under the blend 50 float on row 0, and in row 3, under none.
+	w: neovim.Msgpack_Writer
+	neovim.msgpack_write_array(&w, 3)
+	neovim.msgpack_write_uint(&w, 2)
+	neovim.msgpack_write_str(&w, "redraw")
+	neovim.msgpack_write_array(&w, 4)
+	write_highlight(&w, 4, 0xFF0000, 0)
+	for row in ([2]i64{0, 3}) {
+		redraw_event(&w, "grid_line", 4)
+		write_ints(&w, 2, row, 2)
+		neovim.msgpack_write_array(&w, 1)
+		neovim.msgpack_write_array(&w, 3)
+		neovim.msgpack_write_str(&w, " ")
+		write_ints(&w, 4, 1)
+	}
+	if !testing.expect(t, redraw_send(&c, &w)) {return}
+	// Pixels read back as BGRA: red is [2].
+	edge := f.metrics.cell_width - 1
+	_, sharp := neovim_render(t, &f, &v, &c, style, frame_at(0))
+	testing.expect_value(t, cell_pixel(&f, sharp, 1, 0, edge, 1)[2], 0)
+	style.float_blur = 3
+	_, blurred := neovim_render(t, &f, &v, &c, style, frame_at(0))
+	bled := cell_pixel(&f, blurred, 1, 0, edge, 1)
+	testing.expectf(t, bled[2] > 20, "red shows through the float beside its cell: %v", bled)
+	testing.expect_value(t, cell_pixel(&f, blurred, 1, 3, edge, 1), [4]u8{0, 255, 0, 255})
+}

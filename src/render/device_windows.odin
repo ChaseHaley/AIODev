@@ -40,6 +40,8 @@ Device :: struct {
 	image_ps:           ^d3d.IPixelShader,
 	dust_vs:            ^d3d.IVertexShader,
 	dust_ps:            ^d3d.IPixelShader,
+	blur_ps:            ^d3d.IPixelShader,
+	backdrop:           Backdrop,
 	image_sampler:      ^d3d.ISamplerState,
 	images:             map[u64]Image_Texture,
 	image_bytes:        int,
@@ -92,13 +94,17 @@ Frame_Constants :: struct {
 	dust:                    [4]f32,
 	dust_ash:                Color,
 	dust_grid:               [4]u32,
+	// Backdrop blur only: one texel's step along the pass in uv, then the standard deviation in texels;
+	// and the uv rect its samples stay in.
+	blur:                    [4]f32,
+	blur_limit:              Rect,
 }
 
 // Frame_Constants is draw.hlsl's `Frame` cbuffer. Constant-buffer packing never lets a vector cross
 // a 16-byte register, so the explicit padding keeps round_clip and image_rect on register starts.
 #assert(offset_of(Frame_Constants, rect_start) == 28 && offset_of(Frame_Constants, round_clip) == 48)
 #assert(offset_of(Frame_Constants, image_rect) == 80 && offset_of(Frame_Constants, dust) == 112)
-#assert(size_of(Frame_Constants) == 160)
+#assert(offset_of(Frame_Constants, blur) == 160 && size_of(Frame_Constants) == 192)
 
 // The draw.hlsl names for the fill and glyph flag values, defined from the Odin constants.
 @(private)
@@ -114,6 +120,7 @@ SHADER_CONSTANTS :: [?]Shader_Constant {
 	{"RECT_FILL_RIM", RECT_FILL_RIM},
 	{"RECT_FILL_SEGMENT", RECT_FILL_SEGMENT},
 	{"RECT_FILL_ARC", RECT_FILL_ARC},
+	{"RECT_FILL_SHADOW", RECT_FILL_SHADOW},
 	{"GLYPH_COLOR", GLYPH_COLOR},
 	{"GLYPH_FADE", GLYPH_FADE},
 }
@@ -208,6 +215,7 @@ Shader_Entry :: enum {
 	Image_PS,
 	Dust_VS,
 	Dust_PS,
+	Blur_PS,
 }
 
 @(private, rodata)
@@ -222,6 +230,7 @@ SHADER_ENTRIES := [Shader_Entry]struct {
 	.Image_PS = {"image_ps", "ps_5_0"},
 	.Dust_VS  = {"dust_vs", "vs_5_0"},
 	.Dust_PS  = {"dust_ps", "ps_5_0"},
+	.Blur_PS  = {"blur_ps", "ps_5_0"},
 }
 
 // Compiled shaders. Compiling needs no device and takes about a third as long as the driver
@@ -417,6 +426,9 @@ device_create :: proc(driver: Driver, allocator := context.allocator) -> (^Devic
 	if d.dust_ps, err = pixel_shader(d, code.blobs[.Dust_PS]); err != .None {
 		return nil, err
 	}
+	if d.blur_ps, err = pixel_shader(d, code.blobs[.Blur_PS]); err != .None {
+		return nil, err
+	}
 	sampler := d3d.SAMPLER_DESC {
 		Filter         = .MIN_MAG_MIP_LINEAR,
 		AddressU       = .CLAMP,
@@ -494,6 +506,8 @@ device_destroy :: proc(d: ^Device) {
 	release(d.image_ps)
 	release(d.dust_vs)
 	release(d.dust_ps)
+	release(d.blur_ps)
+	backdrop_release(&d.backdrop)
 	release(d.factory)
 	release(d.ctx)
 	release(d.native)

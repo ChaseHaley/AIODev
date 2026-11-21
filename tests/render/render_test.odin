@@ -529,3 +529,49 @@ segments_and_arcs_draw_round_capped_strokes :: proc(t: ^testing.T) {
 	expect_pixel(t, pixels, 32, 15, 7, {})
 	expect_pixel(t, pixels, 32, 24, 16, {251, 251, 251, 251}, 1)
 }
+
+@(test)
+backdrop_blur_softens_what_is_under_its_clip_only :: proc(t: ^testing.T) {
+	f, ok := fixture_create(t, 32, 16)
+	if !ok {
+		return
+	}
+	defer fixture_destroy(&f)
+	layer(t, &f.list, {0, 0, 32, 16})
+	rect(t, &f.list, {rect = {0, 0, 16, 16}, color = {1, 1, 1, 1}})
+	rect(t, &f.list, {rect = {16, 0, 16, 16}, color = {0, 0, 0, 1}})
+	testing.expect_value(t, render.push_backdrop_blur(&f.list, {8, 0, 16, 8}, 2), render.Error.None)
+	pixels := render_pixels(t, &f)
+	defer delete(pixels)
+	// Inside the clip the hard edge between x 15 and 16 turns to a ramp: a gaussian of sigma 2 leaves
+	// 0.6 and 0.4 of white either side of it.
+	expect_pixel(t, pixels, 32, 15, 4, {153, 153, 153, 255}, 2)
+	expect_pixel(t, pixels, 32, 16, 4, {102, 102, 102, 255}, 2)
+	expect_pixel(t, pixels, 32, 9, 4, {255, 255, 255, 255})
+	expect_pixel(t, pixels, 32, 22, 4, {0, 0, 0, 255})
+	// Below the clip, and beside it, the edge stays sharp.
+	expect_pixel(t, pixels, 32, 15, 12, {255, 255, 255, 255})
+	expect_pixel(t, pixels, 32, 16, 12, {0, 0, 0, 255})
+	expect_pixel(t, pixels, 32, 7, 4, {255, 255, 255, 255})
+}
+
+@(test)
+shadow_fill_draws_nothing_under_its_caster :: proc(t: ^testing.T) {
+	f, ok := fixture_create(t, 32, 32)
+	if !ok {
+		return
+	}
+	defer fixture_destroy(&f)
+	layer(t, &f.list, {0, 0, 32, 32})
+	// The caster is at 8,8 16x16; its shadow falls 2 px lower.
+	rect(t, &f.list, {
+		rect = {8, 10, 16, 16}, color = {0, 0, 0, 0.5}, softness = 2,
+		fill = render.RECT_FILL_SHADOW, sheen = {0, -2, 16, 16},
+	})
+	pixels := render_pixels(t, &f, {1, 1, 1, 1})
+	defer delete(pixels)
+	expect_pixel(t, pixels, 32, 16, 16, {255, 255, 255, 255})
+	expect_pixel(t, pixels, 32, 16, 23, {255, 255, 255, 255})
+	expect_pixel(t, pixels, 32, 16, 24, {143, 143, 143, 255}, 2)
+	expect_pixel(t, pixels, 32, 16, 4, {255, 255, 255, 255})
+}

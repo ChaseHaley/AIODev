@@ -15,7 +15,8 @@ import "core:unicode/utf8"
 // and cluster fitting: the base grid, each window, then floats and messages in Neovim's order, and
 // AIODev's cursor over everything. A window's text scrolls smoothly when Neovim scrolls it, and floats
 // draw their backgrounds translucent where Neovim's blend asks it, or AIODev's overlay opacity does for
-// floats that take no input. The scratch is reused, so a build allocates only while something grows.
+// floats that take no input, over a blur of what shows through, and cast a shadow (WORK-547). The
+// scratch is reused, so a build allocates only while something grows.
 Neovim_View :: struct {
 	paints:     [dynamic]Neovim_Paint,
 	runes:      [dynamic]rune,
@@ -48,6 +49,18 @@ Neovim_Style :: struct {
 	smooth_scroll:    bool,
 	// How opaque the background of a float that takes no input is, 0..1, on top of Neovim's own blend.
 	overlay_opacity:  f32,
+	// The shadow floats cast on what is under them; a clear colour casts none.
+	float_shadow:     Neovim_Shadow,
+	// How much a see-through float blurs what shows through it: the gaussian's standard deviation in
+	// pixels, 0 for none.
+	float_blur:       f32,
+}
+
+// In pixels: how far the shadow falls from its float, and how far its edge fades.
+Neovim_Shadow :: struct {
+	color:    render.Color,
+	offset:   [2]f32,
+	softness: f32,
 }
 
 Neovim_Frame :: struct {
@@ -292,14 +305,18 @@ neovim_build :: proc(
 	cursor := neovim_cursor_place(v, s, origin, metrics, style, frame_time, &frame)
 	b := Builder{list = list, cache = cache, fonts = fonts, metrics = metrics}
 	cursor_text: [2]int
-	for &grid in s.grids {
+	run_end := 0
+	for &grid, index in s.grids {
 		draw := Neovim_Grid_Draw {
 			origin  = origin + {f32(grid.column) * metrics.cell_width, f32(grid.row) * metrics.cell_height},
-			opacity = 1,
+			opacity = neovim_grid_opacity(&grid, style),
 		}
 		if grid.kind == .Float || grid.kind == .Message {
 			draw.floating = true
-			if grid.kind == .Float && !grid.focusable {draw.opacity = clamp(style.overlay_opacity, 0, 1)}
+			if index >= run_end {
+				run_end = neovim_float_run_end(s.grids[:], index)
+				if !neovim_float_backdrops(s, s.grids[index:run_end], list, origin, metrics, style, pane) {return}
+			}
 			// A float draws above everything before it: its backgrounds go over the text below it.
 			if render.push_layer(list, pane.clip, pane.radius) != .None {return}
 		}
@@ -313,6 +330,82 @@ neovim_build :: proc(
 	}
 	neovim_cursor_draw(v, list, cursor, style, pane, cursor_text)
 	return
+}
+
+// How opaque a grid's backgrounds are on top of Neovim's own blend: a float that takes no input takes the
+// overlay opacity.
+@(private)
+neovim_grid_opacity :: proc(grid: ^neovim.Grid_View, style: Neovim_Style) -> f32 {
+	if grid.kind == .Float && !grid.focusable {return clamp(style.overlay_opacity, 0, 1)}
+	return 1
+}
+
+// The end of the run of floats from `first` that share its zindex, as Neovim layers them; a message grid
+// is a run of its own.
+@(private)
+neovim_float_run_end :: proc(grids: []neovim.Grid_View, first: int) -> int {
+	end := first + 1
+	if grids[first].kind != .Float {return end}
+	for end < len(grids) && grids[end].kind == .Float && grids[end].zindex == grids[first].zindex {end += 1}
+	return end
+}
+
+@(private)
+neovim_grid_rect :: proc(grid: ^neovim.Grid_View, origin: [2]f32, metrics: Metrics) -> render.Rect {
+	return {
+		origin.x + f32(grid.column) * metrics.cell_width,
+		origin.y + f32(grid.row) * metrics.cell_height,
+		f32(grid.columns) * metrics.cell_width,
+		f32(grid.rows) * metrics.cell_height,
+	}
+}
+
+// Whether any of a float's backgrounds lets what is under it show through.
+@(private)
+neovim_see_through :: proc(s: ^neovim.Screen, grid: ^neovim.Grid_View, opacity: f32) -> bool {
+	if opacity < 1 {return true}
+	for cell in grid.cells[:grid.rows * grid.columns] {
+		if neovim_highlight(s, cell.highlight).blend > 0 {return true}
+	}
+	return false
+}
+
+// What a run of floats draws over before any of them draws: a blur under each see-through float, of only
+// what is below the run, then the run's shadows, each cut out under its own float and none drawn over
+// another float of the run. False when the list has no room.
+@(private, require_results)
+neovim_float_backdrops :: proc(
+	s: ^neovim.Screen,
+	run: []neovim.Grid_View,
+	list: ^render.Draw_List,
+	origin: [2]f32,
+	metrics: Metrics,
+	style: Neovim_Style,
+	pane: render.Layer,
+) -> bool {
+	if style.float_blur > 0 {
+		for &grid in run {
+			if !neovim_see_through(s, &grid, neovim_grid_opacity(&grid, style)) {continue}
+			area := neovim_intersect(pane.clip, neovim_grid_rect(&grid, origin, metrics))
+			if area.width <= 0 || area.height <= 0 {continue}
+			if render.push_backdrop_blur(list, area, style.float_blur) != .None {return false}
+		}
+	}
+	shadow := style.float_shadow
+	if shadow.color.a <= 0 || run[0].kind != .Float {return true}
+	if render.push_layer(list, pane.clip, pane.radius) != .None {return false}
+	for &grid in run {
+		r := neovim_grid_rect(&grid, origin, metrics)
+		caster := render.Rect_Instance {
+			rect     = {r.x + shadow.offset.x, r.y + shadow.offset.y, r.width, r.height},
+			color    = shadow.color,
+			softness = shadow.softness,
+			fill     = render.RECT_FILL_SHADOW,
+			sheen    = {-shadow.offset.x, -shadow.offset.y, r.width, r.height},
+		}
+		if render.push_rect(list, caster) != .None {return false}
+	}
+	return true
 }
 
 // Where the cursor is drawn this frame and what it looks like; `present` is false while it is off its

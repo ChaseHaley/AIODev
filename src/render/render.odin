@@ -52,6 +52,10 @@ RECT_FILL_RIM :: u32(3)
 // Both are in pixels local to `rect`, which must contain the stroke.
 RECT_FILL_SEGMENT :: u32(4)
 RECT_FILL_ARC :: u32(5)
+// A soft shadow with its caster cut out: sheen holds the caster's rect (x, y, width, height) in pixels
+// local to `rect`, and nothing is drawn inside it, so a see-through caster shows what is under it
+// undarkened.
+RECT_FILL_SHADOW :: u32(6)
 
 // A glyph quad. Coverage glyphs are tinted with color; with GLYPH_COLOR set, the glyph samples the
 // RGBA atlas and color.a only fades it.
@@ -89,10 +93,12 @@ Dust :: struct {
 // Keys of the textures image_render draws. image_upload keys never set this bit, so they never collide.
 IMAGE_KEY_RENDERED :: u64(1) << 63
 
-// A layer draws its rects, then its images, then its glyphs.
+// A layer draws its rects, then its images, then its glyphs. With `blur` set, it first blurs what is
+// already drawn under its clip, as frosted glass: a gaussian with that standard deviation in pixels.
 Layer :: struct {
 	clip:                                             Rect,
 	radius:                                           f32,
+	blur:                                             f32,
 	rect_start, rect_count, glyph_start, glyph_count: int,
 	image_start, image_count:                         int,
 }
@@ -235,6 +241,7 @@ draw_scale :: proc(list: ^Draw_List, mark: Draw_Mark, centre: [2]f32, factor: f3
 	for &layer in list.layers[mark.layers:] {
 		layer.clip = scaled(layer.clip, centre, factor)
 		layer.radius *= factor
+		layer.blur *= factor
 	}
 	for &rect in list.rects[mark.rects:] {
 		rect.rect = scaled(rect.rect, centre, factor)
@@ -314,6 +321,15 @@ push_layer :: proc(list: ^Draw_List, clip: Rect, radius: f32 = 0) -> Error {
 		list.error = .Out_Of_Memory
 	}
 	return list.error
+}
+
+// Pushes a layer that blurs what is drawn under `clip` by a gaussian of standard deviation `sigma` pixels
+// before its own content draws; see Layer.
+@(require_results)
+push_backdrop_blur :: proc(list: ^Draw_List, clip: Rect, sigma: f32, radius: f32 = 0) -> Error {
+	if push_layer(list, clip, radius) != .None {return list.error}
+	list.layers[len(list.layers) - 1].blur = sigma
+	return .None
 }
 
 @(require_results)
