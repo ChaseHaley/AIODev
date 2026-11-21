@@ -226,6 +226,8 @@ function Build-App([string[]] $Mode, [string] $Output = 'build/aiodev.exe', [str
     $nvimDestination = Join-Path (Split-Path $Output) 'nvim'
     Remove-Item -LiteralPath $nvimDestination -Recurse -Force -ErrorAction SilentlyContinue
     Copy-Item -LiteralPath 'nvim' -Destination $nvimDestination -Recurse
+    # PSVim ships beside aiodev.exe under modules\PSVim so PowerShell panes can Import-Module PSVim.
+    Copy-PSVim (Split-Path $Output)
     # The aio command line ships beside every app build; the app puts its directory first on each
     # shell's PATH.
     [string[]] $cliMode = if ($Mode -contains '-o:speed') { '-o:speed' } else { '-debug' }
@@ -233,6 +235,50 @@ function Build-App([string[]] $Mode, [string] $Output = 'build/aiodev.exe', [str
     [string[]] $alternate = if ($AlternateServer) { @("-define:AIO_SERVER_ALTERNATE='$AlternateServer'") } else { @() }
     Invoke-Odin build src/cli "-out:$(Join-Path (Split-Path $Output) 'aio.exe')" @cliMode `
         '-subsystem:console' "-define:AIO_SERVER_NAME='$serverName'" @identity @alternate @flags @cliResource
+}
+
+function Copy-PSVim([string] $Root) {
+    $dest = Join-Path $Root 'modules\PSVim'
+    Remove-Item -LiteralPath $dest -Recurse -Force -ErrorAction SilentlyContinue
+
+    $manifestPath = 'tools/psvim.json'
+    $sourceDir = $null
+    if (Test-Path -LiteralPath $manifestPath) {
+        $spec = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
+        if ($spec.url -and $spec.sha256) {
+            $cacheRoot = Join-Path 'build\cache\psvim' $spec.version
+            $zipFile = Join-Path $cacheRoot "PSVim-$($spec.version).zip"
+            $extractDir = Join-Path $cacheRoot 'module'
+            if (-not (Test-Path -LiteralPath (Join-Path $extractDir 'PSVim.dll'))) {
+                New-Item -ItemType Directory -Force -Path $cacheRoot | Out-Null
+                Invoke-WebRequest -Uri $spec.url -OutFile $zipFile -UseBasicParsing
+                $actual = (Get-FileHash -LiteralPath $zipFile -Algorithm SHA256).Hash.ToLowerInvariant()
+                if ($actual -ne $spec.sha256.ToLowerInvariant()) {
+                    Remove-Item -LiteralPath $zipFile -Force -ErrorAction SilentlyContinue
+                    throw "PSVim archive SHA-256 mismatch: expected $($spec.sha256), got $actual"
+                }
+                if (Test-Path -LiteralPath $extractDir) { Remove-Item -LiteralPath $extractDir -Recurse -Force }
+                Expand-Archive -LiteralPath $zipFile -DestinationPath $extractDir -Force
+            }
+            $sourceDir = $extractDir
+        }
+    }
+
+    if (-not $sourceDir) {
+        $sibling = Resolve-Path -LiteralPath '..\PSVim\module' -ErrorAction SilentlyContinue
+        if ($sibling -and (Test-Path -LiteralPath (Join-Path $sibling.Path 'PSVim.dll'))) {
+            $sourceDir = $sibling.Path
+        }
+    }
+
+    if (-not $sourceDir) { return }
+    New-Item -ItemType Directory -Force -Path $dest | Out-Null
+    foreach ($file in @('PSVim.psd1', 'PSVim.psm1', 'PSVim.dll')) {
+        $src = Join-Path $sourceDir $file
+        if (Test-Path -LiteralPath $src) {
+            Copy-Item -LiteralPath $src -Destination $dest -Force
+        }
+    }
 }
 
 function Build-Release([string] $Destination = 'build/release/aiodev.exe') {
@@ -346,6 +392,7 @@ switch ($Task) {
         Copy-Conpty $stage
         Copy-Item -LiteralPath 'themes' -Destination $stage -Recurse -Force
         Copy-Item -LiteralPath 'nvim' -Destination $stage -Recurse -Force
+        Copy-PSVim $stage
         # The aio API's definitions for lua-language-server ship beside aio.exe as types\aio.lua.
         New-Item -ItemType Directory -Force "$stage/types" | Out-Null
         Copy-Item -LiteralPath 'types/aio.lua' -Destination "$stage/types/aio.lua"

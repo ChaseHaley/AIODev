@@ -10,6 +10,7 @@ import "aio:settings"
 import "aio:term"
 import "core:fmt"
 import "core:log"
+import "core:os"
 import "core:strings"
 import "core:time"
 
@@ -127,6 +128,14 @@ session_config :: proc(
 	if app.cli_directory != "" {
 		cli := fmt.tprintf(`%s\%s`, app.cli_directory, CLI_EXECUTABLE)
 		append(&environment, pty.Env_Var{CLI_VARIABLE, cli})
+		modules := fmt.tprintf(`%s\modules`, app.cli_directory)
+		if os.exists(modules) {
+			if existing, ok := os.lookup_env("PSModulePath", context.temp_allocator); ok && existing != "" {
+				append(&environment, pty.Env_Var{"PSModulePath", fmt.tprintf("%s;%s", modules, existing)})
+			} else {
+				append(&environment, pty.Env_Var{"PSModulePath", modules})
+			}
+		}
 	}
 	agent_environment(app, key, &environment)
 	if record := theme_record_path(app); record != "" {
