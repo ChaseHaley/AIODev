@@ -187,7 +187,50 @@ tab_label_retargets_from_what_it_draws :: proc(t: ^testing.T) {
 	}
 }
 
-// A label rests when nothing about it changes: animations off, its motion off, a pane that looks the same,
+// Panes whose labels look exactly alike (same icon, same title) still turn when focus moves between them:
+// the marks stand for panes, so they spin round the sphere as ever. A redraw that moves no focus, a
+// relayout or an orientation change, starts no turn.
+@(test)
+tab_label_turns_between_alike_panes :: proc(t: ^testing.T) {
+	f: Palette_Fixture
+	defer palette_fixture_destroy(t, &f)
+	s, w, ok := label_fixture(t, &f, "tab-label-alike")
+	if !ok {return}
+	for &entry in s.sessions {
+		delete(entry.name)
+		entry.name = strings.clone("Same")
+	}
+	label_settle(s, w)
+
+	before := focused(w)
+	label_step(s, w, .Focus_Left, TURN / 4)
+	if !testing.expect(t, focused(w) != before, "focus moves") {return}
+	testing.expect(t, ui.motion_active(label_of(w).turn), "the label turns between alike panes")
+	tile, built := app.tab_tile(s, w, 0)
+	testing.expect_value(t, built, render.Build_Status.Ok)
+	if !testing.expect(t, tile.turn.turning, "the tile shows the turn") {return}
+	testing.expect_value(t, tile.turn.title, tile.title)
+	testing.expect_value(t, tile.turn.badge.icon, tile.badge.icon)
+	testing.expect_value(t, tile.turn.badge.shell, tile.badge.shell)
+	testing.expect(t, tile.turn.badge.pane != tile.badge.pane, "the marks stand for different panes")
+	marks, count := ui.tab_spin_marks({0, 0, 200, 40}, tile, 1)
+	spinning := 0
+	for mark in marks[:count] {if mark.path != 0 {spinning += 1}}
+	testing.expect(t, spinning > 0, "a mark rides the sphere")
+	label_settle(s, w)
+
+	// Not a focus move: nothing turns.
+	w.tabs_horizontal = !w.tabs_horizontal
+	app.window_relayout(s, w)
+	w.dirty = true
+	app.window_render(s, w)
+	app.window_motion_update(s, w, {display = time.tick_now(), period = PERIOD})
+	testing.expect(t, !app.tab_labels_turning(w), "a relayout or orientation change")
+	tile, built = app.tab_tile(s, w, 0)
+	testing.expect(t, built == .Ok && !tile.turn.turning, "a redraw")
+}
+
+// A label rests when nothing about it changes: animations off, its motion off,
 // a tab seen for the first time and a switch of tab. Its timing comes from the Tab Label motion settings,
 // inheriting Panes.
 @(test)
@@ -214,17 +257,6 @@ tab_label_rests_when_nothing_turns :: proc(t: ^testing.T) {
 	label_step(s, w, .Focus_Up, TURN / 4)
 	testing.expect_value(t, label_of(w).turn.duration, 400 * time.Millisecond)
 	s.settings.motion.specs[.Panes] = {}
-	label_settle(s, w)
-
-	// Every pane named alike: focus moves, the label looks the same, and its first draw ends the turn.
-	for &entry in s.sessions {
-		delete(entry.name)
-		entry.name = strings.clone("Same")
-	}
-	label_step(s, w, .Focus_Down, 0)
-	w.dirty = true
-	app.window_render(s, w)
-	testing.expect(t, !ui.motion_active(label_of(w).turn), "a label that looks the same")
 	label_settle(s, w)
 
 	app.tab_new(s, w)

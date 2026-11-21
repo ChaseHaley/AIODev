@@ -58,7 +58,7 @@ tab_content_badge :: proc(
 	render.Build_Status,
 ) {
 	badge, result := content_badge(app, workspace_session_for_content(app, content), content, size)
-	return {icon = badge.icon, shell = badge.glyph, atlas = badge.atlas}, result
+	return {icon = badge.icon, shell = badge.glyph, atlas = badge.atlas, pane = pane_motion_key(content)}, result
 }
 
 // How much a pane says about what its tab is for, least first.

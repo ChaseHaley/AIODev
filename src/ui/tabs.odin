@@ -55,6 +55,8 @@ tab_new_rect :: proc(bar: Tab_Bar) -> render.Rect {
 // The picture at the start of a tab: a content kind's icon, else the session's program badge.
 Tab_Badge :: struct {
 	icon:  Icon,
+	// The pane the mark stands for, 0 when unknown: two marks that look alike still stand for different panes.
+	pane:  u64,
 	shell: string,
 	atlas: render.Rect,
 }
@@ -164,7 +166,8 @@ Tab_Spin_Mark :: struct {
 // A mark in both stacks travels from its old place to its new one: the front mark round the sphere to the
 // back and the one behind round to the front when they trade places. A mark only in the new stack comes in
 // from the hidden back of the sphere, fading in, and one only in the old stack goes out to it, fading away.
-// Marks that look alike count as the same mark, so marks that do not change keep still.
+// Marks for the same pane (or, when no pane is known, that look alike) count as the same mark, so marks that
+// do not change keep still; two panes whose marks look alike still trade places.
 tab_spin_marks :: proc(tile: render.Rect, t: Tab_Tile, scale: f32) -> (marks: [4]Tab_Spin_Mark, count: int) {
 	turn := t.turn
 	old_stacked, new_stacked := tab_badge_shown(turn.behind), tab_badge_shown(t.behind)
