@@ -824,6 +824,15 @@ changes_diff_scroll :: proc(app: ^App, w: ^Window, pane: ^Changes_Pane, shown: l
 	if ui.changes_scroll_diff(&pane.state, g, delta) {w.dirty = true}
 }
 
+// Scrolls the diff by whole pages, as the terminal and Markdown panes' page commands do. A page leaves out
+// the row a pinned header covers, so nothing slides under it unseen.
+@(private)
+changes_page :: proc(app: ^App, w: ^Window, pane: ^Changes_Pane, shown: layout.Pane_Rect, pages: f64) {
+	g := changes_geometry_of(app, w, pane, shown)
+	page := max(1, int(g.diff.height) - pane.state.rows.header)
+	if ui.changes_scroll_diff(&pane.state, g, int(pages * f64(page))) {w.dirty = true}
+}
+
 // Pages the strip by as many bars as it shows, toward older turns (`step` -1) or newer ones (+1), as
 // the wheel moves it; the selection stays. The new page's edge bar sits next to the old page's edge: a
 // newer page starts right after it, and an older page, which may show fewer bars once a newer marker
@@ -1028,8 +1037,6 @@ changes_key :: proc(app: ^App, w: ^Window, e: input.Key_Event) {
 	g := changes_geometry_of(app, w, pane, shown)
 	view := &pane.model.view
 	turn_scope := ui.changes_scope_turns(pane.scope)
-	// A page leaves out the row a pinned header covers, so nothing slides under it unseen.
-	page := max(1, int(g.diff.height) - pane.state.rows.header)
 	for shortcut, i in CHANGES_STEP_KEYS {
 		if key.logical.key != shortcut.key || !turn_scope {continue}
 		// Older turns sit to the left in the strip; the table lists the older key first.
@@ -1038,9 +1045,9 @@ changes_key :: proc(app: ^App, w: ^Window, e: input.Key_Event) {
 	}
 	#partial switch key.logical.key {
 	case .Page_Up:
-		if !extend {changes_diff_scroll(app, w, pane, shown, -page)}
+		if !extend {changes_page(app, w, pane, shown, -1)}
 	case .Page_Down:
-		if !extend {changes_diff_scroll(app, w, pane, shown, page)}
+		if !extend {changes_page(app, w, pane, shown, 1)}
 	case .Home:
 		if turn_scope {
 			changes_select(app, pane, g, len(view.turns) - 1, extend)
