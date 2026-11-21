@@ -17,7 +17,9 @@ control_web_open :: proc(
 	url := ""
 	if .Text in invocation.given {
 		normalized, ok := links.normalize_web_input(invocation.text)
-		if !ok {return outcome_failure(.Usage, "give an HTTP, HTTPS, or local file:/// address")}
+		if !ok {
+			return outcome_failure(.Usage, "give a web address, local file:/// URL, or absolute file path")
+		}
 		url = normalized
 	}
 	workspace := target.workspace

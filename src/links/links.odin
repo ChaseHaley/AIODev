@@ -1,5 +1,7 @@
 package links
 
+import "aio:localpath"
+import "core:mem"
 import "core:strings"
 
 // Range is a byte span in the text the caller scanned. End is exclusive.
@@ -249,12 +251,20 @@ trim_prose :: proc(text: string, start, end: int) -> int {
 	return trim
 }
 
-// Normalize_web_input accepts HTTP(S) and local Windows file URLs for web panes only. A bare host
-// gets HTTPS (HTTP for localhost, 127.0.0.1 and [::1]). The result is allocated with `allocator`.
+// Normalize_web_input accepts HTTP(S), local file URLs and absolute Windows drive paths for web panes.
+// A bare host gets HTTPS (HTTP for localhost, 127.0.0.1 and [::1]). The result uses `allocator`.
 @(require_results)
 normalize_web_input :: proc(raw: string, allocator := context.temp_allocator) -> (string, bool) {
 	trimmed := strings.trim_space(raw)
 	if trimmed == "" {return "", false}
+	path := trimmed
+	if len(path) >= 2 && path[0] == '"' && path[len(path) - 1] == '"' {
+		path = path[1:len(path) - 1]
+	}
+	if localpath.is_drive_absolute(path) {
+		if !localpath.local_absolute(path) {return "", false}
+		return web_file_url_from_path(path, allocator)
+	}
 	if web_file_url(trimmed) || allowed(trimmed) {
 		cloned, err := strings.clone(trimmed, allocator)
 		return cloned, err == nil
@@ -270,6 +280,44 @@ normalize_web_input :: proc(raw: string, allocator := context.temp_allocator) ->
 	if err != nil {return "", false}
 	if !allowed(candidate) {delete(candidate, allocator); return "", false}
 	return candidate, true
+}
+
+// Encode the native path literally: '#' and '%' in a filename are not URI syntax.
+@(private, require_results)
+web_file_url_from_path :: proc(path: string, allocator: mem.Allocator) -> (string, bool) {
+	PREFIX :: "file:///"
+	hex := "0123456789ABCDEF"
+	suffix := transmute([]u8)path[2:]
+	size := len(PREFIX) + len(path)
+	for c in suffix {
+		if !web_file_url_path_byte(c) {size += 2}
+	}
+	out, err := make([]u8, size, allocator)
+	if err != nil {return "", false}
+	copy(out, PREFIX)
+	at := len(PREFIX)
+	out[at], out[at + 1] = path[0], ':'
+	at += 2
+	for c in suffix {
+		if localpath.is_separator(c) {
+			out[at] = '/'
+		} else if web_file_url_path_byte(c) {
+			out[at] = c
+		} else {
+			out[at], out[at + 1], out[at + 2] = '%', hex[c >> 4], hex[c & 0xf]
+			at += 2
+		}
+		at += 1
+	}
+	return string(out), true
+}
+
+@(private, require_results)
+web_file_url_path_byte :: proc(c: u8) -> bool {
+	switch c {
+	case 'A'..='Z', 'a'..='z', '0'..='9', '-', '_', '.', '~', '/', '\\': return true
+	case: return false
+	}
 }
 
 // Require a drive path, not a file authority (which could name a network share).

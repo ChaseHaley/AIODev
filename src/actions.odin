@@ -950,7 +950,7 @@ COMMAND_HELP :: #partial [Action]Command_Help {
 			{
 				.Text,
 				{
-					description = "the HTTP, HTTPS, or local file:/// address to open",
+					description = "the web address, local file URL, or absolute Windows path to open",
 					default = "a blank pane",
 					example = "example.com",
 				},

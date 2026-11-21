@@ -53,6 +53,7 @@ New-Item -ItemType Directory -Force $work | Out-Null
 $localFile = Join-Path $work 'local preview.html'
 Set-Content -LiteralPath $localFile -Encoding utf8 '<!doctype html><title>Local preview</title><h1 id="preview">Preview</h1>'
 $localUrl = [Uri]::new($localFile).AbsoluteUri
+$mixedPath = ([IO.Path]::GetDirectoryName($localFile) -replace '\\', '/') + '\' + [IO.Path]::GetFileName($localFile)
 @"
 control.enabled = true
 shell.command = pwsh.exe -NoLogo -NoProfile -NoExit
@@ -85,9 +86,15 @@ try {
     Check ($state["$first.crashed"] -eq 'none') "web crash state: $($state["$first.crashed"])"
     Check ($state["$first.find_count"] -eq '0') "web find count: $($state["$first.find_count"])"
 
-    # Explicit local HTML works through both the CLI and the focused pane's URL bar.
-    Open-Web @('--focus', $localUrl)
+    # Ctrl+V accepts the Windows path itself, with mixed slashes and no scheme.
+    Open-Web @('--focus', "$localUrl#preview")
+    Wait-For 'web.url' "$localUrl#preview"
+    $clipboard = Invoke-Aio @('edit.clipboard_write', $mixedPath)
+    Check ($clipboard.Code -eq 0) "could not set the headless clipboard: $($clipboard.Text)"
+    Invoke-Ctl key Ctrl+L Ctrl+V Enter | Out-Null
     Wait-For 'web.url' $localUrl
+
+    # Explicit file URLs still accept a fragment.
     Invoke-Ctl key Ctrl+L | Out-Null
     Invoke-Ctl type "$localUrl#preview" | Out-Null
     Invoke-Ctl key Enter | Out-Null
@@ -116,17 +123,16 @@ try {
     Wait-For 'web.count' '3'
     Check (((Web-Urls) -join ',') -eq ($urls -join ',')) "restored urls: $((Web-Urls) -join ', ')"
 
-    # Float a local page, then open a separate float from it without changing focus.
-    $preview = "$localUrl#floating-preview"
+    # Float a local page from a raw path, then open a separate float without changing focus.
     $before = Read-State
     Check ($before['tab.1.floating'] -eq '0') 'default opens unexpectedly floated a pane'
-    Open-Web @('--float', '--focus', $preview)
-    Wait-For 'web.url' $preview
+    Open-Web @('--float', '--focus', $mixedPath)
+    Wait-For 'web.url' $localUrl
     Wait-For 'tab.1.floating' '1'
     Open-Web @('--pane', 'focused', 'https://example.com/second-float', '--float')
     Wait-For 'tab.1.floating' '2'
     Check ((Web-Urls) -contains 'https://example.com/second-float') 'second URL did not open'
-    Check ((Read-State)['web.url'] -eq $preview) 'opening without --focus moved focus'
+    Check ((Read-State)['web.url'] -eq $localUrl) 'opening without --focus moved focus'
 
     $paneCount = (Read-State)['web.count']
     $splitOptions = @(@('--direction', 'down'), @('--ratio', '0.3'))
