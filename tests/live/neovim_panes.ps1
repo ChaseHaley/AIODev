@@ -164,6 +164,13 @@ try {
     $state = Read-State
     Check ($state['neovim.count'] -eq '1') "the edit opened another Neovim: $($state['neovim.count'])"
     Check ($state["neovim.row.$($state['neovim.cursor_row'])"] -eq 'changed three') 'the cursor is not on line 3'
+
+    # A folder opens as `nvim .` opens it there: Neovim lists it and works in it, not in its parent.
+    $opened = & $aio --instance $Name pane.open_neovim $repository --focus 2>&1
+    Check ($LASTEXITCODE -eq 0) "aio pane.open_neovim <folder>: $opened"
+    Wait-For 'neovim.count' '2'
+    Wait-For 'neovim.started' 'true'
+    Wait-For 'neovim.directory' $repository
     Write-Output 'PASS neovim_panes'
 } finally {
     & $ctl --name $Name stop | Out-Null

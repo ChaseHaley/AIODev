@@ -2037,12 +2037,12 @@ function aio.pane.open_markdown_default_app(fields) end
 ---@field direction? "left"|"right"|"up"|"down" the side of the pane the new pane opens on; default: right
 ---@field ratio? number the new pane's share of the split pane's width (left, right) or height (up, down); default: 0.5 (half)
 ---@field focus? boolean moves focus to the new pane; default: off (focus stays where it is)
----@field file? string the file to edit; default: an empty buffer
+---@field file? string the file or folder to open; default: an empty buffer
 ---@field float? boolean opens a separate float; cannot be combined with --direction or --ratio; default: the command's usual placement
 
 ---Open Neovim
 ---
----Opens Neovim in a new pane beside the pane, drawn by AIODev rather than in a terminal, with your own config. With a file it edits that file; otherwise it starts in the pane's folder.
+---Opens Neovim in a new pane beside the pane, drawn by AIODev rather than in a terminal, with your own config. With a file it edits that file; with a folder it opens and works in that folder, as nvim . does; otherwise it starts in the pane's folder.
 ---@param fields? aio.fields.pane.open_neovim
 ---@return aio.Reply? reply
 ---@return string? message

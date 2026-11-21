@@ -969,11 +969,12 @@ COMMAND_HELP :: #partial [Action]Command_Help {
 	},
 	.Open_Neovim = {
 		"Opens Neovim in a new pane beside the pane, drawn by AIODev rather than in a terminal, with your own " +
-		"config. With a file it edits that file; otherwise it starts in the pane's folder.",
+		"config. With a file it edits that file; with a folder it opens and works in that folder, as nvim . " +
+		"does; otherwise it starts in the pane's folder.",
 		{
 			{
 				.File,
-				{description = "the file to edit", default = "an empty buffer", example = "src/main.odin"},
+				{description = "the file or folder to open", default = "an empty buffer", example = "."},
 			},
 		},
 	},

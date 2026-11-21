@@ -442,8 +442,9 @@ neovim_edit_beside :: proc(app: ^App, w: ^Window, node: layout.Node_Id, path: st
 	}
 }
 
-// `aio pane.open_neovim [file]`: a split beside the pane, toward --direction when given, or a float with
-// --float. Without a file Neovim starts in the pane's folder.
+// `aio pane.open_neovim [path]`: a split beside the pane, toward --direction when given, or a float with
+// --float. Neovim works in a folder it is given, as `nvim .` does in that folder, else in the file's
+// folder, else in the pane's.
 @(require_results)
 control_neovim_open :: proc(
 	app: ^App,
@@ -452,7 +453,7 @@ control_neovim_open :: proc(
 	invocation: commands.Invocation,
 ) -> Outcome {
 	file := .File in invocation.given ? invocation.file : ""
-	directory := filepath.dir(file)
+	directory := os.is_dir(file) ? file : filepath.dir(file)
 	if file == "" {
 		directory = home_directory()
 		if entry := target.pane.session; entry != nil {
