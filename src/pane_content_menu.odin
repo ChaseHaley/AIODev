@@ -29,6 +29,11 @@ pane_content_menu_choose :: proc(
 	if target, swap := mode.(Profile_Menu_Swap_Pane); swap {
 		node := pane_content_menu_node(w, target.pane)
 		if node == layout.INVALID_NODE {return}
+		// The profile of the shell behind a Neovim shows that shell, as quitting Neovim does.
+		if kind == .Terminal && neovim_shell_show(app, target.pane, value) {
+			pane_focus(app, w, node)
+			return
+		}
 		if neovim_unsaved(app, target.pane) {
 			notify(app, .Warning, "Neovim has unsaved changes. Save them, or quit Neovim, first.")
 			return

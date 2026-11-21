@@ -1,11 +1,11 @@
 [CmdletBinding()]
 param([string] $Name = 'neovim-shell')
 # Neovim panes behave as Neovim run from a shell (WORK-545). `aio pane.open_neovim` typed in a shell pane
-# opens Neovim in that pane over the shell, and quitting Neovim shows the same shell again. Typing hides the
-# pointer until the mouse moves. Closing the pane, its tab or AIODev with an unsaved buffer asks first.
-# Neovim opened beside a pane leaves a shell in its folder when it quits. Needs nvim on PATH. Neovim runs
-# with XDG folders inside this journey's work folder, so the owner's Neovim config is neither read nor
-# written.
+# opens Neovim in that pane over the shell, taking the pane only once Neovim has drawn, and quitting Neovim
+# or choosing the shell's profile in the pane switcher shows the same shell again. Typing hides the pointer
+# until the mouse moves. Closing the pane, its tab or AIODev with an unsaved buffer asks first. Neovim
+# opened beside a pane leaves a shell in its folder when it quits. Needs nvim on PATH. Neovim runs with XDG
+# folders inside this journey's work folder, so the owner's Neovim config is neither read nor written.
 $ErrorActionPreference = 'Stop'
 $repo = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
 $ctl = Join-Path $repo 'build/aioctl.exe'
@@ -56,6 +56,18 @@ function Screen-Text {
     $state = Read-State
     return ($state.Keys | Where-Object { $_ -match '^neovim\.row\.\d+$' } | ForEach-Object { $state[$_] }) -join "`n"
 }
+# Waits for Neovim to take the focused pane, which must already show a screen Neovim drew.
+function Wait-Drawn {
+    for ($i = 0; $i -lt 200; $i++) {
+        $state = Read-State
+        if ($state['neovim.active'] -eq 'true') {
+            Check ($state['neovim.generation'] -ne '0') 'the pane showed Neovim before Neovim drew anything'
+            Check ($state['neovim.started'] -eq 'true') 'the pane showed a Neovim that has not started'
+            return
+        }
+    }
+    throw 'Neovim did not take the pane.'
+}
 
 if (-not (Get-Command nvim -ErrorAction SilentlyContinue)) { throw 'This journey needs nvim on PATH.' }
 Remove-Item -LiteralPath $work -Recurse -Force -ErrorAction SilentlyContinue
@@ -76,10 +88,11 @@ Invoke-Ctl launch --fresh --settings $settings | Out-Null
 try {
     Invoke-Ctl wait text 'PS ' | Out-Null
 
-    # Typed in the shell as the user would: Neovim takes this pane, over the shell, and does not split.
+    # Typed in the shell as the user would: Neovim takes this pane, over the shell, and does not split. It
+    # takes the pane only once it has drawn, so the pane never shows an empty Neovim.
     Invoke-Ctl type "& '$aio' pane.open_neovim notes.txt" | Out-Null
     Invoke-Ctl key Enter | Out-Null
-    Wait-For 'neovim.started' 'true'
+    Wait-Drawn
     Wait-For 'neovim.row.0' 'first line'
     $state = Read-State
     Check ($state['tab.1.panes'] -eq '1') "Neovim split the tab into $($state['tab.1.panes']) panes"
@@ -125,6 +138,19 @@ try {
     Wait-For 'neovim.active' 'false'
     Wait-For 'neovim.count' '0'
     Check ((Read-State)['tab.1.panes'] -eq '1') 'the pane closed instead of showing its shell'
+    Invoke-Ctl wait text 'notes.txt' | Out-Null
+
+    # The pane switcher's shell profile shows the shell behind Neovim again rather than starting another:
+    # Neovim quits, and its first command is still on the shell's screen.
+    Invoke-Ctl type "& '$aio' pane.open_neovim notes.txt" | Out-Null
+    Invoke-Ctl key Enter | Out-Null
+    Wait-Drawn
+    Invoke-Ctl command pane.change_shell | Out-Null
+    Wait-For 'profile_menu.open' 'true'
+    Invoke-Ctl key Enter | Out-Null
+    Wait-For 'neovim.active' 'false'
+    Wait-For 'neovim.count' '0'
+    Check ((Read-State)['tab.1.panes'] -eq '1') 'the switcher closed the pane'
     Invoke-Ctl wait text 'notes.txt' | Out-Null
 
     # Neovim opened beside the shell, not from it, leaves a shell in its folder when it quits.

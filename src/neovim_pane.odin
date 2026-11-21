@@ -71,6 +71,10 @@ Neovim_Pane :: struct {
 	// A close waits on Neovim's question about unsaved buffers; when Neovim then quits, the pane closes
 	// instead of showing a shell.
 	closing:   bool,
+	// Opened over a shell and started at the size of the shell's pane, but not shown yet: Neovim takes
+	// the pane at its first screen, so the pane never shows an empty grid in between (NEOVIM_TAKE_WAIT).
+	pending:   bool,
+	opened:    time.Tick,
 }
 
 @(require_results)
@@ -162,7 +166,7 @@ neovim_environment :: proc(app: ^App) -> []string {
 	return environment[:]
 }
 
-@(private = "file")
+@(private)
 neovim_pane_start :: proc(app: ^App, pane: ^Neovim_Pane, columns, rows: int) {
 	pane.started = true
 	argv := make([dynamic]string, 0, 5, context.temp_allocator)
@@ -228,7 +232,9 @@ neovim_tick :: proc(app: ^App) {
 	now := clock_now(&app.clock)
 	if time.tick_diff(now, app.neovim_deadline) > 0 {return}
 	for i := len(app.neovim_panes) - 1; i >= 0; i -= 1 {
-		if neovim_shown_anywhere(app, app.neovim_panes[i].id) {continue}
+		pane := app.neovim_panes[i]
+		if pane.pending && time.tick_diff(pane.opened, now) >= NEOVIM_TAKE_WAIT {neovim_take_pane(app, pane)}
+		if pane.pending || neovim_shown_anywhere(app, pane.id) {continue}
 		neovim_pane_release(app, app.neovim_panes[i])
 		ordered_remove(&app.neovim_panes, i)
 	}
@@ -250,6 +256,10 @@ neovim_shown_anywhere :: proc(app: ^App, id: u32) -> bool {
 neovim_pane_poll :: proc(app: ^App, pane: ^Neovim_Pane) {
 	if !pane.started || pane.exited {return}
 	polled := neovim.poll(&pane.client)
+	if pane.pending {
+		neovim_pending_poll(app, pane, polled)
+		return
+	}
 	content := layout.Content{.Neovim, pane.id}
 	if polled.flushed {
 		for w in app.windows {

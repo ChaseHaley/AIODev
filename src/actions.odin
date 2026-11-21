@@ -1576,9 +1576,12 @@ command_execute :: proc(app: ^App, ctx: Command_Context, invocation: commands.In
 			rename_open(app, w, Rename_Tab_Target{w.workspace.id, w.workspace.tabs[tab_index].id})
 		}
 	case .Change_Pane_Shell:
+		// A Neovim pane can have its shell behind it, which the menu's profile of that shell shows again.
 		focus := window_tree(w).focus
 		for pane in w.panes {
-			if pane.node != focus || !pane_owns_session(pane.content.kind) {continue}
+			if pane.node != focus || !(pane_owns_session(pane.content.kind) || pane.content.kind == .Neovim) {
+				continue
+			}
 			profile_menu_open_pane(app, w, pane)
 			break
 		}

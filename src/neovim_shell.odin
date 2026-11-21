@@ -3,8 +3,10 @@ package main
 import "aio:layout"
 import "aio:neovim"
 import "aio:platform"
+import "aio:settings"
 import "core:fmt"
 import "core:log"
+import "core:time"
 
 // A Neovim pane behaves as Neovim run from a shell does (WORK-545): `aio pane.open_neovim` from a shell
 // opens it in that pane, over the shell, which keeps running out of sight; quitting Neovim shows the
@@ -37,8 +39,13 @@ neovim_content_swap :: proc(
 	for w in focused {focus_enter(app, w)}
 }
 
-// Opens Neovim over the shell of the pane at `node`: the pane shows Neovim and the shell's session keeps
-// running behind it. False when Neovim could not be made.
+// How long a Neovim opened over a shell may take to draw before it takes the shell's pane anyway.
+@(private)
+NEOVIM_TAKE_WAIT :: time.Second
+
+// Opens Neovim over the shell of the pane at `node`, whose session keeps running behind it. Neovim starts
+// at once at the size the pane gives it but takes the pane only at its first screen (neovim_take_pane), so
+// the shell stays in view until then rather than an empty grid. False when Neovim could not start.
 @(private, require_results)
 neovim_open_over :: proc(
 	app: ^App,
@@ -51,8 +58,68 @@ neovim_open_over :: proc(
 	pane := neovim_pane_create(app, file, directory)
 	if pane == nil {return false}
 	pane.shell = shell
-	neovim_content_swap(app, workspace, tab_index, node, {.Terminal, shell}, {.Neovim, pane.id})
+	shell_content := layout.Content{.Terminal, shell}
+	for w in app.windows {
+		for shown in w.panes {
+			if shown.content != shell_content {continue}
+			box := pane_box(w.metrics, shown.rect, neovim_insets(app, w))
+			neovim_pane_start(app, pane, int(box.columns), int(box.rows))
+			if pane.exited {
+				notify(app, .Error, pane.message)
+				pane.shell = 0
+				neovim_pane_remove(app, pane.id)
+				return false
+			}
+			pane.pending, pane.opened = true, clock_now(&app.clock)
+			return true
+		}
+	}
+	// No window shows the shell, so nothing can flicker: Neovim starts once its pane is laid out.
+	neovim_content_swap(app, workspace, tab_index, node, shell_content, {.Neovim, pane.id})
 	return true
+}
+
+// The pending Neovim takes the pane its shell is in now. Without that pane the shell has closed with it,
+// and the next sweep lets the Neovim go.
+@(private)
+neovim_take_pane :: proc(app: ^App, pane: ^Neovim_Pane) {
+	pane.pending = false
+	shell := layout.Content{.Terminal, pane.shell}
+	for workspace in app.workspaces {
+		for tab, index in workspace.tabs {
+			node := layout.find_content(&tab.tree, shell)
+			if node == layout.INVALID_NODE {continue}
+			neovim_content_swap(app, workspace, index, node, shell, {.Neovim, pane.id})
+			return
+		}
+	}
+	pane.shell = 0
+}
+
+// A pending Neovim takes its pane once it has drawn; one that quits first leaves the shell where it was.
+@(private)
+neovim_pending_poll :: proc(app: ^App, pane: ^Neovim_Pane, polled: neovim.Poll) {
+	if polled.exited {
+		pane.pending, pane.shell, pane.exited = false, 0, true
+		notify(app, .Error, "Neovim quit before it showed anything.")
+		return
+	}
+	if polled.flushed {neovim_take_pane(app, pane)}
+}
+
+// Choosing the profile of the shell a Neovim pane opened over shows that shell: Neovim quits as `:qa`
+// would, asking first about unsaved buffers, and the pane shows the shell as after any quit.
+@(private, require_results)
+neovim_shell_show :: proc(app: ^App, content: layout.Content, profile: string) -> bool {
+	if content.kind != .Neovim {return false}
+	pane := neovim_find(app, content.id)
+	if pane == nil || pane.shell == 0 || !pane.started || pane.exited || pane.pending {return false}
+	entry := session_find(app, pane.shell)
+	if entry == nil || entry.status != .Running {return false}
+	behind, _ := settings.profile_resolve(&app.settings, entry.profile_id)
+	chosen, found := settings.profile_resolve(&app.settings, profile)
+	if !found || behind != chosen {return false}
+	return neovim.quit_confirm(&pane.client) == .None
 }
 
 // The content menu's Neovim on a shell pane of w opens over that shell, so nothing is lost and nothing is
