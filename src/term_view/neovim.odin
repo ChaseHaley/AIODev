@@ -13,26 +13,53 @@ import "core:unicode/utf8"
 // Draws a Neovim screen (WORK-542) with the terminal's fonts, glyph cache and cluster fitting. The
 // scratch is reused across builds, so a build allocates only while a row is longer than any before.
 Neovim_View :: struct {
-	paints:  [dynamic]Neovim_Paint,
-	runes:   [dynamic]rune,
-	columns: [dynamic]int,
-	shaped:  [dynamic]font.Shaped_Glyph,
+	paints:   [dynamic]Neovim_Paint,
+	runes:    [dynamic]rune,
+	columns:  [dynamic]int,
+	shaped:   [dynamic]font.Shaped_Glyph,
+	cursor:   Neovim_Cursor,
+	contrast: Contrast_Cache,
 }
 
+// AIODev's cursor, not Neovim's: Neovim decides only where it is and its shape in each mode. Its
+// colours, text colour and Cursor Animation effects are the ones a terminal pane's cursor has.
 Neovim_Style :: struct {
-	family:         font.Family,
+	family:           font.Family,
 	// The pane has the keyboard: a solid cursor in the mode's shape rather than a hollow block.
-	focused:        bool,
+	focused:          bool,
 	// The window's blink phase shows a blinking cursor.
-	cursor_visible: bool,
+	cursor_visible:   bool,
 	// A flight carries the cursor, or another surface has it: draw none, but still report where it is.
-	cursor_hidden:  bool,
+	cursor_hidden:    bool,
+	cursor_color:     render.Color,
+	cursor_text:      render.Color,
+	minimum_contrast: f32,
+	cursor_effects:   caret.Effects,
 }
 
 Neovim_Frame :: struct {
 	background:      render.Color,
 	cursor:          Maybe(Cursor_Paint),
 	cursor_blinking: bool,
+}
+
+// Changing the cursor's shape or the grid's geometry puts the cursor where it is at once, as a
+// terminal's does.
+@(private)
+Neovim_Cursor_Key :: struct {
+	shape:   caret.Shape,
+	metrics: Metrics,
+	origin:  [2]f32,
+	grid:    [2]int,
+}
+
+@(private)
+Neovim_Cursor :: struct {
+	key:          Neovim_Cursor_Key,
+	cell:         [2]int,
+	using motion: caret.Motion,
+	// The focused cursor's pose survives idle blinking, so the next move can start from it.
+	present:      bool,
 }
 
 @(private)
@@ -52,6 +79,20 @@ neovim_view_destroy :: proc(v: ^Neovim_View) {
 	v^ = {}
 }
 
+// Advances the cursor's motion to `frame`; true when the cursor's pose changed.
+neovim_cursor_animate :: proc(v: ^Neovim_View, frame: render.Frame_Time, enabled: bool) -> bool {
+	return caret.motion_animate(&v.cursor.motion, frame, enabled)
+}
+
+neovim_cursor_animating :: proc(v: ^Neovim_View) -> bool {
+	return v.cursor.active
+}
+
+// Forgets where the cursor was drawn, so the next build puts it where Neovim has it, with no motion.
+neovim_cursor_reset :: proc(v: ^Neovim_View) {
+	if v.cursor.present {v.cursor = {}}
+}
+
 @(private)
 neovim_color :: proc(value: neovim.Color) -> render.Color {
 	return colour.rgba({u8(value >> 16), u8(value >> 8), u8(value)})
@@ -63,7 +104,8 @@ neovim_highlight :: proc(s: ^neovim.Screen, id: u32) -> neovim.Highlight {
 	return s.highlights[id]
 }
 
-// Builds the screen at `origin`, the grid's top-left cell, into the list's current layer.
+// Builds the screen at `origin`, the grid's top-left cell, into the list's current layer. `frame_time`
+// is when the frame will be on screen, which a moving cursor is drawn for.
 neovim_build :: proc(
 	v: ^Neovim_View,
 	client: ^neovim.Client,
@@ -73,6 +115,7 @@ neovim_build :: proc(
 	origin: [2]f32,
 	metrics: Metrics,
 	style: Neovim_Style,
+	frame_time: render.Frame_Time,
 ) -> (
 	Neovim_Frame,
 	render.Build_Status,
@@ -89,21 +132,26 @@ neovim_build :: proc(
 	b := Builder{list = list, cache = cache, fonts = fonts, metrics = metrics, origin = origin}
 	row, column := s.cursor_row, s.cursor_column
 	has_cursor := !s.busy && row >= 0 && row < s.rows && column >= 0 && column < s.columns
+	paint: Cursor_Paint
+	moving := false
+	if has_cursor {
+		paint, moving = neovim_cursor_begin(v, s, style, metrics, origin, frame_time)
+	} else {
+		neovim_cursor_reset(v)
+	}
 	blinking := has_cursor && s.mode.blink_on > 0 && s.mode.blink_off > 0
 	frame.cursor_blinking = blinking && style.focused
 	shown := has_cursor && !style.cursor_hidden && (!style.focused || !blinking || style.cursor_visible)
-	solid_block := shown && style.focused && s.mode.shape == .Block
-	cursor_color, cursor_text: render.Color
+	solid_block := shown && style.focused && paint.shape == .Block && !moving
+	text_start := len(list.glyphs)
 	for y in 0 ..< s.rows {
 		top := origin.y + f32(y) * metrics.cell_height
 		neovim_row_paints(v, s, y)
 		block_column := -1
-		if has_cursor && y == row {
-			cursor_color, cursor_text = neovim_cursor_colors(s, v.paints[column])
-			if solid_block {
-				block_column = column
-				v.paints[column].background, v.paints[column].foreground = cursor_color, cursor_text
-			}
+		if solid_block && y == row {
+			block_column = column
+			v.paints[column].background = paint.color
+			v.paints[column].foreground = neovim_cursor_text(v, paint)
 		}
 		neovim_row_backgrounds(v, &b, frame.background, top)
 		for p, x in v.paints {
@@ -117,6 +165,46 @@ neovim_build :: proc(
 		if list.error != .None {return frame, .Ok}
 	}
 	if !has_cursor {return frame, .Ok}
+	frame.cursor = paint
+	defer if v.cursor.present && list.error == .None {caret.motion_drawn(&v.cursor.motion)}
+	if style.cursor_hidden || (!moving && (!shown || solid_block)) {return frame, .Ok}
+	if moving {
+		caret.paint_body_draw(list, paint, caret.motion_corners(&v.cursor.motion), style.cursor_effects,
+			v.cursor.progress)
+	}
+	layer := list.layers[len(list.layers) - 1]
+	if render.push_layer(list, layer.clip, layer.radius) != .None {return frame, .Ok}
+	if !moving || paint.shape != .Block {
+		cursor_outline(list, paint, !style.focused)
+		return frame, .Ok
+	}
+	// A moving block draws the text it covers again in the cursor text colour, clipped to itself. Each
+	// replay appends a glyph, so the range ends where the screen's text did.
+	_ = render.push_rect(list, {rect = paint.head, color = paint.color})
+	text := neovim_cursor_text(v, paint)
+	text_end := len(list.glyphs)
+	for i in text_start ..< text_end {
+		cursor_replay_glyph(list, list.glyphs[i], {}, paint.head, text)
+		if list.error != .None {break}
+	}
+	return frame, .Ok
+}
+
+// Where the cursor is, in its mode's shape and AIODev's colours, and whether it is moving there: with
+// Cursor Animation on, a focused cursor glides, smears or trails to each new cell.
+@(private)
+neovim_cursor_begin :: proc(
+	v: ^Neovim_View,
+	s: ^neovim.Screen,
+	style: Neovim_Style,
+	metrics: Metrics,
+	origin: [2]f32,
+	frame_time: render.Frame_Time,
+) -> (
+	paint: Cursor_Paint,
+	moving: bool,
+) {
+	row, column := s.cursor_row, s.cursor_column
 	wide := column + 1 < s.columns && s.cells[row * s.columns + column + 1].glyph == 0
 	cell := render.Rect {
 		origin.x + f32(column) * metrics.cell_width,
@@ -124,37 +212,55 @@ neovim_build :: proc(
 		metrics.cell_width * (wide ? 2 : 1),
 		metrics.cell_height,
 	}
-	shape: caret.Shape = .Block
-	stroke := max(1, metrics.underline_thickness)
+	paint = {
+		head = cell, tail = cell, target = cell, shape = .Block,
+		stroke = max(1, metrics.underline_thickness), color = style.cursor_color,
+		text_color = style.cursor_text, minimum_contrast = style.minimum_contrast,
+	}
 	share := f32(s.mode.percentage > 0 ? s.mode.percentage : 25) / 100
 	#partial switch s.mode.shape {
 	case .Vertical:
-		shape, stroke = .Bar, max(1, math.round(cell.width * share / 2))
+		paint.shape, paint.stroke = .Bar, max(1, math.round(cell.width * share / 2))
 	case .Horizontal:
-		shape, stroke = .Underline, max(1, math.round(cell.height * share / 2))
+		paint.shape, paint.stroke = .Underline, max(1, math.round(cell.height * share / 2))
 	}
-	paint := Cursor_Paint {
-		head = cell, tail = cell, target = cell, shape = shape, stroke = stroke,
-		color = cursor_color, text_color = cursor_text,
+	e := style.cursor_effects
+	if !style.focused || style.cursor_hidden || e.preset == .Off {
+		neovim_cursor_reset(v)
+		return
 	}
-	frame.cursor = paint
-	if !shown || solid_block {return frame, .Ok}
-	layer := list.layers[len(list.layers) - 1]
-	if render.push_layer(list, layer.clip, layer.radius) != .None {return frame, .Ok}
-	cursor_outline(list, paint, !style.focused)
-	return frame, .Ok
+	c := &v.cursor
+	key := Neovim_Cursor_Key{paint.shape, metrics, origin, {s.columns, s.rows}}
+	at := [2]int{column, row}
+	if !c.present || c.key != key || c.effects != e || !caret.effects_active(e) || frame_time.display == {} {
+		c^ = {key = key, cell = at, present = true}
+		c.motion = {effects = e, target = cell, head = cell, tail = cell}
+		return
+	}
+	if at != c.cell {
+		c.cell = at
+		caret.motion_retarget(&c.motion, cell)
+	}
+	paint.head, paint.tail = c.head, c.tail
+	if !c.active {return}
+	c.target = cell
+	t := caret.motion_progress(&c.motion, frame_time)
+	if t >= 1 {
+		c.active = false
+		caret.motion_place(&c.motion, 1)
+	} else {
+		moving = true
+		caret.motion_place(&c.motion, t)
+	}
+	paint.head, paint.tail = c.head, c.tail
+	return
 }
 
-// The mode's cursor highlight, or with none the cell's colours swapped, as Neovim's TUI shows it.
+// The cursor's text colour, lifted to the minimum contrast against the cursor as a terminal's is.
 @(private)
-neovim_cursor_colors :: proc(s: ^neovim.Screen, under: Neovim_Paint) -> (color, text: render.Color) {
-	color, text = under.foreground, under.background
-	if s.mode.highlight == 0 {return}
-	h := neovim_highlight(s, s.mode.highlight)
-	if bg, ok := h.background.?; ok {color = neovim_color(bg)}
-	if fg, ok := h.foreground.?; ok {text = neovim_color(fg)}
-	if .Reverse in h.attributes {color, text = text, color}
-	return
+neovim_cursor_text :: proc(v: ^Neovim_View, paint: Cursor_Paint) -> render.Color {
+	if paint.minimum_contrast <= 1 {return paint.text_color}
+	return minimum_contrast_cached(&v.contrast, paint.text_color, paint.color, paint.minimum_contrast)
 }
 
 // Fills v.paints, whose capacity holds the row, with row y's colours, attributes and glyphs. An

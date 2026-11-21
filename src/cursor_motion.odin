@@ -306,6 +306,17 @@ cursor_motion_animate :: proc(app: ^App, w: ^Window, frame: ui.Frame_Time) -> bo
 		}
 		if moved {view.valid = false; changed = true}
 	}
+	for pane in w.panes {
+		if pane.content.kind != .Neovim {continue}
+		np := neovim_find(app, pane.content.id)
+		if np == nil {continue}
+		if enabled && pane_has_keyboard(app, w, pane) && !cursor_crossing_suppresses(w, pane.content) {
+			changed ||= term_view.neovim_cursor_animate(&np.view, frame, true)
+		} else {
+			changed ||= term_view.neovim_cursor_animating(&np.view)
+			term_view.neovim_cursor_reset(&np.view)
+		}
+	}
 	return changed
 }
 
@@ -316,6 +327,18 @@ cursor_motion_animating :: proc(w: ^Window) -> bool {
 	}
 	for &view in w.views {
 		if view.content.kind == .Terminal && term_view.cursor_animating(&view.view) {return true}
+	}
+	return false
+}
+
+// A Neovim pane's cursor still moving, which keeps the window drawing as a terminal's cursor does.
+neovim_cursors_animating :: proc(app: ^App, w: ^Window) -> bool {
+	if !window_drawable(w) {return false}
+	for pane in w.panes {
+		if pane.content.kind != .Neovim {continue}
+		if np := neovim_find(app, pane.content.id); np != nil && term_view.neovim_cursor_animating(&np.view) {
+			return true
+		}
 	}
 	return false
 }

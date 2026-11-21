@@ -121,7 +121,7 @@ window_motion_running :: proc(app: ^App, w: ^Window, part: Window_Motion) -> boo
 	case .Find:
 		return ui.find_is_open(&w.find) && ui.find_animating(&w.find)
 	case .Cursor:
-		return cursor_motion_animating(w)
+		return cursor_motion_animating(w) || neovim_cursors_animating(app, w)
 	case .Field_Carets:
 		return w.carets.moving
 	case .Confirmation:

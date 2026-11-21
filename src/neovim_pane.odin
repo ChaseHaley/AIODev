@@ -1,6 +1,7 @@
 package main
 
 import "aio:commands"
+import "aio:colour"
 import "aio:input"
 import "aio:layout"
 import "aio:neovim"
@@ -356,17 +357,27 @@ neovim_pane_draw :: proc(
 	}
 	focused := pane_has_keyboard(app, w, rect)
 	owner := terminal_caret_owner(rect.content)
+	minimum_contrast := f32(1)
+	if app.settings.active_theme.terminal_light {
+		minimum_contrast = f32(app.settings.terminal.minimum_contrast)
+	}
 	style := term_view.Neovim_Style {
-		family         = app.family,
-		focused        = focused,
-		cursor_visible = cursor_visible(w),
-		cursor_hidden  = focused ? ui.caret_holds(&w.carets, owner) : pane_cursor_held_elsewhere(app, w, rect),
+		family           = app.family,
+		focused          = focused,
+		cursor_visible   = cursor_visible(w),
+		cursor_hidden    = focused ? ui.caret_holds(&w.carets, owner) : pane_cursor_held_elsewhere(app, w, rect),
+		cursor_color     = colour.rgba(app.settings.colors.cursor),
+		cursor_text      = colour.rgba(app.settings.colors.cursor_text),
+		minimum_contrast = minimum_contrast,
+		cursor_effects   = cursor_effects(app),
 	}
 	box := pane_box(w.metrics, rect.rect, neovim_insets(app, w))
 	clip := render.Rect{rect.rect.x, rect.rect.y, rect.rect.width, rect.rect.height}
 	if render.push_layer(&w.list, clip, window_pane_radius(app, w)) != .None {return}
-	return term_view.neovim_build(&pane.view, &pane.client, app.fonts, &app.cache, &w.list, box.origin,
-		w.metrics, style)
+	frame, result = term_view.neovim_build(&pane.view, &pane.client, app.fonts, &app.cache, &w.list,
+		box.origin, w.metrics, style, w.frame)
+	if term_view.neovim_cursor_animating(&pane.view) && !w.frame.resuming {w.frame_moved = true}
+	return
 }
 
 // --- Opening ---
