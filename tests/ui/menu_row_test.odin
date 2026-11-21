@@ -100,3 +100,44 @@ menu_add_reports_a_full_menu_apart_from_an_added_row :: proc(t: ^testing.T) {
 	testing.expect_value(t, len(m.items), ui.MENU_MAX_ITEMS)
 	testing.expect_value(t, m.items[ui.MENU_MAX_ITEMS - 1].payload, u32(ui.MENU_MAX_ITEMS - 1))
 }
+
+@(test)
+a_checked_menu_row_is_drawn_as_a_selected_vertical_tab :: proc(t: ^testing.T) {
+	fonts, err := font.system_create()
+	if !testing.expect_value(t, err, font.Error.None) {return}
+	defer font.system_destroy(fonts)
+	device, device_error := render.device_create(.Warp)
+	if !testing.expect_value(t, device_error, render.Error.None) {return}
+	defer render.device_destroy(device)
+	cache: glyphs.Cache
+	glyphs.init(&cache, fonts, device)
+	defer glyphs.destroy(&cache)
+	text: ui.Text
+	if !testing.expect(t, ui.text_init(&text, fonts, &cache, 14)) {return}
+	theme: ui.Theme
+	theme.rail_active = {0.1, 0.2, 0.3, 1}
+	theme.tab_indicator = {0.9, 0.2, 0.1, 1}
+	theme.selection = {0, 0.5, 1, 0.5}
+	theme.accent = {0.2, 0.9, 0.2, 1}
+	m: ui.Menu
+	ui.menu_init(&m)
+	defer ui.menu_destroy(&m)
+	_, _ = ui.menu_add(&m, {label = "on", enabled = true, checked = true})
+	_, _ = ui.menu_add(&m, {label = "off", enabled = true})
+	ui.menu_select(&m, -1)
+	list := render.draw_list_init()
+	defer render.draw_list_destroy(&list)
+	testing.expect_value(t, ui.menu_draw(&m, &list, &text, theme, 400, 200, 1), render.Build_Status.Ok)
+	row := ui.menu_row_rect(&m, 0, 400, 200, 1)
+	tile, mark := render.Rect{}, render.Rect{}
+	fills, accents := 0, 0
+	for rect in list.rects {
+		if rect.color == theme.rail_active {tile = rect.rect; fills += 1}
+		if rect.color == theme.tab_indicator {mark = rect.rect}
+		if rect.color == theme.accent || rect.color == theme.selection {accents += 1}
+	}
+	testing.expect_value(t, fills, 1)
+	testing.expect_value(t, tile, render.Rect{row.x, row.y + 1, row.width, row.height - 2})
+	testing.expect_value(t, mark, ui.navigation_row_mark_rect(row, 1))
+	testing.expect_value(t, accents, 0)
+}

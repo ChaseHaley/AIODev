@@ -956,6 +956,19 @@ try {
     Aio key Enter | Out-Null
     $s = Await-State @{ 'changes.filter_open' = 'false'; 'changes.filter' = '!long'; 'changes.files' = 3 } `
         'Enter closes the filter and keeps it'
+    # Narrow, the set filter's ⋯ button wears a dot and the Filter files row in its menu is marked the same way.
+    Resize-Window $narrow
+    $s = Await-State @{ 'changes.filter_active' = 'true' } 'the filter stays set in the narrow pane'
+    Assert-Shown $s 'changes.tools_button_rect'
+    Aio capture --out "$data/agent-filter-tools-button.png" | Out-Null
+    Click-Rect $s 'changes.tools_button_rect'
+    $s = Await-State @{ 'changes.tools_open' = 'true' } 'the tools button opens its menu with the filter set'
+    Assert-Shown $s 'changes.tools_row.2.rect'
+    Aio capture --out "$data/agent-filter-tools-menu.png" | Out-Null
+    Aio key Esc | Out-Null
+    Await-State @{ 'changes.tools_open' = 'false' } 'Escape closes the menu' | Out-Null
+    Resize-Window 150
+    Await-State @{ 'changes.row_steps' = '0' } 'the wide window restores the whole row after the filter menu' | Out-Null
     Open-Files | Out-Null
     $s = Await-State @{
         'changes.files_open' = 'true'; 'changes.file_list.0.faded' = 'false'; 'changes.file_list.1.faded' = 'true'

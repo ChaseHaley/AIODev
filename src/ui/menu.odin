@@ -360,15 +360,13 @@ menu_row_draw :: proc(
 		if render.push_rect(list, {rect = row, color = theme.surface, radius = RADIUS_CONTROL * scale}) !=
 		   .None {return .Ok}
 	}
-	if i == selected && item.enabled {
-		if render.push_rect(list, {rect = row, color = theme.selection, radius = RADIUS_CONTROL * scale}) !=
-		   .None {return .Ok}
+	// Rows are drawn as the vertical tab rail draws its own: a checked row is the selected tile with the
+	// accent mark, the row under the keys or pointer the hover tile (Navigation_Row owns both looks).
+	nav := Navigation_Row {
+		selected = item.checked,
+		hovered  = i == selected && item.enabled,
 	}
-	if item.checked {
-		mark := render.Rect{row.x + scale, row.y + 8 * scale, 3 * scale, row.height - 16 * scale}
-		if render.push_rect(list, {rect = mark, color = theme.accent, radius = pill_radius(mark)}) !=
-		   .None {return .Ok}
-	}
+	if navigation_row_surface_draw(list, theme, row, nav, scale, pointer) != .None {return .Ok}
 	label_x := row.x + inset
 	if item.icon != "" || item.icon_atlas.width > 0 {
 		icon_width := (16 + SPACE_2) * scale
@@ -444,10 +442,6 @@ menu_row_draw :: proc(
 				end - detail_x,
 			); result != .Ok {return result}
 		}
-	}
-	if i == selected && item.enabled && render.rect_contains(row, pointer.x, pointer.y) {
-		if result := hover_rim_draw(list, theme, row, RADIUS_CONTROL * scale, 1, scale, pointer);
-		   result != .None {return .Ok}
 	}
 	if item.action != .None {
 		hover: f32 = i == selected && m.hover_part == .Action ? 1 : 0

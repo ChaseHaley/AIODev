@@ -629,10 +629,12 @@ tools_menu_draw :: proc(
 		enabled := entry.enabled
 		hit := Changes_Hit{.Tools_Row, row, 0}
 		hovered, pressed := enabled && state.hover == hit, enabled && state.press == hit && state.hover == hit
-		if hovered || pressed {
+		on := entry.checked || entry.dot
+		if on || hovered || pressed {
 			nav := Navigation_Row {
-				hovered = hovered,
-				pressed = pressed,
+				selected = on,
+				hovered  = hovered,
+				pressed  = pressed,
 			}
 			if navigation_row_surface_draw(list, theme, rect, nav, s, pointer) != .None {return .Ok}
 		}
@@ -651,6 +653,12 @@ tools_menu_draw :: proc(
 		if entry.checked {
 			mark := render.Rect{right - check, rect.y, check, rect.height}
 			icon_draw(list, .Check, mark, theme.accent, ICON_INDICATOR, s)
+		}
+		// A set filter shows the dot its ⋯ button wears, in the check's place.
+		if entry.dot {
+			size := ROW_FILTER_DOT * s
+			dot := render.Rect{right - (check + size) / 2, rect.y + (rect.height - size) / 2, size, size}
+			draw_rect(list, {rect = dot, color = theme.accent, radius = size / 2})
 		}
 	}
 	return .Ok
