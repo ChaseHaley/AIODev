@@ -1693,9 +1693,10 @@ SCHEMA :: [?]Schema_Entry {
 		kind = .Bool,
 		offset = offset_of(Settings, neovim) + offset_of(Neovim_Settings, animate_moves),
 		default_value = "true",
-		description = "A Neovim window or float that Neovim moves, as when a split opens or closes or the " +
-			"completion menu follows the cursor, slides to its new place instead of jumping. Off when " +
-			"Windows animations are off.",
+		description = "A Neovim window or float that Neovim moves, as when windows are swapped (Ctrl+W x) or " +
+			"rotated, a window closing makes its neighbour take its place, or the completion menu follows " +
+			"the cursor, slides to its new place instead of jumping. A new window appears in place. Off " +
+			"when Windows animations are off.",
 	},
 	{
 		key = "neovim.move_duration",
