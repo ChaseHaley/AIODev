@@ -223,6 +223,10 @@ Session :: struct {
 	queue:                                                    Write_Queue,
 	scanner:                                                  Mode_Scanner,
 	win32_input:                                              bool,
+	shell_mode_scanner:                                       Shell_Mode_Scanner,
+	shell_mode_value:                                         Shell_Mode,
+	shell_mode_alt_screen:                                    bool,
+	shell_mode_changed:                                       bool,
 	generation:                                               u64,
 	// 1 while capture waits for or holds the mutex. The reader takes it back only afterwards: it
 	// relocks within microseconds while output floods, so the unfair lock would otherwise keep the
@@ -733,8 +737,19 @@ reader_main :: proc(s: ^Session) {
 		if enabled, changed := scan_win32_input_mode(&s.scanner, chunk); changed {
 			sync.atomic_store(&s.win32_input, enabled)
 		}
+		if mode, changed := scan_shell_mode(&s.shell_mode_scanner, chunk); changed {
+			prev := sync.atomic_exchange(&s.shell_mode_value, mode)
+			if prev != mode {sync.atomic_store(&s.shell_mode_changed, true)}
+		}
 		sync.mutex_lock(&s.mutex)
 		ghostty.terminal_vt_write(s.terminal, raw_data(chunk), uint(n))
+		screen: ghostty.Terminal_Screen
+		alt :=
+			ghostty.terminal_get(s.terminal, .Active_Screen, &screen) == .Success &&
+			screen == .Alternate
+		if sync.atomic_exchange(&s.shell_mode_alt_screen, alt) != alt {
+			sync.atomic_store(&s.shell_mode_changed, true)
+		}
 		record_chunk(s, chunk)
 		sync.mutex_unlock(&s.mutex)
 		mark_changed(s)
@@ -1086,6 +1101,15 @@ working_directory :: proc(s: ^Session, allocator := context.allocator) -> string
 
 take_title_change :: proc(s: ^Session) -> bool {
 	return sync.atomic_exchange(&s.title_changed, false)
+}
+
+shell_mode :: proc(s: ^Session) -> Shell_Mode {
+	if s == nil || sync.atomic_load(&s.shell_mode_alt_screen) {return .None}
+	return sync.atomic_load(&s.shell_mode_value)
+}
+
+take_shell_mode_change :: proc(s: ^Session) -> bool {
+	return sync.atomic_exchange(&s.shell_mode_changed, false)
 }
 
 take_bell :: proc(s: ^Session) -> bool {

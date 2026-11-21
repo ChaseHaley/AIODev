@@ -300,9 +300,10 @@ pane_header_draw :: proc(
 	if entry != nil && .Pane_Headers in app.settings.status.surfaces {
 		status, status_text = pane_status_line(app, entry)
 	}
+	mode_label, mode_color := shell_mode_header_pill(app, entry)
 	aside: f32
 	if view != nil {
-		view.header_status_drawn = status.glyph != .None || l.widget.width > 0
+		view.header_status_drawn = status.glyph != .None || mode_label != "" || l.widget.width > 0
 		aside = view.header_status.value
 	}
 	r := pane.rect
@@ -328,6 +329,8 @@ pane_header_draw :: proc(
 		status_phase(app, w, status),
 		badge.icon,
 		aside,
+		mode_label,
+		mode_color,
 	)
 	if result == .Ok && l.widget.width > 0 {hidden_panes_glyph_draw(app, w, l.widget)}
 	return result

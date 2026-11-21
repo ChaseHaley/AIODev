@@ -178,7 +178,7 @@ theme_validation_reports_and_falls_back :: proc(t: ^testing.T) {
 	testing.expect_value(t, len(d), 10)
 	testing.expect_value(t, s.theme.name, "unknown")
 	testing.expect_value(t, s.active_theme, settings.theme_default())
-	testing.expect_value(t, s.pane, settings.Pane_Settings{4, 8, false, true, true, false, 8, true, 20, 5, 1, 0})
+	testing.expect_value(t, s.pane, settings.Pane_Settings{4, 8, false, true, true, false, .Header, 8, true, 20, 5, 1, 0})
 	unknown := false
 	for diagnostic in d {
 		if diagnostic.key == "theme.name" && strings.contains(diagnostic.message, "unknown theme") {unknown = true}

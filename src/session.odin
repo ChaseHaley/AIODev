@@ -341,6 +341,18 @@ update_sessions :: proc(app: ^App) {
 			status_settle(app, entry)
 			mark_all_dirty(app)
 		}
+		if term.take_shell_mode_change(s) {
+			if app.settings.pane.shell_mode_badge == .Footer {
+				for window in app.windows {
+					for pane in window.panes {
+						if pane.content.kind == .Terminal && pane.content.id == entry.id {
+							pane_fit(app, window, pane)
+						}
+					}
+				}
+			}
+			mark_all_dirty(app)
+		}
 		if term.take_bell(s) {
 			events.push(&app.events, .Pane_Bell, Event_Pane{entry.id})
 			for window in app.windows {

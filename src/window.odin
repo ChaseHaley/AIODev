@@ -919,6 +919,7 @@ pane_draw :: proc(app: ^App, w: ^Window, pane: layout.Pane_Rect, blinking: ^bool
 		); message_result != .Ok {return message_result}
 	}
 	if header_result := pane_header_draw(app, w, framed, entry); header_result != .Ok {return header_result}
+	if mode_result := shell_mode_overlay_draw(app, w, framed, entry); mode_result != .Ok {return mode_result}
 	if scrollbar {pane_scrollbar_draw(app, w, framed)}
 	window_card_dim(app, w, framed, background)
 	window_card_outline(app, w, framed)

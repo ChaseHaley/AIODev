@@ -242,6 +242,8 @@ header_draw :: proc(
 	content_icon: Icon = .None,
 	// 0 for the status beside the buttons, 1 at the header's right end; see header_status_layout.
 	status_aside: f32 = 0,
+	mode_label: string = "",
+	mode_color: render.Color = {},
 ) -> render.Build_Status {
 	if render.push_layer(list, area, radius) != .None {return .Ok}
 	draw_rect(list, {rect = l.panel, color = background})
@@ -263,12 +265,14 @@ header_draw :: proc(
 	strong := text_styled(text, focused ? .Strong : .Body)
 	small := text_styled(text, .Detail)
 	width := l.title.width
+	status_right_used: f32
 	if status.glyph != .None {
 		// A pill pads its ends by SPACE_2: glyph, SPACE_1, then the status text.
 		pad := (SPACE_2 + 12 + SPACE_1 + SPACE_2) * scale
 		pill: render.Rect
 		pill, width = header_status_layout(l, text_width(&small, status_text) + pad, scale, status_aside)
 		if pill.width > 0 {
+			status_right_used = pill.width + SPACE_1 * scale
 			tint := status_color(theme, status.glyph)
 			tint.a *= status.dim ? 0.08 : 0.16
 			draw_rect(list, {rect = pill, color = tint, radius = pill.height / 2})
@@ -291,6 +295,27 @@ header_draw :: proc(
 				pill.y + (pill.height - small.line_height) / 2 + small.ascent,
 				ink,
 				max(0, pill.width - pad),
+			); result != .Ok {return result}
+		}
+	}
+	if mode_label != "" {
+		pad := SPACE_2 * scale
+		pill_w := text_width(&small, mode_label) + 2 * pad
+		pill, next_width := header_status_layout(l, pill_w + status_right_used, scale, status_aside)
+		if pill.width > status_right_used {
+			pill.width -= status_right_used
+			width = min(width, next_width)
+			fill := mode_color
+			fill.a *= 0.18
+			draw_rect(list, {rect = pill, color = fill, radius = pill.height / 2})
+			if result := draw_fading_text(
+				&small,
+				list,
+				mode_label,
+				pill.x + pad,
+				pill.y + (pill.height - small.line_height) / 2 + small.ascent,
+				mode_color,
+				max(0, pill.width - 2 * pad),
 			); result != .Ok {return result}
 		}
 	}
