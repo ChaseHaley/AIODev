@@ -214,6 +214,7 @@ SETTINGS_GROUP_AREAS := [?]struct {
 	{"Shell", .General},
 	{"Activity", .General},
 	{"Agent changes", .General},
+	{"Neovim", .General},
 	{"Motion", .Advanced},
 	{"Profiles", .Advanced},
 	{"Link programs", .Advanced},

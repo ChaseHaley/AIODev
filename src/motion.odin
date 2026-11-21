@@ -30,6 +30,7 @@ Window_Motion :: enum u8 {
 	Confirmation,
 	Autoscroll,
 	Changes,
+	Neovim_Scroll,
 }
 
 // Advances one part to `frame`; true when the window must draw again.
@@ -81,6 +82,8 @@ window_motion_advance :: proc(app: ^App, w: ^Window, part: Window_Motion, frame:
 		return autoscroll_animate(app, w, frame)
 	case .Changes:
 		return changes_animate(app, w, frame)
+	case .Neovim_Scroll:
+		return neovim_scroll_motion(app, w, frame)
 	}
 	return false
 }
@@ -130,6 +133,8 @@ window_motion_running :: proc(app: ^App, w: ^Window, part: Window_Motion) -> boo
 		return autoscroll_moving(w)
 	case .Changes:
 		return changes_animating(app, w)
+	case .Neovim_Scroll:
+		return neovim_scrolls_animating(app, w)
 	}
 	return false
 }

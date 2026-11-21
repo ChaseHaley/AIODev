@@ -582,6 +582,12 @@ Turns_Settings :: struct {
 	quick_labels:          string,
 	saved_filters:         string,
 }
+// Neovim panes: how their windows scroll and how see-through floats that take no input are.
+Neovim_Settings :: struct {
+	smooth_scroll:   bool,
+	scroll_duration: int,
+	overlay_opacity: int,
+}
 Window_Settings :: struct {
 	columns, rows, padding: int,
 	tray_notification:      bool,
@@ -671,6 +677,7 @@ Settings :: struct {
 	tabs:            Tabs_Settings,
 	status:          Status_Settings,
 	turns:           Turns_Settings,
+	neovim:          Neovim_Settings,
 	control:         Control_Settings,
 	profiles:        Profiles,
 	openers:         Openers,
@@ -800,6 +807,8 @@ group_title :: proc(key: string) -> string {
 		return "Activity"
 	case "turns":
 		return "Agent changes"
+	case "neovim":
+		return "Neovim"
 	case "shell":
 		return "Shell"
 	case "input":
@@ -1609,6 +1618,35 @@ SCHEMA :: [?]Schema_Entry {
 		description = "Saved diff filters for Agent changes: " + SAVED_FILTERS_EXAMPLE + ". The filter field's @ " +
 			"button lists them; a filter without a name shows its pattern, one marked with a * after its id starts " +
 			"new panes as a token, and the id, made for the filter, keeps its tokens through a rename.",
+	},
+	{
+		key = "neovim.smooth_scroll",
+		title = "Smooth scrolling",
+		kind = .Bool,
+		offset = offset_of(Settings, neovim) + offset_of(Neovim_Settings, smooth_scroll),
+		default_value = "true",
+		description = "Neovim panes glide to each scroll instead of jumping, a window at a time, while the " +
+			"statusline and winbar stay put. Off when Windows animations are off.",
+	},
+	{
+		key = "neovim.scroll_duration",
+		title = "Smooth scrolling duration (ms)",
+		kind = .Int,
+		offset = offset_of(Settings, neovim) + offset_of(Neovim_Settings, scroll_duration),
+		default_value = "250",
+		valid = {50, 1000},
+		description = "About how long a scroll takes to settle, in milliseconds.",
+	},
+	{
+		key = "neovim.overlay_opacity",
+		title = "Overlay float opacity (%)",
+		kind = .Int,
+		offset = offset_of(Settings, neovim) + offset_of(Neovim_Settings, overlay_opacity),
+		default_value = "85",
+		valid = {20, 100},
+		description = "How opaque the background of a Neovim float that takes no input is, such as " +
+			"treesitter-context's code context, so the text under it shows through. Its own text stays " +
+			"solid. A highlight's blend or 'winblend' makes any float see-through as well.",
 	},
 	{
 		key = "shell.default_profile",

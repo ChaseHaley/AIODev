@@ -8,17 +8,26 @@ import "aio:neovim"
 import "aio:render"
 import "core:log"
 import "core:math"
+import "core:time"
 import "core:unicode/utf8"
 
-// Draws a Neovim screen (WORK-542) with the terminal's fonts, glyph cache and cluster fitting. The
-// scratch is reused across builds, so a build allocates only while a row is longer than any before.
+// Draws a Neovim screen (WORK-542) from its grids (ext_multigrid) with the terminal's fonts, glyph cache
+// and cluster fitting: the base grid, each window, then floats and messages in Neovim's order, and
+// AIODev's cursor over everything. A window's text scrolls smoothly when Neovim scrolls it, and floats
+// draw their backgrounds translucent where Neovim's blend asks it, or AIODev's overlay opacity does for
+// floats that take no input. The scratch is reused, so a build allocates only while something grows.
 Neovim_View :: struct {
-	paints:   [dynamic]Neovim_Paint,
-	runes:    [dynamic]rune,
-	columns:  [dynamic]int,
-	shaped:   [dynamic]font.Shaped_Glyph,
-	cursor:   Neovim_Cursor,
-	contrast: Contrast_Cache,
+	paints:     [dynamic]Neovim_Paint,
+	runes:      [dynamic]rune,
+	columns:    [dynamic]int,
+	shaped:     [dynamic]font.Shaped_Glyph,
+	cursor:     Neovim_Cursor,
+	contrast:   Contrast_Cache,
+	scrolls:    [dynamic]Neovim_Scroll,
+	// The screen generation the scrolls last took their rows from.
+	generation: u64,
+	// When the scroll animation last advanced.
+	animated:   time.Tick,
 }
 
 // AIODev's cursor, not Neovim's: Neovim decides only where it is and its shape in each mode. Its
@@ -35,6 +44,10 @@ Neovim_Style :: struct {
 	cursor_text:      render.Color,
 	minimum_contrast: f32,
 	cursor_effects:   caret.Effects,
+	// Windows scroll smoothly; off, they jump as in a terminal.
+	smooth_scroll:    bool,
+	// How opaque the background of a float that takes no input is, 0..1, on top of Neovim's own blend.
+	overlay_opacity:  f32,
 }
 
 Neovim_Frame :: struct {
@@ -62,6 +75,23 @@ Neovim_Cursor :: struct {
 	present:      bool,
 }
 
+// One window's smooth scroll, as Neovide does it: a ring of twice the viewport's rows keeps the rows
+// that scrolled out, and `position` is how many lines from its place the text is drawn, which a
+// critically damped spring takes to zero. Row k of the viewport (negative above it, past its height
+// below) is ring row (start + k) mod len.
+@(private)
+Neovim_Scroll :: struct {
+	grid:              int,
+	layout:            u64,
+	scrolled:          i64,
+	columns, rows:     int,
+	start:             int,
+	ring:              [dynamic]neovim.Cell,
+	filled:            [dynamic]bool,
+	position, velocity: f32,
+	shown:             bool,
+}
+
 @(private)
 Neovim_Paint :: struct {
 	foreground, background, special: render.Color,
@@ -71,12 +101,29 @@ Neovim_Paint :: struct {
 	wide:                            bool,
 }
 
+// What one grid draws with: where its cells start, and how opaque its backgrounds are.
+@(private)
+Neovim_Grid_Draw :: struct {
+	origin:   [2]f32,
+	// Base and Window grids leave Neovim's background to the pane card; floats draw every cell.
+	floating: bool,
+	opacity:  f32,
+}
+
 neovim_view_destroy :: proc(v: ^Neovim_View) {
 	delete(v.paints)
 	delete(v.runes)
 	delete(v.columns)
 	delete(v.shaped)
+	for &scroll in v.scrolls {neovim_scroll_destroy(&scroll)}
+	delete(v.scrolls)
 	v^ = {}
+}
+
+@(private)
+neovim_scroll_destroy :: proc(scroll: ^Neovim_Scroll) {
+	delete(scroll.ring)
+	delete(scroll.filled)
 }
 
 // Advances the cursor's motion to `frame`; true when the cursor's pose changed.
@@ -93,6 +140,45 @@ neovim_cursor_reset :: proc(v: ^Neovim_View) {
 	if v.cursor.present {v.cursor = {}}
 }
 
+// Advances every window's scroll toward its place with a critically damped spring that settles in about
+// `duration`; true while any text moved. Without `enabled` scrolling lands at once.
+neovim_scroll_animate :: proc(
+	v: ^Neovim_View,
+	frame: render.Frame_Time,
+	duration: time.Duration,
+	enabled: bool,
+) -> bool {
+	dt := f32(time.duration_seconds(frame.period))
+	if v.animated != {} {
+		dt = clamp(f32(time.duration_seconds(time.tick_diff(v.animated, frame.display))), 0, 0.1)
+	}
+	v.animated = frame.display
+	length := f32(time.duration_seconds(duration))
+	moved := false
+	for &scroll in v.scrolls {
+		if scroll.position == 0 {continue}
+		moved = true
+		if !enabled || frame.display == {} || length <= dt {
+			scroll.position, scroll.velocity = 0, 0
+			continue
+		}
+		// x(t) = (x0 + (v0 + ω·x0)·t)·e^(−ωt), stepped by dt; ω = 4 / length settles near `length`.
+		omega := 4 / length
+		decay := math.exp(-omega * dt)
+		push := (scroll.velocity + omega * scroll.position) * dt
+		scroll.position = (scroll.position + push) * decay
+		scroll.velocity = (scroll.velocity - omega * push) * decay
+		if abs(scroll.position) < 0.01 {scroll.position, scroll.velocity = 0, 0}
+	}
+	if !moved {v.animated = {}}
+	return moved
+}
+
+neovim_scroll_animating :: proc(v: ^Neovim_View) -> bool {
+	for scroll in v.scrolls {if scroll.position != 0 {return true}}
+	return false
+}
+
 @(private)
 neovim_color :: proc(value: neovim.Color) -> render.Color {
 	return colour.rgba({u8(value >> 16), u8(value >> 8), u8(value)})
@@ -104,8 +190,83 @@ neovim_highlight :: proc(s: ^neovim.Screen, id: u32) -> neovim.Highlight {
 	return s.highlights[id]
 }
 
-// Builds the screen at `origin`, the grid's top-left cell, into the list's current layer. `frame_time`
-// is when the frame will be on screen, which a moving cursor is drawn for.
+// The viewport of a window or float: its rows between the top and bottom margins (a winbar, a border),
+// which scroll while the margins stay.
+@(private)
+neovim_viewport :: proc(grid: ^neovim.Grid_View) -> (top, rows: int) {
+	top = clamp(grid.margins[0], 0, grid.rows)
+	rows = max(0, grid.rows - top - max(grid.margins[1], 0))
+	return
+}
+
+// Takes the rows of a new screen into each window's scroll ring, turning Neovim's scroll into a distance
+// the text still has to travel. A grid that was reset, resized or shown again starts at rest; so does
+// every grid while smooth scrolling is off, which keeps no ring.
+@(private)
+neovim_scroll_sync :: proc(v: ^Neovim_View, s: ^neovim.Screen, smooth: bool) {
+	for &scroll in v.scrolls {scroll.shown = false}
+	for &grid in s.grids {
+		if grid.kind != .Window && grid.kind != .Float {continue}
+		scroll := neovim_scroll_of(v, grid.id)
+		if scroll == nil {
+			// A layout one behind the grid's never matches it, so the first sync fills the ring.
+			fresh := Neovim_Scroll{grid = grid.id, layout = grid.layout - 1, scrolled = grid.scrolled}
+			if _, err := append(&v.scrolls, fresh); err != nil {continue}
+			scroll = &v.scrolls[len(v.scrolls) - 1]
+		}
+		scroll.shown = true
+		top, rows := neovim_viewport(&grid)
+		delta := int(grid.scrolled - scroll.scrolled)
+		scroll.scrolled = grid.scrolled
+		if !smooth || rows == 0 {
+			scroll.layout, scroll.position, scroll.velocity = grid.layout - 1, 0, 0
+			continue
+		}
+		same := scroll.layout == grid.layout && scroll.rows == rows && scroll.columns == grid.columns &&
+			len(scroll.ring) == 2 * rows * grid.columns
+		if !same || abs(delta) > rows {
+			if !neovim_scroll_reset(scroll, grid.layout, rows, grid.columns) {continue}
+			// A jump of more than a viewport animates only its last line, over a blank row.
+			if same {scroll.position = delta > 0 ? -1 : 1}
+		} else if delta != 0 {
+			scroll.start = ((scroll.start + delta) % (2 * rows) + 2 * rows) % (2 * rows)
+			scroll.position = clamp(scroll.position - f32(delta), -f32(rows), f32(rows))
+		}
+		for y in 0 ..< rows {
+			slot := (scroll.start + y) % (2 * rows)
+			row := grid.cells[(top + y) * grid.columns:][:grid.columns]
+			copy(scroll.ring[slot * grid.columns:][:grid.columns], row)
+			scroll.filled[slot] = true
+		}
+	}
+	for i := len(v.scrolls) - 1; i >= 0; i -= 1 {
+		if v.scrolls[i].shown {continue}
+		neovim_scroll_destroy(&v.scrolls[i])
+		unordered_remove(&v.scrolls, i)
+	}
+}
+
+@(private, require_results)
+neovim_scroll_reset :: proc(scroll: ^Neovim_Scroll, layout: u64, rows, columns: int) -> bool {
+	scroll.layout, scroll.rows, scroll.columns, scroll.start = layout, rows, columns, 0
+	scroll.position, scroll.velocity = 0, 0
+	if resize(&scroll.ring, 2 * rows * columns) != nil || resize(&scroll.filled, 2 * rows) != nil {
+		scroll.rows = 0
+		return false
+	}
+	for &filled in scroll.filled {filled = false}
+	return true
+}
+
+@(private)
+neovim_scroll_of :: proc(v: ^Neovim_View, grid: int) -> ^Neovim_Scroll {
+	for &scroll in v.scrolls {if scroll.grid == grid {return &scroll}}
+	return nil
+}
+
+// Builds the screen at `origin`, the base grid's top-left cell, into the list's current layer, whose
+// clip and radius every later layer of the screen repeats. `frame_time` is when the frame will be on
+// screen, which a moving cursor is drawn for.
 neovim_build :: proc(
 	v: ^Neovim_View,
 	client: ^neovim.Client,
@@ -117,85 +278,231 @@ neovim_build :: proc(
 	style: Neovim_Style,
 	frame_time: render.Frame_Time,
 ) -> (
-	Neovim_Frame,
-	render.Build_Status,
+	frame: Neovim_Frame,
+	result: render.Build_Status,
 ) {
 	s := &client.screen
-	frame := Neovim_Frame{background = neovim_color(s.default_background)}
-	if list.error != .None || s.columns <= 0 || s.rows <= 0 || len(s.cells) < s.columns * s.rows {
-		return frame, .Ok
+	frame.background = neovim_color(s.default_background)
+	if list.error != .None || len(s.grids) == 0 || len(list.layers) == 0 {return}
+	if v.generation != s.generation {
+		neovim_scroll_sync(v, s, style.smooth_scroll)
+		v.generation = s.generation
 	}
-	if reserve(&v.paints, s.columns) != nil {
-		list.error = .Out_Of_Memory
-		return frame, .Ok
-	}
-	b := Builder{list = list, cache = cache, fonts = fonts, metrics = metrics, origin = origin}
-	row, column := s.cursor_row, s.cursor_column
-	has_cursor := !s.busy && row >= 0 && row < s.rows && column >= 0 && column < s.columns
-	paint: Cursor_Paint
-	moving := false
-	if has_cursor {
-		paint, moving = neovim_cursor_begin(v, s, style, metrics, origin, frame_time)
-	} else {
-		neovim_cursor_reset(v)
-	}
-	blinking := has_cursor && s.mode.blink_on > 0 && s.mode.blink_off > 0
-	frame.cursor_blinking = blinking && style.focused
-	shown := has_cursor && !style.cursor_hidden && (!style.focused || !blinking || style.cursor_visible)
-	solid_block := shown && style.focused && paint.shape == .Block && !moving
-	text_start := len(list.glyphs)
-	for y in 0 ..< s.rows {
-		top := origin.y + f32(y) * metrics.cell_height
-		neovim_row_paints(v, s, y)
-		block_column := -1
-		if solid_block && y == row {
-			block_column = column
-			v.paints[column].background = paint.color
-			v.paints[column].foreground = neovim_cursor_text(v, paint)
+	pane := list.layers[len(list.layers) - 1]
+	cursor := neovim_cursor_place(v, s, origin, metrics, style, frame_time, &frame)
+	b := Builder{list = list, cache = cache, fonts = fonts, metrics = metrics}
+	cursor_text: [2]int
+	for &grid in s.grids {
+		draw := Neovim_Grid_Draw {
+			origin  = origin + {f32(grid.column) * metrics.cell_width, f32(grid.row) * metrics.cell_height},
+			opacity = 1,
 		}
-		neovim_row_backgrounds(v, &b, frame.background, top)
-		for p, x in v.paints {
-			if result := neovim_decorate(&b, p, origin.x + f32(x) * metrics.cell_width, top); result != .Ok {
-				return frame, result
-			}
+		if grid.kind == .Float || grid.kind == .Message {
+			draw.floating = true
+			if grid.kind == .Float && !grid.focusable {draw.opacity = clamp(style.overlay_opacity, 0, 1)}
+			// A float draws above everything before it: its backgrounds go over the text below it.
+			if render.push_layer(list, pane.clip, pane.radius) != .None {return}
 		}
-		if result := neovim_row_text(v, &b, client, style.family, top, block_column); result != .Ok {
-			return frame, result
-		}
-		if list.error != .None {return frame, .Ok}
+		// A moving cursor's smear goes over its own grid's backgrounds and under its text.
+		body: Maybe(Neovim_Cursor_Body)
+		if grid.id == s.cursor_grid && cursor.moving {body = Neovim_Cursor_Body{cursor.paint, style.cursor_effects}}
+		start := len(list.glyphs)
+		result = neovim_grid_draw(v, &b, client, s, &grid, draw, style.family, pane, body)
+		if result != .Ok || list.error != .None {return}
+		if grid.id == s.cursor_grid {cursor_text = {start, len(list.glyphs)}}
 	}
-	if !has_cursor {return frame, .Ok}
-	frame.cursor = paint
-	defer if v.cursor.present && list.error == .None {caret.motion_drawn(&v.cursor.motion)}
-	if style.cursor_hidden || (!moving && (!shown || solid_block)) {return frame, .Ok}
-	if moving {
-		caret.paint_body_draw(list, paint, caret.motion_corners(&v.cursor.motion), style.cursor_effects,
-			v.cursor.progress)
-	}
-	layer := list.layers[len(list.layers) - 1]
-	if render.push_layer(list, layer.clip, layer.radius) != .None {return frame, .Ok}
-	if !moving || paint.shape != .Block {
-		cursor_outline(list, paint, !style.focused)
-		return frame, .Ok
-	}
-	// A moving block draws the text it covers again in the cursor text colour, clipped to itself. Each
-	// replay appends a glyph, so the range ends where the screen's text did.
-	_ = render.push_rect(list, {rect = paint.head, color = paint.color})
-	text := neovim_cursor_text(v, paint)
-	text_end := len(list.glyphs)
-	for i in text_start ..< text_end {
-		cursor_replay_glyph(list, list.glyphs[i], {}, paint.head, text)
-		if list.error != .None {break}
-	}
-	return frame, .Ok
+	neovim_cursor_draw(v, list, cursor, style, pane, cursor_text)
+	return
 }
 
-// Where the cursor is, in its mode's shape and AIODev's colours, and whether it is moving there: with
-// Cursor Animation on, a focused cursor glides, smears or trails to each new cell.
+// Where the cursor is drawn this frame and what it looks like; `present` is false while it is off its
+// grid, busy or on a grid not shown.
+@(private)
+Neovim_Cursor_Placed :: struct {
+	paint:            Cursor_Paint,
+	present, moving:  bool,
+	shown:            bool,
+}
+
+@(private)
+Neovim_Cursor_Body :: struct {
+	paint:   Cursor_Paint,
+	effects: caret.Effects,
+}
+
+@(private)
+neovim_cursor_place :: proc(
+	v: ^Neovim_View,
+	s: ^neovim.Screen,
+	origin: [2]f32,
+	metrics: Metrics,
+	style: Neovim_Style,
+	frame_time: render.Frame_Time,
+	frame: ^Neovim_Frame,
+) -> (placed: Neovim_Cursor_Placed) {
+	grid: ^neovim.Grid_View
+	for &candidate in s.grids {if candidate.id == s.cursor_grid {grid = &candidate}}
+	row, column := s.cursor_row, s.cursor_column
+	if s.busy || grid == nil || row < 0 || row >= grid.rows || column < 0 || column >= grid.columns {
+		neovim_cursor_reset(v)
+		return
+	}
+	cell := neovim_cursor_cell(v, grid, row, column, origin, metrics)
+	placed.paint, placed.moving = neovim_cursor_begin(v, s, grid, cell, style, metrics, origin, frame_time)
+	placed.present = true
+	blinking := s.mode.blink_on > 0 && s.mode.blink_off > 0
+	frame.cursor_blinking = blinking && style.focused
+	frame.cursor = placed.paint
+	placed.shown = !style.cursor_hidden && (placed.moving || !style.focused || !blinking || style.cursor_visible)
+	return
+}
+
+// Draws one grid. A window whose text is still travelling draws its viewport from its scroll ring, offset
+// and clipped to the viewport, and its margins in place; the grid after it starts a layer of its own.
+@(private, require_results)
+neovim_grid_draw :: proc(
+	v: ^Neovim_View,
+	b: ^Builder,
+	client: ^neovim.Client,
+	s: ^neovim.Screen,
+	grid: ^neovim.Grid_View,
+	draw: Neovim_Grid_Draw,
+	family: font.Family,
+	pane: render.Layer,
+	body: Maybe(Neovim_Cursor_Body),
+) -> render.Build_Status {
+	if reserve(&v.paints, grid.columns) != nil {
+		b.list.error = .Out_Of_Memory
+		return .Ok
+	}
+	m := b.metrics
+	b.origin = draw.origin
+	scroll := neovim_scroll_of(v, grid.id)
+	top, rows := neovim_viewport(grid)
+	moving := scroll != nil && scroll.position != 0 && scroll.rows == rows && scroll.columns == grid.columns
+	for y in 0 ..< grid.rows {
+		if moving && y >= top && y < top + rows {continue}
+		cells := grid.cells[y * grid.columns:][:grid.columns]
+		row_top := draw.origin.y + f32(y) * m.cell_height
+		if result := neovim_row_draw(v, b, client, s, cells, draw, family, row_top); result != .Ok {
+			return result
+		}
+	}
+	if moving {
+		viewport := render.Rect {
+			draw.origin.x, draw.origin.y + f32(top) * m.cell_height, f32(grid.columns) * m.cell_width,
+			f32(rows) * m.cell_height,
+		}
+		if render.push_layer(b.list, neovim_intersect(pane.clip, viewport), 0) != .None {return .Ok}
+		first := int(math.floor(scroll.position))
+		for k in first ..= first + rows {
+			if k < -rows || k >= 2 * rows {continue}
+			slot := ((scroll.start + k) % (2 * rows) + 2 * rows) % (2 * rows)
+			if !scroll.filled[slot] {continue}
+			cells := scroll.ring[slot * grid.columns:][:grid.columns]
+			row_top := viewport.y + math.round((f32(k) - scroll.position) * m.cell_height)
+			if result := neovim_row_draw(v, b, client, s, cells, draw, family, row_top); result != .Ok {
+				return result
+			}
+		}
+	}
+	if smear, ok := body.?; ok {
+		corners := caret.motion_corners(&v.cursor.motion)
+		caret.paint_body_draw(b.list, smear.paint, corners, smear.effects, v.cursor.progress)
+	}
+	if moving {_ = render.push_layer(b.list, pane.clip, pane.radius)}
+	return .Ok
+}
+
+@(private)
+neovim_intersect :: proc(a, b: render.Rect) -> render.Rect {
+	left, top := max(a.x, b.x), max(a.y, b.y)
+	right, bottom := min(a.x + a.width, b.x + b.width), min(a.y + a.height, b.y + b.height)
+	return {left, top, max(0, right - left), max(0, bottom - top)}
+}
+
+// Draws one row of cells whose top edge is at `top`: backgrounds, decorations, then text.
+@(private, require_results)
+neovim_row_draw :: proc(
+	v: ^Neovim_View,
+	b: ^Builder,
+	client: ^neovim.Client,
+	s: ^neovim.Screen,
+	cells: []neovim.Cell,
+	draw: Neovim_Grid_Draw,
+	family: font.Family,
+	top: f32,
+) -> render.Build_Status {
+	neovim_row_paints(v, s, cells)
+	neovim_row_backgrounds(v, b, neovim_color(s.default_background), top, draw)
+	for p, x in v.paints {
+		if result := neovim_decorate(b, p, draw.origin.x + f32(x) * b.metrics.cell_width, top); result != .Ok {
+			return result
+		}
+	}
+	return neovim_row_text(v, b, client, family, top)
+}
+
+// Draws the cursor over every grid: a block draws the text of its own grid's cell again in the cursor
+// text colour, clipped to itself, so a float over the cursor's window does not hide either.
+@(private)
+neovim_cursor_draw :: proc(
+	v: ^Neovim_View,
+	list: ^render.Draw_List,
+	placed: Neovim_Cursor_Placed,
+	style: Neovim_Style,
+	pane: render.Layer,
+	text: [2]int,
+) {
+	defer if v.cursor.present && list.error == .None {caret.motion_drawn(&v.cursor.motion)}
+	if !placed.present || !placed.shown || list.error != .None {return}
+	if render.push_layer(list, pane.clip, pane.radius) != .None {return}
+	paint := placed.paint
+	if !style.focused || paint.shape != .Block {
+		cursor_outline(list, paint, !style.focused)
+		return
+	}
+	_ = render.push_rect(list, {rect = paint.head, color = paint.color})
+	ink := neovim_cursor_text(v, paint)
+	for i in text[0] ..< text[1] {
+		cursor_replay_glyph(list, list.glyphs[i], {}, paint.head, ink)
+		if list.error != .None {break}
+	}
+}
+
+// The cursor's cell where its grid draws it now, following the grid's scroll and kept inside its
+// viewport while the text travels.
+@(private)
+neovim_cursor_cell :: proc(
+	v: ^Neovim_View,
+	grid: ^neovim.Grid_View,
+	row, column: int,
+	origin: [2]f32,
+	metrics: Metrics,
+) -> render.Rect {
+	wide := column + 1 < grid.columns && grid.cells[row * grid.columns + column + 1].glyph == 0
+	y := f32(row)
+	top, rows := neovim_viewport(grid)
+	if scroll := neovim_scroll_of(v, grid.id); scroll != nil && row >= top && row < top + rows {
+		y = clamp(y - scroll.position, f32(top), f32(top + rows - 1))
+	}
+	return {
+		origin.x + f32(grid.column + column) * metrics.cell_width,
+		origin.y + math.round((f32(grid.row) + y) * metrics.cell_height),
+		metrics.cell_width * (wide ? 2 : 1),
+		metrics.cell_height,
+	}
+}
+
+// The cursor in its mode's shape and AIODev's colours, and whether it is moving to `cell`: with Cursor
+// Animation on, a focused cursor glides, smears or trails to each new cell. Text scrolling under it
+// carries it along without a motion of its own.
 @(private)
 neovim_cursor_begin :: proc(
 	v: ^Neovim_View,
 	s: ^neovim.Screen,
+	grid: ^neovim.Grid_View,
+	cell: render.Rect,
 	style: Neovim_Style,
 	metrics: Metrics,
 	origin: [2]f32,
@@ -204,14 +511,6 @@ neovim_cursor_begin :: proc(
 	paint: Cursor_Paint,
 	moving: bool,
 ) {
-	row, column := s.cursor_row, s.cursor_column
-	wide := column + 1 < s.columns && s.cells[row * s.columns + column + 1].glyph == 0
-	cell := render.Rect {
-		origin.x + f32(column) * metrics.cell_width,
-		origin.y + f32(row) * metrics.cell_height,
-		metrics.cell_width * (wide ? 2 : 1),
-		metrics.cell_height,
-	}
 	paint = {
 		head = cell, tail = cell, target = cell, shape = .Block,
 		stroke = max(1, metrics.underline_thickness), color = style.cursor_color,
@@ -231,7 +530,7 @@ neovim_cursor_begin :: proc(
 	}
 	c := &v.cursor
 	key := Neovim_Cursor_Key{paint.shape, metrics, origin, {s.columns, s.rows}}
-	at := [2]int{column, row}
+	at := [2]int{grid.column + s.cursor_column, grid.row + s.cursor_row}
 	if !c.present || c.key != key || c.effects != e || !caret.effects_active(e) || frame_time.display == {} {
 		c^ = {key = key, cell = at, present = true}
 		c.motion = {effects = e, target = cell, head = cell, tail = cell}
@@ -240,6 +539,8 @@ neovim_cursor_begin :: proc(
 	if at != c.cell {
 		c.cell = at
 		caret.motion_retarget(&c.motion, cell)
+	} else if !c.active {
+		c.target, c.head, c.tail = cell, cell, cell
 	}
 	paint.head, paint.tail = c.head, c.tail
 	if !c.active {return}
@@ -263,14 +564,13 @@ neovim_cursor_text :: proc(v: ^Neovim_View, paint: Cursor_Paint) -> render.Color
 	return minimum_contrast_cached(&v.contrast, paint.text_color, paint.color, paint.minimum_contrast)
 }
 
-// Fills v.paints, whose capacity holds the row, with row y's colours, attributes and glyphs. An
+// Fills v.paints, whose capacity holds the row, with the cells' colours, attributes and glyphs. An
 // underline without a special colour takes the text's.
 @(private)
-neovim_row_paints :: proc(v: ^Neovim_View, s: ^neovim.Screen, y: int) {
+neovim_row_paints :: proc(v: ^Neovim_View, s: ^neovim.Screen, cells: []neovim.Cell) {
 	foreground := neovim_color(s.default_foreground)
 	background := neovim_color(s.default_background)
 	clear(&v.paints)
-	cells := s.cells[y * s.columns:(y + 1) * s.columns]
 	for cell, x in cells {
 		h := neovim_highlight(s, cell.highlight)
 		p := Neovim_Paint {
@@ -285,20 +585,31 @@ neovim_row_paints :: proc(v: ^Neovim_View, s: ^neovim.Screen, y: int) {
 		if .Reverse in h.attributes {p.foreground, p.background = p.background, p.foreground}
 		p.special = p.foreground
 		if sp, ok := h.special.?; ok {p.special = neovim_color(sp)}
+		// Neovim's blend (winblend, pumblend, a highlight's blend) makes only the background see-through.
+		p.background.a = 1 - f32(min(h.blend, 100)) / 100
 		_, _ = append(&v.paints, p)
 	}
 }
 
-// Fills runs of one background that differs from the pane's own, which the pane card already draws.
+// Fills runs of one background. A base or window grid leaves Neovim's own background to the pane card;
+// a float fills every cell, at its opacity.
 @(private)
-neovim_row_backgrounds :: proc(v: ^Neovim_View, b: ^Builder, base: render.Color, top: f32) {
+neovim_row_backgrounds :: proc(
+	v: ^Neovim_View,
+	b: ^Builder,
+	base: render.Color,
+	top: f32,
+	draw: Neovim_Grid_Draw,
+) {
 	m := b.metrics
 	start := 0
 	for x in 1 ..= len(v.paints) {
 		if x < len(v.paints) && v.paints[x].background == v.paints[start].background {continue}
-		if v.paints[start].background != base {
-			left := b.origin.x + f32(start) * m.cell_width
-			rect(b, {left, top, f32(x - start) * m.cell_width, m.cell_height}, v.paints[start].background)
+		color := v.paints[start].background
+		if draw.floating || color != base {
+			color.a *= draw.opacity
+			left := draw.origin.x + f32(start) * m.cell_width
+			rect(b, {left, top, f32(x - start) * m.cell_width, m.cell_height}, color)
 		}
 		start = x
 	}
@@ -342,9 +653,8 @@ neovim_face :: proc(p: Neovim_Paint) -> font.Style {
 	return .Regular
 }
 
-// Shapes the row's text in runs of one face, so programming ligatures form as they do in a terminal. A
-// run breaks around the block cursor's cell, whose glyphs take the cursor text colour. The right half
-// of a double-width character holds no glyph and leaves the run whole.
+// Shapes the row's text in runs of one face, so programming ligatures form as they do in a terminal.
+// The right half of a double-width character holds no glyph and leaves the run whole.
 @(private, require_results)
 neovim_row_text :: proc(
 	v: ^Neovim_View,
@@ -352,16 +662,14 @@ neovim_row_text :: proc(
 	client: ^neovim.Client,
 	family: font.Family,
 	top: f32,
-	block_column: int,
 ) -> render.Build_Status {
 	clear(&v.runes)
 	clear(&v.columns)
 	face: font.Style
-	previous := -1
 	for p, x in v.paints {
 		if p.glyph == 0 {continue}
 		next_face := neovim_face(p)
-		if next_face != face || x == block_column || (previous >= 0 && previous == block_column) {
+		if next_face != face {
 			if result := neovim_run(v, b, family, face, top); result != .Ok {return result}
 		}
 		appended := false
@@ -374,7 +682,7 @@ neovim_row_text :: proc(
 			b.list.error = .Out_Of_Memory
 			return .Ok
 		}
-		face, previous = next_face, x
+		face = next_face
 	}
 	return neovim_run(v, b, family, face, top)
 }
@@ -396,7 +704,7 @@ neovim_append_cluster :: proc(v: ^Neovim_View, text: string, x: int) -> bool {
 	return true
 }
 
-// Draws the pending run, then empties it.
+// Draws the pending run, then empties it. Text is opaque even over a see-through background.
 @(private, require_results)
 neovim_run :: proc(
 	v: ^Neovim_View,
@@ -420,7 +728,7 @@ neovim_run :: proc(
 			entry, result := glyphs.glyph(b.cache, g, m.size_px)
 			if result != .Ok {return result}
 			x := v.columns[i]
-			place(b, entry, {b.origin.x + f32(x) * m.cell_width, top + m.baseline}, v.paints[x].foreground)
+			place(b, entry, {b.origin.x + f32(x) * m.cell_width, top + m.baseline}, neovim_ink(v.paints[x]))
 		}
 		return .Ok
 	}
@@ -446,10 +754,17 @@ neovim_run :: proc(
 		for g in v.shaped[start:end] {
 			entry, result := glyphs.glyph(b.cache, g.glyph, m.size_px * scale, p.wide)
 			if result != .Ok {return result}
-			place(b, entry, {left + pen + g.offset.x * scale, baseline - g.offset.y * scale}, p.foreground)
+			place(b, entry, {left + pen + g.offset.x * scale, baseline - g.offset.y * scale}, neovim_ink(p))
 			pen += g.advance * scale
 		}
 		start = end
 	}
 	return .Ok
+}
+
+@(private)
+neovim_ink :: proc(p: Neovim_Paint) -> render.Color {
+	ink := p.foreground
+	ink.a = 1
+	return ink
 }

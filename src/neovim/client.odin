@@ -1,5 +1,6 @@
 // A Neovim UI client: spawns `nvim --embed`, speaks msgpack-RPC over its stdin and stdout, and keeps
-// a double-buffered picture of grid 1 built from `redraw` events. The caller serializes all calls.
+// a double-buffered picture of every grid (`ext_multigrid`) built from `redraw` events. The caller
+// serializes all calls.
 package neovim
 
 import "aio:spawn"
@@ -58,11 +59,52 @@ Mode :: struct {
 	highlight: u32,
 }
 
-// A consistent picture of grid 1 as of the last `flush`.
-Screen :: struct {
+Grid_Kind :: enum u8 {
+	Base,
+	Window,
+	Float,
+	Message,
+}
+
+// One shown grid as of the last flush. Cells are borrowed until the next publish.
+Grid_View :: struct {
+	id: int,
+	kind: Grid_Kind,
+	// Neovim's window handle; 0 for Base and Message.
+	window: i64,
+	// The top-left corner on the screen, in grid 1 cells.
+	row, column: int,
+	// The drawn size; for Message only the rows from its row to the screen's bottom.
 	columns, rows: int,
+	// rows * columns, row-major.
 	cells: []Cell,
+	// Float and Message; 0 otherwise.
+	zindex, compindex: int,
+	// Float: win_float_pos mouse_enabled; true for every other kind.
+	focusable: bool,
+	// Rows or columns outside the viewport: top, bottom, left, right (win_viewport_margins).
+	margins: [4]int,
+	// The running total of win_viewport scroll_delta for this grid since it was created.
+	scrolled: i64,
+	// Changes whenever the grid is reset in a way a drawer must not animate across: grid_resize, a move
+	// by win_pos, win_float_pos or msg_set_pos, a margins change, grid_clear, being shown again after
+	// win_hide.
+	layout: u64,
+}
+
+// A consistent picture of the screen as of the last `flush`.
+Screen :: struct {
+	// Grid 1, the UI's size.
+	columns, rows: int,
+	// The shown grids in draw order: Base, then Window grids by grid id, then Float and Message grids
+	// by (zindex, compindex). Hidden grids, grids never positioned and external windows are left out.
+	grids: []Grid_View,
+	// The id of the grid grid_cursor_goto named, and the cursor in that grid's cells.
+	cursor_grid: int,
 	cursor_row, cursor_column: int,
+	// The cursor on the screen (its grid's origin plus row and column); -1, -1 while its grid is not
+	// shown.
+	cursor_screen_row, cursor_screen_column: int,
 	mode: Mode,
 	cursor_style_enabled: bool,
 	busy: bool,
@@ -165,6 +207,9 @@ Client :: struct {
 	clusters: [dynamic]string,
 	cluster_index: map[string]u32,
 	back: Back,
+	// The cells of every published grid, back to back; the views in screen.grids slice it.
+	pool: []Cell,
+	views: []Grid_View,
 	// Redraw handlers set these; receive resets them and returns them.
 	events: Poll,
 	fault: Error,
@@ -216,10 +261,12 @@ start :: proc(c: ^Client, options: Start, wake: spawn.Wake, allocator := context
 	if failure == .None {
 		msgpack_write_int(&c.sent, i64(c.columns))
 		msgpack_write_int(&c.sent, i64(c.rows))
-		msgpack_write_map(&c.sent, 2)
+		msgpack_write_map(&c.sent, 3)
 		msgpack_write_str(&c.sent, "rgb")
 		msgpack_write_bool(&c.sent, true)
 		msgpack_write_str(&c.sent, "ext_linegrid")
+		msgpack_write_bool(&c.sent, true)
+		msgpack_write_str(&c.sent, "ext_multigrid")
 		msgpack_write_bool(&c.sent, true)
 		failure = transmit(c)
 	}
@@ -244,14 +291,13 @@ destroy :: proc(c: ^Client) {
 	delete(c.title, c.allocator)
 	delete(c.directory, c.allocator)
 	delete(c.buffer, c.allocator)
-	delete(c.screen.cells, c.allocator)
+	delete(c.pool, c.allocator)
+	delete(c.views, c.allocator)
 	delete(c.screen.highlights, c.allocator)
 	for text in c.clusters {delete(text, c.allocator)}
 	delete(c.clusters)
 	delete(c.cluster_index)
-	delete(c.back.cells)
-	delete(c.back.modes)
-	delete(c.back.highlights)
+	back_destroy(c)
 	c^ = {}
 }
 
@@ -309,6 +355,18 @@ cluster :: proc(c: ^Client, glyph: u32) -> string {
 	index := int(glyph & ~GLYPH_CLUSTER)
 	if index >= len(c.clusters) {return ""}
 	return c.clusters[index]
+}
+
+// The topmost shown cell at a screen position in draw order: what the screen shows, ignoring any
+// animation a drawer adds. ok is false outside the screen.
+screen_cell :: proc(s: ^Screen, row, column: int) -> (cell: Cell, ok: bool) {
+	if row < 0 || row >= s.rows || column < 0 || column >= s.columns {return {}, false}
+	#reverse for &grid in s.grids {
+		grid_row, grid_column := row - grid.row, column - grid.column
+		if grid_row < 0 || grid_row >= grid.rows || grid_column < 0 || grid_column >= grid.columns {continue}
+		return grid.cells[grid_row * grid.columns + grid_column], true
+	}
+	return BLANK, true
 }
 
 @(private)

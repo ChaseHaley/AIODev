@@ -370,13 +370,16 @@ neovim_pane_draw :: proc(
 		cursor_text      = colour.rgba(app.settings.colors.cursor_text),
 		minimum_contrast = minimum_contrast,
 		cursor_effects   = cursor_effects(app),
+		smooth_scroll    = app.animations && app.settings.neovim.smooth_scroll,
+		overlay_opacity  = f32(app.settings.neovim.overlay_opacity) / 100,
 	}
 	box := pane_box(w.metrics, rect.rect, neovim_insets(app, w))
 	clip := render.Rect{rect.rect.x, rect.rect.y, rect.rect.width, rect.rect.height}
 	if render.push_layer(&w.list, clip, window_pane_radius(app, w)) != .None {return}
 	frame, result = term_view.neovim_build(&pane.view, &pane.client, app.fonts, &app.cache, &w.list,
 		box.origin, w.metrics, style, w.frame)
-	if term_view.neovim_cursor_animating(&pane.view) && !w.frame.resuming {w.frame_moved = true}
+	moving := term_view.neovim_cursor_animating(&pane.view) || term_view.neovim_scroll_animating(&pane.view)
+	if moving && !w.frame.resuming {w.frame_moved = true}
 	return
 }
 
@@ -694,6 +697,31 @@ neovim_wheel :: proc(app: ^App, w: ^Window, e: input.Mouse_Wheel_Event) -> bool 
 	return true
 }
 
+// Advances the smooth scroll of every Neovim pane w shows; true while text still travels.
+neovim_scroll_motion :: proc(app: ^App, w: ^Window, frame: render.Frame_Time) -> bool {
+	duration := time.Duration(app.settings.neovim.scroll_duration) * time.Millisecond
+	enabled := app.animations && app.settings.neovim.smooth_scroll && window_drawable(w)
+	moved := false
+	for pane in w.panes {
+		if pane.content.kind != .Neovim {continue}
+		if np := neovim_find(app, pane.content.id); np != nil {
+			moved ||= term_view.neovim_scroll_animate(&np.view, frame, duration, enabled)
+		}
+	}
+	return moved
+}
+
+neovim_scrolls_animating :: proc(app: ^App, w: ^Window) -> bool {
+	if !window_drawable(w) {return false}
+	for pane in w.panes {
+		if pane.content.kind != .Neovim {continue}
+		if np := neovim_find(app, pane.content.id); np != nil && term_view.neovim_scroll_animating(&np.view) {
+			return true
+		}
+	}
+	return false
+}
+
 when AIO_CONTROL {
 	// The verification keys of the Neovim panes: the focused one under neovim.*, with the text of each grid
 	// row, and every pane under neovim.pane.<id>.*.
@@ -720,6 +748,8 @@ when AIO_CONTROL {
 		blank: Neovim_Pane
 		p := pane != nil ? pane : &blank
 		s := &p.client.screen
+		floats := 0
+		for grid in s.grids {if grid.kind == .Float {floats += 1}}
 		state_value(r, state_key("%s.id", prefix), p.id)
 		state_value(r, state_key("%s.started", prefix), p.started)
 		state_value(r, state_key("%s.exited", prefix), p.exited)
@@ -731,18 +761,22 @@ when AIO_CONTROL {
 		state_value(r, state_key("%s.mouse", prefix), p.client.mouse)
 		state_value(r, state_key("%s.columns", prefix), s.columns)
 		state_value(r, state_key("%s.rows", prefix), s.rows)
-		state_value(r, state_key("%s.cursor_row", prefix), s.cursor_row)
-		state_value(r, state_key("%s.cursor_column", prefix), s.cursor_column)
+		state_value(r, state_key("%s.grids", prefix), len(s.grids))
+		state_value(r, state_key("%s.floats", prefix), floats)
+		state_value(r, state_key("%s.cursor_row", prefix), s.cursor_screen_row)
+		state_value(r, state_key("%s.cursor_column", prefix), s.cursor_screen_column)
 		state_word(r, state_key("%s.cursor_shape", prefix), s.mode.shape)
+		state_value(r, state_key("%s.scrolling", prefix), term_view.neovim_scroll_animating(&p.view))
 		state_value(r, state_key("%s.generation", prefix), s.generation)
 	}
 
-	// Row y of the shown screen as text, trailing spaces trimmed.
+	// Screen row y as the grids compose it, trailing spaces trimmed.
 	@(private = "file")
 	neovim_row_text :: proc(client: ^neovim.Client, y: int) -> string {
 		s := &client.screen
 		out := strings.builder_make(context.temp_allocator)
-		for cell in s.cells[y * s.columns:(y + 1) * s.columns] {
+		for x in 0 ..< s.columns {
+			cell, _ := neovim.screen_cell(s, y, x)
 			switch {
 			case cell.glyph == 0:
 			case cell.glyph & neovim.GLYPH_CLUSTER != 0:

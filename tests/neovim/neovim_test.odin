@@ -383,10 +383,17 @@ resize_screen :: proc(t: ^testing.T, c: ^neovim.Client, w: ^Writer, columns, row
 	flush_screen(t, c, w)
 }
 
+// Grid 1's cells, which hold the whole screen until Neovim shows other grids.
+base_cells :: proc(c: ^neovim.Client) -> []neovim.Cell {
+	return c.screen.grids[0].cells
+}
+
+// What the screen shows in one row, windows and floats composed.
 row_text :: proc(c: ^neovim.Client, row: int) -> string {
 	builder := strings.builder_make(context.temp_allocator)
 	for column in 0 ..< c.screen.columns {
-		glyph := c.screen.cells[row * c.screen.columns + column].glyph
+		cell, _ := neovim.screen_cell(&c.screen, row, column)
+		glyph := cell.glyph
 		switch {
 		case glyph == 0:
 		case glyph & neovim.GLYPH_CLUSTER != 0: strings.write_string(&builder, neovim.cluster(c, glyph))
@@ -436,12 +443,16 @@ redraw_publishes_once_at_flush_even_byte_by_byte :: proc(t: ^testing.T) {
 	testing.expect_value(t, screen.generation, u64(1))
 	testing.expect_value(t, screen.columns, 4)
 	testing.expect_value(t, screen.rows, 2)
-	testing.expect_value(t, len(screen.cells), 8)
-	testing.expect_value(t, screen.cells[0], neovim.Cell{'a', 1})
-	testing.expect_value(t, screen.cells[1], neovim.Cell{'b', 1})
-	testing.expect_value(t, screen.cells[2], neovim.Cell{'c', 2})
-	testing.expect_value(t, screen.cells[3], neovim.Cell{'c', 2})
-	testing.expect_value(t, screen.cells[4], neovim.Cell{' ', 0})
+	cells := base_cells(&f.client)
+	testing.expect_value(t, len(cells), 8)
+	testing.expect_value(t, cells[0], neovim.Cell{'a', 1})
+	testing.expect_value(t, cells[1], neovim.Cell{'b', 1})
+	testing.expect_value(t, cells[2], neovim.Cell{'c', 2})
+	testing.expect_value(t, cells[3], neovim.Cell{'c', 2})
+	testing.expect_value(t, cells[4], neovim.Cell{' ', 0})
+	testing.expect_value(t, screen.cursor_grid, 1)
+	testing.expect_value(t, screen.cursor_screen_row, 1)
+	testing.expect_value(t, screen.cursor_screen_column, 3)
 	testing.expect_value(t, screen.cursor_row, 1)
 	testing.expect_value(t, screen.cursor_column, 3)
 	testing.expect(t, screen.busy)
@@ -467,7 +478,7 @@ messages_split_across_chunks_wait_for_the_rest :: proc(t: ^testing.T) {
 	events, error = neovim.receive(&f.client, second.bytes[len(second.bytes) - 3:])
 	testing.expect_value(t, error, neovim.Error.None)
 	testing.expect(t, events.flushed)
-	testing.expect_value(t, f.client.screen.cells[2].glyph, u32('x'))
+	testing.expect_value(t, base_cells(&f.client)[2].glyph, u32('x'))
 	// Both messages whole in one chunk, then nothing.
 	both := slice.concatenate([][]u8{second.bytes[:], second.bytes[:]})
 	defer delete(both)
@@ -489,11 +500,11 @@ changes_after_the_last_flush_stay_hidden :: proc(t: ^testing.T) {
 	write_ints(w, 1, 0, 2)
 	events := feed(t, &f.client, w)
 	testing.expect(t, !events.flushed)
-	testing.expect_value(t, f.client.screen.cells[0].glyph, u32(' '))
+	testing.expect_value(t, base_cells(&f.client)[0].glyph, u32(' '))
 	testing.expect_value(t, f.client.screen.cursor_column, 0)
 	testing.expect_value(t, f.client.screen.generation, u64(1))
 	flush_screen(t, &f.client, w)
-	testing.expect_value(t, f.client.screen.cells[0].glyph, u32('q'))
+	testing.expect_value(t, base_cells(&f.client)[0].glyph, u32('q'))
 	testing.expect_value(t, f.client.screen.cursor_column, 2)
 	testing.expect_value(t, f.client.screen.generation, u64(2))
 }
@@ -508,12 +519,12 @@ grid_line_repeat_and_highlight_carry :: proc(t: ^testing.T) {
 	write_line_event(w, 1, 1, 1, {{"x", 2, 3}, {"y", -1, 0}, {"z", 5, 0}, {"w", 5, 2}})
 	_ = feed(t, &f.client, w)
 	flush_screen(t, &f.client, w)
-	row := f.client.screen.cells[8:16]
+	row := base_cells(&f.client)[8:16]
 	expected := [8]neovim.Cell{
 		{' ', 0}, {'x', 2}, {'x', 2}, {'x', 2}, {'y', 2}, {'z', 5}, {'w', 5}, {'w', 5},
 	}
 	for cell, index in expected {testing.expect_value(t, row[index], cell)}
-	testing.expect_value(t, f.client.screen.cells[0], neovim.Cell{' ', 0})
+	testing.expect_value(t, base_cells(&f.client)[0], neovim.Cell{' ', 0})
 }
 
 @(test)
@@ -526,7 +537,7 @@ wide_characters_have_a_zero_tail :: proc(t: ^testing.T) {
 	write_line_event(w, 1, 0, 0, {{"漢", 4, 0}, {"", -1, 0}, {"a", 0, 0}, {"😀", 0, 0}, {"", 0, 0}})
 	_ = feed(t, &f.client, w)
 	flush_screen(t, &f.client, w)
-	cells := f.client.screen.cells
+	cells := base_cells(&f.client)
 	testing.expect_value(t, cells[0], neovim.Cell{0x6f22, 4})
 	testing.expect_value(t, cells[1], neovim.Cell{0, 4})
 	testing.expect_value(t, cells[2], neovim.Cell{'a', 0})
@@ -550,7 +561,7 @@ clusters_are_interned_and_round_trip :: proc(t: ^testing.T) {
 	})
 	_ = feed(t, &f.client, w)
 	flush_screen(t, &f.client, w)
-	cells := f.client.screen.cells
+	cells := base_cells(&f.client)
 	testing.expect(t, cells[0].glyph & neovim.GLYPH_CLUSTER != 0)
 	testing.expect(t, cells[1].glyph & neovim.GLYPH_CLUSTER != 0)
 	testing.expect_value(t, cells[2].glyph, u32(0))
@@ -611,20 +622,20 @@ grid_clear_resize_and_destroy :: proc(t: ^testing.T) {
 	single(w, "grid_clear", 1)
 	_ = feed(t, &f.client, w)
 	flush_screen(t, &f.client, w)
-	for cell in f.client.screen.cells {testing.expect_value(t, cell, neovim.Cell{' ', 0})}
+	for cell in base_cells(&f.client) {testing.expect_value(t, cell, neovim.Cell{' ', 0})}
 	resize_screen(t, &f.client, w, 2, 3)
 	testing.expect_value(t, f.client.screen.columns, 2)
 	testing.expect_value(t, f.client.screen.rows, 3)
-	testing.expect_value(t, len(f.client.screen.cells), 6)
+	testing.expect_value(t, len(base_cells(&f.client)), 6)
 	single(w, "grid_destroy", 1)
 	_ = feed(t, &f.client, w)
 	flush_screen(t, &f.client, w)
 	testing.expect_value(t, f.client.screen.columns, 0)
-	testing.expect_value(t, len(f.client.screen.cells), 0)
+	testing.expect_value(t, len(base_cells(&f.client)), 0)
 }
 
 @(test)
-other_grids_are_ignored :: proc(t: ^testing.T) {
+unpositioned_grids_stay_hidden :: proc(t: ^testing.T) {
 	f: Fixture
 	defer fixture_destroy(&f)
 	w := &f.writer
@@ -639,9 +650,15 @@ other_grids_are_ignored :: proc(t: ^testing.T) {
 	write_ints(w, 3)
 	_ = feed(t, &f.client, w)
 	flush_screen(t, &f.client, w)
-	testing.expect_value(t, f.client.screen.columns, 3)
+	screen := &f.client.screen
+	testing.expect_value(t, screen.columns, 3)
+	testing.expect_value(t, len(screen.grids), 1)
 	testing.expect_value(t, row_text(&f.client, 0), "   ")
-	testing.expect_value(t, f.client.screen.cursor_column, 0)
+	// The cursor names a grid that is not shown.
+	testing.expect_value(t, screen.cursor_grid, 2)
+	testing.expect_value(t, screen.cursor_column, 2)
+	testing.expect_value(t, screen.cursor_screen_row, -1)
+	testing.expect_value(t, screen.cursor_screen_column, -1)
 }
 
 @(test)
@@ -944,6 +961,699 @@ unknown_and_malformed_events_are_skipped :: proc(t: ^testing.T) {
 	testing.expect(t, events.flushed)
 	testing.expect_value(t, row_text(&f.client, 0), "mmm")
 	testing.expect_value(t, f.client.screen.cursor_column, 1)
+}
+
+BLANK_CELL :: neovim.Cell{glyph = ' '}
+
+// ---- multigrid -----------------------------------------------------------------------------------
+
+write_resize :: proc(w: ^Writer, grid, columns, rows: i64) {
+	begin_event(w, "grid_resize", 1)
+	write_ints(w, grid, columns, rows)
+}
+
+// A window handle as Neovim sends it: an ext value holding an integer.
+write_window :: proc(w: ^Writer, handle: i64) {
+	payload: Writer
+	defer delete(payload.bytes)
+	neovim.msgpack_write_int(&payload, handle)
+	neovim.msgpack_write_ext(w, 1, payload.bytes[:])
+}
+
+write_win_pos :: proc(w: ^Writer, grid, window, row, column, width, height: i64) {
+	begin_event(w, "win_pos", 1)
+	neovim.msgpack_write_array(w, 6)
+	neovim.msgpack_write_int(w, grid)
+	write_window(w, window)
+	for value in ([?]i64{row, column, width, height}) {neovim.msgpack_write_int(w, value)}
+}
+
+Float_Pos :: struct {
+	grid, window: i64,
+	anchor: string,
+	anchor_grid: i64,
+	anchor_row, anchor_column: f64,
+	mouse: bool,
+	zindex, compindex: i64,
+	screen_row, screen_column: i64,
+	// Neovim before 0.11 sends neither the compositor index nor the screen position.
+	legacy: bool,
+}
+
+write_float_pos :: proc(w: ^Writer, p: Float_Pos) {
+	begin_event(w, "win_float_pos", 1)
+	neovim.msgpack_write_array(w, p.legacy ? 8 : 11)
+	neovim.msgpack_write_int(w, p.grid)
+	write_window(w, p.window)
+	neovim.msgpack_write_str(w, p.anchor)
+	neovim.msgpack_write_int(w, p.anchor_grid)
+	neovim.msgpack_write_f64(w, p.anchor_row)
+	neovim.msgpack_write_f64(w, p.anchor_column)
+	neovim.msgpack_write_bool(w, p.mouse)
+	neovim.msgpack_write_int(w, p.zindex)
+	if p.legacy {return}
+	neovim.msgpack_write_int(w, p.compindex)
+	neovim.msgpack_write_int(w, p.screen_row)
+	neovim.msgpack_write_int(w, p.screen_column)
+}
+
+// A float at a screen position, as Neovim 0.12 sends it.
+float_at :: proc(grid, row, column: i64, zindex: i64 = 50, compindex: i64 = 0) -> Float_Pos {
+	return {
+		grid = grid, window = 1000 + grid, anchor = "NW", anchor_grid = 1, zindex = zindex,
+		compindex = compindex, screen_row = row, screen_column = column,
+	}
+}
+
+// A float as Neovim before 0.11 sends it: only the anchor.
+legacy_float :: proc(
+	grid: i64,
+	anchor: string,
+	anchor_grid: i64,
+	row, column: f64,
+	zindex: i64,
+) -> Float_Pos {
+	return {
+		grid = grid, window = 1000 + grid, anchor = anchor, anchor_grid = anchor_grid, anchor_row = row,
+		anchor_column = column, zindex = zindex, legacy = true,
+	}
+}
+
+write_msg_pos :: proc(w: ^Writer, grid, row, zindex, compindex: i64) {
+	begin_event(w, "msg_set_pos", 1)
+	neovim.msgpack_write_array(w, 6)
+	neovim.msgpack_write_int(w, grid)
+	neovim.msgpack_write_int(w, row)
+	neovim.msgpack_write_bool(w, false)
+	neovim.msgpack_write_str(w, " ")
+	neovim.msgpack_write_int(w, zindex)
+	neovim.msgpack_write_int(w, compindex)
+}
+
+write_viewport :: proc(w: ^Writer, grid, window: i64, scroll_delta: f64) {
+	begin_event(w, "win_viewport", 1)
+	neovim.msgpack_write_array(w, 8)
+	neovim.msgpack_write_int(w, grid)
+	write_window(w, window)
+	for value in ([?]i64{0, 10, 0, 0, 50}) {neovim.msgpack_write_int(w, value)}
+	neovim.msgpack_write_f64(w, scroll_delta)
+}
+
+write_margins :: proc(w: ^Writer, grid, window, top, bottom, left, right: i64) {
+	begin_event(w, "win_viewport_margins", 1)
+	neovim.msgpack_write_array(w, 6)
+	neovim.msgpack_write_int(w, grid)
+	write_window(w, window)
+	for value in ([?]i64{top, bottom, left, right}) {neovim.msgpack_write_int(w, value)}
+}
+
+write_grid_ids :: proc(w: ^Writer, name: string, ids: ..i64) {
+	for id in ids {
+		begin_event(w, name, 1)
+		write_ints(w, id)
+	}
+}
+
+view_of :: proc(c: ^neovim.Client, id: int) -> (found: neovim.Grid_View, ok: bool) {
+	for view in c.screen.grids {
+		if view.id == id {return view, true}
+	}
+	return {}, false
+}
+
+shown_ids :: proc(c: ^neovim.Client) -> [dynamic]int {
+	ids := make([dynamic]int, context.temp_allocator)
+	for view in c.screen.grids {append(&ids, view.id)}
+	return ids
+}
+
+expect_ids :: proc(t: ^testing.T, c: ^neovim.Client, expected: []int, location := #caller_location) {
+	ids := shown_ids(c)
+	message := fmt.tprintf("grids %v, wanted %v", ids[:], expected)
+	testing.expect(t, slice.equal(ids[:], expected), message, loc = location)
+}
+
+@(test)
+draw_order_is_base_then_windows_then_layers :: proc(t: ^testing.T) {
+	f: Fixture
+	defer fixture_destroy(&f)
+	w := &f.writer
+	resize_screen(t, &f.client, w, 20, 10)
+	begin_redraw(w, 11)
+	for id in ([?]i64{4, 2}) {write_resize(w, id, 5, 3)}
+	for id in ([?]i64{5, 6, 7}) {write_resize(w, id, 4, 2)}
+	write_win_pos(w, 4, 1004, 0, 10, 5, 3)
+	write_win_pos(w, 2, 1002, 0, 0, 5, 3)
+	write_float_pos(w, float_at(5, 1, 1, 50, 3))
+	mouse_float := float_at(6, 2, 2, 50, 1)
+	mouse_float.mouse = true
+	write_float_pos(w, mouse_float)
+	pum := float_at(7, 3, 3, 10, 9)
+	pum.window = -1
+	write_float_pos(w, pum)
+	write_empty_event(w, "flush")
+	_ = feed(t, &f.client, w)
+	expect_ids(t, &f.client, {1, 2, 4, 7, 6, 5})
+	kinds := [6]neovim.Grid_Kind{.Base, .Window, .Window, .Float, .Float, .Float}
+	for view, index in f.client.screen.grids {
+		testing.expect_value(t, view.kind, kinds[index])
+		testing.expect_value(t, len(view.cells), view.columns * view.rows)
+	}
+	windows := windows_of(&f.client)
+	testing.expect_value(t, windows[0].window, i64(1002))
+	testing.expect_value(t, windows[1].window, i64(1004))
+	testing.expect_value(t, windows[1].column, 10)
+	topmost, _ := view_of(&f.client, 5)
+	testing.expect_value(t, topmost.zindex, 50)
+	testing.expect_value(t, topmost.compindex, 3)
+	testing.expect_value(t, topmost.focusable, false)
+	testing.expect_value(t, topmost.row, 1)
+	middle, _ := view_of(&f.client, 6)
+	testing.expect_value(t, middle.focusable, true)
+	below, _ := view_of(&f.client, 7)
+	testing.expect_value(t, below.window, i64(-1))
+	testing.expect_value(t, below.zindex, 10)
+	base, _ := view_of(&f.client, 1)
+	testing.expect_value(t, base.focusable, true)
+	testing.expect_value(t, f.client.screen.grids[1].zindex, 0)
+}
+
+@(test)
+win_pos_may_precede_its_grid_resize :: proc(t: ^testing.T) {
+	f: Fixture
+	defer fixture_destroy(&f)
+	w := &f.writer
+	resize_screen(t, &f.client, w, 20, 10)
+	begin_redraw(w, 5)
+	// The event's own size is stale or bogus; only the origin counts.
+	write_win_pos(w, 2, 1002, 3, 4, 99, 99)
+	write_resize(w, 2, 6, 3)
+	write_line_event(w, 2, 1, 0, {{"x", 1, 6}})
+	write_win_pos(w, 3, 1003, 0, 0, 99, 99)
+	write_empty_event(w, "flush")
+	_ = feed(t, &f.client, w)
+	window, ok := view_of(&f.client, 2)
+	testing.expect(t, ok)
+	testing.expect_value(t, window.columns, 6)
+	testing.expect_value(t, window.rows, 3)
+	testing.expect_value(t, window.row, 3)
+	testing.expect_value(t, window.column, 4)
+	testing.expect_value(t, window.cells[6], neovim.Cell{'x', 1})
+	testing.expect_value(t, window.cells[0], neovim.Cell{' ', 0})
+	unsized, shown := view_of(&f.client, 3)
+	testing.expect(t, shown)
+	testing.expect_value(t, unsized.columns, 0)
+	testing.expect_value(t, unsized.rows, 0)
+	testing.expect_value(t, len(unsized.cells), 0)
+}
+
+@(test)
+a_placeholder_grid_is_shown_by_a_later_win_pos :: proc(t: ^testing.T) {
+	f: Fixture
+	defer fixture_destroy(&f)
+	w := &f.writer
+	resize_screen(t, &f.client, w, 20, 10)
+	begin_redraw(w, 3)
+	write_resize(w, 2, 4, 2)
+	write_line_event(w, 2, 0, 0, {{"p", 0, 4}})
+	write_empty_event(w, "flush")
+	_ = feed(t, &f.client, w)
+	expect_ids(t, &f.client, {1})
+	begin_redraw(w, 2)
+	write_win_pos(w, 2, 1002, 2, 5, 4, 2)
+	write_empty_event(w, "flush")
+	_ = feed(t, &f.client, w)
+	expect_ids(t, &f.client, {1, 2})
+	window, _ := view_of(&f.client, 2)
+	testing.expect_value(t, window.cells[0].glyph, u32('p'))
+	testing.expect_value(t, row_text(&f.client, 2)[5:9], "pppp")
+	// A float placeholder and a message placeholder come the same way.
+	begin_redraw(w, 3)
+	write_resize(w, 3, 2, 1)
+	write_resize(w, 4, 10, 6)
+	write_empty_event(w, "flush")
+	_ = feed(t, &f.client, w)
+	expect_ids(t, &f.client, {1, 2})
+	begin_redraw(w, 3)
+	write_float_pos(w, float_at(3, 0, 0))
+	write_msg_pos(w, 4, 8, 200, 5)
+	write_empty_event(w, "flush")
+	_ = feed(t, &f.client, w)
+	expect_ids(t, &f.client, {1, 2, 3, 4})
+}
+
+@(test)
+float_pos_is_idempotent_and_a_move_changes_the_layout :: proc(t: ^testing.T) {
+	f: Fixture
+	defer fixture_destroy(&f)
+	w := &f.writer
+	resize_screen(t, &f.client, w, 20, 10)
+	place := float_at(4, 2, 3, 20, 1)
+	begin_redraw(w, 3)
+	write_resize(w, 4, 5, 2)
+	write_float_pos(w, place)
+	write_empty_event(w, "flush")
+	_ = feed(t, &f.client, w)
+	first, _ := view_of(&f.client, 4)
+	testing.expect_value(t, first.row, 2)
+	testing.expect_value(t, first.column, 3)
+
+	begin_redraw(w, 3)
+	write_float_pos(w, place)
+	write_float_pos(w, place)
+	write_empty_event(w, "flush")
+	_ = feed(t, &f.client, w)
+	same, _ := view_of(&f.client, 4)
+	testing.expect_value(t, same.layout, first.layout)
+
+	// Another float opening shifts compindex; that is no move.
+	place.compindex = 2
+	begin_redraw(w, 2)
+	write_float_pos(w, place)
+	write_empty_event(w, "flush")
+	_ = feed(t, &f.client, w)
+	shifted, _ := view_of(&f.client, 4)
+	testing.expect_value(t, shifted.compindex, 2)
+	testing.expect_value(t, shifted.layout, first.layout)
+
+	place.screen_row = 5
+	begin_redraw(w, 2)
+	write_float_pos(w, place)
+	write_empty_event(w, "flush")
+	_ = feed(t, &f.client, w)
+	moved, _ := view_of(&f.client, 4)
+	testing.expect_value(t, moved.row, 5)
+	testing.expect(t, moved.layout != first.layout)
+
+	// A resize resets it too.
+	begin_redraw(w, 2)
+	write_resize(w, 4, 6, 2)
+	write_empty_event(w, "flush")
+	_ = feed(t, &f.client, w)
+	resized, _ := view_of(&f.client, 4)
+	testing.expect(t, resized.layout != moved.layout)
+}
+
+@(test)
+float_without_a_screen_position_is_anchored_by_its_corner :: proc(t: ^testing.T) {
+	f: Fixture
+	defer fixture_destroy(&f)
+	w := &f.writer
+	resize_screen(t, &f.client, w, 40, 20)
+	begin_redraw(w, 7)
+	write_resize(w, 2, 10, 5)
+	write_win_pos(w, 2, 1002, 3, 4, 10, 5)
+	write_resize(w, 3, 5, 2)
+	write_resize(w, 4, 3, 1)
+	write_float_pos(w, legacy_float(3, "SE", 1, 10, 20, 50))
+	write_float_pos(w, legacy_float(4, "NE", 2, 1, 2, 60))
+	write_empty_event(w, "flush")
+	_ = feed(t, &f.client, w)
+	south_east, _ := view_of(&f.client, 3)
+	testing.expect_value(t, south_east.row, 8)
+	testing.expect_value(t, south_east.column, 15)
+	north_east, _ := view_of(&f.client, 4)
+	testing.expect_value(t, north_east.row, 4)
+	testing.expect_value(t, north_east.column, 3)
+	testing.expect_value(t, north_east.zindex, 60)
+	testing.expect_value(t, north_east.compindex, 0)
+	begin_redraw(w, 3)
+	write_float_pos(w, legacy_float(3, "SW", 1, 10.5, 20, 50))
+	write_float_pos(w, legacy_float(4, "NW", 1, 1, 2, 60))
+	write_empty_event(w, "flush")
+	_ = feed(t, &f.client, w)
+	south_west, _ := view_of(&f.client, 3)
+	testing.expect_value(t, south_west.row, 8)
+	testing.expect_value(t, south_west.column, 20)
+	north_west, _ := view_of(&f.client, 4)
+	testing.expect_value(t, north_west.row, 1)
+	testing.expect_value(t, north_west.column, 2)
+}
+
+@(test)
+msg_set_pos_ignores_grid_zero_and_clips_to_the_screen :: proc(t: ^testing.T) {
+	f: Fixture
+	defer fixture_destroy(&f)
+	w := &f.writer
+	resize_screen(t, &f.client, w, 10, 6)
+	begin_redraw(w, 6)
+	write_resize(w, 3, 10, 6)
+	write_msg_pos(w, 0, 5, 200, 4)
+	for letter, row in ([3]string{"m", "n", "o"}) {write_line_event(w, 3, i64(row), 0, {{letter, 1, 10}})}
+	write_empty_event(w, "flush")
+	_ = feed(t, &f.client, w)
+	expect_ids(t, &f.client, {1})
+
+	begin_redraw(w, 2)
+	write_msg_pos(w, 3, 4, 200, 7)
+	write_empty_event(w, "flush")
+	_ = feed(t, &f.client, w)
+	expect_ids(t, &f.client, {1, 3})
+	message, _ := view_of(&f.client, 3)
+	testing.expect_value(t, message.kind, neovim.Grid_Kind.Message)
+	testing.expect_value(t, message.row, 4)
+	testing.expect_value(t, message.column, 0)
+	testing.expect_value(t, message.columns, 10)
+	testing.expect_value(t, message.rows, 2)
+	testing.expect_value(t, len(message.cells), 20)
+	testing.expect_value(t, message.zindex, 200)
+	testing.expect_value(t, message.compindex, 7)
+	testing.expect_value(t, message.window, i64(0))
+	testing.expect_value(t, message.cells[0].glyph, u32('m'))
+	testing.expect_value(t, message.cells[10].glyph, u32('n'))
+	testing.expect_value(t, row_text(&f.client, 3), "          ")
+	testing.expect_value(t, row_text(&f.client, 4), "mmmmmmmmmm")
+	testing.expect_value(t, row_text(&f.client, 5), "nnnnnnnnnn")
+
+	// Message rows above the screen's bottom grow back when the message moves up.
+	begin_redraw(w, 2)
+	write_msg_pos(w, 3, 5, 200, 7)
+	write_empty_event(w, "flush")
+	_ = feed(t, &f.client, w)
+	lower, _ := view_of(&f.client, 3)
+	testing.expect_value(t, lower.rows, 1)
+	testing.expect_value(t, len(lower.cells), 10)
+	testing.expect(t, lower.layout != message.layout)
+}
+
+@(test)
+hide_and_show_again_restarts_the_layout :: proc(t: ^testing.T) {
+	f: Fixture
+	defer fixture_destroy(&f)
+	w := &f.writer
+	resize_screen(t, &f.client, w, 20, 10)
+	begin_redraw(w, 3)
+	write_resize(w, 2, 5, 3)
+	write_win_pos(w, 2, 1002, 1, 1, 5, 3)
+	write_empty_event(w, "flush")
+	_ = feed(t, &f.client, w)
+	shown, _ := view_of(&f.client, 2)
+
+	begin_redraw(w, 2)
+	write_win_pos(w, 2, 1002, 1, 1, 5, 3)
+	write_empty_event(w, "flush")
+	_ = feed(t, &f.client, w)
+	again, _ := view_of(&f.client, 2)
+	testing.expect_value(t, again.layout, shown.layout)
+
+	begin_redraw(w, 2)
+	write_grid_ids(w, "win_hide", 2)
+	write_empty_event(w, "flush")
+	_ = feed(t, &f.client, w)
+	expect_ids(t, &f.client, {1})
+
+	begin_redraw(w, 2)
+	write_win_pos(w, 2, 1002, 1, 1, 5, 3)
+	write_empty_event(w, "flush")
+	_ = feed(t, &f.client, w)
+	back, ok := view_of(&f.client, 2)
+	testing.expect(t, ok)
+	testing.expect(t, back.layout != shown.layout)
+	testing.expect_value(t, back.cells[0].glyph, u32(' '))
+}
+
+@(test)
+windows_leave_by_hide_close_destroy_and_external_pos :: proc(t: ^testing.T) {
+	context.logger = log.nil_logger()
+	f: Fixture
+	defer fixture_destroy(&f)
+	w := &f.writer
+	resize_screen(t, &f.client, w, 20, 10)
+	begin_redraw(w, 10)
+	for id in ([?]i64{2, 3, 4, 5, 6}) {
+		write_resize(w, id, 3, 1)
+		write_win_pos(w, id, 1000 + id, i64(id), 0, 3, 1)
+	}
+	_ = feed(t, &f.client, w)
+	begin_redraw(w, 1)
+	write_empty_event(w, "flush")
+	_ = feed(t, &f.client, w)
+	expect_ids(t, &f.client, {1, 2, 3, 4, 5, 6})
+
+	begin_redraw(w, 8)
+	write_grid_ids(w, "win_hide", 2)
+	write_grid_ids(w, "win_close", 3)
+	write_grid_ids(w, "grid_destroy", 4)
+	begin_event(w, "win_external_pos", 1)
+	neovim.msgpack_write_array(w, 2)
+	neovim.msgpack_write_int(w, 5)
+	write_window(w, 1005)
+	// Events for grids that are gone, and ones Neovim has that this client does not draw.
+	write_grid_ids(w, "win_close", 3, 99)
+	begin_event(w, "win_extmark", 1)
+	write_ints(w, 6, 1006, 1, 1, 0, 0)
+	write_empty_event(w, "flush")
+	_ = feed(t, &f.client, w)
+	expect_ids(t, &f.client, {1, 6})
+	// An external window shown again by a win_pos keeps its cells.
+	begin_redraw(w, 2)
+	write_win_pos(w, 5, 1005, 0, 0, 3, 1)
+	write_empty_event(w, "flush")
+	_ = feed(t, &f.client, w)
+	expect_ids(t, &f.client, {1, 5, 6})
+}
+
+@(test)
+resizing_a_grid_keeps_the_cells_both_sizes_cover :: proc(t: ^testing.T) {
+	f: Fixture
+	defer fixture_destroy(&f)
+	w := &f.writer
+	resize_screen(t, &f.client, w, 20, 10)
+	begin_redraw(w, 6)
+	write_resize(w, 2, 4, 3)
+	write_win_pos(w, 2, 1002, 0, 0, 4, 3)
+	for letter, row in ([3]string{"a", "b", "c"}) {write_line_event(w, 2, i64(row), 0, {{letter, 0, 4}})}
+	write_empty_event(w, "flush")
+	_ = feed(t, &f.client, w)
+	before, _ := view_of(&f.client, 2)
+
+	begin_redraw(w, 2)
+	write_resize(w, 2, 3, 2)
+	write_empty_event(w, "flush")
+	_ = feed(t, &f.client, w)
+	smaller, _ := view_of(&f.client, 2)
+	testing.expect_value(t, smaller.columns, 3)
+	testing.expect_value(t, smaller.rows, 2)
+	testing.expect_value(t, row_text(&f.client, 0)[:3], "aaa")
+	testing.expect_value(t, row_text(&f.client, 1)[:3], "bbb")
+	testing.expect(t, smaller.layout != before.layout)
+
+	begin_redraw(w, 2)
+	write_resize(w, 2, 5, 3)
+	write_empty_event(w, "flush")
+	_ = feed(t, &f.client, w)
+	larger, _ := view_of(&f.client, 2)
+	for column in 0 ..< 3 {testing.expect_value(t, larger.cells[column], neovim.Cell{'a', 0})}
+	testing.expect_value(t, larger.cells[3], BLANK_CELL)
+	testing.expect_value(t, larger.cells[4], BLANK_CELL)
+	testing.expect_value(t, larger.cells[5], neovim.Cell{'b', 0})
+	testing.expect_value(t, larger.cells[10], BLANK_CELL)
+
+	// The same size again is no change.
+	begin_redraw(w, 2)
+	write_resize(w, 2, 5, 3)
+	write_empty_event(w, "flush")
+	_ = feed(t, &f.client, w)
+	same, _ := view_of(&f.client, 2)
+	testing.expect_value(t, same.layout, larger.layout)
+}
+
+@(test)
+scroll_totals_accumulate_between_and_across_flushes :: proc(t: ^testing.T) {
+	f: Fixture
+	defer fixture_destroy(&f)
+	w := &f.writer
+	resize_screen(t, &f.client, w, 20, 10)
+	begin_redraw(w, 6)
+	write_resize(w, 2, 5, 3)
+	write_win_pos(w, 2, 1002, 0, 0, 5, 3)
+	write_viewport(w, 2, 1002, 3)
+	write_viewport(w, 2, 1002, -1)
+	write_viewport(w, 7, 1007, 9)
+	write_empty_event(w, "flush")
+	_ = feed(t, &f.client, w)
+	window, _ := view_of(&f.client, 2)
+	testing.expect_value(t, window.scrolled, i64(2))
+	testing.expect_value(t, f.client.screen.grids[0].scrolled, i64(0))
+	begin_redraw(w, 3)
+	write_viewport(w, 2, 1002, 1.6)
+	write_viewport(w, 2, 1002, -0.4)
+	write_empty_event(w, "flush")
+	_ = feed(t, &f.client, w)
+	later, _ := view_of(&f.client, 2)
+	testing.expect_value(t, later.scrolled, i64(4))
+	// Scrolling is no reason to restart an animation.
+	testing.expect_value(t, later.layout, window.layout)
+}
+
+@(test)
+margins_are_kept_when_they_arrive_before_the_grid :: proc(t: ^testing.T) {
+	f: Fixture
+	defer fixture_destroy(&f)
+	w := &f.writer
+	resize_screen(t, &f.client, w, 20, 10)
+	begin_redraw(w, 4)
+	write_margins(w, 2, 1002, 1, 0, 0, 0)
+	write_resize(w, 2, 5, 3)
+	write_win_pos(w, 2, 1002, 0, 0, 5, 3)
+	write_empty_event(w, "flush")
+	_ = feed(t, &f.client, w)
+	first, _ := view_of(&f.client, 2)
+	testing.expect_value(t, first.margins, [4]int{1, 0, 0, 0})
+
+	begin_redraw(w, 2)
+	write_margins(w, 2, 1002, 1, 0, 0, 0)
+	write_empty_event(w, "flush")
+	_ = feed(t, &f.client, w)
+	same, _ := view_of(&f.client, 2)
+	testing.expect_value(t, same.layout, first.layout)
+
+	begin_redraw(w, 2)
+	write_margins(w, 2, 1002, 1, 2, 3, 4)
+	write_empty_event(w, "flush")
+	_ = feed(t, &f.client, w)
+	changed, _ := view_of(&f.client, 2)
+	testing.expect_value(t, changed.margins, [4]int{1, 2, 3, 4})
+	testing.expect(t, changed.layout != first.layout)
+}
+
+@(test)
+a_floats_blend_attribute_is_kept :: proc(t: ^testing.T) {
+	f: Fixture
+	defer fixture_destroy(&f)
+	w := &f.writer
+	resize_screen(t, &f.client, w, 20, 10)
+	begin_redraw(w, 5)
+	begin_event(w, "hl_attr_define", 1)
+	neovim.msgpack_write_array(w, 4)
+	neovim.msgpack_write_int(w, 7)
+	neovim.msgpack_write_map(w, 2)
+	neovim.msgpack_write_str(w, "background")
+	neovim.msgpack_write_int(w, 0x102030)
+	neovim.msgpack_write_str(w, "blend")
+	neovim.msgpack_write_int(w, 40)
+	neovim.msgpack_write_map(w, 0)
+	neovim.msgpack_write_array(w, 0)
+	write_resize(w, 3, 4, 1)
+	write_float_pos(w, float_at(3, 1, 1))
+	write_line_event(w, 3, 0, 0, {{"f", 7, 4}})
+	write_empty_event(w, "flush")
+	_ = feed(t, &f.client, w)
+	float, _ := view_of(&f.client, 3)
+	testing.expect_value(t, float.cells[0], neovim.Cell{'f', 7})
+	testing.expect_value(t, f.client.screen.highlights[7].blend, u8(40))
+	background, has_background := f.client.screen.highlights[7].background.?
+	testing.expect(t, has_background)
+	testing.expect_value(t, background, neovim.Color(0x102030))
+}
+
+@(test)
+screen_cell_reads_the_topmost_grid :: proc(t: ^testing.T) {
+	f: Fixture
+	defer fixture_destroy(&f)
+	w := &f.writer
+	resize_screen(t, &f.client, w, 8, 4)
+	begin_redraw(w, 7)
+	write_line_event(w, 1, 3, 0, {{"b", 9, 8}})
+	write_resize(w, 2, 8, 3)
+	write_win_pos(w, 2, 1002, 0, 0, 8, 3)
+	for row in 0 ..< 1 {write_line_event(w, 2, i64(row), 0, {{"w", 1, 8}})}
+	write_resize(w, 3, 3, 2)
+	write_float_pos(w, float_at(3, 1, 2, compindex = 1))
+	write_empty_event(w, "flush")
+	_ = feed(t, &f.client, w)
+	begin_redraw(w, 3)
+	write_line_event(w, 2, 1, 0, {{"w", 1, 8}})
+	write_line_event(w, 2, 2, 0, {{"w", 1, 8}})
+	write_empty_event(w, "flush")
+	_ = feed(t, &f.client, w)
+	begin_redraw(w, 3)
+	write_line_event(w, 3, 0, 0, {{"f", 2, 3}})
+	write_line_event(w, 3, 1, 0, {{"f", 2, 3}})
+	write_empty_event(w, "flush")
+	_ = feed(t, &f.client, w)
+	screen := &f.client.screen
+	cell, ok := neovim.screen_cell(screen, 1, 2)
+	testing.expect(t, ok)
+	testing.expect_value(t, cell, neovim.Cell{'f', 2})
+	cell, _ = neovim.screen_cell(screen, 2, 4)
+	testing.expect_value(t, cell, neovim.Cell{'f', 2})
+	cell, _ = neovim.screen_cell(screen, 1, 5)
+	testing.expect_value(t, cell, neovim.Cell{'w', 1})
+	cell, _ = neovim.screen_cell(screen, 3, 2)
+	testing.expect_value(t, cell, neovim.Cell{'b', 9})
+	cell, _ = neovim.screen_cell(screen, 0, 0)
+	testing.expect_value(t, cell, neovim.Cell{'w', 1})
+	_, ok = neovim.screen_cell(screen, 4, 0)
+	testing.expect(t, !ok)
+	_, ok = neovim.screen_cell(screen, 0, 8)
+	testing.expect(t, !ok)
+	_, ok = neovim.screen_cell(screen, -1, 0)
+	testing.expect(t, !ok)
+	testing.expect_value(t, row_text(&f.client, 1), "wwfffwww")
+}
+
+@(test)
+the_cursor_follows_its_grids_origin :: proc(t: ^testing.T) {
+	f: Fixture
+	defer fixture_destroy(&f)
+	w := &f.writer
+	resize_screen(t, &f.client, w, 20, 10)
+	begin_redraw(w, 4)
+	write_resize(w, 2, 6, 4)
+	write_win_pos(w, 2, 1002, 3, 4, 6, 4)
+	begin_event(w, "grid_cursor_goto", 1)
+	write_ints(w, 2, 1, 2)
+	write_empty_event(w, "flush")
+	_ = feed(t, &f.client, w)
+	screen := &f.client.screen
+	testing.expect_value(t, screen.cursor_grid, 2)
+	testing.expect_value(t, screen.cursor_row, 1)
+	testing.expect_value(t, screen.cursor_column, 2)
+	testing.expect_value(t, screen.cursor_screen_row, 4)
+	testing.expect_value(t, screen.cursor_screen_column, 6)
+
+	begin_redraw(w, 2)
+	write_grid_ids(w, "win_hide", 2)
+	write_empty_event(w, "flush")
+	_ = feed(t, &f.client, w)
+	testing.expect_value(t, screen.cursor_screen_row, -1)
+	testing.expect_value(t, screen.cursor_screen_column, -1)
+
+	begin_redraw(w, 2)
+	begin_event(w, "grid_cursor_goto", 1)
+	write_ints(w, 1, 5, 7)
+	write_empty_event(w, "flush")
+	_ = feed(t, &f.client, w)
+	testing.expect_value(t, screen.cursor_grid, 1)
+	testing.expect_value(t, screen.cursor_screen_row, 5)
+	testing.expect_value(t, screen.cursor_screen_column, 7)
+}
+
+@(test)
+steady_flushes_reuse_their_buffers :: proc(t: ^testing.T) {
+	f: Fixture
+	defer fixture_destroy(&f)
+	w := &f.writer
+	resize_screen(t, &f.client, w, 20, 10)
+	begin_redraw(w, 3)
+	write_resize(w, 2, 6, 4)
+	write_win_pos(w, 2, 1002, 3, 4, 6, 4)
+	write_empty_event(w, "flush")
+	_ = feed(t, &f.client, w)
+	screen := &f.client.screen
+	grids := raw_data(screen.grids)
+	base, window := raw_data(screen.grids[0].cells), raw_data(screen.grids[1].cells)
+	for _ in 0 ..< 3 {
+		begin_redraw(w, 2)
+		write_line_event(w, 2, 0, 0, {{"s", 1, 6}})
+		write_empty_event(w, "flush")
+		_ = feed(t, &f.client, w)
+	}
+	testing.expect(t, raw_data(f.client.screen.grids) == grids, "the grids slice was reallocated")
+	testing.expect(t, raw_data(f.client.screen.grids[0].cells) == base, "the pooled cells moved")
+	testing.expect(t, raw_data(f.client.screen.grids[1].cells) == window, "the pooled cells moved")
+	testing.expect_value(t, f.client.screen.grids[1].cells[0].glyph, u32('s'))
 }
 
 // ---- RPC -----------------------------------------------------------------------------------------
@@ -1370,4 +2080,157 @@ real_neovim_draws_edits_and_quits :: proc(t: ^testing.T) {
 	}
 	testing.expect(t, exited, "nvim did not exit after :qa!")
 	testing.expect_value(t, c.exit_code, 0)
+}
+
+wait_until :: proc(
+	c: ^neovim.Client,
+	data: rawptr,
+	check: proc(c: ^neovim.Client, data: rawptr) -> bool,
+) -> bool {
+	began := time.tick_now()
+	for time.tick_since(began) < 10 * time.Second {
+		events := neovim.poll(c)
+		if check(c, data) {return true}
+		if events.exited {return check(c, data)}
+		time.sleep(2 * time.Millisecond)
+	}
+	return false
+}
+
+windows_of :: proc(c: ^neovim.Client) -> [dynamic]neovim.Grid_View {
+	found := make([dynamic]neovim.Grid_View, context.temp_allocator)
+	for view in c.screen.grids {
+		if view.kind == .Window {append(&found, view)}
+	}
+	return found
+}
+
+start_nvim :: proc(c: ^neovim.Client, columns, rows: int) -> neovim.Error {
+	return neovim.start(c, {
+		argv = {"nvim", "--embed", "--clean", "-n", "-i", "NONE"},
+		columns = columns,
+		rows = rows,
+	}, spawn.Wake{})
+}
+
+one_window_at_60x20 :: proc(c: ^neovim.Client, _: rawptr) -> bool {
+	return c.screen.columns == 60 && c.screen.rows == 20 && len(windows_of(c)) == 1
+}
+
+two_windows :: proc(c: ^neovim.Client, _: rawptr) -> bool {
+	return len(windows_of(c)) == 2
+}
+
+has_float :: proc(c: ^neovim.Client, _: rawptr) -> bool {
+	for view in c.screen.grids {
+		if view.kind == .Float {return true}
+	}
+	return false
+}
+
+shows_message :: proc(c: ^neovim.Client, _: rawptr) -> bool {
+	return strings.has_prefix(row_text(c, 19), "msgtest")
+}
+
+nvim_exits :: proc(t: ^testing.T, c: ^neovim.Client) {
+	testing.expect_value(t, neovim.input(c, "<Esc>:qa!<CR>"), neovim.Error.None)
+	began := time.tick_now()
+	exited := false
+	for time.tick_since(began) < 10 * time.Second && !exited {
+		exited = neovim.poll(c).exited
+		time.sleep(2 * time.Millisecond)
+	}
+	testing.expect(t, exited, "nvim did not exit after :qa!")
+	testing.expect_value(t, c.exit_code, 0)
+}
+
+@(test)
+real_neovim_shows_splits_floats_and_messages :: proc(t: ^testing.T) {
+	c: neovim.Client
+	defer neovim.destroy(&c)
+	error := start_nvim(&c, 60, 20)
+	if error == .Not_Found {
+		log.info("nvim is not on PATH; skipping the real Neovim multigrid test")
+		return
+	}
+	if !testing.expect_value(t, error, neovim.Error.None) {return}
+	if !testing.expect(t, wait_until(&c, nil, one_window_at_60x20), "no window grid at 60x20") {return}
+
+	testing.expect_value(t, neovim.input(&c, ":vsplit<CR>"), neovim.Error.None)
+	if !testing.expect(t, wait_until(&c, nil, two_windows), "no second window grid") {return}
+	windows := windows_of(&c)
+	testing.expect_value(t, windows[0].row, windows[1].row)
+	testing.expect(t, windows[0].column != windows[1].column, "the windows share a column")
+	testing.expect_value(t, windows[0].rows, windows[1].rows)
+	left, right := windows[0], windows[1]
+	if left.column > right.column {left, right = right, left}
+	// The left window ends where the separator, one column of grid 1, begins.
+	testing.expect_value(t, left.column + left.columns + 1, right.column)
+	testing.expect_value(t, right.column + right.columns, 60)
+	testing.expect(t, left.window != right.window && left.window > 0 && right.window > 0)
+
+	command := ":lua vim.api.nvim_open_win(vim.api.nvim_create_buf(false, true), false, " +
+		"{relative = 'editor', row = 3, col = 10, width = 20, height = 4, zindex = 50})<CR>"
+	testing.expect_value(t, neovim.input(&c, command), neovim.Error.None)
+	if !testing.expect(t, wait_until(&c, nil, has_float), "no float grid") {return}
+	for view in c.screen.grids {
+		if view.kind != .Float {continue}
+		testing.expect_value(t, view.row, 3)
+		testing.expect_value(t, view.column, 10)
+		testing.expect_value(t, view.columns, 20)
+		testing.expect_value(t, view.rows, 4)
+		testing.expect_value(t, view.zindex, 50)
+		testing.expect_value(t, len(view.cells), 80)
+	}
+	// Layers come after every window.
+	layer_seen := false
+	for view in c.screen.grids {
+		if view.kind == .Float || view.kind == .Message {layer_seen = true}
+		testing.expect(t, !(layer_seen && view.kind == .Window), "a window is drawn over a layer")
+	}
+
+	testing.expect_value(t, neovim.input(&c, "<Esc>:echo 'msgtest'<CR>"), neovim.Error.None)
+	testing.expect(
+		t,
+		wait_until(&c, nil, shows_message),
+		fmt.tprintf("message missing: %q", row_text(&c, 19)),
+	)
+	nvim_exits(t, &c)
+}
+
+scrolled_of_window :: proc(c: ^neovim.Client) -> i64 {
+	windows := windows_of(c)
+	return len(windows) == 1 ? windows[0].scrolled : -1
+}
+
+shows_first_lines :: proc(c: ^neovim.Client, _: rawptr) -> bool {
+	return len(windows_of(c)) == 1 && strings.has_prefix(row_text(c, 0), "1 ") && row_text(c, 3)[0] == '4'
+}
+
+scrolled_by_one :: proc(c: ^neovim.Client, baseline: rawptr) -> bool {
+	return scrolled_of_window(c) == (^i64)(baseline)^ + 1
+}
+
+@(test)
+real_neovim_scroll_raises_the_windows_scrolled_total :: proc(t: ^testing.T) {
+	c: neovim.Client
+	defer neovim.destroy(&c)
+	error := start_nvim(&c, 60, 20)
+	if error == .Not_Found {
+		log.info("nvim is not on PATH; skipping the real Neovim scroll test")
+		return
+	}
+	if !testing.expect_value(t, error, neovim.Error.None) {return}
+	if !testing.expect(t, wait_until(&c, nil, one_window_at_60x20), "no window grid at 60x20") {return}
+	testing.expect_value(t, neovim.input(&c, ":call setline(1, range(1, 50))<CR>gg"), neovim.Error.None)
+	if !testing.expect(t, wait_until(&c, nil, shows_first_lines), "the lines did not appear") {return}
+
+	baseline := scrolled_of_window(&c)
+	testing.expect_value(t, neovim.input(&c, "<C-e>"), neovim.Error.None)
+	testing.expect(
+		t,
+		wait_until(&c, &baseline, scrolled_by_one),
+		fmt.tprintf("scrolled stayed %d, wanted %d", scrolled_of_window(&c), baseline + 1),
+	)
+	nvim_exits(t, &c)
 }

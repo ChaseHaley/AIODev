@@ -1,10 +1,10 @@
 [CmdletBinding()]
 param([string] $Name = 'neovim-panes')
-# Neovim panes (WORK-542): AIODev starts `nvim --embed` and draws its grid. Opens a file through aio, types
-# and saves it, clicks and scrolls with the mouse, follows a resize, closes with :q, reopens the closed
-# pane, restores it after a restart, and edits a file Agent changes shows a diff of. Needs nvim and git on
-# PATH. Neovim runs with XDG folders inside this journey's work folder, so the owner's Neovim config,
-# plugins and state are neither read nor written.
+# Neovim panes (WORK-542): AIODev starts `nvim --embed` and draws its grids. Opens a file through aio, types
+# and saves it, clicks and scrolls with the mouse, opens a float that takes no input and clicks through it,
+# follows a resize, closes with :q, reopens the closed pane, restores it after a restart, and edits a file
+# Agent changes shows a diff of. Needs nvim and git on PATH. Neovim runs with XDG folders inside this
+# journey's work folder, so the owner's Neovim config, plugins and state are neither read nor written.
 $ErrorActionPreference = 'Stop'
 $repo = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
 $ctl = Join-Path $repo 'build/aioctl.exe'
@@ -123,6 +123,25 @@ try {
     Wait-For 'neovim.row.0' 'typed <x> first line'
     Invoke-Ctl mouse wheel "$x,$y" -1 --px | Out-Null
     Wait-For 'neovim.row.0' '2'
+
+    # A float is a grid of its own over the window. One that takes no input, as treesitter-context's does,
+    # shows in the composed rows, lets a click through to the window under it, and stays put while the
+    # window scrolls under it.
+    Send-Command ("lua local b = vim.api.nvim_create_buf(false, true); " +
+        "vim.api.nvim_buf_set_lines(b, 0, -1, false, {'context line'}); vim.g.ctx = vim.api.nvim_open_win(b, " +
+        "false, {relative='win', row=0, col=0, width=12, height=1, focusable=false, zindex=20})")
+    Wait-For 'neovim.floats' '1'
+    Wait-For 'neovim.row.0' 'context line'
+    Invoke-Ctl type 'jj' | Out-Null
+    Wait-For 'neovim.cursor_row' '2'
+    Invoke-Ctl mouse click "$x,$($originY + [int]($height / 2))" --px | Out-Null
+    Wait-For 'neovim.cursor_row' '0'
+    Check ((Read-State)['neovim.row.1'] -eq '3') "row 1: $((Read-State)['neovim.row.1'])"
+    Invoke-Ctl key Ctrl+E | Out-Null
+    Wait-For 'neovim.row.1' '4'
+    Check ((Read-State)['neovim.row.0'] -eq 'context line') 'the float moved with the window'
+    Send-Command 'lua vim.api.nvim_win_close(vim.g.ctx, true)'
+    Wait-For 'neovim.floats' '0'
 
     # The grid follows the window; aioctl's resize waits on a terminal grid, so only the pane is checked.
     $columns = (Read-State)['neovim.columns']
