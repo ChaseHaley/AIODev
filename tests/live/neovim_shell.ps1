@@ -56,12 +56,13 @@ function Screen-Text {
     $state = Read-State
     return ($state.Keys | Where-Object { $_ -match '^neovim\.row\.\d+$' } | ForEach-Object { $state[$_] }) -join "`n"
 }
-# Waits for Neovim to take the focused pane, which must already show a screen Neovim drew.
+# Waits for Neovim to take the focused pane, which must already show a window Neovim drew: its first
+# flush, before its config has run, holds only an empty base grid.
 function Wait-Drawn {
     for ($i = 0; $i -lt 200; $i++) {
         $state = Read-State
         if ($state['neovim.active'] -eq 'true') {
-            Check ($state['neovim.generation'] -ne '0') 'the pane showed Neovim before Neovim drew anything'
+            Check ([int] $state['neovim.grids'] -gt 1) 'the pane showed Neovim before Neovim drew a window'
             Check ($state['neovim.started'] -eq 'true') 'the pane showed a Neovim that has not started'
             return
         }
@@ -73,6 +74,10 @@ if (-not (Get-Command nvim -ErrorAction SilentlyContinue)) { throw 'This journey
 Remove-Item -LiteralPath $work -Recurse -Force -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Force $work | Out-Null
 Set-Content -LiteralPath (Join-Path $work 'notes.txt') -Encoding utf8 -NoNewline "first line`nsecond line`n"
+# A config that waits on the event loop while it loads, as plugin managers do, so Neovim's first flush,
+# an empty base grid, arrives well before its first window: the owner's flicker.
+New-Item -ItemType Directory -Force (Join-Path $work 'xdg/config/nvim') | Out-Null
+Set-Content -LiteralPath (Join-Path $work 'xdg/config/nvim/init.lua') -Encoding utf8 'vim.wait(150)'
 @"
 control.enabled = true
 profile.default.command = pwsh.exe -NoLogo -NoProfile -NoExit

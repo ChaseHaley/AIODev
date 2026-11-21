@@ -96,7 +96,10 @@ neovim_take_pane :: proc(app: ^App, pane: ^Neovim_Pane) {
 	pane.shell = 0
 }
 
-// A pending Neovim takes its pane once it has drawn; one that quits first leaves the shell where it was.
+// A pending Neovim takes its pane once it shows a window; one that quits first leaves the shell where it
+// was. Neovim's first flush comes before its config runs and holds only an empty base grid, without even
+// its colours, and a config that waits on the event loop while it loads (as plugin managers do) leaves
+// that empty screen up long enough to be seen.
 @(private)
 neovim_pending_poll :: proc(app: ^App, pane: ^Neovim_Pane, polled: neovim.Poll) {
 	if polled.exited {
@@ -104,7 +107,13 @@ neovim_pending_poll :: proc(app: ^App, pane: ^Neovim_Pane, polled: neovim.Poll) 
 		notify(app, .Error, "Neovim quit before it showed anything.")
 		return
 	}
-	if polled.flushed {neovim_take_pane(app, pane)}
+	if !polled.flushed {return}
+	for grid in pane.client.screen.grids {
+		if grid.kind == .Window {
+			neovim_take_pane(app, pane)
+			return
+		}
+	}
 }
 
 // Choosing the profile of the shell a Neovim pane opened over shows that shell: Neovim quits as `:qa`
