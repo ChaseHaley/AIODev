@@ -146,7 +146,8 @@ pane_in_float :: proc(w: ^Window, pane: layout.Pane_Rect) -> bool {
 // The header row of a pane, which drawing and hit testing share. Every pane can split, zoom, fill and
 // close; Float and Linked window apply only to the tiled layout, a pane that takes no pins has no Links
 // button and a pane without a shell no Commands button. A pane shown alone by its view carries the hidden
-// panes glyph after its badge.
+// panes glyph before its buttons, which slides to the header's right end with the program status while the
+// buttons hide.
 pane_header_layout :: proc(w: ^Window, pane: layout.Pane_Rect) -> Pane_Header_Layout {
 	r := pane.rect
 	area := render.Rect{r.x, r.y, r.width, r.height}
@@ -158,7 +159,9 @@ pane_header_layout :: proc(w: ^Window, pane: layout.Pane_Rect) -> Pane_Header_La
 	// Without a Commands button, Links ends the first group.
 	if .Commands not_in shown {ends += {.Links}}
 	widget := hidden_panes_glyph_shown(w, pane) ? ui.HIDDEN_PANES_GLYPH_BOX : [2]f32{}
-	return ui.header_layout(area, w.scale, shown, ends, PANE_HEADER_DROP_ORDER[:], widget)
+	aside: f32
+	if view := pane_view(w, pane.content); view != nil {aside = view.header_status.value}
+	return ui.header_layout(area, w.scale, shown, ends, PANE_HEADER_DROP_ORDER[:], widget, aside)
 }
 
 // The view of the pane's container, which its Zoom and Fill window buttons show.
@@ -299,7 +302,7 @@ pane_header_draw :: proc(
 	}
 	aside: f32
 	if view != nil {
-		view.header_status_drawn = status.glyph != .None
+		view.header_status_drawn = status.glyph != .None || l.widget.width > 0
 		aside = view.header_status.value
 	}
 	r := pane.rect
@@ -347,7 +350,8 @@ pane_status_line :: proc(app: ^App, entry: ^Session_Entry) -> (ui.Status_Mark, s
 
 // A header row shows its buttons on the focused pane, the pane under the pointer and a pane whose Links or
 // Commands menu is open. The others keep the buttons' space, so their titles stay put when the buttons
-// appear; their program status moves to the header's right end instead (header_status_layout).
+// appear; their program status and hidden panes glyph move to the header's right end instead
+// (header_status_layout).
 @(private = "file")
 pane_header_buttons_shown :: proc(w: ^Window, pane: layout.Pane_Rect, menu_open: bool) -> bool {
 	hovered, found := w.header_pane.?

@@ -1,6 +1,7 @@
 package app_test
 
 import "core:testing"
+import "core:time"
 import app "../../src"
 import "aio:input"
 import "aio:layout"
@@ -51,6 +52,38 @@ hidden_panes_glyph_shows_while_a_view_hides_panes :: proc(t: ^testing.T) {
 		app.run_action(s, w, action)
 		testing.expectf(t, glyph(w) == {}, "leaving %v drops the glyph", action)
 	}
+}
+
+// The glyph follows the program status: while the header hides its buttons (an unfocused, unhovered pane) it
+// sits at the header's right end, and with the pointer over the pane it is back before the buttons.
+@(test)
+hidden_panes_glyph_sticks_to_the_right_end_while_buttons_hide :: proc(t: ^testing.T) {
+	f: Palette_Fixture
+	defer palette_fixture_destroy(t, &f)
+	if !palette_fixture_create(t, &f, "hidden-panes-glyph-end", second_window = false) {return}
+	s, w := &f.state, f.state.windows[0]
+	s.animations = false
+	app.pane_split(s, w, .Right)
+	app.run_action(s, w, .Zoom_Pane)
+	w.focused = true
+	w.header_pane = nil
+	focused := w.panes[0]
+	beside := glyph(w)
+	if !testing.expect(t, beside.width > 0) {return}
+	// Focus keeps the buttons, so the glyph stays before them.
+	_ = app.pane_header_controls_animate(s, w, render.frame_time_at(time.tick_now()))
+	testing.expect_value(t, glyph(w), beside)
+	// Without window focus and pointer the buttons hide and the glyph takes the corner.
+	w.focused = false
+	_ = app.pane_header_controls_animate(s, w, render.frame_time_at(time.tick_now()))
+	end := glyph(w)
+	testing.expect_value(t, end.x + end.width, focused.rect.x + focused.rect.width - ui.SPACE_1 * w.scale)
+	testing.expect_value(t, end.y, beside.y)
+	testing.expect(t, end.x > beside.x)
+	// The pointer over the pane brings the buttons and the glyph back.
+	w.header_pane = focused.content
+	_ = app.pane_header_controls_animate(s, w, render.frame_time_at(time.tick_now()))
+	testing.expect_value(t, glyph(w), beside)
 }
 
 // Hovering the glyph opens the map, which stays open across the gap, while the pointer heads diagonally for

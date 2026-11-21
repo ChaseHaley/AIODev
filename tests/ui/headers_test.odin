@@ -165,16 +165,25 @@ headers_move_the_status_to_the_right_end_while_buttons_hide :: proc(t: ^testing.
 	testing.expect_value(t, edge.x + edge.width, 400 - ui.SPACE_1)
 	testing.expect_value(t, edge_title, title)
 
-	// The owner's widget before the buttons stays clear of the status at the right end.
+	// The owner's widget sits before the buttons and slides to the right end with the status, which then
+	// ends SPACE_2 before it; the title keeps one width.
 	area := render.Rect{0, 0, 600, 200}
-	with_widget := ui.header_layout(area, 1, ALL, GROUP_ENDS, DROP_ORDER[:], {20, 20})
+	size := [2]f32{20, 20}
+	with_widget := ui.header_layout(area, 1, ALL, GROUP_ENDS, DROP_ORDER[:], size)
 	widget := with_widget.widget
 	if !testing.expect(t, widget.width > 0) {return}
+	testing.expect_value(t, widget.x + widget.width + ui.SPACE_1, with_widget.buttons[.Documents].x)
+	at_end := ui.header_layout(area, 1, ALL, GROUP_ENDS, DROP_ORDER[:], size, 1)
+	testing.expect_value(t, at_end.widget.x + at_end.widget.width, area.width - ui.SPACE_1)
+	testing.expect_value(t, at_end.widget.y, widget.y)
+	testing.expect_value(t, at_end.title, with_widget.title)
+	half_way := ui.header_layout(area, 1, ALL, GROUP_ENDS, DROP_ORDER[:], size, 0.5)
+	testing.expect_value(t, half_way.widget.x, (widget.x + at_end.widget.x) / 2)
 	beside, _ = ui.header_status_layout(with_widget, 1000, 1, 0)
 	testing.expect(t, beside.x + beside.width <= widget.x)
-	edge, _ = ui.header_status_layout(with_widget, 1000, 1, 1)
-	testing.expect_value(t, edge.x, widget.x + widget.width + ui.SPACE_2)
-	testing.expect_value(t, edge.x + edge.width, area.width - ui.SPACE_1)
+	edge, _ = ui.header_status_layout(at_end, 1000, 1, 1)
+	testing.expect_value(t, edge.x, beside.x)
+	testing.expect_value(t, edge.x + edge.width + ui.SPACE_2, at_end.widget.x)
 }
 
 // In every width, narrow headers that drop buttons included, the status at the right end never reaches

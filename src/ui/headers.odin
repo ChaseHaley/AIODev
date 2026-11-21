@@ -15,6 +15,9 @@ Header_Layout :: struct($E: typeid) {
 	// The owner's own control just before the buttons, which it draws and hit tests; empty when the owner
 	// asks for none or the header is too narrow for it.
 	widget:              render.Rect,
+	// Where the widget sits at the header's right end, which it slides to while the buttons hide; empty
+	// with it.
+	widget_end:          render.Rect,
 	buttons:             [E]render.Rect,
 	// Hairlines set each separated button apart from the buttons after it; empty where none follows.
 	dividers:            [E]render.Rect,
@@ -63,13 +66,16 @@ header_buttons_width :: proc(shown, separated: bit_set[$E], button, gap: f32) ->
 // A header row across the top of `area`: the badge and title at the start and the `shown` buttons at the
 // end, each `separated` button set apart from those after it. Buttons never cover the badge or the start
 // of the title, which focus and drag the pane, so in a narrow header they give way in `drop_order`. A
-// `widget` of that size in DIPs sits just before the first button; it is the first to give way.
+// `widget` of that size in DIPs sits just before the first button; it is the first to give way. With
+// `widget_aside` 1, for a header whose buttons are hidden, it sits at the header's right end instead, and in
+// between it slides, as the program status does (header_status_layout). The title never depends on it.
 header_layout :: proc(
 	area: render.Rect,
 	scale: f32,
 	shown, separated: bit_set[$E],
 	drop_order: []E,
 	widget: [2]f32 = {},
+	widget_aside: f32 = 0,
 ) -> Header_Layout(E) {
 	l := Header_Layout(E) {
 		panel = {area.x, area.y, area.width, min(area.height, HEADER_HEIGHT * scale)},
@@ -114,6 +120,9 @@ header_layout :: proc(
 		if widget_x - SPACE_2 * scale - title_x >= HEADER_TITLE_MINIMUM * scale {
 			y := area.y + max(0, (l.panel.height - size.y) / 2)
 			l.widget = {widget_x, y, size.x, min(size.y, l.panel.height)}
+			l.widget_end = l.widget
+			l.widget_end.x = area.x + area.width - SPACE_1 * scale - size.x
+			l.widget.x += (l.widget_end.x - widget_x) * widget_aside
 			end = widget_x
 		}
 	}
@@ -138,8 +147,9 @@ header_contains :: proc(l: Header_Layout($E), x, y: f32) -> bool {
 // Where a header's program status pill of `status_width` sits, and how wide the title may then be.
 // Beside the buttons (`aside` 0) the pill ends where the title's room ends, taking at most half of it.
 // At the header's right end (`aside` 1), for a header whose buttons are hidden, the pill also takes their
-// room, never reaching left of its place beside them nor over the owner's widget; a header without that
-// room keeps it beside them. In between it slides. The title's width never depends on `aside`, so the
+// room, never reaching left of its place beside them; the owner's widget, which also moves to the right
+// end, takes the corner and the pill ends SPACE_2 before it. A header without that room keeps it beside
+// them. In between it slides. The title's width never depends on `aside`, so the
 // title neither moves nor re-truncates when the buttons come and go. A header too narrow for a pill
 // shows none.
 header_status_layout :: proc(
@@ -161,9 +171,8 @@ header_status_layout :: proc(
 	title_width = max(0, width - beside - SPACE_2 * scale)
 	// The pill's fill ends where the last button's does.
 	right := l.panel.x + l.panel.width - SPACE_1 * scale
-	left := pill.x
-	if l.widget.width > 0 {left = max(left, l.widget.x + l.widget.width + SPACE_2 * scale)}
-	edge := min(status_width, right - left)
+	if l.widget_end.width > 0 {right = l.widget_end.x - SPACE_2 * scale}
+	edge := min(status_width, right - pill.x)
 	if aside <= 0 || edge < beside {return}
 	pill.width = beside + (edge - beside) * aside
 	pill.x += (right - edge - pill.x) * aside
