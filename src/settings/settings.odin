@@ -1695,8 +1695,8 @@ SCHEMA :: [?]Schema_Entry {
 		default_value = "true",
 		description = "A Neovim window or float that Neovim moves, as when windows are swapped (Ctrl+W x) or " +
 			"rotated, a window closing makes its neighbour take its place, or the completion menu follows " +
-			"the cursor, slides to its new place instead of jumping. A new window appears in place. Off " +
-			"when Windows animations are off.",
+			"the cursor, slides to its new place instead of jumping, and a split's new window slides out " +
+			"of the split line. Off when Windows animations are off.",
 	},
 	{
 		key = "neovim.move_duration",
