@@ -44,17 +44,17 @@ closed_destroy :: proc(app: ^App) {
 	app.closed = nil
 }
 
-// Terminals and navigated web panes are remembered; a blank web pane holds nothing to bring back.
+// Terminals, Neovim and navigated web panes are remembered; a blank web pane holds nothing to bring back.
 @(private)
 closed_remembers :: proc(app: ^App, content: layout.Content) -> bool {
 	if content.kind == .Web {
 		pane := web_find(app, content.id)
 		return pane != nil && pane.url != ""
 	}
-	return pane_owns_session(content.kind)
+	return pane_owns_session(content.kind) || content.kind == .Neovim
 }
 
-// Remembers the tab at `index` before it closes. Tabs without a terminal or navigated web pane are not kept.
+// Remembers the tab at `index` before it closes. Tabs without a pane closed_remembers keeps are not kept.
 closed_record_tab :: proc(app: ^App, workspace: ^Workspace, index: int) {
 	if index < 0 || index >= len(workspace.tabs) {return}
 	tab := workspace.tabs[index]
@@ -298,6 +298,13 @@ closed_pane_restore :: proc(
 			documents_restore(&created.documents, record.tab.nodes[0].documents)
 			node, placed := closed_place(tree, place, record, {.Web, created.id}, join_slot)
 			// A pane that stayed out of the tree is swept by web_tick.
+			if placed {return node, true}
+		}
+	case .Neovim:
+		saved := record.tab.nodes[0]
+		if created := neovim_pane_create(app, saved.path, saved.directory); created != nil {
+			node, placed := closed_place(tree, place, record, {.Neovim, created.id}, join_slot)
+			// A pane that stayed out of the tree is swept by neovim_tick.
 			if placed {return node, true}
 		}
 	case:

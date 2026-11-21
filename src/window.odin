@@ -556,6 +556,7 @@ window_views_prune :: proc(w: ^Window) {
 pane_fit :: proc(app: ^App, w: ^Window, pane: layout.Pane_Rect) {
 	entry := workspace_session_for_content(app, pane.content)
 	if entry == nil {
+		if pane.content.kind == .Neovim {neovim_pane_fit(app, w, pane)}
 		if pane_view(w, pane.content) == nil {
 			cached, _ := pane_view_create(pane.content, false)
 			if _, err := append(&w.views, cached); err != nil {
@@ -903,6 +904,17 @@ pane_draw :: proc(app: ^App, w: ^Window, pane: layout.Pane_Rect, blinking: ^bool
 	case .Web:
 		if result := web_pane_draw(app, w, pane); result != .Ok {return result}
 		scrollbar = false
+	case .Neovim:
+		frame, result := neovim_pane_draw(app, w, pane, f.shown)
+		if result != .Ok {return result}
+		background = frame.background
+		scrollbar = false
+		keyboard := pane_has_keyboard(app, w, pane)
+		blinking^ ||= frame.cursor_blinking && keyboard
+		if paint, shown := frame.cursor.?; shown && keyboard {
+			translated := cursor_paint_translate(paint, f.offset)
+			_ = ui.caret_claim(&w.carets, terminal_caret_owner(pane.content), translated, frame.cursor_blinking)
+		}
 	}
 	pane_frame_content(w, f, content)
 	if card < len(w.list.rects) {w.list.rects[card].color = background}

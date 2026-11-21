@@ -306,6 +306,40 @@ changes_open :: proc(app: ^App, w: ^Window, placement := Pane_Placement.Split_Ri
 	}
 }
 
+// The work tree the shown diff's paths are relative to; "" until a read has answered.
+@(private = "file")
+changes_worktree :: proc(pane: ^Changes_Pane) -> string {
+	#partial switch result in pane.model.content {
+	case Result_Query:
+		return result.worktree
+	case Result_Plain:
+		return result.worktree
+	}
+	return ""
+}
+
+// Edits shown file `index` in Neovim beside the pane at `node`, at its first changed line (WORK-542).
+@(private = "file")
+changes_edit_file :: proc(app: ^App, w: ^Window, pane: ^Changes_Pane, node: layout.Node_Id, index: int) {
+	view := &pane.model.view
+	worktree := changes_worktree(pane)
+	if index < 0 || index >= len(view.files) || worktree == "" {return}
+	file := &view.files[index]
+	line := 0
+	if len(file.hunks) > 0 {
+		hunk := &file.hunks[0]
+		line = int(hunk.new_start)
+		for diff_line in hunk.lines {
+			if diff_line.kind == .Added {
+				line = int(diff_line.new_line)
+				break
+			}
+		}
+	}
+	path := strings.concatenate({worktree, "/", file.new_path}, context.temp_allocator)
+	neovim_edit_beside(app, w, node, path, max(line, 1))
+}
+
 @(require_results)
 changes_focused :: proc(app: ^App, w: ^Window) -> ^Changes_Pane {
 	content, ok := window_focused_content(w)
@@ -1454,6 +1488,8 @@ changes_press :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) {
 		}
 	case .File_Header:
 		changes_model_fold(&pane.model, hit.index)
+	case .File_Edit:
+		changes_edit_file(app, w, pane, shown.node, hit.index)
 	case .Sticky_Header:
 		// The pinned header's file goes to the top, so what its press folds stays under the pointer: the
 		// file's own header, which takes over the pinned one's hover and press.
@@ -1619,6 +1655,8 @@ changes_tooltip :: proc(app: ^App, w: ^Window, x, y: f32) -> string {
 		return "Source and turns"
 	case .Files_Button:
 		return "Files in this diff"
+	case .File_Edit:
+		return "Edit in Neovim"
 	case .Tools_Button:
 		return "Layout, fold and filter"
 	case .Source_Chip:
@@ -1798,6 +1836,10 @@ when AIO_CONTROL {
 				overview_rect, overview_thumb_rect = g.overview, ui.changes_overview_thumb(&pane.state, g)
 				overview_state = ui.changes_overview_state(&pane.state, g, w.pointer)
 				if view.notice == .Recording_Off {notice_rect = g.notice_button}
+				for i in 0 ..< min(len(view.files), 20) {
+					edit := ui.changes_file_edit_button(g, view, &pane.state, i)
+					state_rect(r, changes_report_key("file", i, "edit_rect"), edit)
+				}
 				// The panel's parts exist while it is open: the chips, the hooks button and the turn strip.
 				if pane.state.panel_open {
 					panel_rect, turn_title_rect = g.panel, g.turn_title

@@ -84,6 +84,7 @@ Action :: enum u32 {
 	Open_Markdown_Default_App,
 	Open_Web,
 	Toggle_Web_Navigator,
+	Open_Neovim,
 	Agent_Changes,
 	Duplicate_Tab,
 	Move_Tab_Left,
@@ -475,6 +476,10 @@ ACTIONS :: [Action]Command_Descriptor {
 	},
 	.Toggle_Web_Navigator = {
 		"pane.toggle_web_navigator", "Toggle web pane URL bar", nil, .Local, {keywords = "browser"},
+	},
+	.Open_Neovim = {
+		"pane.open_neovim", "Open Neovim", nil, .Local,
+		{accepted = {.File, .Direction, .Ratio, .Focus, .Float}, control = .Pane, keywords = "nvim vim editor"},
 	},
 	.Agent_Changes = {"pane.agent_changes", "Open agent changes", nil, .Local, {accepted = {.Float}}},
 	.Duplicate_Tab = {"tab.duplicate", "Duplicate tab", nil, .Host, {}},
@@ -962,6 +967,16 @@ COMMAND_HELP :: #partial [Action]Command_Help {
 		"Shows or hides the URL navigator bar below the focused web pane's header.",
 		nil,
 	},
+	.Open_Neovim = {
+		"Opens Neovim in a new pane beside the pane, drawn by AIODev rather than in a terminal, with your own " +
+		"config. With a file it edits that file; otherwise it starts in the pane's folder.",
+		{
+			{
+				.File,
+				{description = "the file to edit", default = "an empty buffer", example = "src/main.odin"},
+			},
+		},
+	},
 	.Agent_Changes = {
 		"Opens Agent changes beside the focused pane, for that pane's agent. Each run opens another pane.",
 		nil,
@@ -1387,6 +1402,11 @@ command_execute :: proc(app: ^App, ctx: Command_Context, invocation: commands.In
 		web_open_blank(app, w)
 	case .Toggle_Web_Navigator:
 		web_toggle_navigator(app, w)
+	case .Open_Neovim:
+		if t, named := target.?; named {
+			return control_neovim_open(app, window_for_workspace(app, t.workspace), t, invocation)
+		}
+		neovim_open_focused(app, w)
 	case .Agent_Changes:
 		changes_open(app, w, .Float in invocation.given ? .Float : .Split_Right)
 	case .New_Floating:
@@ -1474,6 +1494,8 @@ command_execute :: proc(app: ^App, ctx: Command_Context, invocation: commands.In
 			find_paste(app, w)
 		} else if entry != nil {
 			paste_clipboard(app, w, entry)
+		} else {
+			neovim_paste(app, w)
 		}
 	case .Select_All:
 		if entry != nil {

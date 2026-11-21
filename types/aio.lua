@@ -113,6 +113,7 @@ aio = {}
 ---@overload fun(name: "pane.new_floating", fields?: aio.fields.pane.new_floating): aio.Reply?, string?, integer?
 ---@overload fun(name: "pane.open_markdown", fields?: aio.fields.pane.open_markdown): aio.Reply?, string?, integer?
 ---@overload fun(name: "pane.open_markdown_default_app", fields?: aio.fields.pane.open_markdown_default_app): aio.Reply?, string?, integer?
+---@overload fun(name: "pane.open_neovim", fields?: aio.fields.pane.open_neovim): aio.Reply?, string?, integer?
 ---@overload fun(name: "pane.open_web", fields?: aio.fields.pane.open_web): aio.Reply?, string?, integer?
 ---@overload fun(name: "pane.process", fields?: aio.fields.pane.process): aio.Reply?, string?, integer?
 ---@overload fun(name: "pane.read", fields?: aio.fields.pane.read): aio.Reply?, string?, integer?
@@ -2029,6 +2030,24 @@ function aio.pane.open_markdown(fields) end
 ---@return string? message
 ---@return integer? status
 function aio.pane.open_markdown_default_app(fields) end
+
+---The fields of pane.open_neovim.
+---@class aio.fields.pane.open_neovim
+---@field pane? string|integer the pane to act on: a pane id, a pane name, here or focused; default: here (the pane aio runs in), or the focused pane outside AIODev
+---@field direction? "left"|"right"|"up"|"down" the side of the pane the new pane opens on; default: right
+---@field ratio? number the new pane's share of the split pane's width (left, right) or height (up, down); default: 0.5 (half)
+---@field focus? boolean moves focus to the new pane; default: off (focus stays where it is)
+---@field file? string the file to edit; default: an empty buffer
+---@field float? boolean opens a separate float; cannot be combined with --direction or --ratio; default: the command's usual placement
+
+---Open Neovim
+---
+---Opens Neovim in a new pane beside the pane, drawn by AIODev rather than in a terminal, with your own config. With a file it edits that file; otherwise it starts in the pane's folder.
+---@param fields? aio.fields.pane.open_neovim
+---@return aio.Reply? reply
+---@return string? message
+---@return integer? status
+function aio.pane.open_neovim(fields) end
 
 ---The fields of pane.open_web.
 ---@class aio.fields.pane.open_web

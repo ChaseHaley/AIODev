@@ -36,6 +36,7 @@ CONTENT_POLICY := [layout.Content_Kind]Content_Policy {
 	.Markdown = {linkable = true, documents = true, file = true, icon = .Markdown, display_name = "Markdown"},
 	.Changes = {linkable = true, icon = .Changes, display_name = "Agent changes"},
 	.Web = {linkable = true, documents = true, icon = .Globe, display_name = "Web"},
+	.Neovim = {linkable = true, icon = .Code, display_name = "Neovim"},
 }
 
 // The title of content that does not title itself through a session.
@@ -56,6 +57,9 @@ content_title :: proc(app: ^App, content: layout.Content) -> string {
 			if pane.url != "" {return pane.url}
 		}
 		return CONTENT_POLICY[.Web].display_name
+	case .Neovim:
+		if pane := neovim_find(app, content.id); pane != nil {return neovim_title(pane)}
+		return CONTENT_POLICY[.Neovim].display_name
 	}
 	return ""
 }
@@ -99,6 +103,10 @@ content_badge :: proc(
 			badge.atlas, result = web_favicon_atlas(app, &pane.favicon)
 			if badge.atlas.width > 0 {badge.icon = .None}
 		}
+	case .Neovim:
+		atlas: render.Rect
+		atlas, result = neovim_badge_atlas(app, size)
+		if atlas.width > 0 {badge.icon, badge.atlas = .None, atlas}
 	}
 	return
 }
@@ -113,6 +121,8 @@ content_directory :: proc(app: ^App, content: layout.Content) -> string {
 		if pane := changes_find(app, content.id); pane != nil {return pane.directory}
 	case .Web:
 		if pane := web_find(app, content.id); pane != nil && pane.title != "" {return pane.host_label}
+	case .Neovim:
+		if pane := neovim_find(app, content.id); pane != nil {return neovim_directory(pane)}
 	}
 	return ""
 }
@@ -133,6 +143,7 @@ content_documents :: proc(app: ^App, content: layout.Content) -> ^Document_List 
 		if pane := web_find(app, content.id); pane != nil {return &pane.documents}
 	case .Settings:
 	case .Changes:
+	case .Neovim:
 	}
 	return nil
 }

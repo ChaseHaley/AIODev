@@ -54,6 +54,8 @@ Pointer_Target :: enum u8 {
 	Changes_Page,
 	// An embedded web pane (URL bar and WebView2 body).
 	Web_Page,
+	// A Neovim pane's grid.
+	Neovim_Page,
 	// Terminal content, including its links, and anything uncovered.
 	Content,
 }
@@ -253,6 +255,10 @@ pointer_surfaces := [Pointer_Target]Pointer_Surface {
 	.Web_Page         = {
 		claims = web_claims, hover = web_hover, press = web_press, release = web_release,
 		tooltip = web_tooltip, cancel = web_cancel, leave = web_leave, holds = true, blurs_find = true,
+	},
+	.Neovim_Page      = {
+		claims = neovim_claims, hover = neovim_hover, press = neovim_press, release = neovim_release,
+		cancel = neovim_cancel, holds = true, blurs_find = true,
 	},
 	.Content          = {
 		claims = content_claims, hover = content_hover, press = content_press, release = content_release,

@@ -803,6 +803,28 @@ changes_sticky_header :: proc(
 	return at, {g.diff.x, y, g.diff.width, f32(rows.header)}
 }
 
+// The Edit in Neovim button at a file header's right end; empty for a file with no text left to edit.
+@(private = "file")
+file_edit_rect :: proc(f: ^tr.Diff_File, head: render.Rect, scale: f32) -> render.Rect {
+	if f.status == .Deleted || f.binary {return {}}
+	size := head.height
+	return {head.x + head.width - SPACE_1 * scale - size, head.y, size, size}
+}
+
+// File `file`'s Edit in Neovim button where the diff now draws its header; empty while the header is
+// scrolled out of the diff, or for a file with none. Needs the rows of the latest changes_layout.
+changes_file_edit_button :: proc(
+	g: Changes_Geometry, view: ^Changes_View, state: ^Changes_State, file: int,
+) -> render.Rect {
+	rows := &state.rows
+	if !rows.valid || view.notice != .None || file < 0 || file >= len(view.files) ||
+	   file >= len(rows.tops) - 1 {return {}}
+	top := g.diff.y - f32(state.diff_scroll) + f32(rows.tops[file])
+	if top + f32(rows.header) <= g.diff.y || top >= g.diff.y + g.diff.height {return {}}
+	band := diff_band(g)
+	return file_edit_rect(&view.files[file], {band.x, top, band.width, f32(rows.header)}, g.scale)
+}
+
 // The select button of a hunk header row, at its right end.
 @(private = "file")
 hunk_select_rect :: proc(header: render.Rect, scale: f32) -> render.Rect {
@@ -862,13 +884,25 @@ changes_diff_hit :: proc(
 	rows := &state.rows
 	if !rows.valid {return {.Diff, -1, 0}}
 	if sticky, rect := changes_sticky_header(state, view, g); sticky >= 0 {
-		if render.rect_contains(rect, x, y) {return {.Sticky_Header, sticky, 0}}
+		if render.rect_contains(rect, x, y) {
+			band := diff_band(g)
+			head := render.Rect{band.x, rect.y, band.width, rect.height}
+			if render.rect_contains(file_edit_rect(&view.files[sticky], head, g.scale), x, y) {
+				return {.File_Edit, sticky, 0}
+			}
+			return {.Sticky_Header, sticky, 0}
+		}
 	}
 	if hit := comment_hit(g, view, state, x, y); hit.part != .None {return hit}
 	at := int(y - g.diff.y) + state.diff_scroll
 	file := changes_file_at(rows, at)
 	if file < 0 || file >= len(rows.tops) - 1 {return {.Diff, -1, 0}}
-	if at < rows.tops[file] + rows.header {return {.File_Header, file, 0}}
+	if at < rows.tops[file] + rows.header {
+		if render.rect_contains(changes_file_edit_button(g, view, state, file), x, y) {
+			return {.File_Edit, file, 0}
+		}
+		return {.File_Header, file, 0}
+	}
 	f := &view.files[file]
 	if changes_collapsed(view, file) || f.binary {return {.Diff, file, 0}}
 	origin := g.diff.y - f32(state.diff_scroll)
@@ -1662,6 +1696,13 @@ paint_header :: proc(p: ^Diff_Paint, i: int, head: render.Rect, part: Changes_Pa
 
 	small_baseline := baseline_in(face.y, face.height, p.small)
 	right := face.x + face.width - CONTROL_INSET * s
+	if edit := file_edit_rect(f, head, s); edit.width > 0 {
+		edit_hover, edit_press := changes_lit(p.state, {.File_Edit, i, 0})
+		if icon_button_draw(
+			p.list, t, edit, .Pencil, edit_hover, edit_press, s, p.pointer, ICON_INDICATOR, RADIUS_CONTROL,
+		) != .None {return .Ok}
+		right = edit.x - SPACE_1 * s
+	}
 	if !f.binary {
 		left, r := stats_draw(p.list, p.small, t, right, small_baseline, f.added, f.removed, s)
 		if r != .Ok {return r}

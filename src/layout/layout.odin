@@ -9,6 +9,7 @@ Content_Kind :: enum u8 {
 	Markdown,
 	Changes,
 	Web,
+	Neovim,
 }
 
 // A reference to content owned elsewhere; panes display content, they never own it.

@@ -203,6 +203,8 @@ Changes_Part :: enum u8 {
 	Hooks,
 	Notice_Button,
 	File_Header,
+	// A file header's Edit in Neovim button.
+	File_Edit,
 	Diff,
 	Strip_Bar,
 	Step_Back,
@@ -761,7 +763,7 @@ changes_hit :: proc(
 changes_animated :: proc(hit: Changes_Hit) -> bool {
 	if _, button := changes_row_button_of(hit.part); button {return true}
 	#partial switch hit.part {
-	case .Hooks, .Notice_Button, .File_Header, .Step_Back, .Step_Forward, .Range_Label, .Hunk_Select,
+	case .Hooks, .Notice_Button, .File_Header, .File_Edit, .Step_Back, .Step_Forward, .Range_Label, .Hunk_Select,
 	     .Comment_Edit, .Comment_Remove, .Editor_Untag, .Editor_Bold, .Editor_Code, .Editor_Block,
 	     .Editor_Suggest, .Editor_Cancel, .Editor_Save, .Send, .Copy, .Discard, .Filter_Clear,
 	     .Filter_Bar_Clear, .Sticky_Header, .Strip_Older, .Strip_Newer, .Summary, .Files_Button, .Tools_Button,

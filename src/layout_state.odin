@@ -66,7 +66,7 @@ Saved_Node :: struct {
 	profile:   string `json:"profile,omitempty"`,
 	directory: string `json:"directory,omitempty"`,
 	name:      string `json:"name,omitempty"`,
-	// The file a Markdown pane shows.
+	// The file a Markdown pane shows, or a Neovim pane opened with.
 	path:      string `json:"path,omitempty"`,
 	// The address a Web pane shows, and its page zoom when not 100%.
 	url:       string `json:"url,omitempty"`,
@@ -339,6 +339,11 @@ layout_pane_encode :: proc(
 		if pane := web_find(app, content.id); pane != nil {
 			saved.url, saved.documents = pane.url, pane.documents[:]
 			if abs(pane.zoom - 1) >= 0.001 {saved.web_zoom = pane.zoom}
+		}
+	}
+	if content.kind == .Neovim {
+		if pane := neovim_find(app, content.id); pane != nil {
+			saved.path, saved.directory = neovim_file(pane), neovim_directory(pane)
 		}
 	}
 	if content.kind == .Changes {
@@ -628,6 +633,13 @@ layout_tab_restore :: proc(
 			if created := web_pane_create(app, url, zoom); created != nil {
 				pane.content.id, restored = created.id, true
 				documents_restore(&created.documents, saved.nodes[i].documents)
+			}
+		case .Neovim:
+			node := &saved.nodes[i]
+			path := utf8.valid_string(node.path) ? node.path : ""
+			directory := utf8.valid_string(node.directory) ? node.directory : ""
+			if created := neovim_pane_create(app, path, directory); created != nil {
+				pane.content.id, restored = created.id, true
 			}
 		}
 		if restored && CONTENT_POLICY[kind].one_per_workspace {

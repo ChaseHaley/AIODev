@@ -7,7 +7,7 @@ import "aio:settings"
 
 @(private, require_results)
 pane_content_menu_available :: proc(kind: layout.Content_Kind) -> bool {
-	return pane_owns_session(kind) || kind == .Markdown || kind == .Web
+	return pane_owns_session(kind) || kind == .Markdown || kind == .Web || kind == .Neovim
 }
 
 // A deferred choice still belongs to the same content, and only while this window shows its tree.
@@ -21,7 +21,8 @@ pane_content_menu_node :: proc(w: ^Window, content: layout.Content) -> layout.No
 	return node
 }
 
-// `value` names the selected shell profile or the Markdown path; a new web pane starts blank.
+// `value` names the selected shell profile, the Markdown path or the folder Neovim starts in; a new web pane
+// starts blank.
 pane_content_menu_choose :: proc(
 	app: ^App, w: ^Window, mode: Profile_Menu_Mode, kind: layout.Content_Kind, value: string,
 ) {
@@ -35,7 +36,11 @@ pane_content_menu_choose :: proc(
 			}
 			if entry := session_find(app, target.pane.id);
 			   entry != nil && entry.status == .Running && .Shell_Switch in app.settings.interface.confirm {
-				label := kind == .Web ? "a web pane" : "Markdown"
+				label := "Markdown"
+				#partial switch kind {
+				case .Web: label = "a web pane"
+				case .Neovim: label = "Neovim"
+				}
 				pane_swap_ask(app, w, target.pane, entry, kind, "", label, value)
 				return
 			}
@@ -92,6 +97,7 @@ pane_content_discard :: proc(app: ^App, content: layout.Content) {
 	#partial switch content.kind {
 	case .Terminal: session_close(app, content.id)
 	case .Web: web_pane_remove(app, content.id)
+	case .Neovim: neovim_pane_remove(app, content.id)
 	}
 }
 
@@ -119,6 +125,8 @@ pane_content_make :: proc(app: ^App, kind: layout.Content_Kind, value: string) -
 			pane.nav_bar, pane.url_editing = true, true
 			return {.Web, pane.id}, true
 		}
+	case .Neovim:
+		if pane := neovim_pane_create(app, "", value); pane != nil {return {.Neovim, pane.id}, true}
 	}
 	notify(app, .Error, "Could not open the pane content.")
 	return {}, false

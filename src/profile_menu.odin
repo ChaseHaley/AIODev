@@ -33,6 +33,7 @@ Profile_Menu_Action :: enum {
 	Profile,
 	Markdown,
 	Web,
+	Neovim,
 }
 
 // What a row does. A profile row keeps its own copy of the profile's id: a settings reload frees the
@@ -54,8 +55,8 @@ Profile_Menu :: struct {
 	shortcuts:  [PROFILE_ACTION_COUNT][commands.SHORTCUT_TEXT_CAP]u8,
 }
 
-// Every visible profile, two content choices and their separator.
-#assert(settings.PROFILE_LIMIT + 3 <= ui.MENU_MAX_ITEMS)
+// Every visible profile, three content choices and their separator.
+#assert(settings.PROFILE_LIMIT + 4 <= ui.MENU_MAX_ITEMS)
 
 // The New Tab with Profile N commands label their rows only in the New tab menu.
 @(private)
@@ -158,6 +159,9 @@ profile_menu_open :: proc(app: ^App, w: ^Window, mode: Profile_Menu_Mode, x, y: 
 	profile_menu_push(menu, {label = "Markdown file…", glyph = .Markdown, enabled = true}, .Markdown)
 	in_web := swap && target.pane.kind == .Web
 	profile_menu_push(menu, {label = "Web pane", glyph = .Globe, checked = in_web, enabled = !in_web}, .Web)
+	in_neovim := swap && target.pane.kind == .Neovim
+	neovim_item := ui.Menu_Item{label = "Neovim", glyph = .Code, checked = in_neovim, enabled = !in_neovim}
+	profile_menu_push(menu, neovim_item, .Neovim)
 	ui.menu_anchor(&menu.menu, x, y)
 	ui.menu_select_edge(&menu.menu, false)
 }
@@ -192,6 +196,8 @@ profile_menu_choose :: proc(app: ^App, w: ^Window) {
 		markdown_open_picker(app, w, shown.mode)
 	case .Web:
 		pane_content_menu_choose(app, w, shown.mode, .Web, "")
+	case .Neovim:
+		pane_content_menu_choose(app, w, shown.mode, .Neovim, neovim_focused_directory(app, w))
 	}
 }
 

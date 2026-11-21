@@ -47,10 +47,11 @@ profile.order = default, cmd, windows-powershell, pwsh, hidden
 			testing.expect_value(t, w.profile_menu.items[expected].label, row.name)
 			expected += 1
 		}
-		testing.expect_value(t, len(w.profile_menu.items), expected + 3)
-		if len(w.profile_menu.items) < expected + 3 {return}
+		testing.expect_value(t, len(w.profile_menu.items), expected + 4)
+		if len(w.profile_menu.items) < expected + 4 {return}
 		testing.expect_value(t, w.profile_menu.items[expected + 1].label, "Markdown file…")
 		testing.expect_value(t, w.profile_menu.items[expected + 2].label, "Web pane")
+		testing.expect_value(t, w.profile_menu.items[expected + 3].label, "Neovim")
 		testing.expect_value(t, w.profile_menu.count, len(w.profile_menu.items))
 	}
 }

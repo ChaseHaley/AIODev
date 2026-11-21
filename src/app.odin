@@ -67,6 +67,7 @@ App :: struct {
 	using markdown_state:  Markdown_App,
 	using changes_state:   Changes_App,
 	using web_state:       Web_App,
+	using neovim_state:    Neovim_App,
 	dialogs:               File_Dialogs,
 	// The settings file this app reads and saves; app_init takes it from paths.
 	settings_path:         string,
@@ -323,6 +324,7 @@ app_destroy :: proc(app: ^App) {
 	shell_icons_destroy(&app.shell_icons)
 	link_programs_destroy(&app.link_programs)
 	web_app_destroy(&app.web_state)
+	neovim_app_destroy(&app.neovim_state)
 	glyphs.destroy(&app.cache)
 	if app.device != nil {
 		render.device_destroy(app.device)
@@ -490,6 +492,7 @@ App_Timer :: enum u8 {
 	Markdown,
 	Changes,
 	Web,
+	Neovim,
 	Turns,
 	Update,
 	// init.lua's timers, process polls and the step after any Lua code ran.
@@ -507,7 +510,7 @@ Timer_Phase :: enum u8 {
 @(private = "file")
 app_timer_phase :: proc(timer: App_Timer) -> Timer_Phase {
 	switch timer {
-	case .Processes, .Notices, .Drag_Hover, .Turns, .Lua:
+	case .Processes, .Notices, .Drag_Hover, .Turns, .Lua, .Neovim:
 		return .Before_Draw
 	case .Verify, .Layout_Save, .Palette_Usage_Save, .File_Dialogs, .Markdown, .Changes, .Web, .Update:
 		return .After_Draw
@@ -550,6 +553,8 @@ app_timers_advance :: proc(app: ^App, phase: Timer_Phase) {
 			changes_tick(app)
 		case .Web:
 			web_tick(app)
+		case .Neovim:
+			neovim_tick(app)
 		case .Update:
 			app_update_tick(app)
 		case .Turns:
@@ -586,6 +591,8 @@ app_timer_deadline :: proc(app: ^App, timer: App_Timer) -> (next: time.Tick, pen
 		return changes_poll_deadline(app)
 	case .Web:
 		return web_poll_deadline(app)
+	case .Neovim:
+		return neovim_deadline(app)
 	case .Turns:
 		return turns_deadline(app)
 	case .Update:

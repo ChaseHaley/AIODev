@@ -322,6 +322,10 @@ on_key :: proc(app: ^App, w: ^Window, e: input.Key_Event) {
 		web_key(app, w, e)
 		return
 	}
+	if neovim_active(w) {
+		neovim_key(app, w, e)
+		return
+	}
 	terminal_key(app, w, e)
 }
 
@@ -350,6 +354,10 @@ on_text :: proc(app: ^App, w: ^Window, text: string) {
 	if changes_active(w) && changes_text(app, w, text) {return}
 	if web_active(w) {
 		web_text(app, w, text)
+		return
+	}
+	if neovim_active(w) {
+		neovim_text(app, w, text)
 		return
 	}
 	if entry := focused_session(app, w); entry != nil && entry.status == .Running {
@@ -484,6 +492,7 @@ on_wheel :: proc(app: ^App, w: ^Window, e: input.Mouse_Wheel_Event) {
 		return
 	}
 	if kind == .None && web_wheel(app, w, e) {return}
+	if kind == .None && neovim_wheel(app, w, e) {return}
 	w.wheel_remainder += e.delta_y * WHEEL_LINES
 	rows := int(w.wheel_remainder)
 	w.wheel_remainder -= f32(rows)
@@ -540,6 +549,7 @@ on_focus :: proc(app: ^App, w: ^Window, focused: bool) {
 		term.send_focus(entry.session, focused)
 		if !focused {status_focus_lost(app, entry)}
 	}
+	if entered, ok := w.focus_bracket.(Focus_Entered); ok {neovim_focus_changed(app, entered.content, focused)}
 	if focused {status_focus_enter(app, w)}
 }
 

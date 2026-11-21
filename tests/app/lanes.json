@@ -22,6 +22,7 @@
     "lua_path_names_init_lua_in_the_data_directory",
     "lua_types_app_command_adds_the_actions_init_lua_declared",
     "lua_types_built_in_text_matches_types_aio_lua_and_covers_the_catalogue",
+    "neovim_key_notation_names_keys_as_neovim_reads_them",
     "palette_usage_survives_a_restart_without_session_ids",
     "pane_box_inverse_produces_the_requested_grid_through_the_window_content_area",
     "pane_box_inverse_respects_resized_rail_width",

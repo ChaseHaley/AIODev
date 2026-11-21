@@ -35,6 +35,7 @@ focus_leave :: proc(app: ^App, w: ^Window) {
 	entry := workspace_session_for_content(app, entered.content)
 	if entry != nil {status_focus_leave(app, w, entry)}
 	web_focus_leave(app, w, entered.content)
+	neovim_focus_changed(app, entered.content, false)
 	leader_cancel(w)
 	if entry != nil {term.send_focus(entry.session, false)}
 	if ui.find_is_open(&w.find) {
@@ -68,6 +69,7 @@ focus_enter :: proc(app: ^App, w: ^Window) {
 			term.send_focus(entry.session, w.focused)
 		}
 		web_focus_enter(app, w, content)
+		neovim_focus_changed(app, content, w.focused)
 	}
 	cursor_blink_reset(w, clock_now(&app.clock))
 	status_focus_enter(app, w)
