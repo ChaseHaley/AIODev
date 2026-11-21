@@ -423,6 +423,58 @@ fold_all_and_the_sticky_header_keep_the_file_at_the_top :: proc(t: ^testing.T) {
 	testing.expect_value(t, pane.state.diff_scroll, before + int(g.diff.height) - pane.state.rows.header)
 }
 
+// The terminal's scrolling keys scroll an Agent changes pane too: Shift+Page Up/Down a page, Ctrl+Page
+// Up/Down terminal.scroll_page_length of one (WORK-540).
+@(test)
+the_shell_scroll_keys_scroll_the_diff :: proc(t: ^testing.T) {
+	f: Fixture
+	defer {
+		app.app_destroy(&f.state)
+		testing.expect_value(t, os.remove_all(f.directory), nil)
+		delete(f.directory)
+	}
+	if !fixture_start(t, &f, "ScrollKeys") {return}
+	w := f.state.windows[0]
+	app.window_resize(&f.state, w, 2400, 900)
+	app.run_action(&f.state, w, .Agent_Changes)
+	if !testing.expect_value(t, len(f.state.changes_panes), 1) {return}
+	pane := f.state.changes_panes[0]
+	shown, found := changes_pane_of(&f.state, w)
+	if !testing.expect(t, found) {return}
+	lines := make([]turns.Diff_Line, 400)
+	defer delete(lines)
+	for &line, i in lines {line = {kind = .Context, old_line = i32(i + 1), new_line = i32(i + 1), text = "line"}}
+	hunks := []turns.Hunk{{old_start = 1, old_count = 400, new_start = 1, new_count = 400, lines = lines}}
+	names := [1]string{"long.odin"}
+	files := files_named(names[:], hunks)
+	defer delete(files)
+	plain := app.Result_Plain {
+		pane = pane.id,
+		diff = {files = files},
+	}
+	app.changes_fill_plain(&f.state, pane, &plain)
+	g := app.changes_geometry_of(&f.state, w, pane, shown)
+	page := int(g.diff.height) - pane.state.rows.header
+	length := f.state.settings.terminal.scroll_page_length
+
+	press :: proc(f: ^Fixture, w: ^app.Window, key: input.Key, modifiers: input.Modifiers) {
+		app.handle_event(&f.state, input.Key_Event{window = w.id, key = key, modifiers = modifiers, pressed = true})
+		app.handle_event(&f.state, input.Key_Event{window = w.id, key = key, modifiers = modifiers})
+	}
+	testing.expect_value(t, pane.state.diff_scroll, 0)
+	press(&f, w, .Page_Down, {.Shift})
+	testing.expect_value(t, pane.state.diff_scroll, page)
+	press(&f, w, .Page_Up, {.Shift})
+	testing.expect_value(t, pane.state.diff_scroll, 0)
+	press(&f, w, .Page_Down, {.Control})
+	testing.expect_value(t, pane.state.diff_scroll, int(length * f64(page)))
+	press(&f, w, .Page_Up, {.Control})
+	testing.expect_value(t, pane.state.diff_scroll, 0)
+	// The keys only this pane type had keep scrolling it.
+	press(&f, w, .Page_Down, {})
+	testing.expect_value(t, pane.state.diff_scroll, page)
+}
+
 @(test)
 the_file_list_regex_search_matches_paths_not_labels :: proc(t: ^testing.T) {
 	f: Fixture

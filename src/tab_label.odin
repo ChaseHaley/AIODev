@@ -105,7 +105,8 @@ tab_label_retarget :: proc(
 }
 
 // Fills in `t`'s turn while tab `index`'s label turns, and notes the pane drawn behind its focused `front`
-// for the next turn to start from. A turn between labels that look alike ends at once.
+// for the next turn to start from. Marks stand for panes, so a turn between panes whose labels look alike
+// still spins them.
 tab_label_turn_shown :: proc(
 	app: ^App,
 	w: ^Window,
@@ -130,10 +131,6 @@ tab_label_turn_shown :: proc(
 	result: render.Build_Status
 	turn.badge, turn.behind, result = tab_marks(app, w, label.from, from_behind, stacked)
 	if result != .Ok {return result}
-	if turn.title == t.title && turn.badge == t.badge && turn.behind == t.behind && turn.start == {} {
-		label.turn = {value = 1, target = 1}
-		return .Ok
-	}
 	t.turn = turn
 	return .Ok
 }

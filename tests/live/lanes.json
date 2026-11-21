@@ -198,6 +198,9 @@
     "reopen_closed": {
       "lane": "headless"
     },
+    "scroll_shortcuts": {
+      "lane": "headless"
+    },
     "scrollback_capacity": {
       "lane": "headless"
     },

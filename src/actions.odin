@@ -1240,6 +1240,18 @@ command_window :: proc(app: ^App, w: ^Window, action: Action) -> ^Window {
 	return w
 }
 
+// The page scrolling commands for the panes that have no session: whole pages (negative toward the top)
+// of the focused Markdown document or Agent changes diff, so every pane that scrolls answers the
+// terminal's page keys.
+@(private = "file")
+pane_scroll_pages :: proc(app: ^App, w: ^Window, pages: f64) {
+	if markdown_focused(app, w) != nil {
+		markdown_page(app, w, pages)
+	} else if pane := changes_focused(app, w); pane != nil {
+		if shown, found := changes_pane_rect(w, pane.id); found {changes_page(app, w, pane, shown, pages)}
+	}
+}
+
 // Availability is command policy; each surface decides how an unavailable action is presented, and a key
 // bound to one goes on to the focused pane. Copy needs something to copy: the find query's keyboard, or a
 // selection in the focused terminal or document. Restart Stopped Pane needs a focused session that is not
@@ -1522,7 +1534,7 @@ command_execute :: proc(app: ^App, ctx: Command_Context, invocation: commands.In
 			page := max(1, int(term.geometry(entry.session).rows) - 1)
 			term.scroll_viewport(entry.session, action == .Scroll_Page_Up ? -page : page)
 		} else {
-			markdown_page(app, w, action == .Scroll_Page_Up ? -1 : 1)
+			pane_scroll_pages(app, w, action == .Scroll_Page_Up ? -1 : 1)
 		}
 	case .Scroll_Partial_Up, .Scroll_Partial_Down:
 		if entry != nil {
@@ -1531,7 +1543,7 @@ command_execute :: proc(app: ^App, ctx: Command_Context, invocation: commands.In
 			term.scroll_viewport(entry.session, action == .Scroll_Partial_Up ? -page : page)
 		} else {
 			length := app.settings.terminal.scroll_page_length
-			markdown_page(app, w, action == .Scroll_Partial_Up ? -length : length)
+			pane_scroll_pages(app, w, action == .Scroll_Partial_Up ? -length : length)
 		}
 	// A focused web pane zooms its page instead, as a browser would.
 	case .Font_Size_Increase:

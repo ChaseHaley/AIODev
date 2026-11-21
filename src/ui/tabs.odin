@@ -55,6 +55,8 @@ tab_new_rect :: proc(bar: Tab_Bar) -> render.Rect {
 // The picture at the start of a tab: a content kind's icon, else the session's program badge.
 Tab_Badge :: struct {
 	icon:  Icon,
+	// The pane the mark stands for, 0 when unknown: two marks that look alike still stand for different panes.
+	pane:  u64,
 	shell: string,
 	atlas: render.Rect,
 }
@@ -67,8 +69,6 @@ tab_badge_shown :: proc(b: Tab_Badge) -> bool {
 // down from the mark behind, which stands for the tab's most telling other pane.
 TAB_STACK_MARK :: f32(13)
 TAB_STACK_OFFSET :: [2]f32{7, 3}
-// The space cut from the mark behind around the one in front.
-TAB_STACK_GAP :: f32(1.5)
 
 // Every tab's leading badge column fits a stack, so titles line up whether a tab stacks or not.
 // A single mark sits at the column's left, where the mark behind a stack sits.
@@ -164,7 +164,8 @@ Tab_Spin_Mark :: struct {
 // A mark in both stacks travels from its old place to its new one: the front mark round the sphere to the
 // back and the one behind round to the front when they trade places. A mark only in the new stack comes in
 // from the hidden back of the sphere, fading in, and one only in the old stack goes out to it, fading away.
-// Marks that look alike count as the same mark, so marks that do not change keep still.
+// Marks for the same pane (or, when no pane is known, that look alike) count as the same mark, so marks that
+// do not change keep still; two panes whose marks look alike still trade places.
 tab_spin_marks :: proc(tile: render.Rect, t: Tab_Tile, scale: f32) -> (marks: [4]Tab_Spin_Mark, count: int) {
 	turn := t.turn
 	old_stacked, new_stacked := tab_badge_shown(turn.behind), tab_badge_shown(t.behind)
@@ -244,7 +245,7 @@ tab_spin_sample :: proc(mark: ^Tab_Spin_Mark, turn: Tab_Turn, scale: f32) {
 
 // Draws the badge in the leading icon column of `tile`, stacked over the mark behind it when the tab
 // has one. While the label turns, its marks spin round as tab_spin_marks places them, inside the column,
-// the others kept clear of the nearest by the stack's gap as the mark behind is at rest.
+// farthest first, each over the ones behind it.
 tab_badge_draw :: proc(
 	list: ^render.Draw_List,
 	text: ^Text,
@@ -262,35 +263,10 @@ tab_badge_draw :: proc(
 	left := tile.x + CONTROL_INSET * scale
 	column := render.Rect{left - margin, tile.y, TAB_BADGE_COLUMN * scale + 2 * margin, tile.height}
 	column = rect_within(column, current.clip)
-	// The cut-out shrinks with a fading mark, so a mark coming or going leaves no hole where it is not seen.
-	top := marks[count - 1]
-	gap := TAB_STACK_GAP * scale
-	reach := top.opacity
-	cut := render.Rect {
-		top.rect.x - gap + (top.rect.width + 2 * gap) * (1 - reach) / 2,
-		top.rect.y - gap + (top.rect.height + 2 * gap) * (1 - reach) / 2,
-		(top.rect.width + 2 * gap) * reach,
-		(top.rect.height + 2 * gap) * reach,
-	}
-	right, bottom := column.x + column.width, column.y + column.height
-	beside := [4]render.Rect {
-		{column.x, column.y, cut.x - column.x, column.height},
-		{cut.x + cut.width, column.y, right - cut.x - cut.width, column.height},
-		{cut.x, column.y, cut.width, cut.y - column.y},
-		{cut.x, cut.y + cut.height, cut.width, bottom - cut.y - cut.height},
-	}
-	for mark, i in marks[:count] {
+	for mark in marks[:count] {
 		if mark.opacity <= 0 {continue}
-		if i == count - 1 || cut.width <= 0 {
-			result := tab_spin_mark_draw(list, text, theme, mark, column, ink, scale)
-			if result != .Ok {return result}
-			continue
-		}
-		for clip in beside {
-			if clip.width <= 0 || clip.height <= 0 {continue}
-			result := tab_spin_mark_draw(list, text, theme, mark, rect_within(clip, column), ink, scale)
-			if result != .Ok {return result}
-		}
+		result := tab_spin_mark_draw(list, text, theme, mark, column, ink, scale)
+		if result != .Ok {return result}
 	}
 	_ = render.push_layer(list, current.clip, current.radius)
 	return .Ok
@@ -322,8 +298,8 @@ tab_spin_mark_draw :: proc(
 }
 
 // Draws `badge` in the leading icon column of `tile`, stacked over `behind` when that shows. The mark
-// behind is clipped short of the front mark, so the gap shows whatever lies under the tab: its hover,
-// selection or marked fill.
+// behind draws whole and the front mark over it, so the one behind shows through every transparent pixel
+// of the one in front; nothing is cut out around it.
 @(private = "file")
 tab_marks_draw :: proc(
 	list: ^render.Draw_List,
@@ -336,20 +312,9 @@ tab_marks_draw :: proc(
 ) -> render.Build_Status {
 	front, back := tab_mark_places(tile, tab_badge_shown(behind), scale)
 	if !tab_badge_shown(behind) {return tab_mark_draw(list, text, theme, front, badge, ink, ICON_BUTTON, scale)}
-	cut_x := front.x - TAB_STACK_GAP * scale
-	cut_y := front.y - TAB_STACK_GAP * scale
-	current := list.layers[len(list.layers) - 1]
-	// Left of the cut-out, then above it.
-	clips := [2]render.Rect {
-		{back.x, back.y, cut_x - back.x, back.height},
-		{cut_x, back.y, back.x + back.width - cut_x, cut_y - back.y},
+	if result := tab_mark_draw(list, text, theme, back, behind, ink, TAB_STACK_MARK, scale); result != .Ok {
+		return result
 	}
-	for clip in clips {
-		if render.push_layer(list, rect_within(clip, current.clip)) != .None {return .Ok}
-		if result := tab_mark_draw(list, text, theme, back, behind, ink, TAB_STACK_MARK, scale);
-		   result != .Ok {return result}
-	}
-	if render.push_layer(list, current.clip, current.radius) != .None {return .Ok}
 	return tab_mark_draw(list, text, theme, front, badge, ink, TAB_STACK_MARK, scale)
 }
 

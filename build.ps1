@@ -260,9 +260,13 @@ function Get-BuildId {
 # The release tag, such as v0.10.0, of a clean checkout of exactly that tag; '' for any other build.
 function Get-ReleaseTag([string] $BuildId) {
     if ($BuildId -match '\+dirty$|^unknown$') { return '' }
-    $tag = & git describe --tags --exact-match HEAD 2>$null
-    if ($LASTEXITCODE -ne 0 -or -not $tag) { return '' }
-    return $tag.Trim()
+    # tag --points-at prints nothing for an untagged HEAD; git describe --exact-match writes its
+    # "no tag" message to stderr, which Windows PowerShell 5.1 turns into a terminating error. A real
+    # git failure still fails.
+    $tags = @(& git tag --points-at HEAD)
+    if ($LASTEXITCODE -ne 0) { throw "git tag --points-at HEAD failed with exit code $LASTEXITCODE." }
+    if ($tags.Count -eq 0) { return '' }
+    return $tags[0].Trim()
 }
 
 # Library packages expose API that tests and later features use, so only application code
@@ -274,13 +278,27 @@ $appFlags = @($flags | Where-Object { $_ -notlike '-vet-packages:*' }) +
 # code. Tests and tools are not gated yet; they carry the same drift and a separate pass owns it.
 function Invoke-StyleCheck {
     Invoke-Odin build tools/stylecheck '-out:build/stylecheck.exe' -debug '-subsystem:console' @flags
-    $files = Get-ChildItem src -Recurse -Filter *.odin -File |
+    # Relative paths and batches keep the command line under the Windows limit however long the worktree
+    # path or large the source tree is. Odin accepts forward slashes, which stylecheck's scoping expects.
+    $files = @(Get-ChildItem src -Recurse -Filter *.odin -File |
         Where-Object {
             $_.Name -ne 'win32_windows.odin' -and $_.FullName -notmatch '\\(ghostty|dwrite|shaders|lua)\\'
         } |
-        ForEach-Object FullName
-    & build/stylecheck.exe @files
-    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+        ForEach-Object { 'src/' + $_.FullName.Substring((Join-Path $PWD 'src').Length + 1).Replace('\', '/') })
+    $limit = 16000
+    $run = { & build/stylecheck.exe @args; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE } }
+    $batch = @()
+    $length = 0
+    foreach ($file in $files) {
+        if ($batch.Count -gt 0 -and $length + $file.Length + 1 -gt $limit) {
+            & $run @batch
+            $batch = @()
+            $length = 0
+        }
+        $batch += $file
+        $length += $file.Length + 1
+    }
+    if ($batch.Count -gt 0) { & $run @batch }
 }
 
 switch ($Task) {

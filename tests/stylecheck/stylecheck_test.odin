@@ -129,6 +129,10 @@ design_text_sizes_come_from_styles :: proc(t: ^testing.T) {
 design_rules_cover_interface_code_only :: proc(t: ^testing.T) {
 	testing.expect(t, sc.design_scope(`C:\repo\src\ui\menu.odin`))
 	testing.expect(t, sc.design_scope("C:/repo/src/tab_strip.odin"))
+	testing.expect(t, sc.design_scope("src/ui/menu.odin"))
+	testing.expect(t, sc.design_scope("src/tab_strip.odin"))
+	testing.expect(t, !sc.design_scope("src/render/render.odin"))
+	testing.expect(t, !sc.design_scope("src/ui/design.odin"))
 	testing.expect(t, !sc.design_scope("C:/repo/src/render/render.odin"))
 	testing.expect(t, !sc.design_scope("C:/repo/src/ui/design.odin"))
 	testing.expect(t, !sc.design_scope("C:/repo/src/ui/text.odin"))
