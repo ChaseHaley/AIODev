@@ -121,10 +121,15 @@ pending_close_text :: proc(
 			text.body = "The shells running in it will exit."
 		}
 		text.label = "Close"
-		if index := tab_index_by_id(workspace, target.tab); tab_close_has_work(app, workspace, index) {
+		index := tab_index_by_id(workspace, target.tab)
+		switch {
+		case tab_close_has_unsaved(app, workspace, index):
+			text.title = pc.tabs > 1 ? "Close tabs with unsaved changes?" : "Close tab with unsaved changes?"
+			text.body = "Neovim has unsaved changes here, which closing discards."
+		case tab_close_has_work(app, workspace, index):
 			text.title = pc.tabs > 1 ? "Close tabs with ongoing work?" : "Close tab with ongoing work?"
 			text.body = "Closing will interrupt this work."
-		} else {
+		case:
 			setting := settings.schema_find("interface.confirm")
 			text.note = fmt.tprintf("Turn this off with \"%s\" in Settings.", setting.title)
 		}
@@ -147,6 +152,9 @@ pending_close_text :: proc(
 			pc.sessions == 1 ? "" : "s",
 		)
 		text.label = "Delete"
+		if found != nil && workspace_has_unsaved(app, found) {
+			text.body = fmt.tprintf("%s Neovim's unsaved changes are lost.", text.body)
+		}
 		switch {
 		case target.owner == 0:
 			text.note = "Other workspaces and their sessions stay open."

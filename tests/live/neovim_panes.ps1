@@ -73,6 +73,8 @@ profile.default.directory = $repository
 shell.default_profile = default
 profile.order = default
 cursor.blink = false
+# :q! closes the pane here, so Reopen closed pane can bring it back; neovim_shell covers the shell after it.
+neovim.exit_to_shell = false
 window.columns = 170
 window.rows = 50
 "@ | Set-Content -LiteralPath $settings -Encoding utf8

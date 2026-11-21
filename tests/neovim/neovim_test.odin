@@ -2234,3 +2234,57 @@ real_neovim_scroll_raises_the_windows_scrolled_total :: proc(t: ^testing.T) {
 	)
 	nvim_exits(t, &c)
 }
+
+unsaved_is :: proc(c: ^neovim.Client, count: rawptr) -> bool {
+	return c.unsaved == (^int)(count)^
+}
+
+asks_to_save :: proc(c: ^neovim.Client, _: rawptr) -> bool {
+	for y in 0 ..< c.screen.rows {
+		if strings.contains(row_text(c, y), "Save changes") {return true}
+	}
+	return false
+}
+
+// Closing a Neovim pane asks first when a buffer is unsaved: the client knows how many are, and
+// `:confirm qa` shows Neovim's own question, reports a cancel, and quits at once with nothing unsaved.
+@(test)
+real_neovim_reports_unsaved_buffers_and_confirms_quit :: proc(t: ^testing.T) {
+	c: neovim.Client
+	defer neovim.destroy(&c)
+	error := start_nvim(&c, 60, 20)
+	if error == .Not_Found {
+		log.info("nvim is not on PATH; skipping the real Neovim quit test")
+		return
+	}
+	if !testing.expect_value(t, error, neovim.Error.None) {return}
+	if !testing.expect(t, wait_until(&c, nil, one_window_at_60x20), "no window grid at 60x20") {return}
+	one, none := 1, 0
+	testing.expect_value(t, neovim.input(&c, "ihello<Esc>"), neovim.Error.None)
+	if !testing.expect(t, wait_until(&c, &one, unsaved_is), "the changed buffer was not reported") {return}
+
+	testing.expect_value(t, neovim.quit_confirm(&c), neovim.Error.None)
+	if !testing.expect(t, wait_until(&c, nil, asks_to_save), "Neovim did not ask to save") {return}
+	testing.expect_value(t, neovim.input(&c, "c"), neovim.Error.None)
+	cancelled := false
+	began := time.tick_now()
+	for time.tick_since(began) < 10 * time.Second && !cancelled {
+		events := neovim.poll(&c)
+		if !testing.expect(t, !events.exited, "Neovim quit although the question was cancelled") {return}
+		cancelled = events.quit_cancelled
+		time.sleep(2 * time.Millisecond)
+	}
+	testing.expect(t, cancelled, "the cancel was not reported")
+
+	testing.expect_value(t, neovim.input(&c, ":set nomodified<CR>"), neovim.Error.None)
+	if !testing.expectf(t, wait_until(&c, &none, unsaved_is), "the saved state was not reported: %d %q %q",
+		c.unsaved, row_text(&c, 18), row_text(&c, 19)) {return}
+	testing.expect_value(t, neovim.quit_confirm(&c), neovim.Error.None)
+	exited := false
+	began = time.tick_now()
+	for time.tick_since(began) < 10 * time.Second && !exited {
+		exited = neovim.poll(&c).exited
+		time.sleep(2 * time.Millisecond)
+	}
+	testing.expect(t, exited, "Neovim did not quit at once with nothing unsaved")
+}

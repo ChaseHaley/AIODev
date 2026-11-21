@@ -582,11 +582,13 @@ Turns_Settings :: struct {
 	quick_labels:          string,
 	saved_filters:         string,
 }
-// Neovim panes: how their windows scroll and how see-through floats that take no input are.
+// Neovim panes: how their windows scroll, how see-through floats that take no input are, and what a
+// pane shows once Neovim quits.
 Neovim_Settings :: struct {
 	smooth_scroll:   bool,
 	scroll_duration: int,
 	overlay_opacity: int,
+	exit_to_shell:   bool,
 }
 Window_Settings :: struct {
 	columns, rows, padding: int,
@@ -1647,6 +1649,16 @@ SCHEMA :: [?]Schema_Entry {
 		description = "How opaque the background of a Neovim float that takes no input is, such as " +
 			"treesitter-context's code context, so the text under it shows through. Its own text stays " +
 			"solid. A highlight's blend or 'winblend' makes any float see-through as well.",
+	},
+	{
+		key = "neovim.exit_to_shell",
+		title = "Shell after Neovim quits",
+		kind = .Bool,
+		offset = offset_of(Settings, neovim) + offset_of(Neovim_Settings, exit_to_shell),
+		default_value = "true",
+		description = "When Neovim quits in a pane it did not open over a shell, the pane becomes a shell of " +
+			"the default profile in Neovim's folder, as quitting Neovim in a terminal leaves its shell. Off, " +
+			"the pane closes. A pane opened over a shell always shows that shell again.",
 	},
 	{
 		key = "shell.default_profile",

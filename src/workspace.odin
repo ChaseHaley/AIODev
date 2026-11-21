@@ -275,12 +275,22 @@ tab_close_has_work :: proc(app: ^App, workspace: ^Workspace, index: int) -> bool
 	return false
 }
 
-// The split-tab preference does not disable protection for explicitly reported ongoing work. `restore`
-// is a close subset's replaced marks, which a question takes when it asks.
+// Whether a close of tab `index` covers a Neovim with unsaved buffers.
+tab_close_has_unsaved :: proc(app: ^App, workspace: ^Workspace, index: int) -> bool {
+	if index < 0 || index >= len(workspace.tabs) {return false}
+	for tab, i in workspace.tabs {
+		if tab_close_covers(workspace, index, i) && neovim_unsaved_in(app, &tab.tree) {return true}
+	}
+	return false
+}
+
+// The split-tab preference does not disable protection for explicitly reported ongoing work or unsaved
+// Neovim buffers. `restore` is a close subset's replaced marks, which a question takes when it asks.
 tab_close_request :: proc(app: ^App, w: ^Window, index: int, restore: ^[dynamic]u32 = nil) {
 	_, _, split := tab_close_scope(w.workspace, index)
 	confirm := .Close_Split_Tab in app.settings.interface.confirm
-	if !tab_close_has_work(app, w.workspace, index) && (!split || !confirm) {
+	guarded := tab_close_has_work(app, w.workspace, index) || tab_close_has_unsaved(app, w.workspace, index)
+	if !guarded && (!split || !confirm) {
 		tab_close(app, w, index)
 		return
 	}

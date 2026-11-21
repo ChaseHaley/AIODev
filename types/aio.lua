@@ -2042,7 +2042,7 @@ function aio.pane.open_markdown_default_app(fields) end
 
 ---Open Neovim
 ---
----Opens Neovim in a new pane beside the pane, drawn by AIODev rather than in a terminal, with your own config. With a file it edits that file; with a folder it opens and works in that folder, as nvim . does; otherwise it starts in the pane's folder.
+---Opens Neovim, drawn by AIODev rather than in a terminal, with your own config, in a new pane beside the pane. Run by aio in a shell pane, it opens in that pane instead, over the shell, which shows again when Neovim quits; --direction, --ratio or --float still open it beside the pane or floating. With a file it edits that file; with a folder it opens and works in that folder, as nvim . does; otherwise it starts in the pane's folder.
 ---@param fields? aio.fields.pane.open_neovim
 ---@return aio.Reply? reply
 ---@return string? message

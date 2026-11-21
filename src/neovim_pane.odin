@@ -65,6 +65,12 @@ Neovim_Pane :: struct {
 	exited:    bool,
 	// Why Neovim is not running, shown in the pane: it could not start, or it exited.
 	message:   string,
+	// The terminal session of the shell the pane opened over, running out of sight until Neovim quits and
+	// the pane shows it again; 0 for none. The pane owns it: closing the pane ends it.
+	shell:     u32,
+	// A close waits on Neovim's question about unsaved buffers; when Neovim then quits, the pane closes
+	// instead of showing a shell.
+	closing:   bool,
 }
 
 @(require_results)
@@ -82,6 +88,14 @@ neovim_pane_destroy :: proc(pane: ^Neovim_Pane) {
 	free(pane)
 }
 
+// Ends the pane's Neovim and the shell it opened over.
+@(private = "file")
+neovim_pane_release :: proc(app: ^App, pane: ^Neovim_Pane) {
+	if pane.shell != 0 {session_close(app, pane.shell)}
+	neovim_pane_destroy(pane)
+}
+
+// Sessions are already gone when the app ends, so the panes' shells are not closed again.
 neovim_app_destroy :: proc(state: ^Neovim_App) {
 	for pane in state.neovim_panes {neovim_pane_destroy(pane)}
 	delete(state.neovim_panes)
@@ -116,7 +130,7 @@ neovim_pane_create :: proc(app: ^App, file, directory: string, line := 0) -> ^Ne
 neovim_pane_remove :: proc(app: ^App, id: u32) {
 	for pane, i in app.neovim_panes {
 		if pane.id != id {continue}
-		neovim_pane_destroy(pane)
+		neovim_pane_release(app, pane)
 		ordered_remove(&app.neovim_panes, i)
 		return
 	}
@@ -215,7 +229,7 @@ neovim_tick :: proc(app: ^App) {
 	if time.tick_diff(now, app.neovim_deadline) > 0 {return}
 	for i := len(app.neovim_panes) - 1; i >= 0; i -= 1 {
 		if neovim_shown_anywhere(app, app.neovim_panes[i].id) {continue}
-		neovim_pane_destroy(app.neovim_panes[i])
+		neovim_pane_release(app, app.neovim_panes[i])
 		ordered_remove(&app.neovim_panes, i)
 	}
 	app.neovim_deadline = len(app.neovim_panes) > 0 ? time.tick_add(now, NEOVIM_SWEEP) : {}
@@ -253,27 +267,12 @@ neovim_pane_poll :: proc(app: ^App, pane: ^Neovim_Pane) {
 			}
 		}
 	}
+	if polled.quit_cancelled {pane.closing = false}
 	if polled.exited {
 		pane.exited = true
 		pane.message = "Neovim exited."
 		mark_all_dirty(app)
-		neovim_exited(app, content)
-	}
-}
-
-// Neovim quit, so its pane closes, as a pane whose shell exits does. The last pane of a workspace stays,
-// saying so.
-@(private = "file")
-neovim_exited :: proc(app: ^App, content: layout.Content) {
-	for workspace in app.workspaces {
-		if workspace.provisional {continue}
-		for tab, index in workspace.tabs {
-			node := layout.find_content(&tab.tree, content)
-			if node == layout.INVALID_NODE {continue}
-			if len(workspace.tabs) == 1 && tab.tree.root == node {return}
-			pane_close_at(app, workspace, index, node)
-			return
-		}
+		neovim_exited(app, pane)
 	}
 }
 
@@ -456,15 +455,17 @@ neovim_edit_beside :: proc(app: ^App, w: ^Window, node: layout.Node_Id, path: st
 	}
 }
 
-// `aio pane.open_neovim [path]`: a split beside the pane, toward --direction when given, or a float with
-// --float. Neovim works in a folder it is given, as `nvim .` does in that folder, else in the file's
-// folder, else in the pane's.
+// `aio pane.open_neovim [path]`: run in a shell pane, Neovim in that pane over its shell; otherwise, or
+// with --direction, --ratio or --float, a split beside the target pane or a float. `caller` is the pane
+// aio ran in, 0 outside AIODev. Neovim works in a folder it is given, as `nvim .` does in that folder,
+// else in the file's folder, else in the pane's.
 @(require_results)
 control_neovim_open :: proc(
 	app: ^App,
 	w: ^Window,
 	target: Pane_Target,
 	invocation: commands.Invocation,
+	caller: u32,
 ) -> Outcome {
 	file := .File in invocation.given ? invocation.file : ""
 	directory := os.is_dir(file) ? file : filepath.dir(file)
@@ -475,6 +476,16 @@ control_neovim_open :: proc(
 		} else if folder := content_directory(app, target.pane.content); folder != "" {
 			directory = folder
 		}
+	}
+	// As `nvim` run in that shell would, unless a split or float is asked for.
+	entry := target.pane.session
+	if entry != nil && entry.id == caller && invocation.given & {.Direction, .Ratio, .Float} == {} {
+		node := target.pane.node
+		if !neovim_open_over(app, target.workspace, target.pane.tab, node, entry.id, file, directory) {
+			return outcome_failure(.Failed, "could not open Neovim")
+		}
+		if invocation.focus && w != nil {pane_focus(app, w, target.pane.node)}
+		return {}
 	}
 	placement: Pane_Placement = .Float in invocation.given ? .Float : .Split_Right
 	pane := neovim_pane_create(app, file, directory)
@@ -536,6 +547,7 @@ neovim_key :: proc(app: ^App, w: ^Window, e: input.Key_Event) {
 	if notation == "" {return}
 	if neovim.input(&pane.client, notation) != .None {neovim_lost(app)}
 	cursor_blink_reset(w, clock_now(&app.clock))
+	neovim_pointer_hide(app, w, pane)
 }
 
 // Text typed without a key of its own, such as an input method's.
@@ -545,6 +557,7 @@ neovim_text :: proc(app: ^App, w: ^Window, text: string) {
 	escaped, _ := strings.replace_all(text, "<", "<lt>", context.temp_allocator)
 	if neovim.input(&pane.client, escaped) != .None {neovim_lost(app)}
 	cursor_blink_reset(w, clock_now(&app.clock))
+	neovim_pointer_hide(app, w, pane)
 }
 
 // Pastes the clipboard into the focused Neovim as Neovim's own paste does, so it lands as one undo step
@@ -763,6 +776,9 @@ when AIO_CONTROL {
 		state_value(r, state_key("%s.rows", prefix), s.rows)
 		state_value(r, state_key("%s.grids", prefix), len(s.grids))
 		state_value(r, state_key("%s.floats", prefix), floats)
+		state_value(r, state_key("%s.shell", prefix), p.shell)
+		state_value(r, state_key("%s.unsaved", prefix), p.client.unsaved)
+		state_value(r, state_key("%s.closing", prefix), p.closing)
 		state_value(r, state_key("%s.cursor_row", prefix), s.cursor_screen_row)
 		state_value(r, state_key("%s.cursor_column", prefix), s.cursor_screen_column)
 		state_word(r, state_key("%s.cursor_shape", prefix), s.mode.shape)

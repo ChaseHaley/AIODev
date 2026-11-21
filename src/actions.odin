@@ -968,9 +968,11 @@ COMMAND_HELP :: #partial [Action]Command_Help {
 		nil,
 	},
 	.Open_Neovim = {
-		"Opens Neovim in a new pane beside the pane, drawn by AIODev rather than in a terminal, with your own " +
-		"config. With a file it edits that file; with a folder it opens and works in that folder, as nvim . " +
-		"does; otherwise it starts in the pane's folder.",
+		"Opens Neovim, drawn by AIODev rather than in a terminal, with your own config, in a new pane beside the " +
+		"pane. Run by aio in a shell pane, it opens in that pane instead, over the shell, which shows again when " +
+		"Neovim quits; --direction, --ratio or --float still open it beside the pane or floating. With a file " +
+		"it edits that file; with a folder it opens and works in that folder, as nvim . does; otherwise it " +
+		"starts in the pane's folder.",
 		{
 			{
 				.File,
@@ -1405,7 +1407,8 @@ command_execute :: proc(app: ^App, ctx: Command_Context, invocation: commands.In
 		web_toggle_navigator(app, w)
 	case .Open_Neovim:
 		if t, named := target.?; named {
-			return control_neovim_open(app, window_for_workspace(app, t.workspace), t, invocation)
+			request, _ := ctx.(Control_Request)
+			return control_neovim_open(app, window_for_workspace(app, t.workspace), t, invocation, request.caller)
 		}
 		neovim_open_focused(app, w)
 	case .Agent_Changes:
@@ -1613,9 +1616,9 @@ command_execute :: proc(app: ^App, ctx: Command_Context, invocation: commands.In
 	case .Hide_To_Tray:
 		hide_to_tray(app, w)
 	case .Quit:
-		app_quit(app)
+		app_quit_request(app, false)
 	case .Restart:
-		app_restart(app)
+		app_quit_request(app, true)
 	case .Profile_1, .Profile_2, .Profile_3, .Profile_4, .Profile_5, .Profile_6, .Profile_7, .Profile_8,
 	     .Profile_9:
 		tab_new_profile(app, w, param.index)

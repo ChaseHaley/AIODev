@@ -47,7 +47,7 @@ tray_event :: proc(app: ^App, event: platform.Event) {
 		case TRAY_OPEN:
 			show_window(app)
 		case TRAY_QUIT:
-			app_quit(app)
+			app_quit_request(app, false)
 		}
 	}
 }

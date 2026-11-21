@@ -29,18 +29,23 @@ pane_content_menu_choose :: proc(
 	if target, swap := mode.(Profile_Menu_Swap_Pane); swap {
 		node := pane_content_menu_node(w, target.pane)
 		if node == layout.INVALID_NODE {return}
+		if neovim_unsaved(app, target.pane) {
+			notify(app, .Warning, "Neovim has unsaved changes. Save them, or quit Neovim, first.")
+			return
+		}
 		if pane_owns_session(target.pane.kind) {
 			if kind == .Terminal {
 				pane_shell_swap_request(app, w, node, value)
 				return
 			}
+			// Neovim opens over the shell, which shows again when Neovim quits, so nothing is lost.
+			if kind == .Neovim {
+				neovim_open_over_menu(app, w, target.pane, value)
+				return
+			}
 			if entry := session_find(app, target.pane.id);
 			   entry != nil && entry.status == .Running && .Shell_Switch in app.settings.interface.confirm {
-				label := "Markdown"
-				#partial switch kind {
-				case .Web: label = "a web pane"
-				case .Neovim: label = "Neovim"
-				}
+				label := kind == .Web ? "a web pane" : "Markdown"
 				pane_swap_ask(app, w, target.pane, entry, kind, "", label, value)
 				return
 			}

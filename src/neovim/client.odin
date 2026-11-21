@@ -127,6 +127,8 @@ Poll :: struct {
 	buffer_changed: bool,
 	bell: bool,
 	exited: bool,
+	// Neovim stays after quit_confirm: the user cancelled its question, or the quit failed.
+	quit_cancelled: bool,
 }
 
 Mouse_Button :: enum u8 {
@@ -164,8 +166,10 @@ MAX_MESSAGE :: 1 << 26
 
 // Neovim sends set_title only while 'title' is on, so the current buffer name is reported by an
 // autocmd on this channel instead; special buffers (help, terminals, pickers) are not files, and keep
-// the name before them. nvim_get_api_info is not callable from Lua, so the channel is found by the
-// client name nvim_set_client_info registered just before.
+// the name before them. The count of changed buffers `:qa` would refuse to drop (Neovim's bt_dontwrite
+// leaves nofile, terminal and prompt buffers out) is reported the same way, after the change settles.
+// nvim_get_api_info is not callable from Lua, so the channel is found by the client name
+// nvim_set_client_info registered just before.
 @(private)
 BUFFER_WATCH :: `local channel
 for _, chan in ipairs(vim.api.nvim_list_chans()) do
@@ -176,8 +180,22 @@ local function report()
 	if vim.bo.buftype ~= '' then return end
 	vim.rpcnotify(channel, 'aiodev_buffer', vim.api.nvim_buf_get_name(0))
 end
+local function unsaved()
+	local count = 0
+	for _, buffer in ipairs(vim.api.nvim_list_bufs()) do
+		local kind = vim.bo[buffer].buftype
+		if vim.bo[buffer].modified and (kind == '' or kind == 'acwrite') then count = count + 1 end
+	end
+	vim.rpcnotify(channel, 'aiodev_unsaved', count)
+end
 local group = vim.api.nvim_create_augroup('aiodev_buffer', {clear = true})
 vim.api.nvim_create_autocmd({'BufEnter', 'BufFilePost', 'BufWritePost'}, {group = group, callback = report})
+local function later() vim.schedule(unsaved) end
+vim.api.nvim_create_autocmd({'BufModifiedSet', 'BufWritePost', 'BufReadPost', 'BufDelete', 'BufWipeout'}, {
+	group = group,
+	callback = later,
+})
+vim.api.nvim_create_autocmd('OptionSet', {group = group, pattern = 'modified', callback = later})
 report()`
 
 @(private)
@@ -194,7 +212,13 @@ Client :: struct {
 	// The full name of the current buffer, "" when unnamed; owned.
 	buffer: string,
 	mouse: bool,
+	// Neovim's 'nomousehide': the pointer stays visible while typing.
+	pointer_kept: bool,
 	exit_code: int,
+	// Changed buffers Neovim would ask about before quitting, as its autocmd last reported.
+	unsaved: int,
+	// The id of the `:confirm qa` request still waiting on Neovim's answer, 0 for none.
+	quit_request: u32,
 	allocator: runtime.Allocator,
 	process: ^spawn.Process,
 	// The size most recently requested from Neovim, so an unchanged resize sends nothing.
@@ -424,6 +448,11 @@ response_handle :: proc(c: ^Client, r: ^Msgpack_Reader, count: int) {
 		method = slot.method
 		slot^ = {}
 	}
+	// Neovim answers `:confirm qa` only when it stays: the user cancelled, or a quit failed.
+	if c.quit_request != 0 && u32(id.integer) == c.quit_request {
+		c.quit_request = 0
+		c.events.quit_cancelled = true
+	}
 	if failure.kind == .Nil {return}
 	text := "unknown error"
 	if failure.kind == .Array && failure.count == 2 && msgpack_skip(r) == .None {
@@ -448,6 +477,12 @@ notification_handle :: proc(c: ^Client, r: ^Msgpack_Reader) {
 		if name_error != .None || name.kind != .String || string(name.bytes) == c.buffer {return}
 		string_replace(c, &c.buffer, name.bytes)
 		c.events.buffer_changed = c.fault == .None
+	case "aiodev_unsaved":
+		params, params_error := msgpack_read(r)
+		if params_error != .None || params.kind != .Array || params.count != 1 {return}
+		count, count_error := msgpack_read(r)
+		if count_error != .None || count.kind != .Integer {return}
+		c.unsaved = int(clamp(count.integer, 0, i64(max(i32))))
 	case "nvim_error_event":
 		params, params_error := msgpack_read(r)
 		if params_error != .None || params.kind != .Array || params.count != 2 {return}
@@ -587,4 +622,17 @@ end`
 	msgpack_write_str(&c.sent, path)
 	msgpack_write_int(&c.sent, i64(line))
 	return transmit(c)
+}
+
+// Asks Neovim to quit as `:confirm qa` does: at once when nothing is unsaved, else after Neovim asks
+// about each changed buffer. Poll reports quit_cancelled when Neovim stays.
+@(require_results)
+quit_confirm :: proc(c: ^Client) -> Error {
+	prepare(c)
+	context.allocator = c.allocator
+	if request_begin(c, "nvim_command", 1) != .None {return .Out_Of_Memory}
+	msgpack_write_str(&c.sent, "confirm qa")
+	result := transmit(c)
+	if result == .None {c.quit_request = c.next_id}
+	return result
 }

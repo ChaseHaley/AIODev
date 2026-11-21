@@ -41,6 +41,8 @@ handle_event :: proc(app: ^App, event: platform.Event) {
 			x, y := f32(e.x), f32(e.y)
 			if w.pointer != ([2]f32{x, y}) && w.gloss_hovered {w.dirty = true}
 			w.pointer = {x, y}
+			// Typing into Neovim hid the pointer; any move shows it, and the hover below shapes it.
+			if w.pointer_shape == .Hidden {pointer_set(app, w, .Arrow)}
 			workspace_button_track(app, w, x, y)
 			gesture_move(app, w, e)
 		}

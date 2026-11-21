@@ -198,6 +198,7 @@ redraw_event :: proc(c: ^Client, r: ^Msgpack_Reader) -> bool {
 	case "busy_stop": handler = busy_stop
 	case "mouse_on": handler = mouse_on
 	case "mouse_off": handler = mouse_off
+	case "option_set": handler = option_set
 	case "set_title": handler = set_title
 	case "chdir": handler = chdir
 	case "bell", "visual_bell": handler = bell
@@ -756,6 +757,18 @@ mouse_off :: proc(c: ^Client, r: ^Msgpack_Reader) -> bool {
 	empty_args(r) or_return
 	c.mouse = false
 	return true
+}
+
+// Only 'mousehide' matters to AIODev: off, the pointer stays visible while typing.
+@(private)
+option_set :: proc(c: ^Client, r: ^Msgpack_Reader) -> bool {
+	t := tuple_open(r) or_return
+	name := tuple_bytes(&t) or_return
+	if string(name) == "mousehide" {
+		value := tuple_next(&t) or_return
+		if value.kind == .Boolean {c.pointer_kept = !value.boolean}
+	}
+	return tuple_close(&t)
 }
 
 @(private)

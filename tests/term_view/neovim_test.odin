@@ -334,3 +334,47 @@ neovim_floats_show_the_text_under_them_through_their_background :: proc(t: ^test
 	testing.expect_value(t, cell_pixel(&f, pixels, 1, 2, 1, 1), [4]u8{255, 0, 0, 255})
 	testing.expect_value(t, cell_pixel(&f, pixels, 6, 0, 1, 1), [4]u8{0, 255, 0, 255})
 }
+
+// A grid row of one-cell text starting at `column`, in Neovim's default colours.
+@(private = "file")
+write_text_line :: proc(w: ^neovim.Msgpack_Writer, grid, row, column: i64, text: string) {
+	redraw_event(w, "grid_line", 4)
+	write_ints(w, grid, row, column)
+	neovim.msgpack_write_array(w, len(text))
+	for i in 0 ..< len(text) {
+		neovim.msgpack_write_array(w, 1)
+		neovim.msgpack_write_str(w, text[i:i + 1])
+	}
+}
+
+// The owner's clip: dragging a split left a trail of separators across the windows. Neovim draws
+// separators on the base grid and never clears the cells a window then covers, so the windows hide them.
+@(test)
+neovim_windows_hide_the_separators_a_split_drag_leaves_on_the_base_grid :: proc(t: ^testing.T) {
+	f, ok := headless_create(t)
+	defer fixture_destroy(&f)
+	if !ok {return}
+	c: neovim.Client
+	defer neovim.destroy(&c)
+	v: term_view.Neovim_View
+	defer term_view.neovim_view_destroy(&v)
+	style := term_view.Neovim_Style {
+		family = f.family, cursor_color = {1, 1, 1, 1}, cursor_effects = {preset = .Off}, overlay_opacity = 1,
+	}
+	w: neovim.Msgpack_Writer
+	redraw_begin(&w, 12)
+	for row in 0 ..< i64(3) {write_text_line(&w, 1, row, 5, "|")}
+	write_text_line(&w, 1, 3, 0, "status")
+	redraw_event(&w, "grid_resize", 3)
+	write_ints(&w, 2, COLUMNS, 3)
+	redraw_event(&w, "win_pos", 6)
+	write_ints(&w, 2, 1000, 0, 0, COLUMNS, 3)
+	redraw_event(&w, "grid_cursor_goto", 3)
+	write_ints(&w, 2, 0, 0)
+	if !testing.expect(t, redraw_send(&c, &w)) {return}
+	_, pixels := neovim_render(t, &f, &v, &c, style, frame_at(0))
+	for row in 0 ..< 3 {
+		testing.expectf(t, !cell_has_ink(&f, pixels, 5, row), "a stale separator shows on row %d", row)
+	}
+	testing.expect(t, cell_has_ink(&f, pixels, 0, 3), "the base grid's own row draws")
+}

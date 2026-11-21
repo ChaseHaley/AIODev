@@ -429,8 +429,10 @@ pane_close :: proc(app: ^App, w: ^Window) {
 	pane_close_at(app, w.workspace, w.workspace.selected, window_tree(w).focus)
 }
 
-// A close Reopen Closed can undo, by request or because the shell exited.
+// A close Reopen Closed can undo, by request or because the shell exited. A Neovim pane with unsaved
+// buffers first lets Neovim ask about them.
 pane_close_at :: proc(app: ^App, workspace: ^Workspace, tab_index: int, node: layout.Node_Id) {
+	if neovim_close_deferred(app, workspace, tab_index, node) {return}
 	closed_record_pane(app, workspace, tab_index, node)
 	pane_remove(app, workspace, tab_index, node)
 }

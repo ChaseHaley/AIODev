@@ -25,6 +25,7 @@ Confirmation_Subject :: union {
 	Settings_Reset,
 	Update_Restart,
 	Turns_Delete,
+	Quit_Unsaved,
 }
 
 Confirmation_Text :: struct {
@@ -109,6 +110,8 @@ confirmation_finish :: proc(app: ^App, w: ^Window, accept: bool) {
 		update_restart_finish(app, accept)
 	case Turns_Delete:
 		turns_delete_finish(app, accept)
+	case Quit_Unsaved:
+		quit_unsaved_finish(app, subject, accept)
 	}
 }
 
@@ -133,7 +136,7 @@ confirmation_clear :: proc(w: ^Window) {
 		settings_reset_destroy(&subject)
 	case Update_Restart:
 		update_restart_destroy(&subject)
-	case Turns_Delete:
+	case Turns_Delete, Quit_Unsaved:
 	}
 	w.confirmation = nil
 }
@@ -243,6 +246,8 @@ confirmation_text :: proc(app: ^App, w: ^Window, c: ^Confirmation, recount: bool
 		return update_restart_text(subject)
 	case Turns_Delete:
 		return turns_delete_text()
+	case Quit_Unsaved:
+		return quit_unsaved_text(subject)
 	}
 	return {}
 }
@@ -286,6 +291,7 @@ when AIO_CONTROL {
 		state_value(r, "swap.open", confirmation_asking(w, Pane_Swap) != nil)
 		state_valuef(r, "swap.opacity", "%g", swap != nil ? opacity : 0)
 		state_text(r, "swap.profile", swap != nil ? swap.profile_id : "")
+		state_value(r, "quit.open", confirmation_asking(w, Quit_Unsaved) != nil)
 	}
 }
 

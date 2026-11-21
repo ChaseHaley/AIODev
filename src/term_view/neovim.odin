@@ -384,9 +384,9 @@ neovim_grid_draw :: proc(
 		if moving && y >= top && y < top + rows {continue}
 		cells := grid.cells[y * grid.columns:][:grid.columns]
 		row_top := draw.origin.y + f32(y) * m.cell_height
-		if result := neovim_row_draw(v, b, client, s, cells, draw, family, row_top); result != .Ok {
-			return result
-		}
+		base_row := grid.kind == .Base ? y : -1
+		result := neovim_row_draw(v, b, client, s, cells, draw, family, row_top, base_row)
+		if result != .Ok {return result}
 	}
 	if moving {
 		viewport := render.Rect {
@@ -421,7 +421,8 @@ neovim_intersect :: proc(a, b: render.Rect) -> render.Rect {
 	return {left, top, max(0, right - left), max(0, bottom - top)}
 }
 
-// Draws one row of cells whose top edge is at `top`: backgrounds, decorations, then text.
+// Draws one row of cells whose top edge is at `top`: backgrounds, decorations, then text. Row `base_row`
+// of the base grid leaves out the cells a window covers.
 @(private, require_results)
 neovim_row_draw :: proc(
 	v: ^Neovim_View,
@@ -432,8 +433,10 @@ neovim_row_draw :: proc(
 	draw: Neovim_Grid_Draw,
 	family: font.Family,
 	top: f32,
+	base_row := -1,
 ) -> render.Build_Status {
 	neovim_row_paints(v, s, cells)
+	if base_row >= 0 {neovim_row_uncover(v, s, base_row)}
 	neovim_row_backgrounds(v, b, neovim_color(s.default_background), top, draw)
 	for p, x in v.paints {
 		if result := neovim_decorate(b, p, draw.origin.x + f32(x) * b.metrics.cell_width, top); result != .Ok {
@@ -441,6 +444,23 @@ neovim_row_draw :: proc(
 		}
 	}
 	return neovim_row_text(v, b, client, family, top)
+}
+
+// Neovim never clears the base grid under a window, so the separators a split drag leaves behind stay
+// there; only the windows' own cells are current. Base row y's paints become Neovim's background where a
+// window covers them.
+@(private)
+neovim_row_uncover :: proc(v: ^Neovim_View, s: ^neovim.Screen, y: int) {
+	blank := Neovim_Paint {
+		foreground = neovim_color(s.default_foreground),
+		background = neovim_color(s.default_background),
+	}
+	for grid in s.grids {
+		if grid.kind != .Window || y < grid.row || y >= grid.row + grid.rows {continue}
+		first := clamp(grid.column, 0, len(v.paints))
+		last := clamp(grid.column + grid.columns, 0, len(v.paints))
+		for &p in v.paints[first:last] {p = blank}
+	}
 }
 
 // Draws the cursor over every grid: a block draws the text of its own grid's cell again in the cursor
