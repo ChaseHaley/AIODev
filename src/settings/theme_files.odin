@@ -218,8 +218,7 @@ theme_export :: proc(s: ^Settings, directory: string) -> (path: string, error: o
 		if open_error == .Exist {continue}
 		if open_error != nil {return "", open_error}
 		name := theme_display_name(s, s.theme.name)
-		neovim: Neovim_Theme
-		if custom := custom_theme_find(s, s.theme.name); custom != nil {neovim = custom.neovim}
+		neovim := theme_neovim(s, s.theme.name)
 		text, ok := theme_file_text(
 			id,
 			s.active_theme,

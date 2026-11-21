@@ -96,8 +96,11 @@ plugins. With lazy.nvim, `lazy = true` is enough: it loads the plugin when the c
 | Nord | `{ "gbprod/nord.nvim", lazy = true }` | `nord` |
 | Palenight | `{ "drewtempelmeyer/palenight.vim", lazy = true }` | `palenight` |
 
-Studio, Tide, Ember and custom themes use the generated colorscheme. A theme file you write can add
-`"neovim": { "plugin": "owner/repository", "colorscheme": "name" }`; it holds data only, never Lua.
+Studio, Tide and Ember use the generated colorscheme. A custom theme uses the colorscheme of the theme
+it is based on, so customizing Tokyo Night Day keeps `tokyonight-day`, and one based on Studio uses
+the generated colorscheme. To name another, add `theme.custom.ID.neovim = name` to `settings.ini`, or
+`"neovim": { "plugin": "owner/repository", "colorscheme": "name" }` to a theme file (`plugin` is
+optional). The name `aiodev` picks the generated colorscheme. Theme files hold data only, never Lua.
 
 ## Build from source
 

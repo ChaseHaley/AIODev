@@ -18,9 +18,9 @@
     },
     "neovim": {
       "type": "object",
-      "description": "The Neovim colorscheme this theme matches, applied by the AIODev Neovim plugin when it is installed.",
+      "description": "The Neovim colorscheme this theme matches, applied by the AIODev Neovim plugin when it is installed. Without one, the colorscheme of the base theme applies; aiodev is the one generated from this theme's colors.",
       "additionalProperties": false,
-      "required": ["plugin", "colorscheme"],
+      "required": ["colorscheme"],
       "properties": {
         "plugin": {"type": "string", "description": "The plugin repository that provides the colorscheme.", "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$", "maxLength": 100},
         "colorscheme": {"type": "string", "description": "The colorscheme to apply.", "pattern": "^[A-Za-z0-9_.-]+$", "maxLength": 64},

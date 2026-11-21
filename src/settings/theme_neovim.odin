@@ -32,9 +32,10 @@ Neovim_Background :: enum {
 	Light,
 }
 
-// The Neovim colorscheme a theme file names, as data: the plugin repository that provides it, the
-// colorscheme to apply, and the 'background' it needs when that is not simply the theme's own. A
-// theme without one has an empty colorscheme. Its strings are owned by whoever holds the theme.
+// The Neovim colorscheme a theme names, as data: the colorscheme to apply, the plugin repository that
+// provides it (documentation only, so it may be empty), and the 'background' it needs when that is not
+// simply the theme's own. A theme without one has an empty colorscheme. Its strings are owned by
+// whoever holds the theme.
 Neovim_Theme :: struct {
 	plugin, colorscheme: string,
 	background:          Neovim_Background,
@@ -75,9 +76,13 @@ neovim_theme_parse :: proc(value: json.Value) -> (n: Neovim_Theme, issue: string
 			return {}, fmt.tprintf("Unknown neovim field: %s", key)
 		}
 	}
-	plugin, plugin_ok := object["plugin"].(json.String)
-	if !plugin_ok || !neovim_plugin_valid(string(plugin)) {
-		return {}, "Invalid neovim plugin; use owner/repository."
+	plugin: json.String
+	if entry, has_plugin := object["plugin"]; has_plugin {
+		text, text_ok := entry.(json.String)
+		if !text_ok || !neovim_plugin_valid(string(text)) {
+			return {}, "Invalid neovim plugin; use owner/repository."
+		}
+		plugin = text
 	}
 	colorscheme, colorscheme_ok := object["colorscheme"].(json.String)
 	if !colorscheme_ok || !neovim_colorscheme_valid(string(colorscheme)) {
@@ -150,7 +155,7 @@ write_neovim_theme :: proc(b: ^strings.Builder, n: Neovim_Theme) -> bool {
 	if n.colorscheme == "" {return true}
 	background := neovim_background_text(n.background)
 	if write_parts(b, "  \"neovim\": {\n") != nil {return false}
-	if !write_json_string(b, "    ", "plugin", n.plugin, ",\n") {return false}
+	if n.plugin != "" && !write_json_string(b, "    ", "plugin", n.plugin, ",\n") {return false}
 	if !write_json_string(b, "    ", "colorscheme", n.colorscheme, background == "" ? "\n" : ",\n") {
 		return false
 	}
@@ -182,6 +187,18 @@ RECORD_COLORS :: [?]struct {
 @(private)
 hex_text :: proc(c: Color) -> string {return fmt.tprintf("#%02x%02x%02x", c.r, c.g, c.b)}
 
+// The Neovim colorscheme theme `id` uses: its own, or else the nearest one its bases name, so a theme
+// customized from a community theme keeps that theme's colorscheme (WORK-529). A theme that names
+// `aiodev`, the scheme the plugin generates from the palette, opts out of its bases' colorscheme.
+theme_neovim :: proc(s: ^Settings, id: string) -> Neovim_Theme {
+	theme := custom_theme_find(s, id)
+	for depth := 0; theme != nil && depth <= THEME_BASE_DEPTH; depth += 1 {
+		if theme.neovim.colorscheme != "" {return theme.neovim}
+		theme = theme.base == "" ? nil : custom_theme_find(s, theme.base)
+	}
+	return {}
+}
+
 // The record the Neovim plugin reads: the active theme's id and name, whether the shell background is
 // light, the Neovim colorscheme it names if any, and the colours a generated colorscheme needs, all
 // opaque `#rrggbb`. `generation` counts the records one app run has written.
@@ -204,9 +221,7 @@ neovim_record_text :: proc(s: ^Settings, generation: u64, allocator := context.a
 	if write_parts(&builder, "  \"light\": ", theme.terminal_light ? "true" : "false", ",\n") != nil {
 		return "", false
 	}
-	if custom := custom_theme_find(s, s.theme.name); custom != nil {
-		if !write_neovim_theme(&builder, custom.neovim) {return "", false}
-	}
+	if !write_neovim_theme(&builder, theme_neovim(s, s.theme.name)) {return "", false}
 	if write_parts(&builder, "  \"colors\": {\n") != nil {return "", false}
 	if !write_json_string(&builder, "    ", "cursor", hex_text(theme_cursor(theme)), ",\n") {return "", false}
 	for entry in RECORD_COLORS {
