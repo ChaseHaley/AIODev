@@ -53,7 +53,7 @@ function Exit-TestBudget($Budget) {
 
 function Invoke-TestCommand([string] $Executable, [string[]] $Arguments, [int] $TimeoutSeconds,
     [string] $CapturePath) {
-    # Start-Process needs a Windows command line even when ArgumentList receives an array.
+    # Process.Start takes a Windows command line, so quote each argument ourselves.
     $line = ($Arguments | ForEach-Object { '"' + $_.Replace('"', '\"') + '"' }) -join ' '
     $capture = $null
     if ($CapturePath) {
@@ -63,7 +63,11 @@ function Invoke-TestCommand([string] $Executable, [string[]] $Arguments, [int] $
         try { $child = $capture.Start($Executable, $line, (Get-Location).Path) }
         catch { $capture.Dispose(); throw }
     } else {
-        $child = Start-Process -FilePath $Executable -ArgumentList $line -NoNewWindow -PassThru -ErrorAction Stop
+        # Not Start-Process -PassThru: Windows PowerShell 5.1 leaves ExitCode empty for that process object.
+        # The child inherits this console's streams, as -NoNewWindow did.
+        $info = [Diagnostics.ProcessStartInfo]::new($Executable, $line)
+        $info.UseShellExecute = $false
+        $child = [Diagnostics.Process]::Start($info)
     }
     try {
         $watch = [Diagnostics.Stopwatch]::StartNew()
@@ -73,7 +77,11 @@ function Invoke-TestCommand([string] $Executable, [string[]] $Arguments, [int] $
                 return 124
             }
         }
-        return $child.ExitCode
+        # An exit code that cannot be read is a failure, never a pass.
+        $child.WaitForExit()
+        $exit = $child.ExitCode
+        if ($null -eq $exit) { Write-Host "Cannot read the exit code of $Executable."; return 125 }
+        return [int] $exit
     } finally {
         try {
             # Kill descendants as well when the runner hangs or the invoking shell is cancelled.

@@ -229,6 +229,8 @@ unspaced :: proc(text: string, at: int) -> bool {
 // define the design tokens and the type ramp are the only places that may use raw values.
 design_scope :: proc(path: string) -> bool {
 	p, _ := strings.replace_all(path, "\\", "/", context.temp_allocator)
+	// A path relative to the repository root, as build.ps1 passes, has no leading separator.
+	if strings.has_prefix(p, "src/") {p = strings.concatenate({"/", p}, context.temp_allocator)}
 	if strings.has_suffix(p, "/ui/design.odin") || strings.has_suffix(p, "/ui/text.odin") {return false}
 	if index := strings.last_index(p, "/src/"); index >= 0 {
 		rest := p[index + len("/src/"):]
