@@ -104,8 +104,8 @@ tab_draw_keeps_the_program_icon_left_and_status_before_close :: proc(t: ^testing
 	}
 }
 
-// A tab with several panes stacks its focused pane's mark over the one behind; the mark behind
-// stays clear of a gap around the front one, and the title starts where a one-pane tab's does.
+// A tab with several panes stacks its focused pane's mark over the one behind. The mark behind draws whole,
+// so it shows through the transparent parts of the front one, and the title starts where a one-pane tab's does.
 @(test)
 tab_draw_stacks_the_focused_mark_over_the_one_behind :: proc(t: ^testing.T) {
 	fonts, err := font.system_create()
@@ -136,36 +136,39 @@ tab_draw_stacks_the_focused_mark_over_the_one_behind :: proc(t: ^testing.T) {
 			0, 0, scale), render.Build_Status.Ok)
 		front: render.Rect
 		backs, title_x := 0, f32(-1)
-		for g in list.glyphs {
+		front_at, back_at := -1, -1
+		for g, i in list.glyphs {
 			if g.flags & render.GLYPH_COLOR == 0 {
 				if title_x < 0 {title_x = g.rect.x}
 				continue
 			}
-			if g.atlas == front_atlas {front = g.rect}
+			if g.atlas == front_atlas {front, front_at = g.rect, i}
 		}
 		if !testing.expect(t, front.width > 0) {continue}
 		testing.expect_value(t, front.width, mark)
-		cut := render.Rect {
-			front.x - ui.TAB_STACK_GAP * scale + 0.01,
-			front.y - ui.TAB_STACK_GAP * scale + 0.01,
-			front.width + 2 * ui.TAB_STACK_GAP * scale - 0.02,
-			front.height + 2 * ui.TAB_STACK_GAP * scale - 0.02,
-		}
 		for layer in list.layers {
-			for g in list.glyphs[layer.glyph_start:][:layer.glyph_count] {
+			for g, i in list.glyphs[layer.glyph_start:][:layer.glyph_count] {
 				if g.atlas != back_atlas {continue}
 				backs += 1
-				// The back mark draws only where its clip leaves the cut-out alone.
+				back_at = layer.glyph_start + i
+				// The mark behind draws whole, with nothing cut out around the mark in front of it.
 				visible := layer.clip
-				x := max(visible.x, g.rect.x, cut.x)
-				y := max(visible.y, g.rect.y, cut.y)
-				right := min(visible.x + visible.width, g.rect.x + g.rect.width, cut.x + cut.width)
-				bottom := min(visible.y + visible.height, g.rect.y + g.rect.height, cut.y + cut.height)
-				testing.expectf(t, right <= x || bottom <= y, "scale %v: back mark shows in the cut-out", scale)
+				testing.expectf(
+					t,
+					visible.x <= g.rect.x + 0.01 &&
+					visible.y <= g.rect.y + 0.01 &&
+					visible.x + visible.width >= g.rect.x + g.rect.width - 0.01 &&
+					visible.y + visible.height >= g.rect.y + g.rect.height - 0.01,
+					"scale %v: back mark clipped to %v",
+					scale,
+					visible,
+				)
 				testing.expect(t, g.rect.x < front.x && g.rect.y < front.y)
+				testing.expect(t, g.rect.x + g.rect.width > front.x && g.rect.y + g.rect.height > front.y)
 			}
 		}
-		testing.expect(t, backs > 0)
+		testing.expect_value(t, backs, 1)
+		testing.expect(t, back_at >= 0 && back_at < front_at, "the mark in front draws last")
 		// The title starts where a one-pane tab's does.
 		render.draw_list_reset(&list)
 		testing.expect_value(t, ui.tab_draw(&list, &text, theme, bar, 0,
