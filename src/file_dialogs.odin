@@ -62,8 +62,9 @@ file_dialogs_window_closed :: proc(app: ^App, id: input.Window_Id) {
 markdown_dialog_tick :: proc(app: ^App) {
 	dialog, open := app.dialogs.markdown.?
 	if !open {return}
-	path, finished := platform.file_pick_finished(dialog.pick)
+	paths, finished := platform.file_pick_finished(dialog.pick)
 	if !finished {return}
+	path := len(paths) > 0 ? paths[0] : ""
 	if w := window_find(app, dialog.window); w != nil && path != "" {
 		if mode, menu := dialog.menu.?; menu {
 			pane_content_menu_choose(app, w, mode, .Markdown, path)
@@ -79,8 +80,9 @@ markdown_dialog_tick :: proc(app: ^App) {
 document_dialog_tick :: proc(app: ^App) {
 	dialog, open := app.dialogs.document.?
 	if !open {return}
-	path, finished := platform.file_pick_finished(dialog.pick)
+	paths, finished := platform.file_pick_finished(dialog.pick)
 	if !finished {return}
+	path := len(paths) > 0 ? paths[0] : ""
 	if w := window_find(app, dialog.window); w != nil && path != "" {
 		document_pick_chosen(app, w, dialog.content, path)
 	}
@@ -92,8 +94,9 @@ document_dialog_tick :: proc(app: ^App) {
 icon_dialog_tick :: proc(app: ^App) {
 	dialog, open := app.dialogs.icon.?
 	if !open {return}
-	path, finished := platform.file_pick_finished(dialog.pick)
+	paths, finished := platform.file_pick_finished(dialog.pick)
 	if !finished {return}
+	path := len(paths) > 0 ? paths[0] : ""
 	if w := window_find(app, dialog.window); w != nil && path != "" {
 		editor_icon_chosen(app, w, dialog.key, path)
 	}

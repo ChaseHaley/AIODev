@@ -58,10 +58,10 @@ when platform.HEADLESS {
 		if !icon_browse(t, &f, "profile.alpha.icon", "") {return}
 		pick := icon_browse_last(&f)
 		testing.expect_value(t, pick.window, f.state.windows[0].id)
-		testing.expect_value(t, pick.filter_name, "PNG images")
-		testing.expect_value(t, pick.pattern, "*.png")
-		testing.expect_value(t, pick.directory, "")
-		testing.expect(t, !pick.folders)
+		testing.expect_value(t, pick.options.filters[0].name, "PNG images")
+		testing.expect_value(t, pick.options.filters[0].pattern, "*.png")
+		testing.expect_value(t, pick.options.directory, "")
+		testing.expect_value(t, pick.options.mode, platform.File_Pick_Mode.Open)
 		testing.expect(t, profile_file_lacks(f.path, "profile.alpha.icon"))
 		testing.expect(t, app.shell_icon_find(&f.state, "alpha") == nil)
 
@@ -81,7 +81,7 @@ when platform.HEADLESS {
 
 		// A cancel from the icon's own folder keeps it.
 		if !icon_browse(t, &f, "profile.alpha.icon", "") {return}
-		testing.expect_value(t, icon_browse_last(&f).directory, filepath.dir(icon))
+		testing.expect_value(t, icon_browse_last(&f).options.directory, filepath.dir(icon))
 		testing.expect_value(t, settings.profile_find(&f.state.settings.profiles, "alpha").icon, icon)
 		testing.expect(t, app.shell_icon_find(&f.state, "alpha") != nil)
 		testing.expect_value(t, len(f.state.platform.record.file_picks), 3)
@@ -110,7 +110,7 @@ when platform.HEADLESS {
 		testing.expect_value(t, ui.field_string(&e.value), icon)
 
 		if !icon_browse(t, &f, "opener.program-1.icon", "") {return}
-		testing.expect_value(t, icon_browse_last(&f).directory, filepath.dir(icon))
+		testing.expect_value(t, icon_browse_last(&f).options.directory, filepath.dir(icon))
 		testing.expect_value(t, settings.opener_find(&f.state.settings.openers, "program-1").icon, icon)
 	}
 
@@ -128,14 +128,14 @@ when platform.HEADLESS {
 		_ = profile_open(&f)
 
 		if !icon_browse(t, &f, settings.PROGRAM_ICON_FILES_KEY, nvim) {return}
-		testing.expect_value(t, icon_browse_last(&f).directory, strings.concatenate({f.directory, `\icons`}, context.temp_allocator))
+		testing.expect_value(t, icon_browse_last(&f).options.directory, strings.concatenate({f.directory, `\icons`}, context.temp_allocator))
 		testing.expect_value(t, f.state.settings.tabs.program_icon_files, strings.concatenate({`codex=icons\codex.png; nvim=`, nvim}, context.temp_allocator))
 		path, found := settings.program_icon_file(&f.state.settings, "nvim")
 		testing.expect(t, found)
 		testing.expect_value(t, path, nvim)
 
 		if !icon_browse(t, &f, settings.PROGRAM_ICON_FILES_KEY, codex) {return}
-		testing.expect_value(t, icon_browse_last(&f).directory, f.directory)
+		testing.expect_value(t, icon_browse_last(&f).options.directory, f.directory)
 		testing.expect_value(
 			t,
 			f.state.settings.tabs.program_icon_files,

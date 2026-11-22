@@ -527,7 +527,8 @@ markdown_open_picker :: proc(app: ^App, w: ^Window, menu: Maybe(Profile_Menu_Mod
 		}
 	}
 	if entry != nil {directory, _ = pane_directory(app, entry)}
-	pick := platform.file_pick_start(&app.platform, w.id, "Markdown files", MARKDOWN_FILTER, directory)
+	markdown_files := []platform.File_Filter{{"Markdown files", MARKDOWN_FILTER}}
+	pick := platform.file_pick_start(&app.platform, w.id, {filters = markdown_files, directory = directory})
 	if pick == nil {
 		notify(app, .Error, "Could not show the file dialog.")
 		return

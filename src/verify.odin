@@ -581,12 +581,13 @@ when AIO_CONTROL {
 			state_value(r, "os.file_pick.queued", len(p.file_picks))
 			state_value(r, "os.file_picks", len(p.record.file_picks))
 			for pick, i in p.record.file_picks {
+				filter := len(pick.options.filters) > 0 ? pick.options.filters[0] : {}
 				state_value(r, state_key("os.file_pick.%d.window", i + 1), pick.window)
-				state_text(r, state_key("os.file_pick.%d.filter", i + 1), pick.filter_name)
-				state_text(r, state_key("os.file_pick.%d.pattern", i + 1), pick.pattern)
-				state_text(r, state_key("os.file_pick.%d.directory", i + 1), pick.directory)
-				state_value(r, state_key("os.file_pick.%d.folders", i + 1), pick.folders)
-				state_text(r, state_key("os.file_pick.%d.path", i + 1), pick.path)
+				state_text(r, state_key("os.file_pick.%d.filter", i + 1), filter.name)
+				state_text(r, state_key("os.file_pick.%d.pattern", i + 1), filter.pattern)
+				state_text(r, state_key("os.file_pick.%d.directory", i + 1), pick.options.directory)
+				state_value(r, state_key("os.file_pick.%d.folders", i + 1), pick.options.mode == .Folder)
+				state_text(r, state_key("os.file_pick.%d.path", i + 1), len(pick.paths) > 0 ? pick.paths[0] : "")
 			}
 		}
 	}

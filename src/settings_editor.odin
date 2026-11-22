@@ -673,7 +673,8 @@ editor_icon_browse :: proc(app: ^App, w: ^Window, request: views.Editor_Request)
 	}
 	key, clone_error := strings.clone(browse.key)
 	if clone_error != nil {return}
-	pick := platform.file_pick_start(&app.platform, w.id, ICON_FILTER_NAME, ICON_FILTER, directory)
+	icons := []platform.File_Filter{{ICON_FILTER_NAME, ICON_FILTER}}
+	pick := platform.file_pick_start(&app.platform, w.id, {filters = icons, directory = directory})
 	if pick == nil {
 		delete(key)
 		notify(app, .Error, "Could not show the file dialog.")

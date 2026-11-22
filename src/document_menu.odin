@@ -1078,7 +1078,12 @@ document_pick_start :: proc(app: ^App, w: ^Window, folders: bool) {
 	if entry := workspace_session_for_content(app, content); entry != nil {
 		directory, _ = pane_directory(app, entry)
 	}
-	pick := platform.file_pick_start(&app.platform, w.id, "All files", "*.*", directory, folders)
+	options := platform.File_Pick_Options {
+		mode      = folders ? .Folder : .Open,
+		filters   = []platform.File_Filter{{"All files", "*.*"}},
+		directory = directory,
+	}
+	pick := platform.file_pick_start(&app.platform, w.id, options)
 	if pick == nil {
 		notify(app, .Error, "Could not show the file dialog.")
 		return
