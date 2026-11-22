@@ -1,6 +1,6 @@
 package main
 
-import platform_api "aio:platform"
+import platform_api "cosmos:platform"
 import "aio:events"
 import "cosmos:render"
 import "aio:settings"
@@ -301,6 +301,16 @@ status_notify_changes :: proc(app: ^App, entry: ^Session_Entry, previous: []term
 	}
 }
 
+// How Windows names AIODev on its notifications. The legacy shortcut is the one releases before the
+// program-status identity created.
+NOTIFICATION_IDENTITY :: platform_api.Notification_Identity {
+	app_user_model_id    = "AIODev.ProgramStatus",
+	display_name         = "AIODev",
+	icon_folder          = "AIODev",
+	shortcut_name        = "AIODev",
+	legacy_shortcut_name = "AIODev Notifications",
+}
+
 @(private)
 status_notice :: proc(app: ^App, entry: ^Session_Entry, record: term.Program_Status) {
 	p := status_presentation(record)
@@ -315,7 +325,14 @@ status_notice :: proc(app: ^App, entry: ^Session_Entry, record: term.Program_Sta
 	token := platform_api.Notification_Token(entry.id)
 	if .Banner in c {
 		// Unavailable: notifications could not start, which the first banner already reported.
-		result := platform_api.notification_show(&app.platform, title, text, token, sound)
+		result := platform_api.notification_show(
+			&app.platform,
+			NOTIFICATION_IDENTITY,
+			title,
+			text,
+			token,
+			sound,
+		)
 		if result == .None {
 			sound = false
 		} else if result != .Unavailable {

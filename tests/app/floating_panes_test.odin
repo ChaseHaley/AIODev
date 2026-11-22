@@ -6,7 +6,7 @@ import "core:testing"
 import "core:time"
 import app "../../src"
 import "aio:layout"
-import "aio:platform"
+import "cosmos:platform"
 import "aio:ui"
 
 @(test)

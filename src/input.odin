@@ -3,7 +3,7 @@ package main
 import "aio:commands"
 import "aio:events"
 import "cosmos:input"
-import "aio:platform"
+import "cosmos:platform"
 import "cosmos:render"
 import "aio:term"
 import "aio:ui"

@@ -1,7 +1,6 @@
 package main
 
 import "aio:settings"
-import platform_api "aio:platform"
 import "core:fmt"
 import "core:log"
 import "core:os"
@@ -43,7 +42,7 @@ shell_profiles_detect :: proc() -> []settings.Detected_Profile {
 		detect_append(&detected, settings.shell_definitions[.PowerShell_7])
 	}
 	if os.exists(fmt.tprintf("%s\\System32\\wsl.exe", system_root)) {
-		distributions, distribution_error := platform_api.wsl_distributions(
+		distributions, distribution_error := wsl_distributions(
 			context.temp_allocator,
 		)
 		if distribution_error != nil {

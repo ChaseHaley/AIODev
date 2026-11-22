@@ -7,7 +7,7 @@ import "core:sync"
 import "core:testing"
 import "aio:ghostty"
 import "cosmos:input"
-import "aio:platform"
+import "cosmos:platform"
 import "aio:term"
 import app "../../src"
 

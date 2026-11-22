@@ -1,6 +1,7 @@
 package localpath
 
 import "core:strings"
+import "cosmos:winpath"
 
 // Open_File owns the canonical clicked path and effective target. Preparation is click-only;
 // an active type always needs confirmation, and every shortcut is active. The target is what opens.
@@ -20,7 +21,7 @@ open_file_destroy :: proc(file: ^Open_File) {
 file_needs_confirmation :: proc(path, pathext: string) -> bool {
 	ext := ""
 	for i := len(path) - 1; i >= 0; i -= 1 {
-		if is_separator(path[i]) {break}
+		if winpath.is_separator(path[i]) {break}
 		if path[i] == '.' {ext = path[i:]; break}
 	}
 	for active in ([?]string{

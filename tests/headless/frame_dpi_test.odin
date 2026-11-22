@@ -5,7 +5,7 @@ import "core:os"
 import "core:strings"
 import "core:testing"
 import app "../../src"
-import "aio:platform"
+import "cosmos:platform"
 import "cosmos:render"
 
 // The whole app frame renders offscreen at a chosen DPI, the real build_frame and no window

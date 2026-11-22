@@ -1,17 +1,21 @@
-package platform
+package main
 
-@(require) import "base:runtime"
+import "base:runtime"
+import platform_api "cosmos:platform"
+// Only the Win32 build reads the registry.
 @(require) import w "core:sys/windows"
 
-// The Win32 backend; a headless build compiles another (see AIO_HEADLESS in platform.odin).
-when !AIO_HEADLESS {
-	// Reads installed WSL distribution names from HKCU Lxss. Detection never starts a process.
-	wsl_distributions :: proc(
-		allocator := context.allocator,
-	) -> (
-		[]string,
-		runtime.Allocator_Error,
-	) {
+// Reads installed WSL distribution names from HKCU Lxss. Detection never starts a process, and the
+// headless build reads nothing from the machine, so its detected shells are the same everywhere.
+wsl_distributions :: proc(
+	allocator := context.allocator,
+) -> (
+	[]string,
+	runtime.Allocator_Error,
+) {
+	when platform_api.HEADLESS {
+		return nil, nil
+	} else {
 		root: w.HKEY
 		path := w.L("Software\\Microsoft\\Windows\\CurrentVersion\\Lxss")
 		if w.RegOpenKeyExW(w.HKEY_CURRENT_USER, cast(w.LPCWSTR)path, 0, w.KEY_READ, &root) != 0 {

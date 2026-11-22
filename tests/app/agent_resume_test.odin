@@ -11,7 +11,7 @@ import app "../../src"
 import "aio:agent"
 import "aio:commands"
 import "aio:layout"
-import "aio:platform"
+import "cosmos:platform"
 import "aio:procinfo"
 import "aio:term"
 

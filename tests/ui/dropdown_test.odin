@@ -3,7 +3,7 @@ package ui_test
 import "cosmos:font"
 import "cosmos:glyphs"
 import "cosmos:input"
-import "aio:platform"
+import "cosmos:platform"
 import "cosmos:render"
 import "aio:ui"
 import "core:testing"

@@ -2,7 +2,7 @@ package main
 
 import "aio:commands"
 import "cosmos:input"
-import "aio:platform"
+import "cosmos:platform"
 import "aio:settings"
 import "aio:ui"
 import "core:time"

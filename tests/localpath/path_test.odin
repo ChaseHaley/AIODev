@@ -6,21 +6,20 @@ import "core:os"
 import "core:strings"
 import "core:testing"
 
+// Drive prefixes and drive-absolute shapes are cosmos:winpath's and tested there.
 @(test)
-path_shapes_name_drive_prefixes_without_authorizing_them :: proc(t: ^testing.T) {
-	for row in ([?]struct {path: string, prefix, absolute, local: bool} {
-		{`C:\a.txt`, true, true, true},
-		{`c:/a.txt`, true, true, true},
-		{`C:a.txt`, true, false, false},
-		{`C:`, true, false, false},
-		{`1:\a.txt`, false, false, false},
-		{`\\server\share`, false, false, false},
-		{`C:\a.txt:stream`, true, true, false},
-		{`C:\NUL`, true, true, false},
-		{`relative\a.txt`, false, false, false},
+local_absolute_admits_only_plain_drive_paths :: proc(t: ^testing.T) {
+	for row in ([?]struct {path: string, local: bool} {
+		{`C:\a.txt`, true},
+		{`c:/a.txt`, true},
+		{`C:a.txt`, false},
+		{`C:`, false},
+		{`1:\a.txt`, false},
+		{`\\server\share`, false},
+		{`C:\a.txt:stream`, false},
+		{`C:\NUL`, false},
+		{`relative\a.txt`, false},
 	}) {
-		testing.expectf(t, localpath.has_drive_prefix(row.path) == row.prefix, "%q prefix", row.path)
-		testing.expectf(t, localpath.is_drive_absolute(row.path) == row.absolute, "%q absolute", row.path)
 		testing.expectf(t, localpath.local_absolute(row.path) == row.local, "%q local", row.path)
 	}
 }

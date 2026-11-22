@@ -1,7 +1,7 @@
 package main
 
 import "aio:localpath"
-import platform_api "aio:platform"
+import platform_api "cosmos:platform"
 import "aio:program_art"
 import "cosmos:render"
 import "aio:settings"

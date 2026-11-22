@@ -3,7 +3,7 @@ package ui
 import "aio:commands"
 import "aio:fuzzy"
 import "cosmos:input"
-import "aio:platform"
+import "cosmos:platform"
 import "cosmos:render"
 import "base:runtime"
 import "core:fmt"

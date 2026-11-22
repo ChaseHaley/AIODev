@@ -6,7 +6,7 @@ import "cosmos:font"
 import "cosmos:glyphs"
 import "cosmos:input"
 import "aio:instance"
-import platform_api "aio:platform"
+import platform_api "cosmos:platform"
 import "cosmos:perf"
 import "aio:program_art"
 import "cosmos:render"
@@ -191,7 +191,7 @@ device_abandon :: proc(s: ^Device_Start) {
 app_init :: proc(app: ^App) -> bool {
 	app_events.init(&app.events)
 	when FRAME_STATS {perf.start(&app.perf)}
-	when platform_api.AIO_HEADLESS {
+	when platform_api.HEADLESS {
 		// The same pixels on every machine: WARP (WORK-350).
 		app.render_driver = .Warp
 	}
@@ -239,7 +239,7 @@ app_init :: proc(app: ^App) -> bool {
 	app.runtime_runner = lua_host_run
 	if !load_settings(app) {return false}
 	font_error: font.Error
-	when platform_api.AIO_HEADLESS {
+	when platform_api.HEADLESS {
 		// The same pixels on every machine: bundled fonts (WORK-351).
 		app.fonts, font_error = font.system_create_private(test_fonts.files())
 	} else {

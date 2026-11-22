@@ -5,7 +5,7 @@ import app "../../src"
 import "aio:commands"
 import "cosmos:input"
 import "aio:layout"
-import "aio:platform"
+import "cosmos:platform"
 import "core:fmt"
 import "core:os"
 import "core:strings"
@@ -160,13 +160,13 @@ lua_host_actions_events_timers_budget_and_reload_without_processes :: proc(t: ^t
 
 	// A timer fires when the app clock passes its deadline. A stepped clock lets the timer be long
 	// enough that slow frames cannot reach it first.
-	when platform.AIO_HEADLESS {
+	when platform.HEADLESS {
 		testing.expect(t, strings.contains(lua_host_run(&state, "arm", `{"seconds":30}`), `"ok":true`))
 	} else {
 		testing.expect(t, strings.contains(lua_host_run(&state, "arm", `{"seconds":0.05}`), `"ok":true`))
 	}
 	app.tick(&state)
-	when platform.AIO_HEADLESS {
+	when platform.HEADLESS {
 		testing.expect(t, strings.contains(lua_host_run(&state, "fired"), `"result":false`))
 		// Running an action asks for a step; once it ran, the deadline is the timer's.
 		app.tick(&state)

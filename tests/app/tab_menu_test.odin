@@ -10,7 +10,7 @@ import "cosmos:testkit"
 import "cosmos:font"
 import "cosmos:glyphs"
 import "aio:layout"
-import "aio:platform"
+import "cosmos:platform"
 import "cosmos:render"
 import "aio:ui"
 

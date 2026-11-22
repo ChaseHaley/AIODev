@@ -5,6 +5,7 @@ import "core:encoding/json"
 import "core:os"
 import "core:path/filepath"
 import "core:strings"
+import "cosmos:winpath"
 
 @(private)
 OBSIDIAN_OPEN :: "obsidian://open?"
@@ -94,7 +95,7 @@ obsidian_note_path :: proc(path: string) -> bool {
 	if !localpath.valid_characters(path) {return false}
 	start := 0
 	for i := 0; i <= len(path); i += 1 {
-		if i < len(path) && !localpath.is_separator(path[i]) {continue}
+		if i < len(path) && !winpath.is_separator(path[i]) {continue}
 		part := path[start:i]
 		if part == "" || part == "." || part == ".." {return false}
 		start = i + 1

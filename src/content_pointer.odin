@@ -2,7 +2,7 @@ package main
 
 import "cosmos:input"
 import "aio:layout"
-import "aio:platform"
+import "cosmos:platform"
 import "aio:term"
 
 // The pointer over pane content and anything uncovered: pane focus, links, the selection, and programs

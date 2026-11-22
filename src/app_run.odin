@@ -1,6 +1,6 @@
 package main
 
-import "aio:platform"
+import "cosmos:platform"
 
 // Whether the main loop goes round again, and why it stopped. The procs below are its only writers.
 App_Run :: enum u8 {

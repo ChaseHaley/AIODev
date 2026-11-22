@@ -3,7 +3,7 @@ package term_test
 import "core:sync"
 import "core:testing"
 import "aio:ghostty"
-import "aio:platform"
+import "cosmos:platform"
 import "aio:term"
 
 // Terminal output can rename the window, attach a hyperlink to a cell, ring the bell and ask for a

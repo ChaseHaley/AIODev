@@ -6,7 +6,7 @@ import "core:strings"
 import "core:testing"
 import app "../../src"
 import "aio:layout"
-import "aio:platform"
+import "cosmos:platform"
 import "aio:search"
 
 @(private = "file")

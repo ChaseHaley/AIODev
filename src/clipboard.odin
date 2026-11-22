@@ -1,7 +1,7 @@
 package main
 
 import "cosmos:input"
-import "aio:platform"
+import "cosmos:platform"
 
 @(private)
 Clipboard_Chord :: enum {

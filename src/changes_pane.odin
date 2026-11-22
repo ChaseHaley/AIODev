@@ -3,7 +3,7 @@ package main
 import "aio:commands"
 import "cosmos:input"
 import "aio:layout"
-import "aio:platform"
+import "cosmos:platform"
 import "cosmos:render"
 import "aio:syntax"
 import "aio:turns"

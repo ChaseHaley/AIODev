@@ -1,7 +1,7 @@
 package main
 
 import "cosmos:glyphs"
-import "aio:platform"
+import "cosmos:platform"
 import "cosmos:render"
 import "core:log"
 

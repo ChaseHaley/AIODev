@@ -1,7 +1,7 @@
 package main
 
 import "cosmos:input"
-import "aio:platform"
+import "cosmos:platform"
 import "cosmos:render"
 import "core:math"
 import "aio:ui"

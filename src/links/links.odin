@@ -3,99 +3,12 @@ package links
 import "aio:localpath"
 import "core:mem"
 import "core:strings"
+import "cosmos:weburl"
+import "cosmos:winpath"
 
 // Range is a byte span in the text the caller scanned. End is exclusive.
 Range :: struct {
 	start, end: int,
-}
-
-// Allowed reports whether a target may be opened. Only plain http and https URLs pass: the
-// authority must exist and look like a host, and Windows path shapes, credentials, control
-// characters and backslashes are refused. This is the one allowlist both detection and the
-// opener use, so a target can never be clickable but unopenable, or openable but invisible.
-@(require_results)
-allowed :: proc(uri: string) -> bool {
-	if len(uri) < 8 {
-		return false
-	}
-	for c in uri {
-		if c <= 0x20 ||
-		   c == 0x7f ||
-		   (c >= 0x80 && c <= 0x9f) ||
-		   c == 0x00a0 ||
-		   c == 0x2028 ||
-		   c == 0x2029 ||
-		   c == '\\' ||
-		   c == '"' ||
-		   c == '<' ||
-		   c == '>' {
-			return false
-		}
-	}
-	separator := -1
-	for i := 0; i + 2 < len(uri); i += 1 {
-		if uri[i] == ':' && uri[i + 1] == '/' && uri[i + 2] == '/' {
-			separator = i
-			break
-		}
-	}
-	if separator <= 0 {
-		return false
-	}
-	if !scheme_is(uri[:separator], "http") && !scheme_is(uri[:separator], "https") {
-		return false
-	}
-	rest := uri[separator + 3:]
-	authority_end := len(rest)
-	for c, i in rest {
-		if c == '/' || c == '?' || c == '#' {
-			authority_end = i
-			break
-		}
-	}
-	authority := rest[:authority_end]
-	if authority == "" {
-		return false
-	}
-	// A drive-letter authority is a Windows path wearing a URL scheme, not a web host.
-	if len(authority) == 2 && authority[1] == ':' {
-		return false
-	}
-	if authority[0] == ':' || authority[0] == '.' || authority[len(authority) - 1] == ':' {
-		return false
-	}
-	has_alphanumeric, bracket_open, bracket_close := false, false, false
-	for c in authority {
-		switch {
-		case c >= 'a' && c <= 'z', c >= 'A' && c <= 'Z', c >= '0' && c <= '9':
-			has_alphanumeric = true
-		case c == '-', c == '.', c == '_', c == ':':
-		case c == '[':
-			bracket_open = true
-		case c == ']':
-			bracket_close = true
-		case:
-			return false
-		}
-	}
-	return has_alphanumeric && bracket_open == bracket_close
-}
-
-@(private, require_results)
-scheme_is :: proc(value, expected: string) -> bool {
-	if len(value) != len(expected) {
-		return false
-	}
-	for i in 0 ..< len(value) {
-		c := value[i]
-		if c >= 'A' && c <= 'Z' {
-			c += 'a' - 'A'
-		}
-		if c != expected[i] {
-			return false
-		}
-	}
-	return true
 }
 
 // Find appends terminal URLs in one line of text, with prose punctuation removed.
@@ -147,7 +60,7 @@ terminal_scheme_starts :: proc(text: string, at: int) -> bool {
 // The terminal also detects local Obsidian note links. They are not web targets.
 @(require_results)
 terminal_uri :: proc(uri: string) -> bool {
-	return obsidian_open(uri) || allowed(uri)
+	return obsidian_open(uri) || weburl.allowed(uri)
 }
 
 @(private, require_results)
@@ -264,11 +177,11 @@ normalize_web_input :: proc(raw: string, allocator := context.temp_allocator) ->
 	}
 	expanded: [TARGET_BYTES]u8 = ---
 	if spelling, fits := localpath.expand_variables(path, expanded[:]); fits {path = spelling}
-	if localpath.is_drive_absolute(path) {
+	if winpath.is_drive_absolute(path) {
 		if !localpath.local_absolute(path) {return "", false}
 		return web_file_url_from_path(path, allocator)
 	}
-	if web_file_url(trimmed) || allowed(trimmed) {
+	if web_file_url(trimmed) || weburl.allowed(trimmed) {
 		cloned, err := strings.clone(trimmed, allocator)
 		return cloned, err == nil
 	}
@@ -281,7 +194,7 @@ normalize_web_input :: proc(raw: string, allocator := context.temp_allocator) ->
 	}
 	candidate, err := strings.concatenate({prefix, trimmed}, allocator)
 	if err != nil {return "", false}
-	if !allowed(candidate) {delete(candidate, allocator); return "", false}
+	if !weburl.allowed(candidate) {delete(candidate, allocator); return "", false}
 	return candidate, true
 }
 
@@ -302,7 +215,7 @@ web_file_url_from_path :: proc(path: string, allocator: mem.Allocator) -> (strin
 	out[at], out[at + 1] = path[0], ':'
 	at += 2
 	for c in suffix {
-		if localpath.is_separator(c) {
+		if winpath.is_separator(c) {
 			out[at] = '/'
 		} else if web_file_url_path_byte(c) {
 			out[at] = c
@@ -326,7 +239,7 @@ web_file_url_path_byte :: proc(c: u8) -> bool {
 // Require a drive path, not a file authority (which could name a network share).
 @(private, require_results)
 web_file_url :: proc(uri: string) -> bool {
-	if len(uri) < 11 || !scheme_is(uri[:8], "file:///") {return false}
+	if len(uri) < 11 || !weburl.scheme_is(uri[:8], "file:///") {return false}
 	drive := uri[8]
 	if !(drive >= 'A' && drive <= 'Z' || drive >= 'a' && drive <= 'z') {return false}
 	if uri[9:11] != ":/" {return false}

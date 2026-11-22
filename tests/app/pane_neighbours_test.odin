@@ -3,7 +3,7 @@ package app_test
 import "core:slice"
 import "core:testing"
 import app "../../src"
-import "aio:platform"
+import "cosmos:platform"
 
 // A host window showing pane A beside pane B, with B then moved to a linked window placed by `place`
 // relative to the host: the desktop arrangement directional focus crosses (WORK-479).

@@ -3,7 +3,7 @@ package app_test
 import "core:strings"
 import "core:testing"
 import app "../../src"
-import "aio:platform"
+import "cosmos:platform"
 import "cosmos:render"
 
 @(test)

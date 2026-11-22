@@ -3,7 +3,7 @@ package app_test
 import app "../../src"
 import "aio:cli_protocol"
 import "aio:commands"
-import "aio:platform"
+import "cosmos:platform"
 import "aio:settings"
 import "aio:term"
 import "core:encoding/json"
@@ -183,7 +183,7 @@ pane_io_notice_clipboard_and_settings_share_the_apps_paths :: proc(t: ^testing.T
 	}
 	testing.expect(t, found, "app.notify publishes the ordinary Info notice")
 
-	when platform.AIO_HEADLESS {
+	when platform.HEADLESS {
 		state.settings.status.enabled = true
 		state.settings.status.notify_done = {.Banner}
 		window := state.windows[0]

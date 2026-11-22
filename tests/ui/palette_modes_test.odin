@@ -4,7 +4,7 @@ import "core:strings"
 import "core:testing"
 import "aio:commands"
 import "cosmos:font"
-import "aio:platform"
+import "cosmos:platform"
 import "aio:ui"
 
 @(private)

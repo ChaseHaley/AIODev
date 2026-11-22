@@ -2,7 +2,7 @@ package ui_test
 
 import "core:testing"
 import "core:time"
-import "aio:platform"
+import "cosmos:platform"
 import "aio:settings"
 import "aio:ui"
 

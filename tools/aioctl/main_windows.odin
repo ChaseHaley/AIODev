@@ -9,7 +9,7 @@ import "core:time"
 import w "core:sys/windows"
 import "aio:control"
 import "aio:instance"
-import "aio:platform"
+import "cosmos:platform"
 import "aio:verify_protocol"
 
 // repo and executable are this repository's verify build outputs: executable is the one this

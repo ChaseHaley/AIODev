@@ -6,7 +6,7 @@ import "core:os"
 import "core:strings"
 import "core:testing"
 import app "../../src"
-import "aio:platform"
+import "cosmos:platform"
 import "aio:settings"
 import "aio:ui"
 

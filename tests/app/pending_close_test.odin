@@ -7,7 +7,7 @@ import "core:strings"
 import "core:testing"
 import app "../../src"
 import "aio:layout"
-import "aio:platform"
+import "cosmos:platform"
 
 @(private="file")
 Pending_Fixture :: struct { state: app.App, directory, path: string }

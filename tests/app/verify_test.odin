@@ -8,7 +8,7 @@ import "core:testing"
 import app "../../src"
 import "aio:verify_protocol"
 import "aio:layout"
-import "aio:platform"
+import "cosmos:platform"
 import "aio:term_view"
 
 when app.AIO_CONTROL {

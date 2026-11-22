@@ -6,35 +6,16 @@ import "core:os"
 import "core:path/filepath"
 import "core:strings"
 import "core:unicode/utf8"
+import "cosmos:winpath"
 
-// Path shape, this machine's names and home expansion. These are facts about spellings only:
-// working-directory acceptance (pty) and click-time file opening (open_windows.odin) keep their own
-// admission policies on top of them.
-
-@(require_results)
-is_separator :: proc(c: u8) -> bool {
-	return c == '\\' || c == '/'
-}
-
-// An ASCII letter followed by a colon. A shape, not an authorization: drive-relative "C:name"
-// matches too.
-@(require_results)
-has_drive_prefix :: proc(path: string) -> bool {
-	if len(path) < 2 || path[1] != ':' {return false}
-	c := path[0]
-	return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
-}
-
-// A drive prefix followed by a separator, with no check of the rest.
-@(require_results)
-is_drive_absolute :: proc(path: string) -> bool {
-	return len(path) >= 3 && has_drive_prefix(path) && is_separator(path[2])
-}
+// Path shape (with cosmos:winpath), this machine's names and home expansion. These are facts about
+// spellings only: working-directory acceptance (pty) and click-time file opening (open_windows.odin) keep
+// their own admission policies on top of them.
 
 // Absolute local drive paths only. UNC, device names and alternate data streams never reach an opener.
 @(require_results)
 local_absolute :: proc(path: string) -> bool {
-	return is_drive_absolute(path) && valid_characters(path[2:])
+	return winpath.is_drive_absolute(path) && valid_characters(path[2:])
 }
 
 // The characters and components a local file name may use: no controls, invisible direction marks,
@@ -50,7 +31,7 @@ valid_characters :: proc(path: string) -> bool {
 	}
 	start := 0
 	for i := 0; i <= len(path); i += 1 {
-		if i != len(path) && !is_separator(path[i]) {continue}
+		if i != len(path) && !winpath.is_separator(path[i]) {continue}
 		part := path[start:i]
 		if part != "" && part != "." && part != ".." {
 			if part[len(part) - 1] == '.' || part[len(part) - 1] == ' ' {return false}
@@ -226,7 +207,7 @@ hex_value :: proc(c: u8) -> (u8, bool) {
 // their slashes.
 @(private)
 windows_separators :: proc(path: string) -> string {
-	if !has_drive_prefix(path) && !strings.has_prefix(path, `\\`) && !strings.has_prefix(path, "//") {
+	if !winpath.has_drive_prefix(path) && !strings.has_prefix(path, `\\`) && !strings.has_prefix(path, "//") {
 		return path
 	}
 	bytes := transmute([]u8)path

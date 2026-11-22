@@ -6,11 +6,11 @@ package app_test
 @(require) import "core:strings"
 @(require) import "core:testing"
 @(require) import app "../../src"
-@(require) import "aio:platform"
+@(require) import "cosmos:platform"
 @(require) import "aio:settings"
 @(require) import "aio:ui"
 
-when platform.AIO_HEADLESS {
+when platform.HEADLESS {
 	// Presses the Browse button of row `key`, answers its file dialog with `answer` (empty cancels)
 	// and lets the app collect the answer, as the event loop's tick does.
 	@(private = "file")

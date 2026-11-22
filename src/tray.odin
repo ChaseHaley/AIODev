@@ -1,6 +1,6 @@
 package main
 
-import "aio:platform"
+import "cosmos:platform"
 import "core:log"
 
 // The notification area icon: its menu, its events, and hiding windows to it and showing them again.

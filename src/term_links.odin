@@ -4,6 +4,7 @@ import "aio:layout"
 import "aio:links"
 import "aio:localpath"
 import "aio:term"
+import "cosmos:weburl"
 import "core:os"
 
 // The terminal link under the pointer: the pane content showing it and the cells the renderer
@@ -115,7 +116,7 @@ link_uri_target :: proc(uri: string) -> Target {
 		if path, ok := links.resolve_obsidian(uri, app_data); ok {return Vault_Note_Target{path}}
 		return Missing_Target{}
 	}
-	if links.allowed(uri) {return Web_Target{uri}}
+	if weburl.allowed(uri) {return Web_Target{uri}}
 	return nil
 }
 

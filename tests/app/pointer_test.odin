@@ -4,7 +4,7 @@ import "cosmos:input"
 import "core:testing"
 import app "../../src"
 import "aio:layout"
-import "aio:platform"
+import "cosmos:platform"
 import "cosmos:render"
 import "aio:ui"
 

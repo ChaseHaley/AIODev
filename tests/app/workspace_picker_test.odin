@@ -2,7 +2,7 @@ package app_test
 
 import app "../../src"
 import "cosmos:input"
-import "aio:platform"
+import "cosmos:platform"
 import "cosmos:render"
 import "aio:ui"
 import "core:fmt"

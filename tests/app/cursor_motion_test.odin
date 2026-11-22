@@ -3,7 +3,7 @@ package app_test
 import "cosmos:colour"
 import "aio:ghostty"
 import "cosmos:input"
-import "aio:platform"
+import "cosmos:platform"
 import "cosmos:render"
 import "aio:term"
 import "core:fmt"

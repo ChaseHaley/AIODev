@@ -3,7 +3,8 @@ package main
 import "aio:links"
 import "aio:localpath"
 import "aio:markdown"
-import "aio:platform"
+import "cosmos:platform"
+import "cosmos:weburl"
 import "core:log"
 import "core:path/filepath"
 import "core:strings"
@@ -91,7 +92,7 @@ target_from_link :: proc(
 	target: Target,
 	heading: string,
 ) {
-	if !link.wiki && links.allowed(link.href) {return Web_Target{link.href}, ""}
+	if !link.wiki && weburl.allowed(link.href) {return Web_Target{link.href}, ""}
 	spelling := link.href
 	if fragment := strings.index_byte(spelling, '#'); fragment >= 0 {
 		spelling, heading = spelling[:fragment], spelling[fragment + 1:]

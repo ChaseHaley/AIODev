@@ -2,7 +2,7 @@ package main
 
 import "aio:events"
 import "aio:layout"
-import "aio:platform"
+import "cosmos:platform"
 import "aio:settings"
 import "aio:ui"
 import "core:fmt"

@@ -2,7 +2,7 @@ package ui_test
 
 import "aio:commands"
 import "cosmos:input"
-import "aio:platform"
+import "cosmos:platform"
 import "aio:settings"
 import "aio:ui"
 import "core:strconv"

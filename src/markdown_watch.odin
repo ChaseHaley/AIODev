@@ -1,6 +1,6 @@
 package main
 
-import platform_api "aio:platform"
+import platform_api "cosmos:platform"
 import "aio:turns"
 import "base:runtime"
 import "core:path/filepath"

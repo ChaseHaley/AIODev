@@ -9,7 +9,7 @@ import "core:time"
 import app "../../src"
 import "aio:verify_protocol"
 import "aio:layout"
-import "aio:platform"
+import "cosmos:platform"
 import "aio:term"
 import "aio:ui"
 

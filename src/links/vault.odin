@@ -4,6 +4,7 @@ import "aio:localpath"
 import "core:os"
 import "core:path/filepath"
 import "core:strings"
+import "cosmos:winpath"
 
 // Obsidian wikilinks name notes, not paths: [[Note]] is whichever Note.md the vault holds. Resolving
 // one reads the filesystem, so it runs when a link is opened, never while a document draws.
@@ -27,7 +28,7 @@ VAULT_SEARCH_ENTRIES :: 50_000
 @(require_results)
 resolve_wiki :: proc(name, document: string, buffer: []u8) -> (string, bool) {
 	if name == "" {return buffer_path(buffer, document)}
-	if !localpath.valid_characters(name) || localpath.is_separator(name[0]) {return "", false}
+	if !localpath.valid_characters(name) || winpath.is_separator(name[0]) {return "", false}
 	// Without its trailing separator, so a document at a drive root joins names like any other.
 	folder := strings.trim_right(filepath.dir(document), `\/`)
 	root := vault_root(folder)

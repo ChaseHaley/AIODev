@@ -2,7 +2,7 @@ package ui_test
 
 import "cosmos:render"
 import "aio:ui"
-import "aio:platform"
+import "cosmos:platform"
 import "core:testing"
 import "core:fmt"
 

@@ -2,7 +2,7 @@ package ui
 
 import "cosmos:colour"
 import "cosmos:input"
-import "aio:platform"
+import "cosmos:platform"
 import "cosmos:render"
 import "base:runtime"
 import "core:math"

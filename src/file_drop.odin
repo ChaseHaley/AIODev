@@ -2,7 +2,7 @@ package main
 
 import "aio:layout"
 import "aio:localpath"
-import "aio:platform"
+import "cosmos:platform"
 import "aio:pty"
 import "aio:settings"
 import "core:fmt"

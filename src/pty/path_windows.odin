@@ -5,6 +5,7 @@ import "core:log"
 import "core:strings"
 import "core:unicode/utf8"
 import w "core:sys/windows"
+import "cosmos:winpath"
 
 // A working directory must stay on this machine. UNC, device, and drive-relative forms are refused
 // before any filesystem access. An accepted path is resolved and its final target checked, so a
@@ -82,12 +83,12 @@ open_failure :: proc() -> bool {
 // drive letter not followed by a separator is a drive-relative path whose target is not obvious.
 @(private, require_results)
 local_path_shape :: proc(path: string) -> bool {
-	separator :: localpath.is_separator
+	separator :: winpath.is_separator
 	if len(path) >= 2 && separator(path[0]) && separator(path[1]) {return false}
 	if len(path) >= 4 && separator(path[0]) && path[1] == '?' && path[2] == '?' && separator(path[3]) {
 		return false
 	}
-	if localpath.has_drive_prefix(path) && !localpath.is_drive_absolute(path) {return false}
+	if winpath.has_drive_prefix(path) && !winpath.is_drive_absolute(path) {return false}
 	return true
 }
 

@@ -2,7 +2,7 @@ package ui
 
 import "aio:commands"
 import "cosmos:input"
-import "aio:platform"
+import "cosmos:platform"
 import "cosmos:render"
 import "aio:search"
 import "core:strings"

@@ -9,7 +9,7 @@ import "core:testing"
 import app "../../src"
 import "aio:cli_protocol"
 import "aio:layout"
-import "aio:platform"
+import "cosmos:platform"
 
 @(test)
 layout_apply_opens_a_tab_of_named_panes_or_nothing :: proc(t: ^testing.T) {

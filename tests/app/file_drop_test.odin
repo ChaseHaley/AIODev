@@ -1,7 +1,7 @@
 package app_test
 
 import "aio:layout"
-import "aio:platform"
+import "cosmos:platform"
 import "aio:ui"
 import "core:fmt"
 import "core:os"

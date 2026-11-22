@@ -1,6 +1,6 @@
 package main
 
-import "aio:platform"
+import "cosmos:platform"
 import "cosmos:render"
 import "aio:ui"
 

@@ -1,6 +1,6 @@
 package main
 
-import platform_api "aio:platform"
+import platform_api "cosmos:platform"
 import "aio:term"
 import "core:time"
 
@@ -8,7 +8,7 @@ import "core:time"
 // it, so a build that drives time itself replaces these procs alone (WORK-349). Frame statistics,
 // search work budgets, pipe timeouts and the synchronized-output hold keep the system clock: they
 // measure real work or cross threads, and change no frame's content.
-when platform_api.AIO_HEADLESS {
+when platform_api.HEADLESS {
 	// Follows the system clock until a test sets `stepped`; from then on the clock reads `now` and
 	// `wall`, and time moves only when the test advances them.
 	Clock :: struct {

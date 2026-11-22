@@ -10,7 +10,7 @@ import "aio:cli_protocol"
 import "aio:commands"
 import "aio:events"
 import "aio:layout"
-import "aio:platform"
+import "cosmos:platform"
 import "aio:settings"
 
 // How these tests watch events: app.tick ends in app_events_deliver, which hands the tick's events to

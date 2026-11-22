@@ -4,7 +4,7 @@ import "base:runtime"
 import "core:testing"
 import "core:strings"
 import "core:math/rand"
-import "aio:platform"
+import "cosmos:platform"
 import "aio:ui"
 import app "../../src"
 

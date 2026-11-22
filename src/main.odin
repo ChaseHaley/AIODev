@@ -2,7 +2,7 @@ package main
 
 import "aio:instance"
 import "aio:localpath"
-import "aio:platform"
+import "cosmos:platform"
 import "core:fmt"
 import "core:log"
 import "core:os"

@@ -2,7 +2,7 @@ package main
 
 import "cosmos:input"
 import "aio:layout"
-import "aio:platform"
+import "cosmos:platform"
 
 // A file dialog the app is waiting on, and the window it was opened from. The app holds one or none
 // per purpose. The tick acts on a dialog's answer and closes it as soon as it is finished.

@@ -2,7 +2,7 @@ package ui
 
 import "cosmos:input"
 import "aio:line_match"
-import "aio:platform"
+import "cosmos:platform"
 import "cosmos:render"
 import "aio:search"
 

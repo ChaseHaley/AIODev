@@ -6,7 +6,7 @@ import "core:testing"
 // Only the desktop-lane test reads the clock; the headless build compiles it out.
 @(require) import "core:time"
 import app "../../src"
-import "aio:platform"
+import "cosmos:platform"
 import "cosmos:render"
 import "aio:settings"
 import "aio:ui"
@@ -160,7 +160,7 @@ pane_draws_the_icon_of_the_profile_it_was_launched_with :: proc(t: ^testing.T) {
 
 // Desktop lane (tests/app/lanes.json): reads pwsh.exe's real icon resource, which the headless
 // build replaces with a flat square.
-when !platform.AIO_HEADLESS {
+when !platform.HEADLESS {
 	@(test)
 	empty_icon_on_a_pwsh_profile_resolves_to_the_pwsh_executables_icon :: proc(t: ^testing.T) {
 		f: Palette_Fixture

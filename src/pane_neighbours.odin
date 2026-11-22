@@ -1,7 +1,7 @@
 package main
 
 import "aio:layout"
-import "aio:platform"
+import "cosmos:platform"
 
 // Focus left, right, up and down reach every pane of the tab on screen, whichever window shows it: the
 // window displaying the tab and the linked windows showing part of it (D-079), placed by where they are on

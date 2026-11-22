@@ -2,7 +2,7 @@ package main
 
 import "cosmos:input"
 import "aio:layout"
-import "aio:platform"
+import "cosmos:platform"
 import "cosmos:render"
 import "aio:term"
 import "aio:ui"

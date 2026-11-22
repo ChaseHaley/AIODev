@@ -1,7 +1,7 @@
 package main
 
 import "aio:cli_protocol"
-import "aio:platform"
+import "cosmos:platform"
 import "aio:ui"
 import "core:fmt"
 import "core:os"

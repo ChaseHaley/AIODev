@@ -2,7 +2,7 @@ package ui
 
 import "aio:commands"
 import "cosmos:input"
-import "aio:platform"
+import "cosmos:platform"
 import "cosmos:render"
 
 // Record mode of a search field, shared by the palette query and the Settings search (WORK-407). The

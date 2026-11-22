@@ -5,7 +5,7 @@ import app "../../src"
 import "aio:commands"
 import "cosmos:input"
 import "aio:layout"
-import "aio:platform"
+import "cosmos:platform"
 import "aio:term"
 import "core:fmt"
 import "core:os"
@@ -135,7 +135,7 @@ key_modes_window_sequences_fields_modes_and_timeout_without_processes :: proc(t:
 	mode_test_event(&state, w, .B, {.Control})
 	deadline, pending := app.key_sequence_deadline(w)
 	testing.expect(t, pending)
-	when platform.AIO_HEADLESS {
+	when platform.HEADLESS {
 		state.clock.stepped = true
 		state.clock.now = time.tick_add(deadline, time.Millisecond)
 		app.tick(&state)

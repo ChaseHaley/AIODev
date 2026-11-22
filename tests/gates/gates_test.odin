@@ -53,14 +53,14 @@ term_view_change_requires_a_live_pass_and_the_performance_tier :: proc(t: ^testi
 
 @(test)
 native_change_is_solo_and_names_the_native_boundary :: proc(t: ^testing.T) {
-	plan := gates.classify([]string{"src/platform/platform_windows.odin"})
+	plan := gates.classify([]string{"src/instance/instance_windows.odin"})
 	defer gates.plan_destroy(&plan)
 	testing.expect(t, plan.live)
 	testing.expect(t, plan.solo)
 	testing.expect(t, !plan.perf)
 	testing.expect(t, has_reason(plan, "native boundary"))
-	// Both backends live in the platform package: the headless suite and the desktop app tests.
-	testing.expect(t, has_test(plan, "headless"))
+	// A native boundary owes the desktop app tests; only app sources owe the headless suite.
+	testing.expect(t, !has_test(plan, "headless"))
 	testing.expect(t, plan.desktop)
 }
 
@@ -172,7 +172,7 @@ leaf_packages_select_fast_app_checks :: proc(t: ^testing.T) {
 
 @(test)
 composed_native_persistence_and_mixed_changes_keep_all_app_checks :: proc(t: ^testing.T) {
-	for path in ([]string{"src/window.odin", "src/platform/platform_windows.odin",
+	for path in ([]string{"src/window.odin", "src/pty/conpty_windows.odin",
 		"src/settings/settings.odin", "src/ui/palette.odin", "src/term/input.odin",
 		"src/unknown/module.odin", "tests/app/rail_test.odin"}) {
 		plan := gates.classify([]string{"src/fuzzy/fuzzy.odin", path})

@@ -3,7 +3,7 @@ package app_test
 import "cosmos:input"
 import "core:testing"
 import app "../../src"
-import "aio:platform"
+import "cosmos:platform"
 import "aio:ui"
 
 // The window fits its Settings page with its own interface text, so a long description wraps there

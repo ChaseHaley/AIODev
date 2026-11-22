@@ -7,7 +7,7 @@ import "cosmos:render"
 import "aio:settings"
 import "aio:ui"
 import "core:log"
-import "aio:platform"
+import "cosmos:platform"
 
 // Where a choice from the shared content list goes.
 Profile_Menu_Mode :: union #no_nil {

@@ -1,6 +1,6 @@
 package ui
 
-import "aio:platform"
+import "cosmos:platform"
 import "cosmos:render"
 
 TITLE_BAR_HEIGHT :: f32(platform.TITLE_BAR_HEIGHT)

@@ -7,7 +7,7 @@ import "core:strings"
 import w "core:sys/windows"
 import "core:testing"
 import app "../../src"
-import "aio:platform"
+import "cosmos:platform"
 import "cosmos:render"
 
 // The whole app, started through app_init with the headless backend: it opens a window on the

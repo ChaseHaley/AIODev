@@ -1,7 +1,7 @@
 package main
 
 import "aio:layout"
-import "aio:platform"
+import "cosmos:platform"
 import "aio:procinfo"
 import "aio:settings"
 import "aio:turns"

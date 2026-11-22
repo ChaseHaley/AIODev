@@ -4,7 +4,7 @@ import "aio:cli_protocol"
 import "aio:commands"
 import "cosmos:input"
 import "aio:localpath"
-import "aio:platform"
+import "cosmos:platform"
 import "aio:procinfo"
 import "aio:settings"
 import "aio:term"
@@ -104,7 +104,7 @@ control_app_notify :: proc(app: ^App, title, text: string) {
 	channels := status_notification_channels(&app.settings.status, .Done)
 	sound := .Sound in channels
 	if .Banner in channels {
-		result := platform.notification_show(&app.platform, headline, text, 0, sound)
+		result := platform.notification_show(&app.platform, NOTIFICATION_IDENTITY, headline, text, 0, sound)
 		if result == .None {
 			sound = false
 		} else if result != .Unavailable {

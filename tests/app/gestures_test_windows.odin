@@ -2,11 +2,11 @@ package app_test
 
 @(require) import "core:testing"
 @(require) import app "../../src"
-import "aio:platform"
+import "cosmos:platform"
 @(require) import w "core:sys/windows"
 
 // Desktop lane (tests/app/lanes.json): sends real window messages, so the headless build compiles it out.
-when !platform.AIO_HEADLESS {
+when !platform.HEADLESS {
 	@(private)
 	gesture_dispatch_pending :: proc(t: ^testing.T, s: ^app.App) {
 		events, err := platform.poll_events(&s.platform)

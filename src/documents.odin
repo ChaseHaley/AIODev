@@ -8,6 +8,7 @@ import "core:log"
 import "core:path/filepath"
 import "core:strings"
 import "core:unicode/utf8"
+import "cosmos:weburl"
 
 // Files, folders and web pages pinned to a pane, tab or workspace, to reopen from the pane header. A
 // pane's list lives with its content, so it follows the pane through every move between tabs and windows.
@@ -53,7 +54,7 @@ documents_destroy :: proc(list: ^Document_List) {
 }
 
 @(require_results)
-document_is_web :: proc(target: string) -> bool {return links.allowed(target)}
+document_is_web :: proc(target: string) -> bool {return weburl.allowed(target)}
 
 // Web addresses are case sensitive past the host, and local paths are not.
 @(private, require_results)

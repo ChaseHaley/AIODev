@@ -1,6 +1,6 @@
 package pty
 
-import "aio:localpath"
+import "cosmos:winpath"
 import "base:runtime"
 import "core:os"
 import "core:strings"
@@ -29,7 +29,7 @@ executable_token :: proc(command_line: string) -> string {
 // module name. Explicit paths stay explicit; only bare names are resolved by the terminal.
 @(require_results)
 is_explicit_path :: proc(token: string) -> bool {
-	return localpath.has_drive_prefix(token) || strings.contains_any(token, `/\`)
+	return winpath.has_drive_prefix(token) || strings.contains_any(token, `/\`)
 }
 
 @(private, require_results)
@@ -54,7 +54,7 @@ path_entry_text :: proc(entry: string) -> string {
 path_entry_trusted :: proc(entry, current_directory: string) -> bool {
 	text := path_entry_text(entry)
 	if text == "" || text == "." || text == ".." {return false}
-	if !localpath.is_drive_absolute(text) && !strings.has_prefix(text, `\\`) {return false}
+	if !winpath.is_drive_absolute(text) && !strings.has_prefix(text, `\\`) {return false}
 	return !same_directory(text, current_directory)
 }
 

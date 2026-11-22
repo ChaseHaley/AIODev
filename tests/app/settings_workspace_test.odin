@@ -5,7 +5,7 @@ import "core:os"
 import "core:strings"
 import "core:testing"
 import app "../../src"
-import "aio:platform"
+import "cosmos:platform"
 import "aio:ui"
 
 // The page's reading position and its open rows belong to the workspace, so leaving and coming back

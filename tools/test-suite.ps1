@@ -53,7 +53,7 @@ function Invoke-TestSuite {
                 $runs = @()
                 if ($headless) {
                     $runs += @{ Name = "app$suffix"; Selected = $headlessNames; Expected = $headless
-                        Defines = $appDefines + '-define:AIO_HEADLESS=true' }
+                        Defines = $appDefines + '-define:COSMOS_HEADLESS=true' }
                 }
                 if ($onDesktop) {
                     $runs += @{ Name = "app$suffix-desktop"; Selected = $onDesktop -join ','; Expected = $onDesktop
@@ -65,7 +65,7 @@ function Invoke-TestSuite {
                 [string[]] $testArgs = $flags + $resource + $run.Defines
                 if ($name -eq 'pure') { $testArgs += '-all-packages' }
                 # The headless suite compiles the app and platform with the headless backend (WORK-349).
-                if ($name -eq 'headless') { $testArgs += '-define:AIO_HEADLESS=true' }
+                if ($name -eq 'headless') { $testArgs += '-define:COSMOS_HEADLESS=true' }
                 $required = if ($name -eq 'app') { $run.Expected }
                     elseif ($run.Selected) { $run.Selected.Split(',') } else { @() }
                 $result = Invoke-OdinTest "tests/$name" $runName $testArgs $run.Selected $required $TestTimeoutSeconds

@@ -6,7 +6,7 @@ import "core:os"
 import "core:testing"
 import app "../../src"
 import "aio:layout"
-import "aio:platform"
+import "cosmos:platform"
 import "aio:ui"
 
 @(private="file")

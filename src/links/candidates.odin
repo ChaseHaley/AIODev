@@ -1,6 +1,7 @@
 package links
 
 import "core:strings"
+import "cosmos:weburl"
 
 // Row_Join says whether two rows without a wrap flag are one line a program wrapped itself. Word is a
 // line broken between words, which loses a space. Direct is a word broken at the edge.
@@ -268,7 +269,7 @@ selection_target :: proc(line: string, relative: bool) -> (Range, bool) {
 	resolved: [TARGET_BYTES]u8 = ---
 	readings := break_readings(text, buffer[:])
 	for variant in break_readings_next(&readings) {
-		if allowed(variant) {return {start, end}, true}
+		if weburl.allowed(variant) {return {start, end}, true}
 		absolute := absolute_spelling(variant)
 		if !absolute && (!relative || !strings.contains_any(variant, ".\\/") || !relative_plausible(variant)) {
 			continue

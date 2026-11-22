@@ -1,7 +1,7 @@
 package main
 
 import "aio:agent"
-import platform_api "aio:platform"
+import platform_api "cosmos:platform"
 import "aio:syntax"
 import "aio:turns"
 import "base:runtime"

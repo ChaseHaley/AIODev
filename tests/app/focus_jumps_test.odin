@@ -3,7 +3,7 @@ package app_test
 import "core:slice"
 import "core:testing"
 import app "../../src"
-import "aio:platform"
+import "cosmos:platform"
 
 @(private)
 jumps_all_reachable :: proc(data: rawptr, session: u32) -> bool {return true}

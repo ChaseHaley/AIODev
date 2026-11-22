@@ -14,7 +14,7 @@ import "aio:cli_protocol"
 import "aio:commands"
 import "aio:control"
 import "aio:layout"
-import "aio:platform"
+import "cosmos:platform"
 import "aio:term"
 
 @(private = "file")

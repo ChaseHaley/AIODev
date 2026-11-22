@@ -26,7 +26,7 @@ UI_PREFIXES :: []string {
 	"src/term/",
 	"src/ghostty/",
 }
-NATIVE_PREFIXES :: []string{"src/platform/", "src/instance/", "src/pty/", "src/procinfo/", "src/localpath/"}
+NATIVE_PREFIXES :: []string{"src/instance/", "src/pty/", "src/procinfo/", "src/localpath/"}
 NATIVE_FILES :: []string{"src/term/input.odin", "src/term/input_windows.odin"}
 PERF_PREFIXES :: []string{"src/term/", "src/pty/", "src/procinfo/", "src/term_view/"}
 PERF_FILES :: []string{"src/window.odin"}
@@ -140,8 +140,8 @@ classify_source :: proc(plan: ^Plan, path: string) {
 	} else {
 		plan.app_all = true
 	}
-	// The app and its platform backends also have a whole-app headless suite.
-	if !strings.contains(rest, "/") || strings.has_prefix(path, "src/platform/") {add_test(plan, "headless")}
+	// The app also has a whole-app headless suite.
+	if !strings.contains(rest, "/") {add_test(plan, "headless")}
 	if in_list(path, NATIVE_FILES) || has_prefix_any(path, NATIVE_PREFIXES) {
 		plan.live = true
 		plan.solo = true

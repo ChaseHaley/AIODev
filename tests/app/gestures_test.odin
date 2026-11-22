@@ -7,7 +7,7 @@ import "core:testing"
 import "core:time"
 import app "../../src"
 import "cosmos:input"
-import "aio:platform"
+import "cosmos:platform"
 import "aio:term"
 import "aio:ui"
 

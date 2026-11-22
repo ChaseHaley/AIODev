@@ -5,7 +5,7 @@ import "aio:control"
 import "cosmos:input"
 import "aio:layout"
 import "cosmos:perf"
-import "aio:platform"
+import "cosmos:platform"
 import "cosmos:render"
 import "aio:settings"
 import "aio:term"
@@ -543,10 +543,10 @@ when AIO_CONTROL {
 			state_value(r, state_key("window.%d.linked", n), window_linked(window))
 			state_value(r, state_key("window.%d.link_shown", n), window_linked(window) && window.phase == .Shown)
 		}
-		when platform.AIO_HEADLESS {verify_os_report(r, app)}
+		when platform.HEADLESS {verify_os_report(r, app)}
 	}
 
-	when platform.AIO_HEADLESS {
+	when platform.HEADLESS {
 		// What a headless instance asked of the operating system's services, which it only records:
 		// journeys read these keys where they would read the desktop.
 		verify_os_report :: proc(r: ^State_Report, app: ^App) {
@@ -1060,7 +1060,7 @@ when AIO_CONTROL {
 		}
 		// Only the headless backend's dialog answers from a script; a desktop one waits for a person.
 		if pick, ok := request.(verify_protocol.Pick); ok {
-			when platform.AIO_HEADLESS {
+			when platform.HEADLESS {
 				return platform.file_pick_script(&app.platform, pick.path) == .None ? .None : .Out_Of_Memory
 			} else {
 				_ = pick

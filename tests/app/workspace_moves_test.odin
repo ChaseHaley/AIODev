@@ -8,7 +8,7 @@ import "core:strings"
 import "core:testing"
 import app "../../src"
 import "aio:commands"
-import "aio:platform"
+import "cosmos:platform"
 import "aio:term"
 
 @(test)

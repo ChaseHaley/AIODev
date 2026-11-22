@@ -77,31 +77,6 @@ function Write-VersionHeader([string] $BuildId, [string] $Version) {
 
 New-Item -ItemType Directory -Force build | Out-Null
 
-function Get-Vcvars64([string] $Name) {
-    $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio/Installer/vswhere.exe'
-    if (-not (Test-Path -LiteralPath $vswhere)) { throw "MSVC C++ tools are required to build $Name (vswhere.exe not found)." }
-    $visualStudio = & $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
-    if (-not $visualStudio) { throw "MSVC C++ tools are required to build $Name." }
-    $vcvars = Join-Path $visualStudio 'VC/Auxiliary/Build/vcvars64.bat'
-    if (-not (Test-Path -LiteralPath $vcvars)) { throw "MSVC x64 environment script not found: $vcvars" }
-    return $vcvars
-}
-
-function Build-NativeLibrary([string] $Name, [string] $Source, [string] $CompilerFlags) {
-    $nativeRoot = Join-Path $PSScriptRoot 'build/native'
-    New-Item -ItemType Directory -Force $nativeRoot | Out-Null
-    $library = Join-Path $nativeRoot "$Name.lib"
-    $source = Join-Path $PSScriptRoot $Source
-    if ((Test-Path $library) -and (Get-Item $library).LastWriteTimeUtc -gt (Get-Item $source).LastWriteTimeUtc) { return }
-    $vcvars = Get-Vcvars64 $Name
-    $object = Join-Path $nativeRoot "$Name.obj"
-    $batch = Join-Path $nativeRoot "compile-$Name.cmd"
-    @("@echo off", "call `"$vcvars`" >nul 2>&1", 'if errorlevel 1 exit /b 1',
-      "cl /nologo /c $CompilerFlags /Fo`"$object`" `"$source`"",
-      'if errorlevel 1 exit /b 1', "lib /nologo /out:`"$library`" `"$object`"") | Set-Content -LiteralPath $batch
-    & cmd /d /c $batch
-    if ($LASTEXITCODE -ne 0) { throw "$Name library build failed." }
-}
 function Build-LuaJIT {
     $nativeRoot = Join-Path $PSScriptRoot 'build/native'
     $vendorRoot = Join-Path $PSScriptRoot 'vendor/luajit'
@@ -147,12 +122,9 @@ function Build-LuaJIT {
 }
 
 function Build-NativeLibraries {
-    # C++/WinRT keeps the notification ABI and COM event ownership out of the Odin UI code.
-    Build-NativeLibrary 'notifications' 'native/windows_notifications.cpp' '/std:c++20 /EHsc /MT /O2 /W4 /WX'
-    # The WebView2 SDK is pinned in vendor/webview2 (D-106); its loader links statically.
-    $webviewInclude = Join-Path $PSScriptRoot 'vendor/webview2/include'
-    Build-NativeLibrary 'webview' 'native/windows_webview.cpp' "/std:c++20 /EHsc /MT /O2 /W4 /WX /I`"$webviewInclude`""
-    Build-NativeLibrary 'md4c' 'vendor/md4c/md4c.c' '/MT /O2 /W3'
+    # cosmos:platform links the notification and WebView2 bridges from the Cosmos checkout.
+    Build-CosmosNative $cosmosRoot
+    Build-NativeLibrary $PSScriptRoot 'md4c' 'vendor/md4c/md4c.c' '/MT /O2 /W3'
     Build-LuaJIT
 }
 if ($Task -ne 'test') { Build-NativeLibraries }
@@ -336,7 +308,7 @@ switch ($Task) {
         # The same harness with the headless backend (WORK-349), in its own directory so its aio.exe
         # names it as the server.
         New-Item -ItemType Directory -Force build/headless | Out-Null
-        Build-App @('-debug', '-subsystem:console', '-define:AIO_CONTROL=true', '-define:AIO_HEADLESS=true') `
+        Build-App @('-debug', '-subsystem:console', '-define:AIO_CONTROL=true', '-define:COSMOS_HEADLESS=true') `
             'build/headless/aiodev-headless.exe'
         foreach ($name in $toolPackages) {
             Invoke-Odin build "tools/$name" "-out:build/$name.exe" -debug '-subsystem:console' @flags
@@ -402,14 +374,12 @@ switch ($Task) {
         foreach ($name in $sourcePackages) {
             Invoke-Odin check "src/$name" -no-entry-point @flags
         }
-        # The headless backend (WORK-349) must keep compiling beside the Win32 one.
-        Invoke-Odin check src/platform -no-entry-point '-define:AIO_HEADLESS=true' @flags
         if (Get-ChildItem src -Filter *.odin -File) {
             Invoke-Odin check src @flags
             Invoke-Odin check src @appFlags
             Invoke-Odin check src '-define:AIO_CONTROL=true' @appFlags
-            Invoke-Odin check src '-define:AIO_HEADLESS=true' @appFlags
-            Invoke-Odin check src '-define:AIO_HEADLESS=true' '-define:AIO_CONTROL=true' @appFlags
+            Invoke-Odin check src '-define:COSMOS_HEADLESS=true' @appFlags
+            Invoke-Odin check src '-define:COSMOS_HEADLESS=true' '-define:AIO_CONTROL=true' @appFlags
         }
         foreach ($name in $toolPackages) {
             Invoke-Odin check "tools/$name" @flags

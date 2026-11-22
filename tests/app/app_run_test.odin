@@ -10,7 +10,7 @@ import app "../../src"
 import "aio:commands"
 import "aio:control"
 import "aio:layout"
-import "aio:platform"
+import "cosmos:platform"
 
 // Restart asks no question, as quit asks none, so each way of running it ends the loop to start again,
 // and a quit already under way stays a quit.

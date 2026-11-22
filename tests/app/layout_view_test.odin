@@ -3,7 +3,7 @@ package app_test
 import app "../../src"
 import "aio:cli_protocol"
 import "aio:commands"
-import "aio:platform"
+import "cosmos:platform"
 import "core:encoding/json"
 import "core:fmt"
 import "core:os"

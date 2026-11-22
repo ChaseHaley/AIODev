@@ -4,7 +4,7 @@ import "aio:commands"
 import "cosmos:input"
 import "aio:layout"
 import "aio:links"
-import "aio:platform"
+import "cosmos:platform"
 import "cosmos:render"
 import "aio:search"
 import "aio:ui"
@@ -746,7 +746,7 @@ web_body_rect :: proc(app: ^App, w: ^Window, pane: ^Web_Pane, card: layout.Rect)
 web_body_message :: proc(app: ^App, pane: ^Web_Pane) -> (message: string, recover: bool) {
 	switch {
 	case !platform.webview_supported():
-		when platform.AIO_HEADLESS {
+		when platform.HEADLESS {
 			return "Web panes are unavailable in headless mode.", false
 		} else {
 			return "Web panes are off while AIODev runs as administrator. Use Open in default browser above.", false

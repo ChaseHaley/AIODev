@@ -1,7 +1,7 @@
 package main
 
 import "aio:layout"
-import "aio:platform"
+import "cosmos:platform"
 import "aio:ui"
 
 // The window's half of layout.PANE_VIEW_TRANSITIONS. Each tab owns its view, tree.fill and the zooms of

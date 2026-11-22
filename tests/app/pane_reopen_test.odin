@@ -6,7 +6,7 @@ import "core:strings"
 import "core:testing"
 import app "../../src"
 import "aio:layout"
-import "aio:platform"
+import "cosmos:platform"
 
 @(test)
 closed_panes_and_tabs_reopen_in_place :: proc(t: ^testing.T) {

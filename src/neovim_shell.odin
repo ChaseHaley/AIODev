@@ -2,7 +2,7 @@ package main
 
 import "aio:layout"
 import "aio:neovim"
-import "aio:platform"
+import "cosmos:platform"
 import "aio:settings"
 import "core:fmt"
 import "core:log"

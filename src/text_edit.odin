@@ -2,7 +2,7 @@ package main
 
 import "cosmos:input"
 import "aio:markdown"
-import "aio:platform"
+import "cosmos:platform"
 import "core:strings"
 import "core:unicode/utf8"
 

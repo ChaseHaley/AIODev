@@ -3,7 +3,7 @@ package app_test
 import app "../../src"
 import "aio:commands"
 import "cosmos:input"
-import "aio:platform"
+import "cosmos:platform"
 import "cosmos:render"
 import "aio:settings"
 import "aio:term"
