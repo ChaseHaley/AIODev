@@ -1,7 +1,7 @@
 package main
 
 import "aio:markdown"
-import "aio:ui"
+import "aio:views"
 import "core:strings"
 
 // Collapsed headings in a Markdown pane (WORK-447): a heading's chevron folds its section, everything up
@@ -138,10 +138,10 @@ markdown_view_fitted :: proc(
 	w: ^Window,
 	pane: ^Markdown_Pane,
 	document: ^markdown.Document,
-	g: ui.Markdown_Geometry,
+	g: views.Markdown_Geometry,
 ) {
 	markdown_folds_sync(pane)
-	ui.markdown_view_fit(
+	views.markdown_view_fit(
 		&pane.view, document, pane.revision, &w.ui_text, app.family, g.width, w.scale, pane.folds.folded[:],
 		app.markdown_style,
 	)

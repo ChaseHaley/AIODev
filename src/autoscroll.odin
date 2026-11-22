@@ -5,9 +5,10 @@ import "aio:layout"
 import "cosmos:platform"
 import "cosmos:render"
 import "aio:term"
-import "aio:ui"
+import "aio:views"
 import "core:math"
 import "core:time"
+import "cosmos:ui"
 
 // Middle-click scrolling, as Windows applications do it: a Middle press on a terminal, Markdown, Agent
 // changes or settings pane drops an anchor, and the pane scrolls toward the pointer, faster the further
@@ -213,7 +214,7 @@ autoscroll_animate :: proc(app: ^App, w: ^Window, frame: ui.Frame_Time) -> bool 
 		markdown_scroll(w, document, pane, pixels)
 	case .Settings:
 		_ = settings_layout_for(w, pane)
-		ui.editor_scroll_by(&w.editor, dip)
+		views.editor_scroll_by(&w.editor, dip)
 	case .Changes:
 		changes := changes_find(app, pane.content.id)
 		if changes == nil {

@@ -3,10 +3,10 @@ package main
 import "aio:events"
 import "aio:settings"
 import "aio:term"
-import "aio:ui"
 import "core:log"
 import "core:os"
 import "core:strings"
+import "cosmos:ui"
 
 // Reading the settings file and applying a revision of it to the running app.
 

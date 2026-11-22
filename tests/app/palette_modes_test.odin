@@ -6,13 +6,14 @@ import "core:strings"
 import "core:testing"
 import app "../../src"
 import "aio:commands"
-import "aio:ui"
+import "aio:views"
+import "cosmos:ui"
 
 @(private)
 palette_mode_commands := [?]struct {
 	action: app.Action,
 	name:   string,
-	mode:   ui.Palette_Mode,
+	mode:   views.Palette_Mode,
 }{
 	{app.Action.Palette_Tabs, "app.palette_tabs", .Tabs},
 	{app.Action.Palette_Workspaces, "app.palette_workspaces", .Workspaces},
@@ -85,14 +86,14 @@ palette_mode_binding_survives_reload_and_opens_its_mode :: proc(t: ^testing.T) {
 		},
 	)
 	testing.expect(t, app.palette_active(s, first))
-	testing.expect_value(t, s.palette.mode, ui.Palette_Mode.Tabs)
-	testing.expect_value(t, ui.palette_query(&s.palette), "")
+	testing.expect_value(t, s.palette.mode, views.Palette_Mode.Tabs)
+	testing.expect_value(t, views.palette_query(&s.palette), "")
 }
 
 @(private)
 palette_select_id :: proc(t: ^testing.T, s: ^app.App, id: u64) -> bool {
 	for result, index in s.palette.results {
-		if ui.palette_target(&s.palette, result).id != id {continue}
+		if views.palette_target(&s.palette, result).id != id {continue}
 		s.palette.selected = index
 		return true
 	}
@@ -186,5 +187,5 @@ palette_mode_actions_open_directly_and_default_to_all :: proc(t: ^testing.T) {
 		testing.expect(t, !ui.presence_is_open(s.palette.presence))
 	}
 	app.run_action(s, first, .Command_Palette)
-	testing.expect_value(t, s.palette.mode, ui.Palette_Mode.All)
+	testing.expect_value(t, s.palette.mode, views.Palette_Mode.All)
 }

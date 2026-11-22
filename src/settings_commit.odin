@@ -3,7 +3,7 @@ package main
 import "aio:commands"
 import "aio:events"
 import "aio:settings"
-import "aio:ui"
+import "aio:views"
 import "core:fmt"
 import "core:os"
 import "core:strings"
@@ -98,11 +98,11 @@ Settings_Base :: union #no_nil {
 }
 
 Settings_Page :: struct {
-	page: ^ui.Editor,
+	page: ^views.Editor,
 }
 
 Settings_Kept :: struct {
-	page: ^ui.Editor,
+	page: ^views.Editor,
 }
 
 Settings_Current :: struct {}
@@ -226,9 +226,9 @@ settings_result_text :: proc(result: Settings_Result, workflow: Settings_Workflo
 }
 
 // Shows a result that did not apply on the page that asked. True when the change applied.
-settings_page_report :: proc(p: ^ui.Editor, result: Settings_Result, workflow: Settings_Workflow) -> bool {
+settings_page_report :: proc(p: ^views.Editor, result: Settings_Result, workflow: Settings_Workflow) -> bool {
 	if result.status == .Applied {return true}
-	if text := settings_result_text(result, workflow); text != "" {ui.editor_message(p, text, true)}
+	if text := settings_result_text(result, workflow); text != "" {views.editor_message(p, text, true)}
 	return false
 }
 
@@ -259,12 +259,12 @@ settings_save_value :: proc(app: ^App, key, value, failure: string) -> bool {
 settings_change :: proc(app: ^App, edit: Settings_Edit, base: Settings_Base) -> Settings_Result {
 	if app.settings_path == "" {return settings_change_memory(app, edit)}
 	source: string
-	origin: ^ui.Editor
+	origin: ^views.Editor
 	switch b in base {
 	case Settings_Page:
-		source, origin = ui.editor_source(b.page), b.page
+		source, origin = views.editor_source(b.page), b.page
 	case Settings_Kept:
-		source = ui.editor_source(b.page)
+		source = views.editor_source(b.page)
 	case Settings_Current:
 		data, read_error := os.read_entire_file(app.settings_path, context.temp_allocator)
 		if read_error != nil {return {status = .Failed}}
@@ -295,7 +295,7 @@ settings_change :: proc(app: ^App, edit: Settings_Edit, base: Settings_Base) -> 
 	case .Conflict:
 		for window in app.windows {
 			p := &window.editor
-			if ui.editor_source(p) == previous {ui.editor_revision_stale(p, .Changed_Outside)}
+			if views.editor_source(p) == previous {views.editor_revision_stale(p, .Changed_Outside)}
 		}
 		return {status = .Conflict}
 	case .IO:
@@ -677,7 +677,7 @@ Settings_Publication :: union #no_nil {
 // pending text and selection while receiving the new source.
 Publish_Saved :: struct {
 	previous, revision: string,
-	origin:             ^ui.Editor,
+	origin:             ^views.Editor,
 }
 
 // Settings were read from the file again. Every page adopts the file, keeping drafts whose rows remain.
@@ -698,27 +698,27 @@ Publish_Reset :: struct {
 settings_publish :: proc(app: ^App, publication: Settings_Publication) {
 	for window in app.windows {
 		p := &window.editor
-		if !ui.editor_loaded(p) {continue}
+		if !views.editor_loaded(p) {continue}
 		window.dirty = true
 		switch publish in publication {
 		case Publish_Saved:
-			if ui.editor_source(p) != publish.previous {
-				ui.editor_revision_stale(p, .Changed_Outside)
+			if views.editor_source(p) != publish.previous {
+				views.editor_revision_stale(p, .Changed_Outside)
 				continue
 			}
 			settings_publish_page(app, p, publish.revision, p == publish.origin ? .Saved_Origin : .Saved_Other)
 		case Publish_Reloaded:
 			settings_publish_page(app, p, publish.revision, .Reloaded)
 		case Publish_Unavailable:
-			ui.editor_revision_stale(p, .Refresh_Failed)
+			views.editor_revision_stale(p, .Refresh_Failed)
 		case Publish_Reset:
 			// The page is built afresh rather than carried over, which drops what the user had open.
 			replacement, built := settings_page_build(app, publish.revision, nil)
 			if !built {
-				ui.editor_revision_stale(p, .Refresh_Failed)
+				views.editor_revision_stale(p, .Refresh_Failed)
 				continue
 			}
-			ui.editor_destroy(p)
+			views.editor_destroy(p)
 			p^ = replacement
 		}
 	}
@@ -727,26 +727,31 @@ settings_publish :: proc(app: ^App, publication: Settings_Publication) {
 // Rebuilds one page for `revision` and lets the page adopt it. Every way out short of adopting
 // leaves the page behind the revision with its source and drafts intact.
 @(private)
-settings_publish_page :: proc(app: ^App, p: ^ui.Editor, revision: string, adoption: ui.Editor_Adoption) {
-	if !ui.editor_process_capture(p) {
+settings_publish_page :: proc(
+	app: ^App,
+	p: ^views.Editor,
+	revision: string,
+	adoption: views.Editor_Adoption,
+) {
+	if !views.editor_process_capture(p) {
 		notify(app, .Error, "Could not preserve the active program draft.")
-		ui.editor_revision_stale(p, .Refresh_Failed)
+		views.editor_revision_stale(p, .Refresh_Failed)
 		return
 	}
-	view, view_error := ui.editor_view_take(p)
-	defer ui.editor_view_destroy(&view)
+	view, view_error := views.editor_view_take(p)
+	defer views.editor_view_destroy(&view)
 	if view_error != nil {
 		notify(app, .Error, "Could not refresh the settings page. Reopen Settings to reload it.")
-		ui.editor_revision_stale(p, .Refresh_Failed)
+		views.editor_revision_stale(p, .Refresh_Failed)
 		return
 	}
 	replacement, built := settings_page_build(app, revision, &view)
-	defer ui.editor_destroy(&replacement)
+	defer views.editor_destroy(&replacement)
 	if !built {
-		ui.editor_revision_stale(p, .Refresh_Failed)
+		views.editor_revision_stale(p, .Refresh_Failed)
 		return
 	}
-	if ui.editor_adopt(p, &replacement, adoption) == .Draft_Copy_Failed {
+	if views.editor_adopt(p, &replacement, adoption) == .Draft_Copy_Failed {
 		notify(app, .Error, "Could not preserve program drafts.")
 	}
 }

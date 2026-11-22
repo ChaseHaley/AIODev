@@ -1,0 +1,172 @@
+package views
+
+import "cosmos:render"
+import "aio:settings"
+import "core:fmt"
+import "core:math"
+import "cosmos:ui"
+
+// The narrowest a font list's popup gets, in DIPs, so long family names stay readable.
+@(private)
+FONT_CHOICE_WIDTH :: 360
+
+// The control, range and rounding a schema setting gets wherever it is edited. Settings and the
+// palette both start from this, so a setting cannot show one control on the page and another in
+// the palette. Dynamic choices (themes, fonts) and the current value are filled in by the caller.
+// The strings are borrowed from the static schema.
+schema_row :: proc(entry: settings.Schema_Entry) -> Editor_Row {
+	row := Editor_Row {
+		key           = entry.key,
+		title         = entry.title,
+		description   = entry.description,
+		keywords      = entry.keywords,
+		default_value = entry.default_value,
+		minimum       = entry.valid.minimum,
+		maximum       = entry.valid.maximum,
+		choices       = entry.names,
+		choice_labels = entry.labels,
+	}
+	if entry.slider != (settings.Range{}) {
+		row.minimum, row.maximum = entry.slider.minimum, entry.slider.maximum
+	}
+	switch entry.control {
+	case .By_Kind:
+		switch entry.kind {
+		case .String:
+			row.kind = .Text
+		case .Int:
+			row.kind, row.step = .Integer, 1
+		case .Float:
+			row.kind, row.step = .Number, 0.1
+		case .Bool:
+			row.kind = .Toggle
+		case .Enum:
+			row.kind = .Choice
+		case .Set:
+			row.kind, row.multiple = .Choice, true
+		}
+	case .Shortcut:
+		row.kind, row.shortcut_mode = .Shortcut, .Single
+	case .Choice:
+		row.kind = .Choice
+	case .Group:
+		row.kind = .Text
+	}
+	if entry.step > 0 {row.step = entry.step}
+	switch entry.live_choices {
+	case .None:
+	case .Themes:
+		row.flags += {.Live_Choices}
+	case .Shell_Fonts, .Interface_Fonts, .Markdown_Fonts, .Markdown_Code_Fonts:
+		row.flags += {.Live_Choices}
+		row.searchable, row.choice_min_width = true, FONT_CHOICE_WIDTH
+	}
+	row.font_filter = entry.choice_filter != ""
+	return row
+}
+
+// The rounding step of a numeric row; rows built outside the schema fall back by kind.
+@(private)
+row_step :: proc(row: ^Editor_Row) -> f64 {
+	if row.step > 0 {return row.step}
+	return row.kind == .Integer ? 1 : 0.1
+}
+
+// The multiple of `step` nearest `value`, as the double its decimal text parses to. A bare
+// round(value / step) * step drifts in binary (3 * 0.1 is 0.30000000000000004), and the shortest
+// round-trip text of that drift is what %g would show and save, so the product is rounded once more
+// to the decimals the step itself has.
+@(private)
+step_round :: proc(step, value: f64) -> f64 {
+	rounded := math.round(value / step) * step
+	scale := 1.0
+	for _ in 0 ..< 9 {
+		if abs(step * scale - math.round(step * scale)) < 0.000000001 {break}
+		scale *= 10
+	}
+	return math.round(rounded * scale) / scale
+}
+
+// A number rounded to `step` as a setting value: whole numbers for whole steps, two decimals for
+// steps finer than a tenth.
+@(private)
+number_text :: proc(step, value: f64) -> string {
+	rounded := step_round(step, value)
+	if step >= 1 {return fmt.tprintf("%d", int(rounded))}
+	if step < 0.1 {return fmt.tprintf("%.2f", rounded)}
+	return fmt.tprintf("%g", rounded)
+}
+
+// Wide ranges such as scrollback lines use a logarithmic track so small values stay reachable.
+@(private)
+slider_fraction :: proc(minimum, maximum, value: f64) -> f32 {
+	span := maximum - minimum
+	if span <= 0 {return 0}
+	v := clamp(value, minimum, maximum)
+	if span > 1000 {return f32(math.ln(v - minimum + 1) / math.ln(span + 1))}
+	return f32((v - minimum) / span)
+}
+
+@(private)
+slider_value :: proc(minimum, maximum: f64, fraction: f32) -> f64 {
+	f := f64(clamp(fraction, 0, 1))
+	span := maximum - minimum
+	if span > 1000 {return minimum + math.exp(f * math.ln(span + 1)) - 1}
+	return minimum + f * span
+}
+
+// A slider groove filled to `fraction` with its thumb, centred vertically in `track`.
+@(private)
+slider_draw :: proc(list: ^render.Draw_List, track: render.Rect, fraction: f32, theme: Theme, scale: f32) {
+	cy := track.y + track.height / 2
+	groove := render.Rect{track.x, cy - 2 * scale, track.width, 4 * scale}
+	ui.draw_rect(list, {rect = groove, color = theme.border, radius = ui.pill_radius(groove)})
+	groove.width *= fraction
+	ui.draw_rect(list, {rect = groove, color = theme.accent, radius = ui.pill_radius(groove)})
+	size := ui.SLIDER_THUMB * scale
+	thumb := render.Rect{track.x + track.width * fraction - size / 2, cy - size / 2, size, size}
+	ui.draw_rect(list, {rect = thumb, color = theme.accent, radius = ui.pill_radius(thumb)})
+	ui.draw_rect(list, {rect = thumb, color = theme.surface, radius = ui.pill_radius(thumb), stroke = 2 * scale})
+}
+
+// A setting's reset button: faint while the value is the default, raised and lit under the pointer
+// otherwise. It sits inside its row, so a selected row's tint stays under the hover.
+@(private)
+reset_button_draw :: proc(
+	list: ^render.Draw_List,
+	theme: Theme,
+	rect: render.Rect,
+	modified, hovered, selected: bool,
+	pointer: [2]f32,
+	scale: f32,
+) -> render.Error {
+	b := ui.Button {
+		rect     = rect,
+		hover    = hovered ? 1 : 0,
+		radius   = ui.RADIUS_CONTROL,
+		disabled = !modified,
+		on_tint  = selected,
+	}
+	face, ink, err := ui.button_draw(list, theme, b, scale, pointer)
+	if !modified {ink.a *= 0.5}
+	ui.icon_draw(list, .Undo, face, ink, ui.ICON_BUTTON, scale)
+	return err
+}
+
+// The label of the choice a search matched, after a row's title in the detail style with its matched
+// letters lit, so a row found by one of its values says which. Nothing is drawn without room for it.
+@(private)
+choice_hint_draw :: proc(
+	text: ^ui.Text,
+	list: ^render.Draw_List,
+	theme: Theme,
+	value: string,
+	positions: []int,
+	x, baseline, room: f32,
+) -> render.Build_Status {
+	if value == "" {return .Ok}
+	small := ui.text_styled(text, .Detail)
+	if room <= ui.text_width(&small, ui.ELLIPSIS) {return .Ok}
+	width := min(ui.text_width(&small, value), room)
+	return ui.draw_text(&small, list, value, x, baseline, theme.muted, width, positions, theme.accent)
+}

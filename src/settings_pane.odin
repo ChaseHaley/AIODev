@@ -3,8 +3,9 @@ package main
 import "aio:layout"
 import "cosmos:render"
 import "aio:settings"
-import "aio:ui"
+import "aio:views"
 import "cosmos:input"
+import "cosmos:ui"
 
 // Where the settings page lives in the window: the one settings pane, its layout and drawing, and
 // opening it. The page's rows come from settings_editor.odin; its saves from settings_commit.odin.
@@ -59,15 +60,15 @@ settings_pane_rect :: proc(w: ^Window) -> layout.Pane_Rect {
 }
 
 @(require_results)
-// Composition fits the editor before input/drawing; ui.editor_layout remains a pure geometry query.
+// Composition fits the editor before input/drawing; views.editor_layout remains a pure geometry query.
 // Fitting with the interface text re-wraps descriptions for a new width, DPI or font size.
-settings_layout_for :: proc(w: ^Window, pane: layout.Pane_Rect) -> ui.Editor_Layout {
-	l := ui.editor_layout(pane_body_rect(w, pane), w.scale, len(w.editor.sections) > 0)
-	ui.editor_fit(&w.editor, l, &w.ui_text)
+settings_layout_for :: proc(w: ^Window, pane: layout.Pane_Rect) -> views.Editor_Layout {
+	l := views.editor_layout(pane_body_rect(w, pane), w.scale, len(w.editor.sections) > 0)
+	views.editor_fit(&w.editor, l, &w.ui_text)
 	return l
 }
 
-settings_layout :: proc(w: ^Window) -> ui.Editor_Layout {
+settings_layout :: proc(w: ^Window) -> views.Editor_Layout {
 	return settings_layout_for(w, settings_pane_rect(w))
 }
 
@@ -88,7 +89,7 @@ settings_pane_under_pointer :: proc(
 @(require_results)
 settings_pane_draw :: proc(app: ^App, w: ^Window, pane: layout.Pane_Rect) -> render.Build_Status {
 	if result := settings_page_icons(app, &w.editor, w.scale); result != .Ok {return result}
-	return ui.editor_draw(
+	return views.editor_draw(
 		&w.editor,
 		settings_layout_for(w, pane),
 		&w.list,
@@ -103,7 +104,7 @@ settings_pane_draw :: proc(app: ^App, w: ^Window, pane: layout.Pane_Rect) -> ren
 // loaded Icon PNG, a program's found icon. Rows scrolled away or filtered out ask nothing, so they
 // hold no slot in the program icon cache.
 @(private = "file", require_results)
-settings_page_icons :: proc(app: ^App, p: ^ui.Editor, scale: f32) -> render.Build_Status {
+settings_page_icons :: proc(app: ^App, p: ^views.Editor, scale: f32) -> render.Build_Status {
 	for &row in p.rows {
 		if row.opener != "" || row.profile != "" {row.icon_atlas = {}}
 	}
@@ -140,13 +141,13 @@ workspace_settings_sync :: proc(app: ^App, workspace: ^Workspace) {
 	present := workspace_has_content(workspace, {.Settings, 0})
 	if !present {
 		workspace.settings_scroll = 0
-		ui.editor_view_destroy(&workspace.settings_view)
+		views.editor_view_destroy(&workspace.settings_view)
 	}
 	for w in app.windows {
 		if w.workspace != workspace {continue}
 		if present {
-			if !ui.editor_loaded(&w.editor) && app.settings_path != "" {_ = settings_load(app, &w.editor)}
-		} else if ui.editor_loaded(&w.editor) {ui.editor_destroy(&w.editor)}
+			if !views.editor_loaded(&w.editor) && app.settings_path != "" {_ = settings_load(app, &w.editor)}
+		} else if views.editor_loaded(&w.editor) {views.editor_destroy(&w.editor)}
 	}
 }
 
@@ -189,18 +190,18 @@ editor_open :: proc(app: ^App, w: ^Window, floating := false) -> ^Window {
 	if floating {
 		if pane_place(app, w, w.workspace, w.workspace.selected, window_tree(w).focus,
 		              {.Settings, 0}, .Float, true) {return w}
-		ui.editor_destroy(&w.editor)
+		views.editor_destroy(&w.editor)
 		return nil
 	}
 	tab, reserved := tab_record_reserve(w.workspace)
 	if !reserved {
-		ui.editor_destroy(&w.editor)
+		views.editor_destroy(&w.editor)
 		notify(app, .Error, "Could not open the settings tab.")
 		return nil
 	}
 	if layout.init(&tab.tree, {.Settings, 0}) != nil {
 		tab_record_free(tab)
-		ui.editor_destroy(&w.editor)
+		views.editor_destroy(&w.editor)
 		notify(app, .Error, "Could not open the settings tab.")
 		return nil
 	}
@@ -220,7 +221,7 @@ settings_claims :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {
 @(private)
 settings_pointer_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: input.Mouse_Move_Event) {
 	if owner != .Settings_Page {
-		if ui.editor_hover_clear(&w.editor) {w.dirty = true}
+		if views.editor_hover_clear(&w.editor) {w.dirty = true}
 		return
 	}
 	x, y := f32(e.x), f32(e.y)
@@ -231,44 +232,44 @@ settings_pointer_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: 
 		if w.editor.dropdown.bar_hover {w.editor.dropdown.bar_hover, w.dirty = false, true}
 		if w.editor.page_bar_hover {w.editor.page_bar_hover, w.dirty = false, true}
 		if w.editor.strip.bar_hover {w.editor.strip.bar_hover, w.dirty = false, true}
-		if ui.editor_scrollbar_dragging(&w.editor) && .Left in e.buttons &&
-		   ui.editor_drag(&w.editor, settings_layout(w), &w.ui_text, x, y) {w.dirty = true}
+		if views.editor_scrollbar_dragging(&w.editor) && .Left in e.buttons &&
+		   views.editor_drag(&w.editor, settings_layout(w), &w.ui_text, x, y) {w.dirty = true}
 		pointer_set(app, w, .Arrow)
 		return
 	}
 	l := settings_layout_for(w, pane)
-	changed := ui.editor_hover(&w.editor, l, x, y, &w.ui_text)
-	if .Left in e.buttons && ui.editor_drag(&w.editor, l, &w.ui_text, x, y) {changed = true}
+	changed := views.editor_hover(&w.editor, l, x, y, &w.ui_text)
+	if .Left in e.buttons && views.editor_drag(&w.editor, l, &w.ui_text, x, y) {changed = true}
 	if changed {w.dirty = true}
-	pointer_set(app, w, ui.editor_pointer(&w.editor, l, x, y, &w.ui_text))
+	pointer_set(app, w, views.editor_pointer(&w.editor, l, x, y, &w.ui_text))
 }
 
 @(private)
 settings_tooltip :: proc(_: ^App, w: ^Window, _, _: f32) -> string {
 	if w.editor.hover_reset >= 0 {return "Reset setting"}
 	if w.editor.hover_browse {return "Choose icon…"}
-	if w.editor.keys_hover {return ui.key_search_tooltip(&w.editor.keys)}
-	if label := ui.editor_profile_tooltip(&w.editor); label != "" {return label}
-	if label := ui.editor_filter_tooltip(&w.editor); label != "" {return label}
+	if w.editor.keys_hover {return views.key_search_tooltip(&w.editor.keys)}
+	if label := views.editor_profile_tooltip(&w.editor); label != "" {return label}
+	if label := views.editor_filter_tooltip(&w.editor); label != "" {return label}
 	// A description cut short by its row's width shows whole; the tooltip wraps it.
-	return ui.editor_description_tooltip(&w.editor)
+	return views.editor_description_tooltip(&w.editor)
 }
 
 @(private)
 settings_shortcut :: proc(_: ^App, w: ^Window, _, _: f32) -> Tooltip_Shortcut {
-	if w.editor.hover_reset < 0 && w.editor.keys_hover {return ui.KEY_SEARCH_TOGGLE}
+	if w.editor.hover_reset < 0 && w.editor.keys_hover {return views.KEY_SEARCH_TOGGLE}
 	return nil
 }
 
 @(private)
 settings_pointer_cancel :: proc(_: ^App, w: ^Window) {
-	ui.editor_hover_clear(&w.editor)
-	ui.editor_pointer_cancel(&w.editor)
+	views.editor_hover_clear(&w.editor)
+	views.editor_pointer_cancel(&w.editor)
 }
 
 @(private)
 settings_leave :: proc(_: ^App, w: ^Window) {
-	ui.editor_hover_clear(&w.editor)
+	views.editor_hover_clear(&w.editor)
 }
 
 // A press on a settings pane focuses it, then reaches the page.
@@ -285,8 +286,8 @@ settings_page_press :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) 
 	x, y := f32(e.x), f32(e.y)
 	extend := .Shift in e.modifiers
 	clicks := click_mark_press(&w.editor.clicks, x, e.time_ns, extend)
-	press := ui.editor_press(&w.editor, settings_layout(w), &w.ui_text, x, y, extend, clicks)
-	track, side := ui.editor_take_track(&w.editor)
+	press := views.editor_press(&w.editor, settings_layout(w), &w.ui_text, x, y, extend, clicks)
+	track, side := views.editor_take_track(&w.editor)
 	switch track {
 	case .None:
 	case .Page:
@@ -307,12 +308,12 @@ settings_release :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) -> 
 	if e.button != .Left || confirmation_current(w) != nil || palette_active(app, w) {return false}
 	w.dirty = true
 	x, y := f32(e.x), f32(e.y)
-	if ui.editor_order_dragging(&w.editor, .Process_Groups) {
-		_ = ui.editor_drag(&w.editor, settings_layout(w), &w.ui_text, x, y)
-		editor_outcome(app, w, ui.editor_release(&w.editor))
+	if views.editor_order_dragging(&w.editor, .Process_Groups) {
+		_ = views.editor_drag(&w.editor, settings_layout(w), &w.ui_text, x, y)
+		editor_outcome(app, w, views.editor_release(&w.editor))
 		return true
 	}
 	if !settings_active(w) {return false}
-	editor_outcome(app, w, ui.editor_release(&w.editor))
+	editor_outcome(app, w, views.editor_release(&w.editor))
 	return true
 }

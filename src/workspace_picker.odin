@@ -4,7 +4,7 @@ import "cosmos:input"
 import "cosmos:platform"
 import "cosmos:render"
 import "core:math"
-import "aio:ui"
+import "cosmos:ui"
 
 // Which part of the picker is open; nil is closed. workspace_picker_transition and workspace_picker_list_set
 // are its only writers, so a move target, a drag hold or a row press ends with the list it belongs to.

@@ -4,8 +4,9 @@ import app "../../src"
 import "cosmos:input"
 import "aio:layout"
 import "cosmos:platform"
-import "aio:ui"
+@(require) import "aio:views"
 import "core:testing"
+import "cosmos:ui"
 
 @(test)
 field_edit_failed_clipboard_preserves_unicode_selection :: proc(t: ^testing.T) {

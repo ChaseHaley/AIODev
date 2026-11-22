@@ -3,12 +3,12 @@ package main
 import "aio:layout"
 import "aio:links"
 import "aio:localpath"
-import "aio:ui"
 import "core:log"
 import "core:path/filepath"
 import "core:strings"
 import "core:unicode/utf8"
 import "cosmos:weburl"
+import "cosmos:ui"
 
 // Files, folders and web pages pinned to a pane, tab or workspace, to reopen from the pane header. A
 // pane's list lives with its content, so it follows the pane through every move between tabs and windows.

@@ -1,9 +1,9 @@
 package main
 
 import "cosmos:render"
-import "aio:ui"
 import "core:strings"
 import "core:unicode/utf8"
+import "cosmos:ui"
 
 Workspace_Icon :: struct {
 	preset: int,

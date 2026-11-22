@@ -12,7 +12,7 @@ import "cosmos:platform"
 import "cosmos:render"
 import "cosmos:search"
 import "aio:turns"
-import "aio:ui"
+import "aio:views"
 import "core:log"
 import "core:os"
 import "core:path/filepath"
@@ -20,6 +20,7 @@ import "core:strings"
 import "core:sync"
 import "core:time"
 import "cosmos:textedit"
+import "cosmos:ui"
 
 // Markdown panes: one local file per pane, read-only, reloaded when the file changes (WORK-319).
 
@@ -117,7 +118,7 @@ Markdown_App :: struct {
 	// The watch thread set it: a folder reported news, so the next tick reads what changed.
 	markdown_woken:    bool,
 	// The markdown.* settings with their fonts loaded; markdown_style_apply sets it.
-	markdown_style:    ui.Markdown_Style,
+	markdown_style:    views.Markdown_Style,
 }
 
 // Loads the fonts the markdown.* settings name. A family that is not installed follows the interface
@@ -143,7 +144,7 @@ markdown_style_apply :: proc(app: ^App) {
 			log.warnf("markdown: font %q is not available (%v); following the shell font", s.code_font_family, err)
 		}
 	}
-	app.markdown_style = ui.markdown_style_from(s, family, semibold, code)
+	app.markdown_style = views.markdown_style_from(s, family, semibold, code)
 }
 
 // Owned by App.markdown_panes; panes refer to it by id and the poll frees it once none does.
@@ -152,8 +153,8 @@ Markdown_Pane :: struct {
 	path, title, directory: string,
 	documents: Document_List,
 	load:                   Markdown_Load,
-	view:                   ui.Markdown_View,
-	outline:                ui.Markdown_Outline,
+	view:                   views.Markdown_View,
+	outline:                views.Markdown_Outline,
 	folds:                  Markdown_Folds,
 	search:                 markdown.Search,
 	// Counts the documents the pane has shown, loads and edit view rebuilds alike, so a view lays out
@@ -194,8 +195,8 @@ markdown_pane_destroy :: proc(state: ^Markdown_App, pane: ^Markdown_Pane) {
 		markdown.document_destroy(&loaded.document)
 		delete(loaded.source)
 	}
-	ui.markdown_view_destroy(&pane.view)
-	ui.markdown_outline_destroy(&pane.outline)
+	views.markdown_view_destroy(&pane.view)
+	views.markdown_outline_destroy(&pane.outline)
 	markdown_folds_destroy(&pane.folds)
 	markdown.search_destroy(&pane.search)
 	delete(pane.path)
@@ -300,7 +301,7 @@ markdown_load_enter :: proc(pane: ^Markdown_Pane, next: Markdown_Load) -> bool {
 		pane.revision += 1
 		// The file's text is now what the pane shows, not an editor's.
 		pane.followed = {}
-		ui.markdown_selection_clear(&pane.view)
+		views.markdown_selection_clear(&pane.view)
 		markdown.search_restart(&pane.search)
 	}
 	return changed
@@ -388,7 +389,7 @@ markdown_find_select :: proc(w: ^Window, pane: ^Markdown_Pane, upward: bool) {
 	match := pane.search.matches[pane.search.selected]
 	if shown, found := markdown_pane_rect(w, pane.id); found {
 		visible := int(pane_body_rect(w, shown).height)
-		ui.markdown_reveal(&pane.view, match.start, match.end, visible)
+		views.markdown_reveal(&pane.view, match.start, match.end, visible)
 	}
 }
 
@@ -599,8 +600,8 @@ markdown_under_pointer :: proc(app: ^App, w: ^Window, x, y: f32) -> (^Markdown_P
 }
 
 @(private, require_results)
-markdown_geometry_of :: proc(app: ^App, w: ^Window, shown: layout.Pane_Rect) -> ui.Markdown_Geometry {
-	return ui.markdown_geometry(pane_body_rect(w, shown), w.scale, app.markdown_style.column)
+markdown_geometry_of :: proc(app: ^App, w: ^Window, shown: layout.Pane_Rect) -> views.Markdown_Geometry {
+	return views.markdown_geometry(pane_body_rect(w, shown), w.scale, app.markdown_style.column)
 }
 
 // The link the pointer is over in pane `id`, or -1.
@@ -624,16 +625,16 @@ markdown_outline_of :: proc(
 	app: ^App,
 	w: ^Window,
 	pane: ^Markdown_Pane,
-	g: ui.Markdown_Geometry,
+	g: views.Markdown_Geometry,
 ) -> (
-	ui.Markdown_Outline_Column,
+	views.Markdown_Outline_Column,
 	bool,
 ) {
 	document := markdown_document(pane)
 	if document == nil {return {}, false}
 	markdown_view_fitted(app, w, pane, document, g)
-	ui.markdown_outline_sync(&pane.outline, &pane.view, document)
-	return ui.markdown_outline_column(&pane.outline, g, w.scale)
+	views.markdown_outline_sync(&pane.outline, &pane.view, document)
+	return views.markdown_outline_column(&pane.outline, g, w.scale)
 }
 
 // The heading under a point on the pane's outline: on a bar, or on a row while the panel is open.
@@ -655,14 +656,14 @@ markdown_outline_under :: proc(
 	if !visible {return -1, false}
 	outline := &pane.outline
 	open := markdown_outline_open(w, pane.id)
-	bar := ui.markdown_outline_bar_at(column, x, y)
+	bar := views.markdown_outline_bar_at(column, x, y)
 	if !open && bar < 0 {return -1, false}
-	panel := ui.markdown_outline_panel(outline, markdown_document(pane), column, g.area, &w.ui_text, w.scale)
+	panel := views.markdown_outline_panel(outline, markdown_document(pane), column, g.area, &w.ui_text, w.scale)
 	if !open {
-		ui.markdown_outline_reveal(outline, panel, ui.markdown_outline_current(outline, &pane.view), w.scale)
+		views.markdown_outline_reveal(outline, panel, views.markdown_outline_current(outline, &pane.view), w.scale)
 	}
-	if bar >= 0 {return ui.markdown_outline_bar_heading(outline, column, bar), true}
-	return ui.markdown_outline_row_at(outline, panel, x, y, w.scale)
+	if bar >= 0 {return views.markdown_outline_bar_heading(outline, column, bar), true}
+	return views.markdown_outline_row_at(outline, panel, x, y, w.scale)
 }
 
 // The wheel over an open panel whose rows overflow scrolls them rather than the page.
@@ -680,12 +681,12 @@ markdown_outline_wheel :: proc(
 	column, visible := markdown_outline_of(app, w, pane, g)
 	if !visible {return false}
 	outline := &pane.outline
-	panel := ui.markdown_outline_panel(outline, markdown_document(pane), column, g.area, &w.ui_text, w.scale)
-	if _, inside := ui.markdown_outline_row_at(outline, panel, x, y, w.scale); !inside {return false}
-	if !ui.markdown_outline_scrollable(panel) {return false}
-	if ui.markdown_outline_wheel(outline, panel, rows, w.scale) {
+	panel := views.markdown_outline_panel(outline, markdown_document(pane), column, g.area, &w.ui_text, w.scale)
+	if _, inside := views.markdown_outline_row_at(outline, panel, x, y, w.scale); !inside {return false}
+	if !views.markdown_outline_scrollable(panel) {return false}
+	if views.markdown_outline_wheel(outline, panel, rows, w.scale) {
 		// The rows moved under the pointer.
-		row, _ := ui.markdown_outline_row_at(outline, panel, x, y, w.scale)
+		row, _ := views.markdown_outline_row_at(outline, panel, x, y, w.scale)
 		markdown_hover_set(w, Markdown_Outline_Hover{pane.id, row})
 		w.dirty = true
 	}
@@ -698,7 +699,7 @@ markdown_message_draw :: proc(
 	app: ^App,
 	w: ^Window,
 	pane: ^Markdown_Pane,
-	g: ui.Markdown_Geometry,
+	g: views.Markdown_Geometry,
 ) -> render.Build_Status {
 	if render.push_layer(&w.list, g.area, 0) != .None {return .Ok}
 	message := "This file could not be read."
@@ -742,7 +743,7 @@ markdown_pane_draw :: proc(
 	if pane.heading != "" {
 		if offset, found := markdown.heading_find(document, pane.heading); found {
 			if markdown_fold_reveal(pane, offset) {markdown_view_fitted(app, w, pane, document, g)}
-			ui.markdown_scroll_to_offset(view, offset, visible)
+			views.markdown_scroll_to_offset(view, offset, visible)
 		}
 		delete(pane.heading)
 		pane.heading = ""
@@ -750,12 +751,12 @@ markdown_pane_draw :: proc(
 	if e := pane.editor; e != nil && e.reveal {
 		e.reveal = false
 		caret := markdown.live_display(document, e.buffer.caret)
-		if rect, _, found := ui.markdown_caret_at(view, document, caret); found {
-			_ = ui.markdown_scroll_to_show(view, rect, visible)
+		if rect, _, found := views.markdown_caret_at(view, document, caret); found {
+			_ = views.markdown_scroll_to_show(view, rect, visible)
 		}
 	}
-	ui.markdown_scroll_by(view, 0, visible)
-	find: ui.Markdown_Find
+	views.markdown_scroll_by(view, 0, visible)
+	find: views.Markdown_Find
 	if pane.search.phase != .Off {
 		c := app.settings.colors
 		find = {
@@ -768,23 +769,24 @@ markdown_pane_draw :: proc(
 	}
 	hover := markdown_link_hovered(w, pane.id)
 	caret := markdown_caret_shown(w, pane, shown)
-	folds := ui.Markdown_Folds{pane.folds.folded[:], -1}
+	folds := views.Markdown_Folds{pane.folds.folded[:], -1}
 	if fold, over := w.markdown_hover.(Markdown_Fold_Hover); over && fold.pane == pane.id {
 		folds.hover = fold.heading
 	}
-	result = ui.markdown_draw(view, document, g, &w.list, &w.ui_text, app.theme, find, hover, caret, folds)
+	result = views.markdown_draw(view, document, g, &w.list, &w.ui_text, app.theme, find, hover, caret, folds)
 	if result != .Ok {return true, result}
-	ui.markdown_outline_sync(&pane.outline, view, document)
+	views.markdown_outline_sync(&pane.outline, view, document)
 	outline, open := w.markdown_hover.(Markdown_Outline_Hover)
 	open &&= outline.pane == pane.id
-	return true, ui.markdown_outline_draw(&pane.outline, view, document, g, &w.list, &w.ui_text, app.theme, open,
+	return true, views.markdown_outline_draw(&pane.outline, view, document, g, &w.list, &w.ui_text,
+		app.theme, open,
 		open ? outline.heading : -1, w.scale)
 }
 
 @(private)
 markdown_scroll :: proc(w: ^Window, pane: ^Markdown_Pane, shown: layout.Pane_Rect, delta: int) {
 	visible := int(pane_body_rect(w, shown).height)
-	if ui.markdown_scroll_by(&pane.view, delta, visible) {w.dirty = true}
+	if views.markdown_scroll_by(&pane.view, delta, visible) {w.dirty = true}
 }
 
 // Rows are the scrolled text lines, positive toward the top, as the mouse wheel reports them.
@@ -794,7 +796,7 @@ markdown_wheel :: proc(app: ^App, w: ^Window, x, y: f32, rows: int) -> bool {
 	if shown.content.kind != .Markdown {return false}
 	if pane == nil {return true}
 	if markdown_outline_wheel(app, w, pane, shown, x, y, rows) {return true}
-	markdown_scroll(w, pane, shown, -rows * ui.markdown_line(&pane.view))
+	markdown_scroll(w, pane, shown, -rows * views.markdown_line(&pane.view))
 	return true
 }
 
@@ -805,7 +807,7 @@ markdown_page :: proc(app: ^App, w: ^Window, pages: f64) {
 	shown, found := markdown_pane_rect(w, pane.id)
 	if !found {return}
 	visible := int(markdown_geometry_of(app, w, shown).area.height)
-	page := max(1, visible - ui.markdown_line(&pane.view))
+	page := max(1, visible - views.markdown_line(&pane.view))
 	markdown_scroll(w, pane, shown, int(pages * f64(page)))
 }
 
@@ -817,7 +819,7 @@ markdown_selected :: proc(app: ^App, w: ^Window) -> string {
 	// An editor copies the file's own text, markup included.
 	if e := pane.editor; e != nil {return textedit.selected_text(&e.buffer)}
 	document := markdown_document(pane)
-	return document == nil ? "" : ui.markdown_selected_text(&pane.view, document)
+	return document == nil ? "" : views.markdown_selected_text(&pane.view, document)
 }
 
 markdown_copy :: proc(app: ^App, w: ^Window) {
@@ -831,7 +833,7 @@ markdown_select_all :: proc(app: ^App, w: ^Window) {
 		textedit.select_all(&e.buffer)
 		markdown_editor_sync(pane)
 	} else if document := markdown_document(pane); document != nil {
-		ui.markdown_select_all(&pane.view, document)
+		views.markdown_select_all(&pane.view, document)
 	}
 	w.dirty = true
 }
@@ -872,7 +874,7 @@ markdown_key :: proc(app: ^App, w: ^Window, e: input.Key_Event) {
 	if pane == nil {return}
 	shown, found := markdown_pane_rect(w, pane.id)
 	if !found {return}
-	line := ui.markdown_line(&pane.view)
+	line := views.markdown_line(&pane.view)
 	#partial switch logical.key {
 	case .Arrow_Up:
 		markdown_scroll(w, pane, shown, -line)
@@ -883,11 +885,11 @@ markdown_key :: proc(app: ^App, w: ^Window, e: input.Key_Event) {
 	case .Page_Down:
 		markdown_page(app, w, 1)
 	case .Home:
-		markdown_scroll(w, pane, shown, -ui.markdown_total(&pane.view))
+		markdown_scroll(w, pane, shown, -views.markdown_total(&pane.view))
 	case .End:
-		markdown_scroll(w, pane, shown, ui.markdown_total(&pane.view))
+		markdown_scroll(w, pane, shown, views.markdown_total(&pane.view))
 	case .Escape:
-		ui.markdown_selection_clear(&pane.view)
+		views.markdown_selection_clear(&pane.view)
 		w.dirty = true
 	}
 }
@@ -923,7 +925,7 @@ markdown_link_menu :: proc(
 ) -> bool {
 	document := markdown_document(pane)
 	if document == nil {return false}
-	link := ui.markdown_link_at(&pane.view, markdown_geometry_of(app, w, shown), x, y)
+	link := views.markdown_link_at(&pane.view, markdown_geometry_of(app, w, shown), x, y)
 	if link < 0 {return false}
 	buffer: [links.TARGET_BYTES]u8 = ---
 	target, _ := target_from_link(document.links[link], pane.path, buffer[:])
@@ -953,14 +955,14 @@ markdown_text_at :: proc(
 markdown_link_clicked :: proc(
 	pane: ^Markdown_Pane,
 	document: ^markdown.Document,
-	g: ui.Markdown_Geometry,
+	g: views.Markdown_Geometry,
 	x, y: f32,
 	control: bool,
 ) -> int {
-	link := ui.markdown_link_at(&pane.view, g, x, y)
+	link := views.markdown_link_at(&pane.view, g, x, y)
 	if link < 0 || control || !markdown_editing(pane) {return link}
 	e := pane.editor
-	source := markdown.live_source(document, ui.markdown_offset_at(&pane.view, document, g, x, y))
+	source := markdown.live_source(document, views.markdown_offset_at(&pane.view, document, g, x, y))
 	return source >= e.built_from && source <= e.built_to ? -1 : link
 }
 
@@ -1013,9 +1015,9 @@ markdown_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: input.Mo
 			shape = .Text
 			if link := markdown_link_clicked(pane, document, g, x, y, .Control in e.modifiers); link >= 0 {
 				hover, shape = Markdown_Link_Hover{pane.id, link}, .Hand
-			} else if ui.markdown_task_at(&pane.view, document, g, x, y) != markdown.NO_SOURCE {
+			} else if views.markdown_task_at(&pane.view, document, g, x, y) != markdown.NO_SOURCE {
 				shape = .Hand
-			} else if folding, on_chevron := ui.markdown_fold_at(&pane.view, document, g, x, y); folding >= 0 {
+			} else if folding, on_chevron := views.markdown_fold_at(&pane.view, document, g, x, y); folding >= 0 {
 				hover = Markdown_Fold_Hover{pane.id, folding}
 				if on_chevron {shape = .Hand}
 			}
@@ -1060,14 +1062,14 @@ markdown_selecting_extend :: proc(
 	w: ^Window,
 	pane: ^Markdown_Pane,
 	document: ^markdown.Document,
-	g: ui.Markdown_Geometry,
+	g: views.Markdown_Geometry,
 	selecting: Markdown_Selecting,
 	x, pointer_y: f32,
 ) {
 	y := clamp(pointer_y, g.area.y, max(g.area.y, g.area.y + g.area.height - 1))
 	switch unit, by_unit := selecting.unit.?; {
 	case !markdown_editing(pane):
-		ui.markdown_select_at(&pane.view, ui.markdown_offset_at(&pane.view, document, g, x, y), true)
+		views.markdown_select_at(&pane.view, views.markdown_offset_at(&pane.view, document, g, x, y), true)
 	case by_unit:
 		markdown_edit_unit_drag(w, pane, g, x, y, unit, selecting.from, selecting.to)
 	case:
@@ -1100,7 +1102,7 @@ markdown_autoscroll_tick :: proc(app: ^App, w: ^Window, now: time.Tick) {
 		w.markdown_gesture = selecting
 		return
 	}
-	reach := 3 * ui.markdown_line(&pane.view)
+	reach := 3 * views.markdown_line(&pane.view)
 	markdown_scroll(w, pane, shown, clamp(int(distance) / 4, -reach, reach) + (distance < 0 ? -1 : 1))
 	markdown_selecting_extend(w, pane, document, g, selecting, x, y)
 	selecting.scroll_at = time.tick_add(now, AUTOSCROLL_INTERVAL)
@@ -1135,7 +1137,7 @@ markdown_press :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) {
 		if heading >= 0 {
 			start := pane.outline.headings[heading].start
 			if markdown_fold_reveal(pane, start) {markdown_view_fitted(app, w, pane, document, g)}
-			ui.markdown_scroll_to_offset(&pane.view, start, int(g.area.height))
+			views.markdown_scroll_to_offset(&pane.view, start, int(g.area.height))
 		}
 		return
 	}
@@ -1151,7 +1153,7 @@ markdown_press :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) {
 			return
 		}
 	}
-	if heading, on_chevron := ui.markdown_fold_at(&pane.view, document, g, x, y); on_chevron {
+	if heading, on_chevron := views.markdown_fold_at(&pane.view, document, g, x, y); on_chevron {
 		markdown_fold_toggle(pane, heading)
 		return
 	}
@@ -1161,7 +1163,7 @@ markdown_press :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) {
 			return
 		}
 	}
-	if mark := ui.markdown_task_at(&pane.view, document, g, x, y); mark != markdown.NO_SOURCE {
+	if mark := views.markdown_task_at(&pane.view, document, g, x, y); mark != markdown.NO_SOURCE {
 		markdown_task_toggle(app, pane, mark)
 		return
 	}
@@ -1169,8 +1171,8 @@ markdown_press :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) {
 		at := markdown_edit_point(w, pane, g, x, y, .Shift in e.modifiers)
 		w.markdown_clicks = .Shift in e.modifiers ? Click_Run{} : Click_Run{pane.id, x, y, e.time_ns, 1, at}
 	} else {
-		offset := ui.markdown_offset_at(&pane.view, document, g, x, y)
-		ui.markdown_select_at(&pane.view, offset, .Shift in e.modifiers)
+		offset := views.markdown_offset_at(&pane.view, document, g, x, y)
+		views.markdown_select_at(&pane.view, offset, .Shift in e.modifiers)
 	}
 	w.markdown_gesture = Markdown_Selecting{pane = pane.id}
 }
@@ -1204,7 +1206,7 @@ when AIO_CONTROL {
 		open, editing, unsaved := false, false, false
 		caret, folds := -1, 0
 		if pane := markdown_focused(app, w); pane != nil {
-			scroll, total = pane.view.scroll, ui.markdown_total(&pane.view)
+			scroll, total = pane.view.scroll, views.markdown_total(&pane.view)
 			path = pane.path
 			switch _ in pane.load {
 			case nil:
@@ -1225,7 +1227,7 @@ when AIO_CONTROL {
 				if shown, found := markdown_pane_rect(w, pane.id); found {
 					column, visible := markdown_outline_of(app, w, pane, markdown_geometry_of(app, w, shown))
 					if visible {outline = column.count}
-					current = ui.markdown_outline_current(&pane.outline, &pane.view)
+					current = views.markdown_outline_current(&pane.outline, &pane.view)
 				}
 				open = markdown_outline_open(w, pane.id)
 			}

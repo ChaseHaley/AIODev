@@ -3,10 +3,11 @@ package app_test
 import app "../../src"
 import "aio:commands"
 import "cosmos:input"
-import "aio:ui"
+import "aio:views"
 import "core:os"
 import "core:strings"
 import "core:testing"
+import "cosmos:ui"
 
 @(private)
 palette_binding_press_key :: proc(s: ^app.App, e: input.Key_Event) {
@@ -16,8 +17,8 @@ palette_binding_press_key :: proc(s: ^app.App, e: input.Key_Event) {
 }
 
 @(private)
-palette_binding_edit :: proc(s: ^app.App) -> ^ui.Shortcut_Edit {
-	binding, open := &s.palette.edit.(ui.Shortcut_Edit)
+palette_binding_edit :: proc(s: ^app.App) -> ^views.Shortcut_Edit {
+	binding, open := &s.palette.edit.(views.Shortcut_Edit)
 	return open ? binding : nil
 }
 
@@ -29,8 +30,8 @@ palette_keybindings_capture_clipboard_chords_reject_conflicts_and_apply_without_
 	s := &f.state
 	w := s.windows[0]
 	app.palette_open_mode(s, w, .Commands)
-	ui.palette_text(&s.palette, &s.registry, "Split right")
-	if !testing.expect_value(t, ui.palette_result_name(&s.palette, s.palette.results[0]), "pane.split_right") {return}
+	views.palette_text(&s.palette, &s.registry, "Split right")
+	if !testing.expect_value(t, views.palette_result_name(&s.palette, s.palette.results[0]), "pane.split_right") {return}
 	before, read_error := os.read_entire_file(f.path, context.temp_allocator)
 	if !testing.expect_value(t, read_error, nil) {return}
 	palette_binding_press_key(s, {key = .Enter, modifiers = {.Control}})
@@ -42,24 +43,24 @@ palette_keybindings_capture_clipboard_chords_reject_conflicts_and_apply_without_
 	palette_binding_press_key(s, {key = .C, modifiers = {.Control, .Shift}})
 	b = palette_binding_edit(s)
 	if !testing.expect(t, b != nil) {return}
-	testing.expect_value(t, ui.shortcut_capture_used_by(&b.capture), "Used by Copy")
+	testing.expect_value(t, views.shortcut_capture_used_by(&b.capture), "Used by Copy")
 	palette_binding_press_key(s, {key = .Enter})
-	testing.expect_value(t, ui.palette_editing(&s.palette), ui.Palette_Edit_Kind.Chain)
-	testing.expect(t, ui.palette_chosen_take(&s.palette) == nil, "a conflict chooses nothing to save")
+	testing.expect_value(t, views.palette_editing(&s.palette), views.Palette_Edit_Kind.Chain)
+	testing.expect(t, views.palette_chosen_take(&s.palette) == nil, "a conflict chooses nothing to save")
 	after, after_error := os.read_entire_file(f.path, context.temp_allocator)
 	testing.expect_value(t, after_error, nil)
 	testing.expect_value(t, string(after), string(before))
 	palette_binding_press_key(s, {key = .Escape})
-	testing.expect_value(t, ui.palette_editing(&s.palette), ui.Palette_Edit_Kind.None)
-	testing.expect_value(t, ui.palette_result_name(&s.palette, s.palette.results[s.palette.selected]),
+	testing.expect_value(t, views.palette_editing(&s.palette), views.Palette_Edit_Kind.None)
+	testing.expect_value(t, views.palette_result_name(&s.palette, s.palette.results[s.palette.selected]),
 	                     "pane.split_right")
 	palette_binding_press_key(s, {key = .Enter, modifiers = {.Control}})
 	palette_binding_press_key(s, {key = .Enter})
 	palette_binding_press_key(s, {key = .F9, modifiers = {.Control, .Alt}})
 	palette_binding_press_key(s, {key = .Enter})
-	testing.expect_value(t, ui.palette_editing(&s.palette), ui.Palette_Edit_Kind.None)
+	testing.expect_value(t, views.palette_editing(&s.palette), views.Palette_Edit_Kind.None)
 	testing.expect(t, app.palette_active(s, w))
-	testing.expect(t, !ui.editor_loaded(&w.editor), "editing never opens Settings")
+	testing.expect(t, !views.editor_loaded(&w.editor), "editing never opens Settings")
 	bound := commands.find_by_shortcut(&s.registry, {.F9, {.Control, .Alt}})
 	if testing.expect(t, bound != nil) {testing.expect_value(t, bound.name, "pane.split_right")}
 	saved, saved_error := os.read_entire_file(f.path, context.temp_allocator)
@@ -72,7 +73,7 @@ palette_keybindings_capture_clipboard_chords_reject_conflicts_and_apply_without_
 	palette_binding_press_key(s, {key = .Enter})
 	palette_binding_press_key(s, {key = .F10, modifiers = {.Control, .Alt}})
 	palette_binding_press_key(s, {key = .Escape})
-	testing.expect_value(t, ui.palette_editing(&s.palette), ui.Palette_Edit_Kind.None)
+	testing.expect_value(t, views.palette_editing(&s.palette), views.Palette_Edit_Kind.None)
 	after, after_error = os.read_entire_file(f.path, context.temp_allocator)
 	testing.expect_value(t, after_error, nil)
 	testing.expect_value(t, string(after), string(saved))

@@ -3,10 +3,11 @@ package app_test
 import app "../../src"
 import "aio:commands"
 import "cosmos:input"
-import "aio:ui"
+import "aio:views"
 import "core:os"
 import "core:strings"
 import "core:testing"
+import "cosmos:ui"
 
 @(private = "file")
 press :: proc(s: ^app.App, w: ^app.Window, key: input.Key, modifiers: input.Modifiers = {}, unshifted: rune = 0) {
@@ -26,21 +27,21 @@ keybinding_search_records_app_chords_and_assigns_free_ones :: proc(t: ^testing.T
 
 	app.palette_open_mode(s, w, .All)
 	press(s, w, .K, {.Alt}, 'k')
-	testing.expect(t, ui.palette_recording(&s.palette))
+	testing.expect(t, views.palette_recording(&s.palette))
 	press(s, w, .C, {.Control, .Shift}, 'c')
 	if testing.expect_value(t, len(s.palette.results), 1) {
-		testing.expect_value(t, ui.palette_result_name(&s.palette, s.palette.results[0]), "edit.copy")
+		testing.expect_value(t, views.palette_result_name(&s.palette, s.palette.results[0]), "edit.copy")
 	}
 	press(s, w, .Escape)
 	testing.expect(t, app.palette_active(s, w))
-	testing.expect_value(t, ui.palette_query(&s.palette), "Ctrl+Shift+C")
+	testing.expect_value(t, views.palette_query(&s.palette), "Ctrl+Shift+C")
 	press(s, w, .Escape)
 	testing.expect(t, !app.palette_active(s, w))
 
 	app.editor_open(s, w)
 	p := &w.editor
 	press(s, w, .K, {.Alt}, 'k')
-	testing.expect(t, ui.editor_recording(p))
+	testing.expect(t, views.editor_recording(p))
 	press(s, w, .C, {.Control, .Shift}, 'c')
 	rows := 0
 	for item in p.items {
@@ -59,13 +60,13 @@ keybinding_search_records_app_chords_and_assigns_free_ones :: proc(t: ^testing.T
 	if !testing.expect(t, app.palette_active(s, w)) {return}
 	testing.expect(t, s.palette.assign != nil)
 	app.handle_event(s, input.Text_Event{w.id, "Split right"})
-	if !testing.expect_value(t, ui.palette_result_name(&s.palette, s.palette.results[0]), "pane.split_right") {
+	if !testing.expect_value(t, views.palette_result_name(&s.palette, s.palette.results[0]), "pane.split_right") {
 		return
 	}
 	press(s, w, .Enter)
-	testing.expect_value(t, ui.palette_editing(&s.palette), ui.Palette_Edit_Kind.Shortcut)
+	testing.expect_value(t, views.palette_editing(&s.palette), views.Palette_Edit_Kind.Shortcut)
 	press(s, w, .Enter)
-	testing.expect_value(t, ui.palette_editing(&s.palette), ui.Palette_Edit_Kind.None)
+	testing.expect_value(t, views.palette_editing(&s.palette), views.Palette_Edit_Kind.None)
 	bound := commands.find_by_shortcut(&s.registry, {.Y, {.Control, .Alt}})
 	if testing.expect(t, bound != nil) {testing.expect_value(t, bound.name, "pane.split_right")}
 	saved, err := os.read_entire_file(f.path, context.temp_allocator)

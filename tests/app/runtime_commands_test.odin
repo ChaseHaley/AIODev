@@ -6,7 +6,7 @@ import "aio:commands"
 import "cosmos:input"
 import "aio:layout"
 import "aio:settings"
-import "aio:ui"
+import "aio:views"
 import "core:encoding/json"
 import "core:strings"
 import "core:testing"
@@ -94,7 +94,7 @@ runtime_commands_share_fields_origins_bindings_and_catalogue :: proc(t: ^testing
 	append(&workspace.tabs, &tab)
 	defer delete(workspace.tabs)
 	w := app.Window{id = 1, workspace = &workspace, phase = .Shown, width = 800, height = 600, scale = 1}
-	defer ui.editor_destroy(&w.editor)
+	defer views.editor_destroy(&w.editor)
 	append(&state.windows, &w)
 	defer delete(state.windows)
 	before := runtime_bridge_seen.calls

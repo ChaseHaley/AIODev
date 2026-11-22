@@ -6,7 +6,6 @@ import "cosmos:platform"
 import "cosmos:render"
 import "aio:settings"
 import "aio:term"
-import "aio:ui"
 import "core:fmt"
 import "core:log"
 import "core:math"
@@ -14,6 +13,7 @@ import "core:os"
 import "core:path/filepath"
 import "core:strings"
 import "core:time"
+import "cosmos:ui"
 
 // What the Commands menu shows (D-092); it is held by Overlay_Command_Menu while the menu shows.
 Command_Menu_Mode :: union #no_nil {

@@ -7,7 +7,7 @@ import "core:strings"
 import "core:testing"
 import app "../../src"
 import "cosmos:platform"
-import "aio:ui"
+import "cosmos:ui"
 
 @(private="file")
 Adoption_Fixture :: struct { state: app.App, directory, path: string }
@@ -74,7 +74,7 @@ workspace_adopt_retains_or_replaces_storage_with_one_postcondition :: proc(t: ^t
 	state, w := &f.state, f.state.windows[0]
 	one := w.workspace
 	app.pane_split(state, w, .Right)
-	if !testing.expect_value(t, len(w.views), 2) { return }
+	if !testing.expect_value(t, len(w.pane_views), 2) { return }
 	two := app.workspace_create_empty(state)
 	if !testing.expect(t, two != nil) { return }
 	if _, created := app.tab_create(state, two); !testing.expect(t, created) { return }
@@ -83,13 +83,13 @@ workspace_adopt_retains_or_replaces_storage_with_one_postcondition :: proc(t: ^t
 	if !testing.expect(t, app.workspace_adopt(state, w, two, .Retain)) { return }
 	adoption_expect_postcondition(t, state, w, two)
 	testing.expect_value(t, raw_data(w.panes), panes)
-	testing.expect_value(t, len(w.views), 1)
+	testing.expect_value(t, len(w.pane_views), 1)
 	retained := raw_data(w.panes)
 	adoption_dirty_presentation(w)
 	if !testing.expect(t, app.workspace_adopt(state, w, one, .Replace)) { return }
 	adoption_expect_postcondition(t, state, w, one)
 	// Replacing pre-flights one view per terminal pane before taking over the window.
-	testing.expect_value(t, len(w.views), 2)
+	testing.expect_value(t, len(w.pane_views), 2)
 	testing.expect(t, raw_data(w.panes) != retained)
 	app.tick(state)
 }
@@ -125,7 +125,7 @@ workspace_adopt_failure_keeps_previous_view_and_presentation :: proc(t: ^testing
 	two := app.workspace_create_empty(state)
 	if !testing.expect(t, two != nil) { return }
 	if _, created := app.tab_create(state, two); !testing.expect(t, created) { return }
-	views, panes := raw_data(w.views), raw_data(w.panes)
+	pane_views, panes := raw_data(w.pane_views), raw_data(w.panes)
 	adoption_dirty_presentation(w)
 	backing := context.allocator
 	failure := Adoption_Fail_Allocator{backing = backing}
@@ -137,7 +137,7 @@ workspace_adopt_failure_keeps_previous_view_and_presentation :: proc(t: ^testing
 	// Failure before the old view is released leaves the workspace and its presentation alone.
 	testing.expect_value(t, w.workspace, one)
 	testing.expect(t, app.window_tree(w) == &app.selected_tab(one).tree)
-	testing.expect_value(t, raw_data(w.views), views)
+	testing.expect_value(t, raw_data(w.pane_views), pane_views)
 	testing.expect_value(t, raw_data(w.panes), panes)
 	testing.expect(t, w.tab_hover == app.Tab_Chrome_Tab{1})
 	testing.expect(t, app.gesture_tab_pressed(w) == app.Tab_Chrome_Tab{1})

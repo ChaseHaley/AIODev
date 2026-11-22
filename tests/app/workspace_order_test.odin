@@ -4,10 +4,10 @@ import app "../../src"
 import "cosmos:input"
 import "aio:layout"
 import "cosmos:platform"
-import "aio:ui"
 import "core:encoding/json"
 import "core:testing"
 import "core:time"
+import "cosmos:ui"
 
 @(test)
 workspace_order_grabbed_row_follows_pointer_instead_of_a_drop_line :: proc(t: ^testing.T) {

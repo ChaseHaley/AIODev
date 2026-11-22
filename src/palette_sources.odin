@@ -4,7 +4,7 @@ import "aio:commands"
 import "cosmos:font"
 import "aio:layout"
 import "aio:settings"
-import "aio:ui"
+import "aio:views"
 
 // A tab's second identity: the focused pane's terminal title, which can differ from a user name.
 @(require_results)
@@ -35,7 +35,7 @@ palette_tab_count :: proc(user: rawptr) -> int {
 }
 
 @(private)
-palette_tab_at :: proc(user: rawptr, index: int) -> ui.Palette_Item {
+palette_tab_at :: proc(user: rawptr, index: int) -> views.Palette_Item {
 	app := cast(^App)user
 	remaining := index
 	for workspace in app.workspaces {
@@ -65,7 +65,7 @@ palette_workspace_count :: proc(user: rawptr) -> int {
 }
 
 @(private)
-palette_workspace_at :: proc(user: rawptr, index: int) -> ui.Palette_Item {
+palette_workspace_at :: proc(user: rawptr, index: int) -> views.Palette_Item {
 	app := cast(^App)user
 	remaining := index
 	for workspace in app.workspaces {
@@ -124,16 +124,16 @@ palette_command_available :: proc(user: rawptr, id: commands.Command_Id) -> bool
 }
 
 palette_set_sources :: proc(app: ^App) {
-	ui.palette_set_sources(
+	views.palette_set_sources(
 		&app.palette,
 		{user = app, count = palette_tab_count, item = palette_tab_at},
 		{user = app, count = palette_workspace_count, item = palette_workspace_at},
 	)
-	ui.palette_set_values(
+	views.palette_set_values(
 		&app.palette,
 		{user = app, value = palette_setting_value, choices = palette_setting_choices},
 	)
-	ui.palette_set_availability(&app.palette, {user = app, available = palette_command_available})
+	views.palette_set_availability(&app.palette, {user = app, available = palette_command_available})
 }
 
 // Selecting a tab follows its workspace's exclusive window ownership (D-051): an owned workspace

@@ -1,0 +1,87 @@
+package views
+
+import "cosmos:render"
+import "cosmos:ui"
+
+leader_status_layout :: proc(area: render.Rect, width, scale: f32) -> render.Rect {
+	padding := min(8 * scale, area.width / 4, area.height / 4)
+	height := min(ui.HEIGHT_COMPACT * scale, max(0, area.height - 2 * padding))
+	return {
+		area.x + padding,
+		area.y + area.height - padding - height,
+		min(max(0, area.width - 2 * padding), width + 16 * scale),
+		height,
+	}
+}
+
+LEADER_STATUS_HINT :: "Leader · awaiting key"
+
+// An empty chord draws the hint alone, which is how a key mode or a pending key sequence shows.
+leader_status_draw :: proc(
+	list: ^render.Draw_List,
+	text: ^ui.Text,
+	theme: Theme,
+	area: render.Rect,
+	chord: string,
+	scale: f32,
+	hint := LEADER_STATUS_HINT,
+) -> render.Build_Status {
+	small := ui.text_styled(text, .Detail)
+	keycap := ui.text_styled(text, .Detail)
+	key_width := chord == "" ? 0 : ui.text_width(&keycap, chord) + 8 * scale
+	r := leader_status_layout(area, key_width + ui.text_width(&small, hint), scale)
+	if r.height < small.line_height || r.width <= 16 * scale {return .Ok}
+	if render.push_layer(list, r) != .None {return .Ok}
+	ui.draw_rect(list, {rect = r, color = theme.pane, radius = ui.RADIUS_CONTROL * scale})
+	baseline := r.y + (r.height - small.line_height) / 2 + small.ascent
+	if chord != "" {
+		if result := ui.draw_text(
+			&keycap,
+			list,
+			chord,
+			r.x + 8 * scale,
+			baseline,
+			theme.accent,
+			max(0, r.width - 16 * scale),
+		); result != .Ok {return result}
+	}
+	return ui.draw_text(
+		&small,
+		list,
+		hint,
+		r.x + 8 * scale + key_width,
+		baseline,
+		theme.muted,
+		max(0, r.width - key_width - 16 * scale),
+	)
+}
+
+pane_message_draw :: proc(
+	list: ^render.Draw_List,
+	text: ^ui.Text,
+	theme: Theme,
+	area: render.Rect,
+	message: string,
+	scale: f32,
+	radius: f32 = 0,
+) -> render.Build_Status {
+	if render.push_layer(list, area, radius) != .None {return .Ok}
+	padding := min(ui.SPACE_3 * scale, area.width / 4)
+	lines := make([dynamic]string, context.temp_allocator)
+	ui.wrap(text, message, max(1, area.width - 2 * padding), &lines)
+	height := min(area.height, f32(len(lines)) * text.line_height + 2 * padding)
+	top := area.y + area.height - height
+	ui.draw_rect(list, {rect = {area.x, top, area.width, height}, color = theme.surface})
+	ui.draw_rect(list, {rect = {area.x, top, area.width, 1}, color = theme.accent})
+	for line, i in lines {
+		if result := ui.draw_text(
+			text,
+			list,
+			line,
+			area.x + padding,
+			top + padding + f32(i) * text.line_height + text.ascent,
+			theme.text,
+		); result != .Ok {return result}
+	}
+	return .Ok
+}

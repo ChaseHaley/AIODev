@@ -2,8 +2,8 @@ package main
 
 import "cosmos:platform"
 import "aio:term"
-import "aio:ui"
 import "core:time"
+import "cosmos:ui"
 
 // The text names the duration: change both together.
 @(private)

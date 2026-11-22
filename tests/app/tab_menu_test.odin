@@ -12,7 +12,8 @@ import "cosmos:glyphs"
 import "aio:layout"
 import "cosmos:platform"
 import "cosmos:render"
-import "aio:ui"
+import "aio:views"
+import "cosmos:ui"
 
 @(init)
 menu_warm :: proc "contextless" () {
@@ -62,7 +63,7 @@ menu_fixture_destroy :: proc(f: ^Menu_Fixture) {
 	delete(f.w.rename.bytes)
 	delete(f.w.panes)
 	delete(f.w.dividers)
-	ui.editor_destroy(&f.w.editor)
+	views.editor_destroy(&f.w.editor)
 	_ = platform.destroy(&f.state.platform)
 	commands.destroy(&f.state.registry)
 }
@@ -389,16 +390,16 @@ tab_menu_group_cancel_and_settings_destination :: proc(t: ^testing.T) {
 	settings_tab := f.workspace.tabs[2]
 	layout.destroy(&settings_tab.tree)
 	testing.expect_value(t, layout.init(&settings_tab.tree, {.Settings, 0}), nil)
-	testing.expect_value(t, ui.editor_add(&w.editor,
+	testing.expect_value(t, views.editor_add(&w.editor,
 		{key = "interface.confirm", title = "Confirm Before", value = "Closing Split Tabs"}, "Interface"), nil)
 	ui.field_set(&w.editor.filter, "unrelated query")
-	ui.editor_filter(&w.editor)
+	views.editor_filter(&w.editor)
 	app.tab_menu_open(&f.state, w, 1, 10, 20)
 	menu_key(&f, {key = .End})
 	menu_key(&f, {key = .Enter})
 	testing.expect(t, app.settings_active(w) && !app.tab_menu_shown(w))
 	testing.expect_value(t, ui.field_string(&w.editor.filter), "")
-	if row := ui.editor_row(&w.editor); testing.expect(t, row != nil) {
+	if row := views.editor_row(&w.editor); testing.expect(t, row != nil) {
 		testing.expect_value(t, row.key, "interface.confirm")
 	}
 }

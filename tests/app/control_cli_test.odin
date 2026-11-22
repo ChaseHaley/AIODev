@@ -11,7 +11,8 @@ import "aio:cli_protocol"
 import "aio:commands"
 import "aio:events"
 import "aio:control"
-import "aio:ui"
+@(require) import "aio:views"
+import "cosmos:ui"
 
 @(private = "file")
 cli_sync_quietly :: proc(state: ^app.App) {

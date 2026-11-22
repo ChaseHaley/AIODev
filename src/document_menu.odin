@@ -8,7 +8,6 @@ import "cosmos:platform"
 import "aio:pty"
 import "cosmos:render"
 import "aio:settings"
-import "aio:ui"
 import "core:fmt"
 import "core:log"
 import "core:math"
@@ -16,6 +15,7 @@ import "core:os"
 import "core:path/filepath"
 import "core:strings"
 import "core:time"
+import "cosmos:ui"
 
 // What the Links menu shows; it is held by Overlay_Document_Menu while the menu shows. The list is a search
 // field, the other windows showing part of this tab, then pinned documents: files, folders and web addresses.

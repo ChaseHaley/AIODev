@@ -5,11 +5,12 @@ import "cosmos:input"
 import "cosmos:render"
 import "aio:settings"
 import "aio:term"
-import "aio:ui"
+import "aio:views"
 import "core:fmt"
 import "core:math"
 import "core:slice"
 import "core:time"
+import "cosmos:ui"
 
 // The title-bar pill and the inbox it opens, which lists program status in the rows the Activity panel
 // (status_panel.odin) shows, grouped, ordered and named the same way (status_rows.odin).
@@ -176,7 +177,7 @@ status_row_receipt_rect :: proc(
 ) -> render.Rect {
 	strong := ui.text_styled(&w.ui_text, .Strong)
 	small := ui.text_styled(&w.ui_text, .Detail)
-	_, line_two := ui.stacked_baselines(r, &strong, &small, w.scale)
+	_, line_two := views.stacked_baselines(r, &strong, &small, w.scale)
 	right := status_row_right(w, r, item, highlighted)
 	return status_receipt_rect(app, w, item, right, line_two - small.ascent + small.line_height / 2)
 }
@@ -203,7 +204,7 @@ status_row_draw :: proc(
 	left := r.x + indent + ui.CONTROL_INSET * s
 	strong := ui.text_styled(&w.ui_text, .Strong)
 	small := ui.text_styled(&w.ui_text, .Detail)
-	line_one, line_two := ui.stacked_baselines(r, &strong, &small, s)
+	line_one, line_two := views.stacked_baselines(r, &strong, &small, s)
 	icon := ui.ICON_BUTTON * s
 	icon_y := line_one - strong.ascent + (strong.line_height - icon) / 2
 	if result := status_mark_draw(app, w, {left, icon_y, icon, icon}, mark); result != .Ok {
@@ -215,7 +216,7 @@ status_row_draw :: proc(
 	age := status_state_age(app, item.record)
 	age_width := ui.text_width(&small, age)
 	if !show_dismiss {
-		ink := quiet ? app.theme.faint : ui.status_color(app.theme, mark.glyph)
+		ink := quiet ? app.theme.faint : views.status_color(app.theme, mark.glyph)
 		if result := ui.draw_text(&small, &w.list, age, right - age_width, line_one, ink); result != .Ok {
 			return result
 		}
@@ -234,7 +235,7 @@ status_row_draw :: proc(
 	); result != .Ok {return result}
 	buffer: [8]u8
 	headline := status_headline(mark, buffer[:])
-	headline_color := mark.urgent && !quiet ? ui.status_color(app.theme, mark.glyph) : app.theme.muted
+	headline_color := mark.urgent && !quiet ? views.status_color(app.theme, mark.glyph) : app.theme.muted
 	if result := ui.draw_fading_text(
 		&small,
 		&w.list,
@@ -255,7 +256,7 @@ status_row_draw :: proc(
 		app.theme.faint,
 		max(0, receipt.x - ui.SPACE_2 * s - text_x),
 	); result != .Ok {return result}
-	ui.status_progress_draw(
+	views.status_progress_draw(
 		&w.list,
 		app.theme,
 		{text_x, r.y, max(0, right - text_x), r.height - 2 * s},
@@ -314,7 +315,7 @@ STATUS_DONUT_GAP :: f32(0.24)
 @(private)
 Status_Donut_Arc :: struct {
 	rank:  Status_Rank,
-	glyph: ui.Status_Glyph,
+	glyph: views.Status_Glyph,
 }
 
 // The inbox button draws a donut: one arc per pane with live status in its state's colour, most
@@ -351,7 +352,7 @@ status_pill_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 	gap := len(arcs) > 1 ? min(STATUS_DONUT_GAP, step / 2) : 0
 	for arc, i in arcs {
 		start := -math.PI / 2 + f32(i) * step + gap / 2
-		ink := ui.status_color(app.theme, arc.glyph)
+		ink := views.status_color(app.theme, arc.glyph)
 		if render.push_arc(&w.list, center, radius, start, step - gap, width, ink) != .None {return .Ok}
 	}
 	return .Ok

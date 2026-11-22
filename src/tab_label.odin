@@ -3,8 +3,9 @@ package main
 import "aio:layout"
 import "cosmos:render"
 import "aio:settings"
-import "aio:ui"
+import "aio:views"
 import "core:log"
+import "cosmos:ui"
 
 // A tab's label, by the tab's id: the focused pane it shows, and its turn while focus moves to another of the
 // tab's panes (WORK-483). The label turns from what it showed to the pane focus moved to: its marks swivel
@@ -19,7 +20,7 @@ Tab_Label :: struct {
 	// The pane the label turns away from, with the pane stacked behind it then.
 	from:        layout.Content,
 	from_behind: Maybe(layout.Content),
-	// See ui.Tab_Turn.
+	// See views.Tab_Turn.
 	toward:      [2]f32,
 	start:       [2]f32,
 	// The turn's progress from 0 to 1, still when the label rests.
@@ -113,7 +114,7 @@ tab_label_turn_shown :: proc(
 	index: int,
 	front: layout.Content,
 	behind: Maybe(layout.Content),
-	t: ^ui.Tab_Tile,
+	t: ^views.Tab_Tile,
 ) -> render.Build_Status {
 	tab := w.workspace.tabs[index]
 	label := tab_label_find(w, tab.id)
@@ -121,7 +122,7 @@ tab_label_turn_shown :: proc(
 	label.behind = behind
 	if !ui.motion_active(label.turn) {return .Ok}
 	from_behind, stacked := label.from_behind.?
-	turn := ui.Tab_Turn {
+	turn := views.Tab_Turn {
 		turning  = true,
 		title    = tab_display_title_with(app, tab, label.from, index + 1),
 		progress = label.turn.value,

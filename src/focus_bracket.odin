@@ -2,7 +2,8 @@ package main
 
 import "aio:layout"
 import "aio:term"
-import "aio:ui"
+import "aio:views"
+import "cosmos:ui"
 
 // Which pane holds a window's focus. Entered names the pane whose terminal hears the window's focus
 // reports and whose finished work counts as seen; nil is Left, the gap while the window changes what
@@ -30,7 +31,7 @@ focus_leave :: proc(app: ^App, w: ^Window) {
 	entered, ok := w.focus_bracket.(Focus_Entered)
 	if !ok {return}
 	w.focus_bracket = nil
-	ui.editor_theme_delete_disarm(&w.editor)
+	views.editor_theme_delete_disarm(&w.editor)
 	window_overlays_cancel(app, w)
 	entry := workspace_session_for_content(app, entered.content)
 	if reporter := content_status(app, entered.content, entry); reporter != nil {

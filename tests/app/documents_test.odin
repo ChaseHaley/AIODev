@@ -12,7 +12,8 @@ import app "../../src"
 import "cosmos:input"
 import "aio:layout"
 import "cosmos:platform"
-import "aio:ui"
+@(require) import "aio:views"
+import "cosmos:ui"
 
 @(private = "file")
 Lists :: struct {

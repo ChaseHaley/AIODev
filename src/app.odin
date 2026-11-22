@@ -12,7 +12,7 @@ import "aio:program_art"
 import "cosmos:render"
 import "aio:settings"
 import "aio:term"
-import "aio:ui"
+import "aio:views"
 import "base:runtime"
 import "core:fmt"
 import "core:log"
@@ -22,6 +22,7 @@ import "core:thread"
 import "core:time"
 // Only the headless build reads the bundled test fonts; other builds compile none of them in.
 @(require) import "cosmos:test_fonts"
+import "cosmos:ui"
 
 @(private)
 FALLBACK_FONT_FAMILIES :: [?]string{"Cascadia Mono", "Consolas"}
@@ -87,12 +88,12 @@ App :: struct {
 	program_art:           program_art.Catalogue,
 	ui_text:               ui.Text,
 	animations:            bool,
-	theme:                 ui.Theme,
+	theme:                 views.Theme,
 	registry:              commands.Registry,
 	runtime_runner:        Runtime_Runner,
 	keymap:                commands.Keymap,
 	leader:                Maybe(input.Shortcut),
-	palette:               ui.Palette,
+	palette:               views.Palette,
 	// Where the palette's usage is saved; see palette_usage.odin.
 	palette_store:         Palette_Usage_Store,
 	find_history:          ui.Find_History,
@@ -332,7 +333,7 @@ app_destroy :: proc(app: ^App) {
 	if app.fonts != nil {
 		font.system_destroy(app.fonts)
 	}
-	ui.palette_destroy(&app.palette)
+	views.palette_destroy(&app.palette)
 	ui.query_history_destroy(&app.find_history)
 	focus_jumps_destroy(&app.focus_jumps)
 	file_dialogs_destroy(app)
@@ -784,7 +785,7 @@ apply_fonts :: proc(app: ^App) {
 }
 
 apply_theme :: proc(app: ^App) {
-	app.theme = ui.theme_from(app.settings.active_theme, app.settings.interface)
+	app.theme = views.theme_from(app.settings.active_theme, app.settings.interface)
 	theme_record_publish(app)
 	web_theme_apply(app)
 }

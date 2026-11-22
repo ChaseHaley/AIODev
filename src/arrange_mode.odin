@@ -3,7 +3,7 @@ package main
 import "cosmos:input"
 import "aio:layout"
 import "cosmos:render"
-import "aio:ui"
+import "cosmos:ui"
 
 // Arrange mode (WORK-477), a submap for panes as Hyprland has for windows: Arrange Panes takes the window's
 // keys until Esc, and plain keys move, swap and resize the focused pane while it wears the drag's drop

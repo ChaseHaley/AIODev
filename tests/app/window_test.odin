@@ -1,5 +1,6 @@
 package app_test
 
+import "cosmos:input"
 import "base:runtime"
 import "core:fmt"
 import "core:log"
@@ -7,10 +8,11 @@ import "core:os"
 import "core:strings"
 import "core:testing"
 import app "../../src"
+import "aio:verify_protocol"
 import "aio:layout"
 import "cosmos:platform"
 import "aio:term"
-import "aio:ui"
+import "aio:views"
 
 _ :: log
 
@@ -130,7 +132,7 @@ window_workspaces_keep_metrics_and_runtimes_independent :: proc(t: ^testing.T) {
 	testing.expect_value(t, os.write_entire_file(path, settings), nil)
 	if !testing.expect(t, app.window_open(&state, state.workspaces[0])) {return}
 	first = state.windows[1]
-	testing.expect(t, ui.editor_loaded(&first.editor) && app.settings_active(first))
+	testing.expect(t, views.editor_loaded(&first.editor) && app.settings_active(first))
 	app.tab_close(&state, first, 1)
 
 	context.allocator = runtime.nil_allocator()

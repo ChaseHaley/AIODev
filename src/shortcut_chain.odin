@@ -2,9 +2,10 @@ package main
 
 import "cosmos:input"
 import "cosmos:render"
-import "aio:ui"
+import "aio:views"
 import "core:fmt"
 import "core:strings"
+import "cosmos:ui"
 
 // These imports are used only when AIO_CONTROL is set.
 _ :: fmt
@@ -26,7 +27,7 @@ shortcut_undo_destroy :: proc(undo: ^Shortcut_Undo) {
 // file never holds a duplicate, because the whole revision passes the shortcut check first. A save
 // shows "Saved" with Undo. A change that does not apply leaves the chain open and says why.
 @(require_results)
-shortcut_chain_save :: proc(app: ^App, changes: []ui.Shortcut_Change, base: Settings_Base) -> bool {
+shortcut_chain_save :: proc(app: ^App, changes: []views.Shortcut_Change, base: Settings_Base) -> bool {
 	if len(changes) == 0 {return true}
 	values := make([]Setting_Value, len(changes), context.temp_allocator)
 	for change, i in changes {values[i] = {change.key, change.value}}
@@ -99,7 +100,7 @@ when AIO_CONTROL {
 	shortcut_chain_state_report :: proc(
 		r: ^State_Report,
 		prefix: string,
-		chain: ^ui.Shortcut_Chain,
+		chain: ^views.Shortcut_Chain,
 		rows: []Chain_Report_Row,
 		text: ^ui.Text,
 		scale: f32,
@@ -107,16 +108,16 @@ when AIO_CONTROL {
 		members := strings.builder_make(context.temp_allocator)
 		chips := strings.builder_make(context.temp_allocator)
 		selected, summary := "", ""
-		if chain != nil && ui.shortcut_chain_active(chain) {
-			summary = ui.shortcut_chain_context(chain)
+		if chain != nil && views.shortcut_chain_active(chain) {
+			summary = views.shortcut_chain_context(chain)
 			for member in 0 ..< len(chain.members) {
-				key := ui.shortcut_chain_member_key(chain, member)
+				key := views.shortcut_chain_member_key(chain, member)
 				if member > 0 {strings.write_byte(&members, ',')}
 				strings.write_string(&members, key)
 				if member == chain.selected {selected = key}
 				if member >= len(rows) || !rows[member].shown {continue}
 				row := rows[member]
-				for c in ui.shortcut_chain_chip_rects(chain, member, row.row, row.right, text, scale) {
+				for c in views.shortcut_chain_chip_rects(chain, member, row.row, row.right, text, scale) {
 					if strings.builder_len(chips) > 0 {strings.write_byte(&chips, ';')}
 					flags := fmt.tprintf("%s%s%s", c.chip.contested ? "contested," : "",
 					                     c.chip.pending ? "pending," : "", c.chip.recording ? "recording," : "")
@@ -129,7 +130,8 @@ when AIO_CONTROL {
 		state_text(r, state_key("%s.chain", prefix), strings.to_string(members))
 		state_text(r, state_key("%s.chain.selected", prefix), selected)
 		state_text(r, state_key("%s.chain.context", prefix), summary)
-		state_value(r, state_key("%s.chain.recording", prefix), chain != nil && ui.shortcut_chain_recording(chain))
+		state_value(r, state_key("%s.chain.recording", prefix),
+			chain != nil && views.shortcut_chain_recording(chain))
 		state_text(r, state_key("%s.chain.chips", prefix), strings.to_string(chips))
 	}
 }

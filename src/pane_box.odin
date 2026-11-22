@@ -4,7 +4,7 @@ import "aio:layout"
 import "cosmos:render"
 import "aio:term"
 import "aio:term_view"
-import "aio:ui"
+import "aio:views"
 import "core:math"
 
 Pane_Insets :: struct {
@@ -27,7 +27,7 @@ Pane_Box :: struct {
 // Every pane, tiled or floating, has a header row (D-050); content kind never changes the geometry a
 // pane receives.
 pane_header_height :: proc(scale: f32) -> f32 {
-	return math.round(ui.HEADER_HEIGHT * scale)
+	return math.round(views.HEADER_HEIGHT * scale)
 }
 
 // A shown pane's padding, header and optional shell-mode footer strip.

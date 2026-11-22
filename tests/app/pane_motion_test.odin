@@ -7,7 +7,8 @@ import "core:time"
 import app "../../src"
 import "aio:layout"
 import "cosmos:render"
-import "aio:ui"
+@(require) import "aio:views"
+import "cosmos:ui"
 
 @(private = "file")
 motion_frame :: proc(display: time.Tick) -> ui.Frame_Time {

@@ -8,16 +8,17 @@ import "cosmos:render"
 import "aio:settings"
 import "aio:term"
 import "aio:turns"
-import "aio:ui"
+import "aio:views"
 import "core:fmt"
 import "core:strings"
 import "core:time"
 import "cosmos:textedit"
+import "cosmos:ui"
 
 // Review comments on an Agent changes pane's diff lines: written in the diff, then pasted into the
 // agent's pane or copied. A comment keeps its file's path, a side and that side's line numbers, so the
 // next diff finds its lines again or lists it as no longer in the diff. Flat line indices count a
-// file's diff lines in hunk order, as ui.Changes_Selection does.
+// file's diff lines in hunk order, as views.Changes_Selection does.
 
 Comment_Side :: enum u8 {
 	New,
@@ -37,7 +38,7 @@ Changes_Comment :: struct {
 	// What the note asks. A label note keeps the quick label it was made with, copied so that renaming or
 	// removing the label later leaves the note as it was: its name, its colour (a preset name or #rrggbb)
 	// and the instruction sent with it.
-	kind:                                       ui.Changes_Note_Kind,
+	kind:                                       views.Changes_Note_Kind,
 	label_name, label_colour, label_instruction: string,
 	// A note on part of its lines starts at byte `first_offset` of its first line's text and ends at
 	// `last_offset` of its last line's. Whole lines are not partial, and neither is a range that spans its
@@ -53,19 +54,19 @@ Changes_Comment :: struct {
 	fit_partial:                                bool,
 	fit_first, fit_last:                        int,
 	// The cell side by side it was made in.
-	half:                                       ui.Changes_Half,
+	half:                                       views.Changes_Half,
 	// Where it shows in the current view; file = -1 when its lines are not in this diff.
 	file, first_line, last_line:                int,
 }
 
 Changes_Comments :: struct {
 	items:     [dynamic]Changes_Comment,
-	selection: ui.Changes_Selection,
+	selection: views.Changes_Selection,
 	// The flat line a selection extends from.
 	anchor:    int,
 	dragging:  bool,
 	// The cell side by side the selection's press was in, which the selection and a note made on it carry.
-	anchor_half: ui.Changes_Half,
+	anchor_half: views.Changes_Half,
 	// What the press that started a drag picks: characters, from byte `anchor_offset` of flat line `anchor`
 	// of file `drag_file`, within the cell `drag_cell` side by side; else whole lines.
 	by_text:       bool,
@@ -83,7 +84,7 @@ Changes_Comments :: struct {
 	area:      ui.Text_Area,
 	// The editor's presses, which count double and triple clicks.
 	clicks:    Click_Run,
-	draft:     ui.Changes_Note_Kind,
+	draft:     views.Changes_Note_Kind,
 	// -1 none; an index into `items` edits that note; len(items) writes a new one at the selection.
 	editing:   int,
 	// The selection by path, side and line numbers, so a refreshed diff finds it again; file = -1 when
@@ -91,7 +92,7 @@ Changes_Comments :: struct {
 	held:      Changes_Comment,
 	// What the view's comments and send target point at. Owned here rather than in temporary memory
 	// because hit tests between frames read the view too.
-	views:     [dynamic]ui.Changes_Comment_View,
+	comment_views: [dynamic]views.Changes_Comment_View,
 	target:    strings.Builder,
 	// The view's last send check. Every hover lays the view out, and without process polling the check
 	// reads the process tree, so the view repeats it only after CHANGES_SEND_CHECK; Send checks afresh.
@@ -105,7 +106,7 @@ Changes_Comments :: struct {
 Changes_Text_Point :: struct {
 	offset: int,
 	cell:   render.Rect,
-	half:   ui.Changes_Half,
+	half:   views.Changes_Half,
 }
 
 @(private = "file")
@@ -133,7 +134,7 @@ changes_comments_destroy :: proc(c: ^Changes_Comments) {
 	changes_comment_release(&c.held)
 	textedit.destroy(&c.buffer)
 	ui.text_area_destroy(&c.area)
-	delete(c.views)
+	delete(c.comment_views)
 	strings.builder_destroy(&c.target)
 	c^ = {}
 	c.editing = -1
@@ -184,8 +185,8 @@ changes_range_fit :: proc(
 ) {
 	if !partial {return false, 0, 0}
 	if lines > 0 && changes_span_lines(file, first, last) != lines {return false, 0, 0}
-	first_text, found_first := ui.changes_line_text(file, first)
-	last_text, found_last := ui.changes_line_text(file, last)
+	first_text, found_first := views.changes_line_text(file, first)
+	last_text, found_last := views.changes_line_text(file, last)
 	if !found_first || !found_last {return false, 0, 0}
 	low, high = clamp(first_offset, 0, len(first_text)), clamp(last_offset, 0, len(last_text))
 	if first == last && high < low {low, high = high, low}
@@ -220,13 +221,13 @@ changes_clone :: proc(s: string, failed: ^bool) -> string {
 changes_half_text :: proc(
 	file: turns.Diff_File,
 	flat: int,
-	half: ui.Changes_Half,
+	half: views.Changes_Half,
 ) -> (
 	text: string,
 	ok: bool,
 ) {
-	line := ui.changes_line_at(file, flat) or_return
-	return line.text, ui.changes_half_has(half, line.kind)
+	line := views.changes_line_at(file, flat) or_return
+	return line.text, views.changes_half_has(half, line.kind)
 }
 
 // Works out what the view shows of `item`'s partial range in `files`, once per diff.
@@ -246,7 +247,7 @@ changes_item_fit :: proc(files: []turns.Diff_File, item: ^Changes_Comment) {
 changes_range_of :: proc(
 	file: turns.Diff_File,
 	first, last: int,
-	half := ui.Changes_Half.Both,
+	half := views.Changes_Half.Both,
 ) -> (
 	side: Comment_Side,
 	low, high: i32,
@@ -264,7 +265,7 @@ changes_range_of :: proc(
 		for line in hunk.lines {
 			at := flat
 			flat += 1
-			if at < first || at > last || !ui.changes_half_has(half, line.kind) {continue}
+			if at < first || at > last || !views.changes_half_has(half, line.kind) {continue}
 			#partial switch line.kind {
 			case .Context:
 				if new_low == 0 {new_low = line.new_line}
@@ -294,14 +295,14 @@ changes_range_of :: proc(
 // Flat lines `first..last` of `file` that belong to `half`, with their signs, joined by '\n', in temporary
 // memory.
 @(private = "file", require_results)
-changes_quote :: proc(file: turns.Diff_File, first, last: int, half := ui.Changes_Half.Both) -> string {
+changes_quote :: proc(file: turns.Diff_File, first, last: int, half := views.Changes_Half.Both) -> string {
 	b := strings.builder_make(context.temp_allocator)
 	flat := 0
 	for hunk in file.hunks {
 		for line in hunk.lines {
 			at := flat
 			flat += 1
-			if at < first || at > last || !ui.changes_half_has(half, line.kind) {continue}
+			if at < first || at > last || !views.changes_half_has(half, line.kind) {continue}
 			sign: string
 			switch line.kind {
 			case .Context:
@@ -355,7 +356,7 @@ changes_anchor_find :: proc(
 // The lines the editor's note is on, as its header names them: those of the note being edited, or of the
 // selection a new note goes on.
 @(private = "file", require_results)
-changes_editor_span :: proc(pane: ^Changes_Pane) -> ui.Changes_Span {
+changes_editor_span :: proc(pane: ^Changes_Pane) -> views.Changes_Span {
 	c := &pane.comments
 	files := pane.model.view.files
 	if c.editing < 0 {return {}}
@@ -376,14 +377,14 @@ changes_editor_span :: proc(pane: ^Changes_Pane) -> ui.Changes_Span {
 changes_comments_sync :: proc(pane: ^Changes_Pane) {
 	c := &pane.comments
 	view := &pane.model.view
-	clear(&c.views)
-	if reserve(&c.views, len(c.items)) == nil {
+	clear(&c.comment_views)
+	if reserve(&c.comment_views, len(c.items)) == nil {
 		for item in c.items {
 			detached := item.file < 0
 			partial, first_offset, last_offset := item.fit_partial, item.fit_first, item.fit_last
 			append(
-				&c.views,
-				ui.Changes_Comment_View {
+				&c.comment_views,
+				views.Changes_Comment_View {
 					file = item.file,
 					first = item.first_line,
 					last = item.last_line,
@@ -400,7 +401,7 @@ changes_comments_sync :: proc(pane: ^Changes_Pane) {
 			)
 		}
 	}
-	view.comments = c.views[:]
+	view.comments = c.comment_views[:]
 	view.selection = c.selection
 	view.editing = c.editing <= len(view.comments) ? c.editing : -1
 	view.editor, view.buffer, view.draft = &c.area, &c.buffer, c.draft
@@ -507,7 +508,7 @@ changes_editor_open :: proc(pane: ^Changes_Pane, index: int) {
 // What a new note carries besides its lines. A label's name, colour and instruction are copied from the
 // quick label it was made with.
 Changes_Note :: struct {
-	kind:                                       ui.Changes_Note_Kind,
+	kind:                                       views.Changes_Note_Kind,
 	text:                                       string,
 	label_name, label_colour, label_instruction: string,
 }
@@ -562,7 +563,7 @@ changes_comment_add :: proc(pane: ^Changes_Pane, note: Changes_Note) -> bool {
 // Puts `text` in a note and, when the editor's × took its tag off, makes it a plain comment that forgets its
 // label.
 @(private = "file")
-changes_note_rewrite :: proc(app: ^App, item: ^Changes_Comment, text: string, kind: ui.Changes_Note_Kind) {
+changes_note_rewrite :: proc(app: ^App, item: ^Changes_Comment, text: string, kind: views.Changes_Note_Kind) {
 	cloned, err := strings.clone(text)
 	if err != nil {
 		notify(app, .Error, "Could not save the note.")
@@ -682,7 +683,7 @@ changes_editor_point :: proc(app: ^App, w: ^Window, pane: ^Changes_Pane, e: inpu
 	shown, found := changes_pane_rect(w, pane.id)
 	if !found {return}
 	g := changes_geometry_of(app, w, pane, shown)
-	box, visible := ui.changes_editor_box(g, &pane.model.view, &pane.state, &w.ui_text)
+	box, visible := views.changes_editor_box(g, &pane.model.view, &pane.state, &w.ui_text)
 	if !visible {return}
 	c := &pane.comments
 	x, y, extend := f32(e.x), f32(e.y), .Shift in e.modifiers
@@ -694,7 +695,7 @@ changes_editor_point :: proc(app: ^App, w: ^Window, pane: ^Changes_Pane, e: inpu
 // Starts picking whole lines at flat line `line` of `file`, pressed in `half` of a side-by-side row; Shift
 // extends the selection of the same file, which keeps the half it began in.
 @(private = "file")
-changes_press_lines :: proc(pane: ^Changes_Pane, file, line: int, extend: bool, half: ui.Changes_Half) {
+changes_press_lines :: proc(pane: ^Changes_Pane, file, line: int, extend: bool, half: views.Changes_Half) {
 	c := &pane.comments
 	same_file := c.selection.active && c.selection.file == file
 	if !(extend && same_file) {c.anchor_half = half}
@@ -820,7 +821,7 @@ changes_editor_lines :: proc(pane: ^Changes_Pane) -> (file: turns.Diff_File, fir
 // replaces, in temporary memory.
 @(private = "file", require_results)
 changes_new_side :: proc(file: turns.Diff_File, first, last: int) -> string {
-	return strings.join(ui.changes_new_side(file, first, last), "\n", context.temp_allocator)
+	return strings.join(views.changes_new_side(file, first, last), "\n", context.temp_allocator)
 }
 
 // The word that opens a code block of `file`'s lines: its extension, which names its language.
@@ -835,7 +836,7 @@ changes_fence_language :: proc(file: turns.Diff_File) -> string {
 // Applies one of the editor's tools to its text: bold or inline code around the selection, a code block, or
 // the selected lines as an editable replacement.
 @(private = "file")
-changes_editor_tool :: proc(pane: ^Changes_Pane, part: ui.Changes_Part) {
+changes_editor_tool :: proc(pane: ^Changes_Pane, part: views.Changes_Part) {
 	c := &pane.comments
 	file, first, last, found := changes_editor_lines(pane)
 	#partial switch part {
@@ -869,7 +870,7 @@ changes_note_add :: proc(app: ^App, pane: ^Changes_Pane, note: Changes_Note) {
 // nothing.
 @(private = "file")
 changes_label_apply :: proc(app: ^App, pane: ^Changes_Pane, index: int) {
-	label, found := ui.changes_label_at(app.settings.turns.quick_labels, index)
+	label, found := views.changes_label_at(app.settings.turns.quick_labels, index)
 	if !found {return}
 	changes_note_add(
 		app,
@@ -901,14 +902,14 @@ changes_labels_close :: proc(pane: ^Changes_Pane) {
 // Moves the label menu's key row by `step` labels, stopping at the first and the last.
 @(private)
 changes_label_menu_step :: proc(app: ^App, pane: ^Changes_Pane, step: int) {
-	count := ui.changes_label_count(app.settings.turns.quick_labels)
+	count := views.changes_label_count(app.settings.turns.quick_labels)
 	pane.comments.menu_row = clamp(pane.comments.menu_row + step, 0, max(0, count - 1))
 }
 
 // Whether a press on `part` is on the selection toolbar or its label menu, which a press elsewhere closes
 // the menu around.
 @(private)
-changes_selection_part :: proc(part: ui.Changes_Part) -> bool {
+changes_selection_part :: proc(part: views.Changes_Part) -> bool {
 	#partial switch part {
 	case .Toolbar, .Toolbar_Delete, .Toolbar_Comment, .Toolbar_Label, .Label_Menu, .Label_Row, .Label_Edit:
 		return true
@@ -942,16 +943,16 @@ changes_editor_reveal :: proc(app: ^App, w: ^Window, pane: ^Changes_Pane) {
 	shown, found := changes_pane_rect(w, pane.id)
 	if !found {return}
 	g := changes_geometry_of(app, w, pane, shown)
-	card, visible := ui.changes_card_rect(g, &pane.model.view, &pane.state, pane.comments.editing)
+	card, visible := views.changes_card_rect(g, &pane.model.view, &pane.state, pane.comments.editing)
 	if !visible {return}
 	over := card.y + card.height + ui.SPACE_3 * w.scale - (g.diff.y + g.diff.height)
-	if over > 0 {_ = ui.changes_scroll_diff(&pane.state, g, int(min(over, card.y - g.diff.y)))}
+	if over > 0 {_ = views.changes_scroll_diff(&pane.state, g, int(min(over, card.y - g.diff.y)))}
 }
 
 // Saves the note being written, unless it is an empty plain comment, which has nothing to save.
 @(private = "file")
 changes_editor_save :: proc(app: ^App, pane: ^Changes_Pane) {
-	if ui.changes_editor_can_save(&pane.model.view) {changes_editor_close(app, pane, true)}
+	if views.changes_editor_can_save(&pane.model.view) {changes_editor_close(app, pane, true)}
 }
 
 // Takes presses on diff lines, the selection toolbar and its menu, the note cards and the editor, and the
@@ -960,7 +961,7 @@ changes_comments_press :: proc(
 	app: ^App,
 	w: ^Window,
 	pane: ^Changes_Pane,
-	hit: ui.Changes_Hit,
+	hit: views.Changes_Hit,
 	e: input.Mouse_Button_Event,
 	at := Changes_Text_Point{},
 ) -> bool {
@@ -1031,7 +1032,7 @@ changes_comments_press :: proc(
 // text selection, to the byte `at` gives on the line under the pointer, the first column shown over its
 // numbers.
 changes_comments_drag :: proc(
-	app: ^App, w: ^Window, pane: ^Changes_Pane, hit: ui.Changes_Hit, at := Changes_Text_Point{},
+	app: ^App, w: ^Window, pane: ^Changes_Pane, hit: views.Changes_Hit, at := Changes_Text_Point{},
 ) -> bool {
 	c := &pane.comments
 	if !c.dragging || (hit.part != .Line && hit.part != .Gutter) {return false}
@@ -1095,7 +1096,7 @@ changes_selection_key :: proc(
 			}
 			return true
 		case c.menu && (key == .Arrow_Down || key == .Arrow_Up):
-			if count := ui.changes_label_count(app.settings.turns.quick_labels); count > 0 {
+			if count := views.changes_label_count(app.settings.turns.quick_labels); count > 0 {
 				c.menu_row = (c.menu_row + (key == .Arrow_Down ? 1 : count - 1)) % count
 			}
 			return true
@@ -1133,7 +1134,7 @@ changes_editor_edit :: proc(app: ^App, w: ^Window, pane: ^Changes_Pane, key: Con
 		shown, found := changes_pane_rect(w, pane.id)
 		if !found {break}
 		g := changes_geometry_of(app, w, pane, shown)
-		box, visible := ui.changes_editor_box(g, &pane.model.view, &pane.state, &w.ui_text)
+		box, visible := views.changes_editor_box(g, &pane.model.view, &pane.state, &w.ui_text)
 		if !visible {break}
 		#partial switch result.kind {
 		case .Vertical: ui.text_area_vertical(box, result.lines, result.pages, result.extend)
@@ -1271,7 +1272,7 @@ changes_fence_write :: proc(b: ^strings.Builder, count: int) {
 changes_note_excerpt :: proc(item: Changes_Comment) -> string {
 	lines := strings.split(item.quote, "\n", context.temp_allocator)
 	for &line in lines {line = len(line) > 0 ? line[1:] : ""}
-	return ui.changes_excerpt(lines, item.first_offset, item.last_offset, CHANGES_EXCERPT_RUNES)
+	return views.changes_excerpt(lines, item.first_offset, item.last_offset, CHANGES_EXCERPT_RUNES)
 }
 
 // A note's own text as the message gives it: fenced blocks keep a fence long enough for what they hold, and
@@ -1280,10 +1281,10 @@ changes_note_excerpt :: proc(item: Changes_Comment) -> string {
 @(private = "file", require_results)
 changes_note_text :: proc(text, span: string) -> string {
 	out := strings.builder_make(context.temp_allocator)
-	scan := ui.Note_Scan {
+	scan := views.Note_Scan {
 		rest = text,
 	}
-	for block in ui.note_block_next(&scan) {
+	for block in views.note_block_next(&scan) {
 		if block.kind == .Paragraph {
 			strings.write_string(&out, block.text)
 			continue
@@ -1546,8 +1547,8 @@ when AIO_CONTROL {
 		can_send, select_lines, label_menu := false, false, false
 		advance: f32
 		send_rect, copy_rect, discard_rect, select_lines_rect: render.Rect
-		editor: ui.Changes_Editor
-		bar: ui.Changes_Selection_Bar
+		editor: views.Changes_Editor
+		bar: views.Changes_Selection_Bar
 		if pane != nil {
 			changes_comments_view(app, pane)
 			c := &pane.comments
@@ -1578,19 +1579,19 @@ when AIO_CONTROL {
 				g := changes_geometry_of(app, w, pane, shown)
 				mono := ui.text_mono(&w.ui_text, app.family)
 				advance = ui.text_width(&mono, "0")
-				send_rect, copy_rect, discard_rect = ui.changes_send_rects(g, view)
-				editor, _ = ui.changes_editor_of(g, view, &pane.state)
+				send_rect, copy_rect, discard_rect = views.changes_send_rects(g, view)
+				editor, _ = views.changes_editor_of(g, view, &pane.state)
 				for i in 0 ..< len(c.items) {
-					card, shown := ui.changes_card_rect(g, view, &pane.state, i)
+					card, shown := views.changes_card_rect(g, view, &pane.state, i)
 					if !shown || i == c.editing {continue}
-					edit, remove := ui.changes_note_actions(card, w.scale)
+					edit, remove := views.changes_note_actions(card, w.scale)
 					state_rect(r, fmt.tprintf("changes.comment.%d.rect", i), card)
 					state_rect(r, fmt.tprintf("changes.comment.%d.edit_rect", i), edit)
 					state_rect(r, fmt.tprintf("changes.comment.%d.remove_rect", i), remove)
 				}
 				select_lines_rect = g.select_lines_button
-				limit, _ := ui.changes_h_extent(g, view, &pane.state)
-				h_bar, _ := ui.changes_h_scrollbar(g, view, &pane.state)
+				limit, _ := views.changes_h_extent(g, view, &pane.state)
+				h_bar, _ := views.changes_h_scrollbar(g, view, &pane.state)
 				state_text(r, "changes.long_lines", view.wrap ? "wrap" : "scroll")
 				state_text(r, "changes.hover_part", fmt.tprint(pane.state.hover.part))
 				state_value(r, "changes.h_scroll", pane.state.h_scroll)
@@ -1608,21 +1609,21 @@ when AIO_CONTROL {
 				bar = g.selection_bar
 				for file, n in view.files[:min(3, len(view.files))] {
 					for m in 0 ..< changes_line_count(file) {
-						rect := ui.changes_line_rect(g, view, &pane.state, n, m)
+						rect := views.changes_line_rect(g, view, &pane.state, n, m)
 						if rect.width <= 0 || rect.height <= 0 {continue}
 						state_rect(r, fmt.tprintf("changes.line.%d.%d.rect", n, m), rect)
-						_, column, _ := ui.changes_line_code(g, view, &pane.state, &mono, n, m)
+						_, column, _ := views.changes_line_code(g, view, &pane.state, &mono, n, m)
 						state_value(r, fmt.tprintf("changes.line.%d.%d.text_x", n, m), column.text_x)
 						state_value(r, fmt.tprintf("changes.line.%d.%d.scroll", n, m), column.scroll)
-						from, to, _ := ui.changes_line_visible(g, view, &pane.state, &mono, n, m)
+						from, to, _ := views.changes_line_visible(g, view, &pane.state, &mono, n, m)
 						state_value(r, fmt.tprintf("changes.line.%d.%d.visible_from", n, m), from)
 						state_value(r, fmt.tprintf("changes.line.%d.%d.visible_to", n, m), to)
 					}
 				}
 				for k in 0 ..< bar.shown {
 					index := bar.first + k
-					label, _ := ui.changes_label_at(view.quick_labels, index)
-					state_rect(r, fmt.tprintf("changes.label_menu.%d.rect", index), ui.changes_label_row_rect(bar, k))
+					label, _ := views.changes_label_at(view.quick_labels, index)
+					state_rect(r, fmt.tprintf("changes.label_menu.%d.rect", index), views.changes_label_row_rect(bar, k))
 					state_text(r, fmt.tprintf("changes.label_menu.%d.label", index), label.name)
 				}
 			}

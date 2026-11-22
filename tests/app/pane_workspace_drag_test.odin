@@ -8,7 +8,7 @@ import "core:testing"
 import app "../../src"
 import "cosmos:platform"
 import "aio:term"
-import "aio:ui"
+import "cosmos:ui"
 
 @(test)
 pane_drag_dropdown_preserves_runtime_for_each_destination :: proc(t: ^testing.T) {

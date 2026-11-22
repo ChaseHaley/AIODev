@@ -2,7 +2,7 @@ package main
 
 import "aio:syntax"
 import "aio:turns"
-import "aio:ui"
+import "aio:views"
 import "core:fmt"
 import "core:mem"
 import "core:os"
@@ -10,9 +10,10 @@ import "core:path/filepath"
 import "core:slice"
 import "core:strings"
 import "core:time"
+import "cosmos:ui"
 
 // What an Agent changes pane shows: the turn worker reads git and the recorded segments off the main
-// thread, and this file turns its results into the pane's ui.Changes_View. The model owns the current
+// thread, and this file turns its results into the pane's views.Changes_View. The model owns the current
 // result; the view borrows the diff from it, and owns the arrays that sit beside it.
 
 @(private = "file")
@@ -23,7 +24,7 @@ LIVE_DETAIL :: "Working\u2026"
 
 // The scopes the source chips list after the agents, in their order.
 @(private = "file")
-SOURCE_SCOPES :: ui.CHANGES_SOURCE_SCOPES
+SOURCE_SCOPES :: views.CHANGES_SOURCE_SCOPES
 
 // An agent the source chips list: its session and its newest turn's title, both owned.
 Changes_Agent :: struct {
@@ -96,7 +97,7 @@ changes_notice_of :: proc(
 	turn_scope, recording: bool,
 	rows, files: int,
 ) -> (
-	ui.Changes_Notice,
+	views.Changes_Notice,
 	string,
 ) {
 	switch err {
@@ -183,7 +184,7 @@ changes_text_set :: proc(slot: ^string, text: string) {
 }
 
 @(private = "file")
-changes_notice_set :: proc(model: ^Changes_Model, notice: ui.Changes_Notice, detail := "") {
+changes_notice_set :: proc(model: ^Changes_Model, notice: views.Changes_Notice, detail := "") {
 	model.view.notice = notice
 	changes_text_set(&model.view.detail, detail)
 }
@@ -263,7 +264,7 @@ changes_sources_release :: proc(model: ^Changes_Model) {
 
 @(private = "file")
 changes_source_label_set :: proc(pane: ^Changes_Pane) {
-	labels := ui.CHANGES_SCOPE_LABELS
+	labels := views.CHANGES_SCOPE_LABELS
 	pane.model.view.source_label = pane.scope == .Agent ? pane.model.agent_label : labels[pane.scope]
 }
 
@@ -292,7 +293,7 @@ changes_sources_refresh :: proc(app: ^App, pane: ^Changes_Pane) -> bool {
 		changes_sources_release(model)
 		if sources, err := make([]string, agents + len(SOURCE_SCOPES)); err == nil {
 			for label, i in labels {sources[i] = changes_clone_text(label)}
-			scope_labels := ui.CHANGES_SCOPE_LABELS
+			scope_labels := views.CHANGES_SCOPE_LABELS
 			for scope, i in SOURCE_SCOPES {sources[agents + i] = scope_labels[scope]}
 			model.sources = sources
 		}
@@ -307,7 +308,7 @@ changes_selection_reset :: proc(pane: ^Changes_Pane) {
 	pane.model.view.first, pane.model.view.last = -1, -1
 }
 
-changes_scope_set :: proc(app: ^App, pane: ^Changes_Pane, scope: ui.Changes_Scope) {
+changes_scope_set :: proc(app: ^App, pane: ^Changes_Pane, scope: views.Changes_Scope) {
 	if scope == pane.scope {return}
 	pane.scope = scope
 	changes_selection_reset(pane)
@@ -407,7 +408,7 @@ changes_view_release :: proc(model: ^Changes_Model) {
 @(private = "file", require_results)
 changes_view_alloc :: proc(model: ^Changes_Model, rows, files: int) -> bool {
 	view := &model.view
-	turn_rows, turn_error := make([]ui.Changes_Turn, rows)
+	turn_rows, turn_error := make([]views.Changes_Turn, rows)
 	ids, ids_error := make([]u64, rows)
 	details, details_error := make([]string, rows)
 	labels, labels_error := make([]string, files)
@@ -453,7 +454,7 @@ changes_file_row :: proc(file: turns.Diff_File, listed: string, marked, ambiguou
 	}
 	row := ui.Dropdown_Row {
 		badge      = changes_status_mark(file.status),
-		badge_tint = ui.changes_status_tint(file.status),
+		badge_tint = views.changes_status_tint(file.status),
 		primary    = name,
 		secondary  = folder,
 	}
@@ -576,7 +577,7 @@ changes_status_mark :: proc(status: turns.File_Status) -> string {
 
 // Whether some shown file is expanded, which the fold button reads to collapse rather than expand.
 @(private = "file")
-changes_expanded_sync :: proc(view: ^ui.Changes_View) {
+changes_expanded_sync :: proc(view: ^views.Changes_View) {
 	view.any_expanded = false
 	for _, i in view.files {
 		if i >= len(view.collapsed) || !view.collapsed[i] {
@@ -843,7 +844,7 @@ changes_model_unwatch :: proc(app: ^App, pane: ^Changes_Pane) {
 }
 
 @(private = "file", require_results)
-changes_plain_mode :: proc(scope: ui.Changes_Scope) -> turns.Plain_Mode {
+changes_plain_mode :: proc(scope: views.Changes_Scope) -> turns.Plain_Mode {
 	#partial switch scope {
 	case .Staged:
 		return .Staged
@@ -865,7 +866,7 @@ changes_model_changed :: proc(app: ^App, pane: ^Changes_Pane) {
 	changes_hooks_sync(app, model)
 	if model.loaded && model.shown != pane.scope {changes_model_clear(pane)}
 	model.request += 1
-	if ui.changes_scope_turns(pane.scope) {
+	if views.changes_scope_turns(pane.scope) {
 		changes_model_unwatch(app, pane)
 		if !model.recording && len(model.row_ids) == 0 {
 			changes_model_clear(pane)
@@ -909,7 +910,7 @@ changes_model_result :: proc(app: ^App, result: Turn_Result) {
 	request: u64
 	switch r in result {
 	case Result_Dirty:
-		if pane := changes_find(app, r.pane); pane != nil && !ui.changes_scope_turns(pane.scope) {
+		if pane := changes_find(app, r.pane); pane != nil && !views.changes_scope_turns(pane.scope) {
 			changes_model_changed(app, pane)
 		}
 		return
@@ -953,7 +954,7 @@ changes_model_result :: proc(app: ^App, result: Turn_Result) {
 // reads again; a selection on the newest turn follows the new one.
 changes_turns_saved :: proc(app: ^App, repositories: []string) {
 	for pane in app.changes_panes {
-		if !ui.changes_scope_turns(pane.scope) {
+		if !views.changes_scope_turns(pane.scope) {
 			// A pane following the agent may have a new worktree to show; its result carries no repository.
 			if pane.worktree_pick == "" {changes_model_changed(app, pane)}
 			continue
@@ -968,7 +969,7 @@ changes_turns_saved :: proc(app: ^App, repositories: []string) {
 // keeping its selection.
 changes_turns_live :: proc(app: ^App, repositories: []string) {
 	for pane in app.changes_panes {
-		if !ui.changes_scope_turns(pane.scope) || !slice.contains(repositories, pane.model.repository_key) {
+		if !views.changes_scope_turns(pane.scope) || !slice.contains(repositories, pane.model.repository_key) {
 			continue
 		}
 		changes_model_changed(app, pane)

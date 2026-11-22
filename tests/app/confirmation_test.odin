@@ -9,7 +9,8 @@ import app "../../src"
 import "cosmos:input"
 import "cosmos:platform"
 import "cosmos:render"
-import "aio:ui"
+@(require) import "aio:views"
+import "cosmos:ui"
 
 @(private="file")
 Confirmation_Fixture :: struct { state: app.App, directory, path: string }

@@ -3,9 +3,9 @@ package app_test
 import app "../../src"
 import "cosmos:input"
 import "cosmos:platform"
-import "aio:ui"
 import "core:testing"
 import "core:time"
+import "cosmos:ui"
 
 @(private)
 notice_expect_window :: proc(t: ^testing.T, s: ^app.App, owner: ^app.Window) {

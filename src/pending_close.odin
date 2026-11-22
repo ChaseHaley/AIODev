@@ -1,9 +1,9 @@
 package main
 
 import "aio:settings"
-import "aio:ui"
 import "core:fmt"
 import "core:strings"
+import "cosmos:ui"
 
 // The destructive close a confirmation asks about, and the counts its text shows. The counts follow
 // panes that exit while the question asks, then stay fixed while it closes.

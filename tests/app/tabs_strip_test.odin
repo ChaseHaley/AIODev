@@ -6,7 +6,7 @@ import "aio:layout"
 import "aio:commands"
 import "cosmos:input"
 import "aio:settings"
-import "aio:ui"
+import "cosmos:ui"
 
 @(private="file")
 strip_tab :: proc(workspace: ^app.Workspace, id: u32) -> ^app.Tab {

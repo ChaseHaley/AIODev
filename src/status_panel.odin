@@ -5,11 +5,12 @@ import "aio:layout"
 import "cosmos:render"
 import "aio:settings"
 import "aio:term"
-import "aio:ui"
+import "aio:views"
 import "core:fmt"
 import "core:math"
 import "core:slice"
 import "core:strings"
+import "cosmos:ui"
 
 // Sizes in DIPs. The logos sit left and the state mark right in both views.
 @(private) STATUS_PANEL_COMFY_ROW :: f32(56)
@@ -106,7 +107,7 @@ status_panel_dock_width_in :: proc(app: ^App, w: ^Window, fill: layout.Pane_Fill
 	if !status_panel_visible_in(app, w, fill) || status_panel_in_rail_in(app, w, fill) {return 0}
 	width := w.status.panel_width > 0 ? w.status.panel_width : f32(app.settings.status.panel_width)
 	available := f32(w.width) - (rail_docked_in(w, fill) ? rail_width_pixels(w) : 0)
-	return ui.rail_pixel_width(w.scale, width, available)
+	return views.rail_pixel_width(w.scale, width, available)
 }
 
 // Refreshes what the panel reserves from the rail: its width left of the rail, which places the rail,
@@ -316,7 +317,7 @@ status_panel_row_box :: proc(w: ^Window, r: render.Rect, row: Status_Row) -> ren
 status_panel_comfy_title_middle :: proc(w: ^Window, r: render.Rect) -> f32 {
 	strong := ui.text_styled(&w.ui_text, .Strong)
 	small := ui.text_styled(&w.ui_text, .Detail)
-	line_one, _ := ui.stacked_baselines(r, &strong, &small, w.scale)
+	line_one, _ := views.stacked_baselines(r, &strong, &small, w.scale)
 	return line_one - strong.ascent + strong.line_height / 2
 }
 
@@ -380,7 +381,7 @@ status_panel_receipt_rect :: proc(app: ^App, w: ^Window, r: render.Rect, row: St
 	small := ui.text_styled(&w.ui_text, .Detail)
 	if app.settings.status.panel_view == .Comfy {
 		strong := ui.text_styled(&w.ui_text, .Strong)
-		_, line_two := ui.stacked_baselines(r, &strong, &small, s)
+		_, line_two := views.stacked_baselines(r, &strong, &small, s)
 		return status_receipt_rect(app, w, row.item, right, line_two - small.ascent + small.line_height / 2)
 	}
 	buffer: [8]u8
@@ -397,7 +398,7 @@ status_panel_end_draw :: proc(
 	r: render.Rect,
 	middle, right, baseline: f32,
 	item: Status_Item,
-	mark: ui.Status_Mark,
+	mark: views.Status_Mark,
 	text: string,
 	highlighted: bool,
 ) -> (
@@ -414,7 +415,7 @@ status_panel_end_draw :: proc(
 	if result = status_mark_draw(app, w, area, mark); result != .Ok {return}
 	left = status_panel_state_left(w, right, text)
 	small := ui.text_styled(&w.ui_text, .Detail)
-	ink := mark.dim ? app.theme.faint : ui.status_color(app.theme, mark.glyph)
+	ink := mark.dim ? app.theme.faint : views.status_color(app.theme, mark.glyph)
 	return left, ui.draw_text(&small, &w.list, text, left, baseline, ink)
 }
 
@@ -438,7 +439,7 @@ status_panel_comfy_draw :: proc(
 	if result := status_panel_logo_draw(app, w, left, middle, logo, item); result != .Ok {return result}
 	strong := ui.text_styled(&w.ui_text, .Strong)
 	small := ui.text_styled(&w.ui_text, .Detail)
-	line_one, line_two := ui.stacked_baselines(r, &strong, &small, s)
+	line_one, line_two := views.stacked_baselines(r, &strong, &small, s)
 	text_x := left + (logo + ui.SPACE_2) * s
 	right := box.x + box.width - ui.CONTROL_INSET * s
 	quiet := status_item_quiet(item)
@@ -460,7 +461,7 @@ status_panel_comfy_draw :: proc(
 	if result := ui.draw_fading_text(&small, &w.list, detail, text_x, line_two, app.theme.faint,
 		max(0, receipt.x - ui.SPACE_2 * s - text_x)); result != .Ok {return result}
 	bar := render.Rect{text_x, r.y, max(0, right - text_x), r.height - ui.SPACE_1 * s}
-	ui.status_progress_draw(&w.list, app.theme, bar, mark, s)
+	views.status_progress_draw(&w.list, app.theme, bar, mark, s)
 	return .Ok
 }
 

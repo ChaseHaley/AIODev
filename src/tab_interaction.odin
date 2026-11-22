@@ -1,7 +1,7 @@
 package main
 
 import "cosmos:input"
-import "aio:ui"
+import "cosmos:ui"
 
 // A control on the tab strip or rail: a tab, a tab group's chip, the new-tab button or the profile
 // chevron. Nil is none: empty chrome or outside it.

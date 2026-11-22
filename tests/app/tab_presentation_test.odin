@@ -2,7 +2,7 @@ package app_test
 
 import "core:testing"
 import app "../../src"
-import "aio:ui"
+import "cosmos:ui"
 
 @(test)
 tab_presentation_resize_keeps_storage_and_initialises_only_appended_entries :: proc(

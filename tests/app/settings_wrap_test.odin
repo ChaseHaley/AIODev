@@ -4,7 +4,8 @@ import "cosmos:input"
 import "core:testing"
 import app "../../src"
 import "cosmos:platform"
-import "aio:ui"
+import "aio:views"
+import "cosmos:ui"
 
 // The window fits its Settings page with its own interface text, so a long description wraps there
 // and wraps again when the type size changes; the pointer over its last line is over its row.
@@ -23,7 +24,7 @@ settings_window_wraps_descriptions_with_its_text :: proc(t: ^testing.T) {
 	testing.expect(t, wrapped_row_height(t, w) > before, "a larger type size wraps to taller lines")
 	l := app.settings_layout(w)
 	index := wrapped_row_item(&w.editor)
-	parts := ui.editor_row_parts(&w.editor, l, index)
+	parts := views.editor_row_parts(&w.editor, l, index)
 	x := i32(parts.row.x + 60)
 	last_line := i32(parts.row.y + parts.row.height - 4)
 	app.handle_event(s, input.Mouse_Move_Event{window = w.id, x = x, y = last_line})
@@ -33,7 +34,7 @@ settings_window_wraps_descriptions_with_its_text :: proc(t: ^testing.T) {
 }
 
 @(private = "file")
-wrapped_row_item :: proc(p: ^ui.Editor) -> int {
+wrapped_row_item :: proc(p: ^views.Editor) -> int {
 	for item, index in p.items {
 		if item.row >= 0 && item.part == 0 && p.rows[item.row].key == "control.enabled" {return index}
 	}
@@ -46,7 +47,7 @@ wrapped_row_height :: proc(t: ^testing.T, w: ^app.Window) -> f32 {
 	l := app.settings_layout(w)
 	index := wrapped_row_item(&w.editor)
 	if !testing.expect(t, index >= 0) {return 0}
-	height := ui.editor_row_parts(&w.editor, l, index).row.height
+	height := views.editor_row_parts(&w.editor, l, index).row.height
 	testing.expect(t, height > l.row_height, "the description wraps below the row's first line")
 	return height
 }
@@ -70,7 +71,7 @@ settings_cut_description_shows_whole_in_the_tooltip :: proc(t: ^testing.T) {
 		app.handle_event(s, platform.Resize_Event{window = w.id, width = i32(width * w.scale),
 			height = w.height})
 		l := app.settings_layout(w)
-		parts := ui.editor_row_parts(&w.editor, l, wrapped_row_item(&w.editor))
+		parts := views.editor_row_parts(&w.editor, l, wrapped_row_item(&w.editor))
 		room := parts.text_right - (parts.row.x + (ui.CONTROL_INSET + ui.SPACE_6) * w.scale)
 		if room < 80 * w.scale && room > 20 * w.scale {break}
 	}
@@ -82,7 +83,7 @@ settings_cut_description_shows_whole_in_the_tooltip :: proc(t: ^testing.T) {
 @(private = "file")
 description_hover :: proc(s: ^app.App, w: ^app.Window) -> string {
 	l := app.settings_layout(w)
-	r := ui.editor_row_parts(&w.editor, l, wrapped_row_item(&w.editor)).row
+	r := views.editor_row_parts(&w.editor, l, wrapped_row_item(&w.editor)).row
 	small := ui.text_styled(&w.ui_text, .Detail)
 	gap := 2 * w.scale
 	top := r.y + (l.row_height - w.ui_text.line_height - gap - small.line_height) / 2

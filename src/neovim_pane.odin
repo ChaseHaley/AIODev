@@ -11,7 +11,7 @@ import "aio:settings"
 import "aio:spawn"
 import "aio:term"
 import "aio:term_view"
-import "aio:ui"
+import "aio:views"
 import "base:runtime"
 import "core:fmt"
 import "core:log"
@@ -21,6 +21,7 @@ import "core:path/filepath"
 import "core:strings"
 import "core:sync"
 import "core:time"
+import "cosmos:ui"
 
 // Neovim panes (WORK-542, D-107). Each pane starts its own `nvim --embed` the first time it is laid out,
 // at the size it is shown, and AIODev is that Neovim's UI: it draws the grid itself and sends keys and
@@ -418,7 +419,7 @@ neovim_pane_draw :: proc(
 		if pane.message == "" {return}
 		radius := window_pane_radius(app, w)
 		area := render.Rect{shown.x, shown.y, shown.width, shown.height}
-		result = ui.pane_message_draw(&w.list, &w.ui_text, app.theme, area, pane.message, w.scale, radius)
+		result = views.pane_message_draw(&w.list, &w.ui_text, app.theme, area, pane.message, w.scale, radius)
 		return
 	}
 	focused := pane_has_keyboard(app, w, rect)

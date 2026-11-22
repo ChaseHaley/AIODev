@@ -4,7 +4,7 @@ import "cosmos:input"
 import "core:testing"
 import app "../../src"
 import "cosmos:platform"
-import "aio:ui"
+import "aio:views"
 import "aio:layout"
 
 @(test)
@@ -78,9 +78,9 @@ rail_resize_drag_updates_content_clamps_and_finishes_outside :: proc(t: ^testing
 
 		gesture_button(s, w, .Left, true, app.rail_width_pixels(w), y)
 		rail_resize_drag_to(s, w, -200, y)
-		testing.expect_value(t, app.rail_width_pixels(w), ui.RAIL_MIN_WIDTH * scale)
+		testing.expect_value(t, app.rail_width_pixels(w), views.RAIL_MIN_WIDTH * scale)
 		rail_resize_drag_to(s, w, f32(w.width) + 200, y)
-		testing.expect_value(t, app.rail_width_pixels(w), ui.RAIL_MAX_WIDTH * scale)
+		testing.expect_value(t, app.rail_width_pixels(w), views.RAIL_MAX_WIDTH * scale)
 		gesture_button(s, w, .Left, false, f32(w.width) + 200, y)
 		testing.expect(t, !app.rail_resizing(w))
 	}

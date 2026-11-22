@@ -9,7 +9,7 @@ import "cosmos:platform"
 import "cosmos:render"
 import "aio:settings"
 import "aio:term"
-import "aio:ui"
+import "aio:views"
 import "aio:verify_protocol"
 import "core:fmt"
 import "core:log"
@@ -18,6 +18,7 @@ import "core:os"
 import "core:strings"
 import "core:time"
 import "core:unicode/utf8"
+@(require) import "cosmos:ui"
 
 // These imports are used only when AIO_CONTROL is set.
 _ :: fmt
@@ -35,7 +36,7 @@ _ :: perf
 _ :: platform
 _ :: render
 _ :: term
-_ :: ui
+_ :: views
 _ :: verify_protocol
 _ :: settings
 
@@ -725,7 +726,7 @@ when AIO_CONTROL {
 		state_valuef(r, "panes.gap", "%g", window_gap(app, w))
 		state_valuef(r, "panes.header_height", "%g", pane_header_height(w.scale))
 		state_value(r, "panes.moving", pane_motion_animating(w))
-		for view in w.views {
+		for view in w.pane_views {
 			if !pane_owns_session(view.content.kind) {continue}
 			state_value(r, state_key("session.%d.builds", view.content.id), view.builds)
 		}

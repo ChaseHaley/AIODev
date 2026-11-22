@@ -111,9 +111,9 @@ unknown_path_fails_open :: proc(t: ^testing.T) {
 
 @(test)
 several_paths_share_one_live_reason_and_one_test_name :: proc(t: ^testing.T) {
-	plan := gates.classify([]string{"src/ui/palette.odin", "src/ui/notices.odin"})
+	plan := gates.classify([]string{"src/views/palette.odin", "src/views/tabs.odin"})
 	defer gates.plan_destroy(&plan)
-	testing.expect_value(t, count_test(plan, "ui"), 1)
+	testing.expect_value(t, count_test(plan, "views"), 1)
 	testing.expect_value(t, count_test(plan, "app"), 1)
 	testing.expect_value(t, len(plan.reasons), 1)
 	testing.expect(t, has_reason(plan, "ui"))
@@ -173,7 +173,7 @@ leaf_packages_select_fast_app_checks :: proc(t: ^testing.T) {
 @(test)
 composed_native_persistence_and_mixed_changes_keep_all_app_checks :: proc(t: ^testing.T) {
 	for path in ([]string{"src/window.odin", "src/pty/conpty_windows.odin",
-		"src/settings/settings.odin", "src/ui/palette.odin", "src/term/input.odin",
+		"src/settings/settings.odin", "src/views/palette.odin", "src/term/input.odin",
 		"src/unknown/module.odin", "tests/app/rail_test.odin"}) {
 		plan := gates.classify([]string{"src/draws/draws.odin", path})
 		defer gates.plan_destroy(&plan)

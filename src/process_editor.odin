@@ -1,18 +1,18 @@
 package main
 
 import "aio:settings"
-import "aio:ui"
+import "aio:views"
 import "core:fmt"
 import "core:strings"
 
 editor_process_save :: proc(app: ^App, w: ^Window) {
 	p := &w.editor
-	value, problem := ui.editor_process_value(p)
-	if problem != "" {ui.editor_message(p, problem, true); return}
+	value, problem := views.editor_process_value(p)
+	if problem != "" {views.editor_message(p, problem, true); return}
 	result := settings_change(app, Setting_Value{settings.PADDING_GROUPS_KEY, value}, Settings_Page{p})
 	if !settings_page_report(p, result, .Process) {return}
 	p.process_dirty = false
-	ui.editor_message(p, "Saved and applied.", false)
+	views.editor_message(p, "Saved and applied.", false)
 }
 
 // The program group a confirmation asks before deleting: its name for the question, and the settings
@@ -23,18 +23,18 @@ Process_Remove :: struct {
 }
 
 editor_process_remove_ask :: proc(app: ^App, w: ^Window, group: int) {
-	if !ui.editor_process_capture(&w.editor) {return}
+	if !views.editor_process_capture(&w.editor) {return}
 	name := ""
 	for row in w.editor.rows {
 		if row.process == group && row.process_field == .Group {name = row.title; break}
 	}
 	if name == "" {return}
 	owned, err := strings.clone(name)
-	if err != nil {ui.editor_message(&w.editor, "Could not prepare group deletion.", true); return}
-	source, source_error := strings.clone(ui.editor_source(&w.editor))
+	if err != nil {views.editor_message(&w.editor, "Could not prepare group deletion.", true); return}
+	source, source_error := strings.clone(views.editor_source(&w.editor))
 	if source_error != nil {
 		delete(owned)
-		ui.editor_message(&w.editor, "Could not prepare group deletion.", true)
+		views.editor_message(&w.editor, "Could not prepare group deletion.", true)
 		return
 	}
 	confirmation_ask(app, w, Process_Remove{name = owned, source = source, group = group}, focus = .Cancel)
@@ -43,11 +43,11 @@ editor_process_remove_ask :: proc(app: ^App, w: ^Window, group: int) {
 @(private)
 editor_process_remove_finish :: proc(app: ^App, w: ^Window, remove: Process_Remove, accepted: bool) {
 	if !accepted {return}
-	if ui.editor_source(&w.editor) != remove.source {
-		ui.editor_message(&w.editor, "Settings changed. Review the group before deleting it.", true)
+	if views.editor_source(&w.editor) != remove.source {
+		views.editor_message(&w.editor, "Settings changed. Review the group before deleting it.", true)
 		return
 	}
-	ui.editor_process_group_remove(&w.editor, remove.group)
+	views.editor_process_group_remove(&w.editor, remove.group)
 	editor_process_save(app, w)
 }
 

@@ -3,7 +3,8 @@ package app_test
 import "core:testing"
 import "core:time"
 import app "../../src"
-import "aio:ui"
+import "aio:views"
+import "cosmos:ui"
 
 // Folding a group widens the tabs that stay. Every tab, and New tab, goes straight from where it drew to where
 // it rests, all at one pace, from the first frame on: none starts elsewhere or bows off its path (WORK-454).
@@ -31,7 +32,7 @@ a_fold_moves_every_tab_straight_from_where_it_drew :: proc(t: ^testing.T) {
 	places :: proc(s: ^app.App, w: ^app.Window, out: []f32) {
 		bar := app.window_tab_bar(s, w)
 		for i in 0 ..< len(out) - 1 {out[i] = app.tab_strip_x(w, bar, i)}
-		out[len(out) - 1] = ui.tab_new_rect(bar).x
+		out[len(out) - 1] = views.tab_new_rect(bar).x
 	}
 	before := make([]f32, count + 1, context.temp_allocator)
 	places(s, w, before)

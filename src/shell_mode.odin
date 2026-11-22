@@ -3,8 +3,9 @@ package main
 import "aio:layout"
 import "cosmos:render"
 import "aio:term"
-import "aio:ui"
+import "aio:views"
 import "core:math"
+import "cosmos:ui"
 
 // Height of the optional bottom-of-pane shell mode strip in DIP.
 SHELL_MODE_FOOTER_HEIGHT :: 22
@@ -32,7 +33,7 @@ shell_mode_label :: proc(mode: term.Shell_Mode) -> string {
 	return ""
 }
 
-shell_mode_color :: proc(theme: ui.Theme, mode: term.Shell_Mode) -> render.Color {
+shell_mode_color :: proc(theme: views.Theme, mode: term.Shell_Mode) -> render.Color {
 	switch mode {
 	case .None:
 		return theme.muted

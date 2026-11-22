@@ -6,7 +6,8 @@ import app "../../src"
 import "aio:layout"
 import "aio:settings"
 import "aio:term"
-import "aio:ui"
+import "aio:views"
+import "cosmos:ui"
 
 @(test)
 program_status_spinner_requests_every_display_frame :: proc(t: ^testing.T) {
@@ -35,7 +36,7 @@ program_status_spinner_stops_when_not_drawn_or_window_has_no_extent :: proc(t: ^
 program_status_static_marks_do_not_request_animation :: proc(t: ^testing.T) {
 	a := app.App{animations = true}
 	w: app.Window
-	marks := [3]ui.Status_Mark{
+	marks := [3]views.Status_Mark{
 		{glyph = .Working, progress = 30},
 		{glyph = .Done, progress = -1},
 		{glyph = .Blocked, progress = -1},
@@ -160,10 +161,10 @@ program_status_marks_follow_state_and_kind :: proc(t: ^testing.T) {
 		}
 	}
 	question := app.status_presentation({state = .Blocked, kind = .Question, progress = 10}).mark
-	testing.expect_value(t, question.glyph, ui.Status_Glyph.Question)
+	testing.expect_value(t, question.glyph, views.Status_Glyph.Question)
 	testing.expect_value(t, question.progress, i8(10))
 	auth := app.status_presentation({state = .Blocked, kind = .Auth, progress = -1}).mark
-	testing.expect_value(t, auth.glyph, ui.Status_Glyph.Auth)
+	testing.expect_value(t, auth.glyph, views.Status_Glyph.Auth)
 	seen := app.status_presentation({state = .Done, read = true, progress = -1}).mark
 	testing.expect(t, seen.glyph == .Done && seen.dim)
 	buffer: [8]u8

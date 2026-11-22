@@ -2,7 +2,7 @@ package main
 
 import "cosmos:input"
 import "cosmos:render"
-import "aio:ui"
+import "cosmos:ui"
 
 // The question a window asks before a change it cannot undo. A window asks at most one: nil is None;
 // otherwise the dialog's presence is the phase, Asking while it opens or shows (ui.presence_is_open)

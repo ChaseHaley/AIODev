@@ -10,7 +10,7 @@ import "cosmos:input"
 import "aio:layout"
 import "aio:settings"
 import "aio:term"
-import "aio:ui"
+import "cosmos:ui"
 
 // A Palette_Fixture with a cmd.exe profile and a pane of it in `sub`, a folder below `root`, focused.
 @(private = "file")

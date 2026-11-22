@@ -7,7 +7,6 @@ import platform_api "cosmos:platform"
 import "aio:scripting"
 import "aio:settings"
 import "aio:spawn"
-import "aio:ui"
 import "base:runtime"
 import "core:encoding/json"
 import "core:fmt"
@@ -18,6 +17,7 @@ import "core:slice"
 import "core:strings"
 import "core:sync"
 import "core:time"
+import "cosmos:ui"
 
 // The Config host (WORK-038): init.lua beside the settings file declares actions, keys and modes, and
 // handles events and timers inside the app. Without the file there is no Lua state at all.

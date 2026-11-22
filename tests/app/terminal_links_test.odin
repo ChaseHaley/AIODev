@@ -48,9 +48,9 @@ link_feed :: proc(t: ^testing.T, f: ^Palette_Fixture, text: string) {
 
 @(private, require_results)
 link_view :: proc(w: ^app.Window, id: u32) -> ^app.Pane_View {
-	for &view, i in w.views {
+	for &view, i in w.pane_views {
 		if view.content.id == id {
-			return &w.views[i]
+			return &w.pane_views[i]
 		}
 	}
 	return nil

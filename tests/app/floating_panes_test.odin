@@ -7,7 +7,7 @@ import "core:time"
 import app "../../src"
 import "aio:layout"
 import "cosmos:platform"
-import "aio:ui"
+import "cosmos:ui"
 
 @(test)
 floating_capsules_fit_inside_the_available_row :: proc(t: ^testing.T) {

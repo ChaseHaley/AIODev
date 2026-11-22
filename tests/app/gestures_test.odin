@@ -9,7 +9,8 @@ import app "../../src"
 import "cosmos:input"
 import "cosmos:platform"
 import "aio:term"
-import "aio:ui"
+import "aio:views"
+import "cosmos:ui"
 
 @(private)
 gesture_button :: proc(s: ^app.App, w: ^app.Window, button: input.Mouse_Button,
@@ -122,11 +123,11 @@ gestures_selection_and_editor_release_outside_their_surface :: proc(t: ^testing.
 	gesture_button(s, w, .Left, true, l.filter.x+20, l.filter.y+l.filter.height/2)
 	if !testing.expect(t, w.editor.filter.dragging) {return}
 	gesture_button(s, w, .Left, false, -20, -20)
-	testing.expect(t, !w.editor.filter.dragging && !ui.editor_dragging(&w.editor))
+	testing.expect(t, !w.editor.filter.dragging && !views.editor_dragging(&w.editor))
 	gesture_button(s, w, .Left, true, l.filter.x+20, l.filter.y+l.filter.height/2)
 	app.handle_event(s, platform.Capture_Lost_Event{w.id})
 	gesture_button(s, w, .Left, false, l.filter.x+20, l.filter.y+l.filter.height/2)
-	testing.expect(t, !w.editor.filter.dragging && !ui.editor_dragging(&w.editor))
+	testing.expect(t, !w.editor.filter.dragging && !views.editor_dragging(&w.editor))
 }
 
 // A press on a disabled menu row leaves the menu open, and its release reaches the menu. Closing the
@@ -263,7 +264,7 @@ gesture_terminal_packets :: proc(t: ^testing.T, report: bool) {
 		gesture_button(s, w, .Left, false, px + 10, py)
 	} else {
 		layout, _ := app.rail_current_layout(w)
-		close := ui.rail_close_rect(layout, 0, w.scale)
+		close := views.rail_close_rect(layout, 0, w.scale)
 		gesture_button(s, w, .Left, true, close.x+4, close.y+4)
 		app.handle_event(s, input.Mouse_Move_Event{window = w.id, x = 100, y = 200, buttons = {.Left}})
 		app.handle_event(s, platform.Capture_Lost_Event{w.id})
@@ -408,7 +409,7 @@ gestures_settings_header_zoom_and_close_drive_the_settings_pane :: proc(t: ^test
 	h, found = gesture_settings_header(w)
 	if !testing.expect(t, found) {return}
 	gesture_click_header(s, w, .Close, h)
-	testing.expect(t, !ui.editor_loaded(&w.editor))
+	testing.expect(t, !views.editor_loaded(&w.editor))
 	testing.expect(t, !app.settings_active(w))
 	testing.expect_value(t, len(w.workspace.tabs), tabs - 1)
 	testing.expect_value(t, len(s.sessions), sessions)

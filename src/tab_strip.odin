@@ -3,7 +3,8 @@ package main
 import "cosmos:input"
 import "cosmos:render"
 import "aio:settings"
-import "aio:ui"
+import "aio:views"
+import "cosmos:ui"
 
 // settings is used only when AIO_CONTROL is set.
 _ :: settings
@@ -11,7 +12,7 @@ _ :: settings
 // Horizontal tab-strip geometry and drawing. The strip shares the 40 DIP title bar with the
 // workspace chip and the caption controls, so both the tab bar and the controls end read the same
 // layout. Vertical mode uses the rail instead.
-window_tab_bar :: proc(app: ^App, w: ^Window) -> ui.Tab_Bar {
+window_tab_bar :: proc(app: ^App, w: ^Window) -> views.Tab_Bar {
 	bar := window_tab_bar_rest(app, w)
 	// While a group folds the tabs' width and the strip's end ease with the tabs, so the tabs start from where
 	// they were and New tab moves with them (WORK-454). They hold from the fold's first frame, before the
@@ -24,11 +25,11 @@ window_tab_bar :: proc(app: ^App, w: ^Window) -> ui.Tab_Bar {
 }
 
 // The strip as the tabs will rest.
-window_tab_bar_rest :: proc(app: ^App, w: ^Window) -> ui.Tab_Bar {
+window_tab_bar_rest :: proc(app: ^App, w: ^Window) -> views.Tab_Bar {
 	if w.workspace == nil {return {}}
 	left := workspace_button_width(app, w)
 	layout := tab_layout(app, w, true)
-	return ui.tab_bar_layout(
+	return views.tab_bar_layout(
 		left,
 		max(0, f32(w.width) - window_caption_reserve(w) - left),
 		w.scale,
@@ -52,7 +53,7 @@ tab_position :: proc(w: ^Window, index: int) -> f32 {
 // Where tab `index` draws in the strip, following its motion. While a group folds, the tabs' width eases
 // with their places, and a place times a width would bow off a straight path, starting some tabs too far
 // right; each tab instead goes straight from where it drew to where it rests, at the fold's pace.
-tab_strip_x :: proc(w: ^Window, bar: ui.Tab_Bar, index: int) -> f32 {
+tab_strip_x :: proc(w: ^Window, bar: views.Tab_Bar, index: int) -> f32 {
 	offset := index >= 0 && index < len(w.tab_offsets) ? w.tab_offsets[index].value : 0
 	width := w.strip_width
 	if w.folding != 0 && width.value > 0 && ui.motion_active(width) && width.target != width.from &&
@@ -76,13 +77,13 @@ window_tab_rect :: proc(app: ^App, w: ^Window, index: int) -> render.Rect {
 }
 
 // Tab `index`'s rect in `bar`, so a caller holding the bar does not lay the strip out again.
-tab_strip_rect :: proc(w: ^Window, bar: ui.Tab_Bar, index: int) -> render.Rect {
+tab_strip_rect :: proc(w: ^Window, bar: views.Tab_Bar, index: int) -> render.Rect {
 	if index < 0 || index >= bar.count {return {}}
 	return {tab_strip_x(w, bar, index), 0, bar.tab_width, bar.height}
 }
 
 window_tab_new_rect :: proc(app: ^App, w: ^Window) -> render.Rect {
-	return ui.tab_new_rect(window_tab_bar(app, w))
+	return views.tab_new_rect(window_tab_bar(app, w))
 }
 
 window_tab_close_rect :: proc(app: ^App, w: ^Window, index: int) -> render.Rect {
@@ -90,12 +91,12 @@ window_tab_close_rect :: proc(app: ^App, w: ^Window, index: int) -> render.Rect 
 }
 
 @(private = "file")
-tab_strip_close_rect :: proc(w: ^Window, bar: ui.Tab_Bar, index: int) -> render.Rect {
+tab_strip_close_rect :: proc(w: ^Window, bar: views.Tab_Bar, index: int) -> render.Rect {
 	if index < 0 || index >= bar.count {return {}}
-	return ui.tab_close_rect(bar, tab_strip_x(w, bar, index), w.scale)
+	return views.tab_close_rect(bar, tab_strip_x(w, bar, index), w.scale)
 }
 
-window_tab_hit :: proc(app: ^App, w: ^Window, bar: ui.Tab_Bar, x, y: f32) -> Tab_Chrome_Target {
+window_tab_hit :: proc(app: ^App, w: ^Window, bar: views.Tab_Bar, x, y: f32) -> Tab_Chrome_Target {
 	if x < bar.x || x >= bar.x + bar.width || y < 0 || y >= bar.height {return nil}
 	for pass in 0 ..< 2 {
 		for i := bar.count - 1; i >= 0; i -= 1 {
@@ -109,11 +110,11 @@ window_tab_hit :: proc(app: ^App, w: ^Window, bar: ui.Tab_Bar, x, y: f32) -> Tab
 		chip := tab_chip_strip_rect(w, bar, run)
 		if render.rect_contains(chip, x, y) {return Tab_Chrome_Group{run.group.id}}
 	}
-	if bar.count > 0 && render.rect_contains(ui.tab_new_rect(bar), x, y) {return Tab_Chrome_New{}}
+	if bar.count > 0 && render.rect_contains(views.tab_new_rect(bar), x, y) {return Tab_Chrome_New{}}
 	return nil
 }
 
-window_tab_close_hit :: proc(app: ^App, w: ^Window, bar: ui.Tab_Bar, x, y: f32) -> int {
+window_tab_close_hit :: proc(app: ^App, w: ^Window, bar: views.Tab_Bar, x, y: f32) -> int {
 	tab, ok := window_tab_hit(app, w, bar, x, y).(Tab_Chrome_Tab)
 	if !ok {return -1}
 	index := tab_index_by_id(w.workspace, tab.id)
@@ -190,14 +191,15 @@ window_tab_strip_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 			if result != .Ok {return result}
 		}
 		// The gap a tab dragged on its own leaves lies on the tray of the group it would join.
-		y, height := ui.tab_tray_band(bar.height, w.scale)
+		y, height := views.tab_tray_band(bar.height, w.scale)
 		_, carry := tab_drag_state(w)
 		for tab, i in w.workspace.tabs {
 			if carry == nil || carry.whole || !tab.marked || i >= len(layout.places) {continue}
 			color, ends := tab_tray_place(app, w, i)
 			if color.a <= 0 {continue}
 			x := bar.x + layout.places[i].slot * bar.tab_width + layout.places[i].offset * w.scale
-			if ui.tab_tray_draw(&w.list, {x, y, bar.tab_width, height}, color, ends, .Rest, false, w.scale) != .None {
+			if views.tab_tray_draw(&w.list, {x, y, bar.tab_width, height}, color, ends, .Rest, false,
+				w.scale) != .None {
 				return .Ok
 			}
 		}
@@ -226,7 +228,7 @@ window_tab_strip_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 			tile, built := tab_tile(app, w, i)
 			if built != .Ok {return built}
 			control := tab_motion(w, i)
-			if result := ui.tab_draw(
+			if result := views.tab_draw(
 				&w.list,
 				&w.ui_text,
 				app.theme,
@@ -245,7 +247,7 @@ window_tab_strip_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 	if gathering && render.push_layer(&w.list, {bar.x, 0, bar.width, bar.height}) == .None {
 		shape := strip_fold_rect(app, w, bar, layout, gather)
 		color, state := tab_group_color(app, gather.group), tab_group_state(w, gather.group.id)
-		ui.tab_tray_fold_draw(&w.list, shape, color, state, w.fold.value, w.scale)
+		views.tab_tray_fold_draw(&w.list, shape, color, state, w.fold.value, w.scale)
 		if result := tab_chip_draw(app, w, gather, strip_chip_rest_rect(w, bar, layout, gather), bare = true);
 		   result != .Ok {return result}
 	}
@@ -268,7 +270,7 @@ window_tab_strip_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 			tab_motion(w, w.workspace.selected).hover.value,
 			w.scale,
 		)
-		underline := ui.tab_underline_rect(bar, x, lift, w.scale)
+		underline := views.tab_underline_rect(bar, x, lift, w.scale)
 		if render.push_rect(
 			   &w.list,
 			   {
@@ -282,7 +284,7 @@ window_tab_strip_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 	drop, placed := pane_drag_destination(w).(Pane_Drop)
 	if (placed && drop.place == .New_Tab) || w.tab_incoming.count > 0 || pulled {return .Ok}
 	new_tab := tab_control(w, Tab_Chrome_New{})
-	if result := ui.tab_new_draw(
+	if result := views.tab_new_draw(
 		&w.list,
 		app.theme,
 		bar,
@@ -297,7 +299,7 @@ window_tab_strip_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 	_ = ui.icon_button_draw(
 		&w.list,
 		app.theme,
-		ui.tab_tile_rect(bar, chevron.x, chevron.width, 0, w.scale),
+		views.tab_tile_rect(bar, chevron.x, chevron.width, 0, w.scale),
 		.Chevron_Down,
 		control.hover.value,
 		control.press.value,

@@ -2,11 +2,11 @@ package main
 
 import "aio:cli_protocol"
 import "cosmos:platform"
-import "aio:ui"
 import "core:fmt"
 import "core:os"
 import "core:path/filepath"
 import "core:strings"
+import "cosmos:ui"
 
 // Update AIODev (WORK-414). update.ps1, installed beside aiodev.exe, installs the latest release over the
 // running AIODev, which keeps running its old files; once it reports a newer build installed, AIODev asks

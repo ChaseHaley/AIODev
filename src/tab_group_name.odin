@@ -1,7 +1,7 @@
 package main
 
 import "cosmos:render"
-import "aio:ui"
+import "cosmos:ui"
 
 // The new-group editor's width, and the room its colour swatches take.
 GROUP_EDITOR_WIDTH :: f32(256)

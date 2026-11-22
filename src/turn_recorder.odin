@@ -5,7 +5,7 @@ import platform_api "cosmos:platform"
 import "aio:procinfo"
 import "aio:term"
 import "aio:turns"
-import "aio:ui"
+import "aio:views"
 import "base:runtime"
 import "core:fmt"
 import "core:io"
@@ -209,7 +209,7 @@ turn_worker_query :: proc(
 	pane: u32,
 	request: u64,
 	directory: string,
-	scope: ui.Changes_Scope,
+	scope: views.Changes_Scope,
 	session: turns.Session,
 	selected: []u64,
 ) {

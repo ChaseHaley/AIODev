@@ -3,7 +3,7 @@ package app_test
 import "cosmos:input"
 import "aio:markdown"
 import "cosmos:platform"
-import "aio:ui"
+import "aio:views"
 import "core:fmt"
 import "core:math"
 import "core:os"
@@ -13,6 +13,7 @@ import "core:testing"
 import "core:time"
 import app "../../src"
 import "cosmos:textedit"
+import "cosmos:ui"
 
 @(private = "file")
 Edit_Fixture :: struct {
@@ -77,10 +78,10 @@ file_text :: proc(t: ^testing.T, path: string) -> string {
 
 // The pane laid out as its draw lays it out, and where its page sits.
 @(private = "file")
-edit_fitted :: proc(state: ^app.App, w: ^app.Window, pane: ^app.Markdown_Pane) -> (g: ui.Markdown_Geometry) {
+edit_fitted :: proc(state: ^app.App, w: ^app.Window, pane: ^app.Markdown_Pane) -> (g: views.Markdown_Geometry) {
 	for shown in w.panes {
 		if shown.content != {.Markdown, pane.id} {continue}
-		g = ui.markdown_geometry(app.pane_body_rect(w, shown), w.scale, state.markdown_style.column)
+		g = views.markdown_geometry(app.pane_body_rect(w, shown), w.scale, state.markdown_style.column)
 		app.markdown_view_fitted(state, w, pane, app.markdown_document(pane), g)
 	}
 	return
@@ -93,7 +94,7 @@ task_click :: proc(t: ^testing.T, state: ^app.App, w: ^app.Window, pane: ^app.Ma
 	document := app.markdown_document(pane)
 	for y := g.top; y < g.area.y + g.area.height; y += 1 {
 		for x := g.area.x; x < g.left + g.width; x += 1 {
-			if ui.markdown_task_at(&pane.view, document, g, x, y) != mark {continue}
+			if views.markdown_task_at(&pane.view, document, g, x, y) != mark {continue}
 			for pressed in ([?]bool{true, false}) {
 				app.handle_event(state, input.Mouse_Button_Event{window = w.id, x = i32(x), y = i32(y),
 					button = .Left, pressed = pressed})
@@ -202,7 +203,7 @@ edit_link_click :: proc(state: ^app.App, w: ^app.Window, pane: ^app.Markdown_Pan
 	g := edit_fitted(state, w, pane)
 	for y := g.top; y < g.area.y + g.area.height; y += 1 {
 		for x := g.left; x < g.left + g.width; x += 2 {
-			if ui.markdown_link_at(&pane.view, g, x, y) != link {continue}
+			if views.markdown_link_at(&pane.view, g, x, y) != link {continue}
 			for pressed in ([?]bool{true, false}) {
 				app.handle_event(state, input.Mouse_Button_Event{window = w.id, x = i32(x), y = i32(y),
 					button = .Left, pressed = pressed})
@@ -379,7 +380,7 @@ chevron_click :: proc(t: ^testing.T, state: ^app.App, w: ^app.Window, pane: ^app
 	heading := markdown.block_at(document, offset)
 	for y := g.top; y < g.area.y + g.area.height; y += 1 {
 		for x := g.area.x; x < g.left; x += 1 {
-			found, on := ui.markdown_fold_at(&pane.view, document, g, x, y)
+			found, on := views.markdown_fold_at(&pane.view, document, g, x, y)
 			if found != heading || !on {continue}
 			for pressed in ([?]bool{true, false}) {
 				app.handle_event(state, input.Mouse_Button_Event{window = w.id, x = i32(x), y = i32(y),
@@ -408,8 +409,8 @@ headings_fold_their_sections :: proc(t: ^testing.T) {
 	testing.expect(t, pane.view.height < tall, "the section's lines are gone")
 	// A hidden offset finds the first shown line after it: the next heading of the folded one's level.
 	document := app.markdown_document(pane)
-	hidden, _ := ui.markdown_offset_top(&pane.view, strings.index(string(document.text[:]), "also hidden"))
-	two, _ := ui.markdown_offset_top(&pane.view, strings.index(string(document.text[:]), "Two"))
+	hidden, _ := views.markdown_offset_top(&pane.view, strings.index(string(document.text[:]), "also hidden"))
+	two, _ := views.markdown_offset_top(&pane.view, strings.index(string(document.text[:]), "Two"))
 	testing.expect_value(t, hidden, two)
 
 	app.run_action(&f.state, w, .Edit_Markdown)
@@ -456,7 +457,7 @@ edit_caret_point :: proc(
 ) {
 	g := edit_fitted(state, w, pane)
 	document := app.markdown_document(pane)
-	rect, _, shown := ui.markdown_caret_at(&pane.view, document, markdown.live_display(document, source))
+	rect, _, shown := views.markdown_caret_at(&pane.view, document, markdown.live_display(document, source))
 	return g.left + rect.x, g.top - f32(pane.view.scroll) + rect.y, rect.height, shown
 }
 
@@ -544,7 +545,7 @@ char_point :: proc(
 	g := edit_fitted(state, w, pane)
 	document := app.markdown_document(pane)
 	display := markdown.live_display(document, source)
-	rect, _, found := ui.markdown_caret_at(&pane.view, document, display)
+	rect, _, found := views.markdown_caret_at(&pane.view, document, display)
 	if !testing.expect(t, found, "the character is not on screen") {return}
 	return g.left + rect.x + 1, g.top - f32(pane.view.scroll) + rect.y + rect.height / 2, true
 }
@@ -721,7 +722,7 @@ paragraph_layout :: proc(
 	row_y: f32 = -1
 	out.left, out.right = max(f32), 0
 	for offset in from ..< to {
-		rect, _, found := ui.markdown_caret_at(&pane.view, document, offset)
+		rect, _, found := views.markdown_caret_at(&pane.view, document, offset)
 		if !testing.expect(t, found, "a character is not laid out") {return}
 		if rect.y != row_y {row_y, out.rows = rect.y, out.rows + 1}
 		out.left = min(out.left, g.left + rect.x)
@@ -767,14 +768,14 @@ edit_mode_lays_out_with_the_reading_modes_style :: proc(t: ^testing.T) {
 	testing.expect_value(t, editing.rows, reading_layout.rows)
 	testing.expect_value(t, editing.left, reading_layout.left)
 	testing.expect_value(t, editing.right, reading_layout.right)
-	for face in ui.Markdown_Face {
+	for face in views.Markdown_Face {
 		testing.expect_value(t, pane.view.faces[face].size_px, reading_faces[face].size_px)
 		testing.expect_value(t, pane.view.faces[face].line_height, reading_faces[face].line_height)
 	}
 	// The caret's line shows its markup but keeps the column.
 	edit_press(&f.state, w, .Home, {.Control})
 	g = edit_fitted(&f.state, w, pane)
-	rect, _, found := ui.markdown_caret_at(&pane.view, app.markdown_document(pane),
+	rect, _, found := views.markdown_caret_at(&pane.view, app.markdown_document(pane),
 		markdown.live_display(app.markdown_document(pane), 0))
 	testing.expect(t, found && g.left + rect.x == reading_layout.left, "the caret's line starts at the column's edge")
 }
@@ -826,7 +827,7 @@ reach_right :: proc(
 	g := edit_fitted(state, w, pane)
 	document := app.markdown_document(pane)
 	for offset in 0 ..= len(document.text) {
-		rect, _, found := ui.markdown_caret_at(&pane.view, document, offset)
+		rect, _, found := views.markdown_caret_at(&pane.view, document, offset)
 		if !found {continue}
 		reach = max(reach, g.left + rect.x)
 	}
@@ -926,7 +927,7 @@ a_hand_wrapped_paragraph_wraps_at_the_column_while_editing :: proc(t: ^testing.T
 caret_row :: proc(state: ^app.App, w: ^app.Window, pane: ^app.Markdown_Pane, source: int) -> (x, y: f32) {
 	g := edit_fitted(state, w, pane)
 	document := app.markdown_document(pane)
-	rect, _, _ := ui.markdown_caret_at(&pane.view, document, markdown.live_display(document, source))
+	rect, _, _ := views.markdown_caret_at(&pane.view, document, markdown.live_display(document, source))
 	return g.left + rect.x, g.top + rect.y
 }
 
@@ -1033,7 +1034,7 @@ word_top :: proc(
 	document := app.markdown_document(pane)
 	at := strings.index(string(document.text[:]), word)
 	if !testing.expect(t, at >= 0, word) {return}
-	rect, _, found := ui.markdown_caret_at(&pane.view, document, at)
+	rect, _, found := views.markdown_caret_at(&pane.view, document, at)
 	if !testing.expect(t, found, word) {return}
 	return g.top - f32(pane.view.scroll) + rect.y, true
 }
@@ -1088,7 +1089,7 @@ the_caret_stands_on_empty_lines_and_crosses_gaps :: proc(t: ^testing.T) {
 	app.run_action(&f.state, w, .Edit_Markdown)
 	if !testing.expect(t, app.markdown_editing(pane)) {return}
 	b := &pane.editor.buffer
-	line := f32(ui.markdown_line(&pane.view))
+	line := f32(views.markdown_line(&pane.view))
 	edit_press(&f.state, w, .Home, {.Control})
 	alpha, _ := word_top(t, &f.state, w, pane, "alpha")
 	beta, _ := word_top(t, &f.state, w, pane, "beta")
@@ -1101,7 +1102,7 @@ the_caret_stands_on_empty_lines_and_crosses_gaps :: proc(t: ^testing.T) {
 	testing.expect_value(t, b.caret, 6)
 	g := edit_fitted(&f.state, w, pane)
 	document := app.markdown_document(pane)
-	rect, _, found := ui.markdown_caret_at(&pane.view, document, markdown.live_display(document, b.caret))
+	rect, _, found := views.markdown_caret_at(&pane.view, document, markdown.live_display(document, b.caret))
 	testing.expect(t, found && rect.height == line, "the caret on an empty line is as tall as text")
 	// It is centred in the gap, between the two paragraphs.
 	middle := g.top - f32(pane.view.scroll) + rect.y + rect.height / 2

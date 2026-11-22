@@ -5,8 +5,9 @@ import "cosmos:input"
 import "aio:layout"
 import "cosmos:platform"
 import "cosmos:render"
-import "aio:ui"
+import "aio:views"
 import "core:math"
+import "cosmos:ui"
 
 // The title bar's own controls under the pointer and held: the title actions, the tab orientation
 // button, the native caption buttons and the workspace button. Window embeds it; the pointer surfaces
@@ -56,7 +57,7 @@ window_content_area :: proc(app: ^App, w: ^Window) -> layout.Rect {
 // The content area w has when its pane fill is `fill`, which need not be the fill it has now.
 window_content_area_in :: proc(app: ^App, w: ^Window, fill: layout.Pane_Fill) -> layout.Rect {
 	if fill == .Screen {return {0, 0, f32(w.width), f32(w.height)}}
-	r := ui.pane_area(
+	r := views.pane_area(
 		f32(w.width),
 		f32(w.height),
 		window_title_height_in(w, fill),
@@ -128,7 +129,7 @@ window_chrome_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 }
 
 window_gap :: proc(app: ^App, w: ^Window) -> f32 {
-	return ui.pane_gap(f32(app.settings.pane.gap), w.scale)
+	return views.pane_gap(f32(app.settings.pane.gap), w.scale)
 }
 
 // Fullscreen has no surrounding card to reveal at rounded corners.

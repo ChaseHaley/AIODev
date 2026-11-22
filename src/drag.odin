@@ -2,9 +2,9 @@ package main
 
 import "cosmos:input"
 import "aio:layout"
-import "aio:ui"
 import "core:math"
 import "core:time"
+import "cosmos:ui"
 
 // One pane or tab drag per window; nil is Idle. A Left press on a pane header or a marked tab arms it, the
 // threshold makes it Active, and from then on one destination at a time would take the drop. The release

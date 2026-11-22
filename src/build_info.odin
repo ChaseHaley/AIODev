@@ -1,8 +1,8 @@
 package main
 
 import "aio:cli_protocol"
-import "aio:ui"
 import "core:fmt"
+import "cosmos:ui"
 
 AIO_BUILD_ID :: cli_protocol.BUILD_ID
 AIO_BUILD_KIND :: cli_protocol.BUILD_KIND

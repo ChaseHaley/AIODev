@@ -1,6 +1,6 @@
 package app_test
 
-import "aio:ui"
+import "aio:views"
 import "core:strings"
 import "core:testing"
 import app "../../src"
@@ -118,7 +118,7 @@ tokens_show :: proc(
 	shown: string,
 	ok: bool,
 	error: string,
-	tokens: [dynamic]ui.Filter_Token,
+	tokens: [dynamic]views.Filter_Token,
 ) {
 	f: app.Changes_Filter
 	defer app.changes_filter_destroy(&f)
@@ -176,7 +176,7 @@ a_token_refers_to_its_filter_by_id_so_a_rename_keeps_it_and_shows_the_new_name :
 	if !testing.expect_value(t, len(renamed_tokens), 2) {return}
 	testing.expect_value(t, renamed_tokens[0].name, "Not like the pattern")
 	testing.expect_value(t, renamed_tokens[0].id, "00000002")
-	testing.expect_value(t, renamed_tokens[0].state, ui.Filter_Token_State.Known)
+	testing.expect_value(t, renamed_tokens[0].state, views.Filter_Token_State.Known)
 	testing.expect_value(t, renamed_tokens[1].name, "Without vendor files")
 
 	edited := "#00000001 No vendor | !^vendor/; #00000002 Odin | \\.odin$ !src; #00000003 Bad | ["
@@ -198,10 +198,10 @@ a_token_names_its_filter_by_state_and_an_invalid_saved_pattern_hides_nothing :: 
 	testing.expect_value(t, shown, "src/a.odin vendor/b.odin docs/c.md")
 	testing.expect(t, strings.contains(error, "saved filter Bad"), error)
 	if !testing.expect_value(t, len(tokens), 3) {return}
-	testing.expect_value(t, tokens[0].state, ui.Filter_Token_State.Known)
-	testing.expect_value(t, tokens[1].state, ui.Filter_Token_State.Unknown)
+	testing.expect_value(t, tokens[0].state, views.Filter_Token_State.Known)
+	testing.expect_value(t, tokens[1].state, views.Filter_Token_State.Unknown)
 	testing.expect_value(t, tokens[1].name, "00000009")
-	testing.expect_value(t, tokens[2].state, ui.Filter_Token_State.Invalid)
+	testing.expect_value(t, tokens[2].state, views.Filter_Token_State.Invalid)
 }
 
 @(test)
@@ -215,7 +215,7 @@ tokens_keep_their_byte_spans_and_an_at_being_typed_is_neither_a_token_nor_a_term
 	testing.expect_value(
 		t,
 		tokens[0],
-		ui.Filter_Token{start = 3, end = 13, id = "00000001", name = "No vendor", off = true},
+		views.Filter_Token{start = 3, end = 13, id = "00000001", name = "No vendor", off = true},
 	)
 	testing.expect_value(t, text[tokens[1].start:tokens[1].end], "@00000002")
 	testing.expect_value(t, tokens[1].name, "Odin")

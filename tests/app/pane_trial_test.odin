@@ -4,7 +4,8 @@ import "base:runtime"
 import "core:testing"
 import app "../../src"
 import "aio:layout"
-import "aio:ui"
+@(require) import "aio:views"
+import "cosmos:ui"
 
 @(private="file")
 trial_clone :: proc(tree: ^layout.Layout) -> layout.Layout {

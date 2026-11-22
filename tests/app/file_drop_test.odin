@@ -2,7 +2,7 @@ package app_test
 
 import "aio:layout"
 import "cosmos:platform"
-import "aio:ui"
+import "aio:views"
 import "core:fmt"
 import "core:os"
 import "core:slice"
@@ -321,7 +321,7 @@ a_drop_on_the_new_tab_zone_opens_a_new_tab :: proc(t: ^testing.T) {
 	s, w := &f.palette.state, f.palette.state.windows[0]
 	doc, made := drop_file(t, &f, "doc.md")
 	if !made {return}
-	region := ui.tab_drop_region(app.window_tab_bar(s, w), f32(w.width), w.scale)
+	region := views.tab_drop_region(app.window_tab_bar(s, w), f32(w.width), w.scale)
 	point := [2]f32{region.x + region.width / 2, region.y + region.height / 2}
 	drag(s, w, .Enter, point)
 	shown, placed := w.file_drag.(app.File_Drag).carry.destination.(app.Pane_Drop)

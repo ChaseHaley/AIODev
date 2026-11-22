@@ -1,8 +1,9 @@
 package main
 
 import "aio:layout"
-import "aio:ui"
+import "aio:views"
 import "core:time"
+import "cosmos:ui"
 
 // A Left press held on a scrollbar's track, as Windows repeats it: the press pages once at once toward the
 // pointer (each surface's own press does that), and while the button stays down the window pages again
@@ -103,14 +104,14 @@ scroll_hold_page :: proc(app: ^App, w: ^Window, hold: Scroll_Hold) -> (result: u
 		return rail_scrollbar_page(app, w, x, y, hold.side), !w.tabs_horizontal
 	case .Palette_Results, .Palette_Choices:
 		if !palette_active(app, w) {return}
-		track := ui.Palette_Track.Results if hold.bar == .Palette_Results else .Choices
-		l := ui.palette_layout(&app.palette, f32(w.width), f32(w.height), w.scale)
-		return ui.palette_page(&app.palette, l, track, x, y, hold.side), true
+		track := views.Palette_Track.Results if hold.bar == .Palette_Results else .Choices
+		l := views.palette_layout(&app.palette, f32(w.width), f32(w.height), w.scale)
+		return views.palette_page(&app.palette, l, track, x, y, hold.side), true
 	case .Settings_Page, .Settings_Strip, .Settings_Choices:
 		if !settings_active(w) {return}
-		track := ui.Editor_Track.Page
+		track := views.Editor_Track.Page
 		if hold.bar == .Settings_Strip {track = .Strip} else if hold.bar == .Settings_Choices {track = .Choices}
-		return ui.editor_page(&w.editor, settings_layout(w), track, x, y, hold.side), true
+		return views.editor_page(&w.editor, settings_layout(w), track, x, y, hold.side), true
 	case .Changes_Choices, .Changes_Turn_List, .Changes_Overview, .Changes_H_Scroll:
 		return changes_scroll_hold_page(app, w, hold)
 	}

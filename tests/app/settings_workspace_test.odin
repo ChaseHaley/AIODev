@@ -6,7 +6,7 @@ import "core:strings"
 import "core:testing"
 import app "../../src"
 import "cosmos:platform"
-import "aio:ui"
+import "aio:views"
 
 // The page's reading position and its open rows belong to the workspace, so leaving and coming back
 // shows Settings as it was left.
@@ -30,10 +30,10 @@ settings_view_survives_workspace_round_trips :: proc(t: ^testing.T) {
 	w := state.windows[0]
 	one := w.workspace
 	app.run_action(&state, w, .Settings_UI)
-	if !testing.expect(t, ui.editor_loaded(&w.editor)) {return}
+	if !testing.expect(t, views.editor_loaded(&w.editor)) {return}
 	initial_scroll := w.editor.scroll
 	w.editor.scroll = 24
-	ui.editor_motion_toggle(&w.editor, .Panes)
+	views.editor_motion_toggle(&w.editor, .Panes)
 	app.run_action(&state, w, .New_Workspace)
 	app.rename_finish(&state, w, true)
 	two := w.workspace
@@ -66,7 +66,7 @@ settings_view_survives_workspace_round_trips :: proc(t: ^testing.T) {
 	testing.expect(t, .Panes in w.editor.motion_expanded)
 	// Closing Settings discards its saved position and open rows instead of reviving them on the next open.
 	app.run_action(&state, w, .Close_Tab)
-	testing.expect(t, !ui.editor_loaded(&w.editor))
+	testing.expect(t, !views.editor_loaded(&w.editor))
 	if !testing.expect(t, app.workspace_select(&state, w, two)) {return}
 	if !testing.expect(t, app.workspace_select(&state, w, one)) {return}
 	app.run_action(&state, w, .Settings_UI)

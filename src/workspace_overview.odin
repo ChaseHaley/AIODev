@@ -2,11 +2,11 @@ package main
 
 import "cosmos:render"
 import "aio:settings"
-import "aio:ui"
 import "core:fmt"
 import "core:math"
 import "core:time"
 import "cosmos:motion"
+import "cosmos:ui"
 
 // Switching workspace in a window zooms the window out into a column of every workspace, in workspace list
 // order, travels along the column to the one chosen and zooms back into it, so a workspace change never

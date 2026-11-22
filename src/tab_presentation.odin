@@ -2,16 +2,17 @@ package main
 
 import "aio:layout"
 import "cosmos:render"
-import "aio:ui"
+import "aio:views"
 import "core:log"
+import "cosmos:ui"
 
 // What tab `index` of the window's workspace shows in the strip and in the rail: its title, the
 // focused pane's content icon or program badge with the most telling other pane's stacked behind it,
 // its program status, and its label's turn while focus moves between its panes (tab_label.odin).
-tab_tile :: proc(app: ^App, w: ^Window, index: int) -> (ui.Tab_Tile, render.Build_Status) {
+tab_tile :: proc(app: ^App, w: ^Window, index: int) -> (views.Tab_Tile, render.Build_Status) {
 	tab := w.workspace.tabs[index]
 	status := status_tab_mark(app, w, w.workspace, index)
-	t := ui.Tab_Tile {
+	t := views.Tab_Tile {
 		title        = tab_display_title(tab, index + 1),
 		status       = status,
 		status_phase = status_phase(app, w, status),
@@ -39,10 +40,10 @@ tab_marks :: proc(
 	front, behind: layout.Content,
 	stacked: bool,
 ) -> (
-	badge, back: ui.Tab_Badge,
+	badge, back: views.Tab_Badge,
 	result: render.Build_Status,
 ) {
-	size := (stacked ? ui.TAB_STACK_MARK : ui.ICON_BUTTON) * w.scale
+	size := (stacked ? views.TAB_STACK_MARK : ui.ICON_BUTTON) * w.scale
 	badge = tab_content_badge(app, front, size) or_return
 	if stacked {back = tab_content_badge(app, behind, size) or_return}
 	return
@@ -54,7 +55,7 @@ tab_content_badge :: proc(
 	content: layout.Content,
 	size: f32,
 ) -> (
-	ui.Tab_Badge,
+	views.Tab_Badge,
 	render.Build_Status,
 ) {
 	badge, result := content_badge(app, workspace_session_for_content(app, content), content, size)

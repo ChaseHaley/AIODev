@@ -3,10 +3,10 @@ package main
 import "aio:layout"
 import "cosmos:render"
 import "aio:settings"
-import "aio:ui"
 import "core:math"
 import "core:time"
 import "cosmos:motion"
+import "cosmos:ui"
 
 // When a split or a close changes a tab's panes, they ease from where they were drawn to their new
 // rectangles together, each within its container, the tiling or its floating group; nothing here depends

@@ -4,11 +4,11 @@ import app "../../src"
 import "cosmos:input"
 import "cosmos:platform"
 import "cosmos:render"
-import "aio:ui"
 import "core:fmt"
 import "core:os"
 import "core:strings"
 import "core:testing"
+import "cosmos:ui"
 
 @(private="file")
 Picker152_Fixture :: struct {

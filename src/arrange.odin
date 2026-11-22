@@ -2,8 +2,9 @@ package main
 
 import "aio:layout"
 import "cosmos:render"
-import "aio:ui"
+import "aio:views"
 import "core:time"
+import "cosmos:ui"
 
 // A pane drag from a header: where the pointer is resolves to a Pane_Drop, the trial measures the move it
 // plans (pane_moves.odin), the outline shows it and the release carries it out.
@@ -127,8 +128,8 @@ pane_drop_preview :: proc(
 pane_new_tab_ghost :: proc(app: ^App, w: ^Window) -> layout.Rect {
 	if w.tabs_horizontal {
 		bar := window_tab_bar(app, w)
-		r := ui.tab_drop_region(bar, f32(w.width), w.scale)
-		return layout.Rect(ui.tab_tile_rect(bar, r.x, min(180 * w.scale, r.width), 0, w.scale))
+		r := views.tab_drop_region(bar, f32(w.width), w.scale)
+		return layout.Rect(views.tab_tile_rect(bar, r.x, min(180 * w.scale, r.width), 0, w.scale))
 	}
 	r := rail_new_tab_rect(w)
 	inset := 2 * w.scale
@@ -314,7 +315,7 @@ pane_drop_tabs :: proc(app: ^App, w: ^Window, x, y: f32, swap: bool) -> Drop_Tab
 	}
 	tabs.new_tab = !swap && !window_linked(w) &&
 		(w.tabs_horizontal
-				? ui.tab_drop_hit(window_tab_bar(app, w), f32(w.width), w.scale, x, y)
+				? views.tab_drop_hit(window_tab_bar(app, w), f32(w.width), w.scale, x, y)
 				: tabs.over_rail && rail_new_tab)
 	return tabs
 }

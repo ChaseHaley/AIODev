@@ -5,10 +5,10 @@ import "cosmos:input"
 import "aio:layout"
 import "aio:settings"
 import "aio:term"
-import "aio:ui"
 import "core:testing"
 import "core:time"
 import app "../../src"
+import "cosmos:ui"
 
 // Runs the held track press's next repeat at the moment it falls due; false when no press is held.
 hold_repeat :: proc(state: ^app.App, w: ^app.Window) -> bool {

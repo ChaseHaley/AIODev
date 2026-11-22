@@ -4,7 +4,7 @@ import "cosmos:input"
 import "cosmos:platform"
 import "aio:term"
 import "aio:turns"
-import "aio:ui"
+import "aio:views"
 import "core:fmt"
 import "core:os"
 import "core:strings"
@@ -66,7 +66,7 @@ comments_press :: proc(
 	state: ^app.App,
 	w: ^app.Window,
 	pane: ^app.Changes_Pane,
-	hit: ui.Changes_Hit,
+	hit: views.Changes_Hit,
 	shift := false,
 ) {
 	e := input.Mouse_Button_Event {
@@ -147,7 +147,7 @@ comments_editor_saves_on_ctrl_enter_and_cancels_on_escape :: proc(t: ^testing.T)
 
 	comments_press(&state, &w, pane, {part = .Gutter, index = 0, line = 2})
 	comments_press(&state, &w, pane, {part = .Gutter, index = 0, line = 3}, shift = true)
-	testing.expect_value(t, c.selection, ui.Changes_Selection{file = 0, first = 2, last = 3, active = true})
+	testing.expect_value(t, c.selection, views.Changes_Selection{file = 0, first = 2, last = 3, active = true})
 	testing.expect_value(t, pane.model.view.selection, c.selection)
 
 	// Enter opens the editor on the selection. Ctrl+Enter has nothing to save in an empty plain comment, so
@@ -203,7 +203,7 @@ comments_editor_saves_on_ctrl_enter_and_cancels_on_escape :: proc(t: ^testing.T)
 
 	// Removed lines alone comment on the old side; Escape without an editor ends the selection.
 	comments_press(&state, &w, pane, {part = .Hunk_Select, index = 0, line = 5})
-	testing.expect_value(t, c.selection, ui.Changes_Selection{file = 0, first = 5, last = 6, active = true})
+	testing.expect_value(t, c.selection, views.Changes_Selection{file = 0, first = 5, last = 6, active = true})
 	testing.expect_value(t, c.editing, -1)
 	testing.expect(t, comments_key(&state, &w, pane, .Enter))
 	testing.expect_value(t, c.editing, 1)
@@ -295,35 +295,35 @@ comments_editor_untags_and_adds_text_to_a_label_or_a_deletion :: proc(t: ^testin
 
 	// A label note opens with its tag, and its text is optional: Ctrl+Enter saves it empty.
 	comments_press(&state, &w, pane, {part = .Comment_Edit, index = 0})
-	testing.expect_value(t, c.draft, ui.Changes_Note_Kind.Label)
-	testing.expect_value(t, pane.model.view.draft, ui.Changes_Note_Kind.Label)
-	testing.expect_value(t, ui.changes_editor_placeholder(.Label), "Add to the label (optional)")
+	testing.expect_value(t, c.draft, views.Changes_Note_Kind.Label)
+	testing.expect_value(t, pane.model.view.draft, views.Changes_Note_Kind.Label)
+	testing.expect_value(t, views.changes_editor_placeholder(.Label), "Add to the label (optional)")
 	testing.expect(t, comments_save(&state, &w, pane))
 	testing.expect_value(t, c.editing, -1)
-	testing.expect_value(t, c.items[0].kind, ui.Changes_Note_Kind.Label)
+	testing.expect_value(t, c.items[0].kind, views.Changes_Note_Kind.Label)
 	testing.expect_value(t, c.items[0].text, "")
 	// Words added to it are part of the note, which stays a label.
 	comments_press(&state, &w, pane, {part = .Comment_Edit, index = 0})
 	testing.expect(t, app.changes_comments_text(&state, &w, pane, "Because."))
 	testing.expect(t, comments_save(&state, &w, pane))
 	testing.expect_value(t, c.items[0].text, "Because.")
-	testing.expect_value(t, c.items[0].kind, ui.Changes_Note_Kind.Label)
+	testing.expect_value(t, c.items[0].kind, views.Changes_Note_Kind.Label)
 	testing.expect_value(t, c.items[0].label_instruction, "Check it")
 
 	// The × makes it a plain comment, which needs words: with none, Save does nothing.
 	comments_press(&state, &w, pane, {part = .Comment_Edit, index = 0})
 	comments_press(&state, &w, pane, {part = .Editor_Untag, index = 0})
-	testing.expect_value(t, c.draft, ui.Changes_Note_Kind.Comment)
-	testing.expect_value(t, pane.model.view.draft, ui.Changes_Note_Kind.Comment)
+	testing.expect_value(t, c.draft, views.Changes_Note_Kind.Comment)
+	testing.expect_value(t, pane.model.view.draft, views.Changes_Note_Kind.Comment)
 	textedit.select_all(&c.buffer)
 	testing.expect(t, comments_key(&state, &w, pane, .Delete))
 	testing.expect_value(t, comments_held(pane), "")
-	testing.expect_value(t, ui.changes_editor_can_save(&pane.model.view), false)
+	testing.expect_value(t, views.changes_editor_can_save(&pane.model.view), false)
 	testing.expect(t, comments_save(&state, &w, pane))
 	testing.expect_value(t, c.editing, 0)
 	testing.expect(t, app.changes_comments_text(&state, &w, pane, "Plain."))
 	testing.expect(t, comments_save(&state, &w, pane))
-	testing.expect_value(t, c.items[0].kind, ui.Changes_Note_Kind.Comment)
+	testing.expect_value(t, c.items[0].kind, views.Changes_Note_Kind.Comment)
 	testing.expect_value(t, c.items[0].text, "Plain.")
 	testing.expect_value(t, c.items[0].label_name, "")
 	testing.expect_value(t, c.items[0].label_colour, "")
@@ -337,10 +337,10 @@ comments_editor_untags_and_adds_text_to_a_label_or_a_deletion :: proc(t: ^testin
 	comments_press(&state, &w, pane, {part = .Gutter, index = 0, line = 4})
 	testing.expect(t, app.changes_comment_add(pane, {kind = .Delete}))
 	comments_press(&state, &w, pane, {part = .Comment_Edit, index = 1})
-	testing.expect_value(t, ui.changes_editor_placeholder(c.draft), "Why delete it? (optional)")
+	testing.expect_value(t, views.changes_editor_placeholder(c.draft), "Why delete it? (optional)")
 	comments_press(&state, &w, pane, {part = .Editor_Untag, index = 1})
 	testing.expect(t, comments_key(&state, &w, pane, .Escape))
-	testing.expect_value(t, c.items[1].kind, ui.Changes_Note_Kind.Delete)
+	testing.expect_value(t, c.items[1].kind, views.Changes_Note_Kind.Delete)
 }
 
 @(test)
@@ -379,13 +379,13 @@ comments_editor_buttons_and_pressing_away :: proc(t: ^testing.T) {
 	if !testing.expect_value(t, len(c.items), 2) {return}
 	testing.expect_value(t, c.items[1].text, "Away.")
 	testing.expect_value(t, c.items[1].first_line, 0)
-	testing.expect_value(t, c.selection, ui.Changes_Selection{file = 0, first = 4, last = 4, active = true})
+	testing.expect_value(t, c.selection, views.Changes_Selection{file = 0, first = 4, last = 4, active = true})
 
 	// The editor card reports the lines it is for.
 	testing.expect(t, comments_key(&state, &w, pane, .Enter))
-	testing.expect_value(t, pane.model.view.span, ui.Changes_Span{first = 13, last = 13, old = false})
+	testing.expect_value(t, pane.model.view.span, views.Changes_Span{first = 13, last = 13, old = false})
 	comments_press(&state, &w, pane, {part = .Comment_Edit, index = 0})
-	testing.expect_value(t, pane.model.view.span, ui.Changes_Span{first = 11, last = 12, old = false})
+	testing.expect_value(t, pane.model.view.span, views.Changes_Span{first = 11, last = 12, old = false})
 }
 
 @(test)
@@ -408,7 +408,7 @@ comments_find_their_lines_after_a_refresh_and_detach_when_they_are_gone :: proc(
 	testing.expect_value(t, c.items[0].first_line, 3)
 	testing.expect_value(t, c.items[0].last_line, 4)
 	testing.expect_value(t, pane.model.view.comments[0].detached, false)
-	testing.expect_value(t, c.selection, ui.Changes_Selection{file = 0, first = 2, last = 2, active = true})
+	testing.expect_value(t, c.selection, views.Changes_Selection{file = 0, first = 2, last = 2, active = true})
 
 	pane.model.view.files = comments_files("src/other.odin")
 	app.changes_comments_reanchor(pane)
@@ -702,7 +702,7 @@ comments_text_files :: proc(text: string, lead := false) -> []turns.Diff_File {
 // Saves a note on the context line with the editor, after `select` is set as the selection.
 @(private = "file")
 comments_save_selected :: proc(
-	state: ^app.App, w: ^app.Window, pane: ^app.Changes_Pane, select: ui.Changes_Selection, text: string,
+	state: ^app.App, w: ^app.Window, pane: ^app.Changes_Pane, select: views.Changes_Selection, text: string,
 ) {
 	pane.comments.selection = select
 	_ = comments_key(state, w, pane, .Enter)
@@ -731,7 +731,7 @@ comments_keep_the_offsets_of_a_partial_selection_unless_they_span_the_line :: pr
 	testing.expect(t, item.partial)
 	testing.expect_value(t, item.first_offset, 11)
 	testing.expect_value(t, item.last_offset, 18)
-	testing.expect_value(t, item.kind, ui.Changes_Note_Kind.Comment)
+	testing.expect_value(t, item.kind, views.Changes_Note_Kind.Comment)
 	view := pane.model.view.comments[0]
 	testing.expect(t, view.partial)
 	testing.expect_value(t, view.first_offset, 11)
@@ -800,7 +800,7 @@ comments_follow_a_refresh_with_their_offsets_held_inside_the_new_text :: proc(t:
 	testing.expect_value(t, pane.model.view.comments[0].last_offset, 15)
 	testing.expect_value(
 		t, c.selection,
-		ui.Changes_Selection{file = 0, first = 1, last = 1, active = true, partial = true, first_offset = 11, last_offset = 15},
+		views.Changes_Selection{file = 0, first = 1, last = 1, active = true, partial = true, first_offset = 11, last_offset = 15},
 	)
 	message := app.changes_comments_message(c.items[:], context.temp_allocator)
 	testing.expect(t, strings.contains(message, "line 4, at \"compute\":"), message)
@@ -886,7 +886,7 @@ comments_keep_a_copy_of_the_label_they_were_made_with :: proc(t: ^testing.T) {
 	testing.expect(t, app.changes_comment_add(pane, note))
 	if !testing.expect_value(t, len(c.items), 1) {return}
 	item := c.items[0]
-	testing.expect_value(t, item.kind, ui.Changes_Note_Kind.Label)
+	testing.expect_value(t, item.kind, views.Changes_Note_Kind.Label)
 	testing.expect_value(t, item.label_name, "Verify this")
 	testing.expect_value(t, item.label_colour, "#ff8800")
 	testing.expect_value(t, item.label_instruction, "Check the claim.")
@@ -898,7 +898,7 @@ comments_keep_a_copy_of_the_label_they_were_made_with :: proc(t: ^testing.T) {
 
 	app.changes_comments_view(&state, pane)
 	view := pane.model.view.comments[0]
-	testing.expect_value(t, view.kind, ui.Changes_Note_Kind.Label)
+	testing.expect_value(t, view.kind, views.Changes_Note_Kind.Label)
 	testing.expect_value(t, view.label_name, "Verify this")
 	testing.expect_value(t, view.label_colour, "#ff8800")
 

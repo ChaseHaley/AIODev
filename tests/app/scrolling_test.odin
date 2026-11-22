@@ -8,7 +8,7 @@ import "aio:ghostty"
 import "aio:layout"
 import "aio:settings"
 import "aio:term"
-import "aio:ui"
+import "cosmos:ui"
 
 @(test)
 scrolling_defaults_preserve_only_tab_cycle_shortcuts :: proc(t: ^testing.T) {
@@ -123,10 +123,10 @@ scrollbar_drag_follows_pointer_between_captures :: proc(t: ^testing.T) {
 	append(&w.panes, layout.Pane_Rect{content = {.Terminal, 1}, rect = {0, 100, 800, 500}})
 	// The drawn screen's capture, taken at the bottom and never refreshed during the drag.
 	captured, _ := term.scrollbar(&s)
-	w.views = make([dynamic]app.Pane_View)
-	defer delete(w.views)
-	append(&w.views, app.Pane_View{content = {.Terminal, 1}})
-	w.views[0].view.scrollbar = captured
+	w.pane_views = make([dynamic]app.Pane_View)
+	defer delete(w.pane_views)
+	append(&w.pane_views, app.Pane_View{content = {.Terminal, 1}})
+	w.pane_views[0].view.scrollbar = captured
 	pane := w.panes[0]
 	bar, _ := app.pane_scrollbar_geometry(&state, &w, pane)
 	x := i32(bar.track.x + 3)

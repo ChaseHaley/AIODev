@@ -7,7 +7,8 @@ import app "../../src"
 import "aio:layout"
 import "aio:settings"
 import "aio:term_view"
-import "aio:ui"
+import "aio:views"
+import "cosmos:ui"
 
 @(private="file")
 box_metrics :: proc(scale: f32) -> term_view.Metrics {
@@ -59,7 +60,7 @@ pane_box_inverse_produces_the_requested_grid_through_the_window_content_area :: 
 				workspace: app.Workspace
 				w := box_window(&workspace, scale)
 				insets := app.pane_insets(&state, &w, nil)
-				testing.expect_value(t, insets.header, math.round(ui.HEADER_HEIGHT * scale))
+				testing.expect_value(t, insets.header, math.round(views.HEADER_HEIGHT * scale))
 				for grid in ([?][2]u16{{80, 24}, {40, 10}, {1, 1}}) {
 					box, width, height, solved := app.pane_box_for_grid(&state, w, grid.x, grid.y, insets)
 					testing.expect(t, solved)

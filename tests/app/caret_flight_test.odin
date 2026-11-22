@@ -7,10 +7,10 @@ import "cosmos:input"
 import "cosmos:platform"
 import "cosmos:render"
 import "aio:term"
-import "aio:ui"
 import "core:testing"
 import "core:time"
 import app "../../src"
+import "cosmos:ui"
 
 // The window has one caret. It flies between surfaces (WORK-497), wears one colour and one shape in all
 // of them, blinks with the one window phase and leaves a hidden terminal cursor alone.
@@ -68,7 +68,7 @@ caret_flying :: proc(w: ^app.Window) -> bool {
 // The cursor the window last drew for the pane, which the keyboard's pane draws only as the caret.
 @(private = "file")
 caret_pane_cursor :: proc(w: ^app.Window, pane: int) -> bool {
-	for &view in w.views {
+	for &view in w.pane_views {
 		if view.content == w.panes[pane].content {return view.cursor != nil}
 	}
 	return false
@@ -106,7 +106,7 @@ the_caret_flies_between_a_shell_and_the_palette :: proc(t: ^testing.T) {
 	testing.expect_value(t, w.cursor_crossing.phase, app.Cursor_Crossing_Phase.Flying)
 	testing.expect(t, app.cursor_motion_animating(w))
 	// The pane under the palette draws no cursor, not even a hollow one.
-	testing.expect(t, w.views[0].cursor == nil, "the shell's cursor waits while the palette has the keyboard")
+	testing.expect(t, w.pane_views[0].cursor == nil, "the shell's cursor waits while the palette has the keyboard")
 
 	// Between the shell's cursor and the query field, in the one cursor colour.
 	if !caret_step(t, s, w, 56) {return}
@@ -132,7 +132,7 @@ the_caret_flies_between_a_shell_and_the_palette :: proc(t: ^testing.T) {
 	_ = back
 	testing.expect_value(t, w.carets.claim.owner, shell)
 	testing.expect_value(t, w.carets.claim.paint.head, prompt)
-	testing.expect(t, w.views[0].cursor != nil, "the shell's cursor is back")
+	testing.expect(t, w.pane_views[0].cursor != nil, "the shell's cursor is back")
 }
 
 @(test)

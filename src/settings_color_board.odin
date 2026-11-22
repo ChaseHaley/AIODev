@@ -1,7 +1,7 @@
 package main
 
 import "aio:settings"
-import "aio:ui"
+import "aio:views"
 import "core:fmt"
 import "core:strings"
 
@@ -202,12 +202,12 @@ settings_color_value :: proc(token: settings.Theme_Token, c: settings.Theme_Colo
 // One row per theme color in board order, each showing the value in effect; a custom theme's Reset
 // returns a color to its base theme. Then the board's groups and the card for the active theme.
 @(private, require_results)
-settings_add_color_rows :: proc(p: ^ui.Editor, s: ^settings.Settings) -> bool {
+settings_add_color_rows :: proc(p: ^views.Editor, s: ^settings.Settings) -> bool {
 	base := settings.theme_base(s)
 	tokens := settings.THEME_TOKENS
 	for tile in COLOR_TILES {
 		info := tokens[tile.token]
-		row := ui.Editor_Row {
+		row := views.Editor_Row {
 			key           = fmt.tprintf("%s%s", SETTINGS_COLOR_PREFIX, info.key),
 			title         = info.title,
 			description   = info.description,
@@ -221,17 +221,17 @@ settings_add_color_rows :: proc(p: ^ui.Editor, s: ^settings.Settings) -> bool {
 			clear         = info.kind == .Clear,
 			action        = .Theme_Color,
 		}
-		if ui.editor_add(p, row, COLOR_GROUPS[tile.group].title) != nil {return false}
+		if views.editor_add(p, row, COLOR_GROUPS[tile.group].title) != nil {return false}
 	}
 	for info in COLOR_GROUPS {
-		if !ui.editor_board_group(p, info.title, info.side) {return false}
+		if !views.editor_board_group(p, info.title, info.side) {return false}
 	}
-	return ui.editor_board_card(p, settings_color_card(s)) == nil
+	return views.editor_board_card(p, settings_color_card(s)) == nil
 }
 
 // The theme the board edits: a custom theme with its base, or a theme file that a change copies.
 @(private)
-settings_color_card :: proc(s: ^settings.Settings) -> ui.Board_Card {
+settings_color_card :: proc(s: ^settings.Settings) -> views.Board_Card {
 	name := settings.theme_display_name(s, s.theme.name)
 	if !settings.theme_custom(s) {
 		return {
@@ -257,13 +257,13 @@ settings_color_card :: proc(s: ^settings.Settings) -> ui.Board_Card {
 when AIO_CONTROL {
 	// The board's verification keys: whether it shows, the color in its inspector, its height in page
 	// lines and DIPs, where each tile and inspector part is drawn, and whether it still moves.
-	settings_board_state_report :: proc(r: ^State_Report, p: ^ui.Editor, page: ui.Editor_Layout) {
-		shown := ui.color_board_shown(p)
+	settings_board_state_report :: proc(r: ^State_Report, p: ^views.Editor, page: views.Editor_Layout) {
+		shown := views.color_board_shown(p)
 		state_value(r, "settings.board.shown", shown)
-		state_text(r, "settings.board.key", ui.color_board_token_key(p))
+		state_text(r, "settings.board.key", views.color_board_token_key(p))
 		state_value(r, "settings.board.control", p.board.control)
-		state_value(r, "settings.board.animating", ui.color_board_animating(p))
-		lines := shown ? ui.color_board_lines(p, page) : 0
+		state_value(r, "settings.board.animating", views.color_board_animating(p))
+		lines := shown ? views.color_board_lines(p, page) : 0
 		state_value(r, "settings.board.lines", lines)
 		height := f32(lines) * page.row_height / max(page.scale, 0.001)
 		state_valuef(r, "settings.board.height", "%g", height)
@@ -274,7 +274,7 @@ when AIO_CONTROL {
 				if item.row < 0 {continue}
 				row := &p.rows[item.row]
 				places := row.action == .Theme_Color ? &tiles : &card
-				rect := ui.editor_row_parts(p, page, index).row
+				rect := views.editor_row_parts(p, page, index).row
 				if strings.builder_len(places^) > 0 {strings.write_byte(places, ';')}
 				fmt.sbprintf(places, "%s@%g,%g,%g,%g", row.key, rect.x, rect.y, rect.width, rect.height)
 			}
@@ -289,9 +289,9 @@ when AIO_CONTROL {
 			if row.link != "" {fmt.sbprintf(&colors, ">%s", row.link)}
 		}
 		state_text(r, "settings.board.colors", strings.to_string(colors))
-		for part in ui.Board_Part {
+		for part in views.Board_Part {
 			name := fmt.tprintf("settings.board.%s", strings.to_lower(fmt.tprint(part), context.temp_allocator))
-			state_rect(r, name, ui.color_board_rect(p, page, part))
+			state_rect(r, name, views.color_board_rect(p, page, part))
 		}
 	}
 }

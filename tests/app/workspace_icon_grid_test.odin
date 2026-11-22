@@ -6,8 +6,9 @@ import app "../../src"
 import "cosmos:font"
 import "cosmos:glyphs"
 import "cosmos:render"
-import "aio:ui"
+import "aio:views"
 import fixtures "../fixtures"
+import "cosmos:ui"
 
 @(test)
 workspace_icon_grid_layout_fits_dpi_and_scrolls_only_presets :: proc(t: ^testing.T) {
@@ -191,7 +192,7 @@ workspace_icon_grid_offscreen_draw_retains_selection_and_theme_feedback :: proc(
 		w.scale, w.width, w.height = scale, i32(600*scale), i32(400*scale)
 		ui.text_set_size(&w.ui_text, 14*scale)
 		for id in ([?]string{"studio-dark", "studio-light"}) {
-			state := app.App{theme = ui.theme_from(fixtures.shipped_theme(id), fixtures.default_interface())}
+			state := app.App{theme = views.theme_from(fixtures.shipped_theme(id), fixtures.default_interface())}
 			append(&state.workspaces, &workspace)
 			defer delete(state.workspaces)
 			render.draw_list_reset(&w.list)

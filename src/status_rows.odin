@@ -3,11 +3,12 @@ package main
 import "cosmos:render"
 import "aio:settings"
 import "aio:term"
-import "aio:ui"
+import "aio:views"
 import "core:fmt"
 import "core:slice"
 import "core:strings"
 import "core:time"
+import "cosmos:ui"
 
 // The rows the Activity panel and the status inbox share (WORK-406, WORK-412): reports in trees,
 // grouped and ordered by status.group_by, named by status.row_name and described by status.row_terms.
@@ -266,7 +267,7 @@ status_report_terms :: proc(s: ^settings.Status_Settings, item: Status_Item, nam
 status_label_draw :: proc(app: ^App, w: ^Window, r: render.Rect, row: Status_Row) -> render.Build_Status {
 	s := w.scale
 	small := ui.text_styled(&w.ui_text, .Detail)
-	ink := row.attention ? ui.status_color(app.theme, .Blocked) : app.theme.faint
+	ink := row.attention ? views.status_color(app.theme, .Blocked) : app.theme.faint
 	baseline := r.y + ui.SPACE_1 * s + (r.height - ui.SPACE_1 * s - small.line_height) / 2 + small.ascent
 	indent := row.nested ? STATUS_PANEL_INDENT : 0
 	x, right := r.x + (ui.CONTROL_INSET + indent) * s, r.x + r.width - ui.CONTROL_INSET * s

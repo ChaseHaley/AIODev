@@ -7,7 +7,7 @@ import "aio:layout"
 import "aio:markdown"
 import "cosmos:platform"
 import "aio:term"
-import "aio:ui"
+import "aio:views"
 import "core:fmt"
 import "core:os"
 import "core:slice"
@@ -15,6 +15,7 @@ import "core:strings"
 import "core:testing"
 import "core:time"
 import app "../../src"
+import "cosmos:ui"
 
 @(private = "file")
 Fixture :: struct {
@@ -143,7 +144,7 @@ find_in_a_document_uses_the_terminal_bar_and_reads_top_down :: proc(t: ^testing.
 	pane := f.state.markdown_panes[0]
 	document := app.markdown_document(pane)
 	if !testing.expect(t, document != nil) {return}
-	ui.markdown_view_fit(&pane.view, document, pane.revision, &w.ui_text, f.state.family, 600, w.scale)
+	views.markdown_view_fit(&pane.view, document, pane.revision, &w.ui_text, f.state.family, 600, w.scale)
 
 	app.run_action(&f.state, w, .Find)
 	testing.expect(t, ui.find_has_keyboard(&w.find))
@@ -334,9 +335,9 @@ copy_is_available_in_a_document_with_a_selection :: proc(t: ^testing.T) {
 	document := app.markdown_document(pane)
 	if !testing.expect(t, document != nil) {return}
 	testing.expect(t, !app.action_available(&f.state, w, .Copy))
-	ui.markdown_select_all(&pane.view, document)
+	views.markdown_select_all(&pane.view, document)
 	testing.expect(t, app.action_available(&f.state, w, .Copy))
-	ui.markdown_selection_clear(&pane.view)
+	views.markdown_selection_clear(&pane.view)
 	testing.expect(t, !app.action_available(&f.state, w, .Copy))
 }
 
@@ -505,9 +506,9 @@ a_press_holds_its_pane_until_release_and_hover_has_one_owner :: proc(t: ^testing
 		if candidate.content.kind == .Markdown {shown = candidate} else {terminal = candidate}
 	}
 	if !testing.expect_value(t, shown.content.kind, layout.Content_Kind.Markdown) {return}
-	g := ui.markdown_geometry(app.pane_body_rect(w, shown), w.scale)
-	ui.markdown_view_fit(&pane.view, document, pane.revision, &w.ui_text, f.state.family, g.width, w.scale)
-	line := f32(ui.markdown_line(&pane.view))
+	g := views.markdown_geometry(app.pane_body_rect(w, shown), w.scale)
+	views.markdown_view_fit(&pane.view, document, pane.revision, &w.ui_text, f.state.family, g.width, w.scale)
+	line := f32(views.markdown_line(&pane.view))
 	y := g.top + line / 2
 
 	button := proc(state: ^app.App, w: ^app.Window, x, y: f32, pressed: bool) {
@@ -519,14 +520,14 @@ a_press_holds_its_pane_until_release_and_hover_has_one_owner :: proc(t: ^testing
 	testing.expect(t, selecting && held.pane == pane.id)
 	app.handle_event(&f.state, input.Mouse_Move_Event{window = w.id, x = i32(g.left + g.width),
 		y = i32(y), buttons = {.Left}})
-	testing.expect_value(t, ui.markdown_selected_text(&pane.view, document), "first paragraph")
+	testing.expect_value(t, views.markdown_selected_text(&pane.view, document), "first paragraph")
 	testing.expect(t, w.markdown_hover == nil)
 	button(&f.state, w, g.left + g.width, y, false)
 	testing.expect(t, w.markdown_gesture == nil)
-	testing.expect_value(t, ui.markdown_selected_text(&pane.view, document), "first paragraph")
+	testing.expect_value(t, views.markdown_selected_text(&pane.view, document), "first paragraph")
 
 	link_y := y
-	for ui.markdown_link_at(&pane.view, g, g.left + 5, link_y) < 0 && link_y < g.area.y + g.area.height {
+	for views.markdown_link_at(&pane.view, g, g.left + 5, link_y) < 0 && link_y < g.area.y + g.area.height {
 		link_y += 1
 	}
 	app.handle_event(&f.state, input.Mouse_Move_Event{window = w.id, x = i32(g.left + 5), y = i32(link_y)})
@@ -553,10 +554,10 @@ a_markdown_link_offers_the_link_menu_and_opens_its_file_in_a_linked_window :: pr
 	if !testing.expect(t, document != nil) {return}
 	shown: layout.Pane_Rect
 	for candidate in w.panes {if candidate.content.kind == .Markdown {shown = candidate}}
-	g := ui.markdown_geometry(app.pane_body_rect(w, shown), w.scale)
-	ui.markdown_view_fit(&pane.view, document, pane.revision, &w.ui_text, f.state.family, g.width, w.scale)
+	g := views.markdown_geometry(app.pane_body_rect(w, shown), w.scale)
+	views.markdown_view_fit(&pane.view, document, pane.revision, &w.ui_text, f.state.family, g.width, w.scale)
 	x, y := g.left + 5, g.top
-	for ui.markdown_link_at(&pane.view, g, x, y) < 0 && y < g.area.y + g.area.height {y += 1}
+	for views.markdown_link_at(&pane.view, g, x, y) < 0 && y < g.area.y + g.area.height {y += 1}
 	right_click := proc(state: ^app.App, w: ^app.Window, x, y: f32) {
 		for pressed in ([?]bool{true, false}) {
 			app.handle_event(state, input.Mouse_Button_Event{window = w.id, x = i32(x), y = i32(y),
@@ -606,12 +607,12 @@ a_markdown_link_offers_the_link_menu_and_opens_its_file_in_a_linked_window :: pr
 
 // Where w shows `pane`, laid out as its draw lays it out.
 @(private = "file")
-fitted :: proc(state: ^app.App, w: ^app.Window, pane: ^app.Markdown_Pane) -> (g: ui.Markdown_Geometry, found: bool) {
+fitted :: proc(state: ^app.App, w: ^app.Window, pane: ^app.Markdown_Pane) -> (g: views.Markdown_Geometry, found: bool) {
 	for shown in w.panes {
 		if shown.content != {.Markdown, pane.id} {continue}
-		g = ui.markdown_geometry(app.pane_body_rect(w, shown), w.scale)
+		g = views.markdown_geometry(app.pane_body_rect(w, shown), w.scale)
 		document := app.markdown_document(pane)
-		ui.markdown_view_fit(&pane.view, document, pane.revision, &w.ui_text, state.family, g.width, w.scale)
+		views.markdown_view_fit(&pane.view, document, pane.revision, &w.ui_text, state.family, g.width, w.scale)
 		return g, true
 	}
 	return {}, false
@@ -624,7 +625,7 @@ link_click :: proc(t: ^testing.T, state: ^app.App, w: ^app.Window, pane: ^app.Ma
 	if !testing.expect(t, found) {return}
 	for y := g.top; y < g.area.y + g.area.height; y += 1 {
 		for x := g.left; x < g.left + g.width; x += 2 {
-			if ui.markdown_link_at(&pane.view, g, x, y) != link {continue}
+			if views.markdown_link_at(&pane.view, g, x, y) != link {continue}
 			for pressed in ([?]bool{true, false}) {
 				app.handle_event(state, input.Mouse_Button_Event{window = w.id, x = i32(x), y = i32(y),
 					button = .Left, pressed = pressed})
@@ -642,7 +643,7 @@ expect_heading_at_top :: proc(t: ^testing.T, pane: ^app.Markdown_Pane, heading: 
 	if !testing.expect(t, document != nil) {return}
 	offset, found := markdown.heading_find(document, heading)
 	if !testing.expect(t, found, heading) {return}
-	top, shown := ui.markdown_offset_top(&pane.view, offset)
+	top, shown := views.markdown_offset_top(&pane.view, offset)
 	if !testing.expect(t, shown) {return}
 	testing.expect(t, pane.view.scroll > 0)
 	testing.expect_value(t, pane.view.scroll, int(top))
@@ -791,10 +792,10 @@ when app.AIO_CONTROL {
 		shown: layout.Pane_Rect
 		for candidate in w.panes {if candidate.content.kind == .Markdown {shown = candidate}}
 		if !testing.expect_value(t, shown.content.kind, layout.Content_Kind.Markdown) {return}
-		g := ui.markdown_geometry(app.pane_body_rect(w, shown), w.scale)
-		ui.markdown_view_fit(&pane.view, document, pane.revision, &w.ui_text, f.state.family, g.width, w.scale)
-		ui.markdown_outline_sync(&pane.outline, &pane.view, document)
-		column, visible := ui.markdown_outline_column(&pane.outline, g, w.scale)
+		g := views.markdown_geometry(app.pane_body_rect(w, shown), w.scale)
+		views.markdown_view_fit(&pane.view, document, pane.revision, &w.ui_text, f.state.family, g.width, w.scale)
+		views.markdown_outline_sync(&pane.outline, &pane.view, document)
+		column, visible := views.markdown_outline_column(&pane.outline, g, w.scale)
 		if !testing.expect(t, visible, "the wide page shows its outline") {return}
 		testing.expect_value(t, state_of(&f.state, "markdown.outline"), "12")
 		testing.expect_value(t, state_of(&f.state, "markdown.outline_open"), "false")
@@ -807,25 +808,25 @@ when app.AIO_CONTROL {
 			app.handle_event(state, input.Mouse_Button_Event{window = w.id, x = i32(x), y = i32(y),
 				button = .Left, pressed = pressed})
 		}
-		bar := ui.markdown_outline_bar_rect(&pane.outline, column, 2, w.scale)
+		bar := views.markdown_outline_bar_rect(&pane.outline, column, 2, w.scale)
 		move(&f.state, w, bar.x + bar.width / 2, bar.y + bar.height / 2)
 		hover, over := w.markdown_hover.(app.Markdown_Outline_Hover)
 		testing.expect(t, over && hover.pane == pane.id && hover.heading == 2, "the bar names its heading")
 		testing.expect_value(t, state_of(&f.state, "markdown.outline_open"), "true")
 
-		panel := ui.markdown_outline_panel(&pane.outline, document, column, g.area, &w.ui_text, w.scale)
-		row := ui.markdown_outline_row_rect(&pane.outline, panel, 5, w.scale)
+		panel := views.markdown_outline_panel(&pane.outline, document, column, g.area, &w.ui_text, w.scale)
+		row := views.markdown_outline_row_rect(&pane.outline, panel, 5, w.scale)
 		x, y := row.x + row.width / 2, row.y + row.height / 2
 		move(&f.state, w, x, y)
 		hover, over = w.markdown_hover.(app.Markdown_Outline_Hover)
 		testing.expect(t, over && hover.heading == 5, "the panel stays open under the pointer")
 		button(&f.state, w, x, y, true)
 		button(&f.state, w, x, y, false)
-		top, found := ui.markdown_offset_top(&pane.view, pane.outline.headings[5].start)
+		top, found := views.markdown_offset_top(&pane.view, pane.outline.headings[5].start)
 		testing.expect(t, found)
 		testing.expect_value(t, pane.view.scroll, int(top))
 		testing.expect(t, w.markdown_gesture == nil, "a press on the outline holds no selection")
-		testing.expect_value(t, ui.markdown_selected_text(&pane.view, document), "")
+		testing.expect_value(t, views.markdown_selected_text(&pane.view, document), "")
 		testing.expect_value(t, state_of(&f.state, "markdown.outline_current"), "5")
 		testing.expect_value(t, state_of(&f.state, "markdown.outline_open"), "true")
 

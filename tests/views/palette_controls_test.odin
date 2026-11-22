@@ -1,0 +1,635 @@
+package views_test
+
+import "aio:commands"
+import "cosmos:input"
+import "cosmos:platform"
+import "aio:settings"
+import "aio:views"
+import "core:strconv"
+import "core:strings"
+import "core:testing"
+import "cosmos:ui"
+
+@(private)
+Control_Values :: struct {
+	keys, values: [8]string,
+	count:        int,
+	fonts:        []string,
+}
+
+@(private)
+control_value :: proc(user: rawptr, key: string) -> (value, label: string) {
+	v := cast(^Control_Values)user
+	for i in 0 ..< v.count {if v.keys[i] == key {return v.values[i], ""}}
+	return "", ""
+}
+
+@(private)
+control_choices :: proc(user: rawptr, key: string) -> (choices, labels: []string) {
+	v := cast(^Control_Values)user
+	return key == "font.family" ? v.fonts : nil, nil
+}
+
+@(private)
+control_set :: proc(v: ^Control_Values, key, value: string) {
+	for i in 0 ..< v.count {
+		if v.keys[i] == key {
+			v.values[i] = value
+			return
+		}
+	}
+	v.keys[v.count], v.values[v.count] = key, value
+	v.count += 1
+}
+
+@(private)
+CONTROL_ROWS := [?]views.Palette_Setting {
+	{key = "cursor.blink", title = "Cursor Blink", group = "Cursor", control = .Toggle, resettable = true,
+		default_value = "false"},
+	{key = "pane.gap", title = "Pane Gap", group = "Panes", control = .Slider, minimum = 0, maximum = 24,
+		step = 1, resettable = true, default_value = "5"},
+	{key = "cursor.style", title = "Cursor Style", group = "Cursor", control = .Choice,
+		choices = {"block", "bar", "underline"}},
+	{key = "status.ignore_apps", title = "Ignored Apps", group = "Status", control = .Text},
+	{key = "input.leader", title = "Leader Key", group = "Input", control = .None, resettable = true,
+		default_value = "ctrl+b"},
+	{key = "font.family", title = "Font Family", group = "Font", control = .Choice,
+		searchable = true, choice_min_width = 360, filter_key = "font.show_all"},
+}
+
+@(private)
+control_palette :: proc(t: ^testing.T, p: ^views.Palette, v: ^Control_Values) -> commands.Registry {
+	registry := commands.create()
+	testing.expect_value(t, views.palette_init(p, CONTROL_ROWS[:]), nil)
+	views.palette_set_values(p, {user = v, value = control_value, choices = control_choices})
+	control_set(v, "cursor.blink", "true")
+	control_set(v, "pane.gap", "5")
+	control_set(v, "cursor.style", "block")
+	control_set(v, "status.ignore_apps", "")
+	control_set(v, "input.leader", "ctrl+b")
+	control_set(v, "font.family", "Cascadia Mono")
+	views.palette_open_mode(p, &registry, .Settings)
+	return registry
+}
+
+@(private)
+select_setting :: proc(p: ^views.Palette, key: string) {
+	for result, i in p.results {
+		if views.palette_result_name(p, result) == key {p.selected = i}
+	}
+}
+
+@(private)
+press :: proc(key: input.Key, modifiers: input.Modifiers = {}) -> input.Key_Event {
+	return {key = key, modifiers = modifiers, pressed = true}
+}
+
+// Takes the setting and value a Set_Setting outcome names.
+@(private)
+chosen_value :: proc(p: ^views.Palette) -> (key, value: string) {
+	chosen, _ := views.palette_chosen_take(p).(views.Chosen_Value)
+	return chosen.key, chosen.value
+}
+
+// Takes the setting an Open_Setting outcome names.
+@(private)
+chosen_setting :: proc(p: ^views.Palette) -> string {
+	chosen, _ := views.palette_chosen_take(p).(views.Chosen_Setting)
+	return chosen.key
+}
+
+@(test)
+palette_alt_arrows_step_a_toggle_slider_and_choice_in_place :: proc(t: ^testing.T) {
+	p: views.Palette
+	v: Control_Values
+	registry := control_palette(t, &p, &v)
+	defer commands.destroy(&registry)
+	defer views.palette_destroy(&p)
+
+	select_setting(&p, "cursor.blink")
+	outcome, _ := views.palette_key(&p, &registry, press(.Arrow_Left, {.Alt}))
+	key, value := chosen_value(&p)
+	testing.expect_value(t, outcome, views.Outcome.Set_Setting)
+	testing.expect_value(t, key, "cursor.blink")
+	testing.expect_value(t, value, "false")
+	testing.expect(t, ui.presence_is_open(p.presence), "the palette stays open after a change")
+
+	select_setting(&p, "pane.gap")
+	outcome, _ = views.palette_key(&p, &registry, press(.Arrow_Right, {.Alt}))
+	_, value = chosen_value(&p)
+	testing.expect_value(t, outcome, views.Outcome.Set_Setting)
+	testing.expect_value(t, value, "6")
+
+	control_set(&v, "pane.gap", "24")
+	outcome, _ = views.palette_key(&p, &registry, press(.Arrow_Right, {.Alt}))
+	testing.expect_value(t, outcome, views.Outcome.Changed)
+
+	select_setting(&p, "cursor.style")
+	outcome, _ = views.palette_key(&p, &registry, press(.Arrow_Left, {.Alt}))
+	_, value = chosen_value(&p)
+	testing.expect_value(t, outcome, views.Outcome.Set_Setting)
+	testing.expect_value(t, value, "underline")
+}
+
+@(test)
+palette_enter_still_jumps_to_a_setting_with_a_control :: proc(t: ^testing.T) {
+	p: views.Palette
+	v: Control_Values
+	registry := control_palette(t, &p, &v)
+	defer commands.destroy(&registry)
+	defer views.palette_destroy(&p)
+
+	select_setting(&p, "cursor.blink")
+	outcome, _ := views.palette_key(&p, &registry, press(.Enter))
+	testing.expect_value(t, outcome, views.Outcome.Open_Setting)
+	testing.expect_value(t, chosen_setting(&p), "cursor.blink")
+}
+
+@(test)
+palette_jump_only_setting_ignores_control_keys :: proc(t: ^testing.T) {
+	p: views.Palette
+	v: Control_Values
+	registry := control_palette(t, &p, &v)
+	defer commands.destroy(&registry)
+	defer views.palette_destroy(&p)
+
+	select_setting(&p, "input.leader")
+	outcome, _ := views.palette_key(&p, &registry, press(.Enter, {.Control}))
+	testing.expect(t, outcome != .Set_Setting, "Ctrl+Enter does not edit a jump-only setting")
+	testing.expect_value(t, views.palette_editing(&p), views.Palette_Edit_Kind.None)
+}
+
+@(test)
+palette_choice_list_opens_moves_and_chooses :: proc(t: ^testing.T) {
+	p: views.Palette
+	v: Control_Values
+	registry := control_palette(t, &p, &v)
+	defer commands.destroy(&registry)
+	defer views.palette_destroy(&p)
+
+	select_setting(&p, "cursor.style")
+	views.palette_key(&p, &registry, press(.Enter, {.Control}))
+	testing.expect_value(t, views.palette_editing(&p), views.Palette_Edit_Kind.Choice)
+	outcome, _ := views.palette_key(&p, &registry, press(.Escape))
+	testing.expect_value(t, outcome, views.Outcome.Changed)
+	testing.expect(t, ui.presence_is_open(p.presence), "Escape closes only the list")
+	testing.expect_value(t, views.palette_editing(&p), views.Palette_Edit_Kind.None)
+
+	views.palette_key(&p, &registry, press(.Enter, {.Control}))
+	views.palette_key(&p, &registry, press(.Arrow_Down))
+	outcome, _ = views.palette_key(&p, &registry, press(.Enter))
+	_, value := chosen_value(&p)
+	testing.expect_value(t, outcome, views.Outcome.Set_Setting)
+	testing.expect_value(t, value, "bar")
+}
+
+@(test)
+palette_long_choice_list_filters_typed_text :: proc(t: ^testing.T) {
+	p: views.Palette
+	v: Control_Values
+	v.fonts = {"Aptos", "Bahnschrift", "Calibri", "Cambria", "Cascadia Code", "Cascadia Mono",
+		"Consolas", "Courier New", "Georgia", "JetBrains Mono", "Lucida Console", "Segoe UI", "Verdana"}
+	registry := control_palette(t, &p, &v)
+	defer commands.destroy(&registry)
+	defer views.palette_destroy(&p)
+
+	select_setting(&p, "font.family")
+	views.palette_key(&p, &registry, press(.Enter, {.Control}))
+	views.palette_text(&p, &registry, "jet")
+	testing.expect_value(t, views.palette_query(&p), "")
+	outcome, _ := views.palette_key(&p, &registry, press(.Enter))
+	_, value := chosen_value(&p)
+	testing.expect_value(t, outcome, views.Outcome.Set_Setting)
+	testing.expect_value(t, value, "JetBrains Mono")
+}
+
+@(private)
+LONG_FONTS := []string{"Aptos", "Bahnschrift", "Calibri", "Cambria", "Cascadia Code", "Cascadia Mono",
+	"Consolas", "Courier New", "Georgia", "JetBrains Mono", "Lucida Console", "Segoe UI", "Verdana"}
+
+// Opens the font list in a fitted 1000 x 800 palette, with its row selected.
+@(private)
+open_font_list :: proc(t: ^testing.T, p: ^views.Palette, v: ^Control_Values) -> (commands.Registry, views.Palette_Layout) {
+	v.fonts = LONG_FONTS
+	registry := control_palette(t, p, v)
+	views.palette_fit(p, 1000, 800, 1)
+	select_setting(p, "font.family")
+	views.palette_key(p, &registry, press(.Enter, {.Control}))
+	testing.expect_value(t, views.palette_editing(p), views.Palette_Edit_Kind.Choice)
+	return registry, views.palette_layout(p, 1000, 800, 1)
+}
+
+// The palette opens the Settings page's dropdown: the same rows, search and Show all fonts switch,
+// so a font list is the same size in both, and its saved font is highlighted.
+@(test)
+palette_and_settings_open_the_same_font_dropdown :: proc(t: ^testing.T) {
+	page_editor: views.Editor
+	defer views.editor_destroy(&page_editor)
+	testing.expect_value(t, views.editor_add(&page_editor, {
+		key = "font.family", title = "Shell Font", kind = .Choice, searchable = true, font_filter = true,
+		choice_min_width = 360, value = "Cascadia Mono", choices = LONG_FONTS,
+	}, "Font"), nil)
+	views.editor_filter(&page_editor)
+	testing.expect(t, views.editor_select_key(&page_editor, "font.family"))
+	page_layout := views.editor_layout({0, 40, 1200, 1400}, 1)
+	views.editor_fit(&page_editor, page_layout)
+	views.editor_key(&page_editor, {key = .Enter, pressed = true})
+	page_popup := views.editor_popup_rect(&page_editor, page_layout)
+
+	p: views.Palette
+	v: Control_Values
+	registry, l := open_font_list(t, &p, &v)
+	defer commands.destroy(&registry)
+	defer views.palette_destroy(&p)
+	popup := views.palette_popup_rect(&p, l)
+	// Eight standard rows, the overlay padding, the search and the switch.
+	testing.expect_value(t, popup.height, f32(8 * 32 + 8 + 68))
+	testing.expect_value(t, popup.height, page_popup.height)
+	testing.expect_value(t, popup.width, page_popup.width)
+	testing.expect_value(t, p.buffers.dropdown.list.index, page_editor.dropdown.list.index)
+	testing.expect_value(t, LONG_FONTS[p.buffers.dropdown.list.index], "Cascadia Mono")
+	testing.expect_value(t, views.palette_pointer(&p, l, popup.x + 14, popup.y + 14), platform.Cursor_Shape.Text)
+	testing.expect_value(t, views.palette_pointer(&p, l, popup.x + 14, popup.y + 50), platform.Cursor_Shape.Hand)
+}
+
+// The palette's list has the shared scrollbar: hover, paging, a thumb drag and the wheel.
+@(test)
+palette_font_dropdown_scrollbar_pages_drags_and_wheels :: proc(t: ^testing.T) {
+	p: views.Palette
+	v: Control_Values
+	registry, l := open_font_list(t, &p, &v)
+	defer commands.destroy(&registry)
+	defer views.palette_destroy(&p)
+	d := &p.buffers.dropdown
+	popup := views.palette_popup_rect(&p, l)
+	x := popup.x + popup.width - 4
+	top, bottom := popup.y + 68 + 6, popup.y + popup.height - 8
+
+	testing.expect_value(t, views.palette_pointer_move(&p, l, nil, x, bottom, false), views.Outcome.Changed)
+	testing.expect(t, d.bar_hover)
+	testing.expect_value(t, views.palette_pointer(&p, l, x, bottom), platform.Cursor_Shape.Arrow)
+	d.list = {}
+	outcome, _ := views.palette_mouse_press(&p, &registry, l, x, bottom)
+	testing.expect_value(t, outcome, views.Outcome.Changed)
+	testing.expect(t, d.list.scroll > 0, "a press below the thumb pages down")
+	testing.expect_value(t, views.palette_editing(&p), views.Palette_Edit_Kind.Choice)
+
+	for d.list.scroll > 0 {_, _ = views.palette_mouse_press(&p, &registry, l, x, top)}
+	_, _ = views.palette_mouse_press(&p, &registry, l, x, top)
+	testing.expect(t, ui.dropdown_scrollbar_held(d), "a press on the thumb holds it")
+	testing.expect_value(t, views.palette_pointer_move(&p, l, nil, x + 500, 10000, true), views.Outcome.Changed)
+	testing.expect_value(t, d.list.scroll, len(LONG_FONTS) - 8)
+	testing.expect_value(t, views.palette_pointer_release(&p), views.Outcome.Changed)
+	testing.expect(t, !ui.dropdown_dragging(d))
+
+	testing.expect_value(t, views.palette_scroll(&p, 3), views.Outcome.Changed)
+	testing.expect_value(t, d.list.scroll, len(LONG_FONTS) - 11)
+	testing.expect(t, views.palette_chosen_take(&p) == nil, "scrolling chooses nothing")
+}
+
+// The Show all fonts switch saves the other filter with the list open; once the owner saved it the
+// list shows that filter's fonts and keeps the search.
+@(test)
+palette_font_dropdown_show_all_switch_keeps_the_list_and_search :: proc(t: ^testing.T) {
+	p: views.Palette
+	v: Control_Values
+	registry, _ := open_font_list(t, &p, &v)
+	defer commands.destroy(&registry)
+	defer views.palette_destroy(&p)
+	views.palette_text(&p, &registry, "ca")
+	// Calibri, Cambria and both Cascadias.
+	testing.expect_value(t, len(p.buffers.dropdown.matches), 4)
+	views.palette_key(&p, &registry, press(.Tab))
+	testing.expect(t, p.buffers.dropdown.toggle_focus)
+	outcome, _ := views.palette_key(&p, &registry, press(.Space))
+	key, value := chosen_value(&p)
+	testing.expect_value(t, outcome, views.Outcome.Set_Setting)
+	testing.expect_value(t, key, "font.show_all")
+	testing.expect_value(t, value, "true")
+	testing.expect_value(t, views.palette_editing(&p), views.Palette_Edit_Kind.Choice)
+
+	// The owner saves the filter; its choices now list the other fonts.
+	control_set(&v, "font.show_all", "true")
+	v.fonts = {"Cascadia Mono", "Comic Sans MS", "Calibri"}
+	views.palette_saved(&p, true)
+	testing.expect_value(t, views.palette_editing(&p), views.Palette_Edit_Kind.Choice)
+	testing.expect_value(t, ui.field_string(&p.buffers.dropdown.search), "ca")
+	testing.expect(t, p.buffers.dropdown.toggle_focus)
+	testing.expect_value(t, len(p.buffers.choices), 3)
+	testing.expect_value(t, len(p.buffers.dropdown.matches), 2)
+	views.palette_key(&p, &registry, press(.Tab))
+	views.palette_key(&p, &registry, press(.Arrow_Down))
+	outcome, _ = views.palette_key(&p, &registry, press(.Enter))
+	_, value = chosen_value(&p)
+	testing.expect_value(t, outcome, views.Outcome.Set_Setting)
+	testing.expect_value(t, value, "Calibri")
+	testing.expect_value(t, views.palette_editing(&p), views.Palette_Edit_Kind.None)
+}
+
+@(test)
+palette_text_entry_commits_on_enter :: proc(t: ^testing.T) {
+	p: views.Palette
+	v: Control_Values
+	registry := control_palette(t, &p, &v)
+	defer commands.destroy(&registry)
+	defer views.palette_destroy(&p)
+
+	select_setting(&p, "status.ignore_apps")
+	views.palette_key(&p, &registry, press(.Enter, {.Control}))
+	testing.expect_value(t, views.palette_editing(&p), views.Palette_Edit_Kind.Text)
+	views.palette_text(&p, &registry, "vim, less")
+	outcome, _ := views.palette_key(&p, &registry, press(.Enter))
+	key, value := chosen_value(&p)
+	testing.expect_value(t, outcome, views.Outcome.Set_Setting)
+	testing.expect_value(t, key, "status.ignore_apps")
+	testing.expect_value(t, value, "vim, less")
+	testing.expect_value(t, views.palette_editing(&p), views.Palette_Edit_Kind.None)
+}
+
+@(test)
+palette_slider_typed_value_snaps_and_clamps :: proc(t: ^testing.T) {
+	p: views.Palette
+	v: Control_Values
+	registry := control_palette(t, &p, &v)
+	defer commands.destroy(&registry)
+	defer views.palette_destroy(&p)
+
+	select_setting(&p, "pane.gap")
+	views.palette_key(&p, &registry, press(.Enter, {.Control}))
+	views.palette_text(&p, &registry, "99")
+	outcome, _ := views.palette_key(&p, &registry, press(.Enter))
+	_, value := chosen_value(&p)
+	testing.expect_value(t, outcome, views.Outcome.Set_Setting)
+	testing.expect_value(t, value, "24")
+}
+
+@(test)
+palette_toggle_click_changes_value_and_title_click_jumps :: proc(t: ^testing.T) {
+	p: views.Palette
+	v: Control_Values
+	registry := control_palette(t, &p, &v)
+	defer commands.destroy(&registry)
+	defer views.palette_destroy(&p)
+
+	l := views.palette_layout(&p, 1000, 800, 1)
+	row_y := l.list.y + l.row_height / 2
+	toggle_x := l.list.x + l.list.width - 46 - 18
+	outcome, _ := views.palette_mouse_press(&p, &registry, l, toggle_x, row_y)
+	_, value := chosen_value(&p)
+	testing.expect_value(t, outcome, views.Outcome.Set_Setting)
+	testing.expect_value(t, value, "false")
+	testing.expect(t, ui.presence_is_open(p.presence), "a control click keeps the palette open")
+
+	outcome, _ = views.palette_mouse_press(&p, &registry, l, l.list.x + 60, row_y)
+	testing.expect_value(t, outcome, views.Outcome.Open_Setting)
+}
+
+@(test)
+palette_slider_drag_saves_on_release :: proc(t: ^testing.T) {
+	p: views.Palette
+	v: Control_Values
+	registry := control_palette(t, &p, &v)
+	defer commands.destroy(&registry)
+	defer views.palette_destroy(&p)
+
+	l := views.palette_layout(&p, 1000, 800, 1)
+	row_y := l.list.y + l.row_height * 1.5
+	right := l.list.x + l.list.width - 46
+	track_left := right - 156 + 7
+	track_right := track_left + 98
+	outcome, _ := views.palette_mouse_press(&p, &registry, l, track_left + 2, row_y)
+	testing.expect_value(t, outcome, views.Outcome.Changed)
+	_, sliding := p.drag.(views.Slider_Drag)
+	testing.expect(t, sliding, "a track press starts a drag")
+	views.palette_slider_drag(&p, l, track_right + 40)
+	outcome = views.palette_pointer_release(&p)
+	_, value := chosen_value(&p)
+	testing.expect_value(t, outcome, views.Outcome.Set_Setting)
+	testing.expect_value(t, value, "24")
+	testing.expect(t, p.drag == nil, "release ends the drag")
+}
+
+@(test)
+palette_slider_drag_cancel_saves_nothing :: proc(t: ^testing.T) {
+	p: views.Palette
+	v: Control_Values
+	registry := control_palette(t, &p, &v)
+	defer commands.destroy(&registry)
+	defer views.palette_destroy(&p)
+
+	l := views.palette_layout(&p, 1000, 800, 1)
+	row_y := l.list.y + l.row_height * 1.5
+	track_left := l.list.x + l.list.width - 46 - 156 + 7
+	views.palette_mouse_press(&p, &registry, l, track_left + 2, row_y)
+	testing.expect_value(t, views.palette_editing(&p), views.Palette_Edit_Kind.Slider)
+	views.palette_slider_drag(&p, l, track_left + 200)
+	views.palette_drag_cancel(&p)
+	testing.expect_value(t, views.palette_editing(&p), views.Palette_Edit_Kind.None)
+	testing.expect_value(t, views.palette_pointer_release(&p), views.Outcome.None)
+	testing.expect(t, views.palette_chosen_take(&p) == nil, "a cancelled drag names no value")
+}
+
+@(test)
+palette_close_and_take_drop_a_chosen_value :: proc(t: ^testing.T) {
+	p: views.Palette
+	v: Control_Values
+	registry := control_palette(t, &p, &v)
+	defer commands.destroy(&registry)
+	defer views.palette_destroy(&p)
+
+	select_setting(&p, "cursor.blink")
+	outcome, _ := views.palette_key(&p, &registry, press(.Arrow_Left, {.Alt}))
+	testing.expect_value(t, outcome, views.Outcome.Set_Setting)
+	key, _ := chosen_value(&p)
+	testing.expect_value(t, key, "cursor.blink")
+	testing.expect(t, views.palette_chosen_take(&p) == nil, "a choice is taken once")
+
+	views.palette_key(&p, &registry, press(.Arrow_Left, {.Alt}))
+	views.palette_close(&p)
+	testing.expect(t, views.palette_chosen_take(&p) == nil, "closing drops a choice nobody took")
+}
+
+@(test)
+palette_opening_an_edit_drops_the_previous_pointer_hold_and_choice :: proc(t: ^testing.T) {
+	p: views.Palette
+	v: Control_Values
+	registry := control_palette(t, &p, &v)
+	defer commands.destroy(&registry)
+	defer views.palette_destroy(&p)
+
+	select_setting(&p, "cursor.blink")
+	views.palette_key(&p, &registry, press(.Arrow_Left, {.Alt}))
+	p.drag = views.Query_Drag{}
+	select_setting(&p, "status.ignore_apps")
+	views.palette_key(&p, &registry, press(.Enter, {.Control}))
+	testing.expect_value(t, views.palette_editing(&p), views.Palette_Edit_Kind.Text)
+	testing.expect(t, p.drag == nil, "the new edit owns input, not the previous pointer hold")
+	testing.expect(t, views.palette_chosen_take(&p) == nil, "the previous outcome no longer names a value")
+
+	views.palette_key(&p, &registry, press(.Escape))
+	testing.expect_value(t, views.palette_editing(&p), views.Palette_Edit_Kind.None)
+	testing.expect(t, p.drag == nil && views.palette_chosen_take(&p) == nil)
+}
+
+@(test)
+palette_reset_button_restores_the_default_and_ignores_an_unchanged_setting :: proc(t: ^testing.T) {
+	p: views.Palette
+	v: Control_Values
+	registry := control_palette(t, &p, &v)
+	defer commands.destroy(&registry)
+	defer views.palette_destroy(&p)
+
+	l := views.palette_layout(&p, 1000, 800, 1)
+	reset_x := l.list.x + l.list.width - 8 - 13
+	blink_y := l.list.y + l.row_height / 2
+	outcome, _ := views.palette_mouse_press(&p, &registry, l, reset_x, blink_y)
+	_, value := chosen_value(&p)
+	testing.expect_value(t, outcome, views.Outcome.Set_Setting)
+	testing.expect_value(t, value, "false")
+	testing.expect(t, ui.presence_is_open(p.presence), "a reset keeps the palette open")
+
+	gap_y := l.list.y + l.row_height * 1.5
+	outcome, _ = views.palette_mouse_press(&p, &registry, l, reset_x, gap_y)
+	testing.expect_value(t, outcome, views.Outcome.Changed)
+	testing.expect_value(t, p.selected, 1)
+
+	// A jump-only setting still has its reset button.
+	leader_y := l.list.y + l.row_height * 4.5
+	control_set(&v, "input.leader", "ctrl+a")
+	outcome, _ = views.palette_mouse_press(&p, &registry, l, reset_x, leader_y)
+	key: string
+	key, value = chosen_value(&p)
+	testing.expect_value(t, outcome, views.Outcome.Set_Setting)
+	testing.expect_value(t, key, "input.leader")
+	testing.expect_value(t, value, "ctrl+b")
+}
+
+@(test)
+palette_static_choice_popup_keeps_descriptor_labels_and_saved_values :: proc(t: ^testing.T) {
+	rows := [1]views.Palette_Setting{views.palette_setting(settings.schema_find("status.panel_view")^)}
+	p: views.Palette
+	testing.expect_value(t, views.palette_init(&p, rows[:]), nil)
+	defer views.palette_destroy(&p)
+	v: Control_Values
+	control_set(&v, "status.panel_view", "comfy")
+	views.palette_set_values(&p, {user = &v, value = control_value})
+	registry := commands.create()
+	defer commands.destroy(&registry)
+	views.palette_open_mode(&p, &registry, .Settings)
+	views.palette_fit(&p, 1000, 800, 1)
+
+	views.palette_key(&p, &registry, press(.Enter, {.Control}))
+	if !testing.expect_value(t, len(p.buffers.labels), 2) {return}
+	testing.expect_value(t, p.buffers.labels[0], "Comfy")
+	testing.expect_value(t, p.buffers.labels[1], "Dense")
+	views.palette_key(&p, &registry, press(.Arrow_Down))
+	outcome, _ := views.palette_key(&p, &registry, press(.Enter))
+	key, value := chosen_value(&p)
+	testing.expect_value(t, outcome, views.Outcome.Set_Setting)
+	testing.expect_value(t, key, "status.panel_view")
+	testing.expect_value(t, value, "dense")
+}
+
+@(test)
+palette_alt_arrows_step_a_fractional_slider_onto_clean_decimals :: proc(t: ^testing.T) {
+	rows := [?]views.Palette_Setting {
+		{key = "interface.hover_lift", title = "Hover lift", group = "Interface", control = .Slider,
+			minimum = 0, maximum = 4, step = 0.1},
+	}
+	p: views.Palette
+	v: Control_Values
+	registry := commands.create()
+	defer commands.destroy(&registry)
+	defer views.palette_destroy(&p)
+	testing.expect_value(t, views.palette_init(&p, rows[:]), nil)
+	views.palette_set_values(&p, {user = &v, value = control_value})
+	control_set(&v, "interface.hover_lift", "0")
+	views.palette_open_mode(&p, &registry, .Settings)
+	select_setting(&p, "interface.hover_lift")
+
+	// 0.1 + 0.1 + 0.1 drifts to 0.30000000000000004 in binary; each step lands on the decimal.
+	value: string
+	for _ in 0 ..< 3 {
+		outcome, _ := views.palette_key(&p, &registry, press(.Arrow_Right, {.Alt}))
+		testing.expect_value(t, outcome, views.Outcome.Set_Setting)
+		_, value = chosen_value(&p)
+		control_set(&v, "interface.hover_lift", value)
+	}
+	testing.expect_value(t, value, "0.3")
+	number, ok := strconv.parse_f64(value)
+	testing.expect(t, ok && number == 0.3, "the saved text parses to the same double as \"0.3\"")
+}
+
+// A multiple choice opens the Settings page's dropdown with its saved options checked. Enter and Space
+// flip the highlighted option and save with the list open, Alt+arrows leave it alone, and Escape
+// closes only the list.
+@(test)
+palette_multiple_choice_flips_options_in_the_settings_dropdown :: proc(t: ^testing.T) {
+	entry := settings.schema_find("interface.confirm")
+	if !testing.expect(t, entry != nil) {return}
+	saved := "close_split_tab, multiline_paste"
+
+	page_editor: views.Editor
+	defer views.editor_destroy(&page_editor)
+	page_row := views.schema_row(entry^)
+	page_row.value = saved
+	page_row.choice_mask, _, _ = settings.set_parse(entry.names, saved)
+	testing.expect_value(t, views.editor_add(&page_editor, page_row, "Interface"), nil)
+	views.editor_filter(&page_editor)
+	testing.expect(t, views.editor_select_key(&page_editor, "interface.confirm"))
+	page_layout := views.editor_layout({0, 40, 1200, 1400}, 1)
+	views.editor_fit(&page_editor, page_layout)
+	views.editor_key(&page_editor, {key = .Enter, pressed = true})
+	page_popup := views.editor_popup_rect(&page_editor, page_layout)
+
+	rows := [1]views.Palette_Setting{views.palette_setting(entry^)}
+	testing.expect_value(t, rows[0].control, views.Palette_Control.Choice)
+	testing.expect(t, rows[0].multiple)
+	p: views.Palette
+	testing.expect_value(t, views.palette_init(&p, rows[:]), nil)
+	defer views.palette_destroy(&p)
+	v: Control_Values
+	control_set(&v, "interface.confirm", saved)
+	views.palette_set_values(&p, {user = &v, value = control_value})
+	registry := commands.create()
+	defer commands.destroy(&registry)
+	views.palette_open_mode(&p, &registry, .Settings)
+	views.palette_fit(&p, 1000, 800, 1)
+
+	outcome, _ := views.palette_key(&p, &registry, press(.Arrow_Right, {.Alt}))
+	testing.expect(t, outcome != .Set_Setting, "Alt+Right does not step a multiple choice")
+	_ = views.palette_used_take(&p)
+
+	views.palette_key(&p, &registry, press(.Enter, {.Control}))
+	testing.expect_value(t, views.palette_editing(&p), views.Palette_Edit_Kind.Choice)
+	testing.expect(t, views.palette_used_take(&p), "opening the list is a use")
+	l := views.palette_layout(&p, 1000, 800, 1)
+	testing.expect_value(t, views.palette_popup_rect(&p, l).height, page_popup.height)
+	testing.expect_value(t, p.buffers.dropdown.list.index, page_editor.dropdown.list.index)
+
+	// Enter flips the first option off and saves; the list stays open on it.
+	outcome, _ = views.palette_key(&p, &registry, press(.Enter))
+	key, value := chosen_value(&p)
+	testing.expect_value(t, outcome, views.Outcome.Set_Setting)
+	testing.expect_value(t, key, "interface.confirm")
+	testing.expect_value(t, value, "multiline_paste")
+	control_set(&v, "interface.confirm", strings.clone(value, context.temp_allocator))
+	views.palette_saved(&p, true)
+	testing.expect_value(t, views.palette_editing(&p), views.Palette_Edit_Kind.Choice)
+	testing.expect_value(t, p.buffers.dropdown.list.index, 0)
+
+	// Space flips the next option on, on top of the saved value.
+	views.palette_key(&p, &registry, press(.Arrow_Down))
+	outcome, _ = views.palette_key(&p, &registry, press(.Space))
+	_, value = chosen_value(&p)
+	testing.expect_value(t, outcome, views.Outcome.Set_Setting)
+	testing.expect_value(t, value, "shell_switch, multiline_paste")
+	control_set(&v, "interface.confirm", strings.clone(value, context.temp_allocator))
+	views.palette_saved(&p, true)
+	testing.expect_value(t, views.palette_editing(&p), views.Palette_Edit_Kind.Choice)
+
+	outcome, _ = views.palette_key(&p, &registry, press(.Escape))
+	testing.expect_value(t, outcome, views.Outcome.Changed)
+	testing.expect(t, ui.presence_is_open(p.presence), "Escape closes only the list")
+	testing.expect_value(t, views.palette_editing(&p), views.Palette_Edit_Kind.None)
+}

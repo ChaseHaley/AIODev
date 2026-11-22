@@ -213,7 +213,7 @@ when AIO_CONTROL {
 	link_state_report :: proc(r: ^State_Report, w: ^Window) {
 		hover, uri := "none", ""
 		spans := 0
-		for &view in w.views {spans += term.link_span_count(&view.links)}
+		for &view in w.pane_views {spans += term.link_span_count(&view.links)}
 		if link, ok := w.link_hover.?; ok {
 			if view := pane_view(w, link.content); view != nil {
 				range := link.range

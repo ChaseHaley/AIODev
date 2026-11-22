@@ -3,8 +3,8 @@ package main
 import "aio:layout"
 import "cosmos:platform"
 import "cosmos:render"
-import "aio:ui"
 import "core:log"
+import "cosmos:ui"
 
 // A linked window shows part of a tab on its own, so panes that belong together can span monitors and still
 // switch with their tab (D-077, D-079). Its panes stay in their tab's tree, under a node marked linked, which

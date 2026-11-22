@@ -2,8 +2,8 @@ package main
 
 import "cosmos:input"
 import "cosmos:render"
-import "aio:ui"
 import "core:log"
+import "cosmos:ui"
 
 // The menu a right click on an Activity row opens. Its rows are w.activity_row_menu; which pane they
 // act on is the overlay's.

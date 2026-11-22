@@ -6,8 +6,9 @@ import "cosmos:input"
 import "aio:layout"
 import "cosmos:platform"
 import "aio:term"
-import "aio:ui"
+import "aio:views"
 import "core:fmt"
+import "cosmos:ui"
 
 Action :: enum u32 {
 	Command_Palette,
@@ -281,7 +282,7 @@ Action_Param :: struct {
 	direction: layout.Direction,
 	index:     int,
 	resize:    Resize_Step,
-	mode:      ui.Palette_Mode,
+	mode:      views.Palette_Mode,
 }
 
 // A divider move along `axis`, by `pixels`; negative moves toward the left or the top.
@@ -1508,7 +1509,7 @@ command_execute :: proc(app: ^App, ctx: Command_Context, invocation: commands.In
 		palette_open(app, w)
 	case .Palette_Tabs, .Palette_Workspaces, .Palette_Settings, .Palette_Commands:
 		if palette_active(app, w) {
-			ui.palette_set_mode(&app.palette, &app.registry, param.mode)
+			views.palette_set_mode(&app.palette, &app.registry, param.mode)
 			return {}
 		}
 		palette_open_mode(app, w, param.mode)

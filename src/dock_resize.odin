@@ -3,10 +3,11 @@ package main
 import "cosmos:input"
 import "aio:layout"
 import "cosmos:render"
-import "aio:ui"
+import "aio:views"
 import "core:fmt"
 import "core:log"
 import "core:math"
+import "cosmos:ui"
 
 // The edges of the docked chrome the pointer drags: the Activity panel's top where it shares the rail,
 // its side beside the panes, and the rail's side. Declared in hit order, ahead of the layout's dividers.
@@ -105,10 +106,10 @@ dock_edge_drag :: proc(app: ^App, w: ^Window, edge: Dock_Edge, position: f32) {
 	case .Activity_Width:
 		width := app.settings.status.panel_side == .Right ? f32(w.width) - position : position
 		available := f32(w.width) - (rail_docked(w) ? rail_width_pixels(w) : 0)
-		w.status.panel_width = ui.rail_pixel_width(w.scale, width / w.scale, available) / w.scale
+		w.status.panel_width = views.rail_pixel_width(w.scale, width / w.scale, available) / w.scale
 	case .Rail_Width:
 		width := position - rail_area(w).x
-		w.rail_width = ui.rail_pixel_width(w.scale, width / w.scale, f32(w.width)) / w.scale
+		w.rail_width = views.rail_pixel_width(w.scale, width / w.scale, f32(w.width)) / w.scale
 	}
 }
 

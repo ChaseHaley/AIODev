@@ -1,8 +1,9 @@
 package main
 
 import "aio:settings"
-import "aio:ui"
+import "aio:views"
 import "core:strings"
+import "cosmos:ui"
 
 // How a reveal sets the settings search before it selects its row.
 Reveal_Search :: enum {
@@ -70,10 +71,10 @@ settings_reveal :: proc(app: ^App, w: ^Window, reveal: Settings_Reveal) {
 
 // The order is the invariant: the search is settled before the filter rebuilds the page, and the
 // target is selected after it, since a rebuild would otherwise select the first row.
-settings_reveal_page :: proc(p: ^ui.Editor, reveal: Settings_Reveal) {
+settings_reveal_page :: proc(p: ^views.Editor, reveal: Settings_Reveal) {
 	// Going to another setting leaves a conflict chain, dropping what it did not save.
-	ui.editor_chain_close(p)
-	scroll := ui.editor_scroll_lines(p)
+	views.editor_chain_close(p)
+	scroll := views.editor_scroll_lines(p)
 	query, search := reveal.query, reveal.search
 	if search == .Clear {
 		query = ""
@@ -81,34 +82,34 @@ settings_reveal_page :: proc(p: ^ui.Editor, reveal: Settings_Reveal) {
 		query = strings.clone(ui.field_string(&p.filter), context.temp_allocator)
 	}
 	ui.field_set(&p.filter, query)
-	ui.editor_filter(p)
+	views.editor_filter(p)
 	if area, shown := SETTINGS_SECTIONS[reveal.section].area.?; shown {
-		ui.editor_section_show(p, int(area))
+		views.editor_section_show(p, int(area))
 	}
 	target := settings_reveal_target(reveal)
-	selected := target != nil && ui.editor_reveal(p, target.?)
+	selected := target != nil && views.editor_reveal(p, target.?)
 	if reveal.focus == .Control && selected {
 		// Shortcut rows capture chords instead of typing, so they keep focus in the search.
-		if row := ui.editor_row(p); row != nil && row.kind != .Shortcut {ui.editor_focus_row(p)}
+		if row := views.editor_row(p); row != nil && row.kind != .Shortcut {views.editor_focus_row(p)}
 	}
-	if reveal.keep_scroll {ui.editor_scroll_keep(p, scroll)}
-	if reveal.message != "" {ui.editor_message(p, reveal.message, false)}
+	if reveal.keep_scroll {views.editor_scroll_keep(p, scroll)}
+	if reveal.message != "" {views.editor_message(p, reveal.message, false)}
 }
 
 // The row a reveal selects: a section's own target, the program groups editor, or the named row.
 // Motion keys name rows of their own, so they reveal like any other row.
 @(private)
-settings_reveal_target :: proc(reveal: Settings_Reveal) -> Maybe(ui.Reveal_Target) {
+settings_reveal_target :: proc(reveal: Settings_Reveal) -> Maybe(views.Reveal_Target) {
 	section := reveal.section
 	for info, candidate in SETTINGS_SECTIONS {
 		if info.palette_key != "" && info.palette_key == reveal.key {section = candidate}
 	}
-	if section == .Profiles {return ui.Reveal_Profiles{}}
-	if section == .Link_Programs {return ui.Reveal_Openers{}}
+	if section == .Profiles {return views.Reveal_Profiles{}}
+	if section == .Link_Programs {return views.Reveal_Openers{}}
 	if reveal.key == "" {return nil}
-	if reveal.key == settings.PADDING_GROUPS_KEY {return ui.Reveal_Program_Groups{}}
-	if reveal.key == settings.QUICK_LABELS_KEY {return ui.Reveal_Quick_Labels{}}
-	if reveal.key == settings.SAVED_FILTERS_KEY {return ui.Reveal_Saved_Filters{}}
-	return ui.Reveal_Row{reveal.key}
+	if reveal.key == settings.PADDING_GROUPS_KEY {return views.Reveal_Program_Groups{}}
+	if reveal.key == settings.QUICK_LABELS_KEY {return views.Reveal_Quick_Labels{}}
+	if reveal.key == settings.SAVED_FILTERS_KEY {return views.Reveal_Saved_Filters{}}
+	return views.Reveal_Row{reveal.key}
 }
 

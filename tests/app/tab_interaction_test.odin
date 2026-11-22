@@ -5,8 +5,9 @@ import "cosmos:input"
 import "cosmos:platform"
 import "cosmos:render"
 import "aio:term"
-import "aio:ui"
+import "aio:views"
 import "core:testing"
+import "cosmos:ui"
 
 @(private="file")
 interaction_rect :: proc(s: ^app.App, w: ^app.Window, index: int, close := false) -> render.Rect {
@@ -17,7 +18,7 @@ interaction_rect :: proc(s: ^app.App, w: ^app.Window, index: int, close := false
 	if close {
 		l, ok := app.rail_current_layout(w)
 		if !ok {return {}}
-		return ui.rail_close_rect(l, index, w.scale)
+		return views.rail_close_rect(l, index, w.scale)
 	}
 	return app.rail_row_rect_for_tab(w, index)
 }

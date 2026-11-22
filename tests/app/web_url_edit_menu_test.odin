@@ -2,8 +2,8 @@ package app_test
 
 import app "../../src"
 import "cosmos:platform"
-import "aio:ui"
 import "core:testing"
+import "cosmos:ui"
 
 // The menu rows by label, with whether each is enabled, and how many separators the menu has.
 @(private = "file")

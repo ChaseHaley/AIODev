@@ -1,15 +1,17 @@
 package app_test
 
+import "cosmos:input"
 import "base:runtime"
 import "core:fmt"
 import "core:os"
 import "core:testing"
 import "core:time"
 import app "../../src"
+import "aio:verify_protocol"
 import "aio:layout"
 import "cosmos:platform"
 import "aio:term"
-import "aio:ui"
+import "cosmos:ui"
 
 @(private="file")
 Cleanup_Fixture :: struct { state: app.App, source, destination: ^app.Window }
@@ -46,7 +48,7 @@ cleanup_fixture_init :: proc(t: ^testing.T, f: ^Cleanup_Fixture) -> bool {
 		append(&state.windows, w)
 		view, created := app.pane_view_create({.Terminal, u32(index+1)}, true)
 		if !testing.expect(t, created) { return false }
-		append(&w.views, view)
+		append(&w.pane_views, view)
 		if index == 0 { f.source = w } else { f.destination = w }
 	}
 	return true

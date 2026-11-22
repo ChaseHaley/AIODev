@@ -2,8 +2,8 @@ package main
 
 import "aio:layout"
 import "cosmos:render"
-import "aio:ui"
 import "core:fmt"
+import "cosmos:ui"
 
 // What each kind of pane content may do. A new kind fails to compile until it has an entry here, and
 // its own branches in the switches over layout.Content_Kind.

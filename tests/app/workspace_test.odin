@@ -11,7 +11,8 @@ import app "../../src"
 import "aio:commands"
 import "cosmos:platform"
 import "aio:term"
-import "aio:ui"
+import "aio:views"
+import "cosmos:ui"
 
 _ :: log
 
@@ -131,7 +132,7 @@ workspace_controls_switch_hidden_runtimes_and_activate_owners :: proc(t: ^testin
 	row0 := app.rail_row_rect_for_tab(w, 0)
 	row1 := app.rail_row_rect_for_tab(w, 1)
 	testing.expect_value(t, app.rail_tab_hit(w, layout, row0.x + 10 * w.scale, row0.y + 10 * w.scale), 0)
-	close := ui.rail_close_rect(layout, 1, w.scale)
+	close := views.rail_close_rect(layout, 1, w.scale)
 	hit := app.rail_tab_interaction_hit(w, close.x + close.width / 2, close.y + close.height / 2, .Left)
 	testing.expect(t, hit.close && hit.target == app.Tab_Chrome_Tab{w.workspace.tabs[1].id})
 	app.handle_event(&state, input.Mouse_Button_Event{window = w.id, button = .Left, pressed = true,
@@ -146,17 +147,17 @@ workspace_controls_switch_hidden_runtimes_and_activate_owners :: proc(t: ^testin
 	testing.expect(t, app.selected_tab(original) == settings_tab)
 	if !testing.expect(t, app.workspace_select(&state, w, two)) { return }
 	testing.expect(t, !app.settings_active(w))
-	testing.expect(t, !ui.editor_loaded(&w.editor))
+	testing.expect(t, !views.editor_loaded(&w.editor))
 	if !testing.expect(t, app.workspace_select(&state, w, original)) { return }
 	testing.expect(t, app.settings_active(w))
-	testing.expect(t, ui.editor_loaded(&w.editor) && len(w.editor.rows) > 0)
+	testing.expect(t, views.editor_loaded(&w.editor) && len(w.editor.rows) > 0)
 	testing.expect(t, app.selected_tab(original) == settings_tab)
 	panes := raw_data(w.panes)
 	if !testing.expect(t, app.workspace_select(&state, w, two)) { return }
 	testing.expect_value(t, raw_data(w.panes), panes)
 	testing.expect_value(t, os.remove(path), nil)
 	testing.expect(t, !app.workspace_select(&state, w, original))
-	testing.expect(t, w.workspace == two && !ui.editor_loaded(&w.editor))
+	testing.expect(t, w.workspace == two && !views.editor_loaded(&w.editor))
 	testing.expect_value(t, os.write_entire_file(path, settings), nil)
 	if !testing.expect(t, app.workspace_select(&state, w, original)) { return }
 	app.run_action(&state, w, .New_Window)

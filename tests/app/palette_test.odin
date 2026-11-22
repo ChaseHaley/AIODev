@@ -10,7 +10,8 @@ import "core:time"
 import app "../../src"
 import "cosmos:platform"
 import "aio:term"
-import "aio:ui"
+import "aio:views"
+import "cosmos:ui"
 
 @(private)
 Palette_Fixture :: struct {
@@ -89,15 +90,15 @@ palette_routes_input_and_render_only_to_its_window :: proc(t: ^testing.T) {
 	testing.expect(t, !app.palette_active(s, nil) && !app.palette_visible(s, nil))
 	app.window_render(s, first)
 	app.window_render(s, second)
-	panel := ui.palette_layout(&s.palette, f32(first.width), f32(first.height), first.scale).panel
+	panel := views.palette_layout(&s.palette, f32(first.width), f32(first.height), first.scale).panel
 	owner_drawn := false
 	for rect in first.list.rects { owner_drawn ||= rect.rect == panel && rect.color == s.theme.surface }
 	testing.expect(t, owner_drawn)
 	testing.expect(t, slice.equal(layers, second.list.layers[:]))
 	testing.expect(t, slice.equal(rects, second.list.rects[:]))
 	testing.expect(t, slice.equal(glyphs, second.list.glyphs[:]))
-	testing.expect(t, !first.views[0].style.focused)
-	testing.expect(t, second.views[1].style.focused)
+	testing.expect(t, !first.pane_views[0].style.focused)
+	testing.expect(t, second.pane_views[1].style.focused)
 	app.palette_close(s, second)
 	testing.expect(t, app.palette_active(s, first))
 	app.handle_event(s, input.Text_Event{first.id, "font"})
@@ -105,9 +106,9 @@ palette_routes_input_and_render_only_to_its_window :: proc(t: ^testing.T) {
 	app.handle_event(s, input.Text_Event{second.id, "needle"})
 	app.handle_event(s, input.Key_Event{window = second.id, key = .Backspace, pressed = true})
 	testing.expect_value(t, ui.field_string(&second.find.query), "needl")
-	testing.expect_value(t, ui.palette_query(&s.palette), "font")
+	testing.expect_value(t, views.palette_query(&s.palette), "font")
 	selected, scroll := s.palette.selected, s.palette.scroll
-	l := ui.palette_layout(&s.palette, f32(first.width), f32(first.height), first.scale)
+	l := views.palette_layout(&s.palette, f32(first.width), f32(first.height), first.scale)
 	app.handle_event(s, input.Mouse_Move_Event{window = second.id,
 		x = i32(l.list.x+20), y = i32(l.list.y+2*l.row_height)})
 	app.handle_event(s, input.Mouse_Wheel_Event{window = second.id, delta_y = -1})
@@ -118,13 +119,13 @@ palette_routes_input_and_render_only_to_its_window :: proc(t: ^testing.T) {
 	testing.expect(t, app.palette_active(s, first))
 	testing.expect_value(t, s.palette.selected, selected)
 	testing.expect_value(t, s.palette.scroll, scroll)
-	testing.expect_value(t, ui.palette_query(&s.palette), "font")
+	testing.expect_value(t, views.palette_query(&s.palette), "font")
 	app.editor_open(s, second)
 	testing.expect(t, app.settings_active(second))
 	testing.expect(t, app.palette_active(s, first))
 	app.handle_event(s, input.Text_Event{second.id, "line height"})
 	testing.expect_value(t, ui.field_string(&second.editor.filter), "line height")
-	testing.expect_value(t, ui.palette_query(&s.palette), "font")
+	testing.expect_value(t, views.palette_query(&s.palette), "font")
 	app.palette_release(s, first)
 	app.update_motion(s)
 	app.window_render(s, second)
@@ -155,7 +156,7 @@ palette_transfer_and_lifecycle_preserve_other_window_content :: proc(t: ^testing
 	app.run_action(s, first, .Find)
 	app.handle_event(s, input.Text_Event{first.id, "retained"})
 	app.palette_open(s, first)
-	s.palette.drag = ui.Query_Drag{}
+	s.palette.drag = views.Query_Drag{}
 	second_tab := app.Rename_Tab_Target{second.workspace.id, app.selected_tab(second.workspace).id}
 	app.rename_open(s, second, second_tab)
 	app.handle_event(s, input.Text_Event{second.id, "unsaved"})
@@ -172,7 +173,7 @@ palette_transfer_and_lifecycle_preserve_other_window_content :: proc(t: ^testing
 	testing.expect_value(t, term.process_id(s.sessions[0].session), first_pid)
 	testing.expect_value(t, term.process_id(s.sessions[1].session), second_pid)
 	testing.expect_value(t, app.selected_tab(second.workspace).name, "")
-	s.palette.drag = ui.Query_Drag{}
+	s.palette.drag = views.Query_Drag{}
 	first_tab := app.Rename_Tab_Target{first.workspace.id, app.selected_tab(first.workspace).id}
 	app.rename_open(s, first, first_tab)
 	app.handle_event(s, platform.Focus_Event{first.id, false})

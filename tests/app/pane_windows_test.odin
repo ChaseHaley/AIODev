@@ -10,7 +10,7 @@ import app "../../src"
 import "aio:layout"
 import "cosmos:platform"
 import "aio:term"
-import "aio:ui"
+import "cosmos:ui"
 
 @(test)
 pane_window_preparation_cancel_and_commit_keep_runtime :: proc(t: ^testing.T) {
@@ -98,10 +98,10 @@ pane_window_preparation_cancel_and_commit_keep_runtime :: proc(t: ^testing.T) {
 	testing.expect_value(t, term.process_id(session), pid)
 	testing.expect_value(t, term.geometry(session), geometry)
 	testing.expect_value(t, source.tree.root, node)
-	testing.expect_value(t, len(preview.views), 0)
-	testing.expect_value(t, cap(preview.views), 0)
+	testing.expect_value(t, len(preview.pane_views), 0)
+	testing.expect_value(t, cap(preview.pane_views), 0)
 	app.window_set_dpi(&state, preview, 144)
-	testing.expect_value(t, len(preview.views), 0)
+	testing.expect_value(t, len(preview.pane_views), 0)
 	testing.expect_value(t, term.geometry(session), geometry)
 	app.window_set_dpi(&state, preview, 96)
 	preview_id := preview.id

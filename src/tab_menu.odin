@@ -4,10 +4,10 @@ import "cosmos:input"
 import "aio:commands"
 import "aio:layout"
 import "cosmos:render"
-import "aio:ui"
 import "core:fmt"
 import "core:log"
 import "core:time"
+import "cosmos:ui"
 
 // A tab group submenu is as wide as its longest row needs, at most this.
 TAB_SUBMENU_WIDTH :: f32(220)

@@ -3,7 +3,7 @@ package app_test
 import "core:testing"
 import "core:time"
 import app "../../src"
-import "aio:ui"
+import "cosmos:ui"
 
 @(private = "file")
 overview_frame :: proc(display: time.Tick) -> ui.Frame_Time {

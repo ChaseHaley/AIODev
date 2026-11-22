@@ -10,7 +10,8 @@ import "core:time"
 import app "../../src"
 import "aio:commands"
 import "aio:settings"
-import "aio:ui"
+import "aio:views"
+import "cosmos:ui"
 
 @(test)
 settings_notices_preserve_expiry_and_reappear_only_for_changed_or_reintroduced_problems :: proc(t: ^testing.T) {
@@ -197,7 +198,7 @@ settings_inline_shortcut_warning_outlives_validation :: proc(t: ^testing.T) {
 	w := s.windows[0]
 	app.editor_open(s, w)
 	app.handle_event(s, input.Text_Event{w.id, "input.leader"})
-	if !testing.expect_value(t, ui.editor_row(&w.editor).key, "input.leader") { return }
+	if !testing.expect_value(t, views.editor_row(&w.editor).key, "input.leader") { return }
 	ui.field_set(&w.editor.value, "Ctrl+Shift+T")
 	poison_parent = context.allocator
 	{

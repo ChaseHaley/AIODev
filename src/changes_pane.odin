@@ -6,12 +6,13 @@ import "cosmos:platform"
 import "cosmos:render"
 import "aio:syntax"
 import "aio:turns"
-import "aio:ui"
+import "aio:views"
 import "core:fmt"
 import "core:reflect"
 import "core:strings"
 import "core:time"
 @(require) import "aio:commands"
+import "cosmos:ui"
 
 // Agent changes panes: what agents changed per turn, and plain git diffs. A pane follows one agent (the
 // pane that ran it and its session, either of which may be unknown) and a directory inside the repository.
@@ -22,7 +23,7 @@ CHANGES_POLL :: 500 * time.Millisecond
 // What the pane shows. changes_model.odin fills the view from the worker's results and owns what is
 // listed here; the pane's input only reads it and changes the selection and the folds.
 Changes_Model :: struct {
-	view:           ui.Changes_View,
+	view:           views.Changes_View,
 	// The id of the newest read asked for; an older result is stale.
 	request:        u64,
 	// The id of the read the view shows; equal to `request` once the newest read has answered.
@@ -38,7 +39,7 @@ Changes_Model :: struct {
 	folded:         map[string]struct{},
 	// Whether the view holds a result for `shown`.
 	loaded:         bool,
-	shown:          ui.Changes_Scope,
+	shown:          views.Changes_Scope,
 	// The worker is watching the pane's worktree for a git scope.
 	watching:       bool,
 	// The folder the view watch is on; it follows the worktree the result shows.
@@ -99,8 +100,8 @@ Changes_Pane :: struct {
 	// The agent the pane follows; its strings are owned.
 	agent:      turns.Session,
 	directory:  string,
-	scope:      ui.Changes_Scope,
-	state:      ui.Changes_State,
+	scope:      views.Changes_Scope,
+	state:      views.Changes_State,
 	model:      Changes_Model,
 	comments:   Changes_Comments,
 	dropdown:   ui.Dropdown,
@@ -117,9 +118,9 @@ Changes_Pane :: struct {
 	// and the field's atoms made of them; and the saved filters an `@` being typed can complete to, as
 	// slices of the library.
 	filter_library: string,
-	filter_tokens: [dynamic]ui.Filter_Token,
+	filter_tokens: [dynamic]views.Filter_Token,
 	filter_atoms: [dynamic]ui.Field_Atom,
-	filter_picks: [dynamic]ui.Filter_Pick,
+	filter_picks: [dynamic]views.Filter_Pick,
 	filter_pick_row: int,
 	// The saved filters list is open (`filter_typing`). `filter_pending` is where an `@` being typed starts:
 	// the text from there to the caret is neither a token nor a term, and the list completes it; -1 when the
@@ -164,7 +165,7 @@ changes_pane_free :: proc(pane: ^Changes_Pane) {
 	changes_model_destroy(pane)
 	changes_comments_destroy(&pane.comments)
 	ui.dropdown_destroy(&pane.dropdown)
-	ui.changes_state_destroy(&pane.state)
+	views.changes_state_destroy(&pane.state)
 	changes_session_delete(&pane.agent)
 	delete(pane.directory)
 	delete(pane.worktree_pick)
@@ -188,14 +189,14 @@ changes_app_destroy :: proc(state: ^Changes_App) {
 
 // The scope as the layout file names it.
 @(require_results)
-changes_scope_name :: proc(scope: ui.Changes_Scope) -> string {
+changes_scope_name :: proc(scope: views.Changes_Scope) -> string {
 	return reflect.enum_string(scope)
 }
 
 // The scope a layout file names; an unknown name is Uncommitted, which always works.
 @(require_results)
-changes_scope_parse :: proc(name: string) -> ui.Changes_Scope {
-	scope, ok := reflect.enum_from_name(ui.Changes_Scope, name)
+changes_scope_parse :: proc(name: string) -> views.Changes_Scope {
+	scope, ok := reflect.enum_from_name(views.Changes_Scope, name)
 	return ok ? scope : .Uncommitted
 }
 
@@ -205,7 +206,7 @@ changes_pane_create :: proc(
 	app: ^App,
 	agent: turns.Session,
 	directory: string,
-	scope: ui.Changes_Scope,
+	scope: views.Changes_Scope,
 	side_by_side := false,
 	filter := "",
 ) -> ^Changes_Pane {
@@ -281,7 +282,7 @@ changes_open :: proc(app: ^App, w: ^Window, placement := Pane_Placement.Split_Ri
 	tab := workspace.selected
 	agent: turns.Session
 	directory := ""
-	scope := ui.Changes_Scope.Uncommitted
+	scope := views.Changes_Scope.Uncommitted
 	side_by_side := app.settings.turns.diff_view == .Side_By_Side
 	filter := changes_default_filter(app)
 	if from := changes_focused(app, acting); from != nil {
@@ -372,7 +373,7 @@ changes_anchor_hit :: proc(app: ^App, w: ^Window, shown: layout.Pane_Rect, x, y:
 	pane := changes_find(app, shown.content.id)
 	if pane == nil || changes_list_open(pane) {return false}
 	g := changes_geometry_of(app, w, pane, shown)
-	#partial switch ui.changes_hit(g, &pane.model.view, &pane.state, x, y).part {
+	#partial switch views.changes_hit(g, &pane.model.view, &pane.state, x, y).part {
 	case .Diff, .Line, .Gutter:
 		return true
 	}
@@ -388,16 +389,16 @@ changes_geometry_of :: proc(
 	w: ^Window,
 	pane: ^Changes_Pane,
 	shown: layout.Pane_Rect,
-) -> ui.Changes_Geometry {
+) -> views.Changes_Geometry {
 	changes_comments_view(app, pane)
 	changes_chips_view(pane)
 	pane.model.view.minimum_contrast = f32(app.settings.turns.diff_minimum_contrast)
 	pane.model.view.wrap = app.settings.turns.diff_long_lines == .Wrap
 	changes_filter_view(pane)
 	mono := ui.text_mono(&w.ui_text, app.family)
-	g := ui.changes_geometry(pane_body_rect(w, shown), w.scale, &pane.model.view, &w.ui_text, &pane.state)
-	ui.changes_layout(&pane.state, &pane.model.view, &w.ui_text, &mono, g.diff.width, w.scale)
-	g.selection_bar = ui.changes_selection_place(g, &pane.model.view, &pane.state, &w.ui_text, &mono)
+	g := views.changes_geometry(pane_body_rect(w, shown), w.scale, &pane.model.view, &w.ui_text, &pane.state)
+	views.changes_layout(&pane.state, &pane.model.view, &w.ui_text, &mono, g.diff.width, w.scale)
+	g.selection_bar = views.changes_selection_place(g, &pane.model.view, &pane.state, &w.ui_text, &mono)
 	return g
 }
 
@@ -417,7 +418,7 @@ changes_reveal :: proc(app: ^App, pane: ^Changes_Pane) {
 		shown, found := changes_pane_rect(w, pane.id)
 		if !found {continue}
 		g := changes_geometry_of(app, w, pane, shown)
-		_ = ui.changes_strip_reveal(&pane.state, g, &pane.model.view)
+		_ = views.changes_strip_reveal(&pane.state, g, &pane.model.view)
 		return
 	}
 }
@@ -454,7 +455,7 @@ changes_dropdown_choices :: proc(pane: ^Changes_Pane) -> ui.Dropdown_Choices {
 
 // The file list hangs under the files button, right-aligned to it and inside the pane.
 @(private = "file")
-changes_dropdown_anchor :: proc(pane: ^Changes_Pane, g: ui.Changes_Geometry) -> ui.Dropdown_Anchor {
+changes_dropdown_anchor :: proc(pane: ^Changes_Pane, g: views.Changes_Geometry) -> ui.Dropdown_Anchor {
 	// The room it may use starts just under the button, so a tall list never flips over the row.
 	top := g.files_button.y + g.files_button.height - ui.SPACE_1 * g.scale
 	bounds := render.Rect{g.area.x, top, g.area.width, max(0, g.area.y + g.area.height - top)}
@@ -547,7 +548,7 @@ changes_tools_open :: proc(app: ^App, w: ^Window, pane: ^Changes_Pane) {
 // Runs a header-row button's action, from the button or from its row in the ⋯ menu: the layout toggle, fold
 // all, or the filter popover.
 @(private = "file")
-changes_row_button_run :: proc(app: ^App, w: ^Window, pane: ^Changes_Pane, button: ui.Row_Button) {
+changes_row_button_run :: proc(app: ^App, w: ^Window, pane: ^Changes_Pane, button: views.Row_Button) {
 	switch button {
 	case .Layout:
 		changes_layout_toggle(app, w, pane)
@@ -568,7 +569,7 @@ changes_row_button_run :: proc(app: ^App, w: ^Window, pane: ^Changes_Pane, butto
 @(private = "file")
 changes_tools_row :: proc(app: ^App, w: ^Window, pane: ^Changes_Pane, row: int) {
 	changes_tools_close(w, pane)
-	changes_row_button_run(app, w, pane, ui.Row_Button(row))
+	changes_row_button_run(app, w, pane, views.Row_Button(row))
 }
 
 // What the open list's highlighted choice is, so a new result can find it again: a file's path. In
@@ -657,8 +658,8 @@ changes_scroll_to_file :: proc(app: ^App, w: ^Window, pane: ^Changes_Pane, index
 	shown, found := changes_pane_rect(w, pane.id)
 	if !found {return}
 	g := changes_geometry_of(app, w, pane, shown)
-	pane.state.diff_scroll = ui.changes_diff_file_top(&pane.state, &pane.model.view, index)
-	_ = ui.changes_scroll_diff(&pane.state, g, 0)
+	pane.state.diff_scroll = views.changes_diff_file_top(&pane.state, &pane.model.view, index)
+	_ = views.changes_scroll_diff(&pane.state, g, 0)
 }
 
 // Collapses every file while any shown one is expanded, else expands them all; the file at the top of the
@@ -668,7 +669,7 @@ changes_fold_all :: proc(app: ^App, w: ^Window, pane: ^Changes_Pane) {
 	top := -1
 	if shown, found := changes_pane_rect(w, pane.id); found {
 		_ = changes_geometry_of(app, w, pane, shown)
-		top = ui.changes_top_file(&pane.state, view)
+		top = views.changes_top_file(&pane.state, view)
 	}
 	changes_model_fold_all(&pane.model, view.any_expanded)
 	w.dirty = true
@@ -682,15 +683,15 @@ changes_layout_toggle :: proc(app: ^App, w: ^Window, pane: ^Changes_Pane) {
 	top := -1
 	if found {
 		_ = changes_geometry_of(app, w, pane, shown)
-		top = ui.changes_top_file(&pane.state, view)
+		top = views.changes_top_file(&pane.state, view)
 	}
 	pane.side_by_side = !pane.side_by_side
 	view.side_by_side = pane.side_by_side
 	view.revision += 1
 	if found && top >= 0 {
 		g := changes_geometry_of(app, w, pane, shown)
-		pane.state.diff_scroll = ui.changes_diff_file_top(&pane.state, view, top)
-		_ = ui.changes_scroll_diff(&pane.state, g, 0)
+		pane.state.diff_scroll = views.changes_diff_file_top(&pane.state, view, top)
+		_ = views.changes_scroll_diff(&pane.state, g, 0)
 	}
 	layout_state_touch(app)
 	w.dirty = true
@@ -720,7 +721,7 @@ changes_filter_edited :: proc(app: ^App, w: ^Window, pane: ^Changes_Pane) {
 	top_path := ""
 	if found {
 		_ = changes_geometry_of(app, w, pane, shown)
-		if top := ui.changes_top_file(&pane.state, view); top >= 0 && top < len(view.files) {
+		if top := views.changes_top_file(&pane.state, view); top >= 0 && top < len(view.files) {
 			top_path = strings.clone(changes_file_path(view.files[top]), context.temp_allocator)
 		}
 	}
@@ -730,10 +731,10 @@ changes_filter_edited :: proc(app: ^App, w: ^Window, pane: ^Changes_Pane) {
 		g := changes_geometry_of(app, w, pane, shown)
 		for file, i in view.files {
 			if top_path == "" || changes_file_path(file) != top_path {continue}
-			pane.state.diff_scroll = ui.changes_diff_file_top(&pane.state, view, i)
+			pane.state.diff_scroll = views.changes_diff_file_top(&pane.state, view, i)
 			break
 		}
-		_ = ui.changes_scroll_diff(&pane.state, g, 0)
+		_ = views.changes_scroll_diff(&pane.state, g, 0)
 	}
 	layout_state_touch(app)
 	w.dirty = true
@@ -825,7 +826,7 @@ changes_text :: proc(app: ^App, w: ^Window, text: string) -> bool {
 
 // Selects turn `index`, or with `extend` the run from the anchor to it, and keeps it in the strip.
 @(private = "file")
-changes_select :: proc(app: ^App, pane: ^Changes_Pane, g: ui.Changes_Geometry, index: int, extend: bool) {
+changes_select :: proc(app: ^App, pane: ^Changes_Pane, g: views.Changes_Geometry, index: int, extend: bool) {
 	view := &pane.model.view
 	if index < 0 || index >= len(view.turns) {return}
 	if !extend {
@@ -839,12 +840,12 @@ changes_select :: proc(app: ^App, pane: ^Changes_Pane, g: ui.Changes_Geometry, i
 	if first == view.first && last == view.last {return}
 	view.first, view.last = first, last
 	changes_model_changed(app, pane)
-	_ = ui.changes_strip_reveal(&pane.state, g, view)
+	_ = views.changes_strip_reveal(&pane.state, g, view)
 }
 
 // Steps the selection `step` turns older, or newer when negative.
 @(private = "file")
-changes_move :: proc(app: ^App, pane: ^Changes_Pane, g: ui.Changes_Geometry, step: int, extend: bool) {
+changes_move :: proc(app: ^App, pane: ^Changes_Pane, g: views.Changes_Geometry, step: int, extend: bool) {
 	view := &pane.model.view
 	if len(view.turns) == 0 {return}
 	from := pane.cursor
@@ -855,7 +856,7 @@ changes_move :: proc(app: ^App, pane: ^Changes_Pane, g: ui.Changes_Geometry, ste
 @(private)
 changes_diff_scroll :: proc(app: ^App, w: ^Window, pane: ^Changes_Pane, shown: layout.Pane_Rect, delta: int) {
 	g := changes_geometry_of(app, w, pane, shown)
-	if ui.changes_scroll_diff(&pane.state, g, delta) {w.dirty = true}
+	if views.changes_scroll_diff(&pane.state, g, delta) {w.dirty = true}
 }
 
 // Scrolls the diff by whole pages, as the terminal and Markdown panes' page commands do. A page leaves out
@@ -864,7 +865,7 @@ changes_diff_scroll :: proc(app: ^App, w: ^Window, pane: ^Changes_Pane, shown: l
 changes_page :: proc(app: ^App, w: ^Window, pane: ^Changes_Pane, shown: layout.Pane_Rect, pages: f64) {
 	g := changes_geometry_of(app, w, pane, shown)
 	page := max(1, int(g.diff.height) - pane.state.rows.header)
-	if ui.changes_scroll_diff(&pane.state, g, int(pages * f64(page))) {w.dirty = true}
+	if views.changes_scroll_diff(&pane.state, g, int(pages * f64(page))) {w.dirty = true}
 }
 
 // Pages the strip by as many bars as it shows, toward older turns (`step` -1) or newer ones (+1), as
@@ -881,25 +882,25 @@ changes_strip_page :: proc(
 ) {
 	view := &pane.model.view
 	g := changes_geometry_of(app, w, pane, shown)
-	from, _ := ui.changes_strip_hidden(g, &pane.state, view)
-	if !ui.changes_scroll_strip(&pane.state, g, view, step * max(1, g.strip_bars)) {return}
+	from, _ := views.changes_strip_hidden(g, &pane.state, view)
+	if !views.changes_scroll_strip(&pane.state, g, view, step * max(1, g.strip_bars)) {return}
 	w.dirty = true
 	if step > 0 {return}
 	g = changes_geometry_of(app, w, pane, shown)
-	at, _ := ui.changes_strip_hidden(g, &pane.state, view)
+	at, _ := views.changes_strip_hidden(g, &pane.state, view)
 	if target := max(0, from - g.strip_bars); target != at {
-		_ = ui.changes_scroll_strip(&pane.state, g, view, target - at)
+		_ = views.changes_scroll_strip(&pane.state, g, view, target - at)
 	}
 }
 
 @(private = "file")
-changes_turn_list_set :: proc(w: ^Window, pane: ^Changes_Pane, g: ui.Changes_Geometry, open: bool) {
+changes_turn_list_set :: proc(w: ^Window, pane: ^Changes_Pane, g: views.Changes_Geometry, open: bool) {
 	if pane.state.turn_list_open == open {return}
 	pane.state.turn_list_open = open
 	pane.state.turn_list_bar = {}
 	if open {
 		at := pane.cursor >= 0 ? pane.cursor : pane.model.view.first
-		_ = ui.changes_turn_list_reveal(&pane.state, g, &pane.model.view, at)
+		_ = views.changes_turn_list_reveal(&pane.state, g, &pane.model.view, at)
 	}
 	w.dirty = true
 }
@@ -912,7 +913,7 @@ changes_animate :: proc(app: ^App, w: ^Window, frame: ui.Frame_Time) -> bool {
 		if shown.content.kind != .Changes {continue}
 		pane := changes_find(app, shown.content.id)
 		if pane == nil {continue}
-		pane.moving = ui.changes_animate(&pane.state, app.animations, frame)
+		pane.moving = views.changes_animate(&pane.state, app.animations, frame)
 		if changes_edge_scroll(app, w, pane, shown, frame) {pane.moving = true}
 		changed = changed || pane.moving
 	}
@@ -935,7 +936,8 @@ changes_edge_scroll :: proc(
 	g := changes_geometry_of(app, w, pane, shown)
 	view := &pane.model.view
 	mono := ui.text_mono(&w.ui_text, app.family)
-	_, column, found := ui.changes_line_code(g, view, &pane.state, &mono, c.drag_file, c.anchor, c.drag_cell.x)
+	_, column, found := views.changes_line_code(g, view, &pane.state, &mono, c.drag_file, c.anchor,
+		c.drag_cell.x)
 	if !found {return false}
 	right := c.drag_cell.x + c.drag_cell.width
 	x := pane.drag_point.x
@@ -948,9 +950,9 @@ changes_edge_scroll :: proc(
 	pane.edge_tick = frame.display
 	columns := 1 + min(7, int(abs(over) / (2 * ui.text_width(&mono, "0"))))
 	if over < 0 {columns = -columns}
-	if !ui.changes_scroll_columns(&pane.state, g, view, columns) {return false}
+	if !views.changes_scroll_columns(&pane.state, g, view, columns) {return false}
 	reach := clamp(x, c.drag_cell.x, right - 1)
-	hit := ui.changes_hit(g, view, &pane.state, reach, pane.drag_point.y)
+	hit := views.changes_hit(g, view, &pane.state, reach, pane.drag_point.y)
 	_ = changes_comments_drag(app, w, pane, hit, changes_text_at(app, w, pane, g, hit, reach, pane.drag_point.y))
 	w.dirty = true
 	return true
@@ -966,7 +968,7 @@ changes_animating :: proc(app: ^App, w: ^Window) -> bool {
 }
 
 @(private = "file", require_results)
-changes_has_live :: proc(view: ^ui.Changes_View) -> bool {
+changes_has_live :: proc(view: ^views.Changes_View) -> bool {
 	for turn in view.turns {if turn.live {return true}}
 	return false
 }
@@ -990,7 +992,7 @@ changes_pane_draw :: proc(
 	// status_phase keeps the window repainting while a spinner shows, so the draw's own flag is not needed.
 	phase: f32
 	if changes_has_live(view) {phase = status_phase(app, w, {glyph = .Working, progress = -1})}
-	result, _ = ui.changes_draw(
+	result, _ = views.changes_draw(
 		&w.list, &w.ui_text, &mono, &app.theme, g, view, &pane.state, w.scale, w.pointer, phase,
 	)
 	if result != .Ok {return false, result}
@@ -1070,7 +1072,7 @@ changes_key :: proc(app: ^App, w: ^Window, e: input.Key_Event) {
 	if modifiers != {} && !extend {return}
 	g := changes_geometry_of(app, w, pane, shown)
 	view := &pane.model.view
-	turn_scope := ui.changes_scope_turns(pane.scope)
+	turn_scope := views.changes_scope_turns(pane.scope)
 	for shortcut, i in CHANGES_STEP_KEYS {
 		if key.logical.key != shortcut.key || !turn_scope {continue}
 		// Older turns sit to the left in the strip; the table lists the older key first.
@@ -1117,10 +1119,10 @@ changes_wheel :: proc(
 	delta := -rows * int(mono.line_height)
 	switch {
 	case pane.state.turn_list_open && render.rect_contains(g.turn_list, x, y):
-		if ui.changes_scroll_turn_list(&pane.state, g, view, delta) {w.dirty = true}
+		if views.changes_scroll_turn_list(&pane.state, g, view, delta) {w.dirty = true}
 	case pane.state.panel_open && render.rect_contains(g.panel, x, y):
 		// Scrolling up shows older bars, which sit to the left.
-		if render.rect_contains(g.strip, x, y) && ui.changes_scroll_strip(&pane.state, g, view, -rows) {
+		if render.rect_contains(g.strip, x, y) && views.changes_scroll_strip(&pane.state, g, view, -rows) {
 			w.dirty = true
 		}
 	case pane.comments.menu && render.rect_contains(g.selection_bar.menu, x, y):
@@ -1135,12 +1137,12 @@ changes_wheel :: proc(
 		// Shift turns the wheel sideways, as a sideways wheel does: up goes left.
 		sideways := .Shift in modifiers ? columns - rows : columns
 		if sideways != 0 {
-			if ui.changes_scroll_columns(&pane.state, g, view, sideways * CHANGES_WHEEL_COLUMNS) {w.dirty = true}
+			if views.changes_scroll_columns(&pane.state, g, view, sideways * CHANGES_WHEEL_COLUMNS) {w.dirty = true}
 			break
 		}
 		// Over the note editor the wheel scrolls its text while it has more to show; at an end, or when the
 		// text fits, the diff takes it.
-		if box, visible := ui.changes_editor_box(g, view, &pane.state, &w.ui_text);
+		if box, visible := views.changes_editor_box(g, view, &pane.state, &w.ui_text);
 		   visible && render.rect_contains(box.rect, x, y) && ui.text_area_scroll(box, f32(delta)) {
 			w.dirty = true
 			break
@@ -1172,8 +1174,8 @@ changes_leave :: proc(app: ^App, w: ^Window) {
 }
 
 @(private = "file", require_results)
-changes_cursor :: proc(hit: ui.Changes_Hit, line_mode: bool) -> platform.Cursor_Shape {
-	if _, button := ui.changes_row_button_of(hit.part); button {return .Hand}
+changes_cursor :: proc(hit: views.Changes_Hit, line_mode: bool) -> platform.Cursor_Shape {
+	if _, button := views.changes_row_button_of(hit.part); button {return .Hand}
 	#partial switch hit.part {
 	case .Hooks, .Notice_Button, .File_Header, .Strip_Bar, .Step_Back, .Step_Forward, .Range_Label,
 	     .Hunk_Select, .Comment_Edit, .Comment_Remove, .Editor_Untag, .Editor_Bold, .Editor_Code, .Editor_Block,
@@ -1201,8 +1203,13 @@ changes_cursor :: proc(hit: ui.Changes_Hit, line_mode: bool) -> platform.Cursor_
 
 // A held press on the strip or the turn list extends the selection to the bar or row under the pointer.
 @(private = "file")
-changes_drag_turns :: proc(app: ^App, pane: ^Changes_Pane, g: ui.Changes_Geometry, hit: ui.Changes_Hit) {
-	wanted := pane.dragging == .Strip ? ui.Changes_Part.Strip_Bar : ui.Changes_Part.Turn_List_Row
+changes_drag_turns :: proc(
+	app: ^App,
+	pane: ^Changes_Pane,
+	g: views.Changes_Geometry,
+	hit: views.Changes_Hit,
+) {
+	wanted := pane.dragging == .Strip ? views.Changes_Part.Strip_Bar : views.Changes_Part.Turn_List_Row
 	if hit.part != wanted || hit.index < 0 || hit.index == pane.cursor {return}
 	changes_select(app, pane, g, hit.index, true)
 }
@@ -1211,12 +1218,13 @@ changes_drag_turns :: proc(app: ^App, pane: ^Changes_Pane, g: ui.Changes_Geometr
 // is; nothing for any other hit. The numbers' byte is the start of the line's text.
 @(private = "file", require_results)
 changes_text_at :: proc(
-	app: ^App, w: ^Window, pane: ^Changes_Pane, g: ui.Changes_Geometry, hit: ui.Changes_Hit, x, y: f32,
+	app: ^App, w: ^Window, pane: ^Changes_Pane, g: views.Changes_Geometry, hit: views.Changes_Hit, x, y: f32,
 ) -> Changes_Text_Point {
 	if hit.part != .Line && hit.part != .Gutter {return {}}
 	mono := ui.text_mono(&w.ui_text, app.family)
-	offset, cell, _ := ui.changes_text_point(g, &pane.model.view, &pane.state, &mono, hit.index, hit.line, x, y)
-	return {offset, cell, ui.changes_cell_half(g, &pane.state, cell)}
+	offset, cell, _ := views.changes_text_point(g, &pane.model.view, &pane.state, &mono, hit.index,
+		hit.line, x, y)
+	return {offset, cell, views.changes_cell_half(g, &pane.state, cell)}
 }
 
 // Follow the grabbed divider even when the pointer leaves the diff or crosses another pane.
@@ -1232,7 +1240,7 @@ changes_divider_held :: proc(
 		return .Ended
 	}
 	g := changes_geometry_of(app, w, pane, shown)
-	if ui.changes_divider_move(&pane.state, g, f32(e.x) - grab.offset) {
+	if views.changes_divider_move(&pane.state, g, f32(e.x) - grab.offset) {
 		w.changes_divider_click = {}
 		w.dirty = true
 	}
@@ -1255,7 +1263,7 @@ changes_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: input.Mou
 	g := changes_geometry_of(app, w, pane, shown)
 	view := &pane.model.view
 	if pane.state.turn_list_bar.active {
-		bar, visible := ui.changes_turn_list_scrollbar(&pane.state, g, view)
+		bar, visible := views.changes_turn_list_scrollbar(&pane.state, g, view)
 		if visible && .Left in e.buttons {
 			pane.state.turn_list_scroll = ui.scrollbar_drag(pane.state.turn_list_bar, bar, y)
 		} else {
@@ -1265,10 +1273,10 @@ changes_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: input.Mou
 		return
 	}
 	if pane.state.h_bar.active {
-		bar, visible := ui.changes_h_scrollbar(g, view, &pane.state)
+		bar, visible := views.changes_h_scrollbar(g, view, &pane.state)
 		if visible && .Left in e.buttons {
 			target := ui.scrollbar_drag(pane.state.h_bar, bar, x)
-			_ = ui.changes_scroll_columns(&pane.state, g, view, target - pane.state.h_scroll)
+			_ = views.changes_scroll_columns(&pane.state, g, view, target - pane.state.h_scroll)
 		} else {
 			pane.state.h_bar = {}
 		}
@@ -1277,8 +1285,8 @@ changes_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: input.Mou
 	}
 	if pane.state.overview_drag.active {
 		if .Left in e.buttons {
-			pane.state.diff_scroll = ui.changes_overview_drag(&pane.state, g, y)
-			_ = ui.changes_scroll_diff(&pane.state, g, 0)
+			pane.state.diff_scroll = views.changes_overview_drag(&pane.state, g, y)
+			_ = views.changes_scroll_diff(&pane.state, g, 0)
 		} else {
 			pane.state.overview_drag = {}
 		}
@@ -1310,7 +1318,7 @@ changes_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: input.Mou
 	// A held press in the note editor's text extends its selection, wherever the pointer is.
 	if pane.comments.area.dragging {
 		if .Left in e.buttons {
-			if box, visible := ui.changes_editor_box(g, view, &pane.state, &w.ui_text); visible {
+			if box, visible := views.changes_editor_box(g, view, &pane.state, &w.ui_text); visible {
 				_ = ui.text_area_pointer(box, x, y, false, false)
 				w.dirty = true
 			}
@@ -1332,11 +1340,11 @@ changes_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: input.Mou
 		pane.drag_point, pane.moving = {x, y}, true
 		w.dirty = true
 	}
-	hit := ui.changes_hit(g, view, &pane.state, reach, y)
+	hit := views.changes_hit(g, view, &pane.state, reach, y)
 	shape := changes_cursor(hit, view.select_lines || view.alt)
 	if hit.part == .Filter_Field && hit.index >= 0 {
-		if box, shown := ui.changes_filter_box(g, view, &w.ui_text); shown {
-			if token, _ := ui.filter_field_token_at(box, pane.filter_tokens[:], x); token >= 0 {shape = .Hand}
+		if box, shown := views.changes_filter_box(g, view, &w.ui_text); shown {
+			if token, _ := views.filter_field_token_at(box, pane.filter_tokens[:], x); token >= 0 {shape = .Hand}
 		}
 	}
 	if hit.part == .Filter_Pick && pane.filter_pick_row != hit.index {
@@ -1384,7 +1392,7 @@ changes_press :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) {
 		return
 	}
 	if state.turn_list_open {
-		if bar, visible := ui.changes_turn_list_scrollbar(state, g, view);
+		if bar, visible := views.changes_turn_list_scrollbar(state, g, view);
 		   visible && ui.scrollbar_contains(bar, x, y) {
 			side := ui.scrollbar_side(bar, y)
 			state.turn_list_scroll = ui.scrollbar_press(&state.turn_list_bar, bar, y)
@@ -1392,7 +1400,7 @@ changes_press :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) {
 			return
 		}
 	}
-	hit := ui.changes_hit(g, view, state, x, y)
+	hit := views.changes_hit(g, view, state, x, y)
 	state.press = hit
 	extend := .Shift in e.modifiers
 	// A press anywhere but on the toolbar and its menu closes the menu.
@@ -1454,21 +1462,21 @@ changes_press :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) {
 			return
 		}
 		w.changes_divider_click = Click_Run{pane.id, x, y, e.time_ns, 1, 0}
-		divider := ui.changes_divider_rect(g, view, state)
+		divider := views.changes_divider_rect(g, view, state)
 		w.changes_divider = Changes_Divider_Drag{pane.id, x - divider.x}
 		pointer_set(app, w, .Resize_Horizontal)
 	case .H_Scroll:
-		if bar, visible := ui.changes_h_scrollbar(g, view, state); visible {
+		if bar, visible := views.changes_h_scrollbar(g, view, state); visible {
 			side := ui.scrollbar_side(bar, x)
 			target := ui.scrollbar_press(&state.h_bar, bar, x)
-			_ = ui.changes_scroll_columns(state, g, view, target - state.h_scroll)
+			_ = views.changes_scroll_columns(state, g, view, target - state.h_scroll)
 			if !state.h_bar.active {scroll_hold_begin(app, w, .Changes_H_Scroll, shown.content, x, y, side)}
 		}
 	case .Overview:
 		side: ui.Scroll_Side
-		if bar, visible := ui.changes_overview_bar(state, g); visible {side = ui.scrollbar_side(bar, y)}
-		state.diff_scroll = ui.changes_overview_press(state, g, y)
-		_ = ui.changes_scroll_diff(state, g, 0)
+		if bar, visible := views.changes_overview_bar(state, g); visible {side = ui.scrollbar_side(bar, y)}
+		state.diff_scroll = views.changes_overview_press(state, g, y)
+		_ = views.changes_scroll_diff(state, g, 0)
 		if !state.overview_drag.active {scroll_hold_begin(app, w, .Changes_Overview, shown.content, x, y, side)}
 	case .Hooks:
 		run_action(app, w, .Install_Turn_Hooks, .Button)
@@ -1502,8 +1510,8 @@ changes_press :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) {
 		// file's own header, which takes over the pinned one's hover and press.
 		changes_model_fold(&pane.model, hit.index)
 		changes_scroll_to_file(app, w, pane, hit.index)
-		header := ui.changes_hit(changes_geometry_of(app, w, pane, shown), view, state, x, y)
-		if header == (ui.Changes_Hit{.File_Header, hit.index, 0}) {
+		header := views.changes_hit(changes_geometry_of(app, w, pane, shown), view, state, x, y)
+		if header == (views.Changes_Hit{.File_Header, hit.index, 0}) {
 			state.hover, state.press, state.lit = header, header, header
 		}
 	case .Filter_Bar_Clear:
@@ -1514,7 +1522,7 @@ changes_press :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) {
 	     .Label_Menu, .Label_Row, .Label_Edit:
 		_ = changes_comments_press(app, w, pane, hit, e, changes_text_at(app, w, pane, g, hit, x, y))
 	case:
-		if button, ok := ui.changes_row_button_of(hit.part); ok {changes_row_button_run(app, w, pane, button)}
+		if button, ok := views.changes_row_button_of(hit.part); ok {changes_row_button_run(app, w, pane, button)}
 	}
 }
 
@@ -1575,12 +1583,12 @@ changes_scroll_hold_page :: proc(
 		)
 	case .Changes_Turn_List:
 		if !pane.state.turn_list_open {return}
-		result = ui.changes_turn_list_page(&pane.state, g, &pane.model.view, x, y, hold.side)
+		result = views.changes_turn_list_page(&pane.state, g, &pane.model.view, x, y, hold.side)
 	case .Changes_Overview:
-		result = ui.changes_overview_page(&pane.state, g, x, y, hold.side)
-		if result == .Paged {_ = ui.changes_scroll_diff(&pane.state, g, 0)}
+		result = views.changes_overview_page(&pane.state, g, x, y, hold.side)
+		if result == .Paged {_ = views.changes_scroll_diff(&pane.state, g, 0)}
 	case .Changes_H_Scroll:
-		result = ui.changes_h_page(&pane.state, g, &pane.model.view, x, y, hold.side)
+		result = views.changes_h_page(&pane.state, g, &pane.model.view, x, y, hold.side)
 	case .None, .Pane, .Rail, .Palette_Results, .Palette_Choices:
 		return
 	case .Settings_Page, .Settings_Strip, .Settings_Choices:
@@ -1600,8 +1608,8 @@ changes_tooltip_hit :: proc(
 	x, y: f32,
 ) -> (
 	pane: ^Changes_Pane,
-	hit: ui.Changes_Hit,
-	g: ui.Changes_Geometry,
+	hit: views.Changes_Hit,
+	g: views.Changes_Geometry,
 	listed: bool,
 ) {
 	shown: layout.Pane_Rect
@@ -1617,7 +1625,7 @@ changes_tooltip_hit :: proc(
 	   !render.rect_contains(g.range_label, x, y) {
 		return
 	}
-	hit = ui.changes_hit(g, &pane.model.view, state, x, y)
+	hit = views.changes_hit(g, &pane.model.view, state, x, y)
 	if hit.part != .None {return}
 	switch {
 	case in_panel && render.rect_contains(g.step_back, x, y):
@@ -1627,8 +1635,8 @@ changes_tooltip_hit :: proc(
 	case render.rect_contains(g.files_button, x, y):
 		hit.part = .Files_Button
 	}
-	if button, ok := ui.changes_row_button_at(g, x, y); ok {
-		parts := ui.CHANGES_ROW_BUTTON_PARTS
+	if button, ok := views.changes_row_button_at(g, x, y); ok {
+		parts := views.CHANGES_ROW_BUTTON_PARTS
 		hit.part = parts[button]
 	}
 	return
@@ -1636,7 +1644,12 @@ changes_tooltip_hit :: proc(
 
 // Whether the point is on the open file list's regular expression toggle.
 @(private = "file", require_results)
-changes_on_regex_toggle :: proc(w: ^Window, pane: ^Changes_Pane, g: ui.Changes_Geometry, x, y: f32) -> bool {
+changes_on_regex_toggle :: proc(
+	w: ^Window,
+	pane: ^Changes_Pane,
+	g: views.Changes_Geometry,
+	x, y: f32,
+) -> bool {
 	if !pane.state.files_open {return false}
 	choices, anchor := changes_dropdown_choices(pane), changes_dropdown_anchor(pane, g)
 	return render.rect_contains(ui.dropdown_regex_rect(&pane.dropdown, choices, anchor, w.scale), x, y)
@@ -1654,8 +1667,8 @@ changes_tooltip :: proc(app: ^App, w: ^Window, x, y: f32) -> string {
 		return cut ? changes_list_identity(pane, source) : ""
 	}
 	view := &pane.model.view
-	if button, ok := ui.changes_row_button_of(hit.part); ok {
-		return ui.changes_row_button_entry(view, button).tooltip
+	if button, ok := views.changes_row_button_of(hit.part); ok {
+		return views.changes_row_button_entry(view, button).tooltip
 	}
 	#partial switch hit.part {
 	case .Summary:
@@ -1679,16 +1692,16 @@ changes_tooltip :: proc(app: ^App, w: ^Window, x, y: f32) -> string {
 	case .Step_Forward:
 		return "Newer turn"
 	case .Strip_Older, .Strip_Newer:
-		older, newer := ui.changes_strip_hidden(g, &pane.state, view)
+		older, newer := views.changes_strip_hidden(g, &pane.state, view)
 		count, side := older, "older"
 		if hit.part == .Strip_Newer {count, side = newer, "newer"}
 		return fmt.tprintf("%d %s turn%s", count, side, count == 1 ? "" : "s")
 	case .Range_Label:
 		return "Choose turns"
 	case .Strip_Bar:
-		return ui.changes_turn_tooltip(view, hit.index, context.temp_allocator)
+		return views.changes_turn_tooltip(view, hit.index, context.temp_allocator)
 	case .Turn_List_Row:
-		if hit.index >= 0 {return ui.changes_turn_tooltip(view, hit.index, context.temp_allocator)}
+		if hit.index >= 0 {return views.changes_turn_tooltip(view, hit.index, context.temp_allocator)}
 	case .Filter_Clear, .Filter_Bar_Clear:
 		return "Clear the filter"
 	case .File_Header, .Sticky_Header:
@@ -1705,7 +1718,7 @@ changes_tooltip :: proc(app: ^App, w: ^Window, x, y: f32) -> string {
 	case .Toolbar_Label:
 		return "Quick label"
 	case .Label_Row:
-		label, _ := ui.changes_label_at(view.quick_labels, hit.index)
+		label, _ := views.changes_label_at(view.quick_labels, hit.index)
 		return label.instruction
 	case .Comment_Edit:
 		return "Edit"
@@ -1786,7 +1799,7 @@ when AIO_CONTROL {
 	}
 
 	@(private = "file")
-	changes_token_state_name :: proc(state: ui.Filter_Token_State) -> string {
+	changes_token_state_name :: proc(state: views.Filter_Token_State) -> string {
 		switch state {
 		case .Known:
 			return "known"
@@ -1799,7 +1812,7 @@ when AIO_CONTROL {
 	}
 
 	@(private = "file")
-	changes_highlighted :: proc(view: ^ui.Changes_View, file: int) -> bool {
+	changes_highlighted :: proc(view: ^views.Changes_View, file: int) -> bool {
 		if file >= len(view.highlights) {return false}
 		for spans in view.highlights[file].lines {if len(spans) > 0 {return true}}
 		return false
@@ -1838,13 +1851,13 @@ when AIO_CONTROL {
 				files_button_rect, tools_button_rect = g.files_button, g.tools_button
 				layout_button_rect, fold_button_rect, filter_button_rect = g.layout_button, g.fold_button, g.filter_button
 				wrap_button_rect = g.wrap_button
-				divider_rect = ui.changes_divider_rect(g, view, &pane.state)
+				divider_rect = views.changes_divider_rect(g, view, &pane.state)
 				filter_bar_clear_rect = g.filter_bar_clear
-				overview_rect, overview_thumb_rect = g.overview, ui.changes_overview_thumb(&pane.state, g)
-				overview_state = ui.changes_overview_state(&pane.state, g, w.pointer)
+				overview_rect, overview_thumb_rect = g.overview, views.changes_overview_thumb(&pane.state, g)
+				overview_state = views.changes_overview_state(&pane.state, g, w.pointer)
 				if view.notice == .Recording_Off {notice_rect = g.notice_button}
 				for i in 0 ..< min(len(view.files), 20) {
-					edit := ui.changes_file_edit_button(g, view, &pane.state, i)
+					edit := views.changes_file_edit_button(g, view, &pane.state, i)
 					state_rect(r, changes_report_key("file", i, "edit_rect"), edit)
 				}
 				// The panel's parts exist while it is open: the chips, the hooks button and the turn strip.
@@ -1868,11 +1881,11 @@ when AIO_CONTROL {
 				if pane.state.filter_open {
 					filter_field_rect = g.filter_field
 					if changes_filter_text(pane) != "" {filter_clear_rect = g.filter_clear}
-					if box, shown := ui.changes_filter_box(g, view, &w.ui_text); shown {
+					if box, shown := views.changes_filter_box(g, view, &w.ui_text); shown {
 						for _, i in pane.filter_tokens {
-							rect := ui.filter_field_token_rect(box, pane.filter_tokens[:], i)
+							rect := views.filter_field_token_rect(box, pane.filter_tokens[:], i)
 							state_rect(r, changes_report_key("filter_token", i, "rect"), rect)
-							at, close := ui.filter_field_token_marks(box, pane.filter_tokens[:], i)
+							at, close := views.filter_field_token_marks(box, pane.filter_tokens[:], i)
 							state_rect(r, changes_report_key("filter_token", i, "at_rect"), at)
 							state_rect(r, changes_report_key("filter_token", i, "close_rect"), close)
 						}
@@ -1888,29 +1901,29 @@ when AIO_CONTROL {
 					choices, anchor := changes_dropdown_choices(pane), changes_dropdown_anchor(pane, g)
 					regex_rect = ui.dropdown_regex_rect(&pane.dropdown, choices, anchor, w.scale)
 				}
-				top_file = ui.changes_top_file(&pane.state, view)
-				sticky_file, sticky_rect = ui.changes_sticky_header(&pane.state, view, g)
-				if ui.changes_scope_turns(pane.scope) {
-					strip_older, strip_newer = ui.changes_strip_hidden(g, &pane.state, view)
+				top_file = views.changes_top_file(&pane.state, view)
+				sticky_file, sticky_rect = views.changes_sticky_header(&pane.state, view, g)
+				if views.changes_scope_turns(pane.scope) {
+					strip_older, strip_newer = views.changes_strip_hidden(g, &pane.state, view)
 					strip_bars = g.strip_bars
 				}
 				if pane.state.panel_open {
-					if ui.changes_scope_turns(pane.scope) {
-						strip_older_rect = ui.changes_strip_marker_rect(g, &pane.state, view, false)
-						strip_newer_rect = ui.changes_strip_marker_rect(g, &pane.state, view, true)
+					if views.changes_scope_turns(pane.scope) {
+						strip_older_rect = views.changes_strip_marker_rect(g, &pane.state, view, false)
+						strip_newer_rect = views.changes_strip_marker_rect(g, &pane.state, view, true)
 					}
 					for i in 0 ..< len(view.turns) {
-						rect := ui.changes_strip_bar_rect(g, &pane.state, view, i)
+						rect := views.changes_strip_bar_rect(g, &pane.state, view, i)
 						if rect.width <= 0 || rect.height <= 0 {continue}
 						state_rect(r, changes_report_key("strip", i, "rect"), rect)
 					}
 				}
 			}
 			// State entries borrow their text until the report is written, after this returns.
-			if ui.changes_scope_turns(pane.scope) {
-				range_label = strings.clone(ui.changes_range_label(view, label_buffer[:]), context.temp_allocator)
+			if views.changes_scope_turns(pane.scope) {
+				range_label = strings.clone(views.changes_range_label(view, label_buffer[:]), context.temp_allocator)
 			}
-			range_title = strings.clone(ui.changes_range_title(view, title_buffer[:]), context.temp_allocator)
+			range_title = strings.clone(views.changes_range_title(view, title_buffer[:]), context.temp_allocator)
 			for turn, i in view.turns {state_value(r, changes_report_key("turn", i, "live"), turn.live)}
 			for i in 0 ..< min(len(pane.model.agents), len(pane.model.sources)) {
 				state_text(r, changes_report_key("agent", i, "label"), pane.model.sources[i])

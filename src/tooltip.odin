@@ -3,10 +3,11 @@ package main
 import "aio:commands"
 import "cosmos:input"
 import "cosmos:render"
-import "aio:ui"
+import "aio:views"
 import "core:strings"
 import "core:time"
 import "core:unicode/utf8"
+import "cosmos:ui"
 
 @(private) TOOLTIP_DELAY :: 700 * time.Millisecond
 @(private) TOOLTIP_GRACE :: time.Second
@@ -84,7 +85,7 @@ Tooltip_Warm :: struct {
 // the window afterwards. Built while the tooltip draws, in temporary memory.
 Tooltip_Card :: struct {
 	description: string,
-	preview:     Maybe(ui.Pane_Preview),
+	preview:     Maybe(views.Pane_Preview),
 }
 
 // A window's tooltip with the text its labels point into: a label may be built for one event in
@@ -261,10 +262,10 @@ tooltip_card_draw :: proc(
 	detail := ui.text_styled(&w.ui_text, .Detail)
 	preview, pictured := card.preview.?
 	picture: [2]f32
-	if pictured {picture = ui.pane_preview_size(preview, s)}
+	if pictured {picture = views.pane_preview_size(preview, s)}
 	room := max(0, min(TOOLTIP_MAX_WIDTH * s, f32(w.width) - 8 * s) - 2 * pad)
 	aside := tooltip_shortcut_width(w, shortcut)
-	inner := min(room, max(ui.text_width(&strong, label) + aside, picture.x, ui.PANE_PREVIEW_WIDTH * s))
+	inner := min(room, max(ui.text_width(&strong, label) + aside, picture.x, views.PANE_PREVIEW_WIDTH * s))
 	lines := make([dynamic]string, context.temp_allocator)
 	if card.description != "" {ui.wrap(&detail, card.description, inner, &lines)}
 	width := inner + 2 * pad
@@ -287,7 +288,7 @@ tooltip_card_draw :: proc(
 	top += band
 	if pictured {
 		top += gap
-		if ui.pane_preview_draw(&w.list, app.theme, {x + pad, top}, preview, s) != .None {return .Ok}
+		if views.pane_preview_draw(&w.list, app.theme, {x + pad, top}, preview, s) != .None {return .Ok}
 		top += picture.y
 	}
 	if len(lines) > 0 {top += gap}

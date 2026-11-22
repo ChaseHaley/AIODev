@@ -5,7 +5,7 @@ import "core:testing"
 import "core:time"
 import app "../../src"
 import "cosmos:render"
-import "aio:ui"
+import "cosmos:ui"
 
 @(private = "file")
 flip_frame :: proc(display: time.Tick) -> ui.Frame_Time {

@@ -11,7 +11,8 @@ import "aio:commands"
 import "aio:layout"
 import "cosmos:render"
 import "aio:term"
-import "aio:ui"
+import "aio:views"
+import "cosmos:ui"
 
 // A pane in a float keeps its split, view and close controls; floating and linking belong to tiled panes.
 // Edit and Open in Default App belong to a pane showing a file.
@@ -215,7 +216,7 @@ header_status_pill :: proc(s: ^app.App, w: ^app.Window, pane: layout.Pane_Rect) 
 	render.draw_list_reset(&w.list)
 	if render.push_layer(&w.list, {0, 0, f32(w.width), f32(w.height)}) != .None {return {}, false}
 	if app.pane_header_draw(s, w, pane, &entry) != .Ok {return {}, false}
-	tint := ui.status_color(s.theme, .Working)
+	tint := views.status_color(s.theme, .Working)
 	tint.a *= 0.16
 	for rect in w.list.rects {if rect.color == tint {return rect.rect, true}}
 	return {}, false
@@ -239,7 +240,7 @@ pane_header_status_sits_at_the_right_end_while_buttons_hide :: proc(t: ^testing.
 	if !app.pane_shows_focus(w, focused) {focused, other = other, focused}
 	if !testing.expect(t, app.pane_shows_focus(w, focused)) {return}
 	view, focused_view: ^app.Pane_View
-	for &candidate in w.views {
+	for &candidate in w.pane_views {
 		if candidate.content == other.content {view = &candidate}
 		if candidate.content == focused.content {focused_view = &candidate}
 	}

@@ -9,7 +9,7 @@ import app "../../src"
 import "cosmos:platform"
 import "cosmos:render"
 import "aio:settings"
-import "aio:ui"
+import "cosmos:ui"
 
 // A 2 x 2, 8-bit RGBA PNG: small enough to decode, real enough to prove the loader still runs.
 @(private)

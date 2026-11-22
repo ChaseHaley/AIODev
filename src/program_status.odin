@@ -5,11 +5,12 @@ import "aio:events"
 import "cosmos:render"
 import "aio:settings"
 import "aio:term"
-import "aio:ui"
+import "aio:views"
 import "core:fmt"
 import "core:log"
 import "core:strings"
 import "core:time"
+import "cosmos:ui"
 
 // Program status (OSC 7501) as AIODev presents it. Each session's records are copied when they
 // change, so drawing reads Session_Entry.statuses without taking the session lock. Only reports
@@ -133,7 +134,7 @@ status_workspace_summary :: proc(app: ^App, workspace: ^Workspace) -> Status_Sum
 }
 
 // The mark a tab or row shows for a summary. Finished work already seen is left to the lists.
-status_indicator :: proc(summary: Status_Summary) -> (ui.Status_Mark, bool) {
+status_indicator :: proc(summary: Status_Summary) -> (views.Status_Mark, bool) {
 	if !summary.found {return {}, false}
 	p := status_presentation(summary.top)
 	if p.seen {return {}, false}
@@ -143,7 +144,7 @@ status_indicator :: proc(summary: Status_Summary) -> (ui.Status_Mark, bool) {
 // The spinner position for a mark this frame draws. Drawing a spinner keeps the window repainting
 // while system animations are on; otherwise the spinner holds its still pose. Retained as a draw-time
 // flag: only drawing knows which marks are visible this frame.
-status_phase :: proc(app: ^App, w: ^Window, mark: ui.Status_Mark) -> f32 {
+status_phase :: proc(app: ^App, w: ^Window, mark: views.Status_Mark) -> f32 {
 	if mark.glyph != .Working || mark.progress >= 0 {return 0}
 	if !app.animations {return ui.SPINNER_STILL}
 	w.status_spinning = true
@@ -155,14 +156,14 @@ status_mark_draw :: proc(
 	app: ^App,
 	w: ^Window,
 	area: render.Rect,
-	mark: ui.Status_Mark,
+	mark: views.Status_Mark,
 ) -> render.Build_Status {
 	phase := status_phase(app, w, mark)
-	return ui.status_glyph_draw(&w.list, &w.ui_text, app.theme, area, mark, phase, w.scale)
+	return views.status_glyph_draw(&w.list, &w.ui_text, app.theme, area, mark, phase, w.scale)
 }
 
 // The mark a tab shows, or none when tab indicators are off or the tab is the one in view.
-status_tab_mark :: proc(app: ^App, w: ^Window, workspace: ^Workspace, tab: int) -> ui.Status_Mark {
+status_tab_mark :: proc(app: ^App, w: ^Window, workspace: ^Workspace, tab: int) -> views.Status_Mark {
 	s := &app.settings.status
 	if !s.enabled || .Tabs not_in s.surfaces {return {}}
 	if workspace == w.workspace && tab == workspace.selected && .Active_Tab not_in s.surfaces {return {}}

@@ -7,12 +7,13 @@ import "cosmos:platform"
 import "cosmos:render"
 import "aio:settings"
 import "aio:term"
-import "aio:ui"
+import "aio:views"
 import "core:fmt"
 import "core:os"
 import "core:strings"
 import "core:testing"
 import "core:time"
+import "cosmos:ui"
 
 @(private = "file")
 pane_reports :: proc(
@@ -349,8 +350,8 @@ activity_view_change_repaints_every_window :: proc(t: ^testing.T) {
 activity_view_setting_shows_its_user_facing_names :: proc(t: ^testing.T) {
 	for entry in settings.SCHEMA {
 		if entry.key != "status.panel_view" {continue}
-		row := ui.schema_row(entry)
-		testing.expect_value(t, row.kind, ui.Row_Kind.Choice)
+		row := views.schema_row(entry)
+		testing.expect_value(t, row.kind, views.Row_Kind.Choice)
 		testing.expect_value(t, row.default_value, "comfy")
 		testing.expect_value(t, row.choices[0], "comfy")
 		testing.expect_value(t, row.choice_labels[0], "Comfy")

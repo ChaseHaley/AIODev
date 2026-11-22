@@ -6,12 +6,13 @@ import "core:testing"
 import app "../../src"
 import "aio:commands"
 import "aio:settings"
-import "aio:ui"
+import "aio:views"
+import "cosmos:ui"
 
 @(private)
 Reveal_Fixture :: struct {
 	state:     app.App,
-	editor:    ui.Editor,
+	editor:    views.Editor,
 	directory: string,
 	path:      string,
 }
@@ -27,7 +28,7 @@ reveal_fixture_create :: proc(t: ^testing.T, f: ^Reveal_Fixture, text: string) -
 	if !testing.expect_value(t, app.register_actions(&f.state.registry), commands.Error.None) {
 		return false
 	}
-	rows := [?]ui.Editor_Row {
+	rows := [?]views.Editor_Row {
 		{key = "font.size", title = "Font Size", value = "12", kind = .Integer},
 		{key = "pane.gap", title = "Pane Gap", value = "8", kind = .Integer},
 		{key = "interface.confirm", title = "Confirm Before", value = "Closing Split Tabs", kind = .Choice},
@@ -35,15 +36,15 @@ reveal_fixture_create :: proc(t: ^testing.T, f: ^Reveal_Fixture, text: string) -
 		{key = "keys.tab.new", title = "New Tab", value = "Ctrl+T", kind = .Shortcut},
 	}
 	for row in rows {
-		if !testing.expect_value(t, ui.editor_add(&f.editor, row, "Test"), nil) {return false}
+		if !testing.expect_value(t, views.editor_add(&f.editor, row, "Test"), nil) {return false}
 	}
-	ui.editor_filter(&f.editor)
+	views.editor_filter(&f.editor)
 	return true
 }
 
 @(private)
 reveal_fixture_destroy :: proc(t: ^testing.T, f: ^Reveal_Fixture) {
-	ui.editor_destroy(&f.editor)
+	views.editor_destroy(&f.editor)
 	commands.destroy(&f.state.registry)
 	settings.destroy(&f.state.settings)
 	settings.diagnostics_destroy(&f.state.settings_diagnostics)
@@ -54,8 +55,8 @@ reveal_fixture_destroy :: proc(t: ^testing.T, f: ^Reveal_Fixture) {
 }
 
 @(private)
-reveal_row_key :: proc(e: ^ui.Editor) -> string {
-	row := ui.editor_row(e)
+reveal_row_key :: proc(e: ^views.Editor) -> string {
+	row := views.editor_row(e)
 	return row == nil ? "" : row.key
 }
 
@@ -72,15 +73,15 @@ settings_reveal_palette_clears_the_search_and_focuses_an_editable_row :: proc(t:
 	app.settings_reveal_page(e, {key = "pane.gap", search = .Clear, focus = .Control})
 	testing.expect_value(t, ui.field_string(&e.filter), "")
 	testing.expect_value(t, reveal_row_key(e), "pane.gap")
-	testing.expect_value(t, ui.editor_focus(e), ui.Editor_Focus.Control)
+	testing.expect_value(t, views.editor_focus(e), views.Editor_Focus.Control)
 	testing.expect_value(t, e.message, "")
 	app.settings_reveal_page(e, {key = "keys.tab.new", search = .Clear, focus = .Control})
 	testing.expect_value(t, reveal_row_key(e), "keys.tab.new")
-	testing.expect_value(t, ui.editor_row(e).kind, ui.Row_Kind.Shortcut)
-	testing.expect_value(t, ui.editor_focus(e), ui.Editor_Focus.Search)
+	testing.expect_value(t, views.editor_row(e).kind, views.Row_Kind.Shortcut)
+	testing.expect_value(t, views.editor_focus(e), views.Editor_Focus.Search)
 	app.settings_reveal_page(e, {key = "no.such.key", search = .Clear, focus = .Control})
 	testing.expect_value(t, reveal_row_key(e), "font.size")
-	testing.expect_value(t, ui.editor_focus(e), ui.Editor_Focus.Search)
+	testing.expect_value(t, views.editor_focus(e), views.Editor_Focus.Search)
 }
 
 // The shortcut action narrows the page to key bindings without selecting one of them.
@@ -101,7 +102,7 @@ settings_reveal_shortcut_scopes_the_search_to_key_bindings :: proc(t: ^testing.T
 		testing.expect(t, strings.has_prefix(e.rows[item.row].key, "keys."))
 	}
 	testing.expect_value(t, visible, 2)
-	testing.expect_value(t, ui.editor_focus(e), ui.Editor_Focus.Search)
+	testing.expect_value(t, views.editor_focus(e), views.Editor_Focus.Search)
 	testing.expect_value(t, e.message, "")
 }
 
@@ -117,7 +118,7 @@ settings_reveal_tab_selects_the_confirm_before_row :: proc(t: ^testing.T) {
 	app.settings_reveal_page(e, {key = "interface.confirm", search = .Clear})
 	testing.expect_value(t, ui.field_string(&e.filter), "")
 	testing.expect_value(t, reveal_row_key(e), "interface.confirm")
-	testing.expect_value(t, ui.editor_focus(e), ui.Editor_Focus.Search)
+	testing.expect_value(t, views.editor_focus(e), views.Editor_Focus.Search)
 	testing.expect_value(t, e.message, "")
 }
 
@@ -130,9 +131,9 @@ settings_reveal_theme_preserves_the_search_across_a_reload_and_posts_its_message
 	if !reveal_fixture_create(t, &f, "profile.default.command = pwsh.exe\n") {return}
 	e := &f.editor
 	ui.field_set(&e.filter, "profile")
-	ui.editor_filter(e)
+	views.editor_filter(e)
 	// The reload is what adds the settings rows; this page only has the fixture's rows.
-	testing.expect(t, !ui.editor_select_key(e, "profile.default.command"))
+	testing.expect(t, !views.editor_select_key(e, "profile.default.command"))
 	if !testing.expect_value(t, os.write_entire_file(f.path, "profile.default.command = cmd.exe\n"), nil) {
 		return
 	}
@@ -149,7 +150,7 @@ settings_reveal_theme_preserves_the_search_across_a_reload_and_posts_its_message
 	)
 	testing.expect_value(t, ui.field_string(&e.filter), "profile")
 	testing.expect_value(t, reveal_row_key(e), "profile.default.command")
-	testing.expect_value(t, ui.editor_row(e).value, "cmd.exe")
+	testing.expect_value(t, views.editor_row(e).value, "cmd.exe")
 	testing.expect_value(t, e.message, "Shell foreground and background now follow the theme.")
 	testing.expect(t, !e.error)
 }

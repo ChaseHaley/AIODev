@@ -2,7 +2,8 @@ package main
 
 import "cosmos:platform"
 import "cosmos:render"
-import "aio:ui"
+import "aio:views"
+import "cosmos:ui"
 
 // Every animated part of a window, once. Each feature advances its own animation and says whether it
 // still moves; window_motion_update and window_animating only compose them. A part added here must be
@@ -64,7 +65,7 @@ window_motion_advance :: proc(app: ^App, w: ^Window, part: Window_Motion, frame:
 	case .Arrange:
 		return arrange_animate(app, w, frame)
 	case .Settings_Page:
-		return ui.editor_animate(&w.editor, app.animations, frame)
+		return views.editor_animate(&w.editor, app.animations, frame)
 	case .Pane_Headers:
 		return pane_header_controls_animate(app, w, frame)
 	case .Float_Header:
@@ -119,7 +120,7 @@ window_motion_running :: proc(app: ^App, w: ^Window, part: Window_Motion) -> boo
 	case .Arrange:
 		return ui.presence_active(w.arrange.presence)
 	case .Settings_Page:
-		return ui.editor_animating(&w.editor)
+		return views.editor_animating(&w.editor)
 	case .Pane_Headers:
 		return pane_header_controls_animating(w)
 	case .Float_Header:

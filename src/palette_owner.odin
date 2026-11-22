@@ -4,8 +4,9 @@ import "aio:commands"
 import "cosmos:input"
 import "cosmos:platform"
 import "aio:settings"
-import "aio:ui"
+import "aio:views"
 import "core:time"
+import "cosmos:ui"
 
 // Presence owns the palette's Open/Closing phase; the app owns only its window. This view is the one
 // mapping between them, so keeping a window through a closing fade needs no second hand-synced phase.
@@ -72,7 +73,7 @@ palette_visible :: proc(app: ^App, w: ^Window) -> bool {
 palette_close :: proc(app: ^App, w: ^Window) {
 	if !palette_owned_by(app, w) {return}
 	if w.script_prompt.selection {script_prompt_cancel(app, w)}
-	ui.palette_close(&app.palette)
+	views.palette_close(&app.palette)
 	w.dirty = true
 }
 
@@ -105,19 +106,19 @@ palette_claim :: proc(app: ^App, w: ^Window) -> bool {
 	return true
 }
 
-palette_open_mode :: proc(app: ^App, w: ^Window, mode: ui.Palette_Mode) {
+palette_open_mode :: proc(app: ^App, w: ^Window, mode: views.Palette_Mode) {
 	if !palette_claim(app, w) {return}
-	ui.palette_open_mode(&app.palette, &app.registry, mode, time.time_to_unix(clock_wall(&app.clock)))
-	ui.palette_fit(&app.palette, f32(w.width), f32(w.height), w.scale)
+	views.palette_open_mode(&app.palette, &app.registry, mode, time.time_to_unix(clock_wall(&app.clock)))
+	views.palette_fit(&app.palette, f32(w.width), f32(w.height), w.scale)
 	w.dirty = true
 }
 
 // Transfers the list's owned strings only after the destination window is known to remain.
 @(require_results)
-palette_open_list :: proc(app: ^App, w: ^Window, title: string, items: []ui.Palette_Item) -> bool {
+palette_open_list :: proc(app: ^App, w: ^Window, title: string, items: []views.Palette_Item) -> bool {
 	if !palette_claim(app, w) {return false}
-	ui.palette_open_list(&app.palette, &app.registry, title, items)
-	ui.palette_fit(&app.palette, f32(w.width), f32(w.height), w.scale)
+	views.palette_open_list(&app.palette, &app.registry, title, items)
+	views.palette_fit(&app.palette, f32(w.width), f32(w.height), w.scale)
 	w.dirty = true
 	return true
 }
@@ -126,13 +127,13 @@ palette_open_list :: proc(app: ^App, w: ^Window, title: string, items: []ui.Pale
 // palette can jump to. The palette borrows the table for the app's lifetime.
 @(require_results)
 palette_settings_init :: proc(app: ^App) -> bool {
-	@(static) table: [len(settings.SCHEMA) + len(Settings_Section)]ui.Palette_Setting
+	@(static) table: [len(settings.SCHEMA) + len(Settings_Section)]views.Palette_Setting
 	@(static, rodata)
 	schema := settings.SCHEMA
 	count := 0
 	for entry in schema {
 		if entry.embedded {continue}
-		table[count] = ui.palette_setting(entry)
+		table[count] = views.palette_setting(entry)
 		count += 1
 	}
 	for section in SETTINGS_SECTIONS {
@@ -140,7 +141,7 @@ palette_settings_init :: proc(app: ^App) -> bool {
 		table[count] = {key = section.palette_key, title = section.title, group = section.title}
 		count += 1
 	}
-	return ui.palette_init(&app.palette, table[:count]) == nil
+	return views.palette_init(&app.palette, table[:count]) == nil
 }
 
 when AIO_CONTROL {
@@ -149,16 +150,16 @@ when AIO_CONTROL {
 		owner := palette_owner_id(app)
 		owns := w != nil && owner == w.id
 		p := &app.palette
-		layout: ui.Palette_Layout
+		layout: views.Palette_Layout
 		item, value, match := "", "", ""
-		edit := ui.Palette_Edit_Kind.None
+		edit := views.Palette_Edit_Kind.None
 		buffer, value_buffer, assign_buffer: [commands.SHORTCUT_TEXT_CAP]u8
 		if owns {
-			layout = ui.palette_layout(p, f32(w.width), f32(w.height), w.scale)
-			edit = ui.palette_editing(p)
+			layout = views.palette_layout(p, f32(w.width), f32(w.height), w.scale)
+			edit = views.palette_editing(p)
 			if p.selected >= 0 && p.selected < len(p.results) {
 				selected := p.results[p.selected]
-				item = ui.palette_result_name(p, selected)
+				item = views.palette_result_name(p, selected)
 				// The saved value of the selected setting row, read the way its palette control reads it.
 				if selected.kind == .Setting {value, _ = palette_setting_value(app, item)}
 				if selected.command != nil {
@@ -177,16 +178,16 @@ when AIO_CONTROL {
 			assign = commands.shortcut_text(chord, assign_buffer[:])
 		}
 		state_text(r, "palette.match", match)
-		state_value(r, "palette.keys", owns ? p.keys.state : ui.Key_Search_State.Off)
+		state_value(r, "palette.keys", owns ? p.keys.state : views.Key_Search_State.Off)
 		// Reports keep their strings past this frame, so text written to a local buffer is copied.
 		state_valuef(r, "palette.keys.text", "%s", owns ? commands.key_press_text(p.keys.press, buffer[:]) : "")
 		state_rect(r, "palette.keys.button", layout.keys)
 		state_valuef(r, "palette.assign", "%s", assign)
 		state_value(r, "palette.window", owner)
 		state_value(r, "palette.open", palette_active(app, w))
-		state_text(r, "palette.query", owns ? ui.palette_query(p) : "")
-		state_text(r, "palette.mode", owns ? ui.palette_mode_word(p.mode) : "all")
-		state_text(r, "palette.prefix", owns ? ui.palette_mode_prefix(p.mode) : "")
+		state_text(r, "palette.query", owns ? views.palette_query(p) : "")
+		state_text(r, "palette.mode", owns ? views.palette_mode_word(p.mode) : "all")
+		state_text(r, "palette.prefix", owns ? views.palette_mode_prefix(p.mode) : "")
 		state_value(r, "palette.selected", owns ? p.selected : 0)
 		state_value(r, "palette.items", owns ? len(p.results) : 0)
 		state_text(r, "palette.item", item)
@@ -198,18 +199,18 @@ when AIO_CONTROL {
 		state_rect(r, "palette.panel", layout.panel)
 		state_rect(r, "palette.input", layout.input)
 		state_rect(r, "palette.list", layout.list)
-		for mode in ui.Palette_Mode {
-			state_rect(r, state_key("palette.mode.%s", ui.palette_mode_word(mode)), layout.modes[mode])
+		for mode in views.Palette_Mode {
+			state_rect(r, state_key("palette.mode.%s", views.palette_mode_word(mode)), layout.modes[mode])
 		}
-		chain := owns ? ui.palette_chain(p) : nil
+		chain := owns ? views.palette_chain(p) : nil
 		chain_rows: []Chain_Report_Row
 		if chain != nil {
 			chain_rows = make([]Chain_Report_Row, len(chain.members), context.temp_allocator)
-			for &row, member in chain_rows {row.row, row.right, row.shown = ui.palette_chain_row(p, layout, member)}
+			for &row, member in chain_rows {row.row, row.right, row.shown = views.palette_chain_row(p, layout, member)}
 		}
 		scale := w != nil ? w.scale : 1
 		shortcut_chain_state_report(r, "palette", chain, chain_rows, w != nil ? &w.ui_text : nil, scale)
-		state_text(r, "palette.used_by", owns ? ui.palette_used_by(p) : "")
+		state_text(r, "palette.used_by", owns ? views.palette_used_by(p) : "")
 	}
 }
 
@@ -223,21 +224,21 @@ palette_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: input.Mou
 	if owner != .Palette {return}
 	x, y := f32(e.x), f32(e.y)
 	p := &app.palette
-	l := ui.palette_layout(p, f32(w.width), f32(w.height), w.scale)
-	pointer_set(app, w, ui.palette_pointer(p, l, x, y))
-	on_palette_outcome(app, w, ui.palette_pointer_move(p, l, &w.ui_text, x, y, .Left in e.buttons), 0)
+	l := views.palette_layout(p, f32(w.width), f32(w.height), w.scale)
+	pointer_set(app, w, views.palette_pointer(p, l, x, y))
+	on_palette_outcome(app, w, views.palette_pointer_move(p, l, &w.ui_text, x, y, .Left in e.buttons), 0)
 }
 
 @(private)
 palette_tooltip :: proc(app: ^App, _: ^Window, _, _: f32) -> string {
 	p := &app.palette
-	if p.keys_hover {return ui.key_search_tooltip(&p.keys)}
-	return p.reset_hover >= 0 && ui.palette_editing(p) == .None ? "Reset setting" : ""
+	if p.keys_hover {return views.key_search_tooltip(&p.keys)}
+	return p.reset_hover >= 0 && views.palette_editing(p) == .None ? "Reset setting" : ""
 }
 
 @(private)
 palette_shortcut :: proc(app: ^App, _: ^Window, _, _: f32) -> Tooltip_Shortcut {
-	if app.palette.keys_hover {return ui.KEY_SEARCH_TOGGLE}
+	if app.palette.keys_hover {return views.KEY_SEARCH_TOGGLE}
 	return nil
 }
 
@@ -245,14 +246,14 @@ palette_shortcut :: proc(app: ^App, _: ^Window, _, _: f32) -> Tooltip_Shortcut {
 palette_press :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) {
 	x, y := f32(e.x), f32(e.y)
 	p := &app.palette
-	l := ui.palette_layout(p, f32(w.width), f32(w.height), w.scale)
-	if e.button == .Left && ui.palette_input_contains(l, x, y) && !ui.palette_popup_contains(p, l, x, y) {
-		outcome := ui.palette_input_press(p, l, &w.ui_text, x, y, w.scale, .Shift in e.modifiers)
+	l := views.palette_layout(p, f32(w.width), f32(w.height), w.scale)
+	if e.button == .Left && views.palette_input_contains(l, x, y) && !views.palette_popup_contains(p, l, x, y) {
+		outcome := views.palette_input_press(p, l, &w.ui_text, x, y, w.scale, .Shift in e.modifiers)
 		on_palette_outcome(app, w, outcome, 0)
 		return
 	}
-	outcome, id := ui.palette_mouse_press(p, &app.registry, l, x, y, &w.ui_text)
-	if track, side := ui.palette_take_track(p); e.pressed && e.button == .Left && track != .None {
+	outcome, id := views.palette_mouse_press(p, &app.registry, l, x, y, &w.ui_text)
+	if track, side := views.palette_take_track(p); e.pressed && e.button == .Left && track != .None {
 		scroll_hold_begin(app, w, track == .Results ? .Palette_Results : .Palette_Choices, {}, x, y, side)
 	}
 	on_palette_outcome(app, w, outcome, id)
@@ -260,7 +261,7 @@ palette_press :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) {
 
 @(private)
 palette_pointer_cancel :: proc(app: ^App, w: ^Window) {
-	if palette_active(app, w) {ui.palette_drag_cancel(&app.palette)}
+	if palette_active(app, w) {views.palette_drag_cancel(&app.palette)}
 }
 
 // Keys while the palette shows: a shortcut field, conflict chain or search by keys records them, text
@@ -271,36 +272,37 @@ palette_key_input :: proc(app: ^App, w: ^Window, e, logical: input.Key_Event) {
 	pane_header_cancel(w)
 	key_suppress(w, e)
 	p := &app.palette
-	if editing := ui.palette_editing(p); editing == .Shortcut || editing == .Chain || ui.palette_recording(p) {
-		outcome, id := ui.palette_key(p, &app.registry, e)
+	if editing := views.palette_editing(p);
+		editing == .Shortcut || editing == .Chain || views.palette_recording(p) {
+		outcome, id := views.palette_key(p, &app.registry, e)
 		on_palette_outcome(app, w, outcome, id)
 		return
 	}
 	if shortcut_undo_key(app, logical) {return}
 	switch clipboard_chord(logical) {
 	case .Copy:
-		clipboard_copy(app, ui.palette_selection(p))
+		clipboard_copy(app, views.palette_selection(p))
 	case .Cut:
 		if clipboard_copy(
 			app,
-			ui.palette_selection(p),
-		) {on_palette_outcome(app, w, ui.palette_cut(p, &app.registry), 0)}
+			views.palette_selection(p),
+		) {on_palette_outcome(app, w, views.palette_cut(p, &app.registry), 0)}
 	case .Paste:
 		if text, ok := platform.clipboard_get_text(&app.platform, context.temp_allocator); ok {
-			on_palette_outcome(app, w, ui.palette_paste(p, &app.registry, text), 0)
+			on_palette_outcome(app, w, views.palette_paste(p, &app.registry, text), 0)
 		}
 	case .None:
-		outcome, id := ui.palette_key(p, &app.registry, logical)
+		outcome, id := views.palette_key(p, &app.registry, logical)
 		on_palette_outcome(app, w, outcome, id)
 	}
 }
 
 @(private)
-on_palette_outcome :: proc(app: ^App, w: ^Window, outcome: ui.Outcome, id: commands.Command_Id) {
+on_palette_outcome :: proc(app: ^App, w: ^Window, outcome: views.Outcome, id: commands.Command_Id) {
 	// The outcome that names a choice is the only one that may act on it.
-	chosen := ui.palette_chosen_take(&app.palette)
+	chosen := views.palette_chosen_take(&app.palette)
 	// Every palette interaction comes through here, so any use it recorded is saved.
-	if ui.palette_used_take(&app.palette) {palette_usage_touch(app)}
+	if views.palette_used_take(&app.palette) {palette_usage_touch(app)}
 	switch outcome {
 	case .None:
 	case .Changed:
@@ -309,14 +311,14 @@ on_palette_outcome :: proc(app: ^App, w: ^Window, outcome: ui.Outcome, id: comma
 		if w.script_prompt.selection {script_prompt_cancel(app, w)}
 		w.dirty = true
 	case .Select_Item:
-		if item, ok := chosen.(ui.Chosen_Item); ok {script_prompt_accept_index(app, w, item.index)}
+		if item, ok := chosen.(views.Chosen_Item); ok {script_prompt_accept_index(app, w, item.index)}
 		w.dirty = true
 	case .Run:
 		w.dirty = true
 		run_window_command(app, w, id, .Palette)
 	case .Open_Setting:
 		w.dirty = true
-		if setting, ok := chosen.(ui.Chosen_Setting); ok {
+		if setting, ok := chosen.(views.Chosen_Setting); ok {
 			settings_reveal(
 				app,
 				pane_link_acting_window(app, w),
@@ -325,25 +327,25 @@ on_palette_outcome :: proc(app: ^App, w: ^Window, outcome: ui.Outcome, id: comma
 		}
 	case .Set_Setting:
 		w.dirty = true
-		if value, ok := chosen.(ui.Chosen_Value); ok {
+		if value, ok := chosen.(views.Chosen_Value); ok {
 			saved := settings_save_value(app, value.key, value.value, "Could not save the setting.")
-			ui.palette_saved(&app.palette, saved)
+			views.palette_saved(&app.palette, saved)
 		}
 	case .Open_Tab:
 		w.dirty = true
-		if tab, ok := chosen.(ui.Chosen_Tab); ok {
+		if tab, ok := chosen.(views.Chosen_Tab); ok {
 			palette_activate_tab(app, pane_link_acting_window(app, w), tab.id)
 		}
 	case .Open_Workspace:
 		w.dirty = true
-		if workspace, ok := chosen.(ui.Chosen_Workspace); ok {
+		if workspace, ok := chosen.(views.Chosen_Workspace); ok {
 			palette_activate_workspace(app, pane_link_acting_window(app, w), u32(workspace.id))
 		}
 	case .Save_Chain:
 		w.dirty = true
 		// The chain stays open until its revision applied, so a refused save can still be fixed.
-		if shortcut_chain_save(app, ui.palette_chain_changes(&app.palette), Settings_Current{}) {
-			ui.palette_chain_close(&app.palette, &app.registry)
+		if shortcut_chain_save(app, views.palette_chain_changes(&app.palette), Settings_Current{}) {
+			views.palette_chain_close(&app.palette, &app.registry)
 		}
 	}
 }

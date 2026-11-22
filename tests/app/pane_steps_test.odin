@@ -5,7 +5,8 @@ import app "../../src"
 import "cosmos:input"
 import "aio:layout"
 import "cosmos:platform"
-import "aio:ui"
+@(require) import "aio:views"
+import "cosmos:ui"
 
 // Keyboard pane moves and Arrange mode (WORK-477): each command lands where the header drag would.
 

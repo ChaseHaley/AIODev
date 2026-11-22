@@ -12,8 +12,9 @@ import "cosmos:input"
 import "cosmos:platform"
 import "aio:settings"
 import "aio:term"
-import "aio:ui"
+import "aio:views"
 import win32 "core:sys/windows"
+import "cosmos:ui"
 
 @(private="file")
 Delete_Fixture :: struct { state: app.App, directory, path: string }
@@ -231,7 +232,7 @@ workspace_delete_cancel_and_last_replacement_preserve_window :: proc(t: ^testing
 	testing.expect(t, w.workspace.id > id && app.window_tree(w) == &app.selected_tab(w.workspace).tree)
 	testing.expect_value(t, len(w.workspace.tabs), 1)
 	testing.expect_value(t, len(state.sessions), 1)
-	testing.expect(t, !ui.editor_loaded(&w.editor) && !app.tab_menu_shown(w) &&
+	testing.expect(t, !views.editor_loaded(&w.editor) && !app.tab_menu_shown(w) &&
 		app.confirmation_current(w) == nil)
 	testing.expect_value(t, win32.WaitForSingleObject(process, 1000), win32.WAIT_OBJECT_0)
 	for handle in processes { testing.expect_value(t, win32.WaitForSingleObject(handle, 1000), win32.WAIT_OBJECT_0) }
@@ -320,7 +321,7 @@ workspace_delete_destination_failure_and_changed_ownership_reconfirm :: proc(t: 
 	app.window_close(state, state.windows[1])
 	app.workspace_delete_request(state, w, target)
 	delete_key(state, w, .Enter)
-	testing.expect(t, w.workspace == destination && ui.editor_loaded(&w.editor))
+	testing.expect(t, w.workspace == destination && views.editor_loaded(&w.editor))
 	testing.expect(t, app.workspace_find(state, target_id) == nil)
 	testing.expect_value(t, len(state.sessions), 1)
 	app.tick(state)
@@ -460,7 +461,7 @@ workspace_view_partial_failure_and_move_have_one_owner :: proc(t: ^testing.T) {
 	app.pane_split(state, w, .Right)
 	if !testing.expect_value(t, len(state.sessions), 2) {return}
 	workspace := w.workspace
-	live_views := raw_data(w.views)
+	live_views := raw_data(w.pane_views)
 	session := state.sessions[0].session
 	pid, geometry := term.process_id(session), term.geometry(session)
 	backing := context.allocator
@@ -481,7 +482,7 @@ workspace_view_partial_failure_and_move_have_one_owner :: proc(t: ^testing.T) {
 		testing.expect(t, failure.failed)
 		testing.expect_value(t, len(tracker.allocation_map), 0)
 		testing.expect(t, prepared.workspace == nil && app.workspace_view_tree(&prepared) == nil)
-		testing.expect_value(t, raw_data(w.views), live_views)
+		testing.expect_value(t, raw_data(w.pane_views), live_views)
 		testing.expect(t, w.workspace == workspace && app.window_tree(w) == &app.selected_tab(workspace).tree)
 		testing.expect_value(t, term.geometry(session), geometry)
 		testing.expect_value(t, term.process_id(session), pid)
@@ -494,19 +495,19 @@ workspace_view_partial_failure_and_move_have_one_owner :: proc(t: ^testing.T) {
 	defer app.workspace_view_destroy(&prepared)
 	if !testing.expect(t, app.workspace_view_prepare(state, &prepared, workspace)) {return}
 	if !testing.expect(t, app.workspace_view_prepare(state, &receiver, workspace)) {return}
-	testing.expect_value(t, len(prepared.views), 2)
-	views := raw_data(prepared.views)
+	testing.expect_value(t, len(prepared.pane_views), 2)
+	moved_views := raw_data(prepared.pane_views)
 	app.workspace_view_move(&receiver, &prepared)
 	app.workspace_view_destroy(&prepared)
 	app.workspace_view_destroy(&prepared)
 	testing.expect(t, prepared.workspace == nil && app.workspace_view_tree(&prepared) == nil)
-	testing.expect(t, raw_data(prepared.views) == nil && raw_data(prepared.panes) == nil)
+	testing.expect(t, raw_data(prepared.pane_views) == nil && raw_data(prepared.panes) == nil)
 	testing.expect(t, raw_data(prepared.dividers) == nil)
-	testing.expect(t, raw_data(prepared.dividers) == nil && ui.editor_source(&prepared.editor) == "")
-	testing.expect_value(t, raw_data(receiver.views), views)
+	testing.expect(t, raw_data(prepared.dividers) == nil && views.editor_source(&prepared.editor) == "")
+	testing.expect_value(t, raw_data(receiver.pane_views), moved_views)
 	testing.expect(t, receiver.workspace == workspace)
 	testing.expect(t, app.workspace_view_tree(&receiver) == app.window_tree(w))
-	testing.expect_value(t, raw_data(w.views), live_views)
+	testing.expect_value(t, raw_data(w.pane_views), live_views)
 	testing.expect_value(t, term.geometry(session), geometry)
 	testing.expect_value(t, term.process_id(session), pid)
 	app.workspace_view_destroy(&receiver)
@@ -516,12 +517,12 @@ workspace_view_partial_failure_and_move_have_one_owner :: proc(t: ^testing.T) {
 	app.run_action(state, w, .Settings_UI)
 	context.allocator = tracking
 	if !testing.expect(t, app.workspace_view_prepare(state, &prepared, workspace)) {return}
-	source := ui.editor_source(&prepared.editor)
+	source := views.editor_source(&prepared.editor)
 	app.workspace_view_move(&receiver, &prepared)
 	app.workspace_view_destroy(&prepared)
-	testing.expect(t, ui.editor_source(&prepared.editor) == "" && len(prepared.editor.rows) == 0)
-	testing.expect(t, ui.editor_loaded(&receiver.editor) && len(receiver.editor.rows) > 0)
-	testing.expect_value(t, ui.editor_source(&receiver.editor), source)
+	testing.expect(t, views.editor_source(&prepared.editor) == "" && len(prepared.editor.rows) == 0)
+	testing.expect(t, views.editor_loaded(&receiver.editor) && len(receiver.editor.rows) > 0)
+	testing.expect_value(t, views.editor_source(&receiver.editor), source)
 	app.workspace_view_destroy(&receiver)
 	testing.expect_value(t, len(tracker.allocation_map), 0)
 }

@@ -11,7 +11,7 @@ import "aio:layout"
 import "cosmos:platform"
 import "cosmos:input"
 import "aio:term"
-import "aio:ui"
+import "cosmos:ui"
 
 @(private = "file")
 Fixture :: struct {

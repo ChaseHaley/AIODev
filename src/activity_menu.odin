@@ -3,8 +3,8 @@ package main
 import "cosmos:input"
 import "cosmos:render"
 import "aio:settings"
-import "aio:ui"
 import "core:log"
+import "cosmos:ui"
 
 // The Activity header's two menus (WORK-406, WORK-412). Show picks what names each row and which
 // terms follow the name; Group by picks how reports group and sort. Both save the same settings the

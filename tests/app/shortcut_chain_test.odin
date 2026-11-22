@@ -3,10 +3,11 @@ package app_test
 import app "../../src"
 import "aio:commands"
 import "cosmos:input"
-import "aio:ui"
+import "aio:views"
 import "core:os"
 import "core:strings"
 import "core:testing"
+import "cosmos:ui"
 
 @(private = "file")
 chain_keys :: proc(s: ^app.App, keys: ..input.Key_Event) {
@@ -45,27 +46,27 @@ settings_conflict_chain_saves_the_owners_example_and_undoes_it_as_one_write :: p
 	app.editor_open(s, w)
 	p := &w.editor
 	app.handle_event(s, input.Text_Event{w.id, "keys.terminal.find"})
-	if !testing.expect_value(t, ui.editor_row(p).key, "keys.terminal.find") {return}
+	if !testing.expect_value(t, views.editor_row(p).key, "keys.terminal.find") {return}
 	before := chain_file(t, &f)
 	chain_keys(s, {key = .Enter}, {key = .Enter}, {key = .P, modifiers = {.Control, .Shift}})
-	testing.expect_value(t, ui.shortcut_capture_used_by(&p.capture), "Used by Show everything palette")
-	testing.expect(t, !ui.editor_chained(p), "recording only notes the clash")
+	testing.expect_value(t, views.shortcut_capture_used_by(&p.capture), "Used by Show everything palette")
+	testing.expect(t, !views.editor_chained(p), "recording only notes the clash")
 	chain_keys(s, {key = .Enter})
-	if !testing.expect(t, ui.editor_chained(p)) {return}
+	if !testing.expect(t, views.editor_chained(p)) {return}
 	testing.expect_value(t, len(p.chain.members), 2)
-	testing.expect_value(t, ui.shortcut_chain_context(&p.chain), "Ctrl+Shift+P is used twice. Change one to save.")
+	testing.expect_value(t, views.shortcut_chain_context(&p.chain), "Ctrl+Shift+P is used twice. Change one to save.")
 	chain_keys(s, {key = .Arrow_Down}, {key = .Enter}, {key = .C, modifiers = {.Control, .Shift}})
-	testing.expect_value(t, ui.shortcut_chain_used_by(&p.chain), "Used by Copy")
+	testing.expect_value(t, views.shortcut_chain_used_by(&p.chain), "Used by Copy")
 	chain_keys(s, {key = .Enter})
 	if !testing.expect_value(t, len(p.chain.members), 3) {return}
-	testing.expect_value(t, ui.shortcut_chain_member_key(&p.chain, 2), "keys.edit.copy")
+	testing.expect_value(t, views.shortcut_chain_member_key(&p.chain, 2), "keys.edit.copy")
 	testing.expect_value(t, chain_file(t, &f), before)
 	chain_keys(s, {key = .Arrow_Down}, {key = .Delete})
-	testing.expect(t, !ui.editor_chained(p), "a resolved chain saves and closes")
+	testing.expect(t, !views.editor_chained(p), "a resolved chain saves and closes")
 	saved := chain_file(t, &f)
 	chain_expect_saved(t, s, saved)
 	testing.expect_value(t, ui.field_string(&p.filter), "keys.terminal.find")
-	testing.expect_value(t, ui.editor_row(p).key, "keys.terminal.find")
+	testing.expect_value(t, views.editor_row(p).key, "keys.terminal.find")
 	chain_keys(s, {key = .Z, modifiers = {.Control}})
 	testing.expect_value(t, chain_file(t, &f), before)
 	find := commands.find_by_shortcut(&s.registry, {.F, {.Control, .Shift}})
@@ -80,24 +81,24 @@ palette_conflict_chain_saves_the_owners_example_and_undoes_it_as_one_write :: pr
 	s, w := &f.state, f.state.windows[0]
 	p := &s.palette
 	app.palette_open_mode(s, w, .Commands)
-	ui.palette_text(p, &s.registry, "Find")
+	views.palette_text(p, &s.registry, "Find")
 	find := -1
-	for result, i in p.results {if ui.palette_result_name(p, result) == "terminal.find" {find = i}}
+	for result, i in p.results {if views.palette_result_name(p, result) == "terminal.find" {find = i}}
 	if !testing.expect(t, find >= 0) {return}
 	p.selected = find
 	before := chain_file(t, &f)
 	chain_keys(s, {key = .Enter, modifiers = {.Control}}, {key = .Enter}, {key = .P, modifiers = {.Control, .Shift}})
-	testing.expect_value(t, ui.palette_used_by(p), "Used by Show everything palette")
+	testing.expect_value(t, views.palette_used_by(p), "Used by Show everything palette")
 	chain_keys(s, {key = .Enter})
-	if !testing.expect_value(t, ui.palette_editing(p), ui.Palette_Edit_Kind.Chain) {return}
+	if !testing.expect_value(t, views.palette_editing(p), views.Palette_Edit_Kind.Chain) {return}
 	testing.expect_value(t, len(p.results), 2)
 	chain_keys(s, {key = .Arrow_Down}, {key = .Enter}, {key = .C, modifiers = {.Control, .Shift}}, {key = .Enter})
 	testing.expect_value(t, len(p.results), 3)
 	testing.expect_value(t, chain_file(t, &f), before)
 	chain_keys(s, {key = .Arrow_Down}, {key = .Delete})
-	testing.expect_value(t, ui.palette_editing(p), ui.Palette_Edit_Kind.None)
+	testing.expect_value(t, views.palette_editing(p), views.Palette_Edit_Kind.None)
 	chain_expect_saved(t, s, chain_file(t, &f))
-	testing.expect_value(t, ui.palette_query(p), "Find")
+	testing.expect_value(t, views.palette_query(p), "Find")
 	testing.expect_value(t, p.selected, find)
 	testing.expect(t, app.palette_active(s, w))
 	chain_keys(s, {key = .Z, modifiers = {.Control}})
@@ -116,12 +117,12 @@ settings_conflict_chain_never_overwrites_an_outside_edit :: proc(t: ^testing.T) 
 	p := &w.editor
 	app.handle_event(s, input.Text_Event{w.id, "keys.terminal.find"})
 	chain_keys(s, {key = .Enter}, {key = .Enter}, {key = .P, modifiers = {.Control, .Shift}}, {key = .Enter})
-	if !testing.expect(t, ui.editor_chained(p)) {return}
+	if !testing.expect(t, views.editor_chained(p)) {return}
 	outside := strings.concatenate({chain_file(t, &f), "# outside edit\n"}, context.temp_allocator)
 	testing.expect_value(t, os.write_entire_file(f.path, transmute([]u8)outside), nil)
 	chain_keys(s, {key = .Arrow_Down}, {key = .Delete})
 	testing.expect_value(t, chain_file(t, &f), outside)
-	testing.expect(t, ui.editor_chained(p), "the chain keeps its work")
-	_, stale := p.revision.(ui.Editor_Stale)
+	testing.expect(t, views.editor_chained(p), "the chain keeps its work")
+	_, stale := p.revision.(views.Editor_Stale)
 	testing.expect(t, stale)
 }

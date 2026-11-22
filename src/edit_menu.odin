@@ -3,9 +3,9 @@ package main
 import "cosmos:input"
 import "cosmos:platform"
 import "cosmos:render"
-import "aio:ui"
 import "core:log"
 import "cosmos:textedit"
+import "cosmos:ui"
 
 // The menu a right click on editable text opens: Undo, Redo, Cut, Copy, Paste and Select all, with the
 // keys that do the same. Its rows are w.edit_menu; the Markdown pane or web address field whose text they

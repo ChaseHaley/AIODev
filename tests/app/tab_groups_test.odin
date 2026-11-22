@@ -6,7 +6,8 @@ import "cosmos:font"
 import "cosmos:glyphs"
 import "aio:layout"
 import "cosmos:render"
-import "aio:ui"
+import "aio:views"
+import "cosmos:ui"
 
 // A workspace whose tabs have ids 1..len(groups) and the groups `groups` gives them by id, each group it names
 // existing unnamed in Red.
@@ -258,7 +259,7 @@ the_strip_puts_each_chip_before_its_tabs_and_folds_them_into_it :: proc(t: ^test
 	if !testing.expect(t, ui.text_init(&w.ui_text, fonts, &cache, 14)) {return}
 	grouped_settle(&state, w)
 	bar := app.window_tab_bar(&state, w)
-	chip := ui.HEIGHT_COMPACT + 2 * ui.TAB_CHIP_MARGIN
+	chip := ui.HEIGHT_COMPACT + 2 * views.TAB_CHIP_MARGIN
 	testing.expect_value(t, bar.end, bar.x + 4 * bar.tab_width + chip)
 	second := app.window_tab_rect(&state, w, 1)
 	testing.expect_value(t, second.x, bar.x + bar.tab_width + chip)
@@ -311,7 +312,7 @@ a_groups_tray_runs_from_its_chip_to_its_last_tab_and_goes_while_folded :: proc(t
 	defer grouped_window_destroy(w)
 	Expected :: struct {
 		shown: bool,
-		ends:  ui.Tray_Ends,
+		ends:  views.Tray_Ends,
 	}
 	trays :: proc(state: ^app.App, w: ^app.Window) -> (out: [4]Expected) {
 		for &tray, i in out {

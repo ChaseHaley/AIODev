@@ -3,7 +3,7 @@ package main
 import "cosmos:input"
 import "core:time"
 import "cosmos:render"
-import "aio:ui"
+import "cosmos:ui"
 
 // The keys that open the selected row's menu, the one its "…" button opens; the button's tooltip names
 // the first. An entry without modifiers opens it whatever modifiers are held.

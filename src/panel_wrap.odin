@@ -2,8 +2,9 @@ package main
 
 import "cosmos:render"
 import "aio:settings"
-import "aio:ui"
+import "aio:views"
 import "core:math"
+import "cosmos:ui"
 
 // Moving the Activity panel to the other side. Beside a docked rail it slides down out of the rail and in
 // from the window's right edge, or the reverse, while the panes ease. With no docked rail, the panes and
@@ -52,7 +53,7 @@ panel_side_apply :: proc(app: ^App, w: ^Window) {
 	width := status_panel_dock_width(app, w)
 	if width <= 0 {return}
 	top := window_title_height(w)
-	margin := ui.pane_area(f32(w.width), f32(w.height), top, f32(app.settings.pane.gap), w.scale).x
+	margin := views.pane_area(f32(w.width), f32(w.height), top, f32(app.settings.pane.gap), w.scale).x
 	// A turn still running continues from where it stands.
 	shown := w.wrap_shift * w.wrap.value
 	w.wrap_shift = shown + (side == .Right ? width : -width)

@@ -1,6 +1,6 @@
 package main
 
-import "aio:ui"
+import "aio:views"
 import "core:strings"
 
 // The settings text the reset question was asked against. The reset saves over exactly that revision,
@@ -10,8 +10,8 @@ Settings_Reset :: struct {
 }
 
 settings_reset_ask :: proc(app: ^App, w: ^Window) {
-	if !ui.editor_loaded(&w.editor) {return}
-	value, err := strings.clone(ui.editor_source(&w.editor))
+	if !views.editor_loaded(&w.editor) {return}
+	value, err := strings.clone(views.editor_source(&w.editor))
 	if err != nil {notify(app, .Error, "Could not prepare the settings reset."); return}
 	confirmation_ask(app, w, Settings_Reset{value}, extended = true, focus = .Cancel)
 }

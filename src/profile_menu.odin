@@ -5,9 +5,10 @@ import "aio:commands"
 import "aio:layout"
 import "cosmos:render"
 import "aio:settings"
-import "aio:ui"
+import "aio:views"
 import "core:log"
 import "cosmos:platform"
+import "cosmos:ui"
 
 // Where a choice from the shared content list goes.
 Profile_Menu_Mode :: union #no_nil {
@@ -180,7 +181,7 @@ profile_menu_open_new_tab :: proc(app: ^App, w: ^Window, x, y: f32) {
 
 // Opens the content menu for a shown pane, below the start of its header.
 profile_menu_open_pane :: proc(app: ^App, w: ^Window, pane: layout.Pane_Rect) {
-	x, y := pane.rect.x + 8 * w.scale, pane.rect.y + ui.HEADER_HEIGHT * w.scale
+	x, y := pane.rect.x + 8 * w.scale, pane.rect.y + views.HEADER_HEIGHT * w.scale
 	profile_menu_open(app, w, Profile_Menu_Swap_Pane{pane.content}, x, y)
 }
 

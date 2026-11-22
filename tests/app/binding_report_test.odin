@@ -5,7 +5,8 @@ import app "../../src"
 import "aio:commands"
 import "cosmos:input"
 import "aio:settings"
-import "aio:ui"
+import "aio:views"
+import "cosmos:ui"
 
 @(private, require_results)
 binding_report_for_text :: proc(
@@ -181,7 +182,7 @@ settings_inline_duplicate_names_the_winner_without_reading_prose :: proc(t: ^tes
 	w := s.windows[0]
 	app.editor_open(s, w)
 	app.handle_event(s, input.Text_Event{w.id, "keys.tab.new"})
-	if !testing.expect_value(t, ui.editor_row(&w.editor).key, "keys.tab.new") {return}
+	if !testing.expect_value(t, views.editor_row(&w.editor).key, "keys.tab.new") {return}
 	ui.field_set(&w.editor.value, "Ctrl+Shift+P")
 	app.editor_outcome(s, w, .Save)
 	testing.expect(t, w.editor.error)

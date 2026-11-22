@@ -2,9 +2,10 @@ package main
 
 import "cosmos:line_match"
 import "aio:settings"
-import "aio:ui"
+import "aio:views"
 import "core:fmt"
 import "core:strings"
+import "cosmos:ui"
 
 // The diff filter of an Agent changes pane: words separated by spaces. A plain word is a case-insensitive
 // regular expression on a file's path as the diff header shows it, matched by find's rules; a file shows
@@ -65,7 +66,7 @@ changes_filter_set :: proc(
 	f: ^Changes_Filter,
 	text: string,
 	library := "",
-	tokens: ^[dynamic]ui.Filter_Token = nil,
+	tokens: ^[dynamic]views.Filter_Token = nil,
 	pending_from := -1,
 	pending_to := -1,
 ) -> (
@@ -86,7 +87,7 @@ changes_filter_set :: proc(
 			if !term_ok {error = term_error}
 			continue
 		}
-		token := ui.Filter_Token {
+		token := views.Filter_Token {
 			start = word.start,
 			end   = word.end,
 			id    = word.name,

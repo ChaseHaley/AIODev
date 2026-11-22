@@ -5,8 +5,8 @@ import "core:testing"
 import "core:strings"
 import "core:math/rand"
 import "cosmos:platform"
-import "aio:ui"
 import app "../../src"
+import "cosmos:ui"
 
 @(test)
 workspace_phrases_are_unique_and_previews_remain_unnamed :: proc(t: ^testing.T) {

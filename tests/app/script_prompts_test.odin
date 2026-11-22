@@ -5,11 +5,12 @@ import "aio:cli_protocol"
 import "aio:commands"
 import "aio:events"
 import "cosmos:input"
-import "aio:ui"
+import "aio:views"
 import "core:encoding/json"
 import "core:strconv"
 import "core:strings"
 import "core:testing"
+import "cosmos:ui"
 
 @(private = "file")
 Prompt_Answer :: struct {
@@ -31,7 +32,7 @@ invoke :: proc(state: ^app.App, caller: u32, args: ..string) -> app.Outcome {
 prompt_test_init :: proc(t: ^testing.T, state: ^app.App, w: ^app.Window) -> bool {
 	state.registry = commands.create()
 	if !testing.expect_value(t, app.register_actions(&state.registry), commands.Error.None) {return false}
-	if !testing.expect_value(t, ui.palette_init(&state.palette, nil), nil) {return false}
+	if !testing.expect_value(t, views.palette_init(&state.palette, nil), nil) {return false}
 	events.init(&state.events)
 	interest := events.Kinds{.Prompt_Closed}
 	events.set_interest(&state.events, .Lua, interest)
@@ -45,7 +46,7 @@ prompt_test_init :: proc(t: ^testing.T, state: ^app.App, w: ^app.Window) -> bool
 prompt_test_destroy :: proc(state: ^app.App, w: ^app.Window) {
 	app.window_overlays_cancel(state, w)
 	app.overlay_surfaces_destroy(w)
-	ui.palette_destroy(&state.palette)
+	views.palette_destroy(&state.palette)
 	commands.destroy(&state.registry)
 	events.destroy(&state.events)
 	delete(state.windows)
@@ -89,7 +90,7 @@ script_select_filters_and_reports_original_index_or_cancellation :: proc(t: ^tes
 	testing.expect_value(t, state.palette.list_title, "Choose a task")
 	testing.expect_value(t, len(state.palette.results), 3)
 	testing.expect_value(t, state.palette.list_items[2].detail, "Compile B")
-	geometry := ui.palette_layout(&state.palette, 900, 700, 1)
+	geometry := views.palette_layout(&state.palette, 900, 700, 1)
 	testing.expect_value(t, geometry.mode_bar.height, f32(0))
 	testing.expect_value(t, geometry.keys.width, f32(0))
 	typed := input.Text_Event{window = w.id, text = "build"}

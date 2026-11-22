@@ -4,7 +4,8 @@ import "cosmos:input"
 import "aio:layout"
 import "cosmos:render"
 import "aio:term"
-import "aio:ui"
+import "aio:views"
+import "cosmos:ui"
 
 // The overlay scrollbar of terminal and Markdown panes: one hover and one held thumb per window,
 // keyed by the content whose bar it is. A terminal scrolls by rows and only shows its bar when the
@@ -70,7 +71,7 @@ pane_scrollbar_geometry :: proc(
 		page := markdown_find(app, pane.content.id)
 		if page == nil || markdown_document(page) == nil {return}
 		area = pane_scrollbar_area(markdown_geometry_of(app, w, pane).area, w.scale)
-		extent = {ui.markdown_total(&page.view), int(area.height), page.view.scroll}
+		extent = {views.markdown_total(&page.view), int(area.height), page.view.scroll}
 	case:
 		return
 	}

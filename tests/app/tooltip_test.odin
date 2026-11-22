@@ -6,9 +6,10 @@ import "cosmos:input"
 import "cosmos:render"
 import "cosmos:search"
 import "aio:settings"
-import "aio:ui"
+import "aio:views"
 import "core:testing"
 import "core:time"
+import "cosmos:ui"
 
 @(test)
 tooltip_waits_for_its_hover_deadline :: proc(t: ^testing.T) {
@@ -65,8 +66,8 @@ tooltip_key_search_names_its_toggle_key :: proc(t: ^testing.T) {
 	state: app.App
 	w: app.Window
 	buffer: [commands.SHORTCUT_TEXT_CAP]u8
-	toggle := ui.KEY_SEARCH_TOGGLE
-	testing.expect(t, ui.key_search_toggles({key = toggle.key, modifiers = toggle.modifiers, pressed = true,
+	toggle := views.KEY_SEARCH_TOGGLE
+	testing.expect(t, views.key_search_toggles({key = toggle.key, modifiers = toggle.modifiers, pressed = true,
 		unshifted = 'k'}))
 
 	state.palette.keys_hover = true
@@ -137,8 +138,8 @@ tooltip_workspace_color_wheel :: proc(t: ^testing.T) {
 tooltip_skips_labeled_vertical_new_tab :: proc(t: ^testing.T) {
 	state: app.App
 	w := app.Window{width = 900, height = 600, scale = 1, rail_wide = true, rail = app.Rail_Docked{}}
-	l := ui.rail_layout({0, ui.TITLE_BAR_HEIGHT, ui.RAIL_WIDTH, 560}, 1, 0, 0)
-	r := ui.rail_new_tab_tile(l)
+	l := views.rail_layout({0, ui.TITLE_BAR_HEIGHT, views.RAIL_WIDTH, 560}, 1, 0, 0)
+	r := views.rail_new_tab_tile(l)
 	app.tooltip_hover(&state, &w, .Tabs,
 		input.Mouse_Move_Event{x = i32(r.x + r.width / 2), y = i32(r.y + r.height / 2)})
 	testing.expect_value(t, app.tooltip_current(&w), "")

@@ -290,7 +290,11 @@ key_modifier :: proc(key: input.Key) -> input.Modifiers {
 
 // Records one key press, as shortcut capture reads it: a modifier alone is held, the configured leader
 // waits for its key, and anything else completes the chord, which the result reports.
-key_press_record :: proc(press: ^Key_Press, e: input.Key_Event, leader: Maybe(input.Shortcut)) -> (complete: bool) {
+key_press_record :: proc(
+	press: ^Key_Press,
+	e: input.Key_Event,
+	leader: Maybe(input.Shortcut),
+) -> (complete: bool) {
 	if e.repeat {return false}
 	modifiers := e.modifiers & {.Control, .Shift, .Alt, .Super}
 	if input.is_modifier_key(e.key) {

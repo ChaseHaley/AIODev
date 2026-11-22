@@ -6,11 +6,11 @@ import "aio:commands"
 import "cosmos:input"
 import "aio:settings"
 import "aio:term"
-import "aio:ui"
 import "core:encoding/json"
 import "core:fmt"
 import "core:strings"
 import "core:testing"
+import "cosmos:ui"
 
 @(test)
 command_categories_cover_every_action_namespace :: proc(t: ^testing.T) {

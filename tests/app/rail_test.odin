@@ -4,7 +4,8 @@ import "cosmos:input"
 import "core:testing"
 import app "../../src"
 import "aio:layout"
-import "aio:ui"
+import "aio:views"
+import "cosmos:ui"
 
 @(private="file")
 rail_tab :: proc(workspace: ^app.Workspace, id: u32) -> ^app.Tab {
@@ -188,8 +189,8 @@ rail_preview_windows_do_not_reserve_rail_width :: proc(t: ^testing.T) {
 	testing.expect_value(t, preview.width, f32(1000))
 	w.phase = .Shown
 	docked := app.window_content_area(&state, &w)
-	testing.expect_value(t, docked.x, ui.rail_pixel_width(1))
-	testing.expect_value(t, docked.width, 1000 - ui.rail_pixel_width(1))
+	testing.expect_value(t, docked.x, views.rail_pixel_width(1))
+	testing.expect_value(t, docked.width, 1000 - views.rail_pixel_width(1))
 }
 
 @(test)
@@ -229,7 +230,7 @@ rail_close_and_multiselect_keep_the_selected_group_and_remaining_tab :: proc(t: 
 
 	layout_state, ok := app.rail_current_layout(&w)
 	if !testing.expect(t, ok) {return}
-	close := ui.rail_close_rect(layout_state, 1, w.scale)
+	close := views.rail_close_rect(layout_state, 1, w.scale)
 	app.handle_event(&state, input.Mouse_Button_Event{window = w.id, button = .Left, pressed = true,
 		x = i32(close.x + close.width / 2), y = i32(close.y + close.height / 2)})
 	testing.expect(t, ui.armed_down(w.tab_close_armed))
@@ -270,7 +271,7 @@ rail_footer_and_empty_space_are_new_tab_drop_targets :: proc(t: ^testing.T) {
 	append(&state.windows, &w)
 	layout_state, ok := app.rail_current_layout(&w)
 	if !testing.expect(t, ok) {return}
-	footer := ui.rail_footer_tile(layout_state)
+	footer := views.rail_footer_tile(layout_state)
 	_, new_tab, target := app.rail_pane_target(&w, footer.x + 8, footer.y + 8)
 	testing.expect(t, target && new_tab)
 	empty_y := layout_state.list.y + layout_state.list.height - 4

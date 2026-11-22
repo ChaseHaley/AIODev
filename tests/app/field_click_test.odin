@@ -1,8 +1,8 @@
 package app_test
 
 import app "../../src"
-import "aio:ui"
 import "core:testing"
+import "cosmos:ui"
 
 @(test)
 field_presses_count_double_and_triple_clicks_by_time_and_distance :: proc(t: ^testing.T) {

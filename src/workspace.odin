@@ -4,12 +4,13 @@ import "aio:events"
 import "aio:layout"
 import "cosmos:platform"
 import "aio:settings"
-import "aio:ui"
+import "aio:views"
 import "core:fmt"
 import "core:log"
 import "core:math/rand"
 import "core:slice"
 import "core:strings"
+import "cosmos:ui"
 
 Tab :: struct {
 	id: u32,
@@ -33,7 +34,7 @@ Workspace :: struct {
 	selection_anchor: u32,
 	// The settings page's reading position and open rows while no window shows this workspace.
 	settings_scroll: f32,
-	settings_view: ui.Editor_View,
+	settings_view: views.Editor_View,
 	documents: Document_List,
 	// The labels on runs of tabs, in no particular order; tabs name them by id.
 	groups: [dynamic]Tab_Group,
@@ -123,7 +124,7 @@ tab_create :: proc(
 workspace_destroy :: proc(workspace: ^Workspace) {
 	for tab in workspace.tabs {tab_record_free(tab)}
 	documents_destroy(&workspace.documents)
-	ui.editor_view_destroy(&workspace.settings_view)
+	views.editor_view_destroy(&workspace.settings_view)
 	delete(workspace.tabs)
 	for &group in workspace.groups {tab_group_destroy(&group)}
 	delete(workspace.groups)

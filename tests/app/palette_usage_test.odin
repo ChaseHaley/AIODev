@@ -7,7 +7,7 @@ import "core:testing"
 import "core:time"
 import app "../../src"
 import "aio:frecency"
-import "aio:ui"
+import "aio:views"
 
 @(test)
 palette_usage_survives_a_restart_without_session_ids :: proc(t: ^testing.T) {
@@ -19,8 +19,8 @@ palette_usage_survives_a_restart_without_session_ids :: proc(t: ^testing.T) {
 	now := time.time_to_unix(time.now())
 
 	first: app.App
-	if !testing.expect_value(t, ui.palette_init(&first.palette, nil), nil) { return }
-	defer ui.palette_destroy(&first.palette)
+	if !testing.expect_value(t, views.palette_init(&first.palette, nil), nil) { return }
+	defer views.palette_destroy(&first.palette)
 	defer app.palette_usage_store_destroy(&first.palette_store)
 	app.palette_usage_enable(&first, strings.clone(path))
 	usage := &first.palette.usage
@@ -36,8 +36,8 @@ palette_usage_survives_a_restart_without_session_ids :: proc(t: ^testing.T) {
 	testing.expect(t, os.exists(path))
 
 	second: app.App
-	if !testing.expect_value(t, ui.palette_init(&second.palette, nil), nil) { return }
-	defer ui.palette_destroy(&second.palette)
+	if !testing.expect_value(t, views.palette_init(&second.palette, nil), nil) { return }
+	defer views.palette_destroy(&second.palette)
 	defer app.palette_usage_store_destroy(&second.palette_store)
 	app.palette_usage_enable(&second, strings.clone(path))
 	app.palette_usage_load(&second)
@@ -64,8 +64,8 @@ palette_usage_survives_a_restart_without_session_ids :: proc(t: ^testing.T) {
 	// A damaged file starts the order over instead of failing startup.
 	testing.expect_value(t, os.write_entire_file(path, "{"), nil)
 	third: app.App
-	if !testing.expect_value(t, ui.palette_init(&third.palette, nil), nil) { return }
-	defer ui.palette_destroy(&third.palette)
+	if !testing.expect_value(t, views.palette_init(&third.palette, nil), nil) { return }
+	defer views.palette_destroy(&third.palette)
 	defer app.palette_usage_store_destroy(&third.palette_store)
 	app.palette_usage_enable(&third, strings.clone(path))
 	app.palette_usage_load(&third)

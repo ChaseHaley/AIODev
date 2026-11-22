@@ -8,7 +8,8 @@ package app_test
 @(require) import app "../../src"
 @(require) import "cosmos:platform"
 @(require) import "aio:settings"
-@(require) import "aio:ui"
+@(require) import "aio:views"
+@(require) import "cosmos:ui"
 
 when platform.HEADLESS {
 	// Presses the Browse button of row `key`, answers its file dialog with `answer` (empty cancels)
@@ -17,14 +18,14 @@ when platform.HEADLESS {
 	icon_browse :: proc(t: ^testing.T, f: ^Profile_Fixture, key, answer: string) -> bool {
 		w := f.state.windows[0]
 		e := &w.editor
-		if !testing.expect(t, ui.editor_select_key(e, key), key) {return false}
-		l := ui.editor_layout({0, 40, 1200, 8000}, 1, true)
-		ui.editor_fit(e, l)
-		browse := ui.editor_row_parts(e, l, e.selected).browse
+		if !testing.expect(t, views.editor_select_key(e, key), key) {return false}
+		l := views.editor_layout({0, 40, 1200, 8000}, 1, true)
+		views.editor_fit(e, l)
+		browse := views.editor_row_parts(e, l, e.selected).browse
 		if !testing.expect(t, browse.width > 0, key) {return false}
 		testing.expect_value(t, platform.file_pick_script(&f.state.platform, answer), platform.Error.None)
-		outcome := ui.editor_press(e, l, nil, browse.x + browse.width / 2, browse.y + browse.height / 2, false)
-		if !testing.expect_value(t, outcome, ui.Editor_Outcome.Browse_Icon) {return false}
+		outcome := views.editor_press(e, l, nil, browse.x + browse.width / 2, browse.y + browse.height / 2, false)
+		if !testing.expect_value(t, outcome, views.Editor_Outcome.Browse_Icon) {return false}
 		app.editor_outcome(&f.state, w, outcome)
 		if !testing.expect(t, f.state.dialogs.icon != nil, "the icon dialog opened") {return false}
 		app.file_dialogs_tick(&f.state)
@@ -50,7 +51,7 @@ when platform.HEADLESS {
 		if !testing.expect_value(t, os.write_entire_file(icon, png_icon[:]), nil) {return}
 		defer os.remove(icon)
 		e := profile_open(&f)
-		if !testing.expect(t, ui.editor_select_key(e, "profile.alpha")) {return}
+		if !testing.expect(t, views.editor_select_key(e, "profile.alpha")) {return}
 		profile_press(&f, {key = .Enter})
 		testing.expect_value(t, e.expanded, "alpha")
 
@@ -70,8 +71,8 @@ when platform.HEADLESS {
 		testing.expect_value(t, profile.icon, icon)
 		testing.expect(t, !profile_file_lacks(f.path, "profile.alpha.icon"))
 		testing.expect(t, !e.error, e.message)
-		testing.expect_value(t, ui.editor_row(e).key, "profile.alpha.icon")
-		testing.expect_value(t, ui.editor_row(e).value, icon)
+		testing.expect_value(t, views.editor_row(e).key, "profile.alpha.icon")
+		testing.expect_value(t, views.editor_row(e).value, icon)
 		testing.expect_value(t, ui.field_string(&e.value), icon)
 		loaded := app.shell_icon_find(&f.state, "alpha")
 		if testing.expect(t, loaded != nil, "the chosen PNG is the profile's icon") {
@@ -97,7 +98,7 @@ when platform.HEADLESS {
 		defer os.remove(icon)
 		w := f.state.windows[0]
 		e := profile_open(&f)
-		if !testing.expect(t, ui.editor_select_key(e, "openers.add")) {return}
+		if !testing.expect(t, views.editor_select_key(e, "openers.add")) {return}
 		app.editor_outcome(&f.state, w, .Save)
 		testing.expect_value(t, e.opener_expanded, "program-1")
 

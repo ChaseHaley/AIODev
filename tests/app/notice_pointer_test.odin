@@ -2,9 +2,10 @@ package app_test
 
 import app "../../src"
 import "cosmos:platform"
-import "aio:ui"
+@(require) import "aio:views"
 import "core:testing"
 import "core:time"
+import "cosmos:ui"
 
 // The close button of the front card, a one-line notice without an action at the bottom right.
 @(private)

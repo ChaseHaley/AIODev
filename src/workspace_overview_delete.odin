@@ -2,10 +2,10 @@ package main
 
 import "cosmos:render"
 import "aio:settings"
-import "aio:ui"
 import "core:math"
 import "core:strings"
 import "cosmos:motion"
+import "cosmos:ui"
 
 // Deleting a workspace without closing a window plays the deletion in the overview (WORK-444). In a window
 // that showed it, the switch to its replacement becomes the deletion: the window zooms out onto its card,

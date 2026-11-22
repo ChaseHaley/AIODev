@@ -7,13 +7,13 @@ import "aio:links"
 import "cosmos:platform"
 import "cosmos:render"
 import "cosmos:search"
-import "aio:ui"
 import "base:runtime"
 import "core:fmt"
 import "core:math"
 import "core:path/filepath"
 import "core:strings"
 import "core:time"
+import "cosmos:ui"
 
 // Embedded web panes, hosted with WebView2 DirectComposition visual hosting (WORK-315, D-106). No
 // DirectComposition or WebView2 object exists until a web pane is opened.

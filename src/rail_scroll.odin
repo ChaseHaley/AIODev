@@ -1,9 +1,10 @@
 package main
 
 import "cosmos:render"
-import "aio:ui"
+import "aio:views"
 import "core:math"
 import "core:time"
+import "cosmos:ui"
 
 // How the rail's rows scroll (WORK-468): the wheel and the scrollbar's track glide the scroll, its thumb
 // moves it with the pointer, and tabs dragged near the top or bottom of the rows scroll it that way. The
@@ -39,7 +40,7 @@ rail_wheel :: proc(app: ^App, w: ^Window, delta: f32) {
 	if !ok {return}
 	from := ui.motion_active(w.rail_glide) ? w.rail_glide.target : w.rail_scroll
 	step := f32(math.sign(delta)) * 3 * layout.row_height
-	rail_scroll_glide(app, w, ui.rail_scroll_clamped(layout, from - step))
+	rail_scroll_glide(app, w, views.rail_scroll_clamped(layout, from - step))
 }
 
 // Tabs dragged in the rail follow the scroll under the still pointer.
@@ -65,7 +66,7 @@ rail_drag_edge_speed :: proc(w: ^Window) -> f32 {
 		if layout.scroll <= 0 {return 0}
 		depth = -min(1, (list.y + zone - y) / zone)
 	case y > list.y + list.height - zone:
-		if layout.scroll >= ui.rail_scroll_max(layout) {return 0}
+		if layout.scroll >= views.rail_scroll_max(layout) {return 0}
 		depth = min(1, (y - (list.y + list.height - zone)) / zone)
 	}
 	return depth * RAIL_EDGE_SPEED * w.scale
@@ -81,7 +82,7 @@ rail_scroll_animate :: proc(app: ^App, w: ^Window, frame: ui.Frame_Time) -> bool
 	if speed := rail_drag_edge_speed(w); speed != 0 {
 		if layout, ok := rail_layout_query(w); ok {
 			step := speed * f32(time.duration_seconds(frame.period))
-			next := ui.rail_scroll_clamped(layout, w.rail_scroll + step)
+			next := views.rail_scroll_clamped(layout, w.rail_scroll + step)
 			if next != w.rail_scroll {
 				rail_scroll_set(w, next)
 				moved = true
@@ -100,7 +101,7 @@ rail_scroll_animating :: proc(w: ^Window) -> bool {
 
 // The rail's scrollbar along the right of the rows `layout` places, while they overflow. While a group folds
 // the rows' end eases, but the bar keeps to the rows at rest, so it does not come and go on the way.
-rail_scrollbar_place :: proc(w: ^Window, layout: ui.Rail_Layout) -> (bar: ui.Scrollbar, visible: bool) {
+rail_scrollbar_place :: proc(w: ^Window, layout: views.Rail_Layout) -> (bar: ui.Scrollbar, visible: bool) {
 	list := layout.list
 	if rest, ok := rail_layout_rest(w); ok {list.height = rest.list.height}
 	area := render.Rect{list.x, list.y, list.width - 2 * w.scale, list.height}

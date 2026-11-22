@@ -29,7 +29,7 @@ window_surface_create :: proc(app: ^App, w: ^Window) -> render.Error {
 	surface, err := render.surface_create(app.device, native, max(w.width, 1), max(w.height, 1))
 	if err != .None {return err}
 	w.surface = surface
-	for &pane in w.views {pane.valid = false}
+	for &pane in w.pane_views {pane.valid = false}
 	w.dirty = true
 	return .None
 }

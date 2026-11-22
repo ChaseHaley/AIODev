@@ -1,8 +1,8 @@
 package main
 
 import "aio:term"
-import "aio:ui"
 import "core:time"
+import "cosmos:ui"
 
 @(private)
 COPY_NOTICE_DURATION :: 2 * time.Second

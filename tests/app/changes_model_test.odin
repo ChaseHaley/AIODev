@@ -1,12 +1,13 @@
 package app_test
 
 import "aio:turns"
-import "aio:ui"
+import "aio:views"
 import "core:os"
 import "core:strings"
 import "core:testing"
 import "core:time"
 import app "../../src"
+import "cosmos:ui"
 
 @(private = "file")
 NOW_SECONDS :: 1_000_000
@@ -20,7 +21,7 @@ now_time :: proc() -> time.Time {
 
 // A pane in a state that never starts the turn worker: a turn scope with recording off.
 @(private = "file")
-pane_start :: proc(state: ^app.App, scope: ui.Changes_Scope) -> ^app.Changes_Pane {
+pane_start :: proc(state: ^app.App, scope: views.Changes_Scope) -> ^app.Changes_Pane {
 	return app.changes_pane_create(state, {}, "C:/work/odin", scope, false)
 }
 
@@ -32,27 +33,27 @@ file_of :: proc(path: string) -> turns.Diff_File {
 @(test)
 notice_follows_the_error_then_the_rows_then_the_files :: proc(t: ^testing.T) {
 	notice, detail := app.changes_notice_of(.Git_Missing, true, true, 0, 0)
-	testing.expect_value(t, notice, ui.Changes_Notice.Git_Missing)
+	testing.expect_value(t, notice, views.Changes_Notice.Git_Missing)
 	testing.expect_value(t, detail, "")
 	notice, _ = app.changes_notice_of(.Not_Repository, false, false, 0, 0)
-	testing.expect_value(t, notice, ui.Changes_Notice.Not_Repository)
+	testing.expect_value(t, notice, views.Changes_Notice.Not_Repository)
 	notice, detail = app.changes_notice_of(.Failed, true, true, 3, 2)
-	testing.expect_value(t, notice, ui.Changes_Notice.Failed)
+	testing.expect_value(t, notice, views.Changes_Notice.Failed)
 	testing.expect(t, detail != "", "a failure says something")
 	notice, detail = app.changes_notice_of(.Out_Of_Memory, false, false, 0, 0)
-	testing.expect_value(t, notice, ui.Changes_Notice.Failed)
+	testing.expect_value(t, notice, views.Changes_Notice.Failed)
 	testing.expect(t, detail != "")
 
 	notice, _ = app.changes_notice_of(.None, true, true, 0, 0)
-	testing.expect_value(t, notice, ui.Changes_Notice.No_Turns)
+	testing.expect_value(t, notice, views.Changes_Notice.No_Turns)
 	notice, _ = app.changes_notice_of(.None, true, false, 0, 0)
-	testing.expect_value(t, notice, ui.Changes_Notice.Recording_Off)
+	testing.expect_value(t, notice, views.Changes_Notice.Recording_Off)
 	notice, _ = app.changes_notice_of(.None, true, false, 2, 0)
-	testing.expect_value(t, notice, ui.Changes_Notice.No_Changes)
+	testing.expect_value(t, notice, views.Changes_Notice.No_Changes)
 	notice, _ = app.changes_notice_of(.None, false, false, 0, 0)
-	testing.expect_value(t, notice, ui.Changes_Notice.No_Changes)
+	testing.expect_value(t, notice, views.Changes_Notice.No_Changes)
 	notice, detail = app.changes_notice_of(.None, true, true, 2, 1)
-	testing.expect_value(t, notice, ui.Changes_Notice.None)
+	testing.expect_value(t, notice, views.Changes_Notice.None)
 	testing.expect_value(t, detail, "")
 }
 
@@ -87,14 +88,14 @@ a_turn_scope_without_recording_or_rows_shows_the_recording_notice_and_asks_nothi
 	defer app.changes_app_destroy(&state.changes_state)
 	pane := pane_start(&state, .Agent)
 	if !testing.expect(t, pane != nil) {return}
-	testing.expect_value(t, pane.model.view.notice, ui.Changes_Notice.Recording_Off)
-	testing.expect_value(t, pane.model.view.scope, ui.Changes_Scope.Agent)
+	testing.expect_value(t, pane.model.view.notice, views.Changes_Notice.Recording_Off)
+	testing.expect_value(t, pane.model.view.scope, views.Changes_Scope.Agent)
 	testing.expect_value(t, pane.model.loaded, false)
 	testing.expect_value(t, pane.model.watching, false)
 	testing.expect_value(t, pane.model.request, u64(1))
 	app.changes_model_changed(&state, pane)
 	testing.expect_value(t, pane.model.request, u64(2))
-	testing.expect_value(t, pane.model.view.notice, ui.Changes_Notice.Recording_Off)
+	testing.expect_value(t, pane.model.view.notice, views.Changes_Notice.Recording_Off)
 }
 
 @(test)
@@ -109,16 +110,16 @@ an_empty_query_says_why_there_is_nothing :: proc(t: ^testing.T) {
 		worktree   = "C:/work/odin",
 	}
 	app.changes_fill_query(&state, pane, &empty, now_time(), true)
-	testing.expect_value(t, pane.model.view.notice, ui.Changes_Notice.No_Turns)
+	testing.expect_value(t, pane.model.view.notice, views.Changes_Notice.No_Turns)
 	testing.expect_value(t, pane.model.repository_key, "0123456789abcdef")
 	testing.expect_value(t, pane.model.view.repository, "odin")
 	testing.expect_value(t, pane.model.loaded, true)
 	app.changes_fill_query(&state, pane, &empty, now_time(), false)
-	testing.expect_value(t, pane.model.view.notice, ui.Changes_Notice.Recording_Off)
+	testing.expect_value(t, pane.model.view.notice, views.Changes_Notice.Recording_Off)
 
 	Case :: struct {
 		err:    turns.Error,
-		notice: ui.Changes_Notice,
+		notice: views.Changes_Notice,
 	}
 	cases := []Case{{.Not_Repository, .Not_Repository}, {.Git_Missing, .Git_Missing}, {.Failed, .Failed}}
 	for c in cases {
@@ -183,7 +184,7 @@ rows_become_turns_with_titles_ages_and_the_selection :: proc(t: ^testing.T) {
 	testing.expect_value(t, len(view.marked), 2)
 	testing.expect_value(t, view.marked[0], false)
 	testing.expect_value(t, view.marked[1], true)
-	testing.expect_value(t, view.notice, ui.Changes_Notice.None)
+	testing.expect_value(t, view.notice, views.Changes_Notice.None)
 	testing.expect_value(t, pane.model.row_ids[0], u64(7))
 	testing.expect_value(t, pane.model.row_ids[2], u64(3))
 }
@@ -274,7 +275,7 @@ folds_come_back_by_path :: proc(t: ^testing.T) {
 	}
 	app.changes_fill_plain(&state, pane, &plain)
 	if !testing.expect_value(t, len(view.collapsed), 2) {return}
-	testing.expect_value(t, view.notice, ui.Changes_Notice.None)
+	testing.expect_value(t, view.notice, views.Changes_Notice.None)
 	app.changes_model_fold(&pane.model, 1)
 	testing.expect_value(t, view.collapsed[0], false)
 	testing.expect_value(t, view.collapsed[1], true)
@@ -324,13 +325,13 @@ a_git_scope_result_lists_no_turns_and_counts_what_was_left_out :: proc(t: ^testi
 	testing.expect_value(t, view.first, -1)
 	testing.expect_value(t, view.omitted, 51)
 	testing.expect_value(t, view.repository, "odin")
-	testing.expect_value(t, view.notice, ui.Changes_Notice.None)
+	testing.expect_value(t, view.notice, views.Changes_Notice.None)
 
 	nothing := app.Result_Plain {
 		pane = pane.id,
 	}
 	app.changes_fill_plain(&state, pane, &nothing)
-	testing.expect_value(t, view.notice, ui.Changes_Notice.No_Changes)
+	testing.expect_value(t, view.notice, views.Changes_Notice.No_Changes)
 	testing.expect_value(t, view.omitted, 0)
 
 	broken := app.Result_Plain {
@@ -338,7 +339,7 @@ a_git_scope_result_lists_no_turns_and_counts_what_was_left_out :: proc(t: ^testi
 		error = .Not_Repository,
 	}
 	app.changes_fill_plain(&state, pane, &broken)
-	testing.expect_value(t, view.notice, ui.Changes_Notice.Not_Repository)
+	testing.expect_value(t, view.notice, views.Changes_Notice.Not_Repository)
 	testing.expect_value(t, view.repository, "")
 }
 
@@ -650,7 +651,7 @@ the_source_dropdown_lists_the_agents_then_the_scopes :: proc(t: ^testing.T) {
 
 	request := model.request
 	app.changes_source_pick(&state, pane, 1)
-	testing.expect_value(t, pane.scope, ui.Changes_Scope.Agent)
+	testing.expect_value(t, pane.scope, views.Changes_Scope.Agent)
 	testing.expect_value(t, pane.agent.pane_key, "p2")
 	testing.expect_value(t, pane.agent.harness, "claude")
 	testing.expect_value(t, pane.agent.session, "s2")
@@ -664,11 +665,11 @@ the_source_dropdown_lists_the_agents_then_the_scopes :: proc(t: ^testing.T) {
 	app.changes_source_pick(&state, pane, 1)
 	testing.expect_value(t, model.request, request)
 	app.changes_source_pick(&state, pane, 4)
-	testing.expect_value(t, pane.scope, ui.Changes_Scope.Repository)
+	testing.expect_value(t, pane.scope, views.Changes_Scope.Repository)
 	testing.expect_value(t, view.source_label, "All agents")
 	testing.expect_value(t, pane.agent.session, "s2")
 	app.changes_source_pick(&state, pane, 8)
-	testing.expect_value(t, pane.scope, ui.Changes_Scope.Repository)
+	testing.expect_value(t, pane.scope, views.Changes_Scope.Repository)
 }
 
 @(test)

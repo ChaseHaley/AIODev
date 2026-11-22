@@ -14,11 +14,12 @@ package palette_bench
 import app "../../../src"
 import "aio:commands"
 import "aio:settings"
-import "aio:ui"
+import "aio:views"
 import "base:runtime"
 import "core:fmt"
 import "core:slice"
 import "core:time"
+import "cosmos:ui"
 
 QUERIES :: [?]string {
 	"c", "c1", "rs", "ws", "cls", "aio", "fon", "font", "comfy", "split", "theme", "nwtab", "scrollb",
@@ -49,7 +50,7 @@ Bench :: struct {
 }
 
 tab_count :: proc(user: rawptr) -> int {return len((cast(^[dynamic]Tab)user)^)}
-tab_at :: proc(user: rawptr, index: int) -> ui.Palette_Item {
+tab_at :: proc(user: rawptr, index: int) -> views.Palette_Item {
 	t := (cast(^[dynamic]Tab)user)[index]
 	return {label = t.label, detail = t.detail, owner = t.owner, id = u64(index + 1)}
 }
@@ -108,11 +109,11 @@ main :: proc() {
 
 	registry := commands.create()
 	if app.register_actions(&registry) != .None {fmt.eprintln("commands failed"); return}
-	table := make([dynamic]ui.Palette_Setting)
+	table := make([dynamic]views.Palette_Setting)
 	choice_labels := 0
 	for entry in settings.SCHEMA {
 		if entry.embedded {continue}
-		append(&table, ui.palette_setting(entry))
+		append(&table, views.palette_setting(entry))
 		choice_labels += len(entry.names)
 	}
 	b: Bench
@@ -123,18 +124,18 @@ main :: proc() {
 	}
 	for w in WORKSPACES {append(&b.workspaces, Tab{w, "pwsh", ""})}
 
-	p: ui.Palette
-	if ui.palette_init(&p, table[:]) != nil {fmt.eprintln("palette failed"); return}
-	ui.palette_set_sources(&p, {&b.tabs, tab_count, tab_at}, {&b.workspaces, tab_count, tab_at})
+	p: views.Palette
+	if views.palette_init(&p, table[:]) != nil {fmt.eprintln("palette failed"); return}
+	views.palette_set_sources(&p, {&b.tabs, tab_count, tab_at}, {&b.workspaces, tab_count, tab_at})
 
 	defaults, _ := settings.defaults()
-	editor: ui.Editor
+	editor: views.Editor
 	rows := 0
 	for entry in settings.SCHEMA {
 		if entry.control == .Group || entry.embedded {continue}
-		row := ui.schema_row(entry)
+		row := views.schema_row(entry)
 		row.value = settings.value_text(&defaults, entry)
-		if ui.editor_add(&editor, row, settings.group_title(entry.key)) != nil {fmt.eprintln("editor failed"); return}
+		if views.editor_add(&editor, row, settings.group_title(entry.key)) != nil {fmt.eprintln("editor failed"); return}
 		rows += 1
 	}
 	fmt.printfln(
@@ -149,11 +150,11 @@ main :: proc() {
 	for pass in 0 ..< 21 {
 		measured := pass > 0
 		for query in QUERIES {
-			ui.palette_open_mode(&p, &registry, .All)
+			views.palette_open_mode(&p, &registry, .All)
 			for i in 0 ..< len(query) {
 				heap.calls, heap.bytes, temp.calls, temp.bytes = 0, 0, 0, 0
 				start := time.tick_now()
-				_ = ui.palette_text(&p, &registry, query[i:i + 1])
+				_ = views.palette_text(&p, &registry, query[i:i + 1])
 				elapsed := time.tick_since(start)
 				if measured {
 					append(&palette_samples, Sample{
@@ -166,7 +167,7 @@ main :: proc() {
 				heap.calls, heap.bytes, temp.calls, temp.bytes = 0, 0, 0, 0
 				start := time.tick_now()
 				ui.field_set(&editor.filter, query[:i + 1])
-				ui.editor_filter(&editor)
+				views.editor_filter(&editor)
 				elapsed := time.tick_since(start)
 				if measured {
 					append(&editor_samples, Sample{
@@ -182,16 +183,16 @@ main :: proc() {
 
 	// What each query lists, so a ranking change is visible next to its cost.
 	for query in ([?]string{"c1", "comfy"}) {
-		ui.palette_open_mode(&p, &registry, .All)
-		_ = ui.palette_text(&p, &registry, query)
+		views.palette_open_mode(&p, &registry, .All)
+		_ = views.palette_text(&p, &registry, query)
 		fmt.printf("palette %q:", query)
 		for r, i in p.results {
 			if i == 5 {break}
-			fmt.printf(" [%s]", ui.palette_result_title(&p, r))
+			fmt.printf(" [%s]", views.palette_result_title(&p, r))
 		}
 		fmt.println()
 		ui.field_set(&editor.filter, query)
-		ui.editor_filter(&editor)
+		views.editor_filter(&editor)
 		fmt.printf("Settings %q:", query)
 		shown := 0
 		for item in editor.items {

@@ -5,9 +5,9 @@ import "aio:markdown"
 import "cosmos:platform"
 import "cosmos:search"
 import "aio:term"
-import "aio:ui"
 import "core:fmt"
 import "core:strings"
+import "cosmos:ui"
 
 // Pastes the clipboard's first line into the find bar.
 find_paste :: proc(app: ^App, w: ^Window) {

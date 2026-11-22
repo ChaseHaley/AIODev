@@ -6,7 +6,8 @@ import app "../../src"
 import "aio:layout"
 import "cosmos:platform"
 import "cosmos:render"
-import "aio:ui"
+import "aio:views"
+import "cosmos:ui"
 
 @(private)
 pointer_expect_move :: proc(
@@ -50,9 +51,9 @@ pointer_palette_scope_tabs_use_hand_query_uses_text :: proc(t: ^testing.T) {
 	if !palette_fixture_create(t, &f, "pointer-palette", second_window = false) {return}
 	s, w := &f.state, f.state.windows[0]
 	app.palette_open(s, w)
-	for mode in ui.Palette_Mode {
-		ui.palette_set_mode(&s.palette, &s.registry, mode)
-		l := ui.palette_layout(&s.palette, f32(w.width), f32(w.height), w.scale)
+	for mode in views.Palette_Mode {
+		views.palette_set_mode(&s.palette, &s.registry, mode)
+		l := views.palette_layout(&s.palette, f32(w.width), f32(w.height), w.scale)
 		// The query's text ends at the keyboard button, which takes the hand.
 		pointer_expect_move(t, s, w, l.keys.x - 20 * w.scale, l.input.y + l.input.height / 2, .Text)
 		pointer_expect_move(t, s, w, l.keys.x + l.keys.width / 2, l.keys.y + l.keys.height / 2, .Hand)
@@ -91,7 +92,7 @@ pointer_tabs_use_hand_except_on_the_selected_tab_body :: proc(t: ^testing.T) {
 			l, ok := app.rail_current_layout(w)
 			if !testing.expect(t, ok) {continue}
 			body, other = app.rail_row_rect_for_tab(w, 0), app.rail_row_rect_for_tab(w, 1)
-			close = ui.rail_close_rect(l, 0, w.scale)
+			close = views.rail_close_rect(l, 0, w.scale)
 		}
 		x, y := pointer_center(close)
 		pointer_expect_move(t, s, w, body.x + 6, body.y + body.height / 2, .Arrow)
@@ -115,10 +116,10 @@ pointer_settings_controls_use_hand :: proc(t: ^testing.T) {
 	if !testing.expect(t, app.settings_active(w)) {return}
 	l := app.settings_layout(w)
 	if !testing.expect(t, pointer_settings_select_top(w, "pane.markdown_floating")) {return}
-	x, y := pointer_center(ui.editor_row_parts(&w.editor, l, w.editor.selected).toggle)
+	x, y := pointer_center(views.editor_row_parts(&w.editor, l, w.editor.selected).toggle)
 	pointer_expect_move(t, s, w, x, y, .Hand)
 	if !testing.expect(t, pointer_settings_select_top(w, "font.family")) {return}
-	parts := ui.editor_row_parts(&w.editor, l, w.editor.selected)
+	parts := views.editor_row_parts(&w.editor, l, w.editor.selected)
 	x, y = pointer_center(parts.field)
 	pointer_expect_move(t, s, w, x, y, .Hand)
 	x, y = pointer_center(parts.reset)
@@ -132,7 +133,7 @@ pointer_settings_controls_use_hand :: proc(t: ^testing.T) {
 // Selection keeps a row inside the fitted page, possibly on its last row under the fixture's notice toast.
 @(private)
 pointer_settings_select_top :: proc(w: ^app.Window, key: string) -> bool {
-	if !ui.editor_select_key(&w.editor, key) {return false}
+	if !views.editor_select_key(&w.editor, key) {return false}
 	w.editor.scroll = w.editor.selected
 	return true
 }
@@ -157,7 +158,7 @@ pointer_fullscreen_pane_header_owns_the_top_edge :: proc(t: ^testing.T) {
 		if !testing.expect_value(t, len(w.panes), 1) {return}
 		pane := w.panes[0]
 		view: ^app.Pane_View
-		for &candidate in w.views {if candidate.content == pane.content {view = &candidate}}
+		for &candidate in w.pane_views {if candidate.content == pane.content {view = &candidate}}
 		if !testing.expect(t, view != nil) {return}
 		l := app.pane_header_layout(w, pane)
 		for r, button in l.buttons {

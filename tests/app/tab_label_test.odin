@@ -8,7 +8,8 @@ import "core:time"
 import app "../../src"
 import "aio:layout"
 import "cosmos:render"
-import "aio:ui"
+import "aio:views"
+import "cosmos:ui"
 
 // WORK-483 label turns run on the default 160 ms, made linear here so a sample lands at a known progress.
 @(private = "file")
@@ -107,7 +108,7 @@ tab_label_turns_the_way_focus_moves :: proc(t: ^testing.T) {
 			testing.expect_value(t, tile.title, fmt.tprintf("pane %d", focused(w).id))
 			testing.expect_value(t, tile.turn.toward, step.toward)
 			testing.expect(t, abs(tile.turn.progress - 0.25) < 0.01)
-			leaving, entering := ui.tab_turn_offsets(tile.turn, {100, 30})
+			leaving, entering := views.tab_turn_offsets(tile.turn, {100, 30})
 			testing.expect(t, leaving.x * step.toward.x + leaving.y * step.toward.y < 0)
 			testing.expect(t, entering.x * step.toward.x + entering.y * step.toward.y > 0)
 			// The rail and the strip draw the turn mid-way.
@@ -159,7 +160,7 @@ tab_label_retargets_from_what_it_draws :: proc(t: ^testing.T) {
 		testing.expect_value(t, built, render.Build_Status.Ok)
 		p := label_of(w).turn.value
 		testing.expect(t, before.turn.turning)
-		leaving, entering := ui.tab_turn_offsets(before.turn, size)
+		leaving, entering := views.tab_turn_offsets(before.turn, size)
 
 		app.run_action(s, w, c.then)
 		// A resuming frame retargets without starting the motion, so it shows what the retarget left.
@@ -174,7 +175,7 @@ tab_label_retargets_from_what_it_draws :: proc(t: ^testing.T) {
 		after, after_built := app.tab_tile(s, w, 0)
 		testing.expect_value(t, after_built, render.Build_Status.Ok)
 		if !testing.expect(t, after.turn.turning) {continue}
-		now_leaving, _ := ui.tab_turn_offsets(after.turn, size)
+		now_leaving, _ := views.tab_turn_offsets(after.turn, size)
 		// The title turning away goes on from where it drew: the one leaving, or the one that was coming in.
 		was := c.keeps ? leaving : entering
 		testing.expectf(t, abs(now_leaving.x - was.x) < 0.01 && abs(now_leaving.y - was.y) < 0.01,
@@ -213,7 +214,7 @@ tab_label_turns_between_alike_panes :: proc(t: ^testing.T) {
 	testing.expect_value(t, tile.turn.badge.icon, tile.badge.icon)
 	testing.expect_value(t, tile.turn.badge.shell, tile.badge.shell)
 	testing.expect(t, tile.turn.badge.pane != tile.badge.pane, "the marks stand for different panes")
-	marks, count := ui.tab_spin_marks({0, 0, 200, 40}, tile, 1)
+	marks, count := views.tab_spin_marks({0, 0, 200, 40}, tile, 1)
 	spinning := 0
 	for mark in marks[:count] {if mark.path != 0 {spinning += 1}}
 	testing.expect(t, spinning > 0, "a mark rides the sphere")

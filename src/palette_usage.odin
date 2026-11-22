@@ -1,7 +1,7 @@
 package main
 
 import "aio:frecency"
-import "aio:ui"
+import "aio:views"
 import "core:encoding/json"
 import "core:log"
 import "core:os"
@@ -113,7 +113,7 @@ palette_usage_save :: proc(app: ^App) {
 }
 
 @(require_results)
-palette_usage_encode :: proc(usage: ^ui.Palette_Usage, allocator := context.allocator) -> (string, bool) {
+palette_usage_encode :: proc(usage: ^views.Palette_Usage, allocator := context.allocator) -> (string, bool) {
 	state := Palette_Usage_State {
 		version  = PALETTE_USAGE_VERSION,
 		commands = palette_usage_list(&usage.commands),

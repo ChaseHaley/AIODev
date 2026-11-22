@@ -6,10 +6,11 @@ import "cosmos:input"
 import "cosmos:platform"
 import "cosmos:render"
 import "aio:term"
-import "aio:ui"
+import "aio:views"
 import "core:log"
 import "core:math"
 import "core:time"
+import "cosmos:ui"
 
 // Terminal and settings scrolling moves this many lines per wheel notch.
 @(private)
@@ -252,9 +253,9 @@ overlay_input :: proc(app: ^App, w: ^Window, kind: Overlay_Kind, event: Overlay_
 	case .Palette:
 		switch e in event {
 		case Overlay_Key: palette_key_input(app, w, e.event, e.logical)
-		case Overlay_Text: on_palette_outcome(app, w, ui.palette_text(&app.palette, &app.registry, e.text), 0)
+		case Overlay_Text: on_palette_outcome(app, w, views.palette_text(&app.palette, &app.registry, e.text), 0)
 		case Overlay_Wheel:
-			on_palette_outcome(app, w, ui.palette_scroll(&app.palette, int(math.sign(f32(e.rows)))), 0)
+			on_palette_outcome(app, w, views.palette_scroll(&app.palette, int(math.sign(f32(e.rows)))), 0)
 		}
 	}
 }
@@ -341,7 +342,7 @@ on_text :: proc(app: ^App, w: ^Window, text: string) {
 	if arrange_active(w) {return}
 	status_inbox_close(w)
 	if settings_active(w) {
-		ui.editor_text(&w.editor, text)
+		views.editor_text(&w.editor, text)
 		w.dirty = true
 		return
 	}
@@ -511,7 +512,7 @@ on_wheel :: proc(app: ^App, w: ^Window, e: input.Mouse_Wheel_Event) {
 		return
 	}
 	if pane, found := settings_pane_under_pointer(w, f32(e.x), f32(e.y)); found {
-		ui.editor_wheel(
+		views.editor_wheel(
 			&w.editor,
 			settings_layout_for(w, pane),
 			f32(e.x),
@@ -644,7 +645,7 @@ leader_key :: proc(app: ^App, w: ^Window, e: input.Key_Event) -> Leader_Result {
 window_leader_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 	chord_buffer: [commands.SHORTCUT_TEXT_CAP]u8
 	hint_buffer: [4 * commands.SHORTCUT_TEXT_CAP + 256]u8
-	chord, hint := "", ui.LEADER_STATUS_HINT
+	chord, hint := "", views.LEADER_STATUS_HINT
 	if leader_armed(w) {
 		leader, enabled := app.leader.?
 		if !enabled {return .Ok}
@@ -658,7 +659,7 @@ window_leader_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 	for pane in w.panes {
 		if pane.node != tree.focus {continue}
 		r := pane.rect
-		return ui.leader_status_draw(
+		return views.leader_status_draw(
 			&w.list,
 			&w.ui_text,
 			app.theme,

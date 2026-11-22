@@ -1,9 +1,9 @@
 package main
 
 import "aio:settings"
-import "aio:ui"
 import "core:log"
 import "core:os"
+import "cosmos:ui"
 
 // What the settings notice last reported, so an unchanged revision stays quiet, and whether the format
 // migration was announced this run. App embeds it; reading and applying settings are its only writers.

@@ -1,7 +1,7 @@
 package main
 
 import "cosmos:input"
-import "aio:ui"
+import "cosmos:ui"
 
 // w took focus, so it becomes the most recently focused window, the one the notices prefer.
 window_focus_note :: proc(app: ^App, w: ^Window) {

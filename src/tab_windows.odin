@@ -3,8 +3,9 @@ package main
 import "cosmos:input"
 import "aio:layout"
 import "cosmos:render"
-import "aio:ui"
+import "aio:views"
 import "core:fmt"
+import "cosmos:ui"
 
 // A drag carries the marked tabs. As with a pane, their workspace must keep content of its own.
 @(require_results)
@@ -39,7 +40,7 @@ tab_drop_slot :: proc(app: ^App, w: ^Window, incoming: int, x, y: f32) -> int {
 	if !rail_visible(w) || x < area.x || x >= area.x + area.width || y < area.y {return count}
 	rail, built := rail_current_layout(w)
 	if !built || rail.row_height <= 0 {return count}
-	edge := (y - ui.rail_row_rect(rail, 0).y) / rail.row_height - f32(incoming) / 2
+	edge := (y - views.rail_row_rect(rail, 0).y) / rail.row_height - f32(incoming) / 2
 	return tab_drag_slot(w, tab_layout(nil, w, false), edge, 1, 0, carried = false)
 }
 
@@ -280,10 +281,10 @@ tab_incoming_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 		bar := window_tab_bar(app, w)
 		offset := tab_incoming_place(app, w, incoming.slot).offset * w.scale
 		x := bar.x + incoming.ghost.value * bar.tab_width + offset
-		r = ui.tab_tile_rect(bar, x, f32(incoming.count) * bar.tab_width, 0, w.scale)
+		r = views.tab_tile_rect(bar, x, f32(incoming.count) * bar.tab_width, 0, w.scale)
 		clip = {0, 0, f32(w.width), bar.height}
 	} else if rail, built := rail_current_layout(w); built && rail_visible(w) {
-		first := ui.rail_row_rect(rail, 0)
+		first := views.rail_row_rect(rail, 0)
 		r = {
 			first.x,
 			first.y + incoming.ghost.value * rail.row_height,

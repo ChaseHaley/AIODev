@@ -134,10 +134,11 @@ for `x86_64_v2` from the pinned source before packaging. Every pushed commit's r
 package as a download; `tools/release.ps1 <version>` runs `build.ps1 check`, then tags and pushes,
 and the tag's run publishes the release.
 
-Floating UI surfaces use `ui.Presence` transitions for opening, closing and releasing their
-payloads. Toasts live in one list with entering, timed, sticky or fading state; fading a toast
-also releases its close-button press and hover. The `ui` and `app` test packages cover these
-lifetimes with and without animations.
+The widgets come from Cosmos's `ui` package; AIODev's own screens are the `views` package in
+`src/views`. Floating UI surfaces use `ui.Presence` transitions for opening, closing and releasing
+their payloads. Toasts live in one list with entering, timed, sticky or fading state; fading a toast
+also releases its close-button press and hover. Cosmos's `ui` tests and AIODev's `views` and `app`
+test packages cover these lifetimes with and without animations.
 
 Pane focus changes are bracketed in `src/focus_bracket.odin`: each window records the pane it
 entered, so repeating an enter or leave does not repeat a terminal focus report. Layout saving

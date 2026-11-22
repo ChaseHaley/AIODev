@@ -4,9 +4,10 @@ import "cosmos:caret"
 import "aio:layout"
 import "cosmos:render"
 import "aio:term_view"
-import "aio:ui"
 import "core:math"
 import "core:time"
+import "cosmos:ui"
+@(require) import "aio:views"
 
 // Presets and tuning reach every terminal through the same style, including cached split panes, and
 // every text field's caret through the window's ui.Carets. Windows' motion preference overrides the
@@ -125,7 +126,7 @@ cursor_crossing_suppresses :: proc(w: ^Window, content: layout.Content) -> bool 
 cursor_crossing_forget :: proc(w: ^Window) {
 	w.carets.tracked, w.carets.flying = 0, 0
 	if w.cursor_crossing.phase == .Empty {return}
-	for &view in w.views {
+	for &view in w.pane_views {
 		if view.style.cursor_suppressed {view.valid = false}
 	}
 	w.cursor_crossing = {}
@@ -285,7 +286,7 @@ cursor_motion_animate :: proc(app: ^App, w: ^Window, frame: ui.Frame_Time) -> bo
 	}
 	enabled := app.animations && app.settings.cursor.animation != .Off &&
 	           window_drawable(w)
-	for &view in w.views {
+	for &view in w.pane_views {
 		if view.content.kind != .Terminal {continue}
 		focused := false
 		if enabled {
@@ -325,7 +326,7 @@ cursor_motion_animating :: proc(w: ^Window) -> bool {
 	if w.cursor_crossing.phase in CURSOR_CROSSING_LIVE_PHASES {
 		return true
 	}
-	for &view in w.views {
+	for &view in w.pane_views {
 		if view.content.kind == .Terminal && term_view.cursor_animating(&view.view) {return true}
 	}
 	return false

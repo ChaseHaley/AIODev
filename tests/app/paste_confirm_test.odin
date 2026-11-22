@@ -2,8 +2,8 @@ package app_test
 
 import "core:testing"
 import "core:time"
-import "aio:ui"
 import app "../../src"
+import "cosmos:ui"
 
 // The arm holds exactly while its Paste notice shows: a pointer resting on the paused notice keeps the
 // confirmation it offers, and the notice running out ends it.

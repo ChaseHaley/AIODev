@@ -1,0 +1,129 @@
+package views
+
+import "cosmos:render"
+import "core:math"
+import "cosmos:ui"
+
+// The vertical tab rail. Width, row rhythm and the dock threshold are shared with the window
+// chrome and the settings-free startup geometry, so they live here rather than in one caller.
+RAIL_WIDTH :: f32(208)
+RAIL_MIN_WIDTH :: f32(144)
+RAIL_MAX_WIDTH :: f32(480)
+// Rail rows and the footer that holds the new-tab row are standard list rows.
+RAIL_ROW_HEIGHT :: ui.HEIGHT_STANDARD
+RAIL_FOOTER_HEIGHT :: ui.HEIGHT_STANDARD
+RAIL_PADDING :: f32(4)
+// A docked 208 rail leaves about 500 DIPs of pane at this width, roughly 60 columns at the
+// default font. Narrower than that the rail takes more than a third of the window.
+RAIL_DOCK_MIN_WIDTH :: f32(720)
+
+// Whole-pixel rail width: a fractional width subtracted from an integer client width loses a
+// column at some DPI scales, so every rail and pane geometry reads this value.
+rail_pixel_width :: proc(scale: f32, width: f32 = RAIL_WIDTH, available: f32 = 0) -> f32 {
+	maximum := RAIL_MAX_WIDTH * scale
+	if available > 0 {maximum = min(maximum, available / 2)}
+	return math.round(clamp(width * scale, min(RAIL_MIN_WIDTH * scale, maximum), maximum))
+}
+
+Rail_Layout :: struct {
+	area:           render.Rect,
+	list:           render.Rect,
+	footer:         render.Rect,
+	row_height:     f32,
+	scroll:         f32,
+	content_height: f32,
+	count:          int,
+	scale:          f32,
+}
+
+rail_layout :: proc(area: render.Rect, scale: f32, count: int, scroll: f32) -> Rail_Layout {
+	footer_height := min(RAIL_FOOTER_HEIGHT * scale, max(0, area.height))
+	content_height := f32(max(0, count)) * RAIL_ROW_HEIGHT * scale + 2 * RAIL_PADDING * scale
+	list_height := min(content_height, max(0, area.height - footer_height))
+	layout := Rail_Layout {
+		area           = area,
+		list           = {area.x, area.y, area.width, list_height},
+		footer         = {area.x, area.y + list_height, area.width, footer_height},
+		row_height     = RAIL_ROW_HEIGHT * scale,
+		content_height = content_height,
+		count          = count,
+		scale          = scale,
+	}
+	layout.scroll = rail_scroll_clamped(layout, scroll)
+	return layout
+}
+
+rail_scroll_max :: proc(layout: Rail_Layout) -> f32 {
+	return max(0, layout.content_height - layout.list.height)
+}
+
+rail_scroll_clamped :: proc(layout: Rail_Layout, scroll: f32) -> f32 {
+	return clamp(scroll, 0, rail_scroll_max(layout))
+}
+
+rail_row_rect :: proc(layout: Rail_Layout, index: int) -> render.Rect {
+	if index < 0 || index >= layout.count {return {}}
+	padding := RAIL_PADDING * layout.scale
+	return {
+		layout.list.x + padding,
+		layout.list.y + padding + f32(index) * layout.row_height - layout.scroll,
+		max(0, layout.list.width - 2 * padding),
+		layout.row_height,
+	}
+}
+
+// Keeps `index` fully inside the list, moving the scroll only when it is not already visible.
+rail_reveal_row :: proc(layout: Rail_Layout, index: int) -> f32 {
+	if index < 0 || index >= layout.count {return rail_scroll_clamped(layout, layout.scroll)}
+	padding := RAIL_PADDING * layout.scale
+	top := padding + f32(index) * layout.row_height
+	bottom := top + layout.row_height
+	scroll := layout.scroll
+	if top - scroll < 0 {
+		scroll = top
+	} else if bottom - scroll > layout.list.height {
+		scroll = bottom - layout.list.height
+	}
+	return rail_scroll_clamped(layout, scroll)
+}
+
+rail_close_rect :: proc(layout: Rail_Layout, index: int, scale: f32) -> render.Rect {
+	row := rail_row_rect(layout, index)
+	if row.width <= 0 {return {}}
+	return {
+		row.x + row.width - (ui.SPACE_1 + ui.HEIGHT_COMPACT) * scale,
+		row.y + (row.height - ui.HEIGHT_COMPACT * scale) / 2,
+		ui.HEIGHT_COMPACT * scale,
+		ui.HEIGHT_COMPACT * scale,
+	}
+}
+
+rail_footer_hit :: proc(layout: Rail_Layout, x, y: f32) -> bool {
+	return render.rect_contains(layout.footer, x, y)
+}
+
+rail_footer_tile :: proc(layout: Rail_Layout) -> render.Rect {
+	padding := RAIL_PADDING * layout.scale
+	return {
+		layout.footer.x + padding,
+		layout.footer.y + padding,
+		max(0, layout.footer.width - 2 * padding),
+		max(0, layout.footer.height - 2 * padding),
+	}
+}
+
+rail_profile_rect :: proc(layout: Rail_Layout) -> render.Rect {
+	tile := rail_footer_tile(layout)
+	width := min(tile.width, 28 * layout.scale)
+	return {tile.x + tile.width - width, tile.y, width, tile.height}
+}
+
+rail_profile_hit :: proc(layout: Rail_Layout, x, y: f32) -> bool {
+	return render.rect_contains(rail_profile_rect(layout), x, y)
+}
+
+rail_new_tab_tile :: proc(layout: Rail_Layout) -> render.Rect {
+	tile := rail_footer_tile(layout)
+	tile.width = max(0, tile.width - rail_profile_rect(layout).width)
+	return tile
+}

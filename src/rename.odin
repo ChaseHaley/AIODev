@@ -2,7 +2,7 @@ package main
 
 import "cosmos:input"
 import "cosmos:render"
-import "aio:ui"
+import "cosmos:ui"
 
 // The dialog or the chip's name field shows.
 rename_shown :: proc(w: ^Window) -> bool {

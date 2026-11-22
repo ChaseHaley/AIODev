@@ -8,12 +8,13 @@ import "aio:localpath"
 import "cosmos:platform"
 import "aio:pty"
 import "aio:settings"
-import "aio:ui"
+import "aio:views"
 import "core:fmt"
 import "core:os"
 import "core:path/filepath"
 import "core:slice"
 import "core:strings"
+import "cosmos:ui"
 
 // The row keys of the page's own action rows, which reveals select after a change.
 @(private)
@@ -55,21 +56,21 @@ profile_command_exists :: proc(command: string) -> bool {
 
 // Fills the page from the settings file, keeping its expansion and settling reorders, or restoring
 // `kept` instead when given. A failure leaves the page as it was.
-settings_load :: proc(app: ^App, p: ^ui.Editor, kept: ^ui.Editor_View = nil) -> bool {
+settings_load :: proc(app: ^App, p: ^views.Editor, kept: ^views.Editor_View = nil) -> bool {
 	data, err := os.read_entire_file(app.settings_path, context.temp_allocator)
 	if err != nil {
 		notify(app, .Error, "Could not read settings. Check the settings path and permissions.")
 		return false
 	}
-	view, view_error := ui.editor_view_take(p)
-	defer ui.editor_view_destroy(&view)
+	view, view_error := views.editor_view_take(p)
+	defer views.editor_view_destroy(&view)
 	if view_error != nil {
 		notify(app, .Error, "Could not allocate settings editor.")
 		return false
 	}
 	page, built := settings_page_build(app, string(data), kept != nil ? kept : &view)
 	if !built {return false}
-	ui.editor_destroy(p)
+	views.editor_destroy(p)
 	p^ = page
 	return true
 }
@@ -77,9 +78,13 @@ settings_load :: proc(app: ^App, p: ^ui.Editor, kept: ^ui.Editor_View = nil) -> 
 // A settings page for `source`, parsed with the running revision's inputs, with `view` (when given)
 // restored once its rows exist. The page owns its copy of `source`.
 @(private, require_results)
-settings_page_build :: proc(app: ^App, source: string, view: ^ui.Editor_View) -> (page: ui.Editor, ok: bool) {
+settings_page_build :: proc(
+	app: ^App,
+	source: string,
+	view: ^views.Editor_View,
+) -> (page: views.Editor, ok: bool) {
 	p := &page
-	defer if !ok {ui.editor_destroy(p)}
+	defer if !ok {views.editor_destroy(p)}
 	owned_source, source_error := strings.clone(source)
 	if source_error != nil {
 		notify(app, .Error, "Could not allocate settings editor.")
@@ -101,30 +106,30 @@ settings_page_build :: proc(app: ^App, source: string, view: ^ui.Editor_View) ->
 		notify(app, .Error, "Could not allocate settings editor.")
 		return
 	}
-	if ui.editor_motion_load(p, &s) != nil {
+	if views.editor_motion_load(p, &s) != nil {
 		notify(app, .Error, "Could not build the motion settings.")
 		return
 	}
-	if ui.editor_process_load(p, s.process.padding_groups, s.window.padding) != nil {
+	if views.editor_process_load(p, s.process.padding_groups, s.window.padding) != nil {
 		notify(app, .Error, "Could not build the program groups.")
 		return
 	}
-	if ui.editor_quick_labels_load(p, s.turns.quick_labels) != nil {
+	if views.editor_quick_labels_load(p, s.turns.quick_labels) != nil {
 		notify(app, .Error, "Could not build the quick labels.")
 		return
 	}
-	if ui.editor_saved_filters_load(p, s.turns.saved_filters) != nil {
+	if views.editor_saved_filters_load(p, s.turns.saved_filters) != nil {
 		notify(app, .Error, "Could not build the saved filters.")
 		return
 	}
 	// Profiles are one dense table. The model rows come from the resolved profile list; each becomes
 	// a table row plus its inline editor rows, which stay hidden until the row expands.
-	table, table_error := ui.profile_table_build(&s.profiles, profile_command_exists)
+	table, table_error := views.profile_table_build(&s.profiles, profile_command_exists)
 	if table_error != nil {
 		notify(app, .Error, "Could not build the profile table.")
 		return
 	}
-	defer ui.profile_table_destroy(&table)
+	defer views.profile_table_destroy(&table)
 	if !settings_page_profile_rows(p, table.rows[:]) {
 		notify(app, .Error, "Could not allocate the profile table.")
 		return
@@ -142,17 +147,17 @@ settings_page_build :: proc(app: ^App, source: string, view: ^ui.Editor_View) ->
 	}
 	p.capture.leader = app.leader
 	settings_page_sections(p)
-	if view != nil {ui.editor_view_restore(p, view)}
-	ui.editor_hover_clear(p)
-	ui.editor_filter(p)
+	if view != nil {views.editor_view_restore(p, view)}
+	views.editor_hover_clear(p)
+	views.editor_filter(p)
 	if len(diagnostics) > 0 {
-		ui.editor_message(
+		views.editor_message(
 			p,
 			"File has diagnostics; invalid settings show defaults. Only the selected key is changed.",
 			true,
 		)
 	}
-	ui.editor_revision_open(p, owned_source)
+	views.editor_revision_open(p, owned_source)
 	owned_source = ""
 	return page, true
 }
@@ -160,12 +165,16 @@ settings_page_build :: proc(app: ^App, source: string, view: ^ui.Editor_View) ->
 // One row per schema setting that has its own row; group settings have their own editor and
 // embedded ones live inside another setting's control.
 @(private, require_results)
-settings_page_setting_rows :: proc(p: ^ui.Editor, s: ^settings.Settings, fonts: []font.Family_Info) -> bool {
+settings_page_setting_rows :: proc(
+	p: ^views.Editor,
+	s: ^settings.Settings,
+	fonts: []font.Family_Info,
+) -> bool {
 	@(static, rodata)
 	schema := settings.SCHEMA
 	for &entry in schema {
 		if entry.control == .Group || entry.embedded {continue}
-		row := ui.schema_row(entry)
+		row := views.schema_row(entry)
 		row.value = settings.value_text(s, entry)
 		if row.multiple {row.choice_mask, _, _ = settings.set_parse(entry.names, row.value)}
 		if choices, labels, live := setting_live_choices(s, fonts, entry.live_choices); live {
@@ -177,7 +186,7 @@ settings_page_setting_rows :: proc(p: ^ui.Editor, s: ^settings.Settings, fonts: 
 		if entry.page_description != "" {row.description = entry.page_description}
 		// The list of program PNGs takes one more entry from the file dialog.
 		if entry.key == settings.PROGRAM_ICON_FILES_KEY {row.flags += {.Browse_Icon}}
-		if ui.editor_add(p, row, settings.group_title(entry.key)) != nil {return false}
+		if views.editor_add(p, row, settings.group_title(entry.key)) != nil {return false}
 	}
 	return true
 }
@@ -234,7 +243,7 @@ settings_group_area :: proc(title: string) -> (area: Settings_Area, rank: int) {
 }
 
 @(private)
-settings_page_sections :: proc(p: ^ui.Editor) {
+settings_page_sections :: proc(p: ^views.Editor) {
 	p.sections = SETTINGS_AREA_TITLES[:]
 	for &group in p.groups {
 		area, rank := settings_group_area(group.title)
@@ -243,10 +252,10 @@ settings_page_sections :: proc(p: ^ui.Editor) {
 }
 
 @(private, require_results)
-settings_page_profile_rows :: proc(p: ^ui.Editor, profiles: []ui.Profile_Row) -> bool {
+settings_page_profile_rows :: proc(p: ^views.Editor, profiles: []views.Profile_Row) -> bool {
 	group := SETTINGS_SECTIONS[.Profiles].title
 	for row in profiles {
-		flags: bit_set[ui.Editor_Row_Flag]
+		flags: bit_set[views.Editor_Row_Flag]
 		if row.is_default {flags += {.Default}}
 		if row.hidden {flags += {.Hidden}}
 		if row.listed {flags += {.Listed}}
@@ -258,7 +267,7 @@ settings_page_profile_rows :: proc(p: ^ui.Editor, profiles: []ui.Profile_Row) ->
 			row.directory,
 			row.icon,
 		)
-		table_row := ui.Editor_Row {
+		table_row := views.Editor_Row {
 			key         = settings_profile_row_key(row.id),
 			title       = row.name,
 			description = row.command,
@@ -270,8 +279,8 @@ settings_page_profile_rows :: proc(p: ^ui.Editor, profiles: []ui.Profile_Row) ->
 			kind        = .Profile,
 			flags       = flags,
 		}
-		if ui.editor_add(p, table_row, group) != nil {return false}
-		fields := [settings.Profile_Field]ui.Editor_Row {
+		if views.editor_add(p, table_row, group) != nil {return false}
+		fields := [settings.Profile_Field]views.Editor_Row {
 			.Name = {
 				title = "Name",
 				description = "Shown in menus, tabs and the palette.",
@@ -312,32 +321,32 @@ settings_page_profile_rows :: proc(p: ^ui.Editor, profiles: []ui.Profile_Row) ->
 		for &field_row, field in fields {
 			field_row.key = settings.profile_field_key(row.id, field)
 			field_row.profile, field_row.profile_field = row.id, field
-			if ui.editor_add(p, field_row, group) != nil {return false}
+			if views.editor_add(p, field_row, group) != nil {return false}
 		}
 	}
-	add := ui.Editor_Row {
+	add := views.Editor_Row {
 		key         = PROFILE_ADD_KEY,
 		title       = "Add profile",
 		description = "Add a shell with its own command line and starting directory.",
 		value       = "Add profile",
 		kind        = .Profile_Add,
 	}
-	if ui.editor_add(p, add, group) != nil {return false}
-	ui.editor_group_table(p, group)
+	if views.editor_add(p, add, group) != nil {return false}
+	views.editor_group_table(p, group)
 	return true
 }
 
 // One table line per link program in opener.order order, each followed by its field rows, which
 // stay hidden until the line expands, then the Add row.
 @(private, require_results)
-settings_page_opener_rows :: proc(p: ^ui.Editor, openers: ^settings.Openers) -> bool {
+settings_page_opener_rows :: proc(p: ^views.Editor, openers: ^settings.Openers) -> bool {
 	group := SETTINGS_SECTIONS[.Link_Programs].title
 	offers_names, offers_labels := settings.opener_offers_choices()
 	placement_names, placement_labels := settings.OPENER_PLACEMENT_NAME, settings.OPENER_PLACEMENT_LABEL
 	indices: [settings.OPENER_LIMIT]int
 	for index in indices[:settings.openers_in_order(openers, indices[:])] {
 		opener := &openers.items[index]
-		line := ui.Editor_Row {
+		line := views.Editor_Row {
 			key         = settings_opener_row_key(opener.id),
 			title       = opener.name,
 			description = opener.command,
@@ -350,8 +359,8 @@ settings_page_opener_rows :: proc(p: ^ui.Editor, openers: ^settings.Openers) -> 
 			opener      = opener.id,
 			kind        = .Opener,
 		}
-		if ui.editor_add(p, line, group) != nil {return false}
-		fields := [settings.Opener_Field]ui.Editor_Row {
+		if views.editor_add(p, line, group) != nil {return false}
+		fields := [settings.Opener_Field]views.Editor_Row {
 			.Name = {
 				title = "Name",
 				description = "Shown in link menus.",
@@ -397,10 +406,10 @@ settings_page_opener_rows :: proc(p: ^ui.Editor, openers: ^settings.Openers) -> 
 		for &field_row, field in fields {
 			field_row.key = settings.opener_field_key(opener.id, field)
 			field_row.opener, field_row.opener_field = opener.id, field
-			if ui.editor_add(p, field_row, group) != nil {return false}
+			if views.editor_add(p, field_row, group) != nil {return false}
 		}
 	}
-	add := ui.Editor_Row {
+	add := views.Editor_Row {
 		key         = OPENER_ADD_KEY,
 		title       = "Add link program",
 		description = "Offer a program, such as an editor, for opening a link's file or folder.",
@@ -408,17 +417,17 @@ settings_page_opener_rows :: proc(p: ^ui.Editor, openers: ^settings.Openers) -> 
 		kind        = .Action,
 		action      = .Opener_Add,
 	}
-	return ui.editor_add(p, add, group) == nil
+	return views.editor_add(p, add, group) == nil
 }
 
 // One row per command a key can run, showing the file's shortcuts or the defaults.
 @(private, require_results)
-settings_page_shortcut_rows :: proc(app: ^App, p: ^ui.Editor, s: ^settings.Settings) -> bool {
+settings_page_shortcut_rows :: proc(app: ^App, p: ^views.Editor, s: ^settings.Settings) -> bool {
 	for &command in app.registry.items {
 		if command.hidden {continue}
 		value := commands.shortcut_set_text(command.shortcuts, context.temp_allocator)
 		for binding in s.keys {if binding.name == command.name {value = binding.value; break}}
-		row := ui.Editor_Row {
+		row := views.Editor_Row {
 			key           = settings.binding_key(command.name),
 			title         = command.title,
 			value         = value,
@@ -426,7 +435,7 @@ settings_page_shortcut_rows :: proc(app: ^App, p: ^ui.Editor, s: ^settings.Setti
 			default_value = commands.shortcut_set_text(command.defaults, context.temp_allocator),
 			kind          = .Shortcut,
 		}
-		if ui.editor_add(p, row, commands.category(&command).group) != nil {return false}
+		if views.editor_add(p, row, commands.category(&command).group) != nil {return false}
 	}
 	return true
 }
@@ -436,35 +445,35 @@ settings_page_shortcut_rows :: proc(app: ^App, p: ^ui.Editor, s: ^settings.Setti
 @(private)
 editor_font_filter :: proc(app: ^App, w: ^Window) {
 	p := &w.editor
-	row := ui.editor_row(p)
+	row := views.editor_row(p)
 	if row == nil || !row.font_filter {return}
 	entry := settings.schema_find(row.key)
 	if entry == nil || entry.choice_filter == "" {return}
 	query := strings.clone(ui.field_string(&p.dropdown.search), context.temp_allocator)
-	focused := ui.editor_choice_toggle_focused(p)
+	focused := views.editor_choice_toggle_focused(p)
 	value := row.show_all_fonts ? "false" : "true"
 	result := settings_change(app, Setting_Value{entry.choice_filter, value}, Settings_Page{p})
 	_ = settings_page_report(p, result, .Font_Filter)
-	ui.editor_font_search_restore(p, query, focused)
+	views.editor_font_search_restore(p, query, focused)
 }
 
-editor_outcome :: proc(app: ^App, w: ^Window, outcome: ui.Editor_Outcome) {
+editor_outcome :: proc(app: ^App, w: ^Window, outcome: views.Editor_Outcome) {
 	p := &w.editor
 	// The outcome that names a request is the only one that may act on it.
-	request := ui.editor_request_take(p)
-	defer ui.editor_request_destroy(&request)
-	kept := ui.editor_kept_take(p)
-	defer ui.editor_kept_destroy(&kept)
+	request := views.editor_request_take(p)
+	defer views.editor_request_destroy(&request)
+	kept := views.editor_kept_take(p)
+	defer views.editor_kept_destroy(&kept)
 	// A field the user moved off saves what was typed into it, after what the move itself did.
 	defer editor_kept_save(app, w, &kept)
 	if outcome == .None {return}
 	w.dirty = true
-	ui.editor_outcome_begin(p, outcome)
+	views.editor_outcome_begin(p, outcome)
 	switch outcome {
 	case .None, .Changed:
 		return
 	case .Theme_Customize:
-		ui.editor_section_show(p, int(Settings_Area.Colors))
+		views.editor_section_show(p, int(Settings_Area.Colors))
 		return
 	case .Browse_Icon:
 		editor_icon_browse(app, w, request)
@@ -477,18 +486,18 @@ editor_outcome :: proc(app: ^App, w: ^Window, outcome: ui.Editor_Outcome) {
 		return
 	case .Shortcut_Chain:
 		// Publication rebuilds the page with the chain still open; it closes once the save applied.
-		if shortcut_chain_save(app, ui.editor_chain_changes(p), Settings_Page{p}) {
-			ui.editor_chain_close(p)
+		if shortcut_chain_save(app, views.editor_chain_changes(p), Settings_Page{p}) {
+			views.editor_chain_close(p)
 		}
 		return
 	case .Assign_Shortcut:
-		if chord, free := ui.editor_free_chord(p).?; free {
+		if chord, free := views.editor_free_chord(p).?; free {
 			palette_open_mode(app, w, .Commands)
-			ui.palette_assign(&app.palette, &app.registry, chord)
+			views.palette_assign(&app.palette, &app.registry, chord)
 		}
 		return
 	case .Process_Remove:
-		if remove, ok := request.(ui.Process_Remove_Request); ok {
+		if remove, ok := request.(views.Process_Remove_Request); ok {
 			editor_process_remove_ask(app, w, remove.group)
 		}
 		return
@@ -498,12 +507,12 @@ editor_outcome :: proc(app: ^App, w: ^Window, outcome: ui.Editor_Outcome) {
 	case .Label_Action:
 		// A field left a moment ago is applied by the action itself: its key names a position the
 		// action may renumber.
-		if edit, ok := request.(ui.Label_Edit); ok {
+		if edit, ok := request.(views.Label_Edit); ok {
 			editor_labels_action(app, w, edit, &kept)
 		}
 		return
 	case .Filter_Action:
-		if edit, ok := request.(ui.Filter_Edit); ok {
+		if edit, ok := request.(views.Filter_Edit); ok {
 			editor_filters_action(app, w, edit, &kept)
 		}
 		return
@@ -515,11 +524,11 @@ editor_outcome :: proc(app: ^App, w: ^Window, outcome: ui.Editor_Outcome) {
 		return
 	case .Save, .Reset:
 	}
-	row := ui.editor_row(p)
+	row := views.editor_row(p)
 	if row == nil {return}
 	if row.process_field != .None {
 		if row.process_field == .Add_Group || row.process_field == .Add_Program {
-			_ = ui.editor_process_activate(p, row)
+			_ = views.editor_process_activate(p, row)
 		} else {editor_process_save(app, w)}
 		return
 	}
@@ -546,7 +555,7 @@ editor_outcome :: proc(app: ^App, w: ^Window, outcome: ui.Editor_Outcome) {
 	if outcome == .Reset && row.action != .Theme_Color {ui.field_set(&p.value, row.default_value)}
 	value := ui.field_string(&p.value)
 	// A combination of choices is edited as option bits; the file stores their names.
-	if row.multiple && outcome != .Reset {value = settings.set_text(row.choices, ui.editor_choice_set(p))}
+	if row.multiple && outcome != .Reset {value = settings.set_text(row.choices, views.editor_choice_set(p))}
 	value = strings.clone(value, context.temp_allocator)
 	if field, is_field := row.profile_field.?; is_field {
 		editor_profile_field(app, w, row.profile, field, value)
@@ -576,16 +585,16 @@ editor_outcome :: proc(app: ^App, w: ^Window, outcome: ui.Editor_Outcome) {
 		}
 	case .Theme_Delete:
 		// Deleting discards colors that exist nowhere else, so it takes a second press.
-		if !ui.editor_theme_delete_press(p) {return}
+		if !views.editor_theme_delete_press(p) {return}
 		if result, applied := editor_theme_change(app, w, Theme_Remove{}); applied {
 			editor_theme_reveal(w, THEME_KEY, fmt.tprintf("Theme deleted. Using %s.", result.id))
 		}
 	case .Theme_Export:
 		path, error := settings.theme_export(&app.settings, app.settings_inputs.themes_directory)
 		if error != nil {
-			ui.editor_message(p, "Could not export theme. Check the themes folder permissions.", true)
+			views.editor_message(p, "Could not export theme. Check the themes folder permissions.", true)
 		} else {
-			ui.editor_message(p, fmt.tprintf("Theme saved to %s", path), false)
+			views.editor_message(p, fmt.tprintf("Theme saved to %s", path), false)
 		}
 	case .Opener_Add:
 		editor_opener_mutate(app, w, {kind = .Add})
@@ -598,21 +607,21 @@ editor_outcome :: proc(app: ^App, w: ^Window, outcome: ui.Editor_Outcome) {
 	}
 }
 
-// Saves a field the user moved off without pressing Enter (ui.editor_keep), once the page is at
+// Saves a field the user moved off without pressing Enter (views.editor_keep), once the page is at
 // rest: an open popup or a pointer drag would not survive the page taking the new revision, so
 // until then the field stays kept. The selection stays where the user went. A refusal rings the
 // field's row with the reason, unless the event that left it reported a problem of its own.
 @(private)
-editor_kept_save :: proc(app: ^App, w: ^Window, kept: ^ui.Editor_Kept) {
+editor_kept_save :: proc(app: ^App, w: ^Window, kept: ^views.Editor_Kept) {
 	if kept.key == "" {return}
 	p := &w.editor
-	if !ui.editor_resting(p) {
-		ui.editor_kept_put(p, kept)
+	if !views.editor_resting(p) {
+		views.editor_kept_put(p, kept)
 		return
 	}
 	// Back on the same row with new text in its field, that text is the newer value. Leaving by Tab or
 	// the search box keeps the row selected with its saved text, and the kept value saves.
-	if row := ui.editor_row(p); row != nil && row.key == kept.key && ui.field_string(&p.value) != row.value {
+	if row := views.editor_row(p); row != nil && row.key == kept.key && ui.field_string(&p.value) != row.value {
 		return
 	}
 	w.dirty = true
@@ -649,8 +658,8 @@ ICON_FILTER :: "*.png"
 // the field names. The dialog runs on its own thread (platform.file_pick_start); its owner window
 // waits disabled and every other window keeps drawing. One icon dialog is open at a time.
 @(private)
-editor_icon_browse :: proc(app: ^App, w: ^Window, request: ui.Editor_Request) {
-	browse, ok := request.(ui.Icon_Browse_Request)
+editor_icon_browse :: proc(app: ^App, w: ^Window, request: views.Editor_Request) {
+	browse, ok := request.(views.Icon_Browse_Request)
 	if !ok || app.dialogs.icon != nil {return}
 	written := browse.value
 	if browse.key == settings.PROGRAM_ICON_FILES_KEY {written = settings.program_icon_files_last_path(written)}
@@ -679,7 +688,7 @@ editor_icon_chosen :: proc(app: ^App, w: ^Window, key, path: string) {
 	p := &w.editor
 	for &row in p.rows {
 		if row.key != key {continue}
-		selected := ui.editor_row(p) == &row
+		selected := views.editor_row(p) == &row
 		value := path
 		if key == settings.PROGRAM_ICON_FILES_KEY {
 			current := selected ? ui.field_string(&p.value) : row.value
@@ -694,8 +703,8 @@ editor_icon_chosen :: proc(app: ^App, w: ^Window, key, path: string) {
 			editor_outcome(app, w, .Save)
 			return
 		}
-		kept := ui.Editor_Kept{strings.clone(key), strings.clone(value)}
-		defer ui.editor_kept_destroy(&kept)
+		kept := views.Editor_Kept{strings.clone(key), strings.clone(value)}
+		defer views.editor_kept_destroy(&kept)
 		editor_kept_save(app, w, &kept)
 		return
 	}
@@ -703,22 +712,22 @@ editor_icon_chosen :: proc(app: ^App, w: ^Window, key, path: string) {
 
 // Shows why a kept field's value was refused on its row, unless the page already shows a problem.
 @(private)
-editor_kept_refused :: proc(p: ^ui.Editor, profile, key, message: string) {
+editor_kept_refused :: proc(p: ^views.Editor, profile, key, message: string) {
 	if p.error || p.error_text != "" {return}
-	ui.editor_error_set(p, profile, key, message)
-	ui.editor_message(p, message, true)
+	views.editor_error_set(p, profile, key, message)
+	views.editor_message(p, message, true)
 }
 
 // The base a field save computes against: the page, or for a `kept` field the page as it keeps
 // another row selected.
 @(private)
-editor_field_base :: proc(p: ^ui.Editor, kept: bool) -> Settings_Base {
+editor_field_base :: proc(p: ^views.Editor, kept: bool) -> Settings_Base {
 	return kept ? Settings_Kept{p} : Settings_Page{p}
 }
 
 // Saves a schema setting or shortcut as `value`: the selected row's, or a `kept` one the user left.
 @(private)
-editor_setting_save :: proc(app: ^App, w: ^Window, row: ^ui.Editor_Row, value: string, kept := false) {
+editor_setting_save :: proc(app: ^App, w: ^Window, row: ^views.Editor_Row, value: string, kept := false) {
 	p := &w.editor
 	key := strings.clone(row.key, context.temp_allocator)
 	kind := row.kind
@@ -728,13 +737,13 @@ editor_setting_save :: proc(app: ^App, w: ^Window, row: ^ui.Editor_Row, value: s
 		return
 	}
 	if !settings_page_report(p, result, .Setting) {return}
-	if kind == .Shortcut {ui.editor_browse(p)}
+	if kind == .Shortcut {views.editor_browse(p)}
 	text := "Saved and applied."
 	if result.message != "" {text = fmt.tprintf("Saved. %s", result.message)}
 	if entry := settings.schema_find(key); entry != nil && entry.apply_timing == .New_Sessions {
 		text = "Saved. Initial size applies to new sessions."
 	}
-	ui.editor_message(p, text, false)
+	views.editor_message(p, text, false)
 }
 
 // Reports a profile or link program change: one that did not apply on the page, one that did by
@@ -751,10 +760,10 @@ editor_table_saved :: proc(
 ) {
 	if !settings_page_report(&w.editor, result, workflow) {return}
 	if stay {
-		ui.editor_message(&w.editor, message, false)
+		views.editor_message(&w.editor, message, false)
 		return
 	}
-	ui.editor_browse(&w.editor)
+	views.editor_browse(&w.editor)
 	settings_reveal_page(
 		&w.editor,
 		{key = select_key, search = .Preserve, message = message, focus = focus, keep_scroll = true},
@@ -793,8 +802,8 @@ editor_profile_field :: proc(
 			editor_kept_refused(&w.editor, id, key, result.message)
 			return
 		}
-		ui.editor_error_set(&w.editor, id, key, result.message)
-		ui.editor_message(&w.editor, result.message, true)
+		views.editor_error_set(&w.editor, id, key, result.message)
+		views.editor_message(&w.editor, result.message, true)
 		return
 	}
 	editor_table_saved(w, result, .Profile_Field, key, message, focus, kept)
@@ -822,18 +831,18 @@ editor_profile_mutate :: proc(app: ^App, w: ^Window, change: settings.Profile_Mu
 	}
 	// The reveal rebuilds the published page, which then opens the new profile's inline editor.
 	if change.kind == .Add || change.kind == .Duplicate {
-		ui.editor_profile_set_expanded(&w.editor, result.id)
+		views.editor_profile_set_expanded(&w.editor, result.id)
 	} else if change.kind == .Remove && w.editor.expanded == result.id {
-		ui.editor_profile_set_expanded(&w.editor, "")
+		views.editor_profile_set_expanded(&w.editor, "")
 	}
 	editor_table_saved(w, result, .Profile, key, message)
 }
 
 // Performs the profile write a table control asked for.
 @(private)
-editor_profile_action :: proc(app: ^App, w: ^Window, request: ui.Editor_Request) {
+editor_profile_action :: proc(app: ^App, w: ^Window, request: views.Editor_Request) {
 	#partial switch r in request {
-	case ui.Profile_Request:
+	case views.Profile_Request:
 		switch r.action {
 		case .Default:
 			result := settings_change(
@@ -851,7 +860,7 @@ editor_profile_action :: proc(app: ^App, w: ^Window, request: ui.Editor_Request)
 		case .Remove:
 			editor_profile_remove_ask(app, w, r.id)
 		}
-	case ui.Profile_Hidden_Request:
+	case views.Profile_Hidden_Request:
 		value := Profile_Field_Value{r.id, .Hidden, r.hidden ? "true" : "false"}
 		editor_table_saved(
 			w,
@@ -860,7 +869,7 @@ editor_profile_action :: proc(app: ^App, w: ^Window, request: ui.Editor_Request)
 			settings_profile_row_key(r.id),
 			r.hidden ? "Profile hidden from menus." : "Profile shown in menus.",
 		)
-	case ui.Profile_Order_Request:
+	case views.Profile_Order_Request:
 		editor_profile_mutate(app, w, {kind = .Move, id = r.id, slot = r.slot})
 	}
 }
@@ -887,10 +896,10 @@ editor_opener_field :: proc(
 			editor_kept_refused(&w.editor, "", key, result.message)
 			return
 		}
-		ui.editor_error_set(&w.editor, "", key, result.message)
-		ui.editor_message(&w.editor, result.message, true)
+		views.editor_error_set(&w.editor, "", key, result.message)
+		views.editor_message(&w.editor, result.message, true)
 		// The open list shows the links the program is still offered for.
-		if row := ui.editor_row(&w.editor); row != nil && row.key == key {w.editor.choice_set = row.choice_mask}
+		if row := views.editor_row(&w.editor); row != nil && row.key == key {w.editor.choice_set = row.choice_mask}
 		return
 	}
 	// Offered for is a list of links whose popup stays open while each one is switched.
@@ -918,20 +927,20 @@ editor_opener_mutate :: proc(app: ^App, w: ^Window, change: settings.Opener_Muta
 	}
 	// The reveal rebuilds the published page, which then opens the new program's fields.
 	if change.kind == .Add {
-		ui.editor_opener_set_expanded(&w.editor, result.id)
+		views.editor_opener_set_expanded(&w.editor, result.id)
 	} else if change.kind == .Remove && w.editor.opener_expanded == result.id {
-		ui.editor_opener_set_expanded(&w.editor, "")
+		views.editor_opener_set_expanded(&w.editor, "")
 	}
 	editor_table_saved(w, result, .Opener, key, message)
 }
 
 // Performs the link program write a table control asked for.
 @(private)
-editor_opener_action :: proc(app: ^App, w: ^Window, request: ui.Editor_Request) {
+editor_opener_action :: proc(app: ^App, w: ^Window, request: views.Editor_Request) {
 	#partial switch r in request {
-	case ui.Opener_Remove_Request:
+	case views.Opener_Remove_Request:
 		editor_opener_remove_ask(app, w, r.id)
-	case ui.Opener_Order_Request:
+	case views.Opener_Order_Request:
 		editor_opener_mutate(app, w, {kind = .Move, id = r.id, slot = r.slot})
 	}
 }
@@ -1011,9 +1020,9 @@ THEME_MANAGE_GROUP :: "Manage theme"
 
 // The active theme's management rows, which the Colors board shows as its card, then its colors.
 @(private)
-settings_add_theme_rows :: proc(p: ^ui.Editor, s: ^settings.Settings) -> bool {
-	if ui.editor_theme_set(p, s.theme.name) != nil {return false}
-	duplicate := ui.Editor_Row {
+settings_add_theme_rows :: proc(p: ^views.Editor, s: ^settings.Settings) -> bool {
+	if views.editor_theme_set(p, s.theme.name) != nil {return false}
+	duplicate := views.Editor_Row {
 		key         = "theme.duplicate",
 		title       = "Save as new theme",
 		description = fmt.tprintf(
@@ -1027,7 +1036,7 @@ settings_add_theme_rows :: proc(p: ^ui.Editor, s: ^settings.Settings) -> bool {
 	if settings.theme_custom(s) {
 		custom := settings.custom_theme_find(s, s.theme.name)
 		duplicate.description = "Copy this theme with all its colors and switch to the copy."
-		rows := [?]ui.Editor_Row {
+		rows := [?]views.Editor_Row {
 			{
 				key = THEME_NAME_KEY,
 				title = "Theme name",
@@ -1048,10 +1057,10 @@ settings_add_theme_rows :: proc(p: ^ui.Editor, s: ^settings.Settings) -> bool {
 			duplicate,
 		}
 		for row in rows {
-			if ui.editor_add(p, row, THEME_MANAGE_GROUP) != nil {return false}
+			if views.editor_add(p, row, THEME_MANAGE_GROUP) != nil {return false}
 		}
-	} else if ui.editor_add(p, duplicate, THEME_MANAGE_GROUP) != nil {return false}
-	if ui.editor_add(p, {
+	} else if views.editor_add(p, duplicate, THEME_MANAGE_GROUP) != nil {return false}
+	if views.editor_add(p, {
 		key = "theme.export",
 		title = "Export theme file",
 		description = "Save a portable JSON file in the themes folder. Share it with its schema file.",
@@ -1061,7 +1070,7 @@ settings_add_theme_rows :: proc(p: ^ui.Editor, s: ^settings.Settings) -> bool {
 	}, THEME_MANAGE_GROUP) != nil {return false}
 	// Delete follows the actions that keep the theme.
 	if custom := settings.custom_theme_find(s, s.theme.name); settings.theme_custom(s) {
-		delete_row := ui.Editor_Row {
+		delete_row := views.Editor_Row {
 			key         = "theme.delete",
 			title       = "Delete theme",
 			description = fmt.tprintf(
@@ -1072,7 +1081,7 @@ settings_add_theme_rows :: proc(p: ^ui.Editor, s: ^settings.Settings) -> bool {
 			kind        = .Action,
 			action      = .Theme_Delete,
 		}
-		if ui.editor_add(p, delete_row, THEME_MANAGE_GROUP) != nil {return false}
+		if views.editor_add(p, delete_row, THEME_MANAGE_GROUP) != nil {return false}
 	}
 	return settings_add_color_rows(p, s)
 }
@@ -1092,7 +1101,7 @@ editor_theme_reveal :: proc(w: ^Window, select_key, message: string) {
 
 // Sets or resets one color; the published page keeps the edited row selected.
 @(private)
-editor_theme_color :: proc(app: ^App, w: ^Window, row: ^ui.Editor_Row, reset: bool) {
+editor_theme_color :: proc(app: ^App, w: ^Window, row: ^views.Editor_Row, reset: bool) {
 	token_key := strings.clone(row.key[len(SETTINGS_COLOR_PREFIX):], context.temp_allocator)
 	value := reset ? "" : strings.clone(ui.field_string(&w.editor.value), context.temp_allocator)
 	alpha_dropped := false
@@ -1106,14 +1115,14 @@ editor_theme_color :: proc(app: ^App, w: ^Window, row: ^ui.Editor_Row, reset: bo
 	}
 	result, applied := editor_theme_change(app, w, Theme_Color{token_key, value})
 	if result.status == .Unchanged {
-		ui.editor_message(&w.editor, "Theme files keep their colors; changing one saves a custom theme.", false)
+		views.editor_message(&w.editor, "Theme files keep their colors; changing one saves a custom theme.", false)
 	}
 	if !applied {return}
 	message := "Saved and applied."
 	if result.id != "" {message = fmt.tprintf("Saved as new theme %s.", result.id)}
 	if alpha_dropped {message = fmt.tprintf("%s This color is opaque, so its alpha is ignored.", message)}
 	if reset {message = "Color returned to the base theme."}
-	ui.editor_message(&w.editor, message, false)
+	views.editor_message(&w.editor, message, false)
 }
 
 // Plain and shifted keys type or navigate, and these Ctrl chords edit text or move through the list.
@@ -1141,9 +1150,9 @@ settings_key :: proc(app: ^App, w: ^Window, e: input.Key_Event) {
 	w.dirty = true
 	key_suppress(w, e)
 	// Escape backs out of a delete prompt even when the page has nothing else to leave.
-	if e.pressed && e.key == .Escape {ui.editor_theme_delete_disarm(p)}
-	if ui.editor_capturing(p) || ui.editor_recording(p) {
-		editor_outcome(app, w, ui.editor_key(p, e))
+	if e.pressed && e.key == .Escape {views.editor_theme_delete_disarm(p)}
+	if views.editor_capturing(p) || views.editor_recording(p) {
+		editor_outcome(app, w, views.editor_key(p, e))
 		return
 	}
 	key, consumed := content_key_prelude(app, w, e, false)
@@ -1151,25 +1160,25 @@ settings_key :: proc(app: ^App, w: ^Window, e: input.Key_Event) {
 	if shortcut_undo_key(app, key.logical) {return}
 	switch key.clipboard {
 	case .Copy:
-		clipboard_copy(app, ui.editor_selection(p))
+		clipboard_copy(app, views.editor_selection(p))
 		return
 	case .Cut:
-		if clipboard_copy(app, ui.editor_selection(p)) {ui.editor_cut(p)}
+		if clipboard_copy(app, views.editor_selection(p)) {views.editor_cut(p)}
 		return
 	case .Paste:
 		if text, ok := platform.clipboard_get_text(&app.platform, context.temp_allocator);
-		   ok {ui.editor_paste(p, text)}
+		   ok {views.editor_paste(p, text)}
 		return
 	case .None:
 	}
-	search_owns := ui.editor_focus(p) == .Search && ui.key_search_toggles(e)
+	search_owns := views.editor_focus(p) == .Search && views.key_search_toggles(e)
 	if key.found && !editor_owns(key.logical) && !search_owns &&
 	   (key.runtime || action_available(app, w, key.action)) {
 		run_window_command(app, w, key.command, .Key)
 		return
 	}
 	status_inbox_typed(w, e)
-	editor_outcome(app, w, ui.editor_key(p, e))
+	editor_outcome(app, w, views.editor_key(p, e))
 }
 
 // The custom profile a confirmation asks before deleting, and its name as the page showed it.
@@ -1253,20 +1262,20 @@ when AIO_CONTROL {
 		p := &w.editor
 		key, title := "", ""
 		choice_count := 0
-		if row := ui.editor_row(p); row != nil {
+		if row := views.editor_row(p); row != nil {
 			key, title = row.key, row.title
 			choice_count = len(row.choices)
 		}
-		selected: ui.Row_Parts
-		page: ui.Editor_Layout
+		selected: views.Row_Parts
+		page: views.Editor_Layout
 		if settings_active(w) {
 			page = settings_layout(w)
-			if len(p.items) > 0 {selected = ui.editor_row_parts(p, page, p.selected)}
+			if len(p.items) > 0 {selected = views.editor_row_parts(p, page, p.selected)}
 		}
 		question := confirmation_shown(w)
 		process_remove := confirmation_asking(w, Process_Remove) != nil
 		removing := confirmation_subject(w, Profile_Remove)
-		_, menu_open := p.mode.(ui.Editor_Profile_Menu)
+		_, menu_open := p.mode.(views.Editor_Profile_Menu)
 		detected := 0
 		for &profile in app.settings.profiles.items {
 			if profile.detected {detected += 1}
@@ -1311,7 +1320,7 @@ when AIO_CONTROL {
 			}
 		}
 		key_buffer: [commands.SHORTCUT_TEXT_CAP]u8
-		if chord, offered := ui.editor_free_chord(p).?; offered {
+		if chord, offered := views.editor_free_chord(p).?; offered {
 			free = strings.clone(commands.shortcut_text(chord, key_buffer[:]), context.temp_allocator)
 		}
 		state_text(r, "settings.match", match)
@@ -1319,8 +1328,8 @@ when AIO_CONTROL {
 		state_value(r, "settings.rows", rows)
 		state_value(r, "settings.keys", p.keys.state)
 		state_valuef(r, "settings.keys.text", "%s", commands.key_press_text(p.keys.press, key_buffer[:]))
-		state_rect(r, "settings.keys.button", ui.editor_keys_rect(page))
-		state_value(r, "settings.open", ui.editor_loaded(p))
+		state_rect(r, "settings.keys.button", views.editor_keys_rect(page))
+		state_value(r, "settings.open", views.editor_loaded(p))
 		state_text(r, "settings.revision", settings_page_revision_word(p))
 		state_value(r, "settings.theme_delete_armed", p.delete_armed)
 		settings_theme_strip_state(r, p, page)
@@ -1329,35 +1338,35 @@ when AIO_CONTROL {
 			state_text(r, "settings.section", p.sections[p.section])
 		}
 		state_value(r, "settings.scroll", p.scroll)
-		state_value(r, "settings.group", ui.editor_active_group(p))
+		state_value(r, "settings.group", views.editor_active_group(p))
 		state_text(r, "settings.key", key)
 		state_text(r, "settings.value", string(p.value.bytes[:]))
-		state_value(r, "settings.editing", ui.editor_editing(p))
-		state_value(r, "settings.focus", ui.editor_focus(p))
+		state_value(r, "settings.editing", views.editor_editing(p))
+		state_value(r, "settings.focus", views.editor_focus(p))
 		state_value(r, "settings.active", settings_active(w))
-		state_value(r, "settings.popup", ui.editor_popup(p))
+		state_value(r, "settings.popup", views.editor_popup(p))
 		state_value(r, "settings.choice_count", choice_count)
 		state_text(r, "settings.choice_query", ui.field_string(&p.dropdown.search))
 		state_value(r, "settings.choice_matches", len(p.dropdown.matches))
-		state_value(r, "settings.capturing", ui.editor_capturing(p))
+		state_value(r, "settings.capturing", views.editor_capturing(p))
 		state_text(r, "settings.title", title)
 		state_text(r, "settings.message", p.message)
 		state_value(r, "settings.error", p.error)
 		state_text(r, "settings.labels.rows", settings_page_row_rects(p, page, .Labels))
 		state_value(r, "settings.labels.expanded", p.label_expanded)
-		state_value(r, "settings.labels.dragging", ui.editor_order_dragging(p, .Quick_Labels))
-		state_value(r, "settings.labels.drag_target", ui.editor_order_target(p))
+		state_value(r, "settings.labels.dragging", views.editor_order_dragging(p, .Quick_Labels))
+		state_value(r, "settings.labels.drag_target", views.editor_order_target(p))
 		state_text(r, "settings.labels.value", app.settings.turns.quick_labels)
 		state_text(r, "settings.filters.rows", settings_page_row_rects(p, page, .Filters))
 		state_text(r, "settings.filters.defaults", settings_filter_defaults(p, page))
 		state_value(r, "settings.filters.expanded", p.filter_expanded)
-		state_value(r, "settings.filters.dragging", ui.editor_order_dragging(p, .Saved_Filters))
-		state_value(r, "settings.filters.drag_target", ui.editor_order_target(p))
+		state_value(r, "settings.filters.dragging", views.editor_order_dragging(p, .Saved_Filters))
+		state_value(r, "settings.filters.drag_target", views.editor_order_target(p))
 		state_text(r, "settings.filters.value", app.settings.turns.saved_filters)
 		state_text(r, "settings.process.rows", settings_page_row_rects(p, page, .Process))
 		state_value(r, "settings.process.expanded", p.process_expanded)
-		state_value(r, "settings.process.dragging", ui.editor_order_dragging(p, .Process_Groups))
-		state_value(r, "settings.process.drag_target", ui.editor_order_target(p))
+		state_value(r, "settings.process.dragging", views.editor_order_dragging(p, .Process_Groups))
+		state_value(r, "settings.process.drag_target", views.editor_order_target(p))
 		state_text(r, "settings.process.value", app.settings.process.padding_groups)
 		state_value(r, "settings.process.confirming", process_remove)
 		state_value(r, "settings.process.confirm_option", process_remove && question.dialog.show_option)
@@ -1374,7 +1383,7 @@ when AIO_CONTROL {
 		state_text(r, "settings.profile.error_key", p.error_key)
 		state_text(r, "settings.profile.error", p.error_text)
 		state_value(r, "settings.profile.control", p.profile_control)
-		columns := ui.profile_columns(page.list, page.scale)
+		columns := views.profile_columns(page.list, page.scale)
 		state_value(r, "settings.profile.directory_shown", columns.directory_shown)
 		state_text(r, "settings.profile.rows", settings_page_row_rects(p, page, .Profile))
 		state_text(r, "settings.profile.detected_rows", "")
@@ -1382,9 +1391,9 @@ when AIO_CONTROL {
 		state_value(r, "settings.profile.app_count", len(app.settings.profiles.items))
 		state_value(r, "settings.profile.app_detected", detected)
 		state_value(r, "settings.profile.group", profile_group)
-		state_value(r, "settings.profile.dragging", ui.editor_order_dragging(p, .Profiles))
-		state_value(r, "settings.profile.drag_target", ui.editor_order_target(p))
-		state_text(r, "settings.profile.drag_id", ui.editor_order_profile(p))
+		state_value(r, "settings.profile.dragging", views.editor_order_dragging(p, .Profiles))
+		state_value(r, "settings.profile.drag_target", views.editor_order_target(p))
+		state_text(r, "settings.profile.drag_id", views.editor_order_profile(p))
 		state_text(r, "settings.opener.expanded", p.opener_expanded)
 		state_text(r, "settings.opener.ids", strings.to_string(opener_ids))
 		state_text(r, "settings.opener.icons", strings.to_string(opener_icons))
@@ -1399,9 +1408,9 @@ when AIO_CONTROL {
 		state_text(r, "settings.opener.remove_title", opener_title)
 		state_text(r, "settings.opener.rows", settings_page_row_rects(p, page, .Opener))
 		state_value(r, "settings.opener.group", opener_group)
-		state_value(r, "settings.opener.dragging", ui.editor_order_dragging(p, .Openers))
-		state_value(r, "settings.opener.drag_target", ui.editor_order_target(p))
-		state_text(r, "settings.opener.drag_id", ui.editor_order_opener(p))
+		state_value(r, "settings.opener.dragging", views.editor_order_dragging(p, .Openers))
+		state_value(r, "settings.opener.drag_target", views.editor_order_target(p))
+		state_text(r, "settings.opener.drag_id", views.editor_order_opener(p))
 		state_rect(r, "settings.slider", selected.slider)
 		// The selected row's Browse button, which opens the file dialog for an icon path.
 		state_rect(r, "settings.browse", selected.browse)
@@ -1411,22 +1420,22 @@ when AIO_CONTROL {
 		state_rect(r, "settings.list_rect", page.list)
 		chain_rows := make([]Chain_Report_Row, len(p.chain.members), context.temp_allocator)
 		if settings_active(w) {
-			for &row, member in chain_rows {row.row, row.right, row.shown = ui.editor_chain_row(p, page, member)}
+			for &row, member in chain_rows {row.row, row.right, row.shown = views.editor_chain_row(p, page, member)}
 		}
 		shortcut_chain_state_report(r, "settings", &p.chain, chain_rows, &w.ui_text, w.scale)
-		used_by := ui.shortcut_capture_used_by(&p.capture)
-		if ui.editor_chained(p) {used_by = ui.shortcut_chain_used_by(&p.chain)}
+		used_by := views.shortcut_capture_used_by(&p.capture)
+		if views.editor_chained(p) {used_by = views.shortcut_chain_used_by(&p.chain)}
 		state_text(r, "settings.used_by", used_by)
 		settings_board_state_report(r, p, page)
 	}
 
 	// Current pages report draft while they hold pending work, derived rather than stored.
 	@(private = "file")
-	settings_page_revision_word :: proc(p: ^ui.Editor) -> string {
+	settings_page_revision_word :: proc(p: ^views.Editor) -> string {
 		switch revision in p.revision {
-		case ui.Editor_Current:
-			return ui.editor_draft(p) ? "draft" : "fresh"
-		case ui.Editor_Stale:
+		case views.Editor_Current:
+			return views.editor_draft(p) ? "draft" : "fresh"
+		case views.Editor_Stale:
 			switch revision.reason {
 			case .Changed_Outside:
 				return "stale.changed_outside"
@@ -1450,13 +1459,13 @@ when AIO_CONTROL {
 
 	// "filter.N@on@x,y,w,h;...": each saved filter's on by default control, on being 1 or 0.
 	@(private = "file")
-	settings_filter_defaults :: proc(p: ^ui.Editor, page: ui.Editor_Layout) -> string {
+	settings_filter_defaults :: proc(p: ^views.Editor, page: views.Editor_Layout) -> string {
 		builder := strings.builder_make(context.temp_allocator)
 		first := true
 		for item, index in p.items {
 			if item.row < 0 || p.rows[item.row].kind != .Saved_Filter {continue}
 			row := &p.rows[item.row]
-			rect := ui.filter_default_rect(ui.editor_row_parts(p, page, index).row, page.scale)
+			rect := views.filter_default_rect(views.editor_row_parts(p, page, index).row, page.scale)
 			if !first {strings.write_byte(&builder, ';')}
 			first = false
 			on := int(.Default in row.flags ? 1 : 0)
@@ -1469,8 +1478,8 @@ when AIO_CONTROL {
 	// so a live journey can aim a drag at a row's grip.
 	@(private = "file")
 	settings_page_row_rects :: proc(
-		p: ^ui.Editor,
-		page: ui.Editor_Layout,
+		p: ^views.Editor,
+		page: views.Editor_Layout,
 		table: Settings_Page_Table,
 	) -> string {
 		builder := strings.builder_make(context.temp_allocator)
@@ -1496,7 +1505,7 @@ when AIO_CONTROL {
 				if row.kind != .Saved_Filter && row.filter_field == .None {continue}
 				name = row.key
 			}
-			rect := ui.editor_row_parts(p, page, index).row
+			rect := views.editor_row_parts(p, page, index).row
 			if !first {strings.write_byte(&builder, ';')}
 			first = false
 			fmt.sbprintf(&builder, "%s@%g,%g,%g,%g", name, rect.x, rect.y, rect.width, rect.height)

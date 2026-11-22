@@ -9,7 +9,7 @@ import "core:testing"
 import app "../../src"
 import "aio:layout"
 import "cosmos:platform"
-import "aio:ui"
+import "cosmos:ui"
 
 @(private="file")
 Move_Fixture :: struct {

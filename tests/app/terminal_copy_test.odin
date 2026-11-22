@@ -6,8 +6,8 @@ import "cosmos:input"
 import "aio:layout"
 import "cosmos:platform"
 import "aio:term"
-import "aio:ui"
 import "core:testing"
+import "cosmos:ui"
 
 @(private)
 Terminal_Copy_Fixture :: struct {

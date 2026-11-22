@@ -2,9 +2,10 @@ package app_test
 
 import app "../../src"
 import "aio:layout"
-import "aio:ui"
+import "aio:views"
 import "core:testing"
 import "core:time"
+import "cosmos:ui"
 
 @(test)
 tab_reorder_motion_follows_pointer_and_displaces_rows_in_both_orientations :: proc(t: ^testing.T) {
@@ -39,7 +40,7 @@ tab_reorder_motion_follows_pointer_and_displaces_rows_in_both_orientations :: pr
 			l, ok := app.rail_current_layout(&w)
 			testing.expect(t, ok)
 			testing.expect_value(t, app.rail_tab_hit(&w, l, moved.x + moved.width / 2, moved.y + 2), 1)
-			close := ui.rail_close_rect(l, 1, w.scale)
+			close := views.rail_close_rect(l, 1, w.scale)
 			close.y += 0.25 * first.height
 			hit := app.rail_tab_interaction_hit(&w, close.x + close.width / 2, close.y + close.height / 2, .Left)
 			testing.expect(t, hit.close && hit.target == app.Tab_Chrome_Tab{workspace.tabs[1].id})

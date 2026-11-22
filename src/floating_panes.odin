@@ -4,8 +4,9 @@ import "cosmos:input"
 import "aio:layout"
 import "cosmos:platform"
 import "cosmos:render"
-import "aio:ui"
+import "aio:views"
 import "core:log"
+import "cosmos:ui"
 
 // Floats (WORK-045). A float is a window of one or more panes above its tab's tiled panes, so opening,
 // moving, minimizing or closing it never resizes or reflows them. Its float header moves it, and holds
@@ -26,7 +27,7 @@ FLOAT_CAPSULE_MINIMUM :: f32(96)
 FLOAT_CAPSULE_MAXIMUM :: f32(200)
 // The strip along the top of every float, in DIPs. With every part of the frame outside its panes' cards
 // it forms the float header, which moves the float and holds its buttons.
-FLOAT_HEADER :: ui.HEADER_HEIGHT
+FLOAT_HEADER :: views.HEADER_HEIGHT
 
 // What a point on a float header does.
 Float_Header_Action :: enum u8 {

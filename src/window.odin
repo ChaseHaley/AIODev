@@ -10,9 +10,10 @@ import "cosmos:platform"
 import "cosmos:render"
 import "aio:term"
 import "aio:term_view"
-import "aio:ui"
+import "aio:views"
 import "core:log"
 import "core:time"
+import "cosmos:ui"
 
 // perf is used only when FRAME_STATS is set.
 _ :: perf
@@ -467,7 +468,7 @@ window_relayout :: proc(app: ^App, w: ^Window) {
 	window_dock_reserve(app, w)
 	workspace_picker_layout_changed(w)
 	if palette_visible(app, w) {
-		ui.palette_fit(&app.palette, f32(w.width), f32(w.height), w.scale)
+		views.palette_fit(&app.palette, f32(w.width), f32(w.height), w.scale)
 	}
 	if w.phase == .Preparing || window_minimized(w) {
 		// A change the window cannot show now does not move when it is shown later.
@@ -528,7 +529,7 @@ window_panes_placed :: proc(app: ^App, w: ^Window, first: int) {
 	window_views_prune(w)
 	for pane in w.panes[first:] {
 		pane_fit(app, w, pane)
-		for &view in w.views {if view.content == pane.content {view.valid = false}}
+		for &view in w.pane_views {if view.content == pane.content {view.valid = false}}
 	}
 	floating_capsules_refresh(app, w)
 	// Any pane's room can change when one moves, so every pane's buttons are measured again.
@@ -542,12 +543,12 @@ window_panes_placed :: proc(app: ^App, w: ^Window, first: int) {
 // Releases the views of content the window no longer shows.
 @(private)
 window_views_prune :: proc(w: ^Window) {
-	for i := len(w.views) - 1; i >= 0; i -= 1 {
+	for i := len(w.pane_views) - 1; i >= 0; i -= 1 {
 		visible := false
-		for pane in w.panes {visible ||= pane.content == w.views[i].content}
+		for pane in w.panes {visible ||= pane.content == w.pane_views[i].content}
 		if visible {continue}
-		pane_view_destroy(&w.views[i])
-		ordered_remove(&w.views, i)
+		pane_view_destroy(&w.pane_views[i])
+		ordered_remove(&w.pane_views, i)
 	}
 }
 
@@ -559,7 +560,7 @@ pane_fit :: proc(app: ^App, w: ^Window, pane: layout.Pane_Rect) {
 		if pane.content.kind == .Neovim {neovim_pane_fit(app, w, pane)}
 		if pane_view(w, pane.content) == nil {
 			cached, _ := pane_view_create(pane.content, false)
-			if _, err := append(&w.views, cached); err != nil {
+			if _, err := append(&w.pane_views, cached); err != nil {
 				log.error("storing a pane's header state failed")
 			}
 		}
@@ -585,7 +586,7 @@ pane_fit :: proc(app: ^App, w: ^Window, pane: layout.Pane_Rect) {
 			log.error("creating a terminal view failed")
 			return
 		}
-		if _, err := append(&w.views, cached); err != nil {
+		if _, err := append(&w.pane_views, cached); err != nil {
 			pane_view_destroy(&cached)
 			log.error("storing a terminal view failed")
 		}
@@ -595,7 +596,7 @@ pane_fit :: proc(app: ^App, w: ^Window, pane: layout.Pane_Rect) {
 // The one lookup of the state a window keeps for the pane showing `content`; nil when it has none.
 @(private)
 pane_view :: proc(w: ^Window, content: layout.Content) -> ^Pane_View {
-	for &pane in w.views {
+	for &pane in w.pane_views {
 		if pane.content == content {
 			return &pane
 		}
@@ -788,7 +789,7 @@ build_frame :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 	if result := hidden_panes_draw(app, w); result != .Ok {return result}
 	if result := arrange_card_draw(app, w); result != .Ok {return result}
 	if palette_visible(app, w) {
-		result := ui.palette_draw(
+		result := views.palette_draw(
 			&app.palette, &w.list, &w.ui_text, app.theme, size.x, size.y, w.scale,
 			ui.presence_fade(app.palette.presence, ui.RISE_DIALOG * w.scale), w.pointer,
 		)
@@ -920,7 +921,7 @@ pane_draw :: proc(app: ^App, w: ^Window, pane: layout.Pane_Rect, blinking: ^bool
 	if card < len(w.list.rects) {w.list.rects[card].color = background}
 	if entry != nil && entry.status != .Running {
 		message := session_message(app, entry.profile_id, term.status(entry.session))
-		if message_result := ui.pane_message_draw(
+		if message_result := views.pane_message_draw(
 			&w.list,
 			&w.ui_text,
 			app.theme,
@@ -997,7 +998,7 @@ build_pane :: proc(
 ) {
 	clip := render.Rect{pane.rect.x, pane.rect.y, pane.rect.width, pane.rect.height}
 	radius := window_pane_radius(app, w)
-	for &cached in w.views {
+	for &cached in w.pane_views {
 		if cached.content != pane.content {continue}
 		if len(w.panes) == 1 {
 			if render.push_layer(&w.list, clip, radius) != .None {return {}, .Ok}

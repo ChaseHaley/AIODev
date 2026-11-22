@@ -3,9 +3,9 @@ package app_test
 import app "../../src"
 import "cosmos:platform"
 import "cosmos:render"
-import "aio:ui"
 import "aio:term"
 import "core:testing"
+import "cosmos:ui"
 
 // The find bar floats over the docked Activity panel. Hover, cursor and press must all reach the find
 // bar there, and the panel must see the pointer leave.

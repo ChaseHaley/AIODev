@@ -7,7 +7,7 @@ import app "../../src"
 import "aio:layout"
 import "cosmos:pixels"
 import "cosmos:render"
-import "aio:ui"
+import "cosmos:ui"
 
 // A width x height PNG whose pixels are all opaque `colour`, written and read back through
 // pixels.png_write; the caller deletes it.

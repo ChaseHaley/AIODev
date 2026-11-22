@@ -2,7 +2,7 @@ package main
 
 import "aio:layout"
 import "aio:markdown"
-import "aio:ui"
+import "aio:views"
 import "core:log"
 import "core:os"
 import "core:time"
@@ -84,7 +84,7 @@ markdown_edit_begin :: proc(app: ^App, w: ^Window, pane: ^Markdown_Pane) {
 	top := 0
 	if shown, found := markdown_pane_rect(w, pane.id); found {
 		g := markdown_geometry_of(app, w, shown)
-		top = ui.markdown_offset_at(&pane.view, &loaded.document, g, g.left, g.area.y)
+		top = views.markdown_offset_at(&pane.view, &loaded.document, g, g.left, g.area.y)
 	}
 	// The properties stay rendered: the caret starts in the text below them.
 	text := textedit.to_string(&e.buffer)
@@ -92,7 +92,7 @@ markdown_edit_begin :: proc(app: ^App, w: ^Window, pane: ^Markdown_Pane) {
 	textedit.move(&e.buffer, max(body, markdown.document_source(&loaded.document, top)))
 	e.reveal = true
 	pane.editor = e
-	ui.markdown_selection_clear(&pane.view)
+	views.markdown_selection_clear(&pane.view)
 	markdown_editor_sync(pane)
 }
 
@@ -127,7 +127,7 @@ markdown_edit_end :: proc(app: ^App, pane: ^Markdown_Pane) {
 	}
 	markdown_editor_destroy(e)
 	pane.revision += 1
-	ui.markdown_selection_clear(&pane.view)
+	views.markdown_selection_clear(&pane.view)
 	markdown.search_restart(&pane.search)
 }
 
@@ -156,9 +156,9 @@ markdown_editor_sync :: proc(pane: ^Markdown_Pane) {
 		pane.revision += 1
 		markdown.search_restart(&pane.search)
 	}
-	ui.markdown_select_at(&pane.view, markdown.live_display(&e.document, b.anchor), false)
+	views.markdown_select_at(&pane.view, markdown.live_display(&e.document, b.anchor), false)
 	caret := markdown.live_display(&e.document, b.caret)
-	ui.markdown_select_at(&pane.view, caret, true)
+	views.markdown_select_at(&pane.view, caret, true)
 	// A caret has nowhere to show in a folded section, so moving into one unfolds it.
 	_ = markdown_fold_reveal(pane, caret)
 }
@@ -239,7 +239,7 @@ markdown_follow_edits :: proc(app: ^App, pane: ^Markdown_Pane) {
 		loaded.document, loaded.source = next, source
 		pane.revision += 1
 		pane.followed = followed
-		ui.markdown_selection_clear(&pane.view)
+		views.markdown_selection_clear(&pane.view)
 		markdown.search_restart(&pane.search)
 		return
 	}
@@ -317,12 +317,12 @@ markdown_task_toggle :: proc(app: ^App, pane: ^Markdown_Pane, mark: int) {
 markdown_edit_point :: proc(
 	w: ^Window,
 	pane: ^Markdown_Pane,
-	g: ui.Markdown_Geometry,
+	g: views.Markdown_Geometry,
 	x, y: f32,
 	extend: bool,
 ) -> int {
 	e := pane.editor
-	offset := ui.markdown_offset_at(&pane.view, &e.document, g, x, y)
+	offset := views.markdown_offset_at(&pane.view, &e.document, g, x, y)
 	textedit.move(&e.buffer, markdown.live_source(&e.document, offset), extend)
 	e.goal_x = -1
 	markdown_editor_sync(pane)
@@ -356,13 +356,13 @@ markdown_edit_unit :: proc(
 markdown_edit_unit_drag :: proc(
 	w: ^Window,
 	pane: ^Markdown_Pane,
-	g: ui.Markdown_Geometry,
+	g: views.Markdown_Geometry,
 	x, y: f32,
 	unit: textedit.Unit,
 	from, to: int,
 ) {
 	e := pane.editor
-	offset := ui.markdown_offset_at(&pane.view, &e.document, g, x, y)
+	offset := views.markdown_offset_at(&pane.view, &e.document, g, x, y)
 	textedit.select_unit(&e.buffer, from, to, unit, markdown.live_source(&e.document, offset))
 	e.goal_x = -1
 	markdown_editor_sync(pane)
@@ -371,7 +371,7 @@ markdown_edit_unit_drag :: proc(
 
 // The pane laid out as its next draw lays it out, so keys that move by lines see the lines shown.
 @(private = "file")
-markdown_edit_fitted :: proc(app: ^App, w: ^Window, pane: ^Markdown_Pane) -> (ui.Markdown_Geometry, bool) {
+markdown_edit_fitted :: proc(app: ^App, w: ^Window, pane: ^Markdown_Pane) -> (views.Markdown_Geometry, bool) {
 	shown, found := markdown_pane_rect(w, pane.id)
 	if !found {return {}, false}
 	g := markdown_geometry_of(app, w, shown)
@@ -394,16 +394,16 @@ markdown_edit_vertical :: proc(
 	if !fitted {return}
 	view := &pane.view
 	display := markdown.live_display(&e.document, e.buffer.caret)
-	rect, row, found := ui.markdown_caret_at(view, &e.document, display)
+	rect, row, found := views.markdown_caret_at(view, &e.document, display)
 	if !found {return}
 	// The row's own extent, not the caret's, which is only text high on a blank line's gap.
-	row_top, row_height := ui.markdown_line_band(view, row)
+	row_top, row_height := views.markdown_line_band(view, row)
 	x := e.goal_x >= 0 ? e.goal_x : rect.x
 	y := row_top + row_height / 2
 	if pages != 0 {
-		page := g.area.height - f32(ui.markdown_line(view))
+		page := g.area.height - f32(views.markdown_line(view))
 		y += f32(pages) * page
-		_ = ui.markdown_scroll_by(view, int(f32(pages) * page), int(g.area.height))
+		_ = views.markdown_scroll_by(view, int(f32(pages) * page), int(g.area.height))
 	} else {
 		y = lines < 0 ? row_top - 1 : row_top + row_height + 1
 	}
@@ -414,7 +414,7 @@ markdown_edit_vertical :: proc(
 	case y >= view.height:
 		target = len(e.buffer.text)
 	case:
-		target = markdown.live_source(&e.document, ui.markdown_offset_near(view, &e.document, x, y))
+		target = markdown.live_source(&e.document, views.markdown_offset_near(view, &e.document, x, y))
 	}
 	textedit.move(&e.buffer, target, extend)
 	markdown_editor_sync(pane)
@@ -431,7 +431,7 @@ markdown_edit_row_edge :: proc(app: ^App, w: ^Window, pane: ^Markdown_Pane, end,
 	if _, fitted := markdown_edit_fitted(app, w, pane); fitted {
 		document := &e.document
 		display := markdown.live_display(document, b.caret)
-		if start, stop, found := ui.markdown_row_edges(&pane.view, document, display); found {
+		if start, stop, found := views.markdown_row_edges(&pane.view, document, display); found {
 			row_start, row_end = markdown.live_source(document, start), markdown.live_source(document, stop)
 		}
 	}
@@ -461,7 +461,7 @@ markdown_edit_key :: proc(app: ^App, w: ^Window, pane: ^Markdown_Pane, key: Cont
 		markdown_editor_sync(pane)
 	case .Scroll:
 		if shown, found := markdown_pane_rect(w, pane.id); found {
-			markdown_scroll(w, pane, shown, result.lines * ui.markdown_line(&pane.view))
+			markdown_scroll(w, pane, shown, result.lines * views.markdown_line(&pane.view))
 		}
 	}
 	w.dirty = true
@@ -475,11 +475,11 @@ markdown_edit_menu_open :: proc(
 	app: ^App,
 	w: ^Window,
 	pane: ^Markdown_Pane,
-	g: ui.Markdown_Geometry,
+	g: views.Markdown_Geometry,
 	x, y: f32,
 ) {
 	e := pane.editor
-	at := markdown.live_source(&e.document, ui.markdown_offset_at(&pane.view, &e.document, g, x, y))
+	at := markdown.live_source(&e.document, views.markdown_offset_at(&pane.view, &e.document, g, x, y))
 	from, to := textedit.selection(&e.buffer)
 	if from == to || at < from || at > to {
 		textedit.move(&e.buffer, at)

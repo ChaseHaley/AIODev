@@ -2,7 +2,7 @@ package main
 
 import "cosmos:input"
 import "cosmos:render"
-import "aio:ui"
+import "cosmos:ui"
 
 // The title bar's own controls, left to right after the tab orientation toggle and the Activity panel
 // toggle. None is no control, for hover and press state.

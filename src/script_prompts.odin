@@ -2,10 +2,11 @@ package main
 
 import "aio:commands"
 import "aio:events"
-import "aio:ui"
+import "aio:views"
 import "core:encoding/json"
 import "core:strings"
 import "core:unicode/utf8"
+import "cosmos:ui"
 
 // A window has at most one script question. The UI owns the displayed strings through its close.
 Script_Prompt :: struct {
@@ -64,7 +65,7 @@ script_prompt_select :: proc(app: ^App, ctx: Command_Context, invocation: comman
 	w := script_prompt_window(app, ctx, invocation)
 	if w == nil {return outcome_failure(.Failed, "no window is open")}
 	allocator := app.palette.results.allocator
-	owned, allocation_error := make([]ui.Palette_Item, len(items), allocator)
+	owned, allocation_error := make([]views.Palette_Item, len(items), allocator)
 	if allocation_error != nil {return outcome_failure(.Failed, "not enough memory for the prompt")}
 	transferred := false
 	defer if !transferred {

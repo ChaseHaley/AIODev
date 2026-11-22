@@ -7,10 +7,11 @@ import "aio:localpath"
 import "cosmos:render"
 import "aio:settings"
 import "aio:term"
-import "aio:ui"
+import "aio:views"
 import "core:fmt"
 import "core:log"
 import "core:strings"
+import "cosmos:ui"
 
 Pane_Header_Metadata :: struct {
 	executable, title, directory: string,
@@ -108,9 +109,9 @@ Pane_Header_Button :: enum u8 {
 
 // What a point on a pane header does: a button, the shell badge's menu, or nil for the title, which
 // focuses and drags the pane.
-Pane_Header_Target :: ui.Header_Target(Pane_Header_Button)
+Pane_Header_Target :: views.Header_Target(Pane_Header_Button)
 
-Pane_Header_Layout :: ui.Header_Layout(Pane_Header_Button)
+Pane_Header_Layout :: views.Header_Layout(Pane_Header_Button)
 
 @(private = "file")
 PANE_HEADER_TILED :: bit_set[Pane_Header_Button] {
@@ -158,10 +159,10 @@ pane_header_layout :: proc(w: ^Window, pane: layout.Pane_Rect) -> Pane_Header_La
 	ends := PANE_HEADER_GROUP_ENDS
 	// Without a Commands button, Links ends the first group.
 	if .Commands not_in shown {ends += {.Links}}
-	widget := hidden_panes_glyph_shown(w, pane) ? ui.HIDDEN_PANES_GLYPH_BOX : [2]f32{}
+	widget := hidden_panes_glyph_shown(w, pane) ? views.HIDDEN_PANES_GLYPH_BOX : [2]f32{}
 	aside: f32
 	if view := pane_view(w, pane.content); view != nil {aside = view.header_status.value}
-	return ui.header_layout(area, w.scale, shown, ends, PANE_HEADER_DROP_ORDER[:], widget, aside)
+	return views.header_layout(area, w.scale, shown, ends, PANE_HEADER_DROP_ORDER[:], widget, aside)
 }
 
 // The view of the pane's container, which its Zoom and Fill window buttons show.
@@ -231,7 +232,7 @@ pane_header_command :: proc(button: Pane_Header_Button) -> (Action, bool) {
 
 // What a header control's tooltip says it does, which can depend on the pane's view.
 pane_header_tooltip :: proc(w: ^Window, pane: layout.Pane_Rect, target: Pane_Header_Target) -> string {
-	if _, badge := target.(ui.Header_Badge); badge && pane_content_menu_available(pane.content.kind) {
+	if _, badge := target.(views.Header_Badge); badge && pane_content_menu_available(pane.content.kind) {
 		return "Change pane content"
 	}
 	button, ok := target.(Pane_Header_Button)
@@ -273,7 +274,7 @@ pane_header_draw :: proc(
 	l := pane_header_layout(w, pane)
 	open := pane_header_documents_open(w, pane)
 	commands_open := command_menu_shown_for(w, pane.content)
-	buttons: [Pane_Header_Button]ui.Header_Button
+	buttons: [Pane_Header_Button]views.Header_Button
 	view := pane_view(w, pane.content)
 	for &face, button in buttons {
 		face.icon = pane_header_icon(w, pane, button)
@@ -295,7 +296,7 @@ pane_header_draw :: proc(
 	badge, result := content_badge(app, entry, pane.content, ui.ICON_BUTTON * w.scale)
 	change_content := pane_content_menu_available(pane.content.kind)
 	if result != .Ok {return result}
-	status: ui.Status_Mark
+	status: views.Status_Mark
 	status_text: string
 	if reporter := content_status(app, pane.content, entry);
 	   reporter != nil && .Pane_Headers in app.settings.status.surfaces {
@@ -308,7 +309,7 @@ pane_header_draw :: proc(
 		aside = view.header_status.value
 	}
 	r := pane.rect
-	result = ui.header_draw(
+	result = views.header_draw(
 		&w.list,
 		&w.ui_text,
 		app.theme,
@@ -340,7 +341,7 @@ pane_header_draw :: proc(
 // The most urgent status `entry`'s programs report and the line that names it, in temporary memory: the
 // headline, then the program's message after a dot; a working program without progress shows its message
 // alone. No mark and an empty line when nothing reports.
-pane_status_line :: proc(app: ^App, entry: ^Session_Entry) -> (ui.Status_Mark, string) {
+pane_status_line :: proc(app: ^App, entry: ^Session_Entry) -> (views.Status_Mark, string) {
 	summary: Status_Summary
 	status_summary_add(app, &summary, entry)
 	if !summary.found {return {}, ""}
@@ -391,7 +392,7 @@ pane_header_hit :: proc(w: ^Window, x, y: f32) -> (layout.Pane_Rect, Pane_Header
 	pane, found := layout.hit_test(w.panes[:], x, y)
 	if !found {return {}, nil, false}
 	l := pane_header_layout(w, pane)
-	if ui.header_contains(l, x, y) {return pane, ui.header_hit_test(l, x, y), true}
+	if views.header_contains(l, x, y) {return pane, views.header_hit_test(l, x, y), true}
 	return {}, nil, false
 }
 
@@ -403,13 +404,13 @@ pane_header_menu_anchor :: proc(w: ^Window, pane: layout.Pane_Rect, button: Pane
 	width := ui.MENU_WIDTH * s
 	face := pane_header_layout(w, pane).buttons[button]
 	if face.width == 0 {
-		return {r.x + r.width - width - ui.SPACE_2 * s, r.y + ui.HEADER_HEIGHT * s + ui.SPACE_1 * s}
+		return {r.x + r.width - width - ui.SPACE_2 * s, r.y + views.HEADER_HEIGHT * s + ui.SPACE_1 * s}
 	}
 	return {face.x + face.width - width, face.y + face.height + ui.SPACE_1 * s}
 }
 
 pane_header_cancel :: proc(w: ^Window) {
-	for &view in w.views {
+	for &view in w.pane_views {
 		view.header_hover = nil
 		ui.armed_cancel(&view.header_armed)
 	}
@@ -418,7 +419,7 @@ pane_header_cancel :: proc(w: ^Window) {
 // A relayout moves every header, so each drops its hover and press and its buttons restart at rest.
 pane_header_relayout_reset :: proc(w: ^Window) {
 	pane_header_cancel(w)
-	for &view in w.views {view.header_controls = {}}
+	for &view in w.pane_views {view.header_controls = {}}
 }
 
 // Advances every header button's hover and press, and slides each placed header's program status to
@@ -426,7 +427,7 @@ pane_header_relayout_reset :: proc(w: ^Window) {
 // not draw last time lands at once, so it appears in place.
 pane_header_controls_animate :: proc(app: ^App, w: ^Window, frame: ui.Frame_Time) -> bool {
 	changed := false
-	for &pane in w.views {
+	for &pane in w.pane_views {
 		for &control, button in pane.header_controls {
 			hovered, armed := pane.header_hover == button, ui.armed_is(pane.header_armed, button)
 			changed = ui.control_update(&control, hovered, armed, app.animations, frame) || changed
@@ -438,13 +439,13 @@ pane_header_controls_animate :: proc(app: ^App, w: ^Window, frame: ui.Frame_Time
 		menu_open := pane_header_documents_open(w, rect) || command_menu_shown_for(w, rect.content)
 		aside := !pane_header_buttons_shown(w, rect, menu_open)
 		animate := app.animations && pane.header_status_drawn
-		changed = ui.header_status_update(&pane.header_status, aside, animate, frame) || changed
+		changed = views.header_status_update(&pane.header_status, aside, animate, frame) || changed
 	}
 	return changed
 }
 
 pane_header_controls_animating :: proc(w: ^Window) -> bool {
-	for pane in w.views {
+	for pane in w.pane_views {
 		if ui.motion_active(pane.header_status) {return true}
 		for control in pane.header_controls {if ui.control_active(control) {return true}}
 	}
@@ -468,7 +469,7 @@ pane_header_press :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) {
 	}
 	if e.button != .Left {return}
 	pane_focus(app, w, pane.node)
-	if _, badge := target.(ui.Header_Badge); badge {
+	if _, badge := target.(views.Header_Badge); badge {
 		if !pane_content_menu_available(pane.content.kind) {return}
 		profile_menu_open_pane(app, w, pane)
 		return
@@ -501,7 +502,7 @@ pane_header_release :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) 
 		_ = pane_drag_release(app, w)
 	}
 	chosen: Pane_Header_Target
-	for &view in w.views {
+	for &view in w.pane_views {
 		if e.button == .Left {
 			released: Pane_Header_Target
 			if hit && view.content == pane.content {released = target}
@@ -520,10 +521,10 @@ pane_header_pointer :: proc(w: ^Window, x, y: f32, enabled: bool) -> (bool, Pane
 	pane, target, hit := pane_header_hit(w, x, y)
 	if button, is_button := target.(Pane_Header_Button);
 	   is_button && hit && pane_header_refused(w, pane, button) != .None {target = nil}
-	if _, badge := target.(ui.Header_Badge); badge && !pane_content_menu_available(pane.content.kind) {
+	if _, badge := target.(views.Header_Badge); badge && !pane_content_menu_available(pane.content.kind) {
 		target = nil
 	}
-	for &view in w.views {
+	for &view in w.pane_views {
 		hover: Pane_Header_Target
 		if enabled && hit && view.content == pane.content {hover = target}
 		if hover != view.header_hover {view.header_hover = hover; w.dirty = true}

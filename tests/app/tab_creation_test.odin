@@ -4,8 +4,9 @@ import app "../../src"
 import "cosmos:input"
 import "cosmos:render"
 import "aio:settings"
-import "aio:ui"
+import "aio:views"
 import "core:testing"
+import "cosmos:ui"
 
 @(test)
 profile_menu_matches_configured_settings_rows :: proc(t: ^testing.T) {
@@ -26,9 +27,9 @@ profile.order = default, cmd, windows-powershell, pwsh, hidden
 	testing.expect_value(t, settings.profile_detect(
 		&s.settings, {"pwsh", "PowerShell 7", "pwsh.exe -NoLogo", "~"},
 	), nil)
-	table, table_error := ui.profile_table_build(&s.settings.profiles)
+	table, table_error := views.profile_table_build(&s.settings.profiles)
 	if !testing.expect_value(t, table_error, nil) {return}
-	defer ui.profile_table_destroy(&table)
+	defer views.profile_table_destroy(&table)
 	testing.expect_value(t, len(table.rows), 4)
 	w: app.Window
 	app.profile_menu_init(&w.profile_menu)

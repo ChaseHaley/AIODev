@@ -3,7 +3,7 @@ package main
 import "aio:commands"
 import "aio:layout"
 import "cosmos:render"
-import "aio:ui"
+import "aio:views"
 
 // Why the window would refuse a pane header button for a pane. A refused button draws disabled, takes no
 // press, and its tooltip says why.
@@ -103,7 +103,7 @@ pane_preview_of :: proc(
 	fill: layout.Pane_Fill,
 	solo: bool,
 	node: layout.Node_Id,
-) -> ui.Pane_Preview {
+) -> views.Pane_Preview {
 	g := window_geometry(app, w, fill)
 	rects := make([dynamic]layout.Pane_Rect, 0, len(trial.nodes), context.temp_allocator)
 	layout.place_shown(trial, g, solo, &rects)
@@ -117,7 +117,7 @@ pane_preview_rects :: proc(
 	title: f32,
 	rects: []layout.Pane_Rect,
 	node: layout.Node_Id,
-) -> ui.Pane_Preview {
+) -> views.Pane_Preview {
 	panes := make([]render.Rect, len(rects), context.temp_allocator)
 	chosen := -1
 	for pane, i in rects {

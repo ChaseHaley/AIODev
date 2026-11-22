@@ -3,7 +3,7 @@ package main
 import "aio:layout"
 import "cosmos:platform"
 import "cosmos:render"
-import "aio:ui"
+import "cosmos:ui"
 
 // What a window's surfaces keep: the one showing, and the storage the menus and name fields reuse while
 // one shows. Window embeds it; overlay_surfaces_init and overlay_surfaces_destroy are its lifetime.

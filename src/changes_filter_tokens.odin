@@ -3,10 +3,11 @@ package main
 import "cosmos:fuzzy"
 import "cosmos:input"
 import "aio:settings"
-import "aio:ui"
+import "aio:views"
 import "core:strings"
 import "core:unicode"
 import "core:unicode/utf8"
+import "cosmos:ui"
 
 // Saved filters in the diff filter's field (changes_filter.odin has the grammar): the field's @ button, or
 // an `@` typed in it, lists the saved filters; a token is clicked, or toggled with Space while selected, to
@@ -134,7 +135,7 @@ changes_filter_picks_build :: proc(pane: ^Changes_Pane) {
 			if changes_filter_has_token(pane, filter.id) {continue}
 			if query != "" && fuzzy.classify(query, label) != class {continue}
 			if query == "" && class != .Exact {continue}
-			pick := ui.Filter_Pick {
+			pick := views.Filter_Pick {
 				id      = filter.id,
 				label   = label,
 				pattern = filter.pattern,
@@ -312,19 +313,19 @@ changes_filter_toggle_selected :: proc(app: ^App, w: ^Window, pane: ^Changes_Pan
 // caret goes under the pointer or the selection extends to it.
 @(private)
 changes_filter_point :: proc(
-	app: ^App, w: ^Window, pane: ^Changes_Pane, g: ui.Changes_Geometry, x: f32, pressed, extend: bool,
+	app: ^App, w: ^Window, pane: ^Changes_Pane, g: views.Changes_Geometry, x: f32, pressed, extend: bool,
 	time_ns := i64(0),
 ) {
-	box, visible := ui.changes_filter_box(g, &pane.model.view, &w.ui_text)
+	box, visible := views.changes_filter_box(g, &pane.model.view, &w.ui_text)
 	if !visible {return}
 	if pressed {
-		if index, close := ui.filter_field_token_at(box, pane.filter_tokens[:], x); index >= 0 {
+		if index, close := views.filter_field_token_at(box, pane.filter_tokens[:], x); index >= 0 {
 			if close {changes_filter_remove(app, w, pane, index)} else {changes_filter_toggle(app, w, pane, index)}
 			return
 		}
 		if pane.filter_typing && pane.filter_pending >= 0 {changes_filter_typing_end(app, w, pane)}
 	}
-	at := ui.filter_field_offset(box, pane.filter_tokens[:], x)
+	at := views.filter_field_offset(box, pane.filter_tokens[:], x)
 	change := pressed ? field_press(&pane.filter_editor, at, x, extend, time_ns) :
 		ui.field_pointer(&pane.filter_editor, at, false, extend)
 	if change != .None {w.dirty = true}

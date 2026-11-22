@@ -1,21 +1,22 @@
 package main
 
 import "aio:settings"
-import "aio:ui"
+import "aio:views"
 import "core:fmt"
+import "cosmos:ui"
 
 // Saves the selected Motion row: one context's text, or a curve or preset change.
 editor_motion_save :: proc(app: ^App, w: ^Window, reset: bool) {
 	p := &w.editor
-	change, problem := ui.editor_motion_change(p, reset)
+	change, problem := views.editor_motion_change(p, reset)
 	if problem != "" {
-		ui.editor_message(p, problem, true)
+		views.editor_message(p, problem, true)
 		return
 	}
 	result: Settings_Result
 	text := "Saved and applied."
 	switch c in change {
-	case ui.Motion_Text:
+	case views.Motion_Text:
 		result = settings_change(app, Setting_Value{c.key, c.value}, Settings_Page{p})
 	case settings.Motion_Mutation:
 		// The names are temporary copies, so the text outlives the page publication rebuilds.
@@ -40,8 +41,8 @@ editor_motion_save :: proc(app: ^App, w: ^Window, reset: bool) {
 	if !settings_page_report(p, result, .Motion) {
 		// Nothing changed in the file, so the page was not rebuilt: show the row's value again, which
 		// also clears Save as Preset after saving a preset identical to the one it replaces.
-		if row := ui.editor_row(p); result.status == .Unchanged && row != nil {ui.field_set(&p.value, row.value)}
+		if row := views.editor_row(p); result.status == .Unchanged && row != nil {ui.field_set(&p.value, row.value)}
 		return
 	}
-	ui.editor_message(p, text, false)
+	views.editor_message(p, text, false)
 }

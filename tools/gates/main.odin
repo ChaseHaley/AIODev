@@ -19,7 +19,7 @@ Exit codes: 0 planned, 2 no paths or bad arguments.
 // the performance gate and are validated alone rather than in a batch. Cosmos's packages reach AIODev
 // through tools/cosmos.json, which owes every gate.
 UI_PREFIXES :: []string {
-	"src/ui/",
+	"src/views/",
 	"src/term_view/",
 	"src/layout/",
 	"src/commands/",

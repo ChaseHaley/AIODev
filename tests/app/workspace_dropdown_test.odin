@@ -5,7 +5,7 @@ import "base:runtime"
 import "core:testing"
 import "core:unicode/utf8"
 import app "../../src"
-import "aio:ui"
+import "cosmos:ui"
 
 @(test)
 workspace_dropdown_geometry_keeps_anchor_divider_and_rows_at_dpi :: proc(t: ^testing.T) {

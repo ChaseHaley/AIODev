@@ -3,7 +3,7 @@ package app_test
 import "cosmos:input"
 import "core:testing"
 import app "../../src"
-import "aio:ui"
+import "cosmos:ui"
 
 @(test)
 overlay_rename_replaces_tab_menu_and_receives_text_and_keys :: proc(t: ^testing.T) {

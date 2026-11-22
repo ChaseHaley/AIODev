@@ -1,12 +1,12 @@
 package main
 
 import "aio:layout"
-import "aio:ui"
+import "aio:views"
 
 Workspace_View_Resources :: struct {
 	workspace: ^Workspace,
-	editor: ui.Editor,
-	views: [dynamic]Pane_View,
+	editor: views.Editor,
+	pane_views: [dynamic]Pane_View,
 	using presentation: Tab_Presentation,
 	panes: [dynamic]layout.Pane_Rect,
 	dividers: [dynamic]layout.Divider,
@@ -23,14 +23,14 @@ workspace_view_tree :: proc(resources: ^Workspace_View_Resources) -> ^layout.Lay
 @(require_results)
 workspace_view_init :: proc(app: ^App, resources: ^Workspace_View_Resources, workspace: ^Workspace) -> bool {
 	resources.workspace = workspace
-	resources.views = make([dynamic]Pane_View)
+	resources.pane_views = make([dynamic]Pane_View)
 	resources.panes = make([dynamic]layout.Pane_Rect)
 	tab_presentation_init(&resources.presentation)
 	if settings_tab_index(workspace) >= 0 && !settings_load(app, &resources.editor, &workspace.settings_view) {
 		workspace_view_destroy(resources)
 		return false
 	}
-	ui.editor_view_destroy(&workspace.settings_view)
+	views.editor_view_destroy(&workspace.settings_view)
 	resources.editor.scroll = int(workspace.settings_scroll)
 	resources.editor.scroll_fraction = workspace.settings_scroll - f32(resources.editor.scroll)
 	return true
@@ -51,24 +51,24 @@ workspace_view_prepare :: proc(
 	if !tab_presentation_resize(&resources.presentation, len(workspace.tabs)) ||
 	   reserve(&resources.panes, len(tree.nodes)) != nil ||
 	   reserve(&resources.dividers, len(tree.nodes)) != nil ||
-	   reserve(&resources.views, len(tree.nodes)) != nil {return false}
+	   reserve(&resources.pane_views, len(tree.nodes)) != nil {return false}
 	walk := workspace_tab_panes(app, tree, resources.workspace.selected)
 	for pane, ok := workspace_pane_next(&walk); ok; pane, ok = workspace_pane_next(&walk) {
 		entry, created := pane_view_create(pane.content, pane.session != nil)
 		if !created {return false}
-		append(&resources.views, entry)
+		append(&resources.pane_views, entry)
 	}
 	prepared = true
 	return true
 }
 
 workspace_view_destroy :: proc(resources: ^Workspace_View_Resources) {
-	for &pane in resources.views {pane_view_destroy(&pane)}
-	delete(resources.views)
+	for &pane in resources.pane_views {pane_view_destroy(&pane)}
+	delete(resources.pane_views)
 	tab_presentation_destroy(&resources.presentation)
 	delete(resources.panes)
 	delete(resources.dividers)
-	ui.editor_destroy(&resources.editor)
+	views.editor_destroy(&resources.editor)
 	resources^ = {}
 }
 
@@ -118,10 +118,10 @@ workspace_adopt :: proc(
 	overlay_close(app, w)
 	workspace_picker_cancel(w)
 	// Editor storage belongs to the window; its reading position and open rows belong to the workspace.
-	w.workspace.settings_scroll = ui.editor_scroll_lines(&w.editor)
-	ui.editor_view_destroy(&w.workspace.settings_view)
-	view, view_error := ui.editor_view_take(&w.editor)
-	if view_error == nil {w.workspace.settings_view = view} else {ui.editor_view_destroy(&view)}
+	w.workspace.settings_scroll = views.editor_scroll_lines(&w.editor)
+	views.editor_view_destroy(&w.workspace.settings_view)
+	view, view_error := views.editor_view_take(&w.editor)
+	if view_error == nil {w.workspace.settings_view = view} else {views.editor_view_destroy(&view)}
 	switch adoption {
 	case .Retain:
 		workspace_view_rebind(&w.resources, &prepared)

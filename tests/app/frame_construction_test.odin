@@ -50,7 +50,7 @@ window_failed_frame_keeps_dirty_and_cache_recovers :: proc(t: ^testing.T) {
 	// A failed pane cache must poison the enclosing frame without becoming a valid cached snapshot.
 	app.pane_split(s, w, .Right)
 	testing.expect_value(t, len(w.panes), 2)
-	cached := &w.views[0]
+	cached := &w.pane_views[0]
 	render.draw_list_destroy(&cached.cache)
 	cached.cache = render.draw_list_init(failing)
 	cached.valid = false

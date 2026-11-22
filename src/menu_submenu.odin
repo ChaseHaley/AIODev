@@ -2,8 +2,8 @@ package main
 
 import "cosmos:input"
 import "cosmos:render"
-import "aio:ui"
 import "core:time"
+import "cosmos:ui"
 
 // How long the pointer rests on a row before its submenu shows, Radix UI's open delay, so a sweep down the
 // menu does not flash each submenu it crosses. The keyboard opens one at once.

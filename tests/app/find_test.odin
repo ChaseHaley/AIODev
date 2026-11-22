@@ -10,7 +10,8 @@ import "aio:layout"
 import "cosmos:platform"
 import "aio:term"
 import "aio:term_view"
-import "aio:ui"
+import "aio:views"
+import "cosmos:ui"
 
 @(private)
 find_settle :: proc(t: ^testing.T, session: ^term.Session) {
@@ -49,8 +50,8 @@ find_headless_releases_finish_tab_and_divider_gestures :: proc(t: ^testing.T) {
 	defer {
 		delete(w.panes)
 		delete(w.dividers)
-		for &view in w.views {app.pane_view_destroy(&view)}
-		delete(w.views)
+		for &view in w.pane_views {app.pane_view_destroy(&view)}
+		delete(w.pane_views)
 	}
 	state: app.App
 	append(&state.windows, &w)
@@ -79,7 +80,7 @@ find_headless_releases_finish_tab_and_divider_gestures :: proc(t: ^testing.T) {
 	testing.expect_value(t, workspace.selected, 1)
 	testing.expect(t, !ui.armed_down(w.find.armed))
 	layout_state, _ := app.rail_current_layout(&w)
-	close := ui.rail_close_rect(layout_state, workspace.selected, w.scale)
+	close := views.rail_close_rect(layout_state, workspace.selected, w.scale)
 	app.handle_event(&state, input.Mouse_Button_Event{window = w.id, button = .Left, pressed = true,
 		x = i32(close.x+close.width/2), y = i32(close.y+close.height/2)})
 	selected := workspace.tabs[workspace.selected].id

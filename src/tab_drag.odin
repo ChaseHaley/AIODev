@@ -1,7 +1,8 @@
 package main
 
 import "cosmos:render"
-import "aio:ui"
+import "aio:views"
+import "cosmos:ui"
 
 tab_press :: proc(app: ^App, w: ^Window, index: int, x, y: f32, modified: bool, chip: u32 = 0) {
 	if index < 0 || index >= len(w.workspace.tabs) || !w.workspace.tabs[index].marked {return}
@@ -184,7 +185,7 @@ tab_drag_move_rail :: proc(app: ^App, w: ^Window, x, y: f32) -> bool {
 	// A whole group's block starts at its chip's row, above its first tab.
 	chip := f32(d.whole ? 1 : 0)
 	room := tab_drag_room(w, d, items, 1)
-	first_row := ui.rail_row_rect(layout, 0)
+	first_row := views.rail_row_rect(layout, 0)
 	start := clamp((y - first_row.y) / layout.row_height - d.offset.y - f32(d.rank) - chip, 0, room)
 	if !tab_drag_aim(app, w, d, items, start, 1) {return true}
 	tab_drag_follow_pointer(w, start + chip + (w.rail_scroll - layout.scroll) / layout.row_height)

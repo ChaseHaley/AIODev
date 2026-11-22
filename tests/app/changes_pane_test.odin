@@ -6,7 +6,7 @@ import "cosmos:platform"
 import "cosmos:render"
 import "aio:settings"
 import "aio:turns"
-import "aio:ui"
+import "aio:views"
 import "core:fmt"
 import "core:os"
 import "core:strings"
@@ -14,6 +14,7 @@ import "core:testing"
 import "core:time"
 import app "../../src"
 import "cosmos:textedit"
+import "cosmos:ui"
 
 @(private = "file")
 Fixture :: struct {
@@ -61,7 +62,7 @@ agent_changes_opens_another_pane_on_every_run :: proc(t: ^testing.T) {
 	app.run_action(&f.state, w, .Agent_Changes)
 	if !testing.expect_value(t, len(f.state.changes_panes), 1) {return}
 	pane := f.state.changes_panes[0]
-	testing.expect_value(t, pane.scope, ui.Changes_Scope.Uncommitted)
+	testing.expect_value(t, pane.scope, views.Changes_Scope.Uncommitted)
 	testing.expect_value(t, pane.agent.pane_key, f.state.sessions[0].key)
 	testing.expect_value(t, pane.side_by_side, false)
 	testing.expect(t, app.workspace_has_content(w.workspace, {.Changes, pane.id}))
@@ -81,7 +82,7 @@ agent_changes_opens_another_pane_on_every_run :: proc(t: ^testing.T) {
 	opened := f.state.changes_panes[1]
 	testing.expect(t, app.workspace_has_content(w.workspace, {.Changes, pane.id}))
 	testing.expect(t, app.workspace_has_content(w.workspace, {.Changes, opened.id}))
-	testing.expect_value(t, opened.scope, ui.Changes_Scope.Staged)
+	testing.expect_value(t, opened.scope, views.Changes_Scope.Staged)
 	testing.expect_value(t, opened.agent.pane_key, pane.agent.pane_key)
 	testing.expect_value(t, opened.agent.harness, "claude")
 	testing.expect_value(t, opened.agent.session, "s1")
@@ -124,7 +125,7 @@ layout_restore_keeps_a_changes_pane_with_its_agent_scope_and_directory :: proc(t
 	defer app.app_destroy(&second.state)
 	if !testing.expect_value(t, len(second.state.changes_panes), 1) {return}
 	restored := second.state.changes_panes[0]
-	testing.expect_value(t, restored.scope, ui.Changes_Scope.Staged)
+	testing.expect_value(t, restored.scope, views.Changes_Scope.Staged)
 	testing.expect_value(t, restored.directory, directory)
 	testing.expect_value(t, restored.agent.pane_key, pane_key)
 	testing.expect_value(t, restored.agent.harness, "codex")
@@ -196,17 +197,17 @@ the_file_list_and_the_layout_toggle_keep_the_picked_file_at_the_top :: proc(t: ^
 	testing.expect(t, !view.collapsed[2], "a picked file unfolds")
 	testing.expect(t, pane.state.diff_scroll > 0)
 	_ = app.changes_geometry_of(&f.state, w, pane, shown)
-	testing.expect_value(t, ui.changes_top_file(&pane.state, view), 2)
+	testing.expect_value(t, views.changes_top_file(&pane.state, view), 2)
 
 	app.changes_layout_toggle(&f.state, w, pane)
 	testing.expect_value(t, pane.side_by_side, true)
 	testing.expect_value(t, view.side_by_side, true)
 	_ = app.changes_geometry_of(&f.state, w, pane, shown)
-	testing.expect_value(t, ui.changes_top_file(&pane.state, view), 2)
+	testing.expect_value(t, views.changes_top_file(&pane.state, view), 2)
 	app.changes_layout_toggle(&f.state, w, pane)
 	testing.expect_value(t, pane.side_by_side, false)
 	_ = app.changes_geometry_of(&f.state, w, pane, shown)
-	testing.expect_value(t, ui.changes_top_file(&pane.state, view), 2)
+	testing.expect_value(t, views.changes_top_file(&pane.state, view), 2)
 }
 
 @(private = "file")
@@ -283,7 +284,7 @@ an_open_file_list_takes_typed_text_and_the_comment_draft_is_kept :: proc(t: ^tes
 	tap(&f.state, w, .Enter)
 	testing.expect_value(t, pane.state.files_open, false)
 	_ = app.changes_geometry_of(&f.state, w, pane, shown)
-	testing.expect_value(t, ui.changes_top_file(&pane.state, &pane.model.view), 2)
+	testing.expect_value(t, views.changes_top_file(&pane.state, &pane.model.view), 2)
 }
 
 @(test)
@@ -337,7 +338,7 @@ the_file_list_keeps_its_highlight_when_a_new_result_arrives :: proc(t: ^testing.
 	tap(&f.state, w, .Enter)
 	testing.expect_value(t, pane.state.files_open, false)
 	_ = app.changes_geometry_of(&f.state, w, pane, shown)
-	testing.expect_value(t, ui.changes_top_file(&pane.state, &pane.model.view), 3)
+	testing.expect_value(t, views.changes_top_file(&pane.state, &pane.model.view), 3)
 }
 
 @(test)
@@ -373,7 +374,7 @@ fold_all_and_the_sticky_header_keep_the_file_at_the_top :: proc(t: ^testing.T) {
 	testing.expect(t, view.any_expanded)
 	top_of :: proc(f: ^Fixture, w: ^app.Window, pane: ^app.Changes_Pane, shown: layout.Pane_Rect) -> int {
 		_ = app.changes_geometry_of(&f.state, w, pane, shown)
-		return ui.changes_top_file(&pane.state, &pane.model.view)
+		return views.changes_top_file(&pane.state, &pane.model.view)
 	}
 
 	// Collapsing every file keeps the file at the top there; expanding brings it back the same way.
@@ -391,23 +392,23 @@ fold_all_and_the_sticky_header_keep_the_file_at_the_top :: proc(t: ^testing.T) {
 	testing.expect_value(t, top_of(&f, w, pane, shown), 20)
 
 	// Collapsing from the pinned header puts that file's header at the top.
-	pane.state.diff_scroll = ui.changes_diff_file_top(&pane.state, view, 20) + 300
+	pane.state.diff_scroll = views.changes_diff_file_top(&pane.state, view, 20) + 300
 	g = app.changes_geometry_of(&f.state, w, pane, shown)
-	sticky, sticky_rect := ui.changes_sticky_header(&pane.state, view, g)
+	sticky, sticky_rect := views.changes_sticky_header(&pane.state, view, g)
 	if !testing.expect_value(t, sticky, 20) {return}
 	click(&f.state, w, sticky_rect)
 	testing.expect(t, view.collapsed[20])
 	testing.expect_value(t, top_of(&f, w, pane, shown), 20)
-	testing.expect_value(t, pane.state.diff_scroll, ui.changes_diff_file_top(&pane.state, view, 20))
+	testing.expect_value(t, pane.state.diff_scroll, views.changes_diff_file_top(&pane.state, view, 20))
 	g = app.changes_geometry_of(&f.state, w, pane, shown)
-	sticky, _ = ui.changes_sticky_header(&pane.state, view, g)
+	sticky, _ = views.changes_sticky_header(&pane.state, view, g)
 	testing.expect_value(t, sticky, -1)
 	// The file's own header, now under the pointer, keeps the hover the pinned one had.
-	testing.expect_value(t, pane.state.hover, ui.Changes_Hit{.File_Header, 20, 0})
-	testing.expect_value(t, pane.state.lit, ui.Changes_Hit{.File_Header, 20, 0})
+	testing.expect_value(t, pane.state.hover, views.Changes_Hit{.File_Header, 20, 0})
+	testing.expect_value(t, pane.state.lit, views.Changes_Hit{.File_Header, 20, 0})
 
 	// A header in its own place collapses without moving the diff.
-	pane.state.diff_scroll = ui.changes_diff_file_top(&pane.state, view, 2) - 100
+	pane.state.diff_scroll = views.changes_diff_file_top(&pane.state, view, 2) - 100
 	g = app.changes_geometry_of(&f.state, w, pane, shown)
 	before := pane.state.diff_scroll
 	click(&f.state, w, {g.diff.x + 40, g.diff.y + 102, 10, 4})
@@ -415,7 +416,7 @@ fold_all_and_the_sticky_header_keep_the_file_at_the_top :: proc(t: ^testing.T) {
 	testing.expect_value(t, pane.state.diff_scroll, before)
 
 	// A page leaves out the row a pinned header covers.
-	pane.state.diff_scroll = ui.changes_diff_file_top(&pane.state, view, 10)
+	pane.state.diff_scroll = views.changes_diff_file_top(&pane.state, view, 10)
 	g = app.changes_geometry_of(&f.state, w, pane, shown)
 	before = pane.state.diff_scroll
 	tap(&f.state, w, .Page_Down)
@@ -615,7 +616,7 @@ the_filter_popover_edits_the_filter_and_the_bar_clears_it :: proc(t: ^testing.T)
 	testing.expect_value(t, len(view.files), 4)
 	testing.expect_value(t, view.hidden_count, 0)
 	_ = app.changes_geometry_of(&f.state, w, pane, shown)
-	testing.expect_value(t, ui.changes_top_file(&pane.state, view), 1)
+	testing.expect_value(t, views.changes_top_file(&pane.state, view), 1)
 
 	// Editing the filter hides it again.
 	g = app.changes_geometry_of(&f.state, w, pane, shown)
@@ -808,7 +809,7 @@ every_control_says_what_it_does :: proc(t: ^testing.T) {
 	app.handle_event(&f.state, input.Key_Event{window = w.id, key = .Enter, modifiers = {.Control}, pressed = true})
 	if !testing.expect_value(t, len(pane.comments.items), 1) {return}
 	g = app.changes_geometry_of(&f.state, w, pane, shown)
-	send, copy_rect, discard := ui.changes_send_rects(g, view)
+	send, copy_rect, discard := views.changes_send_rects(g, view)
 	testing.expect(t, !view.send.can_send, "a shell is not an agent")
 	testing.expect_value(t, tooltip_at(&f, w, send), view.send.reason)
 	testing.expect(t, view.send.reason != "")
@@ -875,11 +876,11 @@ the_strip_markers_page_through_turns_it_cannot_show :: proc(t: ^testing.T) {
 	testing.expect(t, pane.state.panel_open && !pane.state.files_open)
 
 	g := app.changes_geometry_of(&f.state, w, pane, shown)
-	marker :: proc(g: ui.Changes_Geometry, pane: ^app.Changes_Pane, newer: bool) -> render.Rect {
-		return ui.changes_strip_marker_rect(g, &pane.state, &pane.model.view, newer)
+	marker :: proc(g: views.Changes_Geometry, pane: ^app.Changes_Pane, newer: bool) -> render.Rect {
+		return views.changes_strip_marker_rect(g, &pane.state, &pane.model.view, newer)
 	}
 	testing.expect_value(t, g.strip_bars, 10)
-	older, newer := ui.changes_strip_hidden(g, &pane.state, view)
+	older, newer := views.changes_strip_hidden(g, &pane.state, view)
 	testing.expect_value(t, older, 15)
 	testing.expect_value(t, newer, 0)
 	testing.expect(t, marker(g, pane, true) == (render.Rect{}), "no newer marker while the newest bar shows")
@@ -889,7 +890,7 @@ the_strip_markers_page_through_turns_it_cannot_show :: proc(t: ^testing.T) {
 	from := older
 	click(&f.state, w, marker(g, pane, false))
 	g = app.changes_geometry_of(&f.state, w, pane, shown)
-	older, newer = ui.changes_strip_hidden(g, &pane.state, view)
+	older, newer = views.changes_strip_hidden(g, &pane.state, view)
 	testing.expect_value(t, older + g.strip_bars, from)
 	testing.expect_value(t, newer, 25 - older - g.strip_bars)
 	testing.expect(t, marker(g, pane, true) != (render.Rect{}), "the newer marker appears")
@@ -898,7 +899,7 @@ the_strip_markers_page_through_turns_it_cannot_show :: proc(t: ^testing.T) {
 	testing.expect_value(t, view.last, 0)
 	click(&f.state, w, marker(g, pane, false))
 	g = app.changes_geometry_of(&f.state, w, pane, shown)
-	older, newer = ui.changes_strip_hidden(g, &pane.state, view)
+	older, newer = views.changes_strip_hidden(g, &pane.state, view)
 	testing.expect_value(t, older, 0)
 	testing.expect_value(t, newer, 25 - g.strip_bars)
 	testing.expect(t, marker(g, pane, false) == (render.Rect{}), "no older marker at the oldest bar")
@@ -906,7 +907,7 @@ the_strip_markers_page_through_turns_it_cannot_show :: proc(t: ^testing.T) {
 	shown_bars := g.strip_bars
 	click(&f.state, w, marker(g, pane, true))
 	g = app.changes_geometry_of(&f.state, w, pane, shown)
-	older, newer = ui.changes_strip_hidden(g, &pane.state, view)
+	older, newer = views.changes_strip_hidden(g, &pane.state, view)
 	testing.expect_value(t, older, shown_bars)
 	testing.expect_value(t, tooltip_at(&f, w, marker(g, pane, true)), fmt.tprintf("%d newer turns", newer))
 
@@ -926,12 +927,12 @@ the_strip_markers_page_through_turns_it_cannot_show :: proc(t: ^testing.T) {
 		if !found {continue}
 		pane.state.strip_offset, pane.state.panel_open = 25, true
 		g = app.changes_geometry_of(&f.state, w, pane, shown)
-		before, _ := ui.changes_strip_hidden(g, &pane.state, view)
+		before, _ := views.changes_strip_hidden(g, &pane.state, view)
 		older_marker := marker(g, pane, false)
 		if older_marker == (render.Rect{}) {continue}
 		click(&f.state, w, older_marker)
 		g = app.changes_geometry_of(&f.state, w, pane, shown)
-		after, _ := ui.changes_strip_hidden(g, &pane.state, view)
+		after, _ := views.changes_strip_hidden(g, &pane.state, view)
 		testing.expectf(t, after == max(0, before - g.strip_bars), "width %d: %d then %d", width, before, after)
 	}
 }
@@ -949,11 +950,11 @@ the_record_button_turns_recording_on :: proc(t: ^testing.T) {
 	app.run_action(&f.state, f.state.windows[0], .Agent_Changes)
 	f.state.changes_panes[0].scope = .Agent
 	app.changes_model_changed(&f.state, f.state.changes_panes[0])
-	testing.expect_value(t, f.state.changes_panes[0].model.view.notice, ui.Changes_Notice.Recording_Off)
+	testing.expect_value(t, f.state.changes_panes[0].model.view.notice, views.Changes_Notice.Recording_Off)
 	testing.expect(t, app.settings_save_value(&f.state, "turns.record", "true", "Could not turn on turn recording."))
 	testing.expect(t, f.state.settings.turns.record)
 	app.changes_model_changed(&f.state, f.state.changes_panes[0])
-	testing.expect(t, f.state.changes_panes[0].model.view.notice != ui.Changes_Notice.Recording_Off)
+	testing.expect(t, f.state.changes_panes[0].model.view.notice != views.Changes_Notice.Recording_Off)
 }
 
 @(private = "file")
@@ -1112,15 +1113,15 @@ the_chips_choose_the_source_and_the_worktree_and_leave_the_panel_open :: proc(t:
 	testing.expect_value(t, view.source_current, 1)
 	// Picking a chip is what choosing in the old dropdown was, and the panel stays open.
 	click(&f.state, w, g.source_chips[2])
-	testing.expect_value(t, pane.scope, ui.Changes_Scope.Staged)
+	testing.expect_value(t, pane.scope, views.Changes_Scope.Staged)
 	testing.expect(t, pane.state.panel_open)
 	g = app.changes_geometry_of(&f.state, w, pane, shown)
 	testing.expect_value(t, view.source_current, 2)
 	click(&f.state, w, g.source_chips[0])
-	testing.expect_value(t, pane.scope, ui.Changes_Scope.Repository)
+	testing.expect_value(t, pane.scope, views.Changes_Scope.Repository)
 	testing.expect(t, pane.state.panel_open)
 	click(&f.state, w, g.source_chips[1])
-	testing.expect_value(t, pane.scope, ui.Changes_Scope.Uncommitted)
+	testing.expect_value(t, pane.scope, views.Changes_Scope.Uncommitted)
 
 	// The worktree chips: Follow the agent first, then each worktree.
 	pane.scope = .Staged
@@ -1264,7 +1265,7 @@ a_held_press_on_the_overview_track_keeps_paging_until_the_thumb_meets_the_pointe
 	}
 	testing.expect(t, pages >= 1 && pages < 40)
 	g = app.changes_geometry_of(&f.state, w, pane, shown)
-	thumb := ui.changes_overview_thumb(&pane.state, g)
+	thumb := views.changes_overview_thumb(&pane.state, g)
 	testing.expect(t, f32(middle) >= thumb.y && f32(middle) < thumb.y + thumb.height)
 	_ = hold_repeat(&f.state, w)
 	testing.expect_value(t, pane.state.diff_scroll, previous)
@@ -1326,7 +1327,7 @@ the_overview_strip_scrolls_the_diff_by_press_and_drag :: proc(t: ^testing.T) {
 	// A press on the thumb holds it where it was grabbed, and moving the pointer scrolls by its distance.
 	pane.state.diff_scroll = 0
 	g = app.changes_geometry_of(&f.state, w, pane, shown)
-	thumb := ui.changes_overview_thumb(&pane.state, g)
+	thumb := views.changes_overview_thumb(&pane.state, g)
 	testing.expect(t, thumb.height >= 24)
 	x, y := i32(lane.x + lane.width / 2), i32(lane.y + 3)
 	app.handle_event(&f.state, input.Mouse_Button_Event{window = w.id, x = x, y = y, button = .Left, pressed = true})
@@ -1576,7 +1577,7 @@ a_saved_filter_keeps_its_tokens_through_rename_edit_reorder_and_delete_in_every_
 		testing.expect_value(t, app.changes_filter_text(open), "@00000002 @00000001 ")
 		if !testing.expect_value(t, len(open.filter_tokens), 2) {return}
 		testing.expect_value(t, open.filter_tokens[0].name, "Not like its pattern")
-		testing.expect_value(t, open.filter_tokens[0].state, ui.Filter_Token_State.Known)
+		testing.expect_value(t, open.filter_tokens[0].state, views.Filter_Token_State.Known)
 		testing.expect_value(t, open.filter_tokens[1].name, "No vendor")
 	}
 	testing.expect_value(t, view.hidden_count, 2)
@@ -1650,7 +1651,7 @@ a_restored_pane_follows_a_renamed_filter_and_drops_tokens_that_name_nothing :: p
 		case "@00000003 ui":
 			testing.expect_value(t, len(pane.filter_tokens), 1)
 			testing.expect_value(t, pane.filter_tokens[0].name, "Documents")
-			testing.expect_value(t, pane.filter_tokens[0].state, ui.Filter_Token_State.Known)
+			testing.expect_value(t, pane.filter_tokens[0].state, views.Filter_Token_State.Known)
 		case:
 			testing.expectf(t, false, "unexpected filter %q", app.changes_filter_text(pane))
 		}

@@ -2,7 +2,7 @@ package app_test
 
 import app "../../src"
 import "aio:settings"
-import "aio:ui"
+import "aio:views"
 import "core:strings"
 import "core:testing"
 
@@ -86,7 +86,7 @@ theme_delete_prompt_ends_when_the_page_moves_on :: proc(t: ^testing.T) {
 	testing.expect(t, !w.editor.delete_armed, "reloading settings ends the prompt")
 	theme_delete_press(s, w)
 	app.run_action(s, w, .Close_Tab)
-	testing.expect(t, !ui.editor_loaded(&w.editor))
+	testing.expect(t, !views.editor_loaded(&w.editor))
 	testing.expect(t, !w.editor.delete_armed, "closing Settings ends the prompt")
 	testing.expect(t, settings.custom_theme_find(&s.settings, "alpha") != nil)
 	testing.expect_value(t, s.settings.theme.name, "alpha")

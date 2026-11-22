@@ -4,7 +4,7 @@ import "cosmos:input"
 import "cosmos:colour"
 import "cosmos:render"
 import "aio:settings"
-import "aio:ui"
+import "cosmos:ui"
 
 Workspace_Icon_Color :: struct {
 	name: string,

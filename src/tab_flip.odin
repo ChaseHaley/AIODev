@@ -2,10 +2,11 @@ package main
 
 import "cosmos:render"
 import "aio:settings"
-import "aio:ui"
+import "aio:views"
 import "core:math"
 import "core:time"
 import "cosmos:motion"
+import "cosmos:ui"
 
 // Changing the tab orientation passes the tabs between the docked rail and the title-bar strip through
 // the corner where the two meet, as walking off one edge of a maze brings you back at another, turned a
@@ -47,8 +48,8 @@ Tab_Flip_Items :: struct {
 }
 
 @(private = "file")
-tab_flip_items :: proc(layout: ui.Rail_Layout) -> Tab_Flip_Items {
-	padding := ui.RAIL_PADDING * layout.scale
+tab_flip_items :: proc(layout: views.Rail_Layout) -> Tab_Flip_Items {
+	padding := views.RAIL_PADDING * layout.scale
 	first := layout.list.y + padding - layout.scroll
 	footer := first + f32(layout.count) * layout.row_height + padding
 	return {
@@ -79,17 +80,17 @@ tab_flip_animate :: proc(w: ^Window, frame: ui.Frame_Time) -> bool {
 // The rail the tabs pass through: the docked rail in vertical view, and going to the strip, the rail as
 // it was.
 @(private = "file")
-tab_flip_rail_layout :: proc(w: ^Window) -> (ui.Rail_Layout, bool) {
+tab_flip_rail_layout :: proc(w: ^Window) -> (views.Rail_Layout, bool) {
 	if w.workspace == nil {return {}, false}
 	if !w.tabs_horizontal {return rail_layout_query(w)}
 	area := w.flip_rail
 	area.height = max(0, area.height - w.flip_reserve)
-	return ui.rail_layout(area, w.scale, tab_layout(nil, w, false).slots, w.rail_scroll), true
+	return views.rail_layout(area, w.scale, tab_layout(nil, w, false).slots, w.rail_scroll), true
 }
 
 // How far the rows of the rail laid out as `layout` have risen into the title bar, in whole pixels: all
 // the way while the tabs are in the strip, so a rail still leaving after the tabs arrived shows none.
-tab_flip_rise :: proc(w: ^Window, layout: ui.Rail_Layout) -> f32 {
+tab_flip_rise :: proc(w: ^Window, layout: views.Rail_Layout) -> f32 {
 	return math.round(w.flip.value * tab_flip_items(layout).span)
 }
 
@@ -205,7 +206,7 @@ tab_flip_strip_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 		if !tab_shown(w.workspace, i) {continue}
 		append(&pieces, Tab_Flip_Piece{kind = .Tab, tab = i, left = x, width = bar.tab_width, row = row})
 	}
-	new_tab := ui.tab_new_rect(bar)
+	new_tab := views.tab_new_rect(bar)
 	footer := Tab_Flip_Piece{kind = .New_Tab, left = new_tab.x, width = 2 * bar.button_width, row = items.footer}
 	append(&pieces, footer)
 	previous: f32
@@ -231,7 +232,7 @@ tab_flip_strip_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 tab_flip_piece_draw :: proc(
 	app: ^App,
 	w: ^Window,
-	bar: ui.Tab_Bar,
+	bar: views.Tab_Bar,
 	piece: Tab_Flip_Piece,
 ) -> render.Build_Status {
 	x := piece.left
@@ -239,19 +240,19 @@ tab_flip_piece_draw :: proc(
 	ui.draw_rect(&w.list, {rect = {x, 0, piece.width, bar.height}, color = app.theme.tab_bar})
 	switch piece.kind {
 	case .Chip:
-		margin := ui.TAB_CHIP_MARGIN * w.scale
+		margin := views.TAB_CHIP_MARGIN * w.scale
 		chip := render.Rect{x + margin, 0, max(0, piece.width - 2 * margin), bar.height}
 		return tab_chip_strip_draw(app, w, bar, piece.run, chip)
 	case .New_Tab:
 		new_tab := tab_control(w, Tab_Chrome_New{})
 		hover, press := new_tab.hover.value, new_tab.press.value
-		if result := ui.tab_new_draw(&w.list, app.theme, bar, hover, press, w.scale, w.pointer); result != .Ok {
+		if result := views.tab_new_draw(&w.list, app.theme, bar, hover, press, w.scale, w.pointer); result != .Ok {
 			return result
 		}
 		chevron := tab_chevron_rect(app, w)
 		if render.push_layer(&w.list, chevron) != .None {return .Ok}
 		profiles := tab_control(w, Tab_Chrome_Profiles{})
-		tile := ui.tab_tile_rect(bar, chevron.x, chevron.width, 0, w.scale)
+		tile := views.tab_tile_rect(bar, chevron.x, chevron.width, 0, w.scale)
 		_ = ui.icon_button_draw(&w.list, app.theme, tile, .Chevron_Down, profiles.hover.value,
 			profiles.press.value, w.scale, w.pointer, ui.ICON_INDICATOR)
 		return .Ok
@@ -259,10 +260,10 @@ tab_flip_piece_draw :: proc(
 	}
 	tile, built := tab_tile(app, w, piece.tab)
 	if built != .Ok {return built}
-	if result := ui.tab_draw(&w.list, &w.ui_text, app.theme, bar, x, tile, 0, 0, w.scale, w.pointer);
+	if result := views.tab_draw(&w.list, &w.ui_text, app.theme, bar, x, tile, 0, 0, w.scale, w.pointer);
 	   result != .Ok {return result}
 	if piece.tab != w.workspace.selected {return .Ok}
-	underline := ui.tab_underline_rect(bar, x, 0, w.scale)
+	underline := views.tab_underline_rect(bar, x, 0, w.scale)
 	if render.push_layer(&w.list, {x, 0, bar.tab_width, bar.height}) != .None {return .Ok}
 	radius := ui.pill_radius(underline)
 	ui.draw_rect(&w.list, {rect = underline, color = app.theme.tab_indicator, radius = radius})

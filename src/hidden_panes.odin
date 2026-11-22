@@ -5,9 +5,10 @@ import "aio:layout"
 import "cosmos:render"
 import "aio:term"
 import "aio:term_view"
-import "aio:ui"
+import "aio:views"
 import "core:log"
 import "core:time"
+import "cosmos:ui"
 
 // While Zoom, Fill window or Fullscreen shows one tiled pane of a tab that has others, that pane's header
 // carries a glyph of the tab's tiled layout. Hovering the glyph shows a map of every tiled pane, each card
@@ -37,7 +38,7 @@ Hidden_Pane_Preview :: struct {
 @(private = "file")
 Hidden_Panes :: struct {
 	glyph, surface: render.Rect,
-	panes:          []ui.Hidden_Pane,
+	panes:          []views.Hidden_Pane,
 	nodes:          []layout.Node_Id,
 	contents:       []layout.Content,
 	cells:          []render.Rect,
@@ -61,7 +62,7 @@ hidden_panes_of :: proc(app: ^App, w: ^Window) -> (h: Hidden_Panes, ok: bool) {
 		if h.glyph.width <= 0 || area.width <= 0 || area.height <= 0 {return}
 		rects := make([dynamic]layout.Pane_Rect, context.temp_allocator)
 		layout.compute(window_tree(w), area, window_gap(app, w), &rects)
-		h.panes = make([]ui.Hidden_Pane, len(rects), context.temp_allocator)
+		h.panes = make([]views.Hidden_Pane, len(rects), context.temp_allocator)
 		h.nodes = make([]layout.Node_Id, len(rects), context.temp_allocator)
 		h.contents = make([]layout.Content, len(rects), context.temp_allocator)
 		for placed, i in rects {
@@ -78,11 +79,11 @@ hidden_panes_of :: proc(app: ^App, w: ^Window) -> (h: Hidden_Panes, ok: bool) {
 			h.nodes[i] = placed.node
 			h.contents[i] = placed.content
 		}
-		h.surface = ui.hidden_panes_map_rect(
+		h.surface = views.hidden_panes_map_rect(
 			h.glyph, {area.width, area.height}, f32(w.width), f32(w.height), w.scale,
 		)
 		h.cells = make([]render.Rect, len(h.panes), context.temp_allocator)
-		ui.hidden_panes_map_cells(h.surface, h.panes, w.scale, h.cells)
+		views.hidden_panes_map_cells(h.surface, h.panes, w.scale, h.cells)
 		return h, true
 	}
 	return
@@ -92,7 +93,7 @@ hidden_panes_of :: proc(app: ^App, w: ^Window) -> (h: Hidden_Panes, ok: bool) {
 hidden_panes_glyph_draw :: proc(app: ^App, w: ^Window, box: render.Rect) {
 	h, ok := hidden_panes_of(app, w)
 	if !ok {return}
-	ui.hidden_panes_glyph_draw(&w.list, app.theme, box, h.panes, w.hidden_panes.reveal.open, w.scale)
+	views.hidden_panes_glyph_draw(&w.list, app.theme, box, h.panes, w.hidden_panes.reveal.open, w.scale)
 }
 
 // Draws the map above the panes while it shows: the cards, a cell-block preview of each hidden terminal,
@@ -108,7 +109,7 @@ hidden_panes_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 		pane.icon, pane.glyph, pane.atlas = badge.icon, badge.glyph, badge.atlas
 	}
 	width, height := f32(w.width), f32(w.height)
-	if !ui.hidden_panes_map_open(&w.list, app.theme, h.surface, h.cells, h.panes, width, height, w.scale) {
+	if !views.hidden_panes_map_open(&w.list, app.theme, h.surface, h.cells, h.panes, width, height, w.scale) {
 		return .Ok
 	}
 	for &preview in w.hidden_panes.previews {preview.used = false}
@@ -119,13 +120,13 @@ hidden_panes_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 		view := hidden_panes_preview(w, h.contents[i])
 		if view == nil {continue}
 		card := h.cells[i]
-		if render.push_layer(&w.list, card, ui.hidden_panes_card_radius(card, w.scale)) != .None {return .Ok}
+		if render.push_layer(&w.list, card, views.hidden_panes_card_radius(card, w.scale)) != .None {return .Ok}
 		g := term.geometry(entry.session)
 		_ = term_view.blocks_build(view, entry.session, &w.list, card, {f32(g.cell_width), f32(g.cell_height)})
 	}
 	hidden_panes_previews_prune(w)
 	hovered := w.hidden_panes.hovered.? or_else -1
-	return ui.hidden_panes_map_labels(
+	return views.hidden_panes_map_labels(
 		&w.list, &w.ui_text, app.theme, h.surface, h.cells, h.panes, hovered, w.scale,
 	)
 }

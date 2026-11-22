@@ -4,7 +4,7 @@ import "core:testing"
 import app "../../src"
 import "aio:layout"
 import "aio:term"
-import "aio:ui"
+import "cosmos:ui"
 
 // The window has entered exactly the pane it shows focused.
 @(private)

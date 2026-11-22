@@ -1,7 +1,8 @@
 package main
 
 import "cosmos:input"
-import "aio:ui"
+import "aio:views"
+import "cosmos:ui"
 
 // The longest gap between the presses of a double click, for every control that tells one apart.
 DOUBLE_CLICK_NS :: i64(500_000_000)
@@ -222,7 +223,7 @@ gesture_finish :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) -> bo
 	w.dirty = true
 	x, y := f32(e.x), f32(e.y)
 	if palette_active(app, w) {
-		if e.button == .Left {on_palette_outcome(app, w, ui.palette_pointer_release(&app.palette), 0)}
+		if e.button == .Left {on_palette_outcome(app, w, views.palette_pointer_release(&app.palette), 0)}
 		return true
 	}
 	if e.button != .Left {return false}

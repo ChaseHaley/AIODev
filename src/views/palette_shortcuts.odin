@@ -1,0 +1,238 @@
+package views
+
+import "aio:commands"
+import "cosmos:input"
+import "cosmos:render"
+import "aio:settings"
+import "core:strings"
+import "cosmos:ui"
+
+// Match the Settings shortcut row so capture, physical positions and its popup share geometry.
+palette_binding_parts :: proc(row: render.Rect, scale: f32) -> Row_Parts {
+	s := scale
+	parts := Row_Parts {
+		row = row, reset = reset_slot(row, s),
+	}
+	shortcut_parts(&parts, s, true)
+	return parts
+}
+
+// The open row's alternatives list, below its field, or nothing while it is closed.
+@(private)
+palette_binding_popup :: proc(p: ^Palette, binding: ^Shortcut_Edit, l: Palette_Layout) -> render.Rect {
+	row, _ := row_rect(p, l, binding.result)
+	parts := palette_binding_parts(row, l.scale)
+	return shortcut_capture_popup_rect(&binding.capture, parts, l.viewport, binding.saved, l.scale)
+}
+
+// Fitting, not drawing, keeps the open alternatives inside the current viewport.
+palette_binding_fit :: proc(p: ^Palette) {
+	if binding, open := p.edit.(Shortcut_Edit); open && binding.capture.state == .Alternatives {
+		ui.choice_list_keep_visible(&binding.capture.alternatives,
+			len(commands.shortcut_alternatives(binding.saved, context.temp_allocator)) + 1,
+			shortcut_capture_popup_rows(binding.saved, p.fit_page, p.fit_scale))
+		p.edit = binding
+	}
+}
+
+palette_binding_open :: proc(p: ^Palette, index: int) -> Outcome {
+	if index < 0 || index >= len(p.results) || p.results[index].command == nil {return .None}
+	command := p.results[index].command
+	edit_set(p, nil)
+	// The shortcut field owns the keys now; a search still waiting for keys keeps what it has.
+	if p.keys.state == .Recording {p.keys.state = .Recorded}
+	binding := Shortcut_Edit {
+		key      = strings.clone(settings.binding_key(command.name)),
+		saved    = commands.shortcut_set_text(command.shortcuts),
+		defaults = commands.shortcut_set_text(command.defaults),
+		result   = index,
+	}
+	ui.field_set(&binding.draft, binding.saved)
+	binding.capture.leader = p.leader
+	shortcut_capture_open(&binding.capture)
+	p.selected = index
+	edit_set(p, binding)
+	palette_use(p, {kind = .Command, name = command.name})
+	return .Changed
+}
+
+@(private)
+palette_binding_outcome :: proc(
+	p: ^Palette,
+	binding: ^Shortcut_Edit,
+	outcome: Shortcut_Capture_Outcome,
+) -> Outcome {
+	switch outcome {
+	case .None, .Changed, .Hinted, .Positions:
+	case .Save:
+		return choose_setting(p, binding.key, ui.field_string(&binding.draft), copy_key = true)
+	case .Cancel:
+		edit_set(p, nil)
+	}
+	return .Changed
+}
+
+// The owner reports whether the value the last Set_Setting named saved. A saved shortcut ends only
+// the inline row, and a refused one stays open to correct. A dropdown is open only when its Show all
+// fonts switch saved, and then lists the other filter's fonts, or when an option of a multiple choice
+// flipped, and then marks the saved options.
+palette_saved :: proc(p: ^Palette, saved: bool) {
+	#partial switch &edit in p.edit {
+	case Shortcut_Edit:
+		if saved {edit_set(p, nil)} else {shortcut_capture_resume(&edit.capture)}
+	case Choice_Edit:
+		if saved {choice_reload(p, edit.setting)}
+	}
+}
+
+// The row stays open while its capture records, lists alternatives, or leaves the keyboard on the
+// Key positions switch, which takes keys as on the Settings page. Enter on a recorded chord another
+// command holds opens a conflict chain instead of saving it.
+@(private)
+palette_binding_key :: proc(
+	p: ^Palette,
+	registry: ^commands.Registry,
+	binding: ^Shortcut_Edit,
+	raw: input.Key_Event,
+) -> Outcome {
+	c := &binding.capture
+	if c.state != .Idle {
+		visible := shortcut_capture_popup_rows(binding.saved, p.fit_page, p.fit_scale)
+		outcome := shortcut_capture_key(c, &binding.draft, binding.saved, .Alternatives, raw, visible)
+		if outcome == .Save && shortcut_capture_used_by(c) != "" {
+			return palette_chain_open(p, registry, binding)
+		}
+		if outcome == .Hinted || outcome == .Changed {
+			shortcut_capture_check(c, palette_shortcut_book(registry), binding.key)
+		}
+		return palette_binding_outcome(p, binding, outcome)
+	}
+	e := raw
+	e.key = commands.logical_key(raw.key, raw.unshifted)
+	#partial switch e.key {
+	case .Enter, .Numpad_Enter, .Space:
+		c.physical = !c.physical
+		return .Changed
+	case .Tab:
+		// Shift+Tab returns to the field, which lists the alternatives again; Tab leaves the row.
+		if .Shift in e.modifiers {shortcut_capture_open(c)} else {edit_set(p, nil)}
+		return .Changed
+	case .Escape, .Page_Up, .Page_Down:
+		edit_set(p, nil)
+		return .Changed
+	case .R:
+		if .Control in e.modifiers && .Alt not_in e.modifiers {
+			return choose_setting(p, binding.key, binding.defaults, copy_key = true)
+		}
+	}
+	if ui.list_step(e) != 0 {edit_set(p, nil)}
+	return .Changed
+}
+
+palette_binding_reset :: proc(p: ^Palette, index: int) -> Outcome {
+	if index < 0 || index >= len(p.results) || p.results[index].command == nil {return .None}
+	p.selected = index
+	command := p.results[index].command
+	if commands.shortcut_set_equal(command.shortcuts, command.defaults) {return .Changed}
+	if palette_binding_open(p, index) == .None {return .None}
+	binding := &p.edit.(Shortcut_Edit)
+	return choose_setting(p, binding.key, binding.defaults, copy_key = true)
+}
+
+@(private)
+palette_binding_press :: proc(
+	p: ^Palette, binding: ^Shortcut_Edit, l: Palette_Layout, x, y: f32,
+) -> Outcome {
+	c := &binding.capture
+	row, _ := row_rect(p, l, binding.result)
+	parts := palette_binding_parts(row, l.scale)
+	if popup := palette_binding_popup(p, binding, l); render.rect_contains(popup, x, y) {
+		outcome := shortcut_capture_press(c, &binding.draft, binding.saved, popup, x, y, l.scale)
+		return palette_binding_outcome(p, binding, outcome)
+	}
+	if render.rect_contains(parts.reset, x, y) {
+		return choose_setting(p, binding.key, binding.defaults, copy_key = true)
+	}
+	if c.state != .Alternatives && render.rect_contains(parts.positions, x, y) {
+		c.physical = !c.physical
+		return .Changed
+	}
+	if render.rect_contains(parts.field, x, y) {
+		shortcut_capture_open(c)
+		return .Changed
+	}
+	edit_set(p, nil)
+	return .Changed
+}
+
+@(private)
+palette_binding_hover :: proc(
+	p: ^Palette, binding: ^Shortcut_Edit, l: Palette_Layout, x, y: f32,
+) -> Outcome {
+	popup := palette_binding_popup(p, binding, l)
+	moved := shortcut_capture_hover(&binding.capture, popup, l.viewport, binding.saved, x, y, l.scale)
+	return moved ? .Changed : .None
+}
+
+palette_binding_draw :: proc(
+	p: ^Palette, command: ^commands.Command, index: int, row: render.Rect,
+	list: ^render.Draw_List, text: ^ui.Text, theme: Theme, l: Palette_Layout, pointer: [2]f32,
+) -> render.Build_Status {
+	parts := palette_binding_parts(row, l.scale)
+	modified := !commands.shortcut_set_equal(command.shortcuts, command.defaults)
+	reset_hovered := render.rect_contains(parts.reset, pointer.x, pointer.y)
+	_ = reset_button_draw(list, theme, parts.reset, modified, reset_hovered,
+	                      index == p.selected, pointer, l.scale)
+	if binding, open := &p.edit.(Shortcut_Edit); open && binding.result == index {
+		c := &binding.capture
+		if c.state == .Alternatives {parts.positions = {}}
+		recording := shortcut_capture_recording(c)
+		state := Shortcut_Field_State {
+			capturing = recording, focused = c.state != .Idle,
+			clash = recording && shortcut_capture_used_by(c) != "",
+			positions_focused = c.state == .Idle, physical = c.physical, empty_label = "Add shortcut",
+		}
+		summary := shortcut_summary(ui.field_string(&binding.draft))
+		return shortcut_field_draw(list, text, theme, parts, summary, state, l.viewport, l.scale)
+	}
+	buffer: [commands.SHORTCUT_TEXT_CAP]u8
+	positions: [commands.SHORTCUT_TEXT_CAP]int
+	summary := Shortcut_Summary{additional = max(0, command.shortcuts.count - 1)}
+	// A search shows the alternative it matched, with its matched keys lit.
+	match := p.results[index].shortcut
+	if shortcuts := commands.active_shortcuts(command); len(shortcuts) > 0 {
+		alternative := clamp(match.alternative, 0, len(shortcuts) - 1)
+		summary.first = commands.shortcut_text(shortcuts[alternative], buffer[:])
+		if match.hit.match != .None {
+			summary.highlights = commands.shortcut_hit_positions(summary.first, match.hit, positions[:])
+		}
+	}
+	parts.positions = {}
+	focused := render.rect_contains(parts.field, pointer.x, pointer.y)
+	return shortcut_field_draw(list, text, theme, parts, summary, {focused = focused}, l.viewport, l.scale)
+}
+
+// Opens the command's shortcut editor recording the chord the Unassigned row offered, as though it had
+// just been pressed after its alternatives; Enter saves it as one more.
+@(private)
+palette_binding_assign :: proc(p: ^Palette, registry: ^commands.Registry, index: int) -> Outcome {
+	chord, assigning := p.assign.?
+	if !assigning || palette_binding_open(p, index) == .None {return .None}
+	p.assign = nil
+	binding := &p.edit.(Shortcut_Edit)
+	shortcut_capture_add(&binding.capture, &binding.draft, binding.saved, chord)
+	// A chord bound since the row offered it names its holder, and Enter opens the conflict chain.
+	shortcut_capture_check(&binding.capture, palette_shortcut_book(registry), binding.key)
+	return .Changed
+}
+
+// The open row's alternatives list, over everything else in the palette.
+@(private)
+palette_binding_popup_draw :: proc(
+	p: ^Palette, binding: ^Shortcut_Edit, l: Palette_Layout,
+	list: ^render.Draw_List, text: ^ui.Text, theme: Theme, pointer: [2]f32,
+) -> render.Build_Status {
+	popup := palette_binding_popup(p, binding, l)
+	return shortcut_capture_popup_draw(&binding.capture, list, text, theme, popup, l.viewport, binding.saved,
+	                                   pointer, l.scale)
+}

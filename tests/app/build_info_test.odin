@@ -2,10 +2,10 @@ package app_test
 
 import app "../../src"
 import "aio:commands"
-import "aio:ui"
 import "core:strings"
 import "core:testing"
 import "core:time"
+import "cosmos:ui"
 
 @(test)
 build_info_registry_dispatch_refreshes_one_owned_notice_without_a_session :: proc(t: ^testing.T) {

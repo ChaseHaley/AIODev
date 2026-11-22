@@ -2,10 +2,11 @@ package main
 
 import "aio:settings"
 import "aio:term"
-import "aio:ui"
+import "aio:views"
 import "core:fmt"
 import "core:strings"
 import "core:time"
+import "cosmos:ui"
 
 // How AIODev presents each program status state (WORK-341): urgency, Activity section, attention,
 // marks, notice kind, taskbar role and wording. Every surface classifies a record here.
@@ -48,7 +49,7 @@ Status_Presentation :: struct {
 	seen:      bool,
 	notice:    ui.Notice_Kind,
 	taskbar:   Status_Taskbar_Role,
-	mark:      ui.Status_Mark,
+	mark:      views.Status_Mark,
 }
 
 // One row per state; the compiler requires every state. `mark.urgent` inks a headline in the state's
@@ -90,7 +91,7 @@ STATUS_PRESENTATIONS := [term.Program_Status_State]Status_Presentation {
 
 // A blocked program's mark says what it needs.
 @(private, rodata)
-STATUS_BLOCKED_GLYPHS := [term.Program_Status_Kind]ui.Status_Glyph {
+STATUS_BLOCKED_GLYPHS := [term.Program_Status_Kind]views.Status_Glyph {
 	.None       = .Blocked,
 	.Permission = .Permission,
 	.Question   = .Question,
@@ -185,7 +186,7 @@ status_progress_text :: proc(progress: i8, buffer: []u8) -> string {
 }
 
 // A short label for the state: what a blocked program needs, or a percentage while working.
-status_headline :: proc(mark: ui.Status_Mark, buffer: []u8) -> string {
+status_headline :: proc(mark: views.Status_Mark, buffer: []u8) -> string {
 	switch mark.glyph {
 	case .None:
 		return ""
