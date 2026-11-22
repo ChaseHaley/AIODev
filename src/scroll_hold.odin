@@ -6,13 +6,9 @@ import "core:time"
 import "cosmos:ui"
 import "cosmos:host"
 
-// A Left press held on a scrollbar's track, as Windows repeats it: the press pages once at once toward the
-// pointer (each surface's own press does that), and while the button stays down the window pages again
-// after ui.SCROLLBAR_REPEAT_DELAY and then every ui.SCROLLBAR_REPEAT_INTERVAL, toward wherever the pointer
-// is then, until the thumb reaches it. Leaving the track pauses the paging and coming back resumes it;
-// the release ends it. Every surface that draws the shared scrollbar begins a hold from its press, so
-// there is one rule for all of them. The hold is a window timer: it wakes the loop only while a track
-// press is down, and a tick allocates nothing.
+// A Left press held on a scrollbar's track (ui.Scroll_Hold). Every surface that draws the shared scrollbar
+// begins a hold from its press, so there is one rule for all of them. The hold is a window timer: it wakes
+// the loop only while a track press is down, and a tick allocates nothing.
 
 // The shared scrollbar a held track press pages.
 Scroll_Hold_Bar :: enum u8 {
@@ -37,14 +33,8 @@ Scroll_Hold_Bar :: enum u8 {
 }
 
 Scroll_Hold :: struct {
-	bar:     Scroll_Hold_Bar,
-	content: layout.Content,
-	// The pointer as the last move left it; each repeat pages toward it.
-	pointer: [2]f32,
-	// The side of the thumb the press began on; the repeat pages only from there.
-	side:    ui.Scroll_Side,
-	// When the next page is due.
-	due:     time.Tick,
+	using hold: ui.Scroll_Hold(Scroll_Hold_Bar),
+	content:    layout.Content,
 }
 
 // Holds the track press at (x, y) that has just paged once on `bar`.
@@ -56,18 +46,13 @@ scroll_hold_begin :: proc(
 	x, y: f32,
 	side: ui.Scroll_Side,
 ) {
-	w.scroll_hold = {
-		bar     = bar,
-		side    = side,
-		content = content,
-		pointer = {x, y},
-		due     = time.tick_add(host.clock_now(&app.clock), ui.SCROLLBAR_REPEAT_DELAY),
-	}
+	ui.scroll_hold_begin(&w.scroll_hold.hold, bar, {x, y}, side, host.clock_now(&app.clock))
+	w.scroll_hold.content = content
 }
 
 // The pointer moved: the next page aims at it.
 scroll_hold_move :: proc(w: ^Window, x, y: f32) {
-	if w.scroll_hold.bar != .None {w.scroll_hold.pointer = {x, y}}
+	ui.scroll_hold_move(&w.scroll_hold.hold, {x, y})
 }
 
 scroll_hold_end :: proc(w: ^Window) {
@@ -75,16 +60,13 @@ scroll_hold_end :: proc(w: ^Window) {
 }
 
 scroll_hold_deadline :: proc(w: ^Window) -> (time.Tick, bool) {
-	return w.scroll_hold.due, w.scroll_hold.bar != .None
+	return ui.scroll_hold_deadline(w.scroll_hold.hold)
 }
 
-// Pages once the repeat is due. The next page is a repeat interval after this one, not after the due
-// time, so a stalled loop pages once on waking rather than catching up.
+// Pages once the repeat is due.
 scroll_hold_tick :: proc(app: ^App, w: ^Window, now: time.Tick) {
-	hold := &w.scroll_hold
-	if hold.bar == .None || time.tick_diff(hold.due, now) < 0 {return}
-	hold.due = time.tick_add(now, ui.SCROLLBAR_REPEAT_INTERVAL)
-	result, shown := scroll_hold_page(app, w, hold^)
+	if !ui.scroll_hold_due(&w.scroll_hold.hold, now) {return}
+	result, shown := scroll_hold_page(app, w, w.scroll_hold)
 	if !shown {
 		scroll_hold_end(w)
 	} else if result == .Paged {

@@ -29,25 +29,16 @@ copy_selection :: proc(app: ^App, entry: ^Session_Entry, explicit: bool) {
 }
 
 // A Left drag selecting terminal text; nil is Idle. Selecting holds the session pressed; past the top or
-// bottom edge it is Autoscrolling, and history scrolls a row each time `deadline` passes. The direction
-// stays with the session's selection gesture. The procs in this file are the only writers.
+// bottom edge history scrolls a row each time `scroll` is due. The direction stays with the session's
+// selection gesture. The procs in this file are the only writers.
 Selection_Drag :: union {
 	Selection_Selecting,
-	Selection_Autoscrolling,
 }
 
 Selection_Selecting :: struct {
 	session: u32,
+	scroll:  ui.Edge_Scroll,
 }
-
-Selection_Autoscrolling :: struct {
-	session:  u32,
-	deadline: time.Tick,
-}
-
-// How often an autoscrolling drag moves history by a row, or a Markdown page by a step.
-@(private)
-AUTOSCROLL_INTERVAL :: 30 * time.Millisecond
 
 selection_active :: proc(w: ^Window) -> bool {
 	return w.selection != nil
@@ -55,22 +46,20 @@ selection_active :: proc(w: ^Window) -> bool {
 
 // The session the drag selects in, or nil while Idle or once it is gone.
 selection_entry :: proc(app: ^App, w: ^Window) -> ^Session_Entry {
-	switch s in w.selection {
-	case Selection_Selecting: return session_find(app, s.session)
-	case Selection_Autoscrolling: return session_find(app, s.session)
-	}
-	return nil
+	selecting, ok := w.selection.(Selection_Selecting)
+	return ok ? session_find(app, selecting.session) : nil
 }
 
 selection_autoscroll_deadline :: proc(w: ^Window) -> (time.Tick, bool) {
-	autoscrolling, ok := w.selection.(Selection_Autoscrolling)
-	return autoscrolling.deadline, ok
+	selecting, ok := w.selection.(Selection_Selecting)
+	if !ok {return {}, false}
+	return ui.edge_scroll_deadline(selecting.scroll)
 }
 
 // A Left press on content starts the drag in `entry`; a press during the drag continues it.
 @(private)
 selection_begin :: proc(w: ^Window, entry: ^Session_Entry, x, y: f32, time_ns: i64) {
-	if w.selection == nil {w.selection = Selection_Selecting{entry.id}}
+	if w.selection == nil {w.selection = Selection_Selecting{session = entry.id}}
 	term.selection_press(entry.session, x, y, time_ns)
 	w.dirty = true
 }
@@ -85,27 +74,25 @@ selection_move :: proc(w: ^Window, entry: ^Session_Entry, x, y: f32, now: time.T
 
 @(private = "file")
 selection_follow :: proc(w: ^Window, entry: ^Session_Entry, now: time.Tick) {
-	if term.selection_autoscroll(entry.session) == .None {
-		w.selection = Selection_Selecting{entry.id}
-	} else if _, autoscrolling := w.selection.(Selection_Autoscrolling); !autoscrolling {
-		w.selection = Selection_Autoscrolling{entry.id, time.tick_add(now, AUTOSCROLL_INTERVAL)}
-	}
+	selecting, ok := &w.selection.(Selection_Selecting)
+	if !ok {return}
+	selecting.session = entry.id
+	_ = ui.edge_scroll_follow(&selecting.scroll, term.selection_autoscroll(entry.session) != .None, now)
 }
 
-// Scrolls one row once the autoscroll deadline passes.
+// Scrolls one row once the autoscroll is due.
 selection_autoscroll_tick :: proc(app: ^App, w: ^Window, now: time.Tick) {
-	autoscrolling, ok := w.selection.(Selection_Autoscrolling)
-	if !ok {return}
-	entry := session_find(app, autoscrolling.session)
+	selecting, ok := &w.selection.(Selection_Selecting)
+	if !ok || selecting.scroll.due == nil {return}
+	entry := session_find(app, selecting.session)
 	// A gone session only stops the scrolling. The button is still held, so the drag stays Selecting
 	// and keeps the pointer until the release ends it; selection_entry then finds nothing to copy.
 	if entry == nil {
-		w.selection = Selection_Selecting{autoscrolling.session}
+		ui.edge_scroll_stop(&selecting.scroll)
 		return
 	}
-	if time.tick_diff(autoscrolling.deadline, now) < 0 {return}
+	if !ui.edge_scroll_due(&selecting.scroll, now) {return}
 	term.selection_autoscroll_tick(entry.session, w.pointer.x, w.pointer.y)
-	w.selection = Selection_Autoscrolling{entry.id, time.tick_add(now, AUTOSCROLL_INTERVAL)}
 	w.dirty = true
 	selection_follow(w, entry, now)
 }

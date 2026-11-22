@@ -369,13 +369,13 @@ workspace_ellipsis_hover_tracks_only_its_button :: proc(t: ^testing.T) {
 	button := app.workspace_picker_menu_button_rect(w, 1)
 	app.handle_event(s, input.Mouse_Move_Event{window = w.id, x = i32(button.x+16), y = i32(button.y+16)})
 	testing.expect_value(t, w.workspace_picker.menu_hover, w.workspace_picker.rows[1].id)
-	testing.expect_value(t, app.tooltip_current(w), "More actions")
+	testing.expect_value(t, ui.tooltip_current(w), "More actions")
 	buffer: [commands.SHORTCUT_TEXT_CAP]u8
 	testing.expect_value(t, app.tooltip_shortcut(s, w, .Workspace_Picker, button.x+16, button.y+16, buffer[:]),
 		"Shift+F10")
 	app.handle_event(s, input.Mouse_Move_Event{window = w.id, x = i32(row.x+8), y = i32(row.y+row.height/2)})
 	testing.expect_value(t, w.workspace_picker.menu_hover, u32(0))
-	testing.expect_value(t, app.tooltip_current(w), "")
+	testing.expect_value(t, ui.tooltip_current(w), "")
 	app.handle_event(s, input.Mouse_Move_Event{window = w.id, x = i32(button.x+16), y = i32(button.y+16)})
 	testing.expect_value(t, w.workspace_picker.menu_hover, w.workspace_picker.rows[1].id)
 	app.handle_event(s, platform.Mouse_Leave_Event{window = w.id})

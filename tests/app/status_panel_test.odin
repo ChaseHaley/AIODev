@@ -602,7 +602,7 @@ toggle_tooltip_expect :: proc(
 ) {
 	testing.expect_value(t, app.pointer_target(s, w, x, y), owner, loc)
 	app.tooltip_hover(s, w, owner, input.Mouse_Move_Event{window = w.id, x = i32(x), y = i32(y)})
-	testing.expect_value(t, app.tooltip_current(w), label, loc)
+	testing.expect_value(t, ui.tooltip_current(w), label, loc)
 	buffer: [commands.SHORTCUT_TEXT_CAP]u8
 	testing.expect_value(t, app.tooltip_shortcut(s, w, owner, x, y, buffer[:]), "Ctrl+Shift+Y", loc)
 }

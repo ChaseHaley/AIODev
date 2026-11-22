@@ -92,5 +92,5 @@ description_hover :: proc(s: ^app.App, w: ^app.Window) -> string {
 	e := input.Mouse_Move_Event{window = w.id, x = i32(x), y = i32(y)}
 	app.handle_event(s, e)
 	app.tooltip_hover(s, w, .Settings_Page, e)
-	return app.tooltip_current(w)
+	return ui.tooltip_current(w)
 }

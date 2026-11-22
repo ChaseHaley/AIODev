@@ -66,13 +66,13 @@ Markdown_Gesture :: union {
 	Markdown_Selecting,
 }
 // A double or triple click holds its `unit`, which the drag grows the selection by, around the source
-// range `from`..`to` the click selected. The view scrolls every AUTOSCROLL_INTERVAL while the pointer is
-// past the page's top or bottom edge, as `scroll_at` says; zero means it is not.
+// range `from`..`to` the click selected. The view scrolls a step each time `scroll` is due while the
+// pointer is past the page's top or bottom edge.
 Markdown_Selecting :: struct {
-	pane:      u32,
-	unit:      Maybe(textedit.Unit),
-	from, to:  int,
-	scroll_at: time.Tick,
+	pane:     u32,
+	unit:     Maybe(textedit.Unit),
+	from, to: int,
+	scroll:   ui.Edge_Scroll,
 }
 
 // What the pointer is over among a window's Markdown panes: a link, or a pane's heading outline, whose
@@ -1046,11 +1046,7 @@ markdown_held_move :: proc(app: ^App, w: ^Window, x, y: f32) {
 	g := markdown_geometry_of(app, w, shown)
 	markdown_selecting_extend(w, pane, document, g, selecting, x, y)
 	outside := y < g.area.y || y > g.area.y + g.area.height
-	if outside && selecting.scroll_at == {} {
-		selecting.scroll_at = time.tick_add(host.clock_now(&app.clock), AUTOSCROLL_INTERVAL)
-		w.markdown_gesture = selecting
-	} else if !outside && selecting.scroll_at != {} {
-		selecting.scroll_at = {}
+	if ui.edge_scroll_follow(&selecting.scroll, outside, host.clock_now(&app.clock)) {
 		w.markdown_gesture = selecting
 	}
 	w.dirty = true
@@ -1081,14 +1077,15 @@ markdown_selecting_extend :: proc(
 
 markdown_autoscroll_deadline :: proc(w: ^Window) -> (time.Tick, bool) {
 	selecting, held := w.markdown_gesture.(Markdown_Selecting)
-	return selecting.scroll_at, held && selecting.scroll_at != {}
+	if !held {return {}, false}
+	return ui.edge_scroll_deadline(selecting.scroll)
 }
 
 // Scrolls the page a step toward a held pointer past its top or bottom edge, faster the farther it is,
 // and extends the selection to the line that comes under it.
 markdown_autoscroll_tick :: proc(app: ^App, w: ^Window, now: time.Tick) {
 	selecting, held := w.markdown_gesture.(Markdown_Selecting)
-	if !held || selecting.scroll_at == {} || time.tick_diff(selecting.scroll_at, now) < 0 {return}
+	if !held || !ui.edge_scroll_due(&selecting.scroll, now) {return}
 	pane := markdown_find(app, selecting.pane)
 	shown, found := markdown_pane_rect(w, selecting.pane)
 	document := pane != nil ? markdown_document(pane) : nil
@@ -1100,14 +1097,13 @@ markdown_autoscroll_tick :: proc(app: ^App, w: ^Window, now: time.Tick) {
 	x, y := w.pointer.x, w.pointer.y
 	distance := y < g.area.y ? y - g.area.y : max(0, y - g.area.y - g.area.height)
 	if distance == 0 {
-		selecting.scroll_at = {}
+		ui.edge_scroll_stop(&selecting.scroll)
 		w.markdown_gesture = selecting
 		return
 	}
 	reach := 3 * views.markdown_line(&pane.view)
 	markdown_scroll(w, pane, shown, clamp(int(distance) / 4, -reach, reach) + (distance < 0 ? -1 : 1))
 	markdown_selecting_extend(w, pane, document, g, selecting, x, y)
-	selecting.scroll_at = time.tick_add(now, AUTOSCROLL_INTERVAL)
 	w.markdown_gesture = selecting
 	w.dirty = true
 }

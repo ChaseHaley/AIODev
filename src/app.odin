@@ -622,7 +622,7 @@ window_timer_deadline :: proc(w: ^Window, timer: Window_Timer) -> (time.Tick, bo
 	case .Scroll_Hold:
 		return scroll_hold_deadline(w)
 	case .Tooltip:
-		return tooltip_deadline(w)
+		return ui.tooltip_deadline(&w.tooltip_state)
 	case .Hidden_Panes:
 		return hidden_panes_deadline(w)
 	case .Link_Submenu:

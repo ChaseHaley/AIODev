@@ -110,7 +110,7 @@ Window :: struct {
 	// The terminal link under the pointer; see term_links.odin.
 	link_hover: Maybe(Link_Hover),
 	pointer: [2]f32,
-	using tooltip_state: Tooltip_State,
+	using tooltip_state: ui.Tooltip_State,
 	pointer_shape: platform.Cursor_Shape,
 	// The last frame drew a pointer-following rim, so pointer movement must repaint it.
 	gloss_hovered: bool,

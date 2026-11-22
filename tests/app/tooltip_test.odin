@@ -14,12 +14,12 @@ import "cosmos:ui"
 @(test)
 tooltip_waits_for_its_hover_deadline :: proc(t: ^testing.T) {
 	now := time.tick_now()
-	w := app.Window{tooltip = app.Tooltip_Pending{"Split right", time.tick_add(now, 700 * time.Millisecond), {}}}
+	w := app.Window{tooltip = ui.Tooltip_Pending{"Split right", time.tick_add(now, 700 * time.Millisecond), {}}}
 	app.tooltip_tick(&w, now)
 	testing.expect(t, !tooltip_visible(&w) && tooltip_pending(&w))
 
 	app.tooltip_tick(&w, time.tick_add(now, 700 * time.Millisecond))
-	label, shown := app.tooltip_shown(&w)
+	label, shown := ui.tooltip_shown(&w)
 	testing.expect(t, shown && !tooltip_pending(&w))
 	testing.expect_value(t, label, "Split right")
 }
@@ -50,7 +50,7 @@ tooltip_covers_scrollback_find_buttons :: proc(t: ^testing.T) {
 		y := i32(button.rect.y + button.rect.height / 2)
 		_ = ui.find_hover(&w.find, l, true, f32(x), f32(y))
 		app.tooltip_hover(&state, &w, .Find, input.Mouse_Move_Event{x = x, y = y})
-		testing.expect_value(t, app.tooltip_current(&w), button.label)
+		testing.expect_value(t, ui.tooltip_current(&w), button.label)
 		testing.expect(t, !tooltip_visible(&w) && tooltip_pending(&w))
 		testing.expect_value(t, app.tooltip_shortcut(&state, &w, .Find, f32(x), f32(y), buffer[:]), button.shortcut)
 		key := ui.FIND_KEYS[w.find.hover]
@@ -72,11 +72,11 @@ tooltip_key_search_names_its_toggle_key :: proc(t: ^testing.T) {
 
 	state.palette.keys_hover = true
 	app.tooltip_hover(&state, &w, .Palette, input.Mouse_Move_Event{})
-	testing.expect_value(t, app.tooltip_current(&w), "Search by pressing a shortcut")
+	testing.expect_value(t, ui.tooltip_current(&w), "Search by pressing a shortcut")
 	testing.expect_value(t, app.tooltip_shortcut(&state, &w, .Palette, 0, 0, buffer[:]), "Alt+K")
 	state.palette.keys.state = .Recording
 	app.tooltip_hover(&state, &w, .Palette, input.Mouse_Move_Event{})
-	testing.expect_value(t, app.tooltip_current(&w), "Search by typing")
+	testing.expect_value(t, ui.tooltip_current(&w), "Search by typing")
 	testing.expect_value(t, app.tooltip_shortcut(&state, &w, .Palette, 0, 0, buffer[:]), "Alt+K")
 	state.palette.keys_hover = false
 	testing.expect_value(t, app.tooltip_shortcut(&state, &w, .Palette, 0, 0, buffer[:]), "")
@@ -85,7 +85,7 @@ tooltip_key_search_names_its_toggle_key :: proc(t: ^testing.T) {
 	w.editor.hover_profile_item = -1
 	w.editor.keys_hover = true
 	app.tooltip_hover(&state, &w, .Settings_Page, input.Mouse_Move_Event{})
-	testing.expect_value(t, app.tooltip_current(&w), "Search by pressing a shortcut")
+	testing.expect_value(t, ui.tooltip_current(&w), "Search by pressing a shortcut")
 	testing.expect_value(t, app.tooltip_shortcut(&state, &w, .Settings_Page, 0, 0, buffer[:]), "Alt+K")
 }
 
@@ -95,7 +95,7 @@ tooltip_covers_palette_setting_reset :: proc(t: ^testing.T) {
 	state.palette.reset_hover = 0
 	w: app.Window
 	app.tooltip_hover(&state, &w, .Palette, input.Mouse_Move_Event{})
-	testing.expect_value(t, app.tooltip_current(&w), "Reset setting")
+	testing.expect_value(t, ui.tooltip_current(&w), "Reset setting")
 	testing.expect(t, !tooltip_visible(&w) && tooltip_pending(&w))
 }
 
@@ -104,17 +104,17 @@ tooltip_neighbor_buttons_skip_second_delay :: proc(t: ^testing.T) {
 	state: app.App
 	w := app.Window{width = 400, height = 300, scale = 1}
 	app.tooltip_hover(&state, &w, .Caption, input.Mouse_Move_Event{x = 285, y = 20})
-	testing.expect_value(t, app.tooltip_current(&w), "Minimize")
+	testing.expect_value(t, ui.tooltip_current(&w), "Minimize")
 	testing.expect(t, !tooltip_visible(&w) && tooltip_pending(&w))
 	app.tooltip_tick(&w, time.tick_add(time.tick_now(), time.Second))
 	testing.expect(t, tooltip_visible(&w))
 
 	app.tooltip_hover(&state, &w, .Caption, input.Mouse_Move_Event{x = 330, y = 20})
-	testing.expect_value(t, app.tooltip_current(&w), "Maximize")
+	testing.expect_value(t, ui.tooltip_current(&w), "Maximize")
 	testing.expect(t, tooltip_visible(&w) && !tooltip_pending(&w))
 	app.tooltip_hover(&state, &w, .Content, input.Mouse_Move_Event{x = 355, y = 20})
 	app.tooltip_hover(&state, &w, .Caption, input.Mouse_Move_Event{x = 375, y = 20})
-	testing.expect_value(t, app.tooltip_current(&w), "Close window")
+	testing.expect_value(t, ui.tooltip_current(&w), "Close window")
 	testing.expect(t, tooltip_visible(&w) && !tooltip_pending(&w))
 
 	app.tooltip_hover(&state, &w, .Content, input.Mouse_Move_Event{x = 0, y = 20})
@@ -130,7 +130,7 @@ tooltip_workspace_color_wheel :: proc(t: ^testing.T) {
 	r := app.workspace_icon_color_button(&w)
 	app.tooltip_hover(&state, &w, .Workspace_Picker,
 		input.Mouse_Move_Event{x = i32(r.x + r.width / 2), y = i32(r.y + r.height / 2)})
-	testing.expect_value(t, app.tooltip_current(&w), "Change icon color")
+	testing.expect_value(t, ui.tooltip_current(&w), "Change icon color")
 	testing.expect(t, !tooltip_visible(&w) && tooltip_pending(&w))
 }
 
@@ -142,7 +142,7 @@ tooltip_skips_labeled_vertical_new_tab :: proc(t: ^testing.T) {
 	r := views.rail_new_tab_tile(l)
 	app.tooltip_hover(&state, &w, .Tabs,
 		input.Mouse_Move_Event{x = i32(r.x + r.width / 2), y = i32(r.y + r.height / 2)})
-	testing.expect_value(t, app.tooltip_current(&w), "")
+	testing.expect_value(t, ui.tooltip_current(&w), "")
 	testing.expect(t, w.tooltip == nil)
 }
 
@@ -153,7 +153,7 @@ tooltip_neighbor_grace_expires :: proc(t: ^testing.T) {
 	app.tooltip_hover(&state, &w, .Caption, input.Mouse_Move_Event{x = 285, y = 20})
 	app.tooltip_tick(&w, time.tick_add(time.tick_now(), time.Second))
 	app.tooltip_hover(&state, &w, .Content, input.Mouse_Move_Event{x = 310, y = 20})
-	warm, ok := &w.tooltip.(app.Tooltip_Warm)
+	warm, ok := &w.tooltip.(ui.Tooltip_Warm)
 	if !testing.expect(t, ok) {return}
 	warm.until = time.tick_add(time.tick_now(), -time.Millisecond)
 	app.tooltip_hover(&state, &w, .Caption, input.Mouse_Move_Event{x = 330, y = 20})
@@ -162,13 +162,13 @@ tooltip_neighbor_grace_expires :: proc(t: ^testing.T) {
 
 @(private = "file")
 tooltip_visible :: proc(w: ^app.Window) -> bool {
-	_, shown := app.tooltip_shown(w)
+	_, shown := ui.tooltip_shown(w)
 	return shown
 }
 
 @(private = "file")
 tooltip_pending :: proc(w: ^app.Window) -> bool {
-	_, pending := app.tooltip_deadline(w)
+	_, pending := ui.tooltip_deadline(w)
 	return pending
 }
 
@@ -184,13 +184,13 @@ tooltip_profile_chevron_uses_shared_hit_bounds :: proc(t: ^testing.T) {
 	r := app.tab_chevron_rect(&state, &w)
 	app.tooltip_hover(&state, &w, .Tabs,
 		input.Mouse_Move_Event{x = i32(r.x + r.width / 2), y = i32(r.y + r.height / 2)})
-	testing.expect(t, app.tooltip_current(&w) != "", "the chevron has a tooltip inside its hit bounds")
+	testing.expect(t, ui.tooltip_current(&w) != "", "the chevron has a tooltip inside its hit bounds")
 	app.tooltip_hover(&state, &w, .Tabs,
 		input.Mouse_Move_Event{x = i32(r.x + r.width + 1), y = i32(r.y + r.height / 2)})
-	testing.expect_value(t, app.tooltip_current(&w), "")
+	testing.expect_value(t, ui.tooltip_current(&w), "")
 	app.tooltip_hover(&state, &w, .Tabs,
 		input.Mouse_Move_Event{x = i32(r.x + r.width / 2), y = i32(r.y + r.height + 1)})
-	testing.expect_value(t, app.tooltip_current(&w), "")
+	testing.expect_value(t, ui.tooltip_current(&w), "")
 }
 
 // A control that runs a command shows that command's first shortcut beside its label, read from the
@@ -204,7 +204,7 @@ tooltip_shortcut_follows_the_commands_binding :: proc(t: ^testing.T) {
 	r := app.title_action_rect(&state, &w, .Palette)
 	x, y := r.x + r.width / 2, r.y + r.height / 2
 	app.tooltip_hover(&state, &w, .Title_Action, input.Mouse_Move_Event{x = i32(x), y = i32(y)})
-	testing.expect_value(t, app.tooltip_current(&w), "Everything palette")
+	testing.expect_value(t, ui.tooltip_current(&w), "Everything palette")
 	buffer: [commands.SHORTCUT_TEXT_CAP]u8
 	testing.expect_value(t, app.tooltip_shortcut(&state, &w, .Title_Action, x, y, buffer[:]), "Ctrl+Shift+P")
 

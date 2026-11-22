@@ -660,7 +660,7 @@ status_panel_row_tooltip :: proc(app: ^App, w: ^Window, x, y: f32) -> string {
 	times := fmt.tprintf("%s for %s · %s", state, status_state_age(app, item.record), read)
 	if item.record.message != "" {
 		// Half the tooltip at most, so a long message never pushes the location out of it.
-		message := tooltip_clip(item.record.message, TOOLTIP_LIMIT / 2)
+		message := ui.tooltip_clip(item.record.message, ui.TOOLTIP_LIMIT / 2)
 		return fmt.tprintf("%s\n%s: %s\n%s\n%s", who, state, message, times, item.pane.crumb)
 	}
 	return fmt.tprintf("%s\n%s\n%s", who, times, item.pane.crumb)
