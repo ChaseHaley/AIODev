@@ -293,7 +293,7 @@ quit_unsaved_text :: proc(subject: Quit_Unsaved) -> Confirmation_Text {
 @(private)
 quit_unsaved_finish :: proc(app: ^App, subject: Quit_Unsaved, accepted: bool) {
 	if !accepted {return}
-	if subject.restart {app_restart(app)} else {app_quit(app)}
+	if subject.restart {host.restart(&app.run)} else {host.quit(&app.run)}
 }
 
 // --- Pointer ---

@@ -12,6 +12,7 @@ import "cosmos:platform"
 import "aio:term"
 import "aio:views"
 import "cosmos:ui"
+import "cosmos:host"
 
 @(private = "file")
 tab_pane_count :: proc(tab: ^app.Tab) -> int {
@@ -218,7 +219,7 @@ tabs_dragged_to_another_window_join_its_workspace :: proc(t: ^testing.T) {
 	testing.expect_value(t, len(state.windows), 1)
 	testing.expect(t, app.workspace_find(&state, workspace_id) == nil)
 	testing.expect_value(t, len(state.workspaces), workspaces - 1)
-	testing.expect_value(t, state.run, app.App_Run.Running)
+	testing.expect_value(t, state.run, host.Run.Running)
 	if !testing.expect_value(t, len(home.tabs), 5) {return}
 	testing.expect(t, layout.find_content(&home.tabs[0].tree, content_second) != layout.INVALID_NODE)
 	testing.expect(t, layout.find_content(&home.tabs[1].tree, content_third) != layout.INVALID_NODE)
@@ -365,7 +366,7 @@ tabs_dragged_onto_the_workspace_dropdown :: proc(t: ^testing.T) {
 	testing.expect(t, app.window_find(&state, source_id) == nil)
 	testing.expect(t, app.workspace_find(&state, workspace_id) == nil)
 	testing.expect_value(t, len(home.tabs), 3)
-	testing.expect_value(t, state.run, app.App_Run.Running)
+	testing.expect_value(t, state.run, host.Run.Running)
 	testing.expect_value(t, len(state.sessions), sessions)
 	app.tick(&state)
 }
@@ -395,7 +396,7 @@ last_tab_dropped_on_an_unshown_workspace_keeps_its_window :: proc(t: ^testing.T)
 	testing.expect_value(t, len(unshown.tabs), 3)
 	testing.expect_value(t, len(state.sessions), sessions)
 	testing.expect(t, app.window_tree(w) == &app.selected_tab(unshown).tree)
-	testing.expect_value(t, state.run, app.App_Run.Running)
+	testing.expect_value(t, state.run, host.Run.Running)
 	app.tick(&state)
 }
 

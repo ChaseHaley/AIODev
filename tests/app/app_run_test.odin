@@ -11,6 +11,7 @@ import "aio:commands"
 import "aio:control"
 import "aio:layout"
 import "cosmos:platform"
+import "cosmos:host"
 
 // Restart asks no question, as quit asks none, so each way of running it ends the loop to start again,
 // and a quit already under way stays a quit.
@@ -27,62 +28,62 @@ restart_command_stops_the_loop_for_restart_from_every_origin :: proc(t: ^testing
 	invocation := commands.invocation(command.id, focus = true)
 	outcome := app.command_execute(&state, app.Control_Request{origin = .Cli}, invocation)
 	testing.expect(t, outcome.status == .Ok)
-	testing.expect_value(t, state.run, app.App_Run.Restart)
+	testing.expect_value(t, state.run, host.Run.Restart)
 
 	state.run = .Running
 	w := app.Window{}
 	app.run_action(&state, &w, app.Action(command.id), .Palette)
-	testing.expect_value(t, state.run, app.App_Run.Restart)
+	testing.expect_value(t, state.run, host.Run.Restart)
 
 	state.run = .Quit
 	app.run_action(&state, &w, app.Action(command.id), .Palette)
-	testing.expect_value(t, state.run, app.App_Run.Quit)
+	testing.expect_value(t, state.run, host.Run.Quit)
 }
 
 when app.AIO_CONTROL {
 	@(test)
 	app_run_holds_only_the_owners_quit :: proc(t: ^testing.T) {
 		state: app.App
-		testing.expect(t, app.app_running(&state))
-		app.app_quit(&state)
-		testing.expect_value(t, state.run, app.App_Run.Quit)
-		testing.expect(t, !app.app_running(&state))
-		testing.expect(t, app.app_quit_hold(&state))
-		testing.expect(t, app.app_running(&state))
-		app.app_quit(&state)
-		testing.expect_value(t, state.run, app.App_Run.Draining)
-		app.app_quit_release(&state)
-		testing.expect_value(t, state.run, app.App_Run.Quit)
-		testing.expect(t, !app.app_running(&state))
+		testing.expect(t, host.running(state.run))
+		host.quit(&state.run)
+		testing.expect_value(t, state.run, host.Run.Quit)
+		testing.expect(t, !host.running(state.run))
+		testing.expect(t, host.quit_hold(&state.run))
+		testing.expect(t, host.running(state.run))
+		host.quit(&state.run)
+		testing.expect_value(t, state.run, host.Run.Draining)
+		host.quit_release(&state.run)
+		testing.expect_value(t, state.run, host.Run.Quit)
+		testing.expect(t, !host.running(state.run))
 
 		// A lost device ends the loop even while a quit is being drained, and is never held open.
 		state = {}
-		app.app_quit(&state)
-		testing.expect(t, app.app_quit_hold(&state))
-		app.app_device_failed(&state)
-		testing.expect_value(t, state.run, app.App_Run.Device_Failed)
-		testing.expect(t, !app.app_quit_hold(&state))
-		app.app_quit(&state)
-		app.app_quit_release(&state)
-		testing.expect_value(t, state.run, app.App_Run.Device_Failed)
-		testing.expect(t, !app.app_running(&state))
+		host.quit(&state.run)
+		testing.expect(t, host.quit_hold(&state.run))
+		host.device_failed(&state.run)
+		testing.expect_value(t, state.run, host.Run.Device_Failed)
+		testing.expect(t, !host.quit_hold(&state.run))
+		host.quit(&state.run)
+		host.quit_release(&state.run)
+		testing.expect_value(t, state.run, host.Run.Device_Failed)
+		testing.expect(t, !host.running(state.run))
 	}
 
 	// A restart through the harness answers before the app goes, as a quit does, and still restarts.
 	@(test)
 	app_run_holds_a_restart_open_and_goes_on_restarting :: proc(t: ^testing.T) {
 		state: app.App
-		app.app_restart(&state)
-		testing.expect_value(t, state.run, app.App_Run.Restart)
-		testing.expect(t, !app.app_running(&state))
-		testing.expect(t, app.app_quit_hold(&state))
-		testing.expect(t, app.app_running(&state))
-		app.app_quit(&state)
-		app.app_restart(&state)
-		testing.expect_value(t, state.run, app.App_Run.Draining_Restart)
-		app.app_quit_release(&state)
-		testing.expect_value(t, state.run, app.App_Run.Restart)
-		testing.expect(t, !app.app_running(&state))
+		host.restart(&state.run)
+		testing.expect_value(t, state.run, host.Run.Restart)
+		testing.expect(t, !host.running(state.run))
+		testing.expect(t, host.quit_hold(&state.run))
+		testing.expect(t, host.running(state.run))
+		host.quit(&state.run)
+		host.restart(&state.run)
+		testing.expect_value(t, state.run, host.Run.Draining_Restart)
+		host.quit_release(&state.run)
+		testing.expect_value(t, state.run, host.Run.Restart)
+		testing.expect(t, !host.running(state.run))
 	}
 
 	@(private = "file")
@@ -113,9 +114,9 @@ when app.AIO_CONTROL {
 		client: ^Harness_Client,
 		args: []string,
 	) -> (
-		runs: [dynamic]app.App_Run,
+		runs: [dynamic]host.Run,
 	) {
-		runs = make([dynamic]app.App_Run, context.temp_allocator)
+		runs = make([dynamic]host.Run, context.temp_allocator)
 		append(&runs, state.run)
 		id := fmt.tprintf("AIODev.Test.VerifyRun.%d.%d", os.get_pid(), time.tick_now()._nsec)
 		name, name_error := control.pipe_name(id, context.temp_allocator)
@@ -129,7 +130,7 @@ when app.AIO_CONTROL {
 		worker.data = client
 		thread.start(worker)
 		start := time.tick_now()
-		for (app.app_running(state) || !control.delivery_finished(server, 1)) &&
+		for (host.running(state.run) || !control.delivery_finished(server, 1)) &&
 		    time.tick_since(start) < 5 * time.Second {
 			app.verify_tick(state)
 			if runs[len(runs) - 1] != state.run {append(&runs, state.run)}
@@ -151,9 +152,9 @@ when app.AIO_CONTROL {
 		testing.expect(t, client.response.ok)
 		testing.expect_value(t, client.response.text, "ok; quitting")
 		if !testing.expect_value(t, len(runs), 3) {return}
-		testing.expect_value(t, runs[0], app.App_Run.Running)
-		testing.expect_value(t, runs[1], app.App_Run.Draining)
-		testing.expect_value(t, runs[2], app.App_Run.Quit)
+		testing.expect_value(t, runs[0], host.Run.Running)
+		testing.expect_value(t, runs[1], host.Run.Draining)
+		testing.expect_value(t, runs[2], host.Run.Quit)
 	}
 
 	// Tray quit once the device is lost: nothing is held, and the reply says the app is ending.
@@ -161,7 +162,7 @@ when app.AIO_CONTROL {
 	verification_tray_quit_after_a_lost_device_holds_nothing :: proc(t: ^testing.T) {
 		state: app.App
 		defer app.verify_destroy(&state)
-		app.app_device_failed(&state)
+		host.device_failed(&state.run)
 		client: Harness_Client
 		defer control.response_destroy(&client.response)
 		runs := request_through_harness(t, &state, &client, {"tray", "quit"})
@@ -169,7 +170,7 @@ when app.AIO_CONTROL {
 		testing.expect(t, !client.response.ok)
 		testing.expect_value(t, client.response.text, "error: the graphics device was lost; AIODev is exiting")
 		if !testing.expect_value(t, len(runs), 1) {return}
-		testing.expect_value(t, runs[0], app.App_Run.Device_Failed)
+		testing.expect_value(t, runs[0], host.Run.Device_Failed)
 	}
 
 	// A drive that finds the app stopped used to set it running again to drain a quit, even when the
@@ -195,7 +196,7 @@ when app.AIO_CONTROL {
 		append(&state.workspaces, &workspace)
 		defer delete(state.workspaces)
 		defer app.verify_destroy(&state)
-		app.app_device_failed(&state)
+		host.device_failed(&state.run)
 		client: Harness_Client
 		defer control.response_destroy(&client.response)
 		runs := request_through_harness(t, &state, &client, {"window", "select", fmt.tprintf("%d", window_id)})
@@ -203,6 +204,6 @@ when app.AIO_CONTROL {
 		testing.expect(t, !client.response.ok)
 		testing.expect_value(t, client.response.text, "error: the graphics device was lost; AIODev is exiting")
 		if !testing.expect_value(t, len(runs), 1) {return}
-		testing.expect_value(t, runs[0], app.App_Run.Device_Failed)
+		testing.expect_value(t, runs[0], host.Run.Device_Failed)
 	}
 }

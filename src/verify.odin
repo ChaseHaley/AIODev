@@ -254,7 +254,7 @@ when AIO_CONTROL {
 	// is drawn again, so a gated reply can prove a presented frame once DXGI statistics catch up; this
 	// redraw is harness-build cadence only.
 	verify_presented :: proc(app: ^App, w: ^Window) {
-		surface := window_surface(w)
+		surface := host.surface_get(w.surface)
 		if surface == nil {return}
 		count, err := render.surface_present_count(surface)
 		if err != .None {
@@ -1448,7 +1448,7 @@ when AIO_CONTROL {
 		if quitting, ok := v.request.(Verify_Quitting); ok {
 			if control.delivery_finished(v.server, quitting.id) ||
 			   time.tick_diff(quitting.started, now) >= QUIT_DRAIN {
-				app_quit_release(app)
+				host.quit_release(&app.run)
 			}
 			return
 		}
@@ -1527,7 +1527,7 @@ when AIO_CONTROL {
 		case .Quit:
 			id := message.transport.id
 			verify_message_destroy(message)
-			app_quit(app)
+			host.quit(&app.run)
 			verify_quit(app, id, now)
 		}
 	}
@@ -1569,7 +1569,7 @@ when AIO_CONTROL {
 	verify_quit :: proc(app: ^App, id: u64, now: time.Tick) {
 		v := &app.verify
 		restarting := app.run == .Restart
-		held := app_quit_hold(app)
+		held := host.quit_hold(&app.run)
 		response := control.Response{ok = held, text = restarting ? "ok; restarting" : "ok; quitting"}
 		if !held {response.text = "error: the graphics device was lost; AIODev is exiting"}
 		if err := control.respond(v.server, id, response); err != .None {

@@ -1008,7 +1008,7 @@ web_layers_have_content :: proc(list: ^render.Draw_List, from, to: int) -> bool 
 // split go to the window's swap chain under every web view, and overlay i (to the next split) sits
 // above web level i.
 web_window_present :: proc(app: ^App, w: ^Window, background: render.Color) -> render.Error {
-	surface := window_surface(w)
+	surface := host.surface_get(w.surface)
 	if !web_window_has_visible(w) {
 		if w.web.host != nil {
 			web_window_hide_all_visuals(app, w)

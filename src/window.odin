@@ -57,7 +57,7 @@ Window :: struct {
 	id: input.Window_Id,
 	// The workspace, tab and pane this window last reported as selected and focused.
 	event_focus: App_Event_Focus,
-	surface: Window_Surface,
+	surface: host.Surface,
 	ui_text: ui.Text,
 	// Every text field caret this window draws; ui_text points here.
 	carets: ui.Carets,
@@ -639,7 +639,7 @@ focused_session :: proc(app: ^App, w: ^Window) -> ^Session_Entry {
 window_render :: proc(app: ^App, w: ^Window, wait := true) {
 	if window_minimized(w) {return}
 	if !window_surface_ready(app, w) {return}
-	surface := window_surface(w)
+	surface := host.surface_get(w.surface)
 	ready, wait_error := render.frame_acquire(surface, wait ? FRAME_WAIT_MS : 0)
 	if wait_error == .Wait_Failed {
 		log.error("waiting for the swap chain failed")

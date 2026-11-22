@@ -1,5 +1,7 @@
 package main
 
+import "cosmos:host"
+
 // Group closes and pane transfers finish using the source before retiring its last tab's workspace.
 workspace_close_empty :: proc(app: ^App, workspace: ^Workspace, replace_window := true) {
 	if workspace == nil || workspace.provisional || len(workspace.tabs) != 0 {return}
@@ -30,5 +32,5 @@ workspace_close_empty :: proc(app: ^App, workspace: ^Workspace, replace_window :
 	workspace_delete_release(app, workspace)
 	workspace_mutation_finish(app, nil, {.Names})
 	for candidate in app.workspaces {if workspace_eligible(app, candidate) {return}}
-	app_quit(app)
+	host.quit(&app.run)
 }

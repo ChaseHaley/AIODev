@@ -8,6 +8,7 @@ import "aio:term"
 import "aio:verify_protocol"
 import "core:fmt"
 import "core:strings"
+@(require) import "cosmos:host"
 
 _ :: verify_protocol
 _ :: font
@@ -114,7 +115,7 @@ when AIO_CONTROL {
 				glyphs.reset_counts(&app.cache)
 			case .Display:
 				for w in app.windows {
-					if surface := window_surface(w); surface != nil {render.frame_report_reset(surface)}
+					if surface := host.surface_get(w.surface); surface != nil {render.frame_report_reset(surface)}
 				}
 			}
 		}
@@ -131,12 +132,12 @@ when AIO_CONTROL {
 	@(private = "file")
 	perf_display :: proc(app: ^App) -> (d: Perf_Display) {
 		if w := verify_window(app); w != nil {
-			if surface := window_surface(w); surface != nil {
+			if surface := host.surface_get(w.surface); surface != nil {
 				d.period_us = f64(render.frame_period(surface)) / 1e3
 			}
 		}
 		for w in app.windows {
-			surface := window_surface(w)
+			surface := host.surface_get(w.surface)
 			if surface == nil {continue}
 			r := render.frame_report(surface)
 			if r.confirmed > 0 {

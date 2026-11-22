@@ -111,7 +111,7 @@ App :: struct {
 	// The last session id session_open allocated; callers use the id it returns instead.
 	next_session_id:       u32,
 	windows:               [dynamic]^Window,
-	run:                   App_Run,
+	run:                   host.Run,
 	tray_hint_shown:       bool,
 	// See update_processes.
 	process_deadline:      time.Tick,
@@ -317,7 +317,7 @@ app_destroy :: proc(app: ^App) {
 }
 
 run :: proc(app: ^App) {
-	for app_running(app) {
+	for host.running(app.run) {
 		waits := frame_waits(app)
 		signaled, err := platform_api.wait_events(
 			&app.platform,
@@ -327,7 +327,7 @@ run :: proc(app: ^App) {
 		if err != .None {
 			log.error("waiting for events failed")
 		}
-		if signaled >= 0 {render.frame_signaled(window_surface(waits.windows[signaled]))}
+		if signaled >= 0 {render.frame_signaled(host.surface_get(waits.windows[signaled].surface))}
 		tick(app, wait_frames = false)
 	}
 	// Consumers hear of the quit while everything they may ask about still exists.
@@ -370,7 +370,7 @@ frame_waits :: proc(app: ^App) -> (waits: Frame_Waits) {
 			}
 			waits.handles[waits.count], waits.windows[waits.count] = handle, w
 			waits.count += 1
-		case Surface_Failed:
+		case host.Surface_Failed:
 			waits.unpaced ||= animating
 		case nil:
 			waits.ready = true

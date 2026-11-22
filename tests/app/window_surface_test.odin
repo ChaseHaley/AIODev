@@ -5,6 +5,7 @@ import "core:os"
 import "core:testing"
 import app "../../src"
 import "cosmos:render"
+import "cosmos:host"
 
 // A window can be left without a surface when device recovery cannot recreate it. It must survive a
 // resize, a second recovery must rebuild it, and its next frame must create it if nothing else does.
@@ -17,19 +18,19 @@ device_recovery_rebuilds_a_window_left_without_a_surface :: proc(t: ^testing.T) 
 	first, second := s.windows[0], s.windows[1]
 	app.window_surface_release(first)
 	app.window_resize(s, first, 640, 480)
-	testing.expect(t, app.window_surface(first) == nil)
+	testing.expect(t, host.surface_get(first.surface) == nil)
 	lost := s.device
 	app.recover_device(s)
-	testing.expect(t, app.app_running(s))
+	testing.expect(t, host.running(s.run))
 	testing.expect(t, s.device != lost)
 	testing.expect(t, s.cache.device == s.device)
 	testing.expect_value(t, render.device_driver(s.device), render.Driver.Warp)
-	testing.expect(t, app.window_surface(first) != nil)
-	testing.expect(t, app.window_surface(second) != nil)
+	testing.expect(t, host.surface_get(first.surface) != nil)
+	testing.expect(t, host.surface_get(second.surface) != nil)
 	app.window_surface_release(second)
 	app.window_resize(s, second, 500, 400)
 	app.tick(s)
-	testing.expect(t, app.window_surface(second) != nil)
+	testing.expect(t, host.surface_get(second.surface) != nil)
 }
 
 // A driver still resetting can lose the recreated device too. The window's next attempt to make its
@@ -46,10 +47,10 @@ a_device_lost_again_while_remaking_a_surface_recovers_again :: proc(t: ^testing.
 		lost := s.device
 		lost.lost = true
 		app.tick(s)
-		testing.expect(t, app.app_running(s))
+		testing.expect(t, host.running(s.run))
 		testing.expect(t, s.device != lost)
 		testing.expect(t, !s.device.lost)
-		testing.expect(t, app.window_surface(first) != nil)
+		testing.expect(t, host.surface_get(first.surface) != nil)
 		testing.expect(t, !first.dirty)
 	}
 }
@@ -77,13 +78,13 @@ a_surface_that_cannot_be_made_is_reported_once_and_waits_for_a_resize :: proc(t:
 	first.dirty = true
 	app.tick(s)
 	context.logger = logger
-	testing.expect(t, app.window_surface(first) == nil)
-	_, failed := first.surface.(app.Surface_Failed)
+	testing.expect(t, host.surface_get(first.surface) == nil)
+	_, failed := first.surface.(host.Surface_Failed)
 	testing.expect(t, failed)
 	testing.expect_value(t, errors, 1)
 	app.window_resize(s, first, 800, 600)
 	app.tick(s)
-	testing.expect(t, app.window_surface(first) != nil)
+	testing.expect(t, host.surface_get(first.surface) != nil)
 }
 
 // The dialog's answer is only for the window it was opened from, so it must not outlive that window.

@@ -9,6 +9,7 @@ import "core:testing"
 import app "../../src"
 import "cosmos:platform"
 import "cosmos:render"
+import "cosmos:host"
 
 // The whole app, started through app_init with the headless backend: it opens a window on the
 // virtual desktop, splits a pane and draws offscreen, and the test process owns no window on the
@@ -39,7 +40,7 @@ app_runs_splits_and_draws_without_a_desktop_window :: proc(t: ^testing.T) {
 	testing.expect_value(t, len(w0.panes), 2)
 	state.animations = false
 	for _ in 0 ..< 3 {app.tick(&state)}
-	surface := app.window_surface(w0)
+	surface := host.surface_get(w0.surface)
 	if !testing.expect(t, surface != nil, "the window has no surface") {return}
 	presented, count_error := render.surface_present_count(surface)
 	testing.expect_value(t, count_error, render.Error.None)

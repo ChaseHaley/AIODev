@@ -139,7 +139,7 @@ update_restart_text :: proc(restart: Update_Restart) -> Confirmation_Text {
 @(private)
 update_restart_finish :: proc(app: ^App, accepted: bool) {
 	if accepted {
-		app_restart(app)
+		host.restart(&app.run)
 		return
 	}
 	// aio only talks to the aiodev.exe beside it, and this process's image now lies under .replaced.

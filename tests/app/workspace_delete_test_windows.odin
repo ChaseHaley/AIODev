@@ -15,6 +15,7 @@ import "aio:term"
 import "aio:views"
 import win32 "core:sys/windows"
 import "cosmos:ui"
+import "cosmos:host"
 
 @(private="file")
 Delete_Fixture :: struct { state: app.App, directory, path: string }
@@ -49,14 +50,14 @@ last_tab_group_removes_workspace_and_reuses_window_then_last_pane_exits :: proc(
 	testing.expect(t, state.run == .Running && !state.tray_hint_shown)
 	app.tick(state)
 	app.pane_close(state, w)
-	testing.expect_value(t, state.run, app.App_Run.Quit)
+	testing.expect_value(t, state.run, host.Run.Quit)
 	testing.expect_value(t, len(state.workspaces), 0)
 	testing.expect_value(t, len(state.windows), 0)
 	testing.expect_value(t, len(state.sessions), 0)
 	// Already-queued open events must not resurrect work or index an empty registry during shutdown.
 	app.handle_event(state, platform.Activate_Request_Event{})
 	app.handle_event(state, platform.Tray_Event{})
-	testing.expect_value(t, state.run, app.App_Run.Quit)
+	testing.expect_value(t, state.run, host.Run.Quit)
 	testing.expect_value(t, len(state.workspaces), 0)
 	testing.expect_value(t, len(state.windows), 0)
 }
@@ -137,7 +138,7 @@ last_settings_tab_closes_the_app_after_split_close_confirmation :: proc(t: ^test
 	testing.expect_value(t, len(state.sessions), 0)
 	testing.expect(t, state.run == .Running && len(w.workspace.tabs) == 1)
 	app.tab_close_request(state, w, 0)
-	testing.expect_value(t, state.run, app.App_Run.Quit)
+	testing.expect_value(t, state.run, host.Run.Quit)
 	testing.expect_value(t, len(state.workspaces), 0)
 	testing.expect_value(t, len(state.windows), 0)
 }

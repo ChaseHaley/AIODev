@@ -7,6 +7,7 @@ import "core:testing"
 import app "../../src"
 import "cosmos:platform"
 import "cosmos:render"
+import "cosmos:host"
 
 // The whole app frame renders offscreen at a chosen DPI, the real build_frame and no window
 // (VT-6's frame harness): a display at 144 DPI scales the window by 1.5, and moving the window to a
@@ -49,7 +50,7 @@ whole_frame_renders_at_chosen_dpis :: proc(t: ^testing.T) {
 // Reads back the window's last frame and returns its byte count, after checking it is not blank.
 @(private = "file")
 frame_size :: proc(t: ^testing.T, state: ^app.App, w: ^app.Window) -> int {
-	surface := app.window_surface(w)
+	surface := host.surface_get(w.surface)
 	if !testing.expect(t, surface != nil, "the window has no surface") {return 0}
 	pixels, err := render.surface_read_pixels(state.device, surface, context.allocator)
 	if !testing.expect_value(t, err, render.Error.None) {return 0}

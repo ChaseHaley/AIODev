@@ -77,7 +77,7 @@ window_motion_advance :: proc(app: ^App, w: ^Window, part: Window_Motion, frame:
 		return cursor_motion_animate(app, w, frame)
 	case .Field_Carets:
 		// Carets move as their fields draw; a window that cannot draw lets them land.
-		if _, failed := w.surface.(Surface_Failed); failed || !window_drawable(w) {w.carets.moving = false}
+		if _, failed := w.surface.(host.Surface_Failed); failed || !window_drawable(w) {w.carets.moving = false}
 		return w.carets.moving
 	case .Confirmation:
 		confirmation_advance(app, w, frame)
@@ -151,7 +151,7 @@ window_motion_running :: proc(app: ^App, w: ^Window, part: Window_Motion) -> boo
 // present has no next frame; its motion runs on the assumed refresh so it still settles.
 window_frame_time :: proc(app: ^App, w: ^Window) -> ui.Frame_Time {
 	now := host.clock_now(&app.clock)
-	surface := window_surface(w)
+	surface := host.surface_get(w.surface)
 	if surface == nil || !window_drawable(w) {return render.frame_time_at(now)}
 	return render.frame_predict(surface, now)
 }
