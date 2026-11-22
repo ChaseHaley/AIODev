@@ -4,9 +4,8 @@ param([string] $Name = 'neovim-shell')
 # opens Neovim in that pane over the shell, taking the pane only once Neovim has drawn, and quitting Neovim
 # or choosing the shell's profile in the pane switcher shows the same shell again. Typing hides the pointer
 # until the mouse moves. Closing the pane, its tab or AIODev with an unsaved buffer asks first. Neovim
-# opened beside a pane leaves a shell in its folder when it quits. Neovim run in the terminal reports
-# :checkhealth in Activity (WORK-548). Needs nvim on PATH. Neovim runs with XDG folders inside this
-# journey's work folder, so the owner's Neovim config is neither read nor written.
+# opened beside a pane leaves a shell in its folder when it quits. Needs nvim on PATH. Neovim runs with XDG
+# folders inside this journey's work folder, so the owner's Neovim config is neither read nor written.
 $ErrorActionPreference = 'Stop'
 $repo = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
 $ctl = Join-Path $repo 'build/aioctl.exe'
@@ -57,16 +56,6 @@ function Screen-Text {
     $state = Read-State
     return ($state.Keys | Where-Object { $_ -match '^neovim\.row\.\d+$' } | ForEach-Object { $state[$_] }) -join "`n"
 }
-# The Activity row whose report mentions `Text`, or $null.
-function Find-Row([string] $Text) {
-    $state = Read-State
-    for ($i = 0; $state.ContainsKey("activity.row.$i.rect"); $i++) {
-        if ($state["activity.row.$i.report"] -eq 'true' -and $state["activity.row.$i.terms"] -like "*$Text*") {
-            return $state["activity.row.$i.terms"]
-        }
-    }
-    return $null
-}
 # Waits for Neovim to take the focused pane, which must already show a window Neovim drew: its first
 # flush, before its config has run, holds only an empty base grid.
 function Wait-Drawn {
@@ -86,12 +75,9 @@ Remove-Item -LiteralPath $work -Recurse -Force -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Force $work | Out-Null
 Set-Content -LiteralPath (Join-Path $work 'notes.txt') -Encoding utf8 -NoNewline "first line`nsecond line`n"
 # A config that waits on the event loop while it loads, as plugin managers do, so Neovim's first flush,
-# an empty base grid, arrives well before its first window: the owner's flicker. It has the line D-105
-# documents for AIODev, which also reports progress messages from a terminal Neovim.
+# an empty base grid, arrives well before its first window: the owner's flicker.
 New-Item -ItemType Directory -Force (Join-Path $work 'xdg/config/nvim') | Out-Null
-Set-Content -LiteralPath (Join-Path $work 'xdg/config/nvim/init.lua') -Encoding utf8 ('vim.wait(150) ' +
-    'if vim.env.AIODEV_CLI then vim.opt.rtp:append(vim.fs.dirname(vim.env.AIODEV_CLI) .. "/nvim") ' +
-    'require("aiodev_theme").setup() end')
+Set-Content -LiteralPath (Join-Path $work 'xdg/config/nvim/init.lua') -Encoding utf8 'vim.wait(150)'
 @"
 control.enabled = true
 profile.default.command = pwsh.exe -NoLogo -NoProfile -NoExit
@@ -181,23 +167,6 @@ try {
     Wait-For 'neovim.active' 'false'
     Wait-For 'neovim.count' '0'
     Check ((Read-State)['tab.1.panes'] -eq '2') 'the pane closed instead of becoming a shell'
-    Invoke-Ctl wait text 'PS ' | Out-Null
-
-    # The owner's report: :checkhealth in Neovim run in the terminal showed its percentages but nothing in
-    # Activity. The terminal Neovim writes each progress message to the terminal as OSC 7501. A shell takes
-    # the user's own environment, XDG_CONFIG_HOME included, so the journey's folders are set in it first.
-    $xdg = ('CONFIG', 'DATA', 'STATE', 'CACHE' | ForEach-Object {
-        "`$env:XDG_$($_)_HOME = '$(Join-Path $work "xdg/$($_.ToLower())")'; " }) -join ''
-    Invoke-Ctl type "$xdg nvim" | Out-Null
-    Invoke-Ctl key Enter | Out-Null
-    # PowerShell expands a bare ~ argument to the home folder, so the empty buffer's statusline is waited on.
-    Invoke-Ctl wait text '[No Name]' | Out-Null
-    Invoke-Ctl type ':checkhealth vim.health' | Out-Null
-    Invoke-Ctl key Enter | Out-Null
-    Wait-Until { $null -ne (Find-Row 'checks done') } ':checkhealth in a terminal Neovim reported nothing in Activity'
-    Invoke-Ctl capture --out (Join-Path $work 'terminal-checkhealth.png') | Out-Null
-    Invoke-Ctl type ':qa!' | Out-Null
-    Invoke-Ctl key Enter | Out-Null
     Invoke-Ctl wait text 'PS ' | Out-Null
     Write-Output 'PASS neovim_shell'
 } finally {

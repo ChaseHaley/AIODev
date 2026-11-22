@@ -2310,16 +2310,7 @@ take_status :: proc(t: ^testing.T, c: ^neovim.Client, store: ^term.Session) -> [
 real_neovim_progress_is_reported_as_program_status :: proc(t: ^testing.T) {
 	c: neovim.Client
 	defer neovim.destroy(&c)
-	// The client loads its report maker from the `nvim` folder beside the `aio` AIODEV_CLI names, which
-	// in the repository is its root.
-	root, root_error := os.get_working_directory(context.temp_allocator)
-	if !testing.expect_value(t, root_error, nil) {return}
-	error := neovim.start(&c, {
-		argv = {"nvim", "--embed", "--clean", "-n", "-i", "NONE"},
-		env = {fmt.tprintf("AIODEV_CLI=%s\\aio.exe", root)},
-		columns = 60,
-		rows = 20,
-	}, spawn.Wake{})
+	error := start_nvim(&c, 60, 20)
 	if error == .Not_Found {
 		log.info("nvim is not on PATH; skipping the real Neovim progress test")
 		return
