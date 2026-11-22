@@ -11,6 +11,7 @@ import "core:slice"
 import "core:strings"
 import "core:time"
 import "cosmos:ui"
+import "cosmos:host"
 
 // What an Agent changes pane shows: the turn worker reads git and the recorded segments off the main
 // thread, and this file turns its results into the pane's views.Changes_View. The model owns the current
@@ -934,7 +935,7 @@ changes_model_result :: proc(app: ^App, result: Turn_Result) {
 	model.content = result
 	switch &r in model.content {
 	case Result_Query:
-		changes_fill_query(app, pane, &r, clock_wall(&app.clock), model.recording)
+		changes_fill_query(app, pane, &r, host.clock_wall(&app.clock), model.recording)
 	case Result_Plain:
 		changes_fill_plain(app, pane, &r)
 		// The view watch follows the worktree the result shows.
@@ -994,7 +995,7 @@ changes_model_poll :: proc(app: ^App, pane: ^Changes_Pane) -> bool {
 		return false
 	}
 	changed := changes_sources_refresh(app, pane)
-	wall := clock_wall(&app.clock)
+	wall := host.clock_wall(&app.clock)
 	minute := changes_minute(wall)
 	if minute != model.aged && len(model.details) > 0 {
 		#partial switch &content in model.content {

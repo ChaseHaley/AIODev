@@ -4,6 +4,7 @@ import "cosmos:input"
 import "aio:layout"
 import "cosmos:platform"
 import "aio:term"
+import "cosmos:host"
 
 // The pointer over pane content and anything uncovered: pane focus, links, the selection, and programs
 // that report the mouse.
@@ -121,7 +122,7 @@ content_move :: proc(app: ^App, w: ^Window, e: input.Mouse_Move_Event) {
 	pointer_set(app, w, shape)
 	if swallowed {return}
 	if selection_active(w) {
-		if entry != nil {selection_move(w, entry, x, y, clock_now(&app.clock))}
+		if entry != nil {selection_move(w, entry, x, y, host.clock_now(&app.clock))}
 		return
 	}
 	if reported := e.buttons & gesture_buttons(w, Gesture_Reported); reported != {} {

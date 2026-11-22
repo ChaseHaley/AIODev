@@ -3,6 +3,7 @@ package main
 import "aio:term"
 import "core:time"
 import "cosmos:ui"
+import "cosmos:host"
 
 @(private)
 COPY_NOTICE_DURATION :: 2 * time.Second
@@ -20,7 +21,7 @@ copy_selection :: proc(app: ^App, entry: ^Session_Entry, explicit: bool) {
 		"Copied to clipboard",
 		COPY_NOTICE_DURATION,
 		app.animations,
-		clock_now(&app.clock),
+		host.clock_now(&app.clock),
 		stack = true,
 	)
 	mark_all_dirty(app)

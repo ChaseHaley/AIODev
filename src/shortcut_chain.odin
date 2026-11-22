@@ -6,6 +6,7 @@ import "aio:views"
 import "core:fmt"
 import "core:strings"
 import "cosmos:ui"
+import "cosmos:host"
 
 // These imports are used only when AIO_CONTROL is set.
 _ :: fmt
@@ -47,7 +48,7 @@ shortcut_chain_save :: proc(app: ^App, changes: []views.Shortcut_Change, base: S
 	}
 	action := app.shortcut_undo.revision != "" ? "Undo" : ""
 	ui.notices_put(&app.notices, u32(Notice_Key.Shortcut_Undo), .Success, "Saved", NOTICE_DURATION,
-	               app.animations, clock_now(&app.clock), action, action != "" ? "Ctrl+Z" : "")
+	               app.animations, host.clock_now(&app.clock), action, action != "" ? "Ctrl+Z" : "")
 	mark_all_dirty(app)
 	return true
 }
@@ -64,7 +65,7 @@ shortcut_undo :: proc(app: ^App) {
 	switch result.status {
 	case .Applied, .Unchanged:
 		ui.notices_put(&app.notices, u32(Notice_Key.Shortcut_Undo), .Info, "Undone", NOTICE_DURATION,
-		               app.animations, clock_now(&app.clock))
+		               app.animations, host.clock_now(&app.clock))
 		mark_all_dirty(app)
 	case .Conflict:
 		notify(app, .Error, "Could not undo: the settings file changed after the save.")

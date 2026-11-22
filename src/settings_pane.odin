@@ -285,7 +285,7 @@ settings_page_press :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) 
 	if e.button != .Left || !settings_active(w) {return}
 	x, y := f32(e.x), f32(e.y)
 	extend := .Shift in e.modifiers
-	clicks := click_mark_press(&w.editor.clicks, x, e.time_ns, extend)
+	clicks := ui.click_mark_press(&w.editor.clicks, x, e.time_ns, extend)
 	press := views.editor_press(&w.editor, settings_layout(w), &w.ui_text, x, y, extend, clicks)
 	track, side := views.editor_take_track(&w.editor)
 	switch track {

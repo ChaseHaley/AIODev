@@ -4,6 +4,7 @@ import "aio:layout"
 import "aio:term"
 import "aio:views"
 import "cosmos:ui"
+import "cosmos:host"
 
 // Which pane holds a window's focus. Entered names the pane whose terminal hears the window's focus
 // reports and whose finished work counts as seen; nil is Left, the gap while the window changes what
@@ -74,7 +75,7 @@ focus_enter :: proc(app: ^App, w: ^Window) {
 		web_focus_enter(app, w, content)
 		neovim_focus_changed(app, content, w.focused)
 	}
-	cursor_blink_reset(w, clock_now(&app.clock))
+	host.blink_reset(&w.cursor_blink, host.clock_now(&app.clock))
 	status_focus_enter(app, w)
 	w.dirty = true
 	window_update_title(app, w)

@@ -18,6 +18,7 @@ import "core:strings"
 import "core:sync"
 import "core:time"
 import "cosmos:ui"
+import host_api "cosmos:host"
 
 // The Config host (WORK-038): init.lua beside the settings file declares actions, keys and modes, and
 // handles events and timers inside the app. Without the file there is no Lua state at all.
@@ -214,7 +215,8 @@ lua_backend_log :: proc(data: rawptr, level, message: string) {
 lua_notice :: proc(app: ^App, kind: ui.Notice_Kind, text: string) {
 	key := u32(Notice_Key.Lua)
 	ui.notices_put(
-		&app.notices, key, kind, text, ERROR_NOTICE_DURATION, app.animations, clock_now(&app.clock), stack = true,
+		&app.notices, key, kind, text, ERROR_NOTICE_DURATION, app.animations,
+		host_api.clock_now(&app.clock), stack = true,
 	)
 	mark_all_dirty(app)
 }
@@ -596,7 +598,7 @@ lua_host_tick :: proc(app: ^App) {
 	host := &app.lua
 	instance := host.current
 	if instance == nil || host.running {return}
-	now := clock_now(&app.clock)
+	now := host_api.clock_now(&app.clock)
 	woken := sync.atomic_exchange(&host.woken, false)
 	if !host.due && !woken && !(host.has_next && time.tick_diff(host.next_step, now) >= 0) {return}
 	host.due = false
@@ -612,7 +614,7 @@ lua_host_tick :: proc(app: ^App) {
 lua_host_deadline :: proc(app: ^App) -> (time.Tick, bool) {
 	host := &app.lua
 	if host.current == nil {return {}, false}
-	if host.due || sync.atomic_load(&host.woken) {return clock_now(&app.clock), true}
+	if host.due || sync.atomic_load(&host.woken) {return host_api.clock_now(&app.clock), true}
 	return host.next_step, host.has_next
 }
 

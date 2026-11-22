@@ -10,6 +10,7 @@ import "core:os"
 import "core:path/filepath"
 import "core:strings"
 import "core:time"
+import "cosmos:host"
 
 // Files dragged in from Explorer open where a pane dragged by its header would land. Over a window they
 // show the header drag's outline (arrange.odin) at the place the pointer picks: beside a pane on its
@@ -99,7 +100,7 @@ files_drag_move :: proc(app: ^App, w: ^Window, x, y: f32) {
 	if !dragging {return}
 	files.pointer = {x, y}
 	tabs := pane_drop_tabs(app, w, x, y, false)
-	pane_drag_hover(app, w, &files.carry, w, tabs.destination, tabs.on_tab, false, clock_now(&app.clock))
+	pane_drag_hover(app, w, &files.carry, w, tabs.destination, tabs.on_tab, false, host.clock_now(&app.clock))
 	next := file_drop_place(app, w, x, y, tabs)
 	if pane_destination_same(files.carry.destination, next) {return}
 	rect: layout.Rect

@@ -4,6 +4,7 @@ import "aio:commands"
 import "cosmos:input"
 import "core:fmt"
 import "core:time"
+import "cosmos:host"
 
 key_sequence_deadline :: proc(w: ^Window) -> (time.Tick, bool) {
 	return w.key_until, w.bindings.count > 0
@@ -25,7 +26,7 @@ keymap_key :: proc(app: ^App, w: ^Window, e: input.Key_Event) -> bool {
 	if e.repeat {return w.keymap_held[e.key]}
 	w.keymap_held[e.key] = false
 	if leader_armed(w) {return false}
-	now := clock_now(&app.clock)
+	now := host.clock_now(&app.clock)
 	key_sequence_expire(w, now)
 	before_count, before_modes := w.bindings.count, len(w.bindings.modes)
 	result := commands.feed(&app.keymap, &w.bindings, &app.registry, e.key, e.modifiers, e.unshifted)

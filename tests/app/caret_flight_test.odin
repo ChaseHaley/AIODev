@@ -11,6 +11,7 @@ import "core:testing"
 import "core:time"
 import app "../../src"
 import "cosmos:ui"
+import "cosmos:host"
 
 // The window has one caret. It flies between surfaces (WORK-497), wears one colour and one shape in all
 // of them, blinks with the one window phase and leaves a hidden terminal cursor alone.
@@ -257,27 +258,27 @@ every_surface_blinks_with_the_one_window_phase :: proc(t: ^testing.T) {
 	// The program asks for a steady cursor: the shell does not blink, the palette's caret does.
 	caret_feed(t, s, w, "\x1b[2 q")
 	if !caret_step(t, s, w, 16) {return}
-	_, blinking := w.cursor_blink.(app.Cursor_Blink_On)
+	_, blinking := w.cursor_blink.(host.Blink_On)
 	testing.expect(t, !blinking, "a steady terminal cursor does not start the blink")
 	app.palette_open(s, w)
 	if !caret_step(t, s, w, 32) {return}
-	on, field_blinks := w.cursor_blink.(app.Cursor_Blink_On)
+	on, field_blinks := w.cursor_blink.(host.Blink_On)
 	if !testing.expect(t, field_blinks, "the palette caret follows cursor.blink") {return}
 	testing.expect_value(t, on.interval, 300 * time.Millisecond)
 	testing.expect(t, on.visible)
 	// A tick hides it, and the next frame draws no caret rect; moving the caret shows it again.
 	app.cursor_blink_tick(w, on.deadline)
-	testing.expect(t, !app.cursor_visible(w))
+	testing.expect(t, !host.blink_visible(w.cursor_blink))
 	if !caret_step(t, s, w, 48) {return}
 	testing.expect(t, !w.carets.restart)
 	app.handle_event(s, input.Text_Event{w.id, "a"})
 	if !caret_step(t, s, w, 64) {return}
 	testing.expect(t, w.carets.restart, "typing moves the caret, which restarts the blink")
-	testing.expect(t, app.cursor_visible(w))
+	testing.expect(t, host.blink_visible(w.cursor_blink))
 
 	// The interval is a setting.
 	s.settings.cursor.blink_interval = 900
 	if !caret_step(t, s, w, 80) {return}
-	on, _ = w.cursor_blink.(app.Cursor_Blink_On)
+	on, _ = w.cursor_blink.(host.Blink_On)
 	testing.expect_value(t, on.interval, 900 * time.Millisecond)
 }

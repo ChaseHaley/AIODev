@@ -22,6 +22,7 @@ import "core:strings"
 import "core:sync"
 import "core:time"
 import "cosmos:ui"
+import "cosmos:host"
 
 // Neovim panes (WORK-542, D-107). Each pane starts its own `nvim --embed` the first time it is laid out,
 // at the size it is shown, and AIODev is that Neovim's UI: it draws the grid itself and sends keys and
@@ -145,7 +146,7 @@ neovim_pane_create :: proc(app: ^App, file, directory: string, line := 0) -> ^Ne
 	pane.id = app.next_neovim_id
 	app.next_session_id += 1
 	pane.status.id = app.next_session_id
-	if app.neovim_deadline == {} {app.neovim_deadline = time.tick_add(clock_now(&app.clock), NEOVIM_SWEEP)}
+	if app.neovim_deadline == {} {app.neovim_deadline = time.tick_add(host.clock_now(&app.clock), NEOVIM_SWEEP)}
 	return pane
 }
 
@@ -248,7 +249,7 @@ neovim_tick :: proc(app: ^App) {
 		for i := 0; i < len(app.neovim_panes); i += 1 {neovim_pane_poll(app, app.neovim_panes[i])}
 	}
 	if app.neovim_deadline == {} {return}
-	now := clock_now(&app.clock)
+	now := host.clock_now(&app.clock)
 	if time.tick_diff(now, app.neovim_deadline) > 0 {return}
 	for i := len(app.neovim_panes) - 1; i >= 0; i -= 1 {
 		pane := app.neovim_panes[i]
@@ -431,7 +432,7 @@ neovim_pane_draw :: proc(
 	style := term_view.Neovim_Style {
 		family           = app.family,
 		focused          = focused,
-		cursor_visible   = cursor_visible(w),
+		cursor_visible   = host.blink_visible(w.cursor_blink),
 		cursor_hidden    = focused ? ui.caret_holds(&w.carets, owner) : pane_cursor_held_elsewhere(app, w, rect),
 		cursor_color     = colour.rgba(app.settings.colors.cursor),
 		cursor_text      = colour.rgba(app.settings.colors.cursor_text),
@@ -626,7 +627,7 @@ neovim_key :: proc(app: ^App, w: ^Window, e: input.Key_Event) {
 	notation := neovim_key_notation(e, buffer[:])
 	if notation == "" {return}
 	if neovim.input(&pane.client, notation) != .None {neovim_lost(app)}
-	cursor_blink_reset(w, clock_now(&app.clock))
+	host.blink_reset(&w.cursor_blink, host.clock_now(&app.clock))
 	neovim_pointer_hide(app, w, pane)
 }
 
@@ -636,7 +637,7 @@ neovim_text :: proc(app: ^App, w: ^Window, text: string) {
 	if pane == nil {return}
 	escaped, _ := strings.replace_all(text, "<", "<lt>", context.temp_allocator)
 	if neovim.input(&pane.client, escaped) != .None {neovim_lost(app)}
-	cursor_blink_reset(w, clock_now(&app.clock))
+	host.blink_reset(&w.cursor_blink, host.clock_now(&app.clock))
 	neovim_pointer_hide(app, w, pane)
 }
 

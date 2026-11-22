@@ -4,6 +4,7 @@ import "aio:layout"
 import "aio:views"
 import "core:time"
 import "cosmos:ui"
+import "cosmos:host"
 
 // A Left press held on a scrollbar's track, as Windows repeats it: the press pages once at once toward the
 // pointer (each surface's own press does that), and while the button stays down the window pages again
@@ -60,7 +61,7 @@ scroll_hold_begin :: proc(
 		side    = side,
 		content = content,
 		pointer = {x, y},
-		due     = time.tick_add(clock_now(&app.clock), ui.SCROLLBAR_REPEAT_DELAY),
+		due     = time.tick_add(host.clock_now(&app.clock), ui.SCROLLBAR_REPEAT_DELAY),
 	}
 }
 

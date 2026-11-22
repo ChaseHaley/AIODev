@@ -8,6 +8,7 @@ import "core:strings"
 import "core:time"
 import "core:unicode/utf8"
 import "cosmos:ui"
+import "cosmos:host"
 
 @(private) TOOLTIP_DELAY :: 700 * time.Millisecond
 @(private) TOOLTIP_GRACE :: time.Second
@@ -132,7 +133,7 @@ tooltip_hover :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: input.Mou
 	dx, dy := point.x - anchor.x, point.y - anchor.y
 	reach := TOOLTIP_NEIGHBOR_DISTANCE * max(1, w.scale)
 	near := dx * dx + dy * dy <= reach * reach
-	now := clock_now(&app.clock)
+	now := host.clock_now(&app.clock)
 	if label == tooltip_current(w) {
 		switch &s in w.tooltip {
 		case Tooltip_Pending: s.anchor = point

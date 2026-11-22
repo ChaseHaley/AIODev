@@ -1784,7 +1784,7 @@ document_menu_button :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event)
 	if e.button != .Left {return}
 	if entry.action == .Url_Field || entry.action == .Search_Field {
 		if box, field, shown := document_field_box(w, entry.action); shown {
-			field_press(field, ui.field_box_offset(box, x), x, .Shift in e.modifiers, e.time_ns)
+			ui.field_press(field, ui.field_box_offset(box, x), x, .Shift in e.modifiers, e.time_ns)
 			w.dirty = true
 		}
 		return

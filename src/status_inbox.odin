@@ -11,6 +11,7 @@ import "core:math"
 import "core:slice"
 import "core:time"
 import "cosmos:ui"
+import "cosmos:host"
 
 // The title-bar pill and the inbox it opens, which lists program status in the rows the Activity panel
 // (status_panel.odin) shows, grouped, ordered and named the same way (status_rows.odin).
@@ -63,7 +64,7 @@ status_item_quiet :: proc(item: Status_Item) -> bool {
 // How long a record has held its state.
 @(private)
 status_state_age :: proc(app: ^App, record: term.Program_Status) -> string {
-	return status_age(record.since, clock_wall(&app.clock))
+	return status_age(record.since, host.clock_wall(&app.clock))
 }
 
 // A row's receipt: two checks once read, one check when the last read came before the latest
@@ -80,7 +81,7 @@ status_receipt :: proc(app: ^App, item: Status_Item) -> (icon: ui.Icon, text: st
 		icon = .Check
 	}
 	if pane.watched {return icon, "now"}
-	return icon, status_age(pane.read_at, clock_wall(&app.clock))
+	return icon, status_age(pane.read_at, host.clock_wall(&app.clock))
 }
 
 // Whether reading or unreading a row means anything: a working row out of view is always unread.
@@ -115,7 +116,7 @@ status_receipt_tooltip :: proc(app: ^App, item: Status_Item) -> string {
 status_read_words :: proc(app: ^App, item: Status_Item) -> string {
 	if item.pane.watched {return "read now"}
 	if item.pane.read_at == {} {return "never read"}
-	return fmt.tprintf("read %s ago", status_age(item.pane.read_at, clock_wall(&app.clock)))
+	return fmt.tprintf("read %s ago", status_age(item.pane.read_at, host.clock_wall(&app.clock)))
 }
 
 // The receipt's place: its icon and time, ending at `right`, centred on `middle`.

@@ -585,7 +585,7 @@ workspace_picker_pointer :: proc(w: ^Window, x: f32, pressed, extend: bool, time
 	}
 	at := ui.field_box_offset(box, x)
 	if pressed {
-		field_press(box.field, at, x, extend, time_ns)
+		ui.field_press(box.field, at, x, extend, time_ns)
 	} else {
 		ui.field_pointer(box.field, at, false, true)
 	}

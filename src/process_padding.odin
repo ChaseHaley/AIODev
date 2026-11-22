@@ -5,6 +5,7 @@ import "aio:settings"
 import "aio:term"
 import "core:math"
 import "core:time"
+import "cosmos:host"
 
 @(private)
 PROCESS_INTERVAL :: 500 * time.Millisecond
@@ -32,7 +33,7 @@ update_processes :: proc(app: ^App) {
 		running ||= entry.status == .Running && padding
 	}
 	if !running {app.process_deadline = {}; return}
-	now := clock_now(&app.clock)
+	now := host.clock_now(&app.clock)
 	if app.process_deadline == {} || time.tick_diff(now, app.process_deadline) <= 0 {
 		app.process_deadline = time.tick_add(now, PROCESS_INTERVAL)
 		process_snapshot_request(&app.processes, process_worker_platform(app), session_roots(app))

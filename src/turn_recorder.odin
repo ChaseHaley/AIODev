@@ -15,6 +15,7 @@ import "core:slice"
 import "core:strings"
 import "core:sync"
 import "core:time"
+import "cosmos:host"
 
 // What the main thread knows of agent turns: where each pane's turn begins and ends, from OSC program
 // status and from the hook inbox, and the recording switch. The turn worker does every git command;
@@ -97,7 +98,7 @@ Turn_Recorder :: struct {
 
 @(private, require_results)
 turn_now :: proc(app: ^App) -> i64 {
-	return turn_unix_ms(clock_wall(&app.clock))
+	return turn_unix_ms(host.clock_wall(&app.clock))
 }
 
 @(private, require_results)
@@ -487,7 +488,7 @@ turn_end :: proc(app: ^App, pane: ^Turn_Pane, status_title: string) {
 		ended     = turn_now(app),
 		end_state = pane.turn.end_state,
 		sources   = pane.turn.sources,
-		due       = time.tick_add(clock_now(&app.clock), TURN_SETTLE),
+		due       = time.tick_add(host.clock_now(&app.clock), TURN_SETTLE),
 	}
 	key, key_error := strings.clone(pane.key)
 	harness, harness_error := strings.clone(pane.session.harness)
@@ -532,7 +533,7 @@ turn_end_post :: proc(app: ^App, end: ^Turn_End, settle_until: time.Tick = {}) {
 @(private)
 turn_end_flush :: proc(app: ^App, key: string) {
 	rec := &app.turn_recorder
-	now := clock_now(&app.clock)
+	now := host.clock_now(&app.clock)
 	for i := len(rec.ends) - 1; i >= 0; i -= 1 {
 		if rec.ends[i].key != key {continue}
 		left := time.tick_diff(now, rec.ends[i].due)
@@ -741,7 +742,7 @@ turn_maintain_post :: proc(app: ^App) {
 	days := app.settings.turns.retention_days
 	if days <= 0 {days = TURN_RETENTION_DEFAULT}
 	_ = turn_post(app, Job_Maintain{days = days, now = turn_now(app)})
-	rec.maintain_due = time.tick_add(clock_now(&app.clock), TURN_MAINTAIN)
+	rec.maintain_due = time.tick_add(host.clock_now(&app.clock), TURN_MAINTAIN)
 }
 
 @(private)
@@ -883,7 +884,7 @@ turns_tick :: proc(app: ^App) {
 	turn_results(app)
 	if sync.atomic_exchange(&rec.inbox_woken, false) {turn_inbox_drain(app)}
 	if rec.ask_delete {turns_ask_delete(app)}
-	now := clock_now(&app.clock)
+	now := host.clock_now(&app.clock)
 	for i := len(rec.ends) - 1; i >= 0; i -= 1 {
 		if time.tick_diff(now, rec.ends[i].due) > 0 {continue}
 		turn_end_post(app, &rec.ends[i])
@@ -896,11 +897,11 @@ turns_tick :: proc(app: ^App) {
 @(require_results)
 turns_deadline :: proc(app: ^App) -> (next: time.Tick, pending: bool) {
 	rec := &app.turn_recorder
-	now := clock_now(&app.clock)
+	now := host.clock_now(&app.clock)
 	if sync.atomic_load(&rec.inbox_woken) {return now, true}
-	for end in rec.ends {next, pending = earliest(next, pending, end.due)}
-	if rec.recording {next, pending = earliest(next, pending, rec.maintain_due)}
-	if rec.ask_delete {next, pending = earliest(next, pending, time.tick_add(now, TURN_ASK_POLL))}
+	for end in rec.ends {next, pending = host.earliest(next, pending, end.due)}
+	if rec.recording {next, pending = host.earliest(next, pending, rec.maintain_due)}
+	if rec.ask_delete {next, pending = host.earliest(next, pending, time.tick_add(now, TURN_ASK_POLL))}
 	return
 }
 

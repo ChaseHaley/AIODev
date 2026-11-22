@@ -11,6 +11,7 @@ import "core:log"
 import "core:math"
 import "core:time"
 import "cosmos:ui"
+import "cosmos:host"
 
 // Terminal and settings scrolling moves this many lines per wheel notch.
 @(private)
@@ -365,7 +366,7 @@ on_text :: proc(app: ^App, w: ^Window, text: string) {
 	}
 	if entry := focused_session(app, w); entry != nil && entry.status == .Running {
 		term.send_text(entry.session, text)
-		cursor_blink_reset(w, clock_now(&app.clock))
+		host.blink_reset(&w.cursor_blink, host.clock_now(&app.clock))
 	}
 }
 
@@ -455,7 +456,7 @@ terminal_key :: proc(app: ^App, w: ^Window, e: input.Key_Event) {
 				term.clear_selection(entry.session)
 			}
 			paste_confirm_cancel(app, w)
-			cursor_blink_reset(w, clock_now(&app.clock))
+			host.blink_reset(&w.cursor_blink, host.clock_now(&app.clock))
 		}
 	}
 	term.send_key(entry.session, e)
@@ -620,7 +621,7 @@ leader_key :: proc(app: ^App, w: ^Window, e: input.Key_Event) -> Leader_Result {
 	is_leader := enabled && commands.shortcut_matches(leader, e.key, e.modifiers, e.unshifted)
 	// A held leader's repeats keep the chord armed.
 	if leader_armed(w) && is_leader && e.repeat {return .Consumed}
-	leader_expire(w, clock_now(&app.clock))
+	leader_expire(w, host.clock_now(&app.clock))
 	if leader_armed(w) {
 		leader_cancel(w)
 		key_suppress(w, e)
@@ -634,7 +635,7 @@ leader_key :: proc(app: ^App, w: ^Window, e: input.Key_Event) -> Leader_Result {
 	}
 	if is_leader {
 		key_suppress(w, e)
-		if !e.repeat {leader_arm(w, clock_now(&app.clock))}
+		if !e.repeat {leader_arm(w, host.clock_now(&app.clock))}
 		return .Consumed
 	}
 	return .None

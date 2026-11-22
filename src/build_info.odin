@@ -3,6 +3,7 @@ package main
 import "aio:cli_protocol"
 import "core:fmt"
 import "cosmos:ui"
+import "cosmos:host"
 
 AIO_BUILD_ID :: cli_protocol.BUILD_ID
 AIO_BUILD_KIND :: cli_protocol.BUILD_KIND
@@ -12,7 +13,8 @@ BUILD_INFO_TEXT :: "AIODev | Revision: " + AIO_BUILD_ID + " | Build: " + AIO_BUI
 show_build_info :: proc(app: ^App) {
 	key := u32(Notice_Key.Build_Info)
 	duration := ERROR_NOTICE_DURATION
-	ui.notices_put(&app.notices, key, .Info, BUILD_INFO_TEXT, duration, app.animations, clock_now(&app.clock),
+	ui.notices_put(&app.notices, key, .Info, BUILD_INFO_TEXT, duration, app.animations,
+		host.clock_now(&app.clock),
 	               stack = true)
 	mark_all_dirty(app)
 }

@@ -7,6 +7,7 @@ import "aio:settings"
 import "aio:views"
 import "core:time"
 import "cosmos:ui"
+import "cosmos:host"
 
 // Presence owns the palette's Open/Closing phase; the app owns only its window. This view is the one
 // mapping between them, so keeping a window through a closing fade needs no second hand-synced phase.
@@ -108,7 +109,7 @@ palette_claim :: proc(app: ^App, w: ^Window) -> bool {
 
 palette_open_mode :: proc(app: ^App, w: ^Window, mode: views.Palette_Mode) {
 	if !palette_claim(app, w) {return}
-	views.palette_open_mode(&app.palette, &app.registry, mode, time.time_to_unix(clock_wall(&app.clock)))
+	views.palette_open_mode(&app.palette, &app.registry, mode, time.time_to_unix(host.clock_wall(&app.clock)))
 	views.palette_fit(&app.palette, f32(w.width), f32(w.height), w.scale)
 	w.dirty = true
 }

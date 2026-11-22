@@ -8,6 +8,7 @@ import "core:math"
 import "core:time"
 import "cosmos:ui"
 @(require) import "aio:views"
+import "cosmos:host"
 
 // Presets and tuning reach every terminal through the same style, including cached split panes, and
 // every text field's caret through the window's ui.Carets. Windows' motion preference overrides the
@@ -180,7 +181,7 @@ cursor_crossing_draw :: proc(app: ^App, w: ^Window) {
 		}
 		c.source, c.destination = c.destination, claim.owner
 		c.phase = .Pending
-		cursor_blink_reset(w, clock_now(&app.clock))
+		host.blink_reset(&w.cursor_blink, host.clock_now(&app.clock))
 	}
 	goal := cursor_crossing_goal(claim.paint)
 	effects := cursor_effects(app)
@@ -251,7 +252,7 @@ cursor_crossing_commit :: proc(app: ^App, w: ^Window) {
 		if content, terminal := caret_owner_terminal(c.destination); terminal {
 			if view := pane_view(w, content); view != nil {view.valid = false}
 		}
-		cursor_blink_reset(w, clock_now(&app.clock))
+		host.blink_reset(&w.cursor_blink, host.clock_now(&app.clock))
 		return
 	}
 	if c.phase == .Pending || c.phase == .Flying {return}
@@ -373,7 +374,7 @@ when AIO_CONTROL {
 			u8(math.round(color.r * 255)), u8(math.round(color.g * 255)), u8(math.round(color.b * 255)),
 		)
 		blink := "steady"
-		if on, blinking := w.cursor_blink.(Cursor_Blink_On); blinking {blink = on.visible ? "shown" : "hidden"}
+		if on, blinking := w.cursor_blink.(host.Blink_On); blinking {blink = on.visible ? "shown" : "hidden"}
 		state_text(r, "caret.blink", blink)
 	}
 

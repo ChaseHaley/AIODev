@@ -4,6 +4,7 @@ import "aio:layout"
 import "cosmos:platform"
 import "cosmos:input"
 import "cosmos:render"
+import "cosmos:ui"
 
 
 // How the pointer grabs dividers and dock edges, in DIPs: the band either side of a bar, the reach of a
@@ -151,7 +152,7 @@ divider_press :: proc(app: ^App, w: ^Window, x, y: f32, time_ns: i64) -> bool {
 	selection_cancel(w)
 	if click, ok := w.divider.(Divider_First_Click);
 	   ok && hits[0].target == click.target && time_ns > click.time_ns &&
-	   time_ns - click.time_ns <= DOUBLE_CLICK_NS {
+	   time_ns - click.time_ns <= ui.DOUBLE_CLICK_NS {
 		w.divider = nil
 		balanced := false
 		tree := window_tree(w)

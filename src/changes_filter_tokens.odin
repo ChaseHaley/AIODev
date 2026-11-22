@@ -326,7 +326,7 @@ changes_filter_point :: proc(
 		if pane.filter_typing && pane.filter_pending >= 0 {changes_filter_typing_end(app, w, pane)}
 	}
 	at := views.filter_field_offset(box, pane.filter_tokens[:], x)
-	change := pressed ? field_press(&pane.filter_editor, at, x, extend, time_ns) :
+	change := pressed ? ui.field_press(&pane.filter_editor, at, x, extend, time_ns) :
 		ui.field_pointer(&pane.filter_editor, at, false, extend)
 	if change != .None {w.dirty = true}
 }

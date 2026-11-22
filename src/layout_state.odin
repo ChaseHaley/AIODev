@@ -11,6 +11,7 @@ import "core:os"
 import "core:strings"
 import "core:time"
 import "core:unicode/utf8"
+import "cosmos:host"
 
 // The workspace, tab and split structure that survives a full exit or reboot (D-020). Panes come
 // back as fresh shells in their saved directories; a pane running a coding agent types its resume
@@ -196,12 +197,13 @@ layout_state_touch :: proc(app: ^App) {
 	app_events_panes_attached(app)
 	idle, ok := app.layout_save.(Layout_Save_Idle)
 	if !ok {return}
-	app.layout_save = Layout_Save_Scheduled{idle.path, time.tick_add(clock_now(&app.clock), LAYOUT_SAVE_DELAY)}
+	due := time.tick_add(host.clock_now(&app.clock), LAYOUT_SAVE_DELAY)
+	app.layout_save = Layout_Save_Scheduled{idle.path, due}
 }
 
 layout_state_tick :: proc(app: ^App) {
 	scheduled, ok := app.layout_save.(Layout_Save_Scheduled)
-	if !ok || time.tick_diff(clock_now(&app.clock), scheduled.deadline) > 0 || motion_active(app) {return}
+	if !ok || time.tick_diff(host.clock_now(&app.clock), scheduled.deadline) > 0 || motion_active(app) {return}
 	app.layout_save = Layout_Save_Idle{scheduled.path}
 	layout_state_save(app)
 }

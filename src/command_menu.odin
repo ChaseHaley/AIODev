@@ -1099,7 +1099,7 @@ command_menu_button :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) 
 		if entry.action != action {continue}
 		if box, field, shown := command_field_box(w, action); shown {
 			command_menu_activate(app, w, hit)
-			field_press(field, ui.field_box_offset(box, x), x, .Shift in e.modifiers, e.time_ns)
+			ui.field_press(field, ui.field_box_offset(box, x), x, .Shift in e.modifiers, e.time_ns)
 			w.dirty = true
 		}
 		return

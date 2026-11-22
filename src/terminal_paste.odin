@@ -4,6 +4,7 @@ import "cosmos:platform"
 import "aio:term"
 import "core:time"
 import "cosmos:ui"
+import "cosmos:host"
 
 // The text names the duration: change both together.
 @(private)
@@ -59,7 +60,7 @@ paste_confirm_arm :: proc(app: ^App, w: ^Window, session: u32) {
 		PASTE_CONFIRM_TEXT,
 		PASTE_CONFIRM_DURATION,
 		app.animations,
-		clock_now(&app.clock),
+		host.clock_now(&app.clock),
 	)
 	mark_all_dirty(app)
 }

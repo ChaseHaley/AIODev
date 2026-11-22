@@ -14,6 +14,7 @@ import "aio:views"
 import "core:log"
 import "core:time"
 import "cosmos:ui"
+import "cosmos:host"
 
 // perf is used only when FRAME_STATS is set.
 _ :: perf
@@ -105,7 +106,7 @@ Window :: struct {
 	scroll_hold: Scroll_Hold,
 	// A divider grabbed in the side-by-side diff.
 	changes_divider: Maybe(Changes_Divider_Drag),
-	changes_divider_click: Click_Run,
+	changes_divider_click: ui.Click_Run,
 	// The terminal link under the pointer; see term_links.odin.
 	link_hover: Maybe(Link_Hover),
 	pointer: [2]f32,
@@ -139,7 +140,7 @@ Window :: struct {
 	wheel_remainder: f32,
 	// The sideways wheel's, kept apart so a partial notch in one direction is not spent in the other.
 	wheel_remainder_x: f32,
-	cursor_blink: Cursor_Blink,
+	cursor_blink: host.Blink,
 	cursor_crossing: Cursor_Crossing,
 	using frame_wakes: Frame_Wakes,
 	taskbar: Status_Taskbar,
@@ -644,7 +645,7 @@ window_render :: proc(app: ^App, w: ^Window, wait := true) {
 		log.error("waiting for the swap chain failed")
 	}
 	if !ready {return}
-	frame := render.frame_predict(surface, clock_now(&app.clock))
+	frame := render.frame_predict(surface, host.clock_now(&app.clock))
 	_ = window_motion_update(app, w, frame)
 	// A motion waiting on a resuming frame still needs that frame on screen so the next one is back to
 	// back; it shows the window unchanged.
@@ -689,14 +690,14 @@ window_build_frame :: proc(app: ^App, w: ^Window) -> bool {
 	build := render.frame_build_begin(&w.list, app.device)
 	ui.carets_begin(&w.carets, cursor_effects(app), w.frame)
 	w.carets.style = cursor_caret_style(app, w)
-	w.carets.shown = cursor_visible(w)
+	w.carets.shown = host.blink_visible(w.cursor_blink)
 	for {
 		build_frame(app, w)
 		switch render.frame_build_finish(&build) {
 		case .Ready:
 			cursor_crossing_commit(app, w)
 			// A caret that moved shows at once and restarts its blink, so typing never hides it.
-			if w.carets.restart {cursor_blink_reset(w, clock_now(&app.clock))}
+			if w.carets.restart {host.blink_reset(&w.cursor_blink, host.clock_now(&app.clock))}
 			return true
 		case .Retry:
 		case .Failed: return false
@@ -800,14 +801,14 @@ build_frame :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 	// whichever surface holds it.
 	cursor_crossing_draw(app, w)
 	blinking ||= w.carets.claim.present && w.carets.claim.blinks
-	cursor_blink_observe(w, blinking, cursor_blink_interval(app), clock_now(&app.clock))
+	host.blink_observe(&w.cursor_blink, blinking, cursor_blink_interval(app), host.clock_now(&app.clock))
 	if result := status_inbox_draw(app, w); result != .Ok {return result}
 	if result := tooltip_draw(app, w); result != .Ok {return result}
 	if app.notice_window != w.id {return .Ok}
 	// The spinner and sweep move one refresh per frame when read at the frame's display time, as status
 	// marks are; the countdown reads the same instant.
 	shown_at := w.frame.display
-	if shown_at == {} {shown_at = clock_now(&app.clock)}
+	if shown_at == {} {shown_at = host.clock_now(&app.clock)}
 	result := ui.notices_draw(
 		&app.notices,
 		&w.list,
@@ -969,7 +970,7 @@ terminal_pane_draw :: proc(
 		cursor_text = colour.rgba(c.cursor_text),
 		minimum_contrast = minimum_contrast,
 		focused = content_focused,
-		cursor_phase_visible = !content_focused || cursor_visible(w),
+		cursor_phase_visible = !content_focused || host.blink_visible(w.cursor_blink),
 		cursor_suppressed = content_focused && ui.caret_holds(&w.carets, terminal_caret_owner(pane.content)),
 		cursor_hidden = !content_focused && pane_cursor_held_elsewhere(app, w, pane),
 		cursor_effects = cursor_effects(app),

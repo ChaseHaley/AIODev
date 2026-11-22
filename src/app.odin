@@ -13,16 +13,15 @@ import "cosmos:render"
 import "aio:settings"
 import "aio:term"
 import "aio:views"
-import "base:runtime"
 import "core:fmt"
 import "core:log"
 import "core:os"
 import "core:strings"
-import "core:thread"
 import "core:time"
 // Only the headless build reads the bundled test fonts; other builds compile none of them in.
 @(require) import "cosmos:test_fonts"
 import "cosmos:ui"
+import "cosmos:host"
 
 @(private)
 FALLBACK_FONT_FAMILIES :: [?]string{"Cascadia Mono", "Consolas"}
@@ -56,7 +55,7 @@ App :: struct {
 	perf:                  perf.Stats,
 	options:               instance.Options,
 	paths:                 instance.Paths,
-	clock:                 Clock,
+	clock:                 host.Clock,
 	app_id:                string,
 	platform:              platform_api.Platform,
 	platform_ready:        bool,
@@ -142,52 +141,6 @@ App :: struct {
 	turn_recorder:         Turn_Recorder,
 }
 
-// Creates the graphics device on a thread of its own. The driver takes longer to create one than
-// app_init takes for settings, fonts and everything else before it needs the device.
-@(private)
-Device_Start :: struct {
-	driver: render.Driver,
-	device: ^render.Device,
-	err:    render.Error,
-	thread: ^thread.Thread,
-}
-
-@(private)
-device_start :: proc(s: ^Device_Start, driver: render.Driver) {
-	s.driver = driver
-	s.thread = thread.create_and_start_with_poly_data(s, device_start_thread, context)
-}
-
-@(private)
-device_start_thread :: proc(s: ^Device_Start) {
-	defer if context.temp_allocator.procedure == runtime.default_temp_allocator_proc {
-		runtime.default_temp_allocator_destroy(cast(^runtime.Default_Temp_Allocator)context.temp_allocator.data)
-	}
-	s.device, s.err = render.device_create(s.driver)
-}
-
-// The device device_start began, which the caller now owns; made here when no thread could start.
-@(private, require_results)
-device_finish :: proc(s: ^Device_Start) -> (device: ^render.Device, err: render.Error) {
-	if s.thread != nil {
-		thread.join(s.thread)
-		thread.destroy(s.thread)
-		s.thread = nil
-	} else if s.device == nil && s.err == .None {
-		s.device, s.err = render.device_create(s.driver)
-	}
-	device, err = s.device, s.err
-	s.device = nil
-	return
-}
-
-// Ends a start nobody finished, as when app_init fails before it needs the device.
-@(private)
-device_abandon :: proc(s: ^Device_Start) {
-	if s.thread == nil && s.device == nil {return}
-	if device, _ := device_finish(s); device != nil {render.device_destroy(device)}
-}
-
 @(require_results)
 app_init :: proc(app: ^App) -> bool {
 	app_events.init(&app.events)
@@ -196,9 +149,9 @@ app_init :: proc(app: ^App) -> bool {
 		// The same pixels on every machine: WARP (WORK-350).
 		app.render_driver = .Warp
 	}
-	starting: Device_Start
-	device_start(&starting, app.render_driver)
-	defer device_abandon(&starting)
+	starting: host.Device_Start
+	host.device_start(&starting, app.render_driver)
+	defer host.device_abandon(&starting)
 	paths, paths_error := instance.paths(app.options)
 	if paths_error != nil {
 		log.errorf("locating the instance files failed: %v", paths_error)
@@ -263,7 +216,7 @@ app_init :: proc(app: ^App) -> bool {
 		if _, created := tab_create(app, fresh); !created {return false}
 	}
 	render_error: render.Error
-	app.device, render_error = device_finish(&starting)
+	app.device, render_error = host.device_finish(&starting)
 	if render_error != .None {
 		log.errorf("graphics device creation failed: %v", render_error)
 		return false
@@ -452,7 +405,7 @@ tick :: proc(app: ^App, wait_frames := true) {
 	pane_links_sync(app)
 	window_notices_sync(app)
 	for window in app.windows {
-		now := clock_now(&app.clock)
+		now := host.clock_now(&app.clock)
 		for timer in Window_Timer {window_timer_advance(app, window, timer, now)}
 		status_spin_tick(window)
 		status_taskbar_follow(app, window)
@@ -527,7 +480,7 @@ app_timers_advance :: proc(app: ^App, phase: Timer_Phase) {
 		case .Processes:
 			update_processes(app)
 		case .Notices:
-			now := clock_now(&app.clock)
+			now := host.clock_now(&app.clock)
 			if ui.notices_expire(&app.notices, app.animations, now) {mark_all_dirty(app)}
 			// The front card's countdown line redraws only once it has lost a whole pixel: about every
 			// frame for a short notice, about 37 times a second for a 12 s one at 100%, and never paused.
@@ -536,7 +489,7 @@ app_timers_advance :: proc(app: ^App, phase: Timer_Phase) {
 			}
 		case .Drag_Hover:
 			for i := 0; i < len(app.windows); i += 1 {
-				now := clock_now(&app.clock)
+				now := host.clock_now(&app.clock)
 				pane_drag_tick(app, app.windows[i], now)
 				files_drag_tick(app, app.windows[i], now)
 			}
@@ -575,8 +528,8 @@ app_timer_deadline :: proc(app: ^App, timer: App_Timer) -> (next: time.Tick, pen
 		return ui.notices_deadline(&app.notices)
 	case .Drag_Hover:
 		for w in app.windows {
-			if at, armed := drag_hover_deadline(w); armed {next, pending = earliest(next, pending, at)}
-			if at, armed := files_drag_deadline(w); armed {next, pending = earliest(next, pending, at)}
+			if at, armed := drag_hover_deadline(w); armed {next, pending = host.earliest(next, pending, at)}
+			if at, armed := files_drag_deadline(w); armed {next, pending = host.earliest(next, pending, at)}
 		}
 	case .Verify:
 		when AIO_CONTROL {return verify_deadline(app)}
@@ -682,40 +635,28 @@ window_timer_deadline :: proc(w: ^Window, timer: Window_Timer) -> (time.Tick, bo
 	return {}, false
 }
 
-// The earlier of a deadline found so far, if any, and `next`.
-@(private)
-earliest :: proc(current: time.Tick, found: bool, next: time.Tick) -> (time.Tick, bool) {
-	if found && time.tick_diff(next, current) <= 0 {return current, true}
-	return next, true
-}
-
 // How long the loop may sleep when nothing signals. Windows paced by their swap chain are not timed
 // here: their waitables wake the loop.
 @(private = "file")
 wait_timeout :: proc(app: ^App, waits: Frame_Waits) -> u32 {
 	if waits.ready {return 0}
 	if waits.unpaced {return u32(time.duration_milliseconds(render.FRAME_PERIOD_DEFAULT))}
-	INFINITE :: max(u32)
 	deadline: time.Tick
 	found := false
 	for timer in App_Timer {
 		if next, pending := app_timer_deadline(app, timer); pending {
-			deadline, found = earliest(deadline, found, next)
+			deadline, found = host.earliest(deadline, found, next)
 		}
 	}
 	for window in app.windows {
 		for timer in Window_Timer {
 			if next, pending := window_timer_deadline(window, timer); pending {
-				deadline, found = earliest(deadline, found, next)
+				deadline, found = host.earliest(deadline, found, next)
 			}
 		}
 	}
 	if find_pending(app) {return 0}
-	if !found {
-		return INFINITE
-	}
-	remaining := time.tick_diff(clock_now(&app.clock), deadline)
-	return u32(clamp(time.duration_milliseconds(remaining) + 1, 0, 60_000))
+	return host.wait_ms(deadline, found, host.clock_now(&app.clock))
 }
 
 mark_all_dirty :: proc(app: ^App) {
@@ -754,7 +695,8 @@ initial_geometry :: proc(app: ^App) -> term.Geometry {
 notify :: proc(app: ^App, kind: ui.Notice_Kind, text: string) {
 	duration := kind == .Error || kind == .Warning ? ERROR_NOTICE_DURATION : NOTICE_DURATION
 	key := u32(Notice_Key.Transient)
-	ui.notices_put(&app.notices, key, kind, text, duration, app.animations, clock_now(&app.clock), stack = true)
+	ui.notices_put(&app.notices, key, kind, text, duration, app.animations,
+		host.clock_now(&app.clock), stack = true)
 	mark_all_dirty(app)
 }
 
@@ -776,7 +718,7 @@ apply_fonts :: proc(app: ^App) {
 			)
 			ui.notices_put(
 				&app.notices, u32(Notice_Key.Font), .Error, text, ERROR_NOTICE_DURATION, app.animations,
-				clock_now(&app.clock),
+				host.clock_now(&app.clock),
 			)
 			return
 		}

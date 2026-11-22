@@ -7,6 +7,7 @@ import "core:os"
 import "core:path/filepath"
 import "core:strings"
 import "cosmos:ui"
+import "cosmos:host"
 
 // Update AIODev (WORK-414). update.ps1, installed beside aiodev.exe, installs the latest release over the
 // running AIODev, which keeps running its old files; once it reports a newer build installed, AIODev asks
@@ -78,7 +79,7 @@ app_update_start :: proc(app: ^App) {
 	}
 	app.update = {run, log_path}
 	key := u32(Notice_Key.Update)
-	ui.notices_put(&app.notices, key, .Info, "Updating AIODev…", 0, app.animations, clock_now(&app.clock))
+	ui.notices_put(&app.notices, key, .Info, "Updating AIODev…", 0, app.animations, host.clock_now(&app.clock))
 	mark_all_dirty(app)
 }
 

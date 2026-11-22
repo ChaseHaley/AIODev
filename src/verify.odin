@@ -19,6 +19,7 @@ import "core:strings"
 import "core:time"
 import "core:unicode/utf8"
 @(require) import "cosmos:ui"
+@(require) import "cosmos:host"
 
 // These imports are used only when AIO_CONTROL is set.
 _ :: fmt
@@ -225,7 +226,7 @@ when AIO_CONTROL {
 				"Could not start the control channel; check the log and restart this instance.",
 			)
 		}
-		app.verify.changed = clock_now(&app.clock)
+		app.verify.changed = host.clock_now(&app.clock)
 	}
 
 	verify_destroy :: proc(app: ^App) {
@@ -288,7 +289,7 @@ when AIO_CONTROL {
 
 	verify_deadline :: proc(app: ^App) -> (time.Tick, bool) {
 		v := &app.verify
-		now := clock_now(&app.clock)
+		now := host.clock_now(&app.clock)
 		started: time.Tick
 		timeout_ms, idle_ms := 0, -1
 		switch s in v.request {
@@ -802,7 +803,7 @@ when AIO_CONTROL {
 		// The pointer is over the deck: it is open and every countdown stands still.
 		state_value(r, "notices.paused", app.notices.over)
 		holder := window_find(app, app.notice_window)
-		clock := ui.notices_clock(&app.notices, clock_now(&app.clock))
+		clock := ui.notices_clock(&app.notices, host.clock_now(&app.clock))
 		live := ui.notices_live(&app.notices)
 		for n, i in live {
 			left := "sticky"
@@ -982,7 +983,7 @@ when AIO_CONTROL {
 			end, ok = verify_position(app, w, m.end, m.pixels, m.screen)
 			if !ok {return .Invalid_Argument}
 		}
-		now := i64(time.tick_diff({}, clock_now(&app.clock)))
+		now := i64(time.tick_diff({}, host.clock_now(&app.clock)))
 		if m.kind == .Wheel {
 			handle_event(
 				app,
@@ -1443,7 +1444,7 @@ when AIO_CONTROL {
 		if v.server == nil {return}
 		presented := v.presented
 		v.presented = false
-		now := clock_now(&app.clock)
+		now := host.clock_now(&app.clock)
 		if quitting, ok := v.request.(Verify_Quitting); ok {
 			if control.delivery_finished(v.server, quitting.id) ||
 			   time.tick_diff(quitting.started, now) >= QUIT_DRAIN {

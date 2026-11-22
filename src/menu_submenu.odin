@@ -4,6 +4,7 @@ import "cosmos:input"
 import "cosmos:render"
 import "core:time"
 import "cosmos:ui"
+import "cosmos:host"
 
 // How long the pointer rests on a row before its submenu shows, Radix UI's open delay, so a sweep down the
 // menu does not flash each submenu it crosses. The keyboard opens one at once.
@@ -148,7 +149,7 @@ submenu_hover :: proc(
 	x, y: f32,
 ) -> bool {
 	width, height := f32(w.width), f32(w.height)
-	slack, now := ui.HOVER_AIM_SLACK * w.scale, clock_now(&app.clock)
+	slack, now := ui.HOVER_AIM_SLACK * w.scale, host.clock_now(&app.clock)
 	hit := ui.menu_hit(parent, x, y, width, height, w.scale)
 	if row, shown := sub.row.?; shown {
 		trigger := ui.menu_row_rect(parent, row, width, height, w.scale)

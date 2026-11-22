@@ -10,6 +10,7 @@ import app "../../src"
 import "aio:layout"
 import "cosmos:platform"
 import "cosmos:ui"
+import "cosmos:host"
 
 @(private="file")
 Move_Fixture :: struct {
@@ -58,7 +59,7 @@ move_fixture_init :: proc(t: ^testing.T, f: ^Move_Fixture) -> bool {
 	source_tree.focus = f.node
 	for w in state.windows {
 		app.focus_init(w)
-		w.cursor_blink = app.Cursor_Blink_On{}
+		w.cursor_blink = host.Blink_On{}
 		w.wheel_remainder = 0.5
 		w.selection = app.Selection_Selecting{}
 	}
@@ -80,12 +81,12 @@ move_fixture_destroy :: proc(t: ^testing.T, f: ^Move_Fixture) {
 @(private="file")
 move_expect_handoff :: proc(t: ^testing.T, f: ^Move_Fixture, prepared := false) {
 	for w in ([?]^app.Window{f.source, f.destination}) {
-		testing.expect(t, app.cursor_visible(w))
+		testing.expect(t, host.blink_visible(w.cursor_blink))
 		borrowed := prepared && w == f.destination
 		testing.expect_value(t, app.selection_active(w), borrowed)
 		testing.expect_value(t, w.wheel_remainder, borrowed ? f32(0.5) : 0)
 	}
-	testing.expect(t, !app.cursor_visible(f.observer) && app.selection_active(f.observer))
+	testing.expect(t, !host.blink_visible(f.observer.cursor_blink) && app.selection_active(f.observer))
 	testing.expect_value(t, f.observer.wheel_remainder, f32(0.5))
 }
 
@@ -283,7 +284,7 @@ pane_move_completion_preserves_unrelated_selected_source_tab :: proc(t: ^testing
 			target = destination.tree.root, direction = .Right})) {return}
 	testing.expect(t, app.selected_tab(f.source.workspace) == other)
 	testing.expect(t, app.window_tree(f.source) == &other.tree)
-	testing.expect(t, app.tab_menu_shown(f.source) && app.selection_active(f.source) && !app.cursor_visible(f.source))
+	testing.expect(t, app.tab_menu_shown(f.source) && app.selection_active(f.source) && !host.blink_visible(f.source.cursor_blink))
 	testing.expect_value(t, f.source.wheel_remainder, f32(0.5))
 	testing.expect_value(t, source.tree.nodes[source.tree.focus].(layout.Pane).content.id, u32(4))
 	testing.expect_value(t, len(f.source.panes), 1)

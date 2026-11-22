@@ -11,6 +11,7 @@ import "core:os"
 import "core:testing"
 import "core:time"
 import app "../../src"
+import "cosmos:host"
 
 @(private = "file")
 cursor_feed :: proc(t: ^testing.T, s: ^app.App, w: ^app.Window, text: string) {
@@ -466,10 +467,10 @@ blink_hidden_cursor_animates_in_cached_panes_and_across_focus :: proc(t: ^testin
 	cursor_feed(t, s, w, "\x1b[1 q\x1b[2J\x1b[Habcdefghijklmnop")
 	if !testing.expect(t, app.window_build_frame(s, w)) {return}
 	from := cursor_head(t, s, w)
-	on, blinking := w.cursor_blink.(app.Cursor_Blink_On)
+	on, blinking := w.cursor_blink.(host.Blink_On)
 	if !testing.expect(t, blinking) {return}
 	app.cursor_blink_tick(w, on.deadline)
-	testing.expect(t, !app.cursor_visible(w))
+	testing.expect(t, !host.blink_visible(w.cursor_blink))
 	if !testing.expect(t, app.window_build_frame(s, w)) {return}
 
 	cursor_feed(t, s, w, "\x1b[H")
@@ -488,13 +489,13 @@ blink_hidden_cursor_animates_in_cached_panes_and_across_focus :: proc(t: ^testin
 	w.frame = finish
 	if !testing.expect(t, app.window_build_frame(s, w)) {return}
 	testing.expect(t, !app.cursor_motion_animating(w))
-	testing.expect(t, !app.cursor_visible(w), "finishing an effect must not disable the idle blink")
+	testing.expect(t, !host.blink_visible(w.cursor_blink), "finishing an effect must not disable the idle blink")
 
 	app.run_action(s, w, .Focus_Left)
 	if !testing.expect(t, app.window_build_frame(s, w)) {return}
 	testing.expect(t, app.cursor_motion_animating(w), "a blink-hidden source must still seed pane travel")
 	testing.expect_value(t, cursor_head(t, s, w).x, target)
-	on, blinking = w.cursor_blink.(app.Cursor_Blink_On)
+	on, blinking = w.cursor_blink.(host.Blink_On)
 	if blinking && on.visible {
 		app.cursor_blink_tick(w, on.deadline)
 	}
@@ -509,8 +510,8 @@ blink_hidden_cursor_animates_in_cached_panes_and_across_focus :: proc(t: ^testin
 	if !testing.expect(t, app.window_build_frame(s, w)) {return}
 	if !cursor_restore_frame(t, s, w) {return}
 	// A flight leaves the caret solid and restarts the blink, which goes on blinking afterwards.
-	_, blinking = w.cursor_blink.(app.Cursor_Blink_On)
-	testing.expect(t, blinking && app.cursor_visible(w) && !app.cursor_motion_animating(w))
+	_, blinking = w.cursor_blink.(host.Blink_On)
+	testing.expect(t, blinking && host.blink_visible(w.cursor_blink) && !app.cursor_motion_animating(w))
 }
 
 // Text fields follow the terminal's cursor animation: the palette's caret glides as the query

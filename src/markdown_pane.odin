@@ -21,6 +21,7 @@ import "core:sync"
 import "core:time"
 import "cosmos:textedit"
 import "cosmos:ui"
+import "cosmos:host"
 
 // Markdown panes: one local file per pane, read-only, reloaded when the file changes (WORK-319).
 
@@ -103,7 +104,7 @@ Markdown_Pointer :: struct {
 	markdown_gesture: Markdown_Gesture,
 	markdown_hover:   Markdown_Hover,
 	// The editor's text clicks, which count double and triple clicks.
-	markdown_clicks:  Click_Run,
+	markdown_clicks:  ui.Click_Run,
 }
 
 // The app's Markdown panes, which windows refer to by id, and when the poll next reads their files.
@@ -218,7 +219,7 @@ markdown_poll_deadline :: proc(app: ^App) -> (next: time.Tick, pending: bool) {
 	if app.markdown_deadline == {} {return}
 	next, pending = app.markdown_deadline, true
 	for pane in app.markdown_panes {
-		if e := pane.editor; e != nil && e.save_at != {} {next, pending = earliest(next, pending, e.save_at)}
+		if e := pane.editor; e != nil && e.save_at != {} {next, pending = host.earliest(next, pending, e.save_at)}
 	}
 	return
 }
@@ -262,7 +263,9 @@ markdown_pane_create :: proc(app: ^App, path: string, verified: bool) -> ^Markdo
 	app.next_markdown_id += 1
 	pane.id = app.next_markdown_id
 	if verified {markdown_pane_verified(app, pane)}
-	if app.markdown_deadline == {} {app.markdown_deadline = time.tick_add(clock_now(&app.clock), MARKDOWN_POLL)}
+	if app.markdown_deadline == {} {
+		app.markdown_deadline = time.tick_add(host.clock_now(&app.clock), MARKDOWN_POLL)
+	}
 	return pane
 }
 
@@ -375,7 +378,7 @@ markdown_pane_reload :: proc(pane: ^Markdown_Pane) -> bool {
 // Has the poll read the panes' files at the next tick.
 @(private)
 markdown_poll_soon :: proc(app: ^App) {
-	if app.markdown_deadline != {} {app.markdown_deadline = clock_now(&app.clock)}
+	if app.markdown_deadline != {} {app.markdown_deadline = host.clock_now(&app.clock)}
 }
 
 // A pane not showing its document has nothing to find, whatever it last searched.
@@ -406,7 +409,7 @@ markdown_referenced :: proc(app: ^App, id: u32) -> bool {
 // placeholder.
 markdown_tick :: proc(app: ^App) {
 	if app.markdown_deadline == {} {return}
-	now := clock_now(&app.clock)
+	now := host.clock_now(&app.clock)
 	markdown_saves_due(app, now)
 	if sync.atomic_exchange(&app.markdown_woken, false) {markdown_watch_drain(app)}
 	if time.tick_diff(now, app.markdown_deadline) > 0 {return}
@@ -1045,7 +1048,7 @@ markdown_held_move :: proc(app: ^App, w: ^Window, x, y: f32) {
 	markdown_selecting_extend(w, pane, document, g, selecting, x, y)
 	outside := y < g.area.y || y > g.area.y + g.area.height
 	if outside && selecting.scroll_at == {} {
-		selecting.scroll_at = time.tick_add(clock_now(&app.clock), AUTOSCROLL_INTERVAL)
+		selecting.scroll_at = time.tick_add(host.clock_now(&app.clock), AUTOSCROLL_INTERVAL)
 		w.markdown_gesture = selecting
 	} else if !outside && selecting.scroll_at != {} {
 		selecting.scroll_at = {}
@@ -1142,7 +1145,7 @@ markdown_press :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) {
 		return
 	}
 	if editing && .Shift not_in e.modifiers {
-		if count := click_run_count(w.markdown_clicks, pane.id, x, y, e.time_ns); count > 1 {
+		if count := ui.click_run_count(w.markdown_clicks, pane.id, x, y, e.time_ns); count > 1 {
 			// The first click moved the caret and so changed the layout under the pointer: the word or
 			// line is the one that click hit.
 			unit: textedit.Unit = count == 2 ? .Word : .Line
@@ -1169,7 +1172,7 @@ markdown_press :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) {
 	}
 	if editing {
 		at := markdown_edit_point(w, pane, g, x, y, .Shift in e.modifiers)
-		w.markdown_clicks = .Shift in e.modifiers ? Click_Run{} : Click_Run{pane.id, x, y, e.time_ns, 1, at}
+		w.markdown_clicks = .Shift in e.modifiers ? ui.Click_Run{} : ui.Click_Run{pane.id, x, y, e.time_ns, 1, at}
 	} else {
 		offset := views.markdown_offset_at(&pane.view, document, g, x, y)
 		views.markdown_select_at(&pane.view, offset, .Shift in e.modifiers)

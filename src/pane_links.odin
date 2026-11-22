@@ -371,7 +371,7 @@ pane_link_hide :: proc(app: ^App, w: ^Window, host: ^Window) {
 	}
 	w.phase = .Hidden
 	// A hidden window draws no frames, so nothing would ever stop these from waking the loop.
-	cursor_blink_stop(w)
+	w.cursor_blink = nil
 	w.status_spinning = false
 }
 

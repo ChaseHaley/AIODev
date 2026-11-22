@@ -11,6 +11,7 @@ import "core:sync"
 import "core:testing"
 import "core:time"
 import app "../../src"
+import "cosmos:host"
 
 // What a file dragged in from Explorer shows and opens: the pane header drag's drop outline at the place the
 // pointer picks, and there a Markdown file in a Markdown pane, a folder in a shell, any other file in Neovim
@@ -351,7 +352,7 @@ resting_over_a_tab_shows_it_and_leaving_shows_the_first_again :: proc(t: ^testin
 	testing.expect_value(t, w.workspace.selected, 0)
 	// A rest of long enough shows the tab.
 	time.sleep(400 * time.Millisecond)
-	app.files_drag_tick(s, w, app.clock_now(&s.clock))
+	app.files_drag_tick(s, w, host.clock_now(&s.clock))
 	testing.expect_value(t, w.workspace.selected, 1)
 	// Leaving puts the first tab back, and a repeated leave changes nothing.
 	drag(s, w, .Leave)

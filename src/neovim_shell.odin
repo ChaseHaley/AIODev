@@ -7,6 +7,7 @@ import "aio:settings"
 import "core:fmt"
 import "core:log"
 import "core:time"
+import "cosmos:host"
 
 // A Neovim pane behaves as Neovim run from a shell does (WORK-545): `aio pane.open_neovim` from a shell
 // opens it in that pane, over the shell, which keeps running out of sight; quitting Neovim shows the
@@ -70,7 +71,7 @@ neovim_open_over :: proc(
 				neovim_pane_remove(app, pane.id)
 				return false
 			}
-			pane.pending, pane.opened = true, clock_now(&app.clock)
+			pane.pending, pane.opened = true, host.clock_now(&app.clock)
 			return true
 		}
 	}

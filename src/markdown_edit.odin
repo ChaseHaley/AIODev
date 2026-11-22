@@ -7,6 +7,7 @@ import "core:log"
 import "core:os"
 import "core:time"
 import "cosmos:textedit"
+import "cosmos:host"
 
 // Editing a Markdown pane's file in place, shown as Obsidian's Live Preview shows it (WORK-441,
 // D-094): every line rendered but the caret's. Edits save shortly after typing stops.
@@ -168,7 +169,7 @@ markdown_editor_sync :: proc(pane: ^Markdown_Pane) {
 @(private = "file")
 markdown_edited :: proc(app: ^App, pane: ^Markdown_Pane) {
 	e := pane.editor
-	e.save_at = time.tick_add(clock_now(&app.clock), MARKDOWN_SAVE_DELAY)
+	e.save_at = time.tick_add(host.clock_now(&app.clock), MARKDOWN_SAVE_DELAY)
 	e.goal_x, e.reveal = -1, true
 	markdown_editor_sync(pane)
 	for other in app.markdown_panes {
@@ -187,7 +188,7 @@ markdown_edit_save :: proc(app: ^App, pane: ^Markdown_Pane) -> bool {
 	e := pane.editor
 	if write_error := os.write_entire_file(pane.path, e.buffer.text[:]); write_error != nil {
 		log.errorf("saving the Markdown file failed: %v", write_error)
-		e.save_at = time.tick_add(clock_now(&app.clock), MARKDOWN_SAVE_RETRY)
+		e.save_at = time.tick_add(host.clock_now(&app.clock), MARKDOWN_SAVE_RETRY)
 		if !e.save_failed {notify(app, .Error, "Could not save the file; trying again.")}
 		e.save_failed = true
 		return false

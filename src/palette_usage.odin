@@ -8,6 +8,7 @@ import "core:os"
 import "core:slice"
 import "core:strings"
 import "core:time"
+import "cosmos:host"
 
 // What the everything palette has run survives restarts in its own file beside the layout, so its
 // frecency order does too (WORK-455). Only command and setting uses are saved: tab and workspace ids
@@ -67,7 +68,7 @@ palette_usage_load :: proc(app: ^App) {
 		log.warnf("the saved palette usage is unreadable: %v (version %d)", decode_error, state.version)
 		return
 	}
-	now := time.time_to_unix(clock_wall(&app.clock))
+	now := time.time_to_unix(host.clock_wall(&app.clock))
 	usage := &app.palette.usage
 	for saved in state.commands {
 		if !frecency.restore(&usage.commands, saved.key, {saved.count, saved.last, saved.weight}, now) {return}
@@ -81,7 +82,7 @@ palette_usage_load :: proc(app: ^App) {
 // Schedules a write; uses recorded before it runs share it.
 palette_usage_touch :: proc(app: ^App) {
 	if app.palette_store.path == "" || app.palette_store.due != nil {return}
-	app.palette_store.due = time.tick_add(clock_now(&app.clock), PALETTE_USAGE_SAVE_DELAY)
+	app.palette_store.due = time.tick_add(host.clock_now(&app.clock), PALETTE_USAGE_SAVE_DELAY)
 }
 
 // Like the layout, the write waits for every motion to settle rather than cost a moving window frames.
@@ -92,7 +93,7 @@ palette_usage_deadline :: proc(app: ^App) -> (time.Tick, bool) {
 
 palette_usage_tick :: proc(app: ^App) {
 	due, pending := app.palette_store.due.?
-	if !pending || time.tick_diff(clock_now(&app.clock), due) > 0 || motion_active(app) {return}
+	if !pending || time.tick_diff(host.clock_now(&app.clock), due) > 0 || motion_active(app) {return}
 	palette_usage_save(app)
 }
 

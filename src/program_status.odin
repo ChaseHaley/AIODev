@@ -11,6 +11,7 @@ import "core:log"
 import "core:strings"
 import "core:time"
 import "cosmos:ui"
+import "cosmos:host"
 
 // Program status (OSC 7501) as AIODev presents it. Each session's records are copied when they
 // change, so drawing reads Session_Entry.statuses without taking the session lock. Only reports
@@ -198,7 +199,7 @@ status_watched :: proc(app: ^App, entry: ^Session_Entry) -> bool {
 // `mark` is the user's choice to read it, which ends a mark to keep it unread.
 @(private = "file")
 status_read_stamp :: proc(app: ^App, entry: ^Session_Entry, mark := false) {
-	at := clock_wall(&app.clock)
+	at := host.clock_wall(&app.clock)
 	term.program_status_read(entry.session, at, mark)
 	entry.status_read_at = at
 	if mark {entry.status_unread = false}
@@ -282,7 +283,7 @@ status_notify_wanted :: proc(app: ^App, record: term.Program_Status) -> bool {
 status_notify_changes :: proc(app: ^App, entry: ^Session_Entry, previous: []term.Program_Status) {
 	if !app.settings.status.enabled {return}
 	if !app.settings.status.notify_focused && status_watched(app, entry) {return}
-	now := clock_now(&app.clock)
+	now := host.clock_now(&app.clock)
 	if entry.status_notified != {} && time.tick_diff(entry.status_notified, now) < STATUS_NOTICE_INTERVAL {
 		return
 	}

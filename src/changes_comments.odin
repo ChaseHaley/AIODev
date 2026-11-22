@@ -14,6 +14,7 @@ import "core:strings"
 import "core:time"
 import "cosmos:textedit"
 import "cosmos:ui"
+import "cosmos:host"
 
 // Review comments on an Agent changes pane's diff lines: written in the diff, then pasted into the
 // agent's pane or copied. A comment keeps its file's path, a side and that side's line numbers, so the
@@ -83,7 +84,7 @@ Changes_Comments :: struct {
 	buffer:    textedit.Buffer,
 	area:      ui.Text_Area,
 	// The editor's presses, which count double and triple clicks.
-	clicks:    Click_Run,
+	clicks:    ui.Click_Run,
 	draft:     views.Changes_Note_Kind,
 	// -1 none; an index into `items` edits that note; len(items) writes a new one at the selection.
 	editing:   int,
@@ -687,9 +688,9 @@ changes_editor_point :: proc(app: ^App, w: ^Window, pane: ^Changes_Pane, e: inpu
 	if !visible {return}
 	c := &pane.comments
 	x, y, extend := f32(e.x), f32(e.y), .Shift in e.modifiers
-	count := extend ? 1 : click_run_count(c.clicks, pane.id, x, y, e.time_ns)
+	count := extend ? 1 : ui.click_run_count(c.clicks, pane.id, x, y, e.time_ns)
 	_ = ui.text_area_pointer(box, x, y, true, extend, count)
-	c.clicks = extend ? Click_Run{} : Click_Run{pane.id, x, y, e.time_ns, count, 0}
+	c.clicks = extend ? ui.Click_Run{} : ui.Click_Run{pane.id, x, y, e.time_ns, count, 0}
 }
 
 // Starts picking whole lines at flat line `line` of `file`, pressed in `half` of a side-by-side row; Shift
@@ -1195,7 +1196,7 @@ changes_comments_view :: proc(app: ^App, pane: ^Changes_Pane) {
 		count = len(c.items),
 	}
 	if view.send.count == 0 {return}
-	now := clock_now(&app.clock)
+	now := host.clock_now(&app.clock)
 	if c.checked == {} || time.tick_diff(c.checked, now) >= CHANGES_SEND_CHECK {
 		_, c.can_send, c.reason = changes_send_target(app, pane)
 		c.checked = now

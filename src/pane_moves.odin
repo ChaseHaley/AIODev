@@ -2,6 +2,7 @@ package main
 
 import "cosmos:input"
 import "aio:layout"
+import "cosmos:host"
 
 // Moving a pane is one operation in two steps: pane_drop_operation resolves where it goes to the trees
 // that own the panes, which pane_trial_operation measures on copies and pane_operation_move then carries
@@ -207,7 +208,7 @@ pane_rearrange :: proc(app: ^App, w: ^Window, op: Pane_Operation) -> bool {
 	pane_motion_arm(w, .Move)
 	window_relayout(app, w)
 	window_update_title(app, w)
-	cursor_blink_reset(w, clock_now(&app.clock))
+	host.blink_reset(&w.cursor_blink, host.clock_now(&app.clock))
 	return true
 }
 

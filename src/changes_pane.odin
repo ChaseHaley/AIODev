@@ -13,6 +13,7 @@ import "core:strings"
 import "core:time"
 @(require) import "aio:commands"
 import "cosmos:ui"
+import "cosmos:host"
 
 // Agent changes panes: what agents changed per turn, and plain git diffs. A pane follows one agent (the
 // pane that ran it and its session, either of which may be unknown) and a directory inside the repository.
@@ -238,7 +239,9 @@ changes_pane_create :: proc(
 	app.turn_hooks = .Unknown
 	_ = changes_sources_refresh(app, pane)
 	changes_model_changed(app, pane)
-	if app.changes_deadline == {} {app.changes_deadline = time.tick_add(clock_now(&app.clock), CHANGES_POLL)}
+	if app.changes_deadline == {} {
+		app.changes_deadline = time.tick_add(host.clock_now(&app.clock), CHANGES_POLL)
+	}
 	return pane
 }
 
@@ -252,7 +255,7 @@ changes_referenced :: proc(app: ^App, id: u32) -> bool {
 // Frees panes nothing shows any more and follows the recording setting.
 changes_tick :: proc(app: ^App) {
 	if app.changes_deadline == {} {return}
-	now := clock_now(&app.clock)
+	now := host.clock_now(&app.clock)
 	if time.tick_diff(now, app.changes_deadline) > 0 {return}
 	changed := false
 	for i := len(app.changes_panes) - 1; i >= 0; i -= 1 {
@@ -1456,12 +1459,12 @@ changes_press :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) {
 	case .Worktree_Chip:
 		changes_worktree_pick(app, pane, hit.index)
 	case .Split_Divider:
-		if click_run_count(last_click, pane.id, x, y, e.time_ns) == 2 {
+		if ui.click_run_count(last_click, pane.id, x, y, e.time_ns) == 2 {
 			state.split = 0
 			pointer_set(app, w, .Resize_Horizontal)
 			return
 		}
-		w.changes_divider_click = Click_Run{pane.id, x, y, e.time_ns, 1, 0}
+		w.changes_divider_click = ui.Click_Run{pane.id, x, y, e.time_ns, 1, 0}
 		divider := views.changes_divider_rect(g, view, state)
 		w.changes_divider = Changes_Divider_Drag{pane.id, x - divider.x}
 		pointer_set(app, w, .Resize_Horizontal)

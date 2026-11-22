@@ -14,6 +14,7 @@ import "core:path/filepath"
 import "core:strings"
 import "core:time"
 import "cosmos:ui"
+import "cosmos:host"
 
 // Embedded web panes, hosted with WebView2 DirectComposition visual hosting (WORK-315, D-106). No
 // DirectComposition or WebView2 object exists until a web pane is opened.
@@ -333,7 +334,7 @@ web_pane_create :: proc(app: ^App, url: string, zoom := f64(1)) -> ^Web_Pane {
 	app.next_web_id += 1
 	pane.id = app.next_web_id
 	if app.web_deadline == {} {
-		app.web_deadline = time.tick_add(clock_now(&app.clock), WEB_POLL)
+		app.web_deadline = time.tick_add(host.clock_now(&app.clock), WEB_POLL)
 	}
 	return pane
 }
@@ -582,7 +583,7 @@ web_tick :: proc(app: ^App) {
 	}
 	// Overlay dismissal and native reactivation can leave the app HWND holding the keyboard.
 	for w in app.windows {if w.focused {web_page_refocus(app, w)}}
-	now := clock_now(&app.clock)
+	now := host.clock_now(&app.clock)
 	if app.web_deadline != {} && time.tick_diff(now, app.web_deadline) <= 0 {
 		for i := len(app.web_panes) - 1; i >= 0; i -= 1 {
 			if !web_content_used(app, app.web_panes[i].id) {
@@ -1353,14 +1354,14 @@ web_press :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) {
 			platform.window_reclaim_focus(&app.platform, w.id)
 			if !was_editing {
 				// The first click selects the address; it still counts, so a double click selects a word.
-				_ = click_mark_press(&pane.url_field.clicks, x, e.time_ns, false)
+				_ = ui.click_mark_press(&pane.url_field.clicks, x, e.time_ns, false)
 				ui.field_select_all(&pane.url_field)
 			} else {
 				pad_x := math.round(8 * w.scale)
 				avail := max(0, nav.url_box.width - 2 * pad_x)
 				start := ui.field_view_start(&pane.url_field, &w.ui_text, avail)
 				at := ui.field_offset_at(&pane.url_field, &w.ui_text, start, nav.url_box.x + pad_x, x)
-				_ = field_press(&pane.url_field, at, x, .Shift in e.modifiers, e.time_ns)
+				_ = ui.field_press(&pane.url_field, at, x, .Shift in e.modifiers, e.time_ns)
 			}
 		} else {
 			pane.url_editing = false
@@ -1383,7 +1384,7 @@ web_press :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) {
 	switch e.button {
 	case .Left:
 		double := e.time_ns > pane.last_click_ns &&
-			e.time_ns - pane.last_click_ns <= DOUBLE_CLICK_NS &&
+			e.time_ns - pane.last_click_ns <= ui.DOUBLE_CLICK_NS &&
 			abs(lx - pane.last_click_pos.x) <= 4 &&
 			abs(ly - pane.last_click_pos.y) <= 4
 		kind = double ? .Left_Button_Double : .Left_Button_Down

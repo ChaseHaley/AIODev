@@ -408,7 +408,7 @@ workspace_picker_button :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Eve
 	if list, listing := p.state.(Workspace_Picker_List); listing && e.button == .Left {
 		if chip, pressed := list.sub.(Workspace_Chip_Pressed); pressed &&
 		   render.rect_contains(workspace_button_rect(app, w), x, y) &&
-		   e.time_ns - chip.time_ns <= DOUBLE_CLICK_NS {
+		   e.time_ns - chip.time_ns <= ui.DOUBLE_CLICK_NS {
 			workspace_name_begin(app, w)
 			return
 		}

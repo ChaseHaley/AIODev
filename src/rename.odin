@@ -136,7 +136,7 @@ rename_pointer :: proc(app: ^App, w: ^Window, x: f32, pressed, extend: bool, tim
 	box := rename_field_box(app, w)
 	at := ui.field_box_offset(box, x)
 	if pressed {
-		field_press(&w.rename, at, x, extend, time_ns)
+		ui.field_press(&w.rename, at, x, extend, time_ns)
 	} else {
 		ui.field_pointer(&w.rename, at, false, true)
 	}

@@ -5,6 +5,7 @@ import "cosmos:render"
 import "aio:views"
 import "core:time"
 import "cosmos:ui"
+import "cosmos:host"
 
 // A pane drag from a header: where the pointer is resolves to a Pane_Drop, the trial measures the move it
 // plans (pane_moves.odin), the outline shows it and the release carries it out.
@@ -257,7 +258,8 @@ pane_drag_target_move :: proc(
 ) -> bool {
 	if !window_linked(w) && pane_workspace_drag_move(app, source_window, w, x, y, swap) {return true}
 	tabs := pane_drop_tabs(app, w, x, y, swap)
-	pane_drag_hover(app, source_window, carry, w, tabs.destination, tabs.on_tab, swap, clock_now(&app.clock))
+	pane_drag_hover(app, source_window, carry, w, tabs.destination, tabs.on_tab, swap,
+		host.clock_now(&app.clock))
 	next := pane_drop_place(app, w, x, y, tabs, carry.source, carry.node, swap)
 	if pane_destination_same(carry.destination, next) && !changed_window {return true}
 	rect: layout.Rect
