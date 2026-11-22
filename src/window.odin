@@ -640,12 +640,8 @@ window_render :: proc(app: ^App, w: ^Window, wait := true) {
 	if window_minimized(w) {return}
 	if !window_surface_ready(app, w) {return}
 	surface := host.surface_get(w.surface)
-	ready, wait_error := render.frame_acquire(surface, wait ? FRAME_WAIT_MS : 0)
-	if wait_error == .Wait_Failed {
-		log.error("waiting for the swap chain failed")
-	}
+	frame, ready := host.frame_begin(surface, host.clock_now(&app.clock), wait ? FRAME_WAIT_MS : 0)
 	if !ready {return}
-	frame := render.frame_predict(surface, host.clock_now(&app.clock))
 	_ = window_motion_update(app, w, frame)
 	// A motion waiting on a resuming frame still needs that frame on screen so the next one is back to
 	// back; it shows the window unchanged.
@@ -675,10 +671,8 @@ window_render :: proc(app: ^App, w: ^Window, wait := true) {
 			perf.record_frame(&app.perf, build_ms, render_ms, perf.idle_at(&app.perf, render_start))
 		}
 	}
-	if err == .None {
-		render.frame_presented(surface, frame, w.frame_moved)
-		w.frame_moved = false
-	}
+	host.frame_end(surface, frame, err == .None, w.frame_moved)
+	if err == .None {w.frame_moved = false}
 	w.dirty = false
 }
 
@@ -687,22 +681,20 @@ window_render :: proc(app: ^App, w: ^Window, wait := true) {
 // Field carets count the frame once, so a retried build still continues their motion.
 @(require_results)
 window_build_frame :: proc(app: ^App, w: ^Window) -> bool {
-	build := render.frame_build_begin(&w.list, app.device)
 	ui.carets_begin(&w.carets, cursor_effects(app), w.frame)
 	w.carets.style = cursor_caret_style(app, w)
 	w.carets.shown = host.blink_visible(w.cursor_blink)
-	for {
-		build_frame(app, w)
-		switch render.frame_build_finish(&build) {
-		case .Ready:
-			cursor_crossing_commit(app, w)
-			// A caret that moved shows at once and restarts its blink, so typing never hides it.
-			if w.carets.restart {host.blink_reset(&w.cursor_blink, host.clock_now(&app.clock))}
-			return true
-		case .Retry:
-		case .Failed: return false
-		}
+	Build :: struct {
+		app: ^App,
+		w:   ^Window,
 	}
+	if !host.frame_build(&w.list, app.device, Build{app, w}, proc(b: Build) {_ = build_frame(b.app, b.w)}) {
+		return false
+	}
+	cursor_crossing_commit(app, w)
+	// A caret that moved shows at once and restarts its blink, so typing never hides it.
+	if w.carets.restart {host.blink_reset(&w.cursor_blink, host.clock_now(&app.clock))}
+	return true
 }
 
 // Builds the window's draw list. An atlas reset stops the build at once; window_build_frame then reads

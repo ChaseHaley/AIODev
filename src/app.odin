@@ -319,15 +319,9 @@ app_destroy :: proc(app: ^App) {
 run :: proc(app: ^App) {
 	for host.running(app.run) {
 		waits := frame_waits(app)
-		signaled, err := platform_api.wait_events(
-			&app.platform,
-			wait_timeout(app, waits),
-			waits.handles[:waits.count],
-		)
-		if err != .None {
+		if host.frame_wait(&app.platform, &waits, wait_timeout(app, waits)) != .None {
 			log.error("waiting for events failed")
 		}
-		if signaled >= 0 {render.frame_signaled(host.surface_get(waits.windows[signaled].surface))}
 		tick(app, wait_frames = false)
 	}
 	// Consumers hear of the quit while everything they may ask about still exists.
@@ -335,46 +329,14 @@ run :: proc(app: ^App) {
 	app_events_deliver(app)
 }
 
-// The windows that want a frame and how the loop learns it may draw them: a window with a swap chain
-// draws when the swap chain signals room for its next frame, so frames follow the display's refresh
-// and each window keeps its own display's pace.
+// The windows that want a frame (host.Frame_Waits); notices with no window to show them keep the loop on
+// the assumed refresh while they move.
 @(private = "file")
-Frame_Waits :: struct {
-	handles: [32]rawptr,
-	windows: [32]^Window,
-	count:   int,
-	// A window can draw at once: it has no surface yet, which its next frame makes.
-	ready:   bool,
-	// A window wants frames that its swap chain cannot wake the loop for: it cannot present but still
-	// has motion to finish, it holds a frame it failed to draw, or no wait slot is left. The loop
-	// retries on the assumed refresh.
-	unpaced: bool,
-}
-
-@(private = "file")
-frame_waits :: proc(app: ^App) -> (waits: Frame_Waits) {
+frame_waits :: proc(app: ^App) -> (waits: host.Frame_Waits) {
 	waits.unpaced = notices_unshown(app) && ui.notices_animating(&app.notices)
 	for w in app.windows {
-		animating := window_animating(app, w)
-		if !window_drawable(w) {
-			waits.unpaced ||= animating
-			continue
-		}
-		if !w.dirty && !animating && !status_spin_active(w) {continue}
-		switch surface in w.surface {
-		case ^render.Surface:
-			handle := render.frame_waitable(surface)
-			if handle == nil || waits.count == len(waits.handles) {
-				waits.unpaced = true
-				continue
-			}
-			waits.handles[waits.count], waits.windows[waits.count] = handle, w
-			waits.count += 1
-		case host.Surface_Failed:
-			waits.unpaced ||= animating
-		case nil:
-			waits.ready = true
-		}
+		wants := w.dirty || status_spin_active(w)
+		host.frame_waits_add(&waits, w.surface, window_drawable(w), wants, window_animating(app, w))
 	}
 	return
 }
@@ -638,25 +600,25 @@ window_timer_deadline :: proc(w: ^Window, timer: Window_Timer) -> (time.Tick, bo
 // How long the loop may sleep when nothing signals. Windows paced by their swap chain are not timed
 // here: their waitables wake the loop.
 @(private = "file")
-wait_timeout :: proc(app: ^App, waits: Frame_Waits) -> u32 {
-	if waits.ready {return 0}
-	if waits.unpaced {return u32(time.duration_milliseconds(render.FRAME_PERIOD_DEFAULT))}
+wait_timeout :: proc(app: ^App, waits: host.Frame_Waits) -> u32 {
 	deadline: time.Tick
 	found := false
-	for timer in App_Timer {
-		if next, pending := app_timer_deadline(app, timer); pending {
-			deadline, found = host.earliest(deadline, found, next)
-		}
-	}
-	for window in app.windows {
-		for timer in Window_Timer {
-			if next, pending := window_timer_deadline(window, timer); pending {
+	if !waits.ready && !waits.unpaced {
+		for timer in App_Timer {
+			if next, pending := app_timer_deadline(app, timer); pending {
 				deadline, found = host.earliest(deadline, found, next)
 			}
 		}
+		for window in app.windows {
+			for timer in Window_Timer {
+				if next, pending := window_timer_deadline(window, timer); pending {
+					deadline, found = host.earliest(deadline, found, next)
+				}
+			}
+		}
+		if find_pending(app) {return 0}
 	}
-	if find_pending(app) {return 0}
-	return host.wait_ms(deadline, found, host.clock_now(&app.clock))
+	return host.frame_wait_ms(waits, deadline, found, host.clock_now(&app.clock))
 }
 
 mark_all_dirty :: proc(app: ^App) {
