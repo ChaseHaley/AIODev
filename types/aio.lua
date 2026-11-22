@@ -144,6 +144,7 @@ aio = {}
 ---@overload fun(name: "pane.swap_next", fields?: aio.fields.pane.swap_next): aio.Reply?, string?, integer?
 ---@overload fun(name: "pane.swap_previous", fields?: aio.fields.pane.swap_previous): aio.Reply?, string?, integer?
 ---@overload fun(name: "pane.swap_right", fields?: aio.fields.pane.swap_right): aio.Reply?, string?, integer?
+---@overload fun(name: "pane.swap_to_neovim", fields?: aio.fields.pane.swap_to_neovim): aio.Reply?, string?, integer?
 ---@overload fun(name: "pane.swap_up", fields?: aio.fields.pane.swap_up): aio.Reply?, string?, integer?
 ---@overload fun(name: "pane.toggle_web_navigator", fields?: aio.fields.pane.toggle_web_navigator): aio.Reply?, string?, integer?
 ---@overload fun(name: "pane.zoom", fields?: aio.fields.pane.zoom): aio.Reply?, string?, integer?
@@ -2426,6 +2427,19 @@ function aio.pane.swap_previous(fields) end
 ---@return string? message
 ---@return integer? status
 function aio.pane.swap_right(fields) end
+
+---The fields of pane.swap_to_neovim.
+---@class aio.fields.pane.swap_to_neovim
+---@field pane? string|integer the pane to act on: a pane id, a pane name, here or focused; default: here (the pane aio runs in), or the focused pane outside AIODev
+
+---Swap pane to Neovim
+---
+---Shows Neovim in the focused pane in place of what it shows, as the pane menu's Neovim does. A shell keeps running behind it and shows again when Neovim quits; Neovim starts in the pane's folder.
+---@param fields? aio.fields.pane.swap_to_neovim
+---@return aio.Reply? reply
+---@return string? message
+---@return integer? status
+function aio.pane.swap_to_neovim(fields) end
 
 ---The fields of pane.swap_up.
 ---@class aio.fields.pane.swap_up

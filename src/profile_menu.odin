@@ -51,8 +51,9 @@ Profile_Menu :: struct {
 	// Each row's payload keys its entry.
 	entries:    [ui.MENU_MAX_ITEMS]Profile_Menu_Entry,
 	count:      int,
-	// The shortcut labels the rows show, as bound when the menu opened.
-	shortcuts:  [PROFILE_ACTION_COUNT][commands.SHORTCUT_TEXT_CAP]u8,
+	// The shortcut labels the rows show, as bound when the menu opened: the profiles' slots, then
+	// PROFILE_MENU_NEOVIM_SLOT.
+	shortcuts:  [PROFILE_ACTION_COUNT + 1][commands.SHORTCUT_TEXT_CAP]u8,
 }
 
 // Every visible profile, three content choices and their separator.
@@ -61,6 +62,10 @@ Profile_Menu :: struct {
 // The New Tab with Profile N commands label their rows only in the New tab menu.
 @(private)
 PROFILE_ACTION_COUNT :: int(Action.Profile_9) - int(Action.Profile_1) + 1
+
+// The pane badge's Neovim row shows Swap pane to Neovim's shortcut here.
+@(private)
+PROFILE_MENU_NEOVIM_SLOT :: PROFILE_ACTION_COUNT
 
 profile_menu_init :: proc(menu: ^Profile_Menu) {
 	ui.menu_init(&menu.menu)
@@ -161,6 +166,9 @@ profile_menu_open :: proc(app: ^App, w: ^Window, mode: Profile_Menu_Mode, x, y: 
 	profile_menu_push(menu, {label = "Web pane", glyph = .Globe, checked = in_web, enabled = !in_web}, .Web)
 	in_neovim := swap && target.pane.kind == .Neovim
 	neovim_item := ui.Menu_Item{label = "Neovim", glyph = .Code, checked = in_neovim, enabled = !in_neovim}
+	if swap && !in_neovim {
+		neovim_item.shortcut = profile_menu_shortcut(app, menu, PROFILE_MENU_NEOVIM_SLOT, .Swap_Pane_Neovim)
+	}
 	profile_menu_push(menu, neovim_item, .Neovim)
 	ui.menu_anchor(&menu.menu, x, y)
 	ui.menu_select_edge(&menu.menu, false)

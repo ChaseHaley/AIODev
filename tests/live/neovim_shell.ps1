@@ -158,6 +158,18 @@ try {
     Check ((Read-State)['tab.1.panes'] -eq '1') 'the switcher closed the pane'
     Invoke-Ctl wait text 'notes.txt' | Out-Null
 
+    # Swap pane to Neovim's default shortcut does what the pane switcher's Neovim does: Neovim takes the
+    # focused shell pane, over the shell, which shows again when Neovim quits.
+    Invoke-Ctl key Ctrl+Shift+G | Out-Null
+    Wait-Drawn
+    $state = Read-State
+    Check ($state['tab.1.panes'] -eq '1') "the shortcut split the tab into $($state['tab.1.panes']) panes"
+    Check ($state['neovim.shell'] -ne '0') 'Neovim opened by the shortcut has no shell behind it'
+    Send-Command 'q'
+    Wait-For 'neovim.active' 'false'
+    Wait-For 'neovim.count' '0'
+    Invoke-Ctl wait text 'notes.txt' | Out-Null
+
     # Neovim opened beside the shell, not from it, leaves a shell in its folder when it quits.
     Invoke-Ctl command pane.open_neovim | Out-Null
     Wait-For 'neovim.started' 'true'

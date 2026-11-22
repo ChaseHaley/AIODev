@@ -85,6 +85,7 @@ Action :: enum u32 {
 	Open_Web,
 	Toggle_Web_Navigator,
 	Open_Neovim,
+	Swap_Pane_Neovim,
 	Agent_Changes,
 	Duplicate_Tab,
 	Move_Tab_Left,
@@ -480,6 +481,10 @@ ACTIONS :: [Action]Command_Descriptor {
 	.Open_Neovim = {
 		"pane.open_neovim", "Open Neovim", nil, .Local,
 		{accepted = {.File, .Direction, .Ratio, .Focus, .Float}, control = .Pane, keywords = "nvim vim editor"},
+	},
+	.Swap_Pane_Neovim = {
+		"pane.swap_to_neovim", "Swap pane to Neovim", {{.G, {.Control, .Shift}}}, .Local,
+		{keywords = "nvim vim editor change replace"},
 	},
 	.Agent_Changes = {"pane.agent_changes", "Open agent changes", nil, .Local, {accepted = {.Float}}},
 	.Duplicate_Tab = {"tab.duplicate", "Duplicate tab", nil, .Host, {}},
@@ -980,6 +985,11 @@ COMMAND_HELP :: #partial [Action]Command_Help {
 			},
 		},
 	},
+	.Swap_Pane_Neovim = {
+		"Shows Neovim in the focused pane in place of what it shows, as the pane menu's Neovim does. A shell " +
+		"keeps running behind it and shows again when Neovim quits; Neovim starts in the pane's folder.",
+		nil,
+	},
 	.Agent_Changes = {
 		"Opens Agent changes beside the focused pane, for that pane's agent. Each run opens another pane.",
 		nil,
@@ -1423,6 +1433,11 @@ command_execute :: proc(app: ^App, ctx: Command_Context, invocation: commands.In
 			return control_neovim_open(app, window_for_workspace(app, t.workspace), t, invocation, request.caller)
 		}
 		neovim_open_focused(app, w)
+	case .Swap_Pane_Neovim:
+		content, shown := window_focused_content(w)
+		if !shown || content.kind == .Neovim || !pane_content_menu_available(content.kind) {return {}}
+		directory := neovim_focused_directory(app, w)
+		pane_content_menu_choose(app, w, Profile_Menu_Swap_Pane{content}, .Neovim, directory)
 	case .Agent_Changes:
 		changes_open(app, w, .Float in invocation.given ? .Float : .Split_Right)
 	case .New_Floating:
