@@ -11,6 +11,7 @@ import "core:testing"
 import "core:time"
 import fixtures "../fixtures"
 import "cosmos:ui"
+import "cosmos:testkit"
 
 @(private)
 process_fixture :: proc(t: ^testing.T, p: ^views.Editor) {
@@ -95,7 +96,7 @@ process_groups_rows_below_a_focused_field_stay_visible :: proc(t: ^testing.T) {
 	if !testing.expect(t, ui.text_init(&text, fonts, &cache, 14)) {return}
 	list := render.draw_list_init()
 	defer render.draw_list_destroy(&list)
-	theme := views.theme_from(fixtures.shipped_theme("studio-dark"), fixtures.default_interface())
+	theme := views.theme_from(testkit.bundled_theme("studio-dark"), fixtures.default_interface())
 	p: views.Editor
 	defer views.editor_destroy(&p)
 	process_fixture(t, &p)

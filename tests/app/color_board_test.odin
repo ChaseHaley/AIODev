@@ -8,6 +8,7 @@ import "aio:views"
 import "core:fmt"
 import "core:strings"
 import "core:testing"
+import theme_api "cosmos:theme"
 
 @(private)
 board_center_press :: proc(f: ^Profile_Fixture, r: render.Rect) {
@@ -39,7 +40,7 @@ color_board_edits_save_a_custom_copy_reset_and_delete :: proc(t: ^testing.T) {
 	for item in p.items {
 		if item.row >= 0 && p.rows[item.row].action == .Theme_Color {tiles += 1}
 	}
-	testing.expect_value(t, tiles, len(settings.Theme_Token))
+	testing.expect_value(t, tiles, len(theme_api.Token))
 	testing.expect(t, views.color_board_lines(p, p.fit_layout) * 2 < len(p.items))
 
 	profile_press(&f, {key = .Tab})
@@ -117,7 +118,7 @@ color_board_links_follow_the_color_they_point_at :: proc(t: ^testing.T) {
 	testing.expect(t, profile_file_has(f.path, fmt.tprintf("theme.custom.%s.cursor = accent", copy)))
 	theme := f.state.settings.active_theme
 	testing.expect(t, .Cursor in theme.linked)
-	testing.expect_value(t, theme.target[.Cursor], settings.Theme_Token.Accent)
+	testing.expect_value(t, theme.target[.Cursor], theme_api.Token.Accent)
 	testing.expect_value(t, f.state.settings.colors.cursor, theme.colors[.Accent].rgb)
 	testing.expect(t, views.color_board_rect(p, p.fit_layout, .Unlink).width > 0)
 

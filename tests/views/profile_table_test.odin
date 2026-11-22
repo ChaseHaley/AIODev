@@ -9,6 +9,7 @@ import "aio:settings"
 import "aio:views"
 import fixtures "../fixtures"
 import "cosmos:ui"
+import "cosmos:testkit"
 
 @(test)
 profile_overflow_click_targets_stay_inside_a_narrow_right_pane :: proc(t: ^testing.T) {
@@ -633,7 +634,7 @@ editor_profile_buttons_lift_under_the_pointer :: proc(t: ^testing.T) {
 	if !testing.expect(t, ui.text_init(&text, fonts, &cache, 14)) {return}
 	list := render.draw_list_init()
 	defer render.draw_list_destroy(&list)
-	theme := views.theme_from(fixtures.shipped_theme("studio-dark"), fixtures.default_interface())
+	theme := views.theme_from(testkit.bundled_theme("studio-dark"), fixtures.default_interface())
 	p: views.Editor
 	defer views.editor_destroy(&p)
 	profile_editor_fixture(t, &p)

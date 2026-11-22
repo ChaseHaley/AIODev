@@ -5,9 +5,10 @@ import "core:fmt"
 import "core:strings"
 import "core:testing"
 import "aio:settings"
-import fixtures "../fixtures"
+import theme_api "cosmos:theme"
+import "cosmos:testkit"
 
-THEMES :: "themes"
+THEMES :: testkit.BUNDLED_THEMES_DIRECTORY
 
 // Parses `source` with the theme files of `directory`, as the app parses a revision with its inputs.
 @(private)
@@ -102,7 +103,7 @@ shipped_themes_resolve_after_parsing :: proc(t: ^testing.T) {
 		testing.expect_value(t, s.colors.palette[1], fixture.ansi_red)
 		testing.expect_value(t, s.colors.foreground, theme.colors[.Foreground].rgb)
 		testing.expect_value(t, theme.light, fixture.light)
-		testing.expect_value(t, theme, fixtures.shipped_theme(fixture.id))
+		testing.expect_value(t, theme, testkit.bundled_theme(fixture.id))
 	}
 }
 
@@ -114,15 +115,15 @@ the_compiled_default_survives_an_empty_themes_folder :: proc(t: ^testing.T) {
 	testing.expect_value(t, err, nil)
 	testing.expect_value(t, len(d), 1)
 	testing.expect_value(t, len(s.themes), 1)
-	testing.expect_value(t, s.themes[0].id, settings.DEFAULT_THEME_ID)
-	testing.expect_value(t, s.active_theme, fixtures.shipped_theme(settings.DEFAULT_THEME_ID))
-	testing.expect_value(t, settings.theme_default(), fixtures.shipped_theme(settings.DEFAULT_THEME_ID))
+	testing.expect_value(t, s.themes[0].id, theme_api.DEFAULT_ID)
+	testing.expect_value(t, s.active_theme, testkit.bundled_theme(theme_api.DEFAULT_ID))
+	testing.expect_value(t, theme_api.default(), testkit.bundled_theme(theme_api.DEFAULT_ID))
 
 	defaults, default_error := settings.defaults()
 	defer settings.destroy(&defaults)
 	testing.expect_value(t, default_error, nil)
-	testing.expect_value(t, defaults.theme.name, settings.DEFAULT_THEME_ID)
-	testing.expect_value(t, defaults.active_theme, settings.theme_default())
+	testing.expect_value(t, defaults.theme.name, theme_api.DEFAULT_ID)
+	testing.expect_value(t, defaults.active_theme, theme_api.default())
 }
 
 @(test)
@@ -134,9 +135,9 @@ custom_theme_inherits_its_base_and_overrides_single_colors :: proc(t: ^testing.T
 	defer settings.diagnostics_destroy(&d)
 	testing.expect_value(t, err, nil)
 	testing.expect_value(t, len(d), 0)
-	base := fixtures.shipped_theme("tide-light")
-	testing.expect_value(t, s.active_theme.colors[.Tab_Bar], settings.Theme_Color{1, 2, 3, 255})
-	testing.expect_value(t, s.active_theme.colors[.Border], settings.Theme_Color{4, 5, 6, 0x80})
+	base := testkit.bundled_theme("tide-light")
+	testing.expect_value(t, s.active_theme.colors[.Tab_Bar], theme_api.Color{1, 2, 3, 255})
+	testing.expect_value(t, s.active_theme.colors[.Border], theme_api.Color{4, 5, 6, 0x80})
 	testing.expect_value(t, s.colors.palette[15], settings.Color{7, 8, 9})
 	testing.expect_value(t, s.active_theme.colors[.Cursor], base.colors[.Cursor])
 	testing.expect_value(t, s.active_theme.colors[.Window], base.colors[.Window])
@@ -154,13 +155,13 @@ custom_themes_stack_on_custom_bases_and_survive_cycles :: proc(t: ^testing.T) {
 	defer settings.diagnostics_destroy(&d)
 	testing.expect_value(t, err, nil)
 	testing.expect_value(t, len(d), 0)
-	base := fixtures.shipped_theme("ember-light")
-	testing.expect_value(t, s.active_theme.colors[.Cursor], settings.Theme_Color{1, 1, 1, 255})
-	testing.expect_value(t, s.active_theme.colors[.Tab_Bar], settings.Theme_Color{2, 2, 2, 255})
+	base := testkit.bundled_theme("ember-light")
+	testing.expect_value(t, s.active_theme.colors[.Cursor], theme_api.Color{1, 1, 1, 255})
+	testing.expect_value(t, s.active_theme.colors[.Tab_Bar], theme_api.Color{2, 2, 2, 255})
 	testing.expect_value(t, s.active_theme.colors[.Window], base.colors[.Window])
-	loop := settings.custom_theme_resolve(&s, settings.custom_theme_find(&s, "loop"))
-	testing.expect_value(t, loop.colors[.Accent], settings.Theme_Color{3, 3, 3, 255})
-	testing.expect_value(t, loop.colors[.Window], settings.theme_default().colors[.Window])
+	loop := theme_api.resolve(s.themes[:], theme_api.find(s.themes[:], "loop"))
+	testing.expect_value(t, loop.colors[.Accent], theme_api.Color{3, 3, 3, 255})
+	testing.expect_value(t, loop.colors[.Window], theme_api.default().colors[.Window])
 }
 
 @(test)
@@ -177,7 +178,7 @@ theme_validation_reports_and_falls_back :: proc(t: ^testing.T) {
 	testing.expect_value(t, err, nil)
 	testing.expect_value(t, len(d), 10)
 	testing.expect_value(t, s.theme.name, "unknown")
-	testing.expect_value(t, s.active_theme, settings.theme_default())
+	testing.expect_value(t, s.active_theme, theme_api.default())
 	testing.expect_value(t, s.pane, settings.Pane_Settings{4, 8, false, true, true, false, .Header, 8, true, 20, 5, 1, 0})
 	unknown := false
 	for diagnostic in d {
@@ -204,17 +205,17 @@ theme_validation_reports_and_falls_back :: proc(t: ^testing.T) {
 	if testing.expect_value(t, len(missing_d), 1) {
 		testing.expect(t, strings.contains(missing_d[0].message, "\"gone\""))
 	}
-	testing.expect_value(t, missing.active_theme.colors[.Cursor], settings.Theme_Color{1, 2, 3, 255})
-	testing.expect_value(t, missing.active_theme.colors[.Window], settings.theme_default().colors[.Window])
+	testing.expect_value(t, missing.active_theme.colors[.Cursor], theme_api.Color{1, 2, 3, 255})
+	testing.expect_value(t, missing.active_theme.colors[.Window], theme_api.default().colors[.Window])
 }
 
 @(test)
 theme_ids_follow_profile_rules :: proc(t: ^testing.T) {
 	for id in ([?]string{"ocean", "studio", "studio-2", "tokyonight-day"}) {
-		testing.expectf(t, settings.theme_id_valid(id), "%q should be valid", id)
+		testing.expectf(t, theme_api.id_valid(id), "%q should be valid", id)
 	}
 	for id in ([?]string{"", "Ocean", "-x", "a b", "a.b"}) {
-		testing.expectf(t, !settings.theme_id_valid(id), "%q should be invalid", id)
+		testing.expectf(t, !theme_api.id_valid(id), "%q should be invalid", id)
 	}
 }
 
@@ -251,7 +252,7 @@ legacy_theme_name_and_mode_become_one_theme_id :: proc(t: ^testing.T) {
 	defer settings.diagnostics_destroy(&d)
 	testing.expect_value(t, err, nil)
 	testing.expect_value(t, len(d), 0)
-	testing.expect_value(t, s.active_theme, fixtures.shipped_theme("tokyonight-day"))
+	testing.expect_value(t, s.active_theme, testkit.bundled_theme("tokyonight-day"))
 }
 
 @(test)
@@ -316,26 +317,26 @@ theme_name_edits_own_custom_theme_admission_and_line_layout :: proc(t: ^testing.
 // text under a block cursor is the text on accent unless it sets its own.
 @(test)
 the_cursor_follows_the_accent_unless_the_theme_sets_one :: proc(t: ^testing.T) {
-	for file in fixtures.SHIPPED_THEMES {
-		theme, ok := fixtures.shipped_theme_file(file)
+	for file in testkit.BUNDLED_THEMES {
+		theme, ok := testkit.bundled_theme_file(file)
 		if !ok {continue}
-		testing.expect_value(t, settings.theme_cursor(theme), theme.colors[.Accent].rgb)
-		testing.expect_value(t, settings.theme_cursor_text(theme), theme.colors[.Accent_Text].rgb)
+		testing.expect_value(t, theme_api.cursor(theme), theme.colors[.Accent].rgb)
+		testing.expect_value(t, theme_api.cursor_text(theme), theme.colors[.Accent_Text].rgb)
 		terminal := settings.theme_terminal(theme)
 		testing.expect_value(t, terminal.cursor, theme.colors[.Accent].rgb)
 		testing.expect_value(t, terminal.cursor_text, theme.colors[.Accent_Text].rgb)
 	}
-	theme := fixtures.shipped_theme(settings.DEFAULT_THEME_ID)
+	theme := testkit.bundled_theme(theme_api.DEFAULT_ID)
 	theme.colors[.Cursor] = {0x12, 0x34, 0x56, 255}
 	theme.colors[.Cursor_Text] = {0x65, 0x43, 0x21, 255}
-	testing.expect_value(t, settings.theme_cursor(theme), settings.Color{0x12, 0x34, 0x56})
-	testing.expect_value(t, settings.theme_cursor_text(theme), settings.Color{0x65, 0x43, 0x21})
+	testing.expect_value(t, theme_api.cursor(theme), settings.Color{0x12, 0x34, 0x56})
+	testing.expect_value(t, theme_api.cursor_text(theme), settings.Color{0x65, 0x43, 0x21})
 	testing.expect_value(t, settings.theme_terminal(theme).cursor, settings.Color{0x12, 0x34, 0x56})
 	// An empty colour is how a theme file says "follow the accent".
-	cleared, parsed := settings.theme_color_parse(.Cursor, "", .Strict)
+	cleared, parsed := theme_api.color_parse(.Cursor, "", .Strict)
 	testing.expect(t, parsed)
 	testing.expect_value(t, cleared.a, u8(0))
-	text := settings.theme_color_text(.Cursor, cleared)
+	text := theme_api.color_text(.Cursor, cleared)
 	testing.expect_value(t, text, "")
 }
 

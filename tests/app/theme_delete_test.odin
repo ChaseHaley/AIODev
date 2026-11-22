@@ -1,10 +1,10 @@
 package app_test
 
 import app "../../src"
-import "aio:settings"
 import "aio:views"
 import "core:strings"
 import "core:testing"
+import "cosmos:theme"
 
 @(private, rodata)
 THEME_DELETE_THEMES := [?][2]string {
@@ -49,11 +49,11 @@ theme_delete_confirms_only_the_theme_its_prompt_named :: proc(t: ^testing.T) {
 	testing.expect(t, app.settings_save_value(s, "theme.name", "beta", "Could not switch themes."))
 	testing.expect_value(t, s.settings.theme.name, "beta")
 	theme_delete_press(s, w)
-	testing.expect(t, settings.custom_theme_find(&s.settings, "beta") != nil)
+	testing.expect(t, theme.find(s.settings.themes[:], "beta") != nil)
 	testing.expect(t, strings.contains(w.editor.message, "beta"))
 	theme_delete_press(s, w)
-	testing.expect(t, settings.custom_theme_find(&s.settings, "beta") == nil)
-	testing.expect(t, settings.custom_theme_find(&s.settings, "alpha") != nil)
+	testing.expect(t, theme.find(s.settings.themes[:], "beta") == nil)
+	testing.expect(t, theme.find(s.settings.themes[:], "alpha") != nil)
 	testing.expect(t, !w.editor.delete_armed)
 }
 
@@ -88,6 +88,6 @@ theme_delete_prompt_ends_when_the_page_moves_on :: proc(t: ^testing.T) {
 	app.run_action(s, w, .Close_Tab)
 	testing.expect(t, !views.editor_loaded(&w.editor))
 	testing.expect(t, !w.editor.delete_armed, "closing Settings ends the prompt")
-	testing.expect(t, settings.custom_theme_find(&s.settings, "alpha") != nil)
+	testing.expect(t, theme.find(s.settings.themes[:], "alpha") != nil)
 	testing.expect_value(t, s.settings.theme.name, "alpha")
 }

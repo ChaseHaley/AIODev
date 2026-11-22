@@ -6,6 +6,7 @@ import "aio:settings"
 import "aio:views"
 import "core:testing"
 import "cosmos:ui"
+import "cosmos:theme"
 
 @(test)
 palette_profiles_result_jumps_to_the_profile_table :: proc(t: ^testing.T) {
@@ -166,7 +167,7 @@ palette_setting_values_use_static_choice_labels :: proc(t: ^testing.T) {
 @(test)
 palette_setting_values_use_live_choice_labels :: proc(t: ^testing.T) {
 	state: app.App
-	append(&state.settings.themes, settings.Custom_Theme{id = "custom-theme", name = "My Theme"})
+	append(&state.settings.themes, theme.Layer{id = "custom-theme", name = "My Theme"})
 	defer delete(state.settings.themes)
 	state.settings.theme.name = "custom-theme"
 	app.palette_set_sources(&state)

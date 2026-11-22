@@ -7,7 +7,8 @@ import "core:thread"
 import "core:time"
 import win32 "core:sys/windows"
 import "aio:settings"
-import fixtures "../fixtures"
+import "cosmos:theme"
+import "cosmos:testkit"
 
 @(test)
 editing_a_theme_file_color_saves_and_selects_a_custom_theme :: proc(t: ^testing.T) {
@@ -28,8 +29,8 @@ editing_a_theme_file_color_saves_and_selects_a_custom_theme :: proc(t: ^testing.
 	testing.expect_value(t, len(diagnostics), 0)
 	testing.expect_value(t, s.theme.name, "tide-light-custom")
 	testing.expect_value(t, s.font.size, 14)
-	testing.expect_value(t, s.active_theme.colors[.Tab_Bar], settings.Theme_Color{1, 2, 3, 255})
-	base := fixtures.shipped_theme("tide-light")
+	testing.expect_value(t, s.active_theme.colors[.Tab_Bar], theme.Color{1, 2, 3, 255})
+	base := testkit.bundled_theme("tide-light")
 	testing.expect_value(t, s.active_theme.colors[.Text], base.colors[.Text])
 
 	again, again_created, _, again_error := edit_color(updated, "border", "#11223344")
@@ -83,8 +84,8 @@ themes_duplicate_rename_and_delete_as_whole_blocks :: proc(t: ^testing.T) {
 	testing.expect_value(t, parse_error, nil)
 	testing.expect_value(t, len(diagnostics), 0)
 	testing.expect_value(t, s.theme.name, "mine-copy")
-	testing.expect_value(t, s.active_theme.colors[.Cursor], settings.Theme_Color{1, 2, 3, 255})
-	testing.expect_value(t, settings.custom_theme_find(&s, "mine-copy").base, "ember-dark")
+	testing.expect_value(t, s.active_theme.colors[.Cursor], theme.Color{1, 2, 3, 255})
+	testing.expect_value(t, theme.find(s.themes[:], "mine-copy").base, "ember-dark")
 	settings.destroy(&s)
 	settings.diagnostics_destroy(&diagnostics)
 
@@ -115,7 +116,7 @@ themes_duplicate_rename_and_delete_as_whole_blocks :: proc(t: ^testing.T) {
 	defer delete(orphan)
 	defer delete(orphan_selected)
 	testing.expect_value(t, orphan_error, settings.Theme_Edit_Error.None)
-	testing.expect_value(t, orphan_selected, settings.DEFAULT_THEME_ID)
+	testing.expect_value(t, orphan_selected, theme.DEFAULT_ID)
 
 	file_copy, file_created, file_error := edit_duplicate("theme.name = tide-dark\n", THEMES)
 	defer delete(file_copy)
@@ -151,7 +152,7 @@ legacy_color_overrides_migrate_into_a_custom_theme :: proc(t: ^testing.T) {
 	testing.expect_value(t, parse_error, nil)
 	testing.expect_value(t, len(diagnostics), 0)
 	testing.expect_value(t, s.theme.name, "tide-light-custom")
-	base := fixtures.shipped_theme("tide-light")
+	base := testkit.bundled_theme("tide-light")
 	testing.expect_value(t, s.colors.background, settings.Color{0x0f, 0x11, 0x15})
 	testing.expect_value(t, s.colors.palette[3], settings.Color{0x11, 0x22, 0x33})
 	testing.expect_value(t, s.colors.foreground, base.colors[.Foreground].rgb)

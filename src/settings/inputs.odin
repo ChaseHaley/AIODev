@@ -5,6 +5,7 @@ import "core:fmt"
 import "core:os"
 import "core:slice"
 import "core:strings"
+import theme_api "cosmos:theme"
 
 // Machine facts a settings revision is parsed with: the theme files in the themes folder and the
 // shells found on this machine. The app reads them once per settings read; every parse of that
@@ -21,7 +22,7 @@ Inputs :: struct {
 // One themes-folder result in scan order: a parsed theme, or the problem reported under `path`.
 Theme_File :: struct {
 	path, issue: string,
-	theme:       Custom_Theme,
+	theme:       theme_api.Layer,
 }
 
 @(private)
@@ -67,8 +68,8 @@ inputs_read :: proc(
 		if file.type != .Regular {continue}
 		if !strings.has_suffix(file.name, ".theme.json") {continue}
 		path := fmt.tprintf("%s/%s", themes_directory, file.name)
-		if file.size > THEME_FILE_MAX_BYTES {
-			theme_file_keep(&inputs, path, THEME_FILE_SIZE_NOTICE, {}) or_return
+		if file.size > theme_api.FILE_MAX_BYTES {
+			theme_file_keep(&inputs, path, theme_api.FILE_SIZE_NOTICE, {}) or_return
 			continue
 		}
 		data, error := os.read_entire_file(path, context.temp_allocator)
@@ -76,7 +77,7 @@ inputs_read :: proc(
 			theme_file_keep(&inputs, path, "Could not read theme file.", {}) or_return
 			continue
 		}
-		theme, issue := theme_file_parse(string(data))
+		theme, issue := theme_api.file_parse(string(data))
 		delete(data, context.temp_allocator)
 		theme_file_keep(&inputs, path, issue, theme) or_return
 	}
@@ -90,7 +91,7 @@ inputs_destroy :: proc(inputs: ^Inputs) {
 		for text in ([?]string{file.path, file.issue, file.theme.id, file.theme.base, file.theme.name}) {
 			delete(text, allocator)
 		}
-		neovim_theme_destroy(file.theme.neovim, allocator)
+		theme_api.neovim_destroy(file.theme.neovim, allocator)
 	}
 	delete(inputs.theme_files)
 	for shell in inputs.detected {
@@ -105,7 +106,7 @@ inputs_destroy :: proc(inputs: ^Inputs) {
 theme_file_keep :: proc(
 	inputs: ^Inputs,
 	path, issue: string,
-	theme: Custom_Theme,
+	theme: theme_api.Layer,
 ) -> runtime.Allocator_Error {
 	append(&inputs.theme_files, Theme_File{}) or_return
 	kept := &inputs.theme_files[len(inputs.theme_files) - 1]
@@ -120,7 +121,7 @@ theme_file_keep :: proc(
 	kept.theme.base = strings.clone(theme.base, inputs.allocator) or_return
 	kept.theme.name = strings.clone(theme.name, inputs.allocator) or_return
 	if theme.neovim.colorscheme != "" {
-		kept.theme.neovim = neovim_theme_clone(theme.neovim, inputs.allocator) or_return
+		kept.theme.neovim = theme_api.neovim_clone(theme.neovim, inputs.allocator) or_return
 	}
 	return nil
 }
@@ -138,7 +139,7 @@ theme_files_apply :: proc(
 			diagnostic_append(diagnostics, 0, file.path, file.issue) or_return
 			continue
 		}
-		if existing := custom_theme_find(s, file.theme.id); existing != nil {
+		if existing := theme_api.find(s.themes[:], file.theme.id); existing != nil {
 			if existing.external {
 				diagnostic_append(diagnostics, 0, file.path, "Duplicate theme ID; file ignored.") or_return
 			}

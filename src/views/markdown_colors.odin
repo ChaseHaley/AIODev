@@ -2,7 +2,7 @@ package views
 
 import "cosmos:colour"
 import "cosmos:render"
-import "aio:settings"
+import "cosmos:theme"
 
 // The colours of Markdown's elements, resolved from the theme once whenever it changes, so drawing a
 // page looks nothing up beyond one entry per run. A zero colour (alpha 0) is none: as a background it
@@ -28,13 +28,13 @@ Markdown_Colors :: struct {
 	fallback:                                                            render.Color,
 }
 
-markdown_colors_from :: proc(t: settings.Theme) -> Markdown_Colors {
-	c :: proc(t: settings.Theme, token: settings.Theme_Token) -> render.Color {
+markdown_colors_from :: proc(t: theme.Theme) -> Markdown_Colors {
+	c :: proc(t: theme.Theme, token: theme.Token) -> render.Color {
 		value := t.colors[token]
 		if value.a == 0 {return {}}
 		return colour.rgba(value.rgb, f32(value.a) / 255)
 	}
-	pair :: proc(t: settings.Theme, text, background: settings.Theme_Token) -> Markdown_Pair {
+	pair :: proc(t: theme.Theme, text, background: theme.Token) -> Markdown_Pair {
 		return {c(t, text), c(t, background)}
 	}
 	m := Markdown_Colors {

@@ -9,6 +9,7 @@ import "core:strings"
 import "core:testing"
 import fixtures "../fixtures"
 import "cosmos:ui"
+import "cosmos:testkit"
 
 // A page drawn into a list, to read the colours of what it drew.
 @(private = "file")
@@ -115,7 +116,7 @@ the_shipped_defaults_draw_with_the_shared_colors_only :: proc(t: ^testing.T) {
 		"| h1 | h2 |\n|----|----|\n| a  | b  |\n"
 	if !page_init(t, &p, source) {return}
 	for id in ([?]string{"studio-dark", "studio-light", "dracula"}) {
-		theme := views.theme_from(fixtures.shipped_theme(id), fixtures.default_interface())
+		theme := views.theme_from(testkit.bundled_theme(id), fixtures.default_interface())
 		if !page_draw(t, &p, theme) {return}
 		// Only text, secondary text and the accent colour text; none of the bands are drawn.
 		other := 0

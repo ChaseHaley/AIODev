@@ -1,18 +1,12 @@
 package settings
 
-import "base:runtime"
-import "core:encoding/json"
+import theme_api "cosmos:theme"
 import "core:fmt"
 import "core:io"
 import "core:os"
 import "core:path/filepath"
 import "core:strings"
 import "core:time"
-
-NEOVIM_PLUGIN_PATTERN :: "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$"
-NEOVIM_COLORSCHEME_PATTERN :: "^[A-Za-z0-9_.-]+$"
-NEOVIM_PLUGIN_MAX_LENGTH :: 100
-NEOVIM_COLORSCHEME_MAX_LENGTH :: 64
 
 // The record the Neovim plugin follows lives at <data directory>\nvim\current.json.
 NEOVIM_RECORD_DIRECTORY :: "nvim"
@@ -26,147 +20,10 @@ RECORD_REPLACE_ATTEMPTS :: 5
 @(private)
 RECORD_REPLACE_WAIT :: 20 * time.Millisecond
 
-Neovim_Background :: enum {
-	Auto,
-	Dark,
-	Light,
-}
-
-// The Neovim colorscheme a theme names, as data: the colorscheme to apply, the plugin repository that
-// provides it (documentation only, so it may be empty), and the 'background' it needs when that is not
-// simply the theme's own. A theme without one has an empty colorscheme. Its strings are owned by
-// whoever holds the theme.
-Neovim_Theme :: struct {
-	plugin, colorscheme: string,
-	background:          Neovim_Background,
-}
-
-@(private)
-neovim_name_byte :: proc(c: u8) -> bool {
-	return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') ||
-		c == '_' || c == '.' || c == '-'
-}
-
-neovim_colorscheme_valid :: proc(text: string) -> bool {
-	if len(text) == 0 || len(text) > NEOVIM_COLORSCHEME_MAX_LENGTH {return false}
-	for i in 0 ..< len(text) {
-		if !neovim_name_byte(text[i]) {return false}
-	}
-	return true
-}
-
-// `owner/repository`, the form a plugin manager takes.
-neovim_plugin_valid :: proc(text: string) -> bool {
-	if len(text) == 0 || len(text) > NEOVIM_PLUGIN_MAX_LENGTH {return false}
-	slash := strings.index_byte(text, '/')
-	if slash <= 0 || slash == len(text) - 1 {return false}
-	for i in 0 ..< len(text) {
-		if i != slash && !neovim_name_byte(text[i]) {return false}
-	}
-	return true
-}
-
-// Reads the `neovim` object of a theme file. `n`'s strings and `issue` are temporary.
-@(private, require_results)
-neovim_theme_parse :: proc(value: json.Value) -> (n: Neovim_Theme, issue: string) {
-	object, is_object := value.(json.Object)
-	if !is_object {return {}, "Expected a neovim object."}
-	for key in object {
-		if key != "plugin" && key != "colorscheme" && key != "background" {
-			return {}, fmt.tprintf("Unknown neovim field: %s", key)
-		}
-	}
-	plugin: json.String
-	if entry, has_plugin := object["plugin"]; has_plugin {
-		text, text_ok := entry.(json.String)
-		if !text_ok || !neovim_plugin_valid(string(text)) {
-			return {}, "Invalid neovim plugin; use owner/repository."
-		}
-		plugin = text
-	}
-	colorscheme, colorscheme_ok := object["colorscheme"].(json.String)
-	if !colorscheme_ok || !neovim_colorscheme_valid(string(colorscheme)) {
-		return {}, "Invalid neovim colorscheme."
-	}
-	if background, has_background := object["background"]; has_background {
-		text, text_ok := background.(json.String)
-		switch {
-		case text_ok && text == "dark":
-			n.background = .Dark
-		case text_ok && text == "light":
-			n.background = .Light
-		case:
-			return {}, "Neovim background must be dark or light."
-		}
-	}
-	cloned_plugin, plugin_error := strings.clone(string(plugin), context.temp_allocator)
-	cloned_colorscheme, colorscheme_error := strings.clone(string(colorscheme), context.temp_allocator)
-	if plugin_error != nil || colorscheme_error != nil {return {}, "Could not allocate neovim theme."}
-	n.plugin, n.colorscheme = cloned_plugin, cloned_colorscheme
-	return
-}
-
-@(private, require_results)
-neovim_theme_clone :: proc(
-	n: Neovim_Theme,
-	allocator: runtime.Allocator,
-) -> (
-	c: Neovim_Theme,
-	err: runtime.Allocator_Error,
-) {
-	c.background = n.background
-	c.plugin = strings.clone(n.plugin, allocator) or_return
-	c.colorscheme, err = strings.clone(n.colorscheme, allocator)
-	if err != nil {delete(c.plugin, allocator)}
-	return
-}
-
-@(private)
-neovim_theme_destroy :: proc(n: Neovim_Theme, allocator: runtime.Allocator) {
-	delete(n.plugin, allocator)
-	delete(n.colorscheme, allocator)
-}
-
-@(private)
-neovim_background_text :: proc(b: Neovim_Background) -> string {
-	switch b {
-	case .Auto:
-		return ""
-	case .Dark:
-		return "dark"
-	case .Light:
-		return "light"
-	}
-	return ""
-}
-
-// Writes `"key": "value"` with the value quoted as JSON; false when it cannot be quoted.
-@(private, require_results)
-write_json_string :: proc(b: ^strings.Builder, indent, key, value, separator: string) -> bool {
-	quoted_key, key_error := json.marshal(key, allocator = context.temp_allocator)
-	quoted_value, value_error := json.marshal(value, allocator = context.temp_allocator)
-	if key_error != nil || value_error != nil {return false}
-	return write_parts(b, indent, string(quoted_key), ": ", string(quoted_value), separator) == nil
-}
-
-// The neovim object as a theme file writes it, at the top level: a trailing comma follows.
-@(private, require_results)
-write_neovim_theme :: proc(b: ^strings.Builder, n: Neovim_Theme) -> bool {
-	if n.colorscheme == "" {return true}
-	background := neovim_background_text(n.background)
-	if write_parts(b, "  \"neovim\": {\n") != nil {return false}
-	if n.plugin != "" && !write_json_string(b, "    ", "plugin", n.plugin, ",\n") {return false}
-	if !write_json_string(b, "    ", "colorscheme", n.colorscheme, background == "" ? "\n" : ",\n") {
-		return false
-	}
-	if background != "" && !write_json_string(b, "    ", "background", background, "\n") {return false}
-	return write_parts(b, "  },\n") == nil
-}
-
 @(private)
 RECORD_COLORS :: [?]struct {
 	key:   string,
-	token: Theme_Token,
+	token: theme_api.Token,
 } {
 	{"foreground", .Foreground},
 	{"background", .Background},
@@ -190,11 +47,11 @@ hex_text :: proc(c: Color) -> string {return fmt.tprintf("#%02x%02x%02x", c.r, c
 // The Neovim colorscheme theme `id` uses: its own, or else the nearest one its bases name, so a theme
 // customized from a community theme keeps that theme's colorscheme (WORK-529). A theme that names
 // `aiodev`, the scheme the plugin generates from the palette, opts out of its bases' colorscheme.
-theme_neovim :: proc(s: ^Settings, id: string) -> Neovim_Theme {
-	theme := custom_theme_find(s, id)
-	for depth := 0; theme != nil && depth <= THEME_BASE_DEPTH; depth += 1 {
+theme_neovim :: proc(s: ^Settings, id: string) -> theme_api.Neovim {
+	theme := theme_api.find(s.themes[:], id)
+	for depth := 0; theme != nil && depth <= theme_api.BASE_DEPTH; depth += 1 {
 		if theme.neovim.colorscheme != "" {return theme.neovim}
-		theme = theme.base == "" ? nil : custom_theme_find(s, theme.base)
+		theme = theme.base == "" ? nil : theme_api.find(s.themes[:], theme.base)
 	}
 	return {}
 }
@@ -214,24 +71,26 @@ neovim_record_text :: proc(s: ^Settings, generation: u64, allocator := context.a
 		generation,
 	)
 	if write_parts(&builder, header) != nil {return "", false}
-	if !write_json_string(&builder, "  ", "theme", s.theme.name, ",\n") ||
-	   !write_json_string(&builder, "  ", "name", theme_display_name(s, s.theme.name), ",\n") {
+	if !theme_api.write_json_string(&builder, "  ", "theme", s.theme.name, ",\n") ||
+	   !theme_api.write_json_string(&builder, "  ", "name", theme_display_name(s, s.theme.name), ",\n") {
 		return "", false
 	}
 	if write_parts(&builder, "  \"light\": ", theme.terminal_light ? "true" : "false", ",\n") != nil {
 		return "", false
 	}
-	if !write_neovim_theme(&builder, theme_neovim(s, s.theme.name)) {return "", false}
+	if !theme_api.neovim_write(&builder, theme_neovim(s, s.theme.name)) {return "", false}
 	if write_parts(&builder, "  \"colors\": {\n") != nil {return "", false}
-	if !write_json_string(&builder, "    ", "cursor", hex_text(theme_cursor(theme)), ",\n") {return "", false}
+	cursor := hex_text(theme_api.cursor(theme))
+	if !theme_api.write_json_string(&builder, "    ", "cursor", cursor, ",\n") {return "", false}
 	for entry in RECORD_COLORS {
-		if !write_json_string(&builder, "    ", entry.key, hex_text(theme.colors[entry.token].rgb), ",\n") {
+		color := hex_text(theme.colors[entry.token].rgb)
+		if !theme_api.write_json_string(&builder, "    ", entry.key, color, ",\n") {
 			return "", false
 		}
 	}
 	if write_parts(&builder, "    \"palette\": [") != nil {return "", false}
 	for i in 0 ..< 16 {
-		token := Theme_Token(int(Theme_Token.Palette_0) + i)
+		token := theme_api.Token(int(theme_api.Token.Palette_0) + i)
 		if write_parts(&builder, i == 0 ? "" : ", ", `"`, hex_text(theme.colors[token].rgb), `"`) != nil {
 			return "", false
 		}

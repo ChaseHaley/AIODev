@@ -84,7 +84,7 @@ function Set-View-Button($view) {
     Equal (State)['activity.view'] $view "header button shows $view"
 }
 function Flat-Edges($theme, $label, $r, $rightOnly = $false) {
-    $colors = (Get-Content -Raw (Join-Path $repo "themes/$theme.theme.json") | ConvertFrom-Json).colors
+    $colors = (Get-Content -Raw (Join-Path $repo "build/themes/$theme.theme.json") | ConvertFrom-Json).colors
     $expected = $colors.tab_bar.ToLower() + 'ff'
     $middleX, $middleY = [int]($r[0]+$r[2]/2), [int]($r[1]+$r[3]/2)
     # Use fully covered pixels when layout edges land between device pixels.
@@ -111,7 +111,7 @@ function Surface-Proof($theme, $label) {
     $s = State
     $scale = [double]$s['window.scale']
     $panel = Rect $s 'activity.rect'
-    $colors = (Get-Content -Raw (Join-Path $repo "themes/$theme.theme.json") | ConvertFrom-Json).colors
+    $colors = (Get-Content -Raw (Join-Path $repo "build/themes/$theme.theme.json") | ConvertFrom-Json).colors
     $expected = $colors.tab_bar.ToLower() + 'ff'
     Flat-Edges $theme $label $panel
     # Sample inside the standalone frame and the empty bottom edge of its title band.

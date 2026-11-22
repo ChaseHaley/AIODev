@@ -7,6 +7,7 @@ import "core:log"
 import "core:os"
 import "core:strings"
 import "cosmos:ui"
+import "cosmos:theme"
 
 // Reading the settings file and applying a revision of it to the running app.
 
@@ -28,7 +29,7 @@ Settings_Read :: struct {
 // cannot be read. Fails only when neither is available.
 @(private, require_results)
 settings_read :: proc(app: ^App) -> (read: Settings_Read, ok: bool) {
-	inputs, inputs_error := settings.inputs_read(settings.theme_directory(), shell_profiles_detect())
+	inputs, inputs_error := settings.inputs_read(theme.bundled_directory(), shell_profiles_detect())
 	if inputs_error != nil {log.errorf("recording theme files and shells failed: %v", inputs_error)}
 	read.inputs = inputs
 	comments, comment_count := binding_comments()

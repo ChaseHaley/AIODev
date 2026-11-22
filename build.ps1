@@ -192,9 +192,9 @@ function Build-App([string[]] $Mode, [string] $Output = 'build/aiodev.exe', [str
     Copy-Conpty (Split-Path $Output)
     $themeDestination = Join-Path (Split-Path $Output) 'themes'
     New-Item -ItemType Directory -Force $themeDestination | Out-Null
-    # Start empty so themes removed from the repository do not linger in the build.
+    # The family's bundled themes come from Cosmos. Start empty so themes removed there do not linger.
     Get-ChildItem $themeDestination -Filter *.json -File | Remove-Item -Force
-    Copy-Item -Path 'themes/*.json' -Destination $themeDestination -Force
+    Copy-Item -Path "$cosmosRoot/themes/*.json" -Destination $themeDestination -Force
     # The Neovim plugin ships beside aiodev.exe and aio.exe; its path comes from AIODEV_CLI.
     $nvimDestination = Join-Path (Split-Path $Output) 'nvim'
     Remove-Item -LiteralPath $nvimDestination -Recurse -Force -ErrorAction SilentlyContinue
@@ -343,7 +343,7 @@ switch ($Task) {
         Copy-Item -LiteralPath 'LICENSE' -Destination "$stage/LICENSE.txt"
         Copy-Item -LiteralPath 'THIRD_PARTY_NOTICES.txt' -Destination "$stage/THIRD_PARTY_NOTICES.txt"
         Copy-Conpty $stage
-        Copy-Item -LiteralPath 'themes' -Destination $stage -Recurse -Force
+        Copy-Item -LiteralPath "$cosmosRoot/themes" -Destination $stage -Recurse -Force
         Copy-Item -LiteralPath 'nvim' -Destination $stage -Recurse -Force
         Copy-PSVim $stage
         # The aio API's definitions for lua-language-server ship beside aio.exe as types\aio.lua.

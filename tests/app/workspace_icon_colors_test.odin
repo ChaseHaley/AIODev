@@ -7,6 +7,7 @@ import "cosmos:render"
 import "aio:views"
 import fixtures "../fixtures"
 import "cosmos:ui"
+import "cosmos:testkit"
 
 @(test)
 workspace143_tint_validation_reset_and_icon_changes_preserve_identity :: proc(t: ^testing.T) {
@@ -39,9 +40,9 @@ workspace143_tint_validation_reset_and_icon_changes_preserve_identity :: proc(t:
 
 @(test)
 workspace143_colors_have_contrast_in_all_shipped_themes_and_selection_states :: proc(t: ^testing.T) {
-	for file in fixtures.SHIPPED_THEMES {
+	for file in testkit.BUNDLED_THEMES {
 		{
-			resolved := fixtures.shipped_theme_file(file) or_continue
+			resolved := testkit.bundled_theme_file(file) or_continue
 			theme := views.theme_from(resolved, fixtures.default_interface())
 			testing.expect_value(t, app.workspace_icon_tint(0, theme.text), theme.text)
 			testing.expect_value(t, app.workspace_icon_tint(-1, theme.text), theme.text)

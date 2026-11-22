@@ -1,23 +1,23 @@
 package settings_test
 
 import "aio:settings"
-import "core:encoding/json"
 import "core:fmt"
 import "core:os"
 import "core:strings"
 import "core:testing"
+import theme_api "cosmos:theme"
 
 THEME_FIXTURE :: `{"version":1,"id":"shared","base":"studio-dark","colors":{"tab_bar":"#123456","border":"#12345680","selection_foreground":""}}`
 
 @(test)
 theme_files_validate_and_inherit :: proc(t: ^testing.T) {
-	theme, issue := settings.theme_file_parse(THEME_FIXTURE)
+	theme, issue := theme_api.file_parse(THEME_FIXTURE)
 	testing.expect_value(t, issue, "")
 	testing.expect_value(t, theme.id, "shared")
-	resolved := settings.custom_theme_resolve(nil, &theme)
-	testing.expect_value(t, resolved.colors[.Tab_Bar], settings.Theme_Color{0x12, 0x34, 0x56, 255})
-	testing.expect_value(t, resolved.colors[.Border], settings.Theme_Color{0x12, 0x34, 0x56, 128})
-	base := settings.theme_default()
+	resolved := theme_api.resolve(nil, &theme)
+	testing.expect_value(t, resolved.colors[.Tab_Bar], theme_api.Color{0x12, 0x34, 0x56, 255})
+	testing.expect_value(t, resolved.colors[.Border], theme_api.Color{0x12, 0x34, 0x56, 128})
+	base := theme_api.default()
 	testing.expect_value(t, resolved.colors[.Text], base.colors[.Text])
 	for invalid in ([?]string {
 		`{}`, `[]`, THEME_FIXTURE + `{}`, `{ "version": 1, "version": 1 }`,
@@ -32,7 +32,7 @@ theme_files_validate_and_inherit :: proc(t: ^testing.T) {
 		`{"version":1,"id":"shared","colors":{},"extra":1}`,
 		`{"colors":[[[[[[]]]]]]}`,
 	}) {
-		_, problem := settings.theme_file_parse(invalid)
+		_, problem := theme_api.file_parse(invalid)
 		testing.expect(t, problem != "", invalid)
 	}
 }
@@ -56,10 +56,10 @@ theme_export_roundtrips_every_color_and_preserves_files :: proc(t: ^testing.T) {
 	data, read_error := os.read_entire_file(first, context.allocator)
 	testing.expect_value(t, read_error, nil)
 	defer delete(data)
-	theme, issue := settings.theme_file_parse(string(data))
+	theme, issue := theme_api.file_parse(string(data))
 	testing.expect_value(t, issue, "")
-	testing.expect_value(t, int(card(theme.overrides)), len(settings.THEME_TOKENS))
-	testing.expect_value(t, settings.custom_theme_resolve(nil, &theme), s.active_theme)
+	testing.expect_value(t, int(card(theme.overrides)), len(theme_api.TOKENS))
+	testing.expect_value(t, theme_api.resolve(nil, &theme), s.active_theme)
 	loaded, diagnostics, load_error := parse_themes(fmt.tprintf("theme.name = %s\n", theme.id), directory)
 	testing.expect_value(t, load_error, nil)
 	defer settings.destroy(&loaded)
@@ -84,7 +84,7 @@ theme_discovery_isolates_bad_files_and_edits_shared_theme_as_copy :: proc(t: ^te
 	defer settings.destroy(&s)
 	defer settings.diagnostics_destroy(&d)
 	testing.expect_value(t, len(d), 1)
-	testing.expect_value(t, s.active_theme.colors[.Tab_Bar], settings.Theme_Color{0x12, 0x34, 0x56, 255})
+	testing.expect_value(t, s.active_theme.colors[.Tab_Bar], theme_api.Color{0x12, 0x34, 0x56, 255})
 	updated, created, issue, edit_error := edit_color(source, "accent", "#abcdef", directory)
 	defer delete(updated)
 	defer delete(created)
@@ -96,7 +96,7 @@ theme_discovery_isolates_bad_files_and_edits_shared_theme_as_copy :: proc(t: ^te
 	defer settings.diagnostics_destroy(&cd)
 	testing.expect_value(t, ce, nil)
 	testing.expect_value(t, copy.active_theme.colors[.Tab_Bar], s.active_theme.colors[.Tab_Bar])
-	testing.expect_value(t, copy.active_theme.colors[.Accent], settings.Theme_Color{0xab, 0xcd, 0xef, 255})
+	testing.expect_value(t, copy.active_theme.colors[.Accent], theme_api.Color{0xab, 0xcd, 0xef, 255})
 	data, re := os.read_entire_file(path, context.allocator)
 	defer delete(data)
 	testing.expect_value(t, re, nil)
@@ -105,27 +105,7 @@ theme_discovery_isolates_bad_files_and_edits_shared_theme_as_copy :: proc(t: ^te
 	defer settings.destroy(&local)
 	defer settings.diagnostics_destroy(&ld)
 	testing.expect_value(t, le, nil)
-	testing.expect_value(t, local.active_theme, settings.theme_default())
-}
-
-@(test)
-theme_schema_tracks_the_token_catalogue :: proc(t: ^testing.T) {
-	text, ok := settings.theme_schema_text()
-	testing.expect(t, ok)
-	defer delete(text)
-	value, error := json.parse(text, spec = .JSON)
-	testing.expect_value(t, error, json.Error.None)
-	defer json.destroy_value(value)
-	root := value.(json.Object)
-	properties := root["properties"].(json.Object)
-	colors := properties["colors"].(json.Object)
-	tokens := colors["properties"].(json.Object)
-	testing.expect_value(t, len(tokens), len(settings.THEME_TOKENS))
-	for info in settings.THEME_TOKENS {testing.expect(t, info.key in tokens)}
-	checked_in, read_error := os.read_entire_file("themes/theme.schema.json", context.allocator)
-	testing.expect_value(t, read_error, nil)
-	defer delete(checked_in)
-	testing.expect_value(t, string(checked_in), text)
+	testing.expect_value(t, local.active_theme, theme_api.default())
 }
 
 fixture_replace :: proc(source, old, replacement: string) -> string {

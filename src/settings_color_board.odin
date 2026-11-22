@@ -4,6 +4,7 @@ import "aio:settings"
 import "aio:views"
 import "core:fmt"
 import "core:strings"
+import "cosmos:theme"
 
 // The state report below uses strings only in control builds.
 _ :: strings
@@ -60,7 +61,7 @@ COLOR_GROUPS := [Color_Group]struct {
 
 @(private)
 Color_Tile :: struct {
-	token: settings.Theme_Token,
+	token: theme.Token,
 	group: Color_Group,
 	label: string,
 }
@@ -173,7 +174,7 @@ COLOR_TILES := [?]Color_Tile {
 	{.Palette_14, .Ansi_Bright, "Bright cyan"},
 	{.Palette_15, .Ansi_Bright, "Bright white"},
 }
-#assert(len(COLOR_TILES) == len(settings.Theme_Token))
+#assert(len(COLOR_TILES) == len(theme.Token))
 
 // A color group's place in the Colors section, after Manage theme.
 @(private)
@@ -186,17 +187,17 @@ settings_color_group_area :: proc(title: string) -> (rank: int, found: bool) {
 
 // The key of the color `token` follows in `t`, or "" when it holds its own color.
 @(private)
-settings_color_link :: proc(t: settings.Theme, token: settings.Theme_Token) -> string {
-	tokens := settings.THEME_TOKENS
+settings_color_link :: proc(t: theme.Theme, token: theme.Token) -> string {
+	tokens := theme.TOKENS
 	return token in t.linked ? tokens[t.target[token]].key : ""
 }
 
 // The text a color row shows: a Clear color that is none is empty, as an optional one is.
 @(private)
-settings_color_value :: proc(token: settings.Theme_Token, c: settings.Theme_Color) -> string {
-	tokens := settings.THEME_TOKENS
+settings_color_value :: proc(token: theme.Token, c: theme.Color) -> string {
+	tokens := theme.TOKENS
 	if tokens[token].kind == .Clear && c.a == 0 {return ""}
-	return settings.theme_color_text(token, c)
+	return theme.color_text(token, c)
 }
 
 // One row per theme color in board order, each showing the value in effect; a custom theme's Reset
@@ -204,7 +205,7 @@ settings_color_value :: proc(token: settings.Theme_Token, c: settings.Theme_Colo
 @(private, require_results)
 settings_add_color_rows :: proc(p: ^views.Editor, s: ^settings.Settings) -> bool {
 	base := settings.theme_base(s)
-	tokens := settings.THEME_TOKENS
+	tokens := theme.TOKENS
 	for tile in COLOR_TILES {
 		info := tokens[tile.token]
 		row := views.Editor_Row {
@@ -242,8 +243,8 @@ settings_color_card :: proc(s: ^settings.Settings) -> views.Board_Card {
 			base = fmt.tprintf("Theme file · %s", name),
 		}
 	}
-	custom := settings.custom_theme_find(s, s.theme.name)
-	base_id := custom.base != "" ? custom.base : settings.DEFAULT_THEME_ID
+	custom := theme.find(s.themes[:], s.theme.name)
+	base_id := custom.base != "" ? custom.base : theme.DEFAULT_ID
 	base := settings.theme_display_name(s, base_id)
 	return {
 		title = name,

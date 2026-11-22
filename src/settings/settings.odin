@@ -6,6 +6,7 @@ import "core:os"
 import "core:strconv"
 import "core:strings"
 import "core:unicode/utf8"
+import theme_api "cosmos:theme"
 
 Color :: [3]u8
 Cursor_Style :: enum int {
@@ -708,8 +709,8 @@ Settings :: struct {
 	// The active theme's terminal colors, derived from active_theme.
 	colors:          Color_Settings,
 	theme:           Theme_Settings,
-	themes:          [dynamic]Custom_Theme,
-	active_theme:    Theme,
+	themes:          [dynamic]theme_api.Layer,
+	active_theme:    theme_api.Theme,
 	pane:            Pane_Settings,
 	markdown:        Markdown_Settings,
 	motion:          Motion_Settings,
@@ -897,7 +898,7 @@ SCHEMA :: [?]Schema_Entry {
 		title = "Theme",
 		kind = .String,
 		offset = offset_of(Settings, theme) + offset_of(Theme_Settings, name),
-		default_value = DEFAULT_THEME_ID,
+		default_value = theme_api.DEFAULT_ID,
 		valid = {1, 64},
 		control = .Choice,
 		live_choices = .Themes,
@@ -2428,7 +2429,7 @@ destroy :: proc(s: ^Settings) {
 		delete(theme.id, s.allocator)
 		delete(theme.base, s.allocator)
 		delete(theme.name, s.allocator)
-		neovim_theme_destroy(theme.neovim, s.allocator)
+		theme_api.neovim_destroy(theme.neovim, s.allocator)
 	}
 	delete(s.themes)
 	s^ = {}

@@ -15,6 +15,7 @@ import "core:path/filepath"
 import "core:slice"
 import "core:strings"
 import "cosmos:ui"
+import "cosmos:theme"
 
 // The row keys of the page's own action rows, which reveals select after a change.
 @(private)
@@ -992,11 +993,11 @@ markdown_font_choices :: proc(families: []string, follows: string) -> (choices, 
 // borrow the parsed settings.
 @(private)
 settings_theme_choices :: proc(s: ^settings.Settings) -> (choices, labels: []string) {
-	files := make([dynamic]^settings.Custom_Theme, 0, len(s.themes), context.temp_allocator)
+	files := make([dynamic]^theme.Layer, 0, len(s.themes), context.temp_allocator)
 	for &theme in s.themes {
 		if theme.external {append(&files, &theme)}
 	}
-	slice.sort_by(files[:], proc(a, b: ^settings.Custom_Theme) -> bool {
+	slice.sort_by(files[:], proc(a, b: ^theme.Layer) -> bool {
 		a_name, b_name := a.name != "" ? a.name : a.id, b.name != "" ? b.name : b.id
 		return a_name != b_name ? a_name < b_name : a.id < b.id
 	})
@@ -1034,7 +1035,7 @@ settings_add_theme_rows :: proc(p: ^views.Editor, s: ^settings.Settings) -> bool
 		action      = .Theme_Duplicate,
 	}
 	if settings.theme_custom(s) {
-		custom := settings.custom_theme_find(s, s.theme.name)
+		custom := theme.find(s.themes[:], s.theme.name)
 		duplicate.description = "Copy this theme with all its colors and switch to the copy."
 		rows := [?]views.Editor_Row {
 			{
@@ -1069,7 +1070,7 @@ settings_add_theme_rows :: proc(p: ^views.Editor, s: ^settings.Settings) -> bool
 		action = .Theme_Export,
 	}, THEME_MANAGE_GROUP) != nil {return false}
 	// Delete follows the actions that keep the theme.
-	if custom := settings.custom_theme_find(s, s.theme.name); settings.theme_custom(s) {
+	if custom := theme.find(s.themes[:], s.theme.name); settings.theme_custom(s) {
 		delete_row := views.Editor_Row {
 			key         = "theme.delete",
 			title       = "Delete theme",
@@ -1106,11 +1107,11 @@ editor_theme_color :: proc(app: ^App, w: ^Window, row: ^views.Editor_Row, reset:
 	value := reset ? "" : strings.clone(ui.field_string(&w.editor.value), context.temp_allocator)
 	alpha_dropped := false
 	// Empty is no color, not the reset an empty value asks of the edit, so a Clear color says so.
-	if !reset && value == "" && row.clear {value = settings.NONE_COLOR_TEXT}
-	if token, found := settings.token_find(token_key); found {
+	if !reset && value == "" && row.clear {value = theme.NONE_TEXT}
+	if token, found := theme.token_find(token_key); found {
 		if value != "" {
 			_, _, alpha := colour.parse(value, .Permissive)
-			alpha_dropped = alpha && !settings.token_alpha(token)
+			alpha_dropped = alpha && !theme.token_alpha(token)
 		}
 	}
 	result, applied := editor_theme_change(app, w, Theme_Color{token_key, value})

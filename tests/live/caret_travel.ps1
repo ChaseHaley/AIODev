@@ -10,7 +10,7 @@ $aio = Join-Path $repo 'build/aio.exe'
 $work = Join-Path $repo "build/verify/$Name-files"
 $captures = Join-Path $repo "build/verify/$Name-captures"
 $settings = Join-Path $work 'settings.ini'
-$accent = ((Get-Content -Raw (Join-Path $repo 'themes/studio-dark.theme.json') | ConvertFrom-Json).colors.accent).ToLower()
+$accent = ((Get-Content -Raw (Join-Path $repo 'build/themes/studio-dark.theme.json') | ConvertFrom-Json).colors.accent).ToLower()
 # aio must name this instance's focused pane, not the pane this script runs in.
 $env:AIODEV_PANE = $null
 $env:AIODEV_CLI = $null

@@ -6,6 +6,7 @@ import "core:fmt"
 import "core:os"
 import "core:strings"
 import "core:testing"
+import theme_api "cosmos:theme"
 
 NEOVIM_FIXTURE :: `{"version":1,"id":"vim","neovim":{"plugin":"folke/tokyonight.nvim","colorscheme":"tokyonight-moon","background":"dark"},"colors":{}}`
 
@@ -29,25 +30,25 @@ json_flag :: proc(value: json.Value) -> bool {
 
 @(test)
 neovim_object_parses_and_validates :: proc(t: ^testing.T) {
-	theme, issue := settings.theme_file_parse(NEOVIM_FIXTURE)
+	theme, issue := theme_api.file_parse(NEOVIM_FIXTURE)
 	testing.expect_value(t, issue, "")
 	testing.expect_value(t, theme.neovim.plugin, "folke/tokyonight.nvim")
 	testing.expect_value(t, theme.neovim.colorscheme, "tokyonight-moon")
-	testing.expect_value(t, theme.neovim.background, settings.Neovim_Background.Dark)
-	bare, bare_issue := settings.theme_file_parse(
+	testing.expect_value(t, theme.neovim.background, theme_api.Neovim_Background.Dark)
+	bare, bare_issue := theme_api.file_parse(
 		fixture_replace(NEOVIM_FIXTURE, `,"background":"dark"`, ``),
 	)
 	testing.expect_value(t, bare_issue, "")
-	testing.expect_value(t, bare.neovim.background, settings.Neovim_Background.Auto)
-	plain, plain_issue := settings.theme_file_parse(`{"version":1,"id":"plain","colors":{}}`)
+	testing.expect_value(t, bare.neovim.background, theme_api.Neovim_Background.Auto)
+	plain, plain_issue := theme_api.file_parse(`{"version":1,"id":"plain","colors":{}}`)
 	testing.expect_value(t, plain_issue, "")
-	testing.expect_value(t, plain.neovim, settings.Neovim_Theme{})
+	testing.expect_value(t, plain.neovim, theme_api.Neovim{})
 	// The plugin only documents where the colorscheme comes from, so a theme may leave it out.
-	unnamed, unnamed_issue := settings.theme_file_parse(
+	unnamed, unnamed_issue := theme_api.file_parse(
 		fixture_replace(NEOVIM_FIXTURE, `"plugin":"folke/tokyonight.nvim",`, ``),
 	)
 	testing.expect_value(t, unnamed_issue, "")
-	testing.expect_value(t, unnamed.neovim, settings.Neovim_Theme{"", "tokyonight-moon", .Dark})
+	testing.expect_value(t, unnamed.neovim, theme_api.Neovim{"", "tokyonight-moon", .Dark})
 	for invalid in ([?]string {
 		fixture_replace(NEOVIM_FIXTURE, `"folke/tokyonight.nvim"`, `"tokyonight"`),
 		fixture_replace(NEOVIM_FIXTURE, `"folke/tokyonight.nvim"`, `"a/b/c"`),
@@ -62,23 +63,23 @@ neovim_object_parses_and_validates :: proc(t: ^testing.T) {
 		fixture_replace(NEOVIM_FIXTURE, `{"plugin"`, `[{"plugin"`),
 		`{"version":1,"id":"vim","neovim":"tokyonight","colors":{}}`,
 	}) {
-		_, problem := settings.theme_file_parse(invalid)
+		_, problem := theme_api.file_parse(invalid)
 		testing.expect(t, problem != "", invalid)
 	}
 }
 
 @(test)
 neovim_object_roundtrips_through_a_theme_file :: proc(t: ^testing.T) {
-	base := settings.theme_default()
-	named := settings.Neovim_Theme{"owner/repo.nvim", "scheme-1", .Light}
-	text, ok := settings.theme_file_text("rt", base, neovim = named)
+	base := theme_api.default()
+	named := theme_api.Neovim{"owner/repo.nvim", "scheme-1", .Light}
+	text, ok := theme_api.file_text("rt", base, neovim = named)
 	testing.expect(t, ok)
 	defer delete(text)
-	theme, issue := settings.theme_file_parse(text)
+	theme, issue := theme_api.file_parse(text)
 	testing.expect_value(t, issue, "")
 	testing.expect_value(t, theme.neovim, named)
-	testing.expect_value(t, settings.custom_theme_resolve(nil, &theme), base)
-	bare, bare_ok := settings.theme_file_text("rt", base)
+	testing.expect_value(t, theme_api.resolve(nil, &theme), base)
+	bare, bare_ok := theme_api.file_text("rt", base)
 	testing.expect(t, bare_ok)
 	defer delete(bare)
 	testing.expect(t, !strings.contains(bare, `"neovim"`))
@@ -87,7 +88,7 @@ neovim_object_roundtrips_through_a_theme_file :: proc(t: ^testing.T) {
 // Plugin and colorscheme per bundled theme, and none for the AIODev originals.
 BUNDLED_NEOVIM :: [?]struct {
 	id, plugin, colorscheme: string,
-	background:              settings.Neovim_Background,
+	background:              theme_api.Neovim_Background,
 } {
 	{"catppuccin-latte", "catppuccin/nvim", "catppuccin-latte", .Auto},
 	{"catppuccin-frappe", "catppuccin/nvim", "catppuccin-frappe", .Auto},
@@ -113,16 +114,16 @@ bundled_themes_name_their_neovim_colorschemes :: proc(t: ^testing.T) {
 	defer settings.diagnostics_destroy(&d)
 	testing.expect_value(t, len(d), 0)
 	for expected in BUNDLED_NEOVIM {
-		theme := settings.custom_theme_find(&s, expected.id)
+		theme := theme_api.find(s.themes[:], expected.id)
 		if !testing.expect(t, theme != nil, expected.id) {continue}
 		testing.expect_value(t, theme.neovim.plugin, expected.plugin)
 		testing.expect_value(t, theme.neovim.colorscheme, expected.colorscheme)
 		testing.expect_value(t, theme.neovim.background, expected.background)
 	}
 	for id in ([?]string{"studio-dark", "studio-light", "tide-dark", "tide-light", "ember-dark", "ember-light"}) {
-		theme := settings.custom_theme_find(&s, id)
+		theme := theme_api.find(s.themes[:], id)
 		if !testing.expect(t, theme != nil, id) {continue}
-		testing.expect_value(t, theme.neovim, settings.Neovim_Theme{})
+		testing.expect_value(t, theme.neovim, theme_api.Neovim{})
 	}
 }
 
@@ -141,7 +142,7 @@ theme_export_keeps_the_neovim_object :: proc(t: ^testing.T) {
 	data, read_error := os.read_entire_file(path, context.allocator)
 	testing.expect_value(t, read_error, nil)
 	defer delete(data)
-	theme, issue := settings.theme_file_parse(string(data))
+	theme, issue := theme_api.file_parse(string(data))
 	testing.expect_value(t, issue, "")
 	testing.expect_value(t, theme.neovim.colorscheme, "tokyonight-storm")
 	testing.expect_value(t, theme.neovim.plugin, "folke/tokyonight.nvim")
@@ -308,7 +309,7 @@ copies_and_exports_keep_the_neovim_colorscheme_a_theme_uses :: proc(t: ^testing.
 		if !testing.expect_value(t, export_error, nil) {continue}
 		data, read_error := os.read_entire_file(path, context.allocator)
 		testing.expect_value(t, read_error, nil)
-		theme, issue := settings.theme_file_parse(string(data))
+		theme, issue := theme_api.file_parse(string(data))
 		delete(data)
 		testing.expect_value(t, issue, "")
 		testing.expect_value(t, theme.neovim.plugin, entry.plugin)

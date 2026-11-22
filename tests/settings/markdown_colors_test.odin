@@ -3,18 +3,19 @@ package settings_test
 import "aio:settings"
 import "core:strings"
 import "core:testing"
-import fixtures "../fixtures"
+import theme_api "cosmos:theme"
+import "cosmos:testkit"
 
 @(test)
 markdown_colors_default_to_the_shared_colors_in_every_shipped_theme :: proc(t: ^testing.T) {
-	tokens := settings.THEME_TOKENS
+	tokens := theme_api.TOKENS
 	count := 0
-	for file in fixtures.SHIPPED_THEMES {
-		theme, ok := fixtures.shipped_theme_file(file)
+	for file in testkit.BUNDLED_THEMES {
+		theme, ok := testkit.bundled_theme_file(file)
 		if !ok {continue}
 		count += 1
-		for token in settings.Theme_Token {
-			if target, follows := settings.TOKEN_DEFAULT_LINKS[token].?; follows {
+		for token in theme_api.Token {
+			if target, follows := theme_api.DEFAULT_LINKS[token].?; follows {
 				testing.expectf(t, token in theme.linked, "%s follows by default in %s", tokens[token].key, file.name)
 				testing.expectf(
 					t,
@@ -54,12 +55,12 @@ the_heading_pair_reaches_every_level_and_a_level_can_differ :: proc(t: ^testing.
 	testing.expect_value(t, err, nil)
 	testing.expect_value(t, len(d), 0)
 	c := s.active_theme.colors
-	pair := settings.Theme_Color{0xaa, 0xbb, 0xcc, 255}
-	for token in ([?]settings.Theme_Token{.Md_H1_Text, .Md_H3_Text, .Md_H4_Text, .Md_H5_Text, .Md_H6_Text}) {
+	pair := theme_api.Color{0xaa, 0xbb, 0xcc, 255}
+	for token in ([?]theme_api.Token{.Md_H1_Text, .Md_H3_Text, .Md_H4_Text, .Md_H5_Text, .Md_H6_Text}) {
 		testing.expect_value(t, c[token], pair)
 	}
-	testing.expect_value(t, c[.Md_H2_Text], settings.Theme_Color{0x11, 0x22, 0x33, 255})
-	for token in ([?]settings.Theme_Token{.Md_H1_Background, .Md_H2_Background, .Md_H6_Background}) {
+	testing.expect_value(t, c[.Md_H2_Text], theme_api.Color{0x11, 0x22, 0x33, 255})
+	for token in ([?]theme_api.Token{.Md_H1_Background, .Md_H2_Background, .Md_H6_Background}) {
 		testing.expect_value(t, c[token], c[.Accent])
 	}
 	// Changing the colors followed moves what follows them.
@@ -70,9 +71,9 @@ the_heading_pair_reaches_every_level_and_a_level_can_differ :: proc(t: ^testing.
 	defer settings.destroy(&moved)
 	defer settings.diagnostics_destroy(&md)
 	testing.expect_value(t, me, nil)
-	testing.expect_value(t, moved.active_theme.colors[.Md_Link_Text], settings.Theme_Color{1, 2, 3, 255})
-	testing.expect_value(t, moved.active_theme.colors[.Md_Wikilink_Text], settings.Theme_Color{1, 2, 3, 255})
-	testing.expect_value(t, moved.active_theme.colors[.Md_Task_Done_Background], settings.Theme_Color{1, 2, 3, 255})
+	testing.expect_value(t, moved.active_theme.colors[.Md_Link_Text], theme_api.Color{1, 2, 3, 255})
+	testing.expect_value(t, moved.active_theme.colors[.Md_Wikilink_Text], theme_api.Color{1, 2, 3, 255})
+	testing.expect_value(t, moved.active_theme.colors[.Md_Task_Done_Background], theme_api.Color{1, 2, 3, 255})
 }
 
 @(test)
@@ -90,7 +91,7 @@ none_is_a_value_that_overrides_a_default_link_and_reset_restores_the_link :: pro
 	defer settings.diagnostics_destroy(&d)
 	testing.expect_value(t, err, nil)
 	testing.expect_value(t, len(d), 0)
-	testing.expect_value(t, s.active_theme.colors[.Md_Inline_Code_Background], settings.Theme_Color{})
+	testing.expect_value(t, s.active_theme.colors[.Md_Inline_Code_Background], theme_api.Color{})
 	testing.expect(t, .Md_Inline_Code_Background not_in s.active_theme.linked)
 	testing.expect_value(t, s.active_theme.colors[.Md_Code_Block_Background], s.active_theme.colors[.Code_Background])
 
@@ -128,19 +129,19 @@ a_color_that_may_be_none_is_followed_only_by_another_that_may_be :: proc(t: ^tes
 	defer settings.diagnostics_destroy(&d)
 	testing.expect_value(t, err, nil)
 	testing.expect_value(t, len(d), 2)
-	base := settings.theme_default()
+	base := theme_api.default()
 	testing.expect_value(t, s.active_theme.colors[.Text], base.colors[.Text])
-	testing.expect_value(t, s.active_theme.target[.Md_H4_Text], settings.Theme_Token.Md_H5_Text)
+	testing.expect_value(t, s.active_theme.target[.Md_H4_Text], theme_api.Token.Md_H5_Text)
 	testing.expect(t, .Md_H4_Text in s.active_theme.linked)
 }
 
 @(test)
 the_default_theme_stays_concrete_with_the_markdown_colors_filled_in :: proc(t: ^testing.T) {
-	base := settings.theme_default()
+	base := theme_api.default()
 	// It follows the default links like every theme, and holds no link of its own.
-	testing.expect_value(t, explicit_links(base), bit_set[settings.Theme_Token]{})
+	testing.expect_value(t, explicit_links(base), bit_set[theme_api.Token]{})
 	testing.expect(t, .Md_Link_Text in base.linked)
 	testing.expect_value(t, base.colors[.Md_Link_Text], base.colors[.Accent])
 	testing.expect_value(t, base.colors[.Md_Paragraph_Text], base.colors[.Text])
-	testing.expect_value(t, base.colors[.Md_Strong_Background], settings.Theme_Color{})
+	testing.expect_value(t, base.colors[.Md_Strong_Background], theme_api.Color{})
 }

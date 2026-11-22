@@ -3,11 +3,11 @@ package views
 import "cosmos:colour"
 import "cosmos:input"
 import "cosmos:render"
-import "aio:settings"
 import "base:runtime"
 import "core:strings"
 import "core:time"
 import "cosmos:ui"
+import theme_api "cosmos:theme"
 
 // The Theme row as a filmstrip: every theme in one strip of fixed height that scrolls sideways. The
 // applied theme is a wide card with a preview of the app in its own colours and a Customize button;
@@ -17,14 +17,14 @@ import "cosmos:ui"
 Theme_Card_Source :: struct {
 	id, name, detail: string,
 	custom:           bool,
-	theme:            settings.Theme,
+	theme:            theme_api.Theme,
 }
 
 // `id`, `name` and `detail` are owned. `open` runs from 0, a spine, to 1, the wide card.
 Theme_Card :: struct {
 	id, name, detail: string,
 	custom:           bool,
-	theme:            settings.Theme,
+	theme:            theme_api.Theme,
 	open:             ui.Motion,
 }
 
@@ -588,11 +588,11 @@ editor_strip_card_id :: proc(p: ^Editor, card: int) -> string {
 }
 
 @(private)
-strip_color :: proc(t: settings.Theme, token: settings.Theme_Token) -> render.Color {
+strip_color :: proc(t: theme_api.Theme, token: theme_api.Token) -> render.Color {
 	// A theme that sets no cursor draws it in the accent, as the terminal and every text field do.
 	#partial switch token {
-	case .Cursor:      return colour.rgba(settings.theme_cursor(t))
-	case .Cursor_Text: return colour.rgba(settings.theme_cursor_text(t))
+	case .Cursor:      return colour.rgba(theme_api.cursor(t))
+	case .Cursor_Text: return colour.rgba(theme_api.cursor_text(t))
 	}
 	value := t.colors[token]
 	return colour.rgba(value.rgb, f32(value.a) / 255)
@@ -634,7 +634,7 @@ strip_bar :: proc(
 @(private)
 strip_preview_draw :: proc(
 	list: ^render.Draw_List,
-	t: settings.Theme,
+	t: theme_api.Theme,
 	m: render.Rect,
 	border: render.Color,
 	s: f32,
@@ -655,7 +655,7 @@ strip_preview_draw :: proc(
 	ui.draw_rect(list, {rect = terminal, color = c(t, .Background), radius = radius})
 	ui.draw_rect(list, {rect = terminal, color = c(t, .Pane_Focus), radius = radius, stroke = s})
 	Run :: struct {
-		token: settings.Theme_Token,
+		token: theme_api.Token,
 		width: f32,
 	}
 	@(static, rodata)
@@ -717,14 +717,14 @@ strip_spine_draw :: proc(
 	edge := card.custom ? theme.accent : theme.border
 	ui.draw_rect(list, {rect = swatch, color = edge, radius = radius, stroke = s})
 	bars := [3]struct {
-		token: settings.Theme_Token,
+		token: theme_api.Token,
 		share: f32,
 	}{{.Foreground, 0.7}, {.Accent, 0.45}, {.Palette_8, 0.58}}
 	for bar, i in bars {
 		strip_bar(list, swatch, s, 6, 8 + f32(i) * 7, (inner - 12) * bar.share, 3, strip_color(t, bar.token))
 	}
 	@(static, rodata)
-	dots := [8]settings.Theme_Token {
+	dots := [8]theme_api.Token {
 		.Palette_1, .Palette_2, .Palette_3, .Palette_4, .Palette_5, .Palette_6, .Palette_9, .Palette_11,
 	}
 	row_width := 4 * 8 + 3 * 3
@@ -785,7 +785,7 @@ strip_wide_draw :: proc(
 	   result != .Ok {return result}
 	top += small.line_height + 6 * s
 	for i in 0 ..< 16 {
-		token := settings.Theme_Token(int(settings.Theme_Token.Palette_0) + i)
+		token := theme_api.Token(int(theme_api.Token.Palette_0) + i)
 		cell := render.Rect{x + f32(i % 8) * 18 * s, top + f32(i / 8) * 10 * s, 16 * s, 8 * s}
 		ui.draw_rect(list, {rect = cell, color = strip_color(card.theme, token), radius = ui.pill_radius(cell)})
 	}

@@ -5,6 +5,7 @@ import "aio:settings"
 import "core:encoding/json"
 import "core:os"
 import "core:testing"
+import "cosmos:theme"
 
 
 @(private)
@@ -43,7 +44,7 @@ theme_record_is_written_at_startup_and_follows_theme_changes :: proc(t: ^testing
 	if !palette_fixture_create(t, &f, "theme-record", second_window = false) {return}
 	s := &f.state
 	record := theme_record_read(t, s)
-	testing.expect_value(t, json_text(record["theme"]), settings.DEFAULT_THEME_ID)
+	testing.expect_value(t, json_text(record["theme"]), theme.DEFAULT_ID)
 	testing.expect_value(t, json_number(record["generation"]), f64(1))
 	testing.expect_value(t, json_flag(record["light"]), false)
 

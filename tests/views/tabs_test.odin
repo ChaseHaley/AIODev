@@ -8,6 +8,7 @@ import "cosmos:render"
 import "aio:views"
 import fixtures "../fixtures"
 import "cosmos:ui"
+import "cosmos:testkit"
 
 @(test)
 tab_bar_caps_widths_and_places_tabs_actions_and_empty_space :: proc(t: ^testing.T) {
@@ -65,7 +66,7 @@ tab_draw_keeps_the_program_icon_left_and_status_before_close :: proc(t: ^testing
 	if !testing.expect(t, ui.text_init(&text, fonts, &cache, 14)) {return}
 	list := render.draw_list_init()
 	defer render.draw_list_destroy(&list)
-	resolved, ok := fixtures.shipped_theme_file(fixtures.SHIPPED_THEMES[0])
+	resolved, ok := testkit.bundled_theme_file(testkit.BUNDLED_THEMES[0])
 	if !testing.expect(t, ok) {return}
 	theme := views.theme_from(resolved, fixtures.default_interface())
 	done := views.Status_Mark{glyph = .Done, progress = -1}
@@ -122,7 +123,7 @@ tab_draw_stacks_the_focused_mark_over_the_one_behind :: proc(t: ^testing.T) {
 	if !testing.expect(t, ui.text_init(&text, fonts, &cache, 14)) {return}
 	list := render.draw_list_init()
 	defer render.draw_list_destroy(&list)
-	resolved, ok := fixtures.shipped_theme_file(fixtures.SHIPPED_THEMES[0])
+	resolved, ok := testkit.bundled_theme_file(testkit.BUNDLED_THEMES[0])
 	if !testing.expect(t, ok) {return}
 	theme := views.theme_from(resolved, fixtures.default_interface())
 	for scale in ([?]f32{1, 1.5, 2}) {
@@ -205,7 +206,7 @@ tab_turn_spins_the_marks_on_a_sphere :: proc(t: ^testing.T) {
 	if !testing.expect(t, ui.text_init(&text, fonts, &cache, 14)) {return}
 	list := render.draw_list_init()
 	defer render.draw_list_destroy(&list)
-	resolved, ok := fixtures.shipped_theme_file(fixtures.SHIPPED_THEMES[0])
+	resolved, ok := testkit.bundled_theme_file(testkit.BUNDLED_THEMES[0])
 	if !testing.expect(t, ok) {return}
 	theme := views.theme_from(resolved, fixtures.default_interface())
 	everything := render.Rect{0, 0, 2000, 2000}
@@ -320,7 +321,7 @@ tab_turn_slides_the_title_fading_only_at_the_right :: proc(t: ^testing.T) {
 	if !testing.expect(t, ui.text_init(&text, fonts, &cache, 14)) {return}
 	list := render.draw_list_init()
 	defer render.draw_list_destroy(&list)
-	resolved, ok := fixtures.shipped_theme_file(fixtures.SHIPPED_THEMES[0])
+	resolved, ok := testkit.bundled_theme_file(testkit.BUNDLED_THEMES[0])
 	if !testing.expect(t, ok) {return}
 	theme := views.theme_from(resolved, fixtures.default_interface())
 	everything := render.Rect{0, 0, 2000, 2000}

@@ -3,9 +3,9 @@ package views_test
 import "core:testing"
 import "core:time"
 import "cosmos:platform"
-import "aio:settings"
 import "aio:views"
 import "cosmos:ui"
+import "cosmos:theme"
 
 @(private, rodata)
 strip_ids := [?]string{
@@ -27,7 +27,7 @@ strip_page :: proc(t: ^testing.T, p: ^views.Editor, applied: string) {
 	}
 	testing.expect_value(t, views.editor_add(p, theme_row, "Theme"), nil)
 	editor_fixture(t, p)
-	theme := settings.theme_default()
+	theme := theme.default()
 	sources: [len(strip_ids)]views.Theme_Card_Source
 	for &source, i in sources {
 		source = {id = strip_ids[i], name = strip_names[i], detail = "Theme file", theme = theme}

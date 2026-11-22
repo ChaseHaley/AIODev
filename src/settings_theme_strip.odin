@@ -4,6 +4,7 @@ import "aio:settings"
 import "aio:views"
 import "core:fmt"
 import "core:strings"
+import theme_api "cosmos:theme"
 
 // Used only when AIO_CONTROL is set.
 _ :: strings
@@ -15,9 +16,9 @@ settings_theme_strip_load :: proc(p: ^views.Editor, s: ^settings.Settings) -> bo
 	ids, names := settings_theme_choices(s)
 	sources := make([dynamic]views.Theme_Card_Source, 0, len(ids), context.temp_allocator)
 	for id, i in ids {
-		theme := settings.custom_theme_find(s, id)
+		theme := theme_api.find(s.themes[:], id)
 		if theme == nil {continue}
-		resolved := settings.custom_theme_resolve(s, theme)
+		resolved := theme_api.resolve(s.themes[:], theme)
 		detail := fmt.tprintf("Theme file · %s", resolved.light ? "light" : "dark")
 		if !theme.external {
 			detail = "Custom"

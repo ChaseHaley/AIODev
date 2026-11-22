@@ -10,6 +10,24 @@ import "aio:settings"
 import "aio:views"
 import fixtures "../fixtures"
 import "cosmos:ui"
+import "cosmos:testkit"
+
+// Counts the allocations and resizes made through it, so a test can prove a draw reuses its storage.
+@(private = "file")
+Counted_Allocations :: struct {
+	backing: runtime.Allocator,
+	calls:   int,
+}
+
+@(private = "file")
+counting_allocator :: proc(data: rawptr, mode: runtime.Allocator_Mode, size, alignment: int,
+	old_memory: rawptr, old_size: int, location := #caller_location) -> ([]u8, runtime.Allocator_Error) {
+	state := cast(^Counted_Allocations)data
+	if mode == .Alloc || mode == .Alloc_Non_Zeroed || mode == .Resize || mode == .Resize_Non_Zeroed {
+		state.calls += 1
+	}
+	return state.backing.procedure(state.backing.data, mode, size, alignment, old_memory, old_size, location)
+}
 
 @(test)
 palette_header_flood_fits_measured_narrow_viewport :: proc(t: ^testing.T) {
@@ -103,7 +121,7 @@ palette_fit_renders_final_selection_inside_client :: proc(t: ^testing.T) {
 		views.palette_key(&p, &registry, key({key = .End, modifiers = {.Control}}))
 		testing.expect_value(t, p.selected, len(p.results)-1)
 		for id in ([?]string{"studio-dark", "studio-light"}) {
-			theme := views.theme_from(fixtures.shipped_theme(id), fixtures.default_interface())
+			theme := views.theme_from(testkit.bundled_theme(id), fixtures.default_interface())
 			theme.selection = {1, 0, 0, 1}
 			for progress in ([?]f32{0.01, 0.25, 0.5, 0.75, 1}) {
 				render.draw_list_reset(&list)
@@ -299,8 +317,8 @@ palette_fit_tracks_navigation_query_resize_and_pointer :: proc(t: ^testing.T) {
 
 @(test)
 palette_fit_draws_complete_selected_rows_with_reused_owned_storage :: proc(t: ^testing.T) {
-	allocations := Notice_Allocations{backing = context.allocator}
-	allocator := runtime.Allocator{notice_allocator, &allocations}
+	allocations := Counted_Allocations{backing = context.allocator}
+	allocator := runtime.Allocator{counting_allocator, &allocations}
 	fonts, font_error := font.system_create(allocator)
 	if !testing.expect_value(t, font_error, font.Error.None) { return }
 	defer font.system_destroy(fonts)
@@ -346,7 +364,7 @@ palette_fit_draws_complete_selected_rows_with_reused_owned_storage :: proc(t: ^t
 		l = views.palette_layout(&p, w, h, scale)
 		selected_y := l.list.y + f32(p.selected-p.scroll) * l.row_height
 		for id in ([?]string{"studio-dark", "studio-light"}) {
-			theme := views.theme_from(fixtures.shipped_theme(id), fixtures.default_interface())
+			theme := views.theme_from(testkit.bundled_theme(id), fixtures.default_interface())
 			render.draw_list_reset(&list)
 			testing.expect_value(t, views.palette_draw(&p, &list, &text, theme, w, h, scale), render.Build_Status.Ok)
 			selected_rows := 0

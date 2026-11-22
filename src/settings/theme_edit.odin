@@ -3,6 +3,7 @@ package settings
 import "base:runtime"
 import "core:fmt"
 import "core:strings"
+import "cosmos:theme"
 
 Theme_Edit_Error :: enum {
 	None,
@@ -26,13 +27,13 @@ theme_color_edit :: proc(
 	updated, created, issue: string,
 	error: Theme_Edit_Error,
 ) {
-	token, found := token_find(token_key)
+	token, found := theme.token_find(token_key)
 	if !found {return "", "", "", .Unavailable}
-	if followed, problem := theme_value_parse(token, value, .Permissive); problem == .None && followed.linked {
+	if followed, problem := theme.value_parse(token, value, .Permissive); problem == .None && followed.linked {
 		linked, target := s.active_theme.linked, s.active_theme.target
 		linked += {token}
 		target[token] = followed.target
-		if loop := theme_loop_text(linked, &target); loop != "" {
+		if loop := theme.loop_text(linked, &target); loop != "" {
 			issue = fmt.tprintf("That would make colors follow each other in a loop: %s.", loop)
 			return "", "", issue, .Invalid
 		}
@@ -83,7 +84,7 @@ theme_duplicate :: proc(
 	if clone_error != nil {return "", "", .Allocation}
 	defer delete(revision, allocator)
 	id: string
-	if custom := custom_theme_find(s, s.theme.name); custom != nil && !custom.external {
+	if custom := theme.find(s.themes[:], s.theme.name); custom != nil && !custom.external {
 		id = theme_id_free(s, fmt.tprintf("%s-copy", custom.id))
 		if custom.name != "" {
 			if _, error = theme_edit_line(
@@ -109,11 +110,11 @@ theme_duplicate :: proc(
 				allocator,
 			); error != .None {return}
 		}
-		tokens := THEME_TOKENS
+		tokens := theme.TOKENS
 		for token in custom.overrides {
 			key := custom_theme_field_key(id, tokens[token].key)
 			linked := token in custom.linked
-			text := theme_value_text(token, {custom.colors[token], custom.target[token], linked})
+			text := theme.value_text(token, {custom.colors[token], custom.target[token], linked})
 			if text == "" {continue}
 			if _, error = theme_edit_line(&revision, key, text, allocator); error != .None {return}
 		}
@@ -164,11 +165,11 @@ theme_rename :: proc(
 	error: Theme_Edit_Error,
 ) {
 	if !theme_custom(s) {return "", "", .Unavailable}
-	if custom_theme_find(s, s.theme.name).external {return "", "", .Unavailable}
-	if !theme_id_valid(new_id) {
+	if theme.find(s.themes[:], s.theme.name).external {return "", "", .Unavailable}
+	if !theme.id_valid(new_id) {
 		return "", "Use lowercase letters, digits, - and _.", .Invalid
 	}
-	if new_id != s.theme.name && custom_theme_find(s, new_id) != nil {
+	if new_id != s.theme.name && theme.find(s.themes[:], new_id) != nil {
 		return "", "Another theme uses this ID.", .Invalid
 	}
 	old_prefix := fmt.tprintf("%s%s.", CUSTOM_THEME_PREFIX, s.theme.name)
@@ -214,7 +215,7 @@ theme_delete :: proc(
 	updated, selected: string,
 	error: Theme_Edit_Error,
 ) {
-	custom := custom_theme_find(s, s.theme.name)
+	custom := theme.find(s.themes[:], s.theme.name)
 	if custom == nil || custom.external {return "", "", .Unavailable}
 	revision, clone_error := strings.clone(source, allocator)
 	if clone_error != nil {return "", "", .Allocation}
@@ -249,13 +250,13 @@ theme_custom_lines :: proc(
 // The theme a new custom theme starts from: the selected theme, or the default for an unknown name.
 @(private)
 theme_active_id :: proc(s: ^Settings) -> string {
-	return custom_theme_find(s, s.theme.name) != nil ? s.theme.name : DEFAULT_THEME_ID
+	return theme.find(s.themes[:], s.theme.name) != nil ? s.theme.name : theme.DEFAULT_ID
 }
 
 // The theme selected once `custom` is deleted: its base when that survives the deletion.
-theme_delete_target :: proc(s: ^Settings, custom: ^Custom_Theme) -> string {
-	base := custom_theme_find(s, custom.base)
-	return base != nil && base != custom ? base.id : DEFAULT_THEME_ID
+theme_delete_target :: proc(s: ^Settings, custom: ^theme.Layer) -> string {
+	base := theme.find(s.themes[:], custom.base)
+	return base != nil && base != custom ? base.id : theme.DEFAULT_ID
 }
 
 // `wanted`, or `wanted-2`, `wanted-3` and so on, whichever no theme uses yet. The result is
@@ -263,10 +264,10 @@ theme_delete_target :: proc(s: ^Settings, custom: ^Custom_Theme) -> string {
 @(private)
 theme_id_free :: proc(s: ^Settings, wanted: string) -> string {
 	stem := wanted
-	if len(stem) > THEME_ID_MAX_LENGTH - 3 {stem = stem[:THEME_ID_MAX_LENGTH - 3]}
+	if len(stem) > theme.ID_MAX_LENGTH - 3 {stem = stem[:theme.ID_MAX_LENGTH - 3]}
 	stem = strings.trim_right(stem, "-_")
 	id := stem
-	for number := 2; custom_theme_find(s, id) != nil; number += 1 {
+	for number := 2; theme.find(s.themes[:], id) != nil; number += 1 {
 		id = fmt.tprintf("%s-%d", stem, number)
 	}
 	return id
@@ -346,10 +347,10 @@ migrate_theme_text :: proc(
 	err: runtime.Allocator_Error,
 ) {
 	Legacy :: struct {
-		token: Theme_Token,
+		token: theme.Token,
 		value: string,
 	}
-	colors: [len(Theme_Token)]Legacy
+	colors: [len(theme.Token)]Legacy
 	count := 0
 	found := false
 	scanner := line_scanner_init(text)
@@ -357,11 +358,11 @@ migrate_theme_text :: proc(
 		line, ok := line_next(&scanner)
 		if !ok {break}
 		if !line.split || !strings.has_prefix(line.key, LEGACY_COLOR_PREFIX) {continue}
-		token, known := token_find(line.key[len(LEGACY_COLOR_PREFIX):])
-		if !known || !token_terminal(token) {continue}
+		token, known := theme.token_find(line.key[len(LEGACY_COLOR_PREFIX):])
+		if !known || !theme.token_terminal(token) {continue}
 		found = true
 		if line.value == "" {continue}
-		if _, valid := theme_color_parse(token, line.value, .Strict); !valid {continue}
+		if _, valid := theme.color_parse(token, line.value, .Strict); !valid {continue}
 		duplicate := false
 		for &c in colors[:count] {
 			if c.token == token {c.value, duplicate = line.value, true}
@@ -383,8 +384,8 @@ migrate_theme_text :: proc(
 		if !ok {break}
 		legacy := false
 		if line.split && strings.has_prefix(line.key, LEGACY_COLOR_PREFIX) {
-			token, known := token_find(line.key[len(LEGACY_COLOR_PREFIX):])
-			legacy = known && token_terminal(token)
+			token, known := theme.token_find(line.key[len(LEGACY_COLOR_PREFIX):])
+			legacy = known && theme.token_terminal(token)
 		}
 		if legacy {
 			if held != "" && !legacy_color_comment(strings.trim_space(held)) {
@@ -414,7 +415,7 @@ migrate_theme_text :: proc(
 		id := theme_id_free(&s, fmt.tprintf("%s-custom", base))
 		lines := make([dynamic][2]string, 0, count + 2, context.temp_allocator)
 		append(&lines, [2]string{custom_theme_field_key(id, "base"), base})
-		tokens := THEME_TOKENS
+		tokens := theme.TOKENS
 		for c in colors[:count] {
 			key := custom_theme_field_key(id, tokens[c.token].key)
 			append(&lines, [2]string{key, c.value})
@@ -499,7 +500,7 @@ migrate_theme_variant_text :: proc(
 	}
 	if held != "" {write_parts(&builder, held) or_return}
 	revision := strings.clone(strings.to_string(builder), allocator) or_return
-	if id, legacy := theme_legacy_id(name, mode); legacy {
+	if id, legacy := theme.legacy_id(name, mode); legacy {
 		if _, error := theme_edit_line(&revision, "theme.name", id, allocator); error != .None {
 			delete(revision, allocator)
 			return "", false, .Out_Of_Memory

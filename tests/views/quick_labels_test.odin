@@ -8,6 +8,7 @@ import "core:strings"
 import "core:testing"
 import fixtures "../fixtures"
 import "cosmos:ui"
+import "cosmos:testkit"
 
 @(private)
 LABELS_THREE :: "One | blue | first; Two | #2ea043 | second; Three | orange"
@@ -283,7 +284,7 @@ quick_label_fields_show_no_reset_button :: proc(t: ^testing.T) {
 @(test)
 quick_labels_colors_resolve_presets_against_the_theme_and_hex_as_typed :: proc(t: ^testing.T) {
 	for id in ([?]string{"studio-dark", "studio-light"}) {
-		theme := views.theme_from(fixtures.shipped_theme(id), fixtures.default_interface())
+		theme := views.theme_from(testkit.bundled_theme(id), fixtures.default_interface())
 		testing.expect_value(t, views.quick_label_color(theme, "blue"), theme.palette[4])
 		testing.expect_value(t, views.quick_label_color(theme, "yellow"), theme.palette[3])
 		testing.expect_value(t, views.quick_label_color(theme, "red"), theme.palette[1])
@@ -308,7 +309,7 @@ quick_labels_colors_resolve_presets_against_the_theme_and_hex_as_typed :: proc(t
 @(test)
 quick_labels_ink_is_lifted_to_the_minimum_contrast :: proc(t: ^testing.T) {
 	for id in ([?]string{"studio-dark", "studio-light"}) {
-		theme := views.theme_from(fixtures.shipped_theme(id), fixtures.default_interface())
+		theme := views.theme_from(testkit.bundled_theme(id), fixtures.default_interface())
 		for value in ([?]string{"blue", "yellow", "orange", "teal", "red", "violet", "green", "gray", "#ffff00", "#101010"}) {
 			for minimum in ([?]f32{3, 4.5, 7}) {
 				ink := views.quick_label_ink(theme, value, theme.pane, minimum)
