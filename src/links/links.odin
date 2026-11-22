@@ -251,8 +251,9 @@ trim_prose :: proc(text: string, start, end: int) -> int {
 	return trim
 }
 
-// Normalize_web_input accepts HTTP(S), local file URLs and absolute Windows drive paths for web panes.
-// A bare host gets HTTPS (HTTP for localhost, 127.0.0.1 and [::1]). The result uses `allocator`.
+// Normalize_web_input accepts HTTP(S), local file URLs and absolute Windows drive paths for web panes,
+// including shorthand that expands to one, such as "~\page.html" or "%TEMP%\page.html". A bare host
+// gets HTTPS (HTTP for localhost, 127.0.0.1 and [::1]). The result uses `allocator`.
 @(require_results)
 normalize_web_input :: proc(raw: string, allocator := context.temp_allocator) -> (string, bool) {
 	trimmed := strings.trim_space(raw)
@@ -261,6 +262,8 @@ normalize_web_input :: proc(raw: string, allocator := context.temp_allocator) ->
 	if len(path) >= 2 && path[0] == '"' && path[len(path) - 1] == '"' {
 		path = path[1:len(path) - 1]
 	}
+	expanded: [TARGET_BYTES]u8 = ---
+	if spelling, fits := localpath.expand_variables(path, expanded[:]); fits {path = spelling}
 	if localpath.is_drive_absolute(path) {
 		if !localpath.local_absolute(path) {return "", false}
 		return web_file_url_from_path(path, allocator)

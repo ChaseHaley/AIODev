@@ -92,6 +92,103 @@ expand_home :: proc(path: string, allocator := context.allocator) -> (string, os
 	return result, nil
 }
 
+// Shorthand a shell would expand: a leading "~" ("~", "~/x" or "~\x"), and anywhere %NAME%, $env:NAME,
+// ${env:NAME}, $NAME and ${NAME}, read from this process's environment. Home is USERPROFILE, and an
+// unset HOME falls back to it, as PowerShell's $HOME does. An unset name stays as written, as cmd
+// leaves it, so a literal "$" or "%" in a file name survives. The result borrows text when nothing
+// expands, otherwise buffer; false when the expansion does not fit.
+@(require_results)
+expand_variables :: proc(text: string, buffer: []u8) -> (string, bool) {
+	home := text == "~" || strings.has_prefix(text, "~/") || strings.has_prefix(text, "~\\")
+	if !home && strings.index_any(text, "%$") < 0 {return text, true}
+	at, i := 0, 0
+	expanded := false
+	if home {
+		length, found, fits := env_value("USERPROFILE", buffer)
+		if !fits {return "", false}
+		if found {at, i, expanded = length, 1, true}
+	}
+	for i < len(text) {
+		if name, token := variable_at(text, i); token > 0 {
+			length, found, fits := variable_value(name, buffer[at:])
+			if !fits {return "", false}
+			if found {
+				at += length
+				i += token
+				expanded = true
+				continue
+			}
+		}
+		if at >= len(buffer) {return "", false}
+		buffer[at] = text[i]
+		at += 1
+		i += 1
+	}
+	if !expanded {return text, true}
+	return string(buffer[:at]), true
+}
+
+// The length of the variable spelled at text[at:] when it is set, else 0.
+@(require_results)
+set_variable_length :: proc(text: string, at: int) -> int {
+	name, token := variable_at(text, at)
+	if token == 0 {return 0}
+	value: [4096]u8 = ---
+	_, found, _ := variable_value(name, value[:])
+	return found ? token : 0
+}
+
+@(private, require_results)
+variable_value :: proc(name: string, out: []u8) -> (length: int, found, fits: bool) {
+	length, found, fits = env_value(name, out)
+	if !found && fits && strings.equal_fold(name, "HOME") {return env_value("USERPROFILE", out)}
+	return
+}
+
+// The variable name spelled at text[at:] and the length of its spelling, or 0 when none starts there.
+// Braced and %-quoted names may hold parentheses, as in %ProgramFiles(x86)%.
+@(private, require_results)
+variable_at :: proc(text: string, at: int) -> (name: string, length: int) {
+	rest := text[at:]
+	switch {
+	case strings.has_prefix(rest, "%"):
+		close := strings.index_byte(rest[1:], '%')
+		if close <= 0 || !variable_name(rest[1:1 + close], true) {return "", 0}
+		return rest[1:1 + close], close + 2
+	case strings.has_prefix(rest, "${"):
+		close := strings.index_byte(rest, '}')
+		if close < 0 {return "", 0}
+		name = rest[2:close]
+		if len(name) > 4 && strings.equal_fold(name[:4], "env:") {name = name[4:]}
+		if !variable_name(name, true) {return "", 0}
+		return name, close + 1
+	case strings.has_prefix(rest, "$"):
+		start := 1
+		if len(rest) > 5 && strings.equal_fold(rest[1:5], "env:") {start = 5}
+		end := start
+		for end < len(rest) && variable_byte(rest[end], false) {end += 1}
+		name = rest[start:end]
+		if !variable_name(name, false) {return "", 0}
+		return name, end
+	}
+	return "", 0
+}
+
+@(private, require_results)
+variable_name :: proc(name: string, parentheses: bool) -> bool {
+	if name == "" || (name[0] >= '0' && name[0] <= '9') {return false}
+	for i in 0 ..< len(name) {
+		if !variable_byte(name[i], parentheses) {return false}
+	}
+	return true
+}
+
+@(private, require_results)
+variable_byte :: proc(c: u8, parentheses: bool) -> bool {
+	return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_' ||
+		(parentheses && (c == '(' || c == ')'))
+}
+
 // Which step of settings_relative failed; callers word the two differently.
 Settings_Path_Error :: enum {
 	None,

@@ -86,8 +86,9 @@ strip_location :: proc(path: string) -> string {
 	return path[:end]
 }
 
-// Resolve a printed target using only a shell-reported local cwd. The returned string borrows
-// buffer; there is no filesystem access or allocation. File URIs name literal files, not locations.
+// Resolve a printed target using only a shell-reported local cwd. Shorthand such as "~" and %APPDATA%
+// expands first, from this process's environment. The returned string borrows buffer; there is no
+// filesystem access or allocation. File URIs name literal files, not locations.
 @(require_results)
 resolve_file :: proc(target, cwd: string, hosts: []string, buffer: []u8) -> (string, bool) {
 	if len(target) >= 5 && strings.equal_fold(target[:5], "file:") {
@@ -95,7 +96,10 @@ resolve_file :: proc(target, cwd: string, hosts: []string, buffer: []u8) -> (str
 		if !ok {return "", false}
 		return path, true
 	}
-	path := strip_location(target)
+	expanded: [TARGET_BYTES]u8 = ---
+	spelling, fits := localpath.expand_variables(target, expanded[:])
+	if !fits {return "", false}
+	path := strip_location(spelling)
 	if localpath.local_absolute(path) {
 		if len(path) > len(buffer) {return "", false}
 		copy(buffer, transmute([]u8)path)
@@ -117,8 +121,8 @@ resolve_file :: proc(target, cwd: string, hosts: []string, buffer: []u8) -> (str
 
 // Resolve a Markdown link's path beside the document's folder. Unlike printed text, a Markdown href
 // is URL-encoded (Obsidian writes a space as %20), so its escapes decode once first; a '%' that starts
-// no escape stays as written. File URIs decode in resolve_file, as printed ones do. The returned
-// string borrows buffer.
+// no escape, or a set %NAME% variable, stays as written. File URIs decode in resolve_file, as printed
+// ones do. The returned string borrows buffer.
 @(require_results)
 resolve_href :: proc(href, directory: string, hosts: []string, buffer: []u8) -> (string, bool) {
 	if (len(href) >= 5 && strings.equal_fold(href[:5], "file:")) || strings.index_byte(href, '%') < 0 {
@@ -129,10 +133,19 @@ resolve_href :: proc(href, directory: string, hosts: []string, buffer: []u8) -> 
 	for i := 0; i < len(href); i += 1 {
 		if at >= len(decoded) {return "", false}
 		c := href[i]
-		if c == '%' && i + 2 < len(href) {
-			if hi, lo := hex_digit(href[i + 1]), hex_digit(href[i + 2]); hi >= 0 && lo >= 0 {
-				c = u8(hi * 16 + lo)
-				i += 2
+		if c == '%' {
+			if variable := localpath.set_variable_length(href, i); variable > 0 {
+				if at + variable > len(decoded) {return "", false}
+				copy(decoded[at:], href[i:i + variable])
+				at += variable
+				i += variable - 1
+				continue
+			}
+			if i + 2 < len(href) {
+				if hi, lo := hex_digit(href[i + 1]), hex_digit(href[i + 2]); hi >= 0 && lo >= 0 {
+					c = u8(hi * 16 + lo)
+					i += 2
+				}
 			}
 		}
 		decoded[at] = c
@@ -167,7 +180,7 @@ find_files :: proc(text: string, relative: bool, out: ^[dynamic]Range) -> bool {
 			at += 1
 		}
 		end := quote != 0 ? at : trim_prose(text, start, at)
-		if quote == 0 && end == at && end > start && localpath.local_absolute(strip_location(text[start:end])) {
+		if quote == 0 && end == at && end > start && absolute_spelling(text[start:end]) {
 			end = spaced_end(text, start, at)
 			at = end
 		}
@@ -175,7 +188,7 @@ find_files :: proc(text: string, relative: bool, out: ^[dynamic]Range) -> bool {
 			candidate, spaced_ok := break_variant(text[start:end], break_variants(text[start:end]) - 1, spaced[:])
 			if !spaced_ok {continue}
 			shaped := strings.contains_any(candidate, ".\\/")
-			absolute := localpath.local_absolute(strip_location(candidate)) ||
+			absolute := absolute_spelling(candidate) ||
 				len(candidate) >= 5 && strings.equal_fold(candidate[:5], "file:")
 			cwd := relative ? "C:/" : ""
 			if shaped && (absolute || relative_plausible(candidate)) {
@@ -188,6 +201,15 @@ find_files :: proc(text: string, relative: bool, out: ^[dynamic]Range) -> bool {
 		if at < len(text) && (quote != 0 || (text[at] != '"' && text[at] != '`')) {at += 1}
 	}
 	return true
+}
+
+// True when text names an absolute local path once its shorthand expands. Reads the environment,
+// never the filesystem.
+@(private, require_results)
+absolute_spelling :: proc(text: string) -> bool {
+	expanded: [TARGET_BYTES]u8 = ---
+	path, fits := localpath.expand_variables(text, expanded[:])
+	return fits && localpath.local_absolute(strip_location(path))
 }
 
 // Relative names need a letter in their final segment. A bare name also needs an extension of two
