@@ -3,41 +3,19 @@ package main
 import "cosmos:input"
 import "aio:views"
 import "cosmos:ui"
+import "cosmos:host"
 
-// What each mouse button is doing between its press and its release; nil is a free button. The procs
-// in this file are the only writers. Every press records its surface before reaching it, so a release
-// and the moves before it go to the surface recorded at the press.
-Gesture_State :: struct {
-	captures: [input.Mouse_Button]Gesture_Capture,
-}
-
-Gesture_Capture :: union {
-	Gesture_Held,
-	Gesture_Swallowed,
-	Gesture_Reported,
-	Gesture_Cancelled,
-}
-
-// Pressed on a surface, which receives the release; a release it declines reaches the shared completion
-// for confirmations, the palette and pane content.
-Gesture_Held :: struct {
-	owner: Gesture_Owner,
-}
-
-// Consumed by a surface: neither half reaches pane content or a program, and the release goes to that
-// surface alone, or to a modal surface open at the time.
-Gesture_Swallowed :: struct {
-	by: Pointer_Target,
-}
-
-// Pressed on pane content and sent to the program there, which also receives the release: the session
-// keeps it, though the release lands on another pane.
-Gesture_Reported :: struct {
-	session: u32,
-}
-
-// The pointer was taken away while the button was down: its moves and its release reach nothing.
-Gesture_Cancelled :: struct {}
+// What each mouse button is doing between its press and its release (host.Captures). The procs in this
+// file are the only writers. A held press belongs to a surface, or to a tab chrome press; a surface
+// swallows a press when neither half may reach pane content or a program, and the release then goes to
+// that surface alone, or to a modal surface open at the time; a content press is reported to the program
+// in a session, which keeps it though the release lands on another pane.
+Gesture_State :: host.Captures(Gesture_Owner, Pointer_Target, u32)
+Gesture_Capture :: host.Capture(Gesture_Owner, Pointer_Target, u32)
+Gesture_Held :: host.Capture_Held(Gesture_Owner)
+Gesture_Swallowed :: host.Capture_Swallowed(Pointer_Target)
+Gesture_Reported :: host.Capture_Forwarded(u32)
+Gesture_Cancelled :: host.Capture_Cancelled
 
 Gesture_Owner :: union #no_nil {
 	Pointer_Target,
@@ -72,11 +50,8 @@ gesture_capture_owner :: proc(capture: Gesture_Capture) -> (Pointer_Target, bool
 }
 
 // The buttons whose capture is a T.
-gesture_buttons :: proc(w: ^Window, $T: typeid) -> (buttons: input.Mouse_Buttons) {
-	for capture, button in w.gesture.captures {
-		if _, ok := capture.(T); ok {buttons += {button}}
-	}
-	return
+gesture_buttons :: proc(w: ^Window, $T: typeid) -> input.Mouse_Buttons {
+	return host.capture_buttons(&w.gesture, T)
 }
 
 // A surface consumed a held button, so pane content shows no hover and programs see no motion.
@@ -84,7 +59,7 @@ gesture_swallowing :: proc(w: ^Window) -> bool {return gesture_buttons(w, Gestur
 
 // The tab chrome target a held Left press draws pressed, or nil.
 gesture_tab_pressed :: proc(w: ^Window) -> Tab_Chrome_Target {
-	held, ok := w.gesture.captures[.Left].(Gesture_Held)
+	held, ok := w.gesture.buttons[.Left].(Gesture_Held)
 	if !ok {return nil}
 	pressed, _ := held.owner.(Gesture_Tab_Press)
 	return pressed.target
@@ -93,52 +68,44 @@ gesture_tab_pressed :: proc(w: ^Window) -> Tab_Chrome_Target {
 // The surface holding `button` consumes it: one call per press, from that surface's press handler. A
 // press the handler already cancelled stays cancelled.
 gesture_swallow :: proc(w: ^Window, button: input.Mouse_Button, by: Pointer_Target) {
-	if _, held := w.gesture.captures[button].(Gesture_Held); held {
-		w.gesture.captures[button] = Gesture_Swallowed{by}
-	}
+	host.capture_swallow(&w.gesture, button, by)
 }
 
 // A content press the program in `session` receives.
 @(private)
 gesture_report :: proc(w: ^Window, button: input.Mouse_Button, session: u32) {
-	if _, held := w.gesture.captures[button].(Gesture_Held); held {
-		w.gesture.captures[button] = Gesture_Reported{session}
-	}
+	host.capture_forward(&w.gesture, button, session)
 }
 
 // A surface passes its press on to `owner`, which then holds it.
 gesture_hand_off :: proc(w: ^Window, button: input.Mouse_Button, owner: Pointer_Target) {
-	if _, held := w.gesture.captures[button].(Gesture_Held); held {
-		w.gesture.captures[button] = Gesture_Held{owner}
-	}
+	host.capture_hand_off(&w.gesture, button, owner)
 }
 
 // A Left press on the tabs that draws `target` pressed until its release.
 gesture_tab_press :: proc(w: ^Window, target: Tab_Chrome_Target) {
-	held, ok := w.gesture.captures[.Left].(Gesture_Held)
+	held, ok := w.gesture.buttons[.Left].(Gesture_Held)
 	if ok && gesture_owner_target(held.owner) == .Tabs {
-		w.gesture.captures[.Left] = Gesture_Held{Gesture_Tab_Press{target}}
+		w.gesture.buttons[.Left] = Gesture_Held{Gesture_Tab_Press{target}}
 	}
 }
 
 // The tabs changed under a held press: it stops drawing pressed and still finishes with the tabs.
 gesture_tab_unpress :: proc(w: ^Window) {
-	held, ok := w.gesture.captures[.Left].(Gesture_Held)
-	if ok && gesture_owner_target(held.owner) == .Tabs {w.gesture.captures[.Left] = Gesture_Held{.Tabs}}
+	held, ok := w.gesture.buttons[.Left].(Gesture_Held)
+	if ok && gesture_owner_target(held.owner) == .Tabs {w.gesture.buttons[.Left] = Gesture_Held{.Tabs}}
 }
 
 // The held button stops reaching anything until it is released.
 gesture_cancel_button :: proc(w: ^Window, button: input.Mouse_Button) {
-	if w.gesture.captures[button] != nil {w.gesture.captures[button] = Gesture_Cancelled{}}
+	host.capture_cancel(&w.gesture, button)
 }
 
 // Capture loss: every held button is cancelled and every surface drops its pointer state.
 @(private)
 gesture_clear :: proc(app: ^App, w: ^Window) {
 	for button in input.Mouse_Button {gesture_cancel_button(w, button)}
-	for surface in pointer_surfaces {
-		if surface.cancel != nil {surface.cancel(app, w)}
-	}
+	host.pointer_cancel(&pointer_surfaces, app, w)
 	leader_cancel(w)
 	autoscroll_stop(w)
 	scroll_hold_end(w)
@@ -167,7 +134,7 @@ gesture_complete :: proc(app: ^App, w: ^Window, capture: Gesture_Capture, e: inp
 	case Gesture_Reported, Gesture_Cancelled:
 	}
 	if gesture_finish(app, w, e) {return}
-	if reported, ok := capture.(Gesture_Reported); ok {content_report_release(app, reported.session, e)}
+	if reported, ok := capture.(Gesture_Reported); ok {content_report_release(app, reported.to, e)}
 }
 
 // The shared completion of a release its surface declined: a confirmation, the palette and the
@@ -207,11 +174,11 @@ gesture_button :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) {
 		if e.pressed {
 			// A press while scrolling only ends it, and its release reaches nothing.
 			autoscroll_end(app, w)
-			w.gesture.captures[e.button] = Gesture_Cancelled{}
+			w.gesture.buttons[e.button] = Gesture_Cancelled{}
 			return
 		}
 		if e.button == .Middle && autoscroll_release(app, w) {
-			w.gesture.captures[.Middle] = nil
+			_ = host.capture_release(&w.gesture, .Middle)
 			return
 		}
 	}
@@ -224,10 +191,10 @@ gesture_button :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) {
 			if ui.armed_down(w.find.armed) {target = .Find} else if selection_active(w) {target = .Content}
 		}
 		if e.button == .Left && target != .Changes_Page {w.changes_divider_click = {}}
-		w.gesture.captures[e.button] = Gesture_Held{target}
+		host.capture_press(&w.gesture, e.button, target)
 		if !modal {
 			w.dirty = true
-			if pointer_surfaces[target].blurs_find && ui.find_has_keyboard(&w.find) {
+			if target in POINTER_BLURS_FIND && ui.find_has_keyboard(&w.find) {
 				ui.find_blur(&w.find, &app.find_history)
 			}
 		}
@@ -239,8 +206,7 @@ gesture_button :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) {
 		return
 	}
 	if e.button == .Left {scroll_hold_end(w)}
-	capture := w.gesture.captures[e.button]
-	w.gesture.captures[e.button] = nil
+	capture := host.capture_release(&w.gesture, e.button)
 	if _, cancelled := capture.(Gesture_Cancelled); cancelled {return}
 	target := pointer_target(app, w, x, y)
 	if gesture_release_taken(w, target, capture, e.button) {
@@ -276,7 +242,7 @@ gesture_move :: proc(app: ^App, w: ^Window, event: input.Mouse_Move_Event) {
 // program, leaves the pointer on content.
 @(private)
 pointer_held_target :: proc(w: ^Window, target: Pointer_Target) -> Pointer_Target {
-	for capture in w.gesture.captures {
+	for capture in w.gesture.buttons {
 		owner, owned := gesture_capture_owner(capture)
 		if owned && pointer_surfaces[owner].holds {return owner}
 	}

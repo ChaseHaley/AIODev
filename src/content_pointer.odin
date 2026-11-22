@@ -140,15 +140,15 @@ content_report_motion :: proc(app: ^App, w: ^Window, held: input.Mouse_Buttons, 
 	sent: input.Mouse_Buttons
 	for button in held {
 		if button in sent {continue}
-		recipient, _ := w.gesture.captures[button].(Gesture_Reported)
+		recipient, _ := w.gesture.buttons[button].(Gesture_Reported)
 		buttons: input.Mouse_Buttons
 		for other in held {
-			if c, ok := w.gesture.captures[other].(Gesture_Reported); ok && c.session == recipient.session {
+			if c, ok := w.gesture.buttons[other].(Gesture_Reported); ok && c.to == recipient.to {
 				buttons += {other}
 			}
 		}
 		sent += buttons
-		if entry := session_find(app, recipient.session); entry != nil && reports_mouse(entry, e.modifiers) {
+		if entry := session_find(app, recipient.to); entry != nil && reports_mouse(entry, e.modifiers) {
 			term.send_mouse(entry.session, .Motion, nil, buttons, e.modifiers, f32(e.x), f32(e.y))
 		}
 	}

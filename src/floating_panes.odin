@@ -7,6 +7,7 @@ import "cosmos:render"
 import "aio:views"
 import "core:log"
 import "cosmos:ui"
+import "cosmos:host"
 
 // Floats (WORK-045). A float is a window of one or more panes above its tab's tiled panes, so opening,
 // moving, minimizing or closing it never resizes or reflows them. Its float header moves it, and holds
@@ -1090,6 +1091,11 @@ floating_leave :: proc(_: ^App, w: ^Window) {
 }
 
 @(private)
-floating_held :: proc(app: ^App, w: ^Window, _: Pointer_Target, e: input.Mouse_Move_Event) -> Pointer_Held {
+floating_held :: proc(
+	app: ^App,
+	w: ^Window,
+	_: Pointer_Target,
+	e: input.Mouse_Move_Event,
+) -> host.Pointer_Held {
 	return floating_pointer_move(app, w, e) ? .Taken : .Free
 }

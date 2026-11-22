@@ -1233,7 +1233,7 @@ changes_text_at :: proc(
 // Follow the grabbed divider even when the pointer leaves the diff or crosses another pane.
 changes_divider_held :: proc(
 	app: ^App, w: ^Window, under: Pointer_Target, e: input.Mouse_Move_Event,
-) -> Pointer_Held {
+) -> host.Pointer_Held {
 	grab, active := w.changes_divider.?
 	if !active || pointer_modal(under) {return .Free}
 	pane := changes_find(app, grab.pane)

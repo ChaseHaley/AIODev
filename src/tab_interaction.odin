@@ -2,6 +2,7 @@ package main
 
 import "cosmos:input"
 import "cosmos:ui"
+import "cosmos:host"
 
 // A control on the tab strip or rail: a tab, a tab group's chip, the new-tab button or the profile
 // chevron. Nil is none: empty chrome or outside it.
@@ -220,7 +221,12 @@ tabs_leave :: proc(_: ^App, w: ^Window) {
 
 // A tab drag follows the pointer once it has started, or while no modal surface is under it.
 @(private)
-tabs_held :: proc(app: ^App, w: ^Window, under: Pointer_Target, e: input.Mouse_Move_Event) -> Pointer_Held {
+tabs_held :: proc(
+	app: ^App,
+	w: ^Window,
+	under: Pointer_Target,
+	e: input.Mouse_Move_Event,
+) -> host.Pointer_Held {
 	if .Left in e.buttons && rail_scrollbar_move(w, f32(e.y)) {return .Taken}
 	if !tab_drag_held(w) || drag_active(w) == nil && pointer_modal(under) {return .Free}
 	if .Left not_in e.buttons {tab_drag_cancel(app, w); return .Ended}

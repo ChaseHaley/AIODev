@@ -70,7 +70,7 @@ autoscroll_speed :: proc(w: ^Window, on: Autoscroll_On, y: f32) -> f32 {
 @(private)
 autoscroll_begin :: proc(app: ^App, w: ^Window, target: Pointer_Target, e: input.Mouse_Button_Event) -> bool {
 	if e.button != .Middle || target not_in AUTOSCROLL_TARGETS {return false}
-	for capture, button in w.gesture.captures {if button != .Middle && capture != nil {return false}}
+	for capture, button in w.gesture.buttons {if button != .Middle && capture != nil {return false}}
 	if selection_active(w) || drag_active(w) != nil || arrange_active(w) {return false}
 	x, y := f32(e.x), f32(e.y)
 	pane, found := layout.hit_test(w.panes[:], x, y)

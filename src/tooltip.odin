@@ -13,7 +13,7 @@ import "cosmos:host"
 
 @(private)
 tooltip_label :: proc(app: ^App, w: ^Window, owner: Pointer_Target, x, y: f32) -> string {
-	label := pointer_surfaces[owner].tooltip
+	label := pointer_tips[owner].tooltip
 	if label == nil {return ""}
 	return ui.tooltip_clip(label(app, w, x, y), ui.TOOLTIP_LIMIT)
 }
@@ -32,7 +32,7 @@ Tooltip_Shortcut :: union {
 // (commands.SHORTCUT_TEXT_CAP bytes). A command's is its first active shortcut, read at every draw so a
 // rebinding shows at once. Empty when the control names none or its command is unbound.
 tooltip_shortcut :: proc(app: ^App, w: ^Window, owner: Pointer_Target, x, y: f32, out: []u8) -> string {
-	shortcut_of := pointer_surfaces[owner].shortcut
+	shortcut_of := pointer_tips[owner].shortcut
 	if shortcut_of == nil {return ""}
 	switch shortcut in shortcut_of(app, w, x, y) {
 	case Action: return action_shortcut_text(app, shortcut, out)
@@ -71,7 +71,7 @@ tooltip_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 	if tooltip_label(app, w, owner, w.pointer.x, w.pointer.y) != label {return .Ok}
 	shortcut_buffer: [commands.SHORTCUT_TEXT_CAP]u8
 	shortcut := tooltip_shortcut(app, w, owner, w.pointer.x, w.pointer.y, shortcut_buffer[:])
-	if card_of := pointer_surfaces[owner].tooltip_card; card_of != nil {
+	if card_of := pointer_tips[owner].tooltip_card; card_of != nil {
 		card := card_of(app, w, w.pointer.x, w.pointer.y)
 		if card.description != "" || card.preview != nil {
 			return tooltip_card_draw(app, w, label, shortcut, card)

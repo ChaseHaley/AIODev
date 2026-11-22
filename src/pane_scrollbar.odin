@@ -6,6 +6,7 @@ import "cosmos:render"
 import "aio:term"
 import "aio:views"
 import "cosmos:ui"
+import "cosmos:host"
 
 // The overlay scrollbar of terminal and Markdown panes: one hover and one held thumb per window,
 // keyed by the content whose bar it is. A terminal scrolls by rows and only shows its bar when the
@@ -256,7 +257,12 @@ scrollbar_leave :: proc(_: ^App, w: ^Window) {
 
 // A held thumb of either kind follows the pointer anywhere; a Markdown thumb is pressed on its page.
 @(private)
-scrollbar_held :: proc(app: ^App, w: ^Window, _: Pointer_Target, e: input.Mouse_Move_Event) -> Pointer_Held {
+scrollbar_held :: proc(
+	app: ^App,
+	w: ^Window,
+	_: Pointer_Target,
+	e: input.Mouse_Move_Event,
+) -> host.Pointer_Held {
 	if !pane_scrollbar_dragging(w) {return .Free}
 	pane_scrollbar_move(app, w, f32(e.x), f32(e.y))
 	return .Taken

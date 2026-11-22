@@ -40,7 +40,7 @@ adoption_fixture_destroy :: proc(t: ^testing.T, f: ^Adoption_Fixture) {
 @(private="file")
 adoption_dirty_presentation :: proc(w: ^app.Window) {
 	w.tab_hover = app.Tab_Chrome_Tab{1}
-	w.gesture.captures[.Left] = app.Gesture_Held{app.Gesture_Tab_Press{app.Tab_Chrome_Tab{1}}}
+	w.gesture.buttons[.Left] = app.Gesture_Held{app.Gesture_Tab_Press{app.Tab_Chrome_Tab{1}}}
 	w.rail_scroll = 99
 	ui.armed_press(&w.tab_close_armed, 2)
 	w.overlay = app.Overlay_Rename{target = app.Rename_Tab_Target{}}

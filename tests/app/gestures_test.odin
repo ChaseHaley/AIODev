@@ -22,7 +22,7 @@ gesture_button :: proc(s: ^app.App, w: ^app.Window, button: input.Mouse_Button,
 // The buttons whose capture is not free.
 @(private)
 gesture_captured :: proc(w: ^app.Window) -> (buttons: input.Mouse_Buttons) {
-	for capture, button in w.gesture.captures {
+	for capture, button in w.gesture.buttons {
 		if capture != nil {buttons += {button}}
 	}
 	return

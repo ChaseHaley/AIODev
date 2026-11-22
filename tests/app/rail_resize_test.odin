@@ -134,7 +134,7 @@ rail_resize_ended_elsewhere_leaves_later_presses_alone :: proc(t: ^testing.T) {
 	if !testing.expect_value(t, app.pointer_target(s, w, x, cy), app.Pointer_Target.Content) {return}
 	gesture_button(s, w, .Left, true, x, cy)
 	app.rail_toggle(s, w)
-	_, cancelled := w.gesture.captures[.Left].(app.Gesture_Cancelled)
+	_, cancelled := w.gesture.buttons[.Left].(app.Gesture_Cancelled)
 	testing.expect(t, !cancelled, "the toggle must not take a press that is not a rail resize")
 	gesture_button(s, w, .Left, false, x, cy)
 }

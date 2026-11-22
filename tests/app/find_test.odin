@@ -66,7 +66,7 @@ find_headless_releases_finish_tab_and_divider_gestures :: proc(t: ^testing.T) {
 	if !testing.expect(t, app.tab_drag_held(&w)) { return }
 	// Seed the gesture, the tabs' hold on it and the overlay together; moves and releases use the real
 	// app dispatcher.
-	w.gesture.captures[.Left] = app.Gesture_Held{app.Pointer_Target.Tabs}
+	w.gesture.buttons[.Left] = app.Gesture_Held{app.Pointer_Target.Tabs}
 	ui.find_open(&w.find)
 	if !testing.expect(t, ui.find_is_open(&w.find)) { return }
 	target := app.rail_row_rect_for_tab(&w, 1)

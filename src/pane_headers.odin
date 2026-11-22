@@ -12,6 +12,7 @@ import "core:fmt"
 import "core:log"
 import "core:strings"
 import "cosmos:ui"
+import "cosmos:host"
 
 Pane_Header_Metadata :: struct {
 	executable, title, directory: string,
@@ -607,7 +608,7 @@ pane_drag_held :: proc(
 	w: ^Window,
 	under: Pointer_Target,
 	e: input.Mouse_Move_Event,
-) -> Pointer_Held {
+) -> host.Pointer_Held {
 	if _, pane := pane_drag_grab(w); !pane {return .Free}
 	if drag_active(w) == nil && pointer_modal(under) {return .Free}
 	if .Left not_in e.buttons {pane_drag_cancel(app, w); return .Ended}

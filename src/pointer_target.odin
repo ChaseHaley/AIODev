@@ -1,5 +1,6 @@
 package main
 
+import "cosmos:host"
 import "cosmos:input"
 
 // The surfaces that can own the pointer, listed topmost first. The order is the precedence: hover,
@@ -60,69 +61,30 @@ Pointer_Target :: enum u8 {
 	Content,
 }
 
-// What a drag a surface holds did with a move.
-Pointer_Held :: enum u8 {
-	// No drag of this surface is held, or it leaves this move to the surfaces.
-	Free,
-	// The drag followed the move, which ends there.
-	Taken,
-	// The move ended a drag whose release was missed. What lies under the pointer may have changed with
-	// it, so routing resolves the target again.
-	Ended,
-}
-
-// Everything a surface tells the pointer system: its handlers and its policy. A new surface adds a
-// target above and one entry in pointer_surfaces.
-Pointer_Surface :: struct {
-	// Whether the point lies on the surface while it is showing.
-	claims:       proc(app: ^App, w: ^Window, x, y: f32) -> bool,
-	// Runs for every surface on every move. The owner updates its hover and sets the cursor; every
-	// other surface clears its own hover, cheaply when there is none.
-	hover:        proc(app: ^App, w: ^Window, owner: Pointer_Target, e: input.Mouse_Move_Event),
-	// A press the surface owns. A modal surface also receives every release while it is open.
-	press:        proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event),
-	// The release of a press the surface owned, wherever it lands; false passes it on to the shared
-	// completion for confirmations, the palette and pane content. A release of a press the surface
-	// swallowed ends there either way.
-	release:      proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) -> bool,
+// What a surface's controls show in tooltips (tooltip.odin); every field may be nil.
+Pointer_Tip :: struct {
 	// The hovered control supplies a short label; the shared tooltip owns timing and drawing.
 	tooltip:      proc(app: ^App, w: ^Window, x, y: f32) -> string,
-	// Optional: what the labelled control would do, drawn under the label while the tooltip shows.
+	// What the labelled control would do, drawn under the label while the tooltip shows.
 	tooltip_card: proc(app: ^App, w: ^Window, x, y: f32) -> Tooltip_Card,
-	// Optional: the command or fixed key that does what the labelled control does, for a tooltip that
-	// names its shortcut. A control names it here, never in its label, so the tooltip shows the key the
-	// handler uses and a rebinding at once.
+	// The command or fixed key that does what the labelled control does, for a tooltip that names its
+	// shortcut. A control names it here, never in its label, so the tooltip shows the key the handler uses
+	// and a rebinding at once.
 	shortcut:     proc(app: ^App, w: ^Window, x, y: f32) -> Tooltip_Shortcut,
-	// Capture loss: the surface drops its hover, armed control and drag, whether or not it holds a button.
-	cancel:       proc(app: ^App, w: ^Window),
-	// The pointer left the window: the surface drops its hover, as a move another surface owns does.
-	leave:        proc(app: ^App, w: ^Window),
-	// A drag the surface holds follows every move before hover runs; `under` is the surface under the
-	// pointer. Only one drag is held at a time, since each starts with a Left press.
-	held:         proc(app: ^App, w: ^Window, under: Pointer_Target, e: input.Mouse_Move_Event) -> Pointer_Held,
-	// Takes the whole window while it shows: every press, every release that began elsewhere, and the
-	// moves of held presses and of drags that have not started.
-	modal:        bool,
-	// A press here keeps the pointer with this surface until its release, whatever buttons a move
-	// reports. The palette and a confirmation take the whole window while open, so a press on one that
-	// has since closed keeps nothing.
-	holds:        bool,
-	// A press here hands the keyboard back from the find bar to the pane; the bar and its matches stay.
-	blurs_find:   bool,
-	// A floating pane over the point hides the surface.
-	under_floats: bool,
 }
 
+// A new surface adds a target above and one entry in pointer_surfaces (host.Pointer_Surface), and one in
+// pointer_tips when its controls have tooltips.
+
 @(rodata)
-pointer_surfaces := [Pointer_Target]Pointer_Surface {
+pointer_surfaces := [Pointer_Target]host.Pointer_Surface(App, Window, Pointer_Target) {
 	.Notice           = {
 		claims = notice_claims, hover = notice_hover, press = notice_press, release = notice_release,
-		tooltip = notice_tooltip, cancel = notice_cancel, leave = notice_leave, holds = true,
+		cancel = notice_cancel, leave = notice_leave, holds = true,
 	},
 	.Workspace_Picker = {
 		claims = workspace_picker_claims, hover = workspace_picker_pointer_hover,
-		press = workspace_picker_button, tooltip = workspace_picker_tooltip,
-		shortcut = workspace_picker_shortcut, cancel = workspace_picker_pointer_cancel,
+		press = workspace_picker_button, cancel = workspace_picker_pointer_cancel,
 		leave = workspace_picker_leave, modal = true,
 	},
 	.Tab_Menu         = {
@@ -132,7 +94,8 @@ pointer_surfaces := [Pointer_Target]Pointer_Surface {
 		claims = divider_menu_claims, hover = divider_menu_hover, press = divider_menu_button, modal = true,
 	},
 	.Activity_Menu    = {
-		claims = activity_menu_claims, hover = activity_menu_hover, press = activity_menu_button, modal = true,
+		claims = activity_menu_claims, hover = activity_menu_hover, press = activity_menu_button,
+		modal = true,
 	},
 	.Activity_Row_Menu = {
 		claims = activity_row_menu_claims, hover = activity_row_menu_hover, press = activity_row_menu_button,
@@ -146,8 +109,7 @@ pointer_surfaces := [Pointer_Target]Pointer_Surface {
 	},
 	.Document_Menu    = {
 		claims = document_menu_claims, hover = document_menu_pointer_hover, press = document_menu_button,
-		tooltip = document_menu_tooltip, cancel = document_menu_pointer_cancel, leave = document_menu_leave,
-		modal = true,
+		cancel = document_menu_pointer_cancel, leave = document_menu_leave, modal = true,
 	},
 	.Command_Menu     = {
 		claims = command_menu_claims, hover = command_menu_pointer_hover, press = command_menu_button,
@@ -164,106 +126,175 @@ pointer_surfaces := [Pointer_Target]Pointer_Surface {
 	// native caption moves keep; a caption move outside the client area clears it instead.
 	.Caption          = {
 		claims = caption_claims, hover = caption_hover, press = caption_press, release = caption_release,
-		tooltip = caption_tooltip, shortcut = caption_shortcut, cancel = caption_cancel, holds = true,
+		cancel = caption_cancel, holds = true,
 	},
 	.Confirmation     = {
 		claims = confirmation_claims, hover = confirmation_pointer_hover, press = confirmation_press,
 		cancel = confirmation_pointer_cancel,
 	},
 	.Palette          = {
-		claims = palette_claims, hover = palette_hover, press = palette_press, tooltip = palette_tooltip,
-		shortcut = palette_shortcut, cancel = palette_pointer_cancel,
+		claims = palette_claims, hover = palette_hover, press = palette_press,
+		cancel = palette_pointer_cancel,
 	},
 	.Tab_Orientation  = {
 		claims = orientation_claims, hover = orientation_hover, press = orientation_press,
-		release = orientation_release, tooltip = orientation_tooltip, shortcut = orientation_shortcut,
-		cancel = orientation_cancel, leave = orientation_leave, holds = true,
+		release = orientation_release, cancel = orientation_cancel, leave = orientation_leave, holds = true,
 	},
 	.Title_Action     = {
 		claims = title_action_claims, hover = title_action_pointer_hover, press = title_action_press,
-		release = title_action_release, tooltip = title_action_tooltip, shortcut = title_action_shortcut,
-		cancel = title_action_cancel, leave = title_action_leave, holds = true,
+		release = title_action_release, cancel = title_action_cancel, leave = title_action_leave,
+		holds = true,
 	},
 	.Hidden_Panes     = {
 		claims = hidden_panes_claims, hover = hidden_panes_hover, press = hidden_panes_press,
-		cancel = hidden_panes_leave, leave = hidden_panes_leave, holds = true, blurs_find = true,
+		cancel = hidden_panes_leave, leave = hidden_panes_leave, holds = true,
 	},
 	.Find             = {
 		claims = find_claims, hover = find_pointer_hover, press = find_press, release = find_release,
-		tooltip = find_tooltip, shortcut = find_shortcut, cancel = find_pointer_cancel, leave = find_leave,
-		holds = true,
+		cancel = find_pointer_cancel, leave = find_leave, holds = true,
 	},
 	.Workspace_Button = {
 		claims = workspace_button_claims, hover = workspace_button_hover, press = workspace_button_press,
-		tooltip = workspace_button_tooltip, shortcut = workspace_button_shortcut, leave = workspace_button_leave,
-		holds = true, blurs_find = true,
+		leave = workspace_button_leave, holds = true,
 	},
 	.Status_Pill      = {
 		claims = status_pill_claims, hover = status_pill_hover, press = status_pill_press,
-		tooltip = status_pill_tooltip, shortcut = status_pill_shortcut, leave = status_pill_leave, holds = true,
-		blurs_find = true, under_floats = true,
+		leave = status_pill_leave, holds = true, under_covers = true,
 	},
 	.Activity_Toggle  = {
 		claims = status_panel_toggle_claims, hover = status_panel_toggle_hover,
 		press = status_panel_toggle_press, release = status_panel_toggle_release,
-		tooltip = status_panel_toggle_tooltip, shortcut = status_panel_toggle_shortcut,
-		cancel = status_panel_toggle_cancel, leave = status_panel_toggle_leave, holds = true, blurs_find = true,
+		cancel = status_panel_toggle_cancel, leave = status_panel_toggle_leave, holds = true,
 	},
 	.Divider          = {
-		claims = divider_claims, hover = divider_hover, press = divider_pointer_press, release = divider_release,
-		cancel = divider_pointer_cancel, held = divider_held, holds = true, blurs_find = true,
+		claims = divider_claims, hover = divider_hover, press = divider_pointer_press,
+		release = divider_release, cancel = divider_pointer_cancel, held = divider_held, holds = true,
 	},
 	.Status_Panel     = {
 		claims = status_panel_claims, hover = status_panel_hover, press = status_panel_press,
-		release = status_panel_release, tooltip = status_panel_tooltip, cancel = status_panel_cancel,
-		leave = status_panel_leave, holds = true, blurs_find = true, under_floats = true,
+		release = status_panel_release, cancel = status_panel_cancel, leave = status_panel_leave,
+		holds = true, under_covers = true,
 	},
 	.Tabs             = {
 		claims = tabs_claims, hover = tabs_hover, press = tab_interaction_press, release = tabs_release,
-		tooltip = tabs_tooltip, shortcut = tabs_shortcut, cancel = tabs_cancel, leave = tabs_leave,
-		held = tabs_held, holds = true, blurs_find = true, under_floats = true,
+		cancel = tabs_cancel, leave = tabs_leave, held = tabs_held, holds = true, under_covers = true,
 	},
 	.Floating         = {
 		claims = floating_claims, hover = floating_hover, press = floating_press, release = floating_release,
-		tooltip = floating_tooltip, shortcut = floating_shortcut, cancel = floating_pointer_cancel,
-		leave = floating_leave, held = floating_held, holds = true, blurs_find = true,
+		cancel = floating_pointer_cancel, leave = floating_leave, held = floating_held, holds = true,
 	},
 	.Pane_Header      = {
 		claims = header_claims, hover = header_hover, press = pane_header_press, release = header_release,
-		tooltip = header_tooltip, tooltip_card = header_tooltip_card, shortcut = header_shortcut,
-		cancel = header_cancel, leave = header_leave, held = pane_drag_held, holds = true, blurs_find = true,
+		cancel = header_cancel, leave = header_leave, held = pane_drag_held, holds = true,
 	},
 	.Scrollbar        = {
 		claims = scrollbar_claims, hover = scrollbar_hover, press = scrollbar_press,
 		release = scrollbar_release, cancel = scrollbar_cancel, leave = scrollbar_leave,
-		held = scrollbar_held, holds = true, blurs_find = true,
+		held = scrollbar_held, holds = true,
 	},
 	.Settings_Page    = {
 		claims = settings_claims, hover = settings_pointer_hover, press = settings_press,
-		release = settings_release, tooltip = settings_tooltip, shortcut = settings_shortcut,
-		cancel = settings_pointer_cancel, leave = settings_leave, holds = true, blurs_find = true,
+		release = settings_release, cancel = settings_pointer_cancel, leave = settings_leave, holds = true,
 	},
 	.Markdown_Page    = {
 		claims = markdown_claims, hover = markdown_hover, press = markdown_press, release = markdown_release,
-		cancel = markdown_gesture_clear, leave = markdown_leave, holds = true, blurs_find = true,
+		cancel = markdown_gesture_clear, leave = markdown_leave, holds = true,
 	},
 	.Changes_Page     = {
 		claims = changes_claims, hover = changes_hover, press = changes_press, release = changes_release,
-		cancel = changes_cancel, leave = changes_leave, tooltip = changes_tooltip, shortcut = changes_shortcut,
-		held = changes_divider_held, holds = true, blurs_find = true,
+		cancel = changes_cancel, leave = changes_leave, held = changes_divider_held, holds = true,
 	},
 	.Web_Page         = {
-		claims = web_claims, hover = web_hover, press = web_press, release = web_release,
-		tooltip = web_tooltip, cancel = web_cancel, leave = web_leave, holds = true, blurs_find = true,
+		claims = web_claims, hover = web_hover, press = web_press, release = web_release, cancel = web_cancel,
+		leave = web_leave, holds = true,
 	},
 	.Neovim_Page      = {
 		claims = neovim_claims, hover = neovim_hover, press = neovim_press, release = neovim_release,
-		cancel = neovim_cancel, holds = true, blurs_find = true,
+		cancel = neovim_cancel, holds = true,
 	},
 	.Content          = {
 		claims = content_claims, hover = content_hover, press = content_press, release = content_release,
-		cancel = content_cancel, leave = content_leave, holds = true, blurs_find = true,
+		cancel = content_cancel, leave = content_leave, holds = true,
 	},
+}
+
+@(rodata)
+pointer_tips := #partial [Pointer_Target]Pointer_Tip {
+	.Notice           = {
+		tooltip = notice_tooltip,
+	},
+	.Workspace_Picker = {
+		tooltip = workspace_picker_tooltip, shortcut = workspace_picker_shortcut,
+	},
+	.Document_Menu    = {
+		tooltip = document_menu_tooltip,
+	},
+	.Caption          = {
+		tooltip = caption_tooltip, shortcut = caption_shortcut,
+	},
+	.Palette          = {
+		tooltip = palette_tooltip, shortcut = palette_shortcut,
+	},
+	.Tab_Orientation  = {
+		tooltip = orientation_tooltip, shortcut = orientation_shortcut,
+	},
+	.Title_Action     = {
+		tooltip = title_action_tooltip, shortcut = title_action_shortcut,
+	},
+	.Find             = {
+		tooltip = find_tooltip, shortcut = find_shortcut,
+	},
+	.Workspace_Button = {
+		tooltip = workspace_button_tooltip, shortcut = workspace_button_shortcut,
+	},
+	.Status_Pill      = {
+		tooltip = status_pill_tooltip, shortcut = status_pill_shortcut,
+	},
+	.Activity_Toggle  = {
+		tooltip = status_panel_toggle_tooltip, shortcut = status_panel_toggle_shortcut,
+	},
+	.Status_Panel     = {
+		tooltip = status_panel_tooltip,
+	},
+	.Tabs             = {
+		tooltip = tabs_tooltip, shortcut = tabs_shortcut,
+	},
+	.Floating         = {
+		tooltip = floating_tooltip, shortcut = floating_shortcut,
+	},
+	.Pane_Header      = {
+		tooltip = header_tooltip, tooltip_card = header_tooltip_card, shortcut = header_shortcut,
+	},
+	.Settings_Page    = {
+		tooltip = settings_tooltip, shortcut = settings_shortcut,
+	},
+	.Changes_Page     = {
+		tooltip = changes_tooltip, shortcut = changes_shortcut,
+	},
+	.Web_Page         = {
+		tooltip = web_tooltip,
+	},
+}
+
+// A press on one of these hands the keyboard back from the find bar to the pane; the bar and its matches
+// stay.
+POINTER_BLURS_FIND :: bit_set[Pointer_Target] {
+	.Hidden_Panes,
+	.Workspace_Button,
+	.Status_Pill,
+	.Activity_Toggle,
+	.Divider,
+	.Status_Panel,
+	.Tabs,
+	.Floating,
+	.Pane_Header,
+	.Scrollbar,
+	.Settings_Page,
+	.Markdown_Page,
+	.Changes_Page,
+	.Web_Page,
+	.Neovim_Page,
+	.Content,
 }
 
 // The workspace and tab chrome a linked window does not draw.
@@ -294,13 +325,10 @@ POINTER_SCREEN_ABSENT :: bit_set[Pointer_Target] {
 // The topmost surface whose area holds the point. Below the modal surfaces, callers handle presses
 // and drags that already hold the pointer before acting on the answer.
 pointer_target :: proc(app: ^App, w: ^Window, x, y: f32) -> Pointer_Target {
-	for target in Pointer_Target {
-		if window_linked(w) && target in POINTER_LINKED_ABSENT {continue}
-		if w.pane_fill == .Screen && target in POINTER_SCREEN_ABSENT {continue}
-		if pointer_surfaces[target].under_floats && floating_covers(w, x, y) {continue}
-		if pointer_surfaces[target].claims(app, w, x, y) {return target}
-	}
-	return .Content
+	absent: bit_set[Pointer_Target]
+	if window_linked(w) {absent += POINTER_LINKED_ABSENT}
+	if w.pane_fill == .Screen {absent += POINTER_SCREEN_ABSENT}
+	return host.pointer_target(&pointer_surfaces, app, w, x, y, absent, floating_covers, Pointer_Target.Content)
 }
 
 // Whether the target takes the whole window ahead of held presses and drags.
@@ -310,18 +338,14 @@ pointer_modal :: proc(target: Pointer_Target) -> bool {
 
 // Lets every surface see the move: the owner hovers and sets the cursor, the rest clear their hover.
 pointer_move :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: input.Mouse_Move_Event) {
-	for surface in pointer_surfaces {
-		if surface.hover != nil {surface.hover(app, w, owner, e)}
-	}
+	host.pointer_move(&pointer_surfaces, app, w, owner, e)
 	tooltip_hover(app, w, owner, e)
 }
 
 // The pointer left the window: every surface drops its hover through its own leave.
 pointer_leave :: proc(app: ^App, w: ^Window) {
 	tooltip_cancel(w)
-	for surface in pointer_surfaces {
-		if surface.leave != nil {surface.leave(app, w)}
-	}
+	host.pointer_leave(&pointer_surfaces, app, w)
 	w.dirty = true
 }
 
@@ -331,17 +355,13 @@ pointer_held :: proc(
 	w: ^Window,
 	under: Pointer_Target,
 	e: input.Mouse_Move_Event,
-) -> Pointer_Held {
-	for surface in pointer_surfaces {
-		if surface.held == nil {continue}
-		if held := surface.held(app, w, under, e); held != .Free {return held}
-	}
-	return .Free
+) -> host.Pointer_Held {
+	return host.pointer_held(&pointer_surfaces, app, w, under, e)
 }
 
 pointer_press :: proc(app: ^App, w: ^Window, owner: Pointer_Target, e: input.Mouse_Button_Event) {
 	if e.pressed {tooltip_cancel(w)}
-	pointer_surfaces[owner].press(app, w, e)
+	host.pointer_press(&pointer_surfaces, app, w, owner, e)
 }
 
 pointer_release :: proc(
@@ -350,7 +370,5 @@ pointer_release :: proc(
 	owner: Pointer_Target,
 	e: input.Mouse_Button_Event,
 ) -> bool {
-	release := pointer_surfaces[owner].release
-	return release != nil && release(app, w, e)
+	return host.pointer_release(&pointer_surfaces, app, w, owner, e)
 }
-

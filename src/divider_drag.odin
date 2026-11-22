@@ -5,6 +5,7 @@ import "cosmos:platform"
 import "cosmos:input"
 import "cosmos:render"
 import "cosmos:ui"
+import "cosmos:host"
 
 
 // How the pointer grabs dividers and dock edges, in DIPs: the band either side of a bar, the reach of a
@@ -265,7 +266,7 @@ divider_held :: proc(
 	w: ^Window,
 	under: Pointer_Target,
 	e: input.Mouse_Move_Event,
-) -> Pointer_Held {
+) -> host.Pointer_Held {
 	if divider_dragging(w) == nil || pointer_modal(under) {return .Free}
 	if .Left not_in e.buttons {divider_cancel(w); return .Taken}
 	divider_drag(app, w, f32(e.x), f32(e.y))
