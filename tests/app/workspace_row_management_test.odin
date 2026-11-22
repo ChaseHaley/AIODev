@@ -143,16 +143,16 @@ workspace134_menu_targets_row_and_confirms_only_its_deletion :: proc(t: ^testing
 	app.workspace_picker_key(s, w, {key = .P, modifiers = {.Control}, pressed = true})
 	testing.expect_value(t, w.workspace_picker.menu_selected, len(app.WORKSPACE_ROW_MENU) - 1)
 	app.workspace_picker_key(s, w, {key = .Enter, pressed = false})
-	testing.expect(t, app.confirmation_current(w) == nil)
+	testing.expect(t, ui.confirmation_current(&w.confirmation) == nil)
 	app.workspace_picker_key(s, w, {key = .Enter, pressed = true})
-	pc := app.confirmation_asking(w, app.Pending_Close)
+	pc := ui.confirmation_asking(&w.confirmation, app.Pending_Close)
 	if !testing.expect(t, pc != nil && !app.workspace_picker_active(&w.workspace_picker)) { return }
 	question, _ := pc.target.(app.Close_Workspace)
 	testing.expect_value(t, question.workspace, f.target.id)
 	testing.expect_value(t, question.owner, f.owner.id)
 	testing.expect(t, w.workspace == f.current && f.owner.workspace == f.target)
 	app.handle_event(s, input.Key_Event{window = w.id, key = .Escape, pressed = true})
-	testing.expect(t, app.confirmation_current(w) == nil)
+	testing.expect(t, ui.confirmation_current(&w.confirmation) == nil)
 	testing.expect_value(t, len(s.workspaces), 2)
 	testing.expect(t, w.workspace == f.current && f.owner.workspace == f.target)
 	app.workspace_picker_open(s, w)
@@ -305,7 +305,7 @@ workspace134_stale_and_disabled_targets_never_fall_back_to_current :: proc(t: ^t
 	w.workspace_picker.menu_selected = len(app.WORKSPACE_ROW_MENU) - 1
 	testing.expect(t, app.workspace_discard_empty(s, other))
 	app.workspace_row_menu_choose(s, w)
-	testing.expect(t, app.confirmation_current(w) == nil)
+	testing.expect(t, ui.confirmation_current(&w.confirmation) == nil)
 	testing.expect_value(t, len(s.workspaces), 1)
 }
 

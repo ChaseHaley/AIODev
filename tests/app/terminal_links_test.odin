@@ -10,6 +10,7 @@ import "cosmos:input"
 import "cosmos:platform"
 import "aio:term"
 import app "../../src"
+import "cosmos:ui"
 
 Open_Stub :: struct {
 	uri:   string,
@@ -279,9 +280,9 @@ active_terminal_file_waits_for_confirmation_and_can_be_cancelled :: proc(t: ^tes
 	if !palette_fixture_create(t, &f, "terminal-active-file", second_window = false) {return}
 	s, w := &f.state, f.state.windows[0]
 	app.target_open(s, w, app.File_Target{`C:\Windows\System32\cmd.exe`})
-	testing.expect(t, app.confirmation_asking(w, app.Pending_File) != nil)
+	testing.expect(t, ui.confirmation_asking(&w.confirmation, app.Pending_File) != nil)
 	app.confirmation_cancel(s, w)
-	testing.expect(t, app.confirmation_asking(w, app.Pending_File) == nil)
+	testing.expect(t, ui.confirmation_asking(&w.confirmation, app.Pending_File) == nil)
 }
 
 link_file_stub :: proc(path, approved: string) -> bool {
@@ -431,10 +432,10 @@ ctrl_click_active_file_opens_only_after_explicit_acceptance :: proc(t: ^testing.
 	link_feed(t, &f, "\x1b[2J\x1b[3J\x1b[H" +
 		"\x1b]8;;file:///C:/Windows/System32/cmd.exe\x1b\\EXEC\x1b]8;;\x1b\\")
 	link_click(t, &f, 0, 0, true)
-	testing.expect(t, app.confirmation_asking(w, app.Pending_File) != nil)
+	testing.expect(t, ui.confirmation_asking(&w.confirmation, app.Pending_File) != nil)
 	testing.expect_value(t, Open_Stub_State.calls, 0)
 	_ = app.confirmation_key(s, w, {key = .Enter, pressed = true})
-	testing.expect(t, app.confirmation_asking(w, app.Pending_File) == nil, "Enter initially cancels")
+	testing.expect(t, ui.confirmation_asking(&w.confirmation, app.Pending_File) == nil, "Enter initially cancels")
 	link_click(t, &f, 0, 0, true)
 	_ = app.confirmation_key(s, w, {key = .Tab, pressed = true})
 	_ = app.confirmation_key(s, w, {key = .Enter, pressed = true})

@@ -94,8 +94,8 @@ process_editor_always_confirms_deletion_and_rejects_changed_subjects :: proc(t: 
 	s, w := &f.state, f.state.windows[0]
 	p := &w.editor
 	app.editor_process_remove_ask(s, w, 1)
-	c := app.confirmation_current(w)
-	if !testing.expect(t, c != nil && app.confirmation_asking(w, app.Process_Remove) != nil) {return}
+	c := ui.confirmation_current(&w.confirmation)
+	if !testing.expect(t, c != nil && ui.confirmation_asking(&w.confirmation, app.Process_Remove) != nil) {return}
 	testing.expect(t, !c.show_option)
 	testing.expect_value(t, c.focus, ui.Confirm_Button.Cancel)
 	app.confirmation_finish(s, w, false)
@@ -106,7 +106,7 @@ process_editor_always_confirms_deletion_and_rejects_changed_subjects :: proc(t: 
 	testing.expect_value(t, s.settings.process.padding_groups, "Different:4:codex;Tools:8:less")
 	testing.expect(t, p.error)
 	app.editor_process_remove_ask(s, w, 1)
-	c = app.confirmation_current(w)
+	c = ui.confirmation_current(&w.confirmation)
 	testing.expect(t, c != nil && !c.show_option)
 	app.confirmation_finish(s, w, true)
 	testing.expect_value(t, s.settings.process.padding_groups, "Tools:8:less")

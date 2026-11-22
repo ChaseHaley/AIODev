@@ -58,7 +58,7 @@ opener_table_adds_edits_moves_and_removes_a_program :: proc(t: ^testing.T) {
 	if !testing.expect(t, views.editor_select_key(e, "opener.program-1")) {return}
 	profile_press(&f, {key = .Tab})
 	profile_press(&f, {key = .Delete})
-	removing := app.confirmation_asking(w, app.Opener_Remove)
+	removing := ui.confirmation_asking(&w.confirmation, app.Opener_Remove)
 	if !testing.expect(t, removing != nil) {return}
 	testing.expect_value(t, app.editor_opener_remove_text(removing^).title, "Delete New program?")
 	app.confirmation_finish(&f.state, w, true)
@@ -71,7 +71,7 @@ opener_table_adds_edits_moves_and_removes_a_program :: proc(t: ^testing.T) {
 	if !testing.expect(t, views.editor_select_key(e, "opener.program-2")) {return}
 	profile_press(&f, {key = .Tab})
 	profile_press(&f, {key = .Delete})
-	if !testing.expect(t, app.confirmation_asking(w, app.Opener_Remove) != nil) {return}
+	if !testing.expect(t, ui.confirmation_asking(&w.confirmation, app.Opener_Remove) != nil) {return}
 	app.confirmation_finish(&f.state, w, true)
 	testing.expect(t, profile_file_lacks(f.path, "opener.program-2."))
 	testing.expect(t, profile_file_lacks(f.path, "opener.order ="))

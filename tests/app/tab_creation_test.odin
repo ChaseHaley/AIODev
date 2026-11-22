@@ -156,7 +156,7 @@ profile.order = default, cmd
 	}
 	ui.menu_select(&w.profile_menu.menu, cmd)
 	app.profile_menu_choose(s, w)
-	testing.expect(t, !app.profile_menu_shown(w) && app.confirmation_asking(w, app.Pane_Swap) == nil)
+	testing.expect(t, !app.profile_menu_shown(w) && ui.confirmation_asking(&w.confirmation, app.Pane_Swap) == nil)
 	testing.expect_value(t, app.focused_session(s, w).profile_id, "default")
 	testing.expect_value(t, app.session_find(s, first).profile_id, "default")
 }

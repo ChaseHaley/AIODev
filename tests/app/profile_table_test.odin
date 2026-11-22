@@ -59,7 +59,7 @@ profile_add_and_remove_preserve_settings_scroll :: proc(t: ^testing.T) {
 	testing.expect_value(t, e.scroll, scroll)
 	views.editor_request_set(e, views.Profile_Request{.Remove, strings.clone("profile-1")})
 	app.editor_outcome(&f.state, f.state.windows[0], .Profile_Action)
-	removing := app.confirmation_asking(f.state.windows[0], app.Profile_Remove)
+	removing := ui.confirmation_asking(&f.state.windows[0].confirmation, app.Profile_Remove)
 	if !testing.expect(t, removing != nil) {return}
 	testing.expect_value(t, app.editor_profile_remove_text(removing^).title, "Delete New profile?")
 	e.scroll = scroll
@@ -427,15 +427,15 @@ profile_table_includes_detected_and_confirms_custom_removal :: proc(t: ^testing.
 	testing.expect(t, .Protected in views.editor_row(e).flags)
 	profile_press(&f, {key = .Tab})
 	profile_press(&f, {key = .Delete})
-	testing.expect(t, app.confirmation_asking(f.state.windows[0], app.Profile_Remove) == nil)
+	testing.expect(t, ui.confirmation_asking(&f.state.windows[0].confirmation, app.Profile_Remove) == nil)
 	testing.expect(t, settings.profile_visible(settings.profile_find(&f.state.settings.profiles, "fake-shell")))
 	app.editor_profile_remove_ask(&f.state, f.state.windows[0], "fake-shell")
-	testing.expect(t, app.confirmation_asking(f.state.windows[0], app.Profile_Remove) == nil)
+	testing.expect(t, ui.confirmation_asking(&f.state.windows[0].confirmation, app.Profile_Remove) == nil)
 
 	testing.expect(t, views.editor_select_key(e, "profile.beta"))
 	views.editor_focus_row(e)
 	profile_press(&f, {key = .Delete})
-	testing.expect(t, app.confirmation_asking(f.state.windows[0], app.Profile_Remove) != nil)
+	testing.expect(t, ui.confirmation_asking(&f.state.windows[0].confirmation, app.Profile_Remove) != nil)
 	app.confirmation_finish(&f.state, f.state.windows[0], false)
 	testing.expect(t, !profile_file_lacks(f.path, "profile.beta.command"))
 	app.editor_profile_remove_ask(&f.state, f.state.windows[0], "beta")
@@ -468,7 +468,7 @@ profile_table_keeps_the_built_in_default_and_resets_a_removed_default :: proc(t:
 	if !testing.expect(t, views.editor_select_key(e, "profile.beta")) {return}
 	profile_press(&f, {key = .Tab})
 	profile_press(&f, {key = .Delete})
-	testing.expect(t, app.confirmation_asking(f.state.windows[0], app.Profile_Remove) != nil)
+	testing.expect(t, ui.confirmation_asking(&f.state.windows[0].confirmation, app.Profile_Remove) != nil)
 	app.confirmation_finish(&f.state, f.state.windows[0], true)
 	testing.expect(t, profile_file_lacks(f.path, "profile.beta."))
 	testing.expect(t, profile_file_has(f.path, `shell.default_profile = "default"`))
@@ -477,7 +477,7 @@ profile_table_keeps_the_built_in_default_and_resets_a_removed_default :: proc(t:
 	if !testing.expect(t, views.editor_select_key(e, "profile.default")) {return}
 	profile_press(&f, {key = .Tab})
 	profile_press(&f, {key = .Delete})
-	testing.expect(t, app.confirmation_asking(f.state.windows[0], app.Profile_Remove) == nil)
+	testing.expect(t, ui.confirmation_asking(&f.state.windows[0].confirmation, app.Profile_Remove) == nil)
 	testing.expect(t, settings.profile_find(&f.state.settings.profiles, "default") != nil)
 }
 

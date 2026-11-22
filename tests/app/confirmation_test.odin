@@ -44,12 +44,12 @@ confirmation_fixture_destroy :: proc(t: ^testing.T, f: ^Confirmation_Fixture) {
 confirmation_open_subject :: proc(t: ^testing.T, state: ^app.App, w: ^app.Window, swap: bool) -> ^ui.Confirm {
 	if swap {
 		app.pane_shell_swap_request(state, w, app.window_tree(w).focus, "alternate")
-		testing.expect(t, app.confirmation_asking(w, app.Pane_Swap) != nil)
+		testing.expect(t, ui.confirmation_asking(&w.confirmation, app.Pane_Swap) != nil)
 	} else {
 		app.pending_close_open_tab(state, w, w.workspace.selected)
-		testing.expect(t, app.confirmation_asking(w, app.Pending_Close) != nil)
+		testing.expect(t, ui.confirmation_asking(&w.confirmation, app.Pending_Close) != nil)
 	}
-	return app.confirmation_current(w)
+	return ui.confirmation_current(&w.confirmation)
 }
 
 @(private="file")
@@ -93,14 +93,14 @@ confirmation_both_subjects_advance_draw_fade_and_release_payload :: proc(t: ^tes
 		testing.expect(t, len(w.list.rects) > 0 && len(w.list.glyphs) > 0)
 		confirmation_test_key(state, w, .Escape)
 		testing.expect(t, !ui.presence_is_open(c.presence) && ui.presence_visible(c.presence))
-		if swap {testing.expect_value(t, app.confirmation_subject(w, app.Pane_Swap).profile_id, "alternate")}
-		else {testing.expect(t, app.confirmation_subject(w, app.Pending_Close) != nil)}
+		if swap {testing.expect_value(t, ui.confirmation_subject(&w.confirmation, app.Pane_Swap).profile_id, "alternate")}
+		else {testing.expect(t, ui.confirmation_subject(&w.confirmation, app.Pending_Close) != nil)}
 		app.update_motion(state)
 		c.motion.started = time.tick_add(time.tick_now(), -200 * time.Millisecond)
 		w.dirty = false
 		app.update_motion(state)
 		// The settled question released its subject with it.
-		testing.expect(t, w.dirty && app.confirmation_shown(w) == nil)
+		testing.expect(t, w.dirty && ui.confirmation_shown(&w.confirmation) == nil)
 		render.draw_list_reset(&w.list)
 		testing.expect_value(t, app.confirmation_draw(state, w), render.Build_Status.Ok)
 		testing.expect_value(t, len(w.list.rects), 0)
@@ -111,7 +111,7 @@ confirmation_both_subjects_advance_draw_fade_and_release_payload :: proc(t: ^tes
 		testing.expect_value(t, c.motion.value, f32(1))
 		confirmation_test_key(state, w, .Escape)
 		app.update_motion(state)
-		testing.expect(t, app.confirmation_shown(w) == nil)
+		testing.expect(t, ui.confirmation_shown(&w.confirmation) == nil)
 	}
 }
 
@@ -137,18 +137,18 @@ confirmation_both_subjects_cancel_outside_release_capture_and_focus :: proc(t: ^
 		testing.expect(t, ui.presence_is_open(c.presence))
 		confirmation_test_mouse(state, w, true, 1, f32(w.height - 1))
 		confirmation_test_mouse(state, w, false, 1, f32(w.height - 1))
-		testing.expect(t, app.confirmation_current(w) == nil && !app.selection_active(w))
+		testing.expect(t, ui.confirmation_current(&w.confirmation) == nil && !app.selection_active(w))
 		testing.expect_value(t, len(w.workspace.tabs), 1)
 		testing.expect_value(t, app.focused_session(state, w).profile_id, "default")
 		c = confirmation_open_subject(t, state, w, swap)
 		if swap {c.option = true}
 		confirmation_test_mouse(state, w, true, x, y)
 		app.handle_event(state, platform.Focus_Event{window = w.id, focused = false})
-		shown := app.confirmation_shown(w)
-		testing.expect(t, app.confirmation_current(w) == nil && (shown == nil || !ui.armed_down(shown.dialog.armed)))
+		shown := ui.confirmation_shown(&w.confirmation)
+		testing.expect(t, ui.confirmation_current(&w.confirmation) == nil && (shown == nil || !ui.armed_down(shown.dialog.armed)))
 		state.animations = false
 		app.update_motion(state)
-		testing.expect(t, app.confirmation_shown(w) == nil)
+		testing.expect(t, ui.confirmation_shown(&w.confirmation) == nil)
 		testing.expect(t, .Shell_Switch in state.settings.interface.confirm)
 	}
 }
@@ -175,7 +175,7 @@ confirmation_accept_keeps_swap_identity_and_retires_last_tab_window :: proc(t: ^
 	app.update_motion(state)
 	app.pane_split(state, w, .Right)
 	app.tab_close_request(state, w, 0)
-	testing.expect(t, app.confirmation_asking(w, app.Pending_Close) != nil)
+	testing.expect(t, ui.confirmation_asking(&w.confirmation, app.Pending_Close) != nil)
 	window_id := w.id
 	l := ui.confirm_layout(f32(w.width), f32(w.height), w.scale)
 	confirmation_test_mouse(state, w, true, l.accept.x + 10, l.accept.y + 10)

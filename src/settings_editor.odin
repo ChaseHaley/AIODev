@@ -1273,9 +1273,9 @@ when AIO_CONTROL {
 			page = settings_layout(w)
 			if len(p.items) > 0 {selected = views.editor_row_parts(p, page, p.selected)}
 		}
-		question := confirmation_shown(w)
-		process_remove := confirmation_asking(w, Process_Remove) != nil
-		removing := confirmation_subject(w, Profile_Remove)
+		question := ui.confirmation_shown(&w.confirmation)
+		process_remove := ui.confirmation_asking(&w.confirmation, Process_Remove) != nil
+		removing := ui.confirmation_subject(&w.confirmation, Profile_Remove)
 		_, menu_open := p.mode.(views.Editor_Profile_Menu)
 		detected := 0
 		for &profile in app.settings.profiles.items {
@@ -1285,7 +1285,7 @@ when AIO_CONTROL {
 		for group, index in p.groups {
 			if group.title == SETTINGS_SECTIONS[.Profiles].title {profile_group = index; break}
 		}
-		opener_removing := confirmation_subject(w, Opener_Remove)
+		opener_removing := ui.confirmation_subject(&w.confirmation, Opener_Remove)
 		opener_group := -1
 		for group, index in p.groups {
 			if group.title == SETTINGS_SECTIONS[.Link_Programs].title {opener_group = index; break}
@@ -1375,7 +1375,8 @@ when AIO_CONTROL {
 		state_text(r, "settings.profile.default", app.settings.profiles.default_id)
 		// The page no longer has a detected-profile section; its keys keep their empty values.
 		state_text(r, "settings.profile.detected_open", "false")
-		state_text(r, "settings.profile.removing", confirmation_asking(w, Profile_Remove) != nil ? removing.id : "")
+		removing_asked := ui.confirmation_asking(&w.confirmation, Profile_Remove) != nil
+		state_text(r, "settings.profile.removing", removing_asked ? removing.id : "")
 		remove_title := removing != nil ? editor_profile_remove_text(removing^).title : "Delete profile?"
 		state_text(r, "settings.profile.remove_title", remove_title)
 		state_value(r, "settings.profile.menu_open", menu_open)
@@ -1403,7 +1404,7 @@ when AIO_CONTROL {
 		state_text(
 			r,
 			"settings.opener.removing",
-			confirmation_asking(w, Opener_Remove) != nil ? opener_removing.id : "",
+			ui.confirmation_asking(&w.confirmation, Opener_Remove) != nil ? opener_removing.id : "",
 		)
 		opener_title := opener_removing != nil ? editor_opener_remove_text(opener_removing^).title : ""
 		state_text(r, "settings.opener.remove_title", opener_title)

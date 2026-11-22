@@ -8,6 +8,7 @@ import "core:testing"
 import app "../../src"
 import "aio:layout"
 import "cosmos:platform"
+import "cosmos:ui"
 
 @(private="file")
 Pending_Fixture :: struct { state: app.App, directory, path: string }
@@ -38,7 +39,7 @@ pending_fixture_destroy :: proc(t: ^testing.T, f: ^Pending_Fixture) {
 
 @(private="file")
 close_asking :: proc(w: ^app.Window) -> ^app.Pending_Close {
-	return app.confirmation_asking(w, app.Pending_Close)
+	return ui.confirmation_asking(&w.confirmation, app.Pending_Close)
 }
 
 @(test)
@@ -141,7 +142,7 @@ pending_close_workspace_subject_recounts_and_deletes :: proc(t: ^testing.T) {
 	testing.expect_value(t, len(state.workspaces), 1)
 	testing.expect(t, w.workspace.id != target_id)
 	// The window adopting its replacement released the question's subject, names included.
-	testing.expect(t, app.confirmation_shown(w) == nil)
+	testing.expect(t, ui.confirmation_shown(&w.confirmation) == nil)
 }
 
 @(test)

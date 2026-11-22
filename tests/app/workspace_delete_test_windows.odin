@@ -129,7 +129,7 @@ last_settings_tab_closes_the_app_after_split_close_confirmation :: proc(t: ^test
 	w := state.windows[0]
 	app.pane_split(state, w, .Right)
 	app.tab_close_request(state, w, 0)
-	testing.expect(t, app.confirmation_asking(w, app.Pending_Close) != nil)
+	testing.expect(t, ui.confirmation_asking(&w.confirmation, app.Pending_Close) != nil)
 	delete_key(state, w, .Escape)
 	testing.expect(t, state.run == .Running && len(w.workspace.tabs) == 1)
 	app.run_action(state, w, .Settings_UI)
@@ -201,7 +201,7 @@ workspace_delete_cancel_and_last_replacement_preserve_window :: proc(t: ^testing
 	defer for handle in processes { if handle != nil { testing.expect(t, bool(win32.CloseHandle(handle))) } }
 	for cancel in ([?]int{0, 1, 2, 3}) {
 		app.workspace_delete_request(state, w, workspace)
-		pc := app.confirmation_asking(w, app.Pending_Close)
+		pc := ui.confirmation_asking(&w.confirmation, app.Pending_Close)
 		if !testing.expect(t, pc != nil && !app.workspace_picker_active(&w.workspace_picker)) { return }
 		text := app.pending_close_text(state, pc, true, w.workspace)
 		testing.expect(t, strings.contains(text.title, workspace.name))
@@ -218,7 +218,7 @@ workspace_delete_cancel_and_last_replacement_preserve_window :: proc(t: ^testing
 		case 3:
 			app.handle_event(state, input.Mouse_Button_Event{window = w.id, button = .Left, pressed = true})
 		}
-		testing.expect(t, app.confirmation_current(w) == nil && w.workspace == workspace)
+		testing.expect(t, ui.confirmation_current(&w.confirmation) == nil && w.workspace == workspace)
 		testing.expect_value(t, len(workspace.tabs), 3)
 		testing.expect_value(t, len(state.sessions), 3)
 		testing.expect_value(t, win32.WaitForSingleObject(process, 0), win32.WAIT_TIMEOUT)
@@ -233,7 +233,7 @@ workspace_delete_cancel_and_last_replacement_preserve_window :: proc(t: ^testing
 	testing.expect_value(t, len(w.workspace.tabs), 1)
 	testing.expect_value(t, len(state.sessions), 1)
 	testing.expect(t, !views.editor_loaded(&w.editor) && !app.tab_menu_shown(w) &&
-		app.confirmation_current(w) == nil)
+		ui.confirmation_current(&w.confirmation) == nil)
 	testing.expect_value(t, win32.WaitForSingleObject(process, 1000), win32.WAIT_OBJECT_0)
 	for handle in processes { testing.expect_value(t, win32.WaitForSingleObject(handle, 1000), win32.WAIT_OBJECT_0) }
 	app.tick(state)
@@ -424,11 +424,11 @@ workspace_delete_rejects_previews_and_cancels_when_requester_closes :: proc(t: ^
 	id := target.id
 	target.provisional = true
 	app.workspace_delete_request(state, w, target)
-	testing.expect(t, app.confirmation_current(w) == nil)
+	testing.expect(t, ui.confirmation_current(&w.confirmation) == nil)
 	target.provisional = false
 	w.phase = .Preparing
 	app.workspace_delete_request(state, w, target)
-	testing.expect(t, app.confirmation_current(w) == nil)
+	testing.expect(t, ui.confirmation_current(&w.confirmation) == nil)
 	w.phase = .Shown
 	app.workspace_new(state, w, true)
 	app.rename_finish(state, w, true)
@@ -445,7 +445,7 @@ workspace_delete_rejects_previews_and_cancels_when_requester_closes :: proc(t: ^
 	delete_key(state, w, .Enter)
 	testing.expect(t, app.workspace_find(state, id) == nil)
 	delete_key(state, requester, .Enter)
-	testing.expect(t, app.confirmation_current(requester) == nil)
+	testing.expect(t, ui.confirmation_current(&requester.confirmation) == nil)
 	testing.expect_value(t, len(state.sessions), 2)
 	testing.expect_value(t, len(state.workspaces), 2)
 	app.tick(state)
@@ -530,7 +530,7 @@ workspace_view_partial_failure_and_move_have_one_owner :: proc(t: ^testing.T) {
 // The workspace deletion the window asks about, if it asks one.
 @(private="file")
 delete_question :: proc(w: ^app.Window) -> (app.Close_Workspace, bool) {
-	pc := app.confirmation_asking(w, app.Pending_Close)
+	pc := ui.confirmation_asking(&w.confirmation, app.Pending_Close)
 	if pc == nil {return {}, false}
 	question, ok := pc.target.(app.Close_Workspace)
 	return question, ok

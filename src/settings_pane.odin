@@ -305,7 +305,8 @@ settings_page_press :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) 
 // then the focused page finishes its press.
 @(private)
 settings_release :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) -> bool {
-	if e.button != .Left || confirmation_current(w) != nil || palette_active(app, w) {return false}
+	asking := ui.confirmation_current(&w.confirmation) != nil
+	if e.button != .Left || asking || palette_active(app, w) {return false}
 	w.dirty = true
 	x, y := f32(e.x), f32(e.y)
 	if views.editor_order_dragging(&w.editor, .Process_Groups) {

@@ -190,7 +190,7 @@ overlay_kind :: proc(app: ^App, w: ^Window) -> Overlay_Kind {
 	case Overlay_Document_Menu: return .Document_Menu
 	case Overlay_Command_Menu: return .Command_Menu
 	}
-	if confirmation_current(w) != nil {return .Confirmation}
+	if ui.confirmation_current(&w.confirmation) != nil {return .Confirmation}
 	if palette_active(app, w) {return .Palette}
 	return .None
 }
@@ -219,7 +219,8 @@ overlay_close_all :: proc(app: ^App, w: ^Window, reopening: ^ui.Confirm = nil) {
 	overlay_close(app, w)
 	palette_close(app, w)
 	if workspace_picker_active(&w.workspace_picker) {workspace_picker_cancel(w)}
-	if current := confirmation_current(w); current != nil && current != reopening {confirmation_cancel(app, w)}
+	current := ui.confirmation_current(&w.confirmation)
+	if current != nil && current != reopening {confirmation_cancel(app, w)}
 	status_inbox_close(w)
 	w.dirty = true
 }

@@ -52,8 +52,8 @@ pending_close_open_tab :: proc(app: ^App, w: ^Window, index: int, restore: ^[dyn
 	close := Close_Tab{tab = w.workspace.tabs[index].id}
 	if restore != nil {close.restore, restore^ = restore^, {}}
 	reopening: ^ui.Confirm
-	if asking := confirmation_asking(w, Pending_Close); asking != nil {
-		reopening = confirmation_current(w)
+	if asking := ui.confirmation_asking(&w.confirmation, Pending_Close); asking != nil {
+		reopening = ui.confirmation_current(&w.confirmation)
 		if held, ok := &asking.target.(Close_Tab); ok && len(held.restore) > 0 {
 			delete(close.restore)
 			close.restore, held.restore = held.restore, {}

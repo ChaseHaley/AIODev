@@ -10,6 +10,7 @@ import "core:strings"
 import "core:testing"
 import "core:time"
 import app "../../src"
+import "cosmos:ui"
 
 @(private = "file")
 TIMEOUT :: 10 * time.Second
@@ -69,7 +70,7 @@ tick_until_missing :: proc(state: ^app.App, path: string) -> bool {
 tick_until_asking :: proc(state: ^app.App, w: ^app.Window) -> bool {
 	for start := time.tick_now(); time.tick_since(start) < TIMEOUT; {
 		app.tick(state)
-		if app.confirmation_asking(w, app.Turns_Delete) != nil {return true}
+		if ui.confirmation_asking(&w.confirmation, app.Turns_Delete) != nil {return true}
 		time.sleep(10 * time.Millisecond)
 	}
 	return false
@@ -96,7 +97,7 @@ recording_writes_its_marker_and_removes_it_when_turned_off :: proc(t: ^testing.T
 	testing.expect(t, !os.exists(marker), "turning recording off removes the marker")
 	// Nothing was recorded, so nothing is offered for deletion.
 	for _ in 0 ..< 5 {app.tick(&f.state)}
-	testing.expect(t, app.confirmation_asking(f.state.windows[0], app.Turns_Delete) == nil)
+	testing.expect(t, ui.confirmation_asking(&f.state.windows[0].confirmation, app.Turns_Delete) == nil)
 
 	testing.expect(t, app.settings_save_value(&f.state, "turns.record", "true", "Could not save."))
 	testing.expect(t, f.state.turn_recorder.recording)
@@ -124,7 +125,7 @@ turning_recording_off_offers_to_delete_the_copies :: proc(t: ^testing.T) {
 	app.reload_settings(&f.state, false)
 	testing.expect(t, !f.state.turn_recorder.recording)
 	if !testing.expect(t, tick_until_asking(&f.state, w), "a recorded copy prompts the question") {return}
-	asking := app.confirmation_current(w)
+	asking := ui.confirmation_current(&w.confirmation)
 	testing.expect(t, asking != nil)
 	text := app.turns_delete_text()
 	testing.expect_value(t, text.title, "Delete recorded turns?")

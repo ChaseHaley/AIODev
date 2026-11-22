@@ -133,7 +133,7 @@ window_motion_running :: proc(app: ^App, w: ^Window, part: Window_Motion) -> boo
 	case .Field_Carets:
 		return w.carets.moving
 	case .Confirmation:
-		return confirmation_active(w)
+		return ui.confirmation_active(&w.confirmation)
 	case .Autoscroll:
 		return autoscroll_moving(w)
 	case .Changes:

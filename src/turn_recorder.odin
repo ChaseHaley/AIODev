@@ -14,6 +14,7 @@ import "core:slice"
 import "core:strings"
 import "core:time"
 import "cosmos:host"
+import "cosmos:ui"
 
 // What the main thread knows of agent turns: where each pane's turn begins and ends, from OSC program
 // status and from the hook inbox, and the recording switch. The turn worker does every git command;
@@ -808,7 +809,7 @@ turns_ask_delete :: proc(app: ^App) {
 	rec := &app.turn_recorder
 	if rec.recording {rec.ask_delete = false; return}
 	w := window_focused_or_recent(app)
-	if w == nil || confirmation_shown(w) != nil {return}
+	if w == nil || ui.confirmation_shown(&w.confirmation) != nil {return}
 	rec.ask_delete = false
 	if turns_has_segments(app) {confirmation_ask(app, w, Turns_Delete{}, extended = true, focus = .Cancel)}
 }
@@ -930,7 +931,7 @@ when AIO_CONTROL {
 		state_text(r, "turns.last_error", rec.last_error)
 		asking := false
 		for w in app.windows {
-			if confirmation_asking(w, Turns_Delete) != nil {asking = true}
+			if ui.confirmation_asking(&w.confirmation, Turns_Delete) != nil {asking = true}
 		}
 		// confirm.open reports only the close question, so this one has its own key.
 		state_value(r, "turns.delete_open", asking)
