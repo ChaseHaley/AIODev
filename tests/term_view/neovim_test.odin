@@ -274,6 +274,180 @@ neovim_window_scrolls_smoothly_when_neovim_scrolls_it :: proc(t: ^testing.T) {
 	}
 }
 
+// A green 10x3 window grid 2 whose top-left cell is at `column`, with the cursor at its top-left cell. The
+// first call also sets up grid 1; later ones are what Neovim sends when it moves the window.
+@(private = "file")
+neovim_window_at :: proc(c: ^neovim.Client, column: i64, first: bool) -> bool {
+	w: neovim.Msgpack_Writer
+	if first {
+		redraw_begin(&w, 12)
+		write_highlight(&w, 1, 0x00FF00, 0)
+		redraw_event(&w, "grid_resize", 3)
+		write_ints(&w, 2, 10, 3)
+		for row in 0 ..< i64(3) {write_blank_line(&w, 2, row, 1, 10)}
+	} else {
+		neovim.msgpack_write_array(&w, 3)
+		neovim.msgpack_write_uint(&w, 2)
+		neovim.msgpack_write_str(&w, "redraw")
+		neovim.msgpack_write_array(&w, 3)
+	}
+	redraw_event(&w, "win_pos", 6)
+	write_ints(&w, 2, 1000, 0, column, 10, 3)
+	redraw_event(&w, "grid_cursor_goto", 3)
+	write_ints(&w, 2, 0, 0)
+	return redraw_send(c, &w)
+}
+
+// The owner asked for Neovim's windows to move as Neovide moves them: a window Neovim moves slides from
+// where it was drawn to its new place, the cursor riding with it, and lands. A window shown for the first
+// time does not slide, and with the setting off a moved window jumps.
+@(test)
+neovim_window_slides_when_neovim_moves_it :: proc(t: ^testing.T) {
+	f, ok := headless_create(t)
+	defer fixture_destroy(&f)
+	if !ok {return}
+	green, black := [4]u8{0, 255, 0, 255}, [4]u8{0, 0, 0, 255}
+	place := 10 * f.metrics.cell_width
+	duration := 100 * time.Millisecond
+	for animate in ([2]bool{true, false}) {
+		c: neovim.Client
+		defer neovim.destroy(&c)
+		v: term_view.Neovim_View
+		defer term_view.neovim_view_destroy(&v)
+		style := term_view.Neovim_Style {
+			family = f.family, cursor_color = {1, 1, 1, 1}, cursor_effects = {preset = .Off},
+			animate_moves = animate, overlay_opacity = 1,
+		}
+		if !testing.expect(t, neovim_window_at(&c, 0, true)) {return}
+		_, shown := neovim_render(t, &f, &v, &c, style, frame_at(0))
+		testing.expect(t, !term_view.neovim_moves_animating(&v), "a window shown for the first time does not slide")
+		testing.expect_value(t, cell_pixel(&f, shown, 2, 1, 1, 1), green)
+
+		if !testing.expect(t, neovim_window_at(&c, 10, false)) {return}
+		frame, first := neovim_render(t, &f, &v, &c, style, frame_at(1))
+		if !animate {
+			testing.expect(t, !term_view.neovim_moves_animating(&v), "with window moves off a window jumps")
+			testing.expect_value(t, cell_pixel(&f, first, 12, 1, 1, 1), green)
+			testing.expect_value(t, cell_pixel(&f, first, 2, 1, 1, 1), black)
+			testing.expect_value(t, frame.cursor.?.head.x, place)
+			continue
+		}
+		testing.expect(t, term_view.neovim_moves_animating(&v), "a move starts where the window was")
+		testing.expect_value(t, cell_pixel(&f, first, 2, 1, 1, 1), green)
+		testing.expect_value(t, cell_pixel(&f, first, 12, 1, 1, 1), black)
+		testing.expect_value(t, frame.cursor.?.head.x, 0)
+
+		testing.expect(t, term_view.neovim_moves_animate(&v, frame_at(2), duration, true))
+		frame, _ = neovim_render(t, &f, &v, &c, style, frame_at(2))
+		x := frame.cursor.?.head.x
+		testing.expectf(t, x > 0 && x < place, "the cursor rides with its window, at %v", x)
+
+		for n in 3 ..< 40 {
+			if !term_view.neovim_moves_animate(&v, frame_at(n), duration, true) {break}
+		}
+		testing.expect(t, !term_view.neovim_moves_animating(&v), "a move lands")
+		landed: []u8
+		frame, landed = neovim_render(t, &f, &v, &c, style, frame_at(40))
+		testing.expect_value(t, cell_pixel(&f, landed, 12, 1, 1, 1), green)
+		testing.expect_value(t, cell_pixel(&f, landed, 2, 1, 1, 1), black)
+		testing.expect_value(t, frame.cursor.?.head.x, place)
+	}
+}
+
+// A green window over the top three rows, the full width, as Neovim sends it before a split.
+@(private = "file")
+neovim_unsplit :: proc(c: ^neovim.Client) -> bool {
+	w: neovim.Msgpack_Writer
+	redraw_begin(&w, 12)
+	write_highlight(&w, 1, 0x00FF00, 0)
+	write_highlight(&w, 2, 0x0000FF, 0)
+	redraw_event(&w, "grid_resize", 3)
+	write_ints(&w, 2, COLUMNS, 3)
+	redraw_event(&w, "win_pos", 6)
+	write_ints(&w, 2, 1000, 0, 0, COLUMNS, 3)
+	for row in 0 ..< i64(3) {write_blank_line(&w, 2, row, 1, COLUMNS)}
+	return redraw_send(c, &w)
+}
+
+// What Neovim sends for `:vsplit` with 'splitright': the green window keeps its place on the left, 10
+// columns wide, and a new blue window takes columns 11 to 19, with the cursor in it.
+@(private = "file")
+neovim_split_right :: proc(c: ^neovim.Client) -> bool {
+	w: neovim.Msgpack_Writer
+	neovim.msgpack_write_array(&w, 3)
+	neovim.msgpack_write_uint(&w, 2)
+	neovim.msgpack_write_str(&w, "redraw")
+	neovim.msgpack_write_array(&w, 9)
+	redraw_event(&w, "grid_resize", 3)
+	write_ints(&w, 2, 10, 3)
+	redraw_event(&w, "win_pos", 6)
+	write_ints(&w, 2, 1000, 0, 0, 10, 3)
+	redraw_event(&w, "grid_resize", 3)
+	write_ints(&w, 3, 9, 3)
+	redraw_event(&w, "win_pos", 6)
+	write_ints(&w, 3, 1001, 0, 11, 9, 3)
+	for row in 0 ..< i64(3) {write_blank_line(&w, 3, row, 2, 9)}
+	redraw_event(&w, "grid_cursor_goto", 3)
+	write_ints(&w, 3, 0, 0)
+	return redraw_send(c, &w)
+}
+
+// The owner asked for a new split to animate too: the window a split makes slides out of the split line,
+// never over the window it was cut from, the cursor coming out with it, and lands. With window moves off
+// it is simply there.
+@(test)
+neovim_split_window_slides_out_of_the_split_line :: proc(t: ^testing.T) {
+	f, ok := headless_create(t)
+	defer fixture_destroy(&f)
+	if !ok {return}
+	green, blue, black := [4]u8{0, 255, 0, 255}, [4]u8{255, 0, 0, 255}, [4]u8{0, 0, 0, 255}
+	split := 11 * f.metrics.cell_width
+	duration := 100 * time.Millisecond
+	for animate in ([2]bool{true, false}) {
+		c: neovim.Client
+		defer neovim.destroy(&c)
+		v: term_view.Neovim_View
+		defer term_view.neovim_view_destroy(&v)
+		style := term_view.Neovim_Style {
+			family = f.family, cursor_color = {1, 1, 1, 1}, cursor_effects = {preset = .Off},
+			animate_moves = animate, overlay_opacity = 1,
+		}
+		if !testing.expect(t, neovim_unsplit(&c)) {return}
+		_, _ = neovim_render(t, &f, &v, &c, style, frame_at(0))
+		testing.expect(t, !term_view.neovim_moves_animating(&v), "the first window does not slide in")
+
+		if !testing.expect(t, neovim_split_right(&c)) {return}
+		frame, first := neovim_render(t, &f, &v, &c, style, frame_at(1))
+		testing.expect_value(t, cell_pixel(&f, first, 5, 1, 1, 1), green)
+		if !animate {
+			testing.expect(t, !term_view.neovim_moves_animating(&v), "with window moves off a split is there")
+			testing.expect_value(t, cell_pixel(&f, first, 15, 1, 1, 1), blue)
+			testing.expect_value(t, frame.cursor.?.head.x, split)
+			continue
+		}
+		testing.expect(t, term_view.neovim_moves_animating(&v), "a split's new window slides in")
+		testing.expect_value(t, cell_pixel(&f, first, 15, 1, 1, 1), black)
+		testing.expect_value(t, frame.cursor.?.head.x, split)
+
+		testing.expect(t, term_view.neovim_moves_animate(&v, frame_at(2), duration, true))
+		mid: []u8
+		frame, mid = neovim_render(t, &f, &v, &c, style, frame_at(2))
+		testing.expect_value(t, cell_pixel(&f, mid, 11, 1, 1, 1), blue)
+		testing.expect_value(t, cell_pixel(&f, mid, 5, 1, 1, 1), green)
+		testing.expect(t, frame.cursor.?.head.x >= split, "the cursor stays inside the new window")
+
+		for n in 3 ..< 40 {
+			if !term_view.neovim_moves_animate(&v, frame_at(n), duration, true) {break}
+		}
+		testing.expect(t, !term_view.neovim_moves_animating(&v), "a split's new window lands")
+		landed: []u8
+		frame, landed = neovim_render(t, &f, &v, &c, style, frame_at(40))
+		testing.expect_value(t, cell_pixel(&f, landed, 15, 1, 1, 1), blue)
+		testing.expect_value(t, cell_pixel(&f, landed, 5, 1, 1, 1), green)
+		testing.expect_value(t, frame.cursor.?.head.x, split)
+	}
+}
+
 // A green window under three blue floats on its first three rows: one whose highlight has blend 50, one
 // that takes no input (as treesitter-context's does), and one opaque.
 @(private = "file")

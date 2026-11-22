@@ -13,10 +13,11 @@ import "core:unicode/utf8"
 
 // Draws a Neovim screen (WORK-542) from its grids (ext_multigrid) with the terminal's fonts, glyph cache
 // and cluster fitting: the base grid, each window, then floats and messages in Neovim's order, and
-// AIODev's cursor over everything. A window's text scrolls smoothly when Neovim scrolls it, and floats
-// draw their backgrounds translucent where Neovim's blend asks it, or AIODev's overlay opacity does for
-// floats that take no input, over a blur of what shows through, and cast a shadow (WORK-547). The
-// scratch is reused, so a build allocates only while something grows.
+// AIODev's cursor over everything. A window's text scrolls smoothly when Neovim scrolls it, a window or
+// float Neovim moves slides to its new place, and floats draw their backgrounds translucent where
+// Neovim's blend asks it, or AIODev's overlay opacity does for floats that take no input, over a blur of
+// what shows through, and cast a shadow (WORK-547). The scratch is reused, so a build allocates only
+// while something grows.
 Neovim_View :: struct {
 	paints:     [dynamic]Neovim_Paint,
 	runes:      [dynamic]rune,
@@ -25,10 +26,15 @@ Neovim_View :: struct {
 	cursor:     Neovim_Cursor,
 	contrast:   Contrast_Cache,
 	scrolls:    [dynamic]Neovim_Scroll,
-	// The screen generation the scrolls last took their rows from.
+	moves:      [dynamic]Neovim_Move,
+	// The screen generation the scrolls and moves last took their rows and places from.
 	generation: u64,
 	// When the scroll animation last advanced.
 	animated:   time.Tick,
+	// When the window moves last advanced.
+	slid:       time.Tick,
+	// The screen's size the moves last saw: a resize puts every window in its place at once.
+	screen:     [2]int,
 }
 
 // AIODev's cursor, not Neovim's: Neovim decides only where it is and its shape in each mode. Its
@@ -47,6 +53,8 @@ Neovim_Style :: struct {
 	cursor_effects:   caret.Effects,
 	// Windows scroll smoothly; off, they jump as in a terminal.
 	smooth_scroll:    bool,
+	// A window or float Neovim moves slides to its new place; off, it jumps there.
+	animate_moves:    bool,
 	// How opaque the background of a float that takes no input is, 0..1, on top of Neovim's own blend.
 	overlay_opacity:  f32,
 	// The shadow floats cast on what is under them; a clear colour casts none.
@@ -105,6 +113,26 @@ Neovim_Scroll :: struct {
 	shown:             bool,
 }
 
+// One window's or float's place, as Neovide animates it: when Neovim moves the grid, the drawing slides
+// from where it was drawn (`from`) to where Neovim has it (`to`), easing out exponentially as `t` goes
+// from 0 to 1, while its size and cells are Neovim's at once. `at` is where it is drawn now. A window a
+// split makes is `entering`: it slides out of the split line, drawn only inside its own place. Places
+// and sizes are in grid 1 cells, x then y.
+@(private)
+Neovim_Move :: struct {
+	grid:         int,
+	kind:         neovim.Grid_Kind,
+	from, at, to: [2]f32,
+	size:         [2]f32,
+	// The place and size before the latest screen, which tell a split's new window where it came from.
+	was, was_size: [2]f32,
+	t:            f32,
+	shown:        bool,
+	// First shown by the latest screen.
+	created:      bool,
+	entering:     bool,
+}
+
 @(private)
 Neovim_Paint :: struct {
 	foreground, background, special: render.Color,
@@ -130,6 +158,7 @@ neovim_view_destroy :: proc(v: ^Neovim_View) {
 	delete(v.shaped)
 	for &scroll in v.scrolls {neovim_scroll_destroy(&scroll)}
 	delete(v.scrolls)
+	delete(v.moves)
 	v^ = {}
 }
 
@@ -190,6 +219,151 @@ neovim_scroll_animate :: proc(
 neovim_scroll_animating :: proc(v: ^Neovim_View) -> bool {
 	for scroll in v.scrolls {if scroll.position != 0 {return true}}
 	return false
+}
+
+// Advances every window's and float's slide to `frame`, easing out exponentially over `duration` as
+// Neovide does; true while any of them moved. Without `enabled` each lands at once.
+neovim_moves_animate :: proc(
+	v: ^Neovim_View,
+	frame: render.Frame_Time,
+	duration: time.Duration,
+	enabled: bool,
+) -> bool {
+	dt := f32(time.duration_seconds(frame.period))
+	if v.slid != {} {
+		dt = clamp(f32(time.duration_seconds(time.tick_diff(v.slid, frame.display))), 0, 0.1)
+	}
+	v.slid = frame.display
+	length := f32(time.duration_seconds(duration))
+	moved := false
+	for &move in v.moves {
+		if move.t >= 1 {continue}
+		moved = true
+		move.t = !enabled || frame.display == {} || length <= dt ? 1 : min(1, move.t + dt / length)
+		ease := move.t >= 1 ? 1 : 1 - math.pow(f32(2), -10 * move.t)
+		move.at = move.from + (move.to - move.from) * ease
+		if move.t >= 1 {move.entering = false}
+	}
+	if !moved {v.slid = {}}
+	return moved
+}
+
+neovim_moves_animating :: proc(v: ^Neovim_View) -> bool {
+	for move in v.moves {if move.t < 1 {return true}}
+	return false
+}
+
+// Takes each window's and float's place from a new screen. A grid Neovim moved slides on from where it
+// is drawn, and a window a split makes slides out of the split line. Any other grid shown for the first
+// time or again, or turned from a window into a float, sits in its place at once, as does every grid when
+// the screen changes size or while moves are off. The message grid never slides: it rises with each line
+// of output.
+@(private)
+neovim_moves_sync :: proc(v: ^Neovim_View, s: ^neovim.Screen, animate: bool) {
+	resized := v.screen != {s.columns, s.rows}
+	v.screen = {s.columns, s.rows}
+	for &move in v.moves {
+		move.shown, move.created = false, false
+		move.was, move.was_size = move.to, move.size
+	}
+	for &grid in s.grids {
+		if grid.kind != .Window && grid.kind != .Float {continue}
+		to := [2]f32{f32(grid.column), f32(grid.row)}
+		move := neovim_move_of(v, grid.id)
+		if move == nil || move.kind != grid.kind {
+			if move == nil {
+				if _, err := append(&v.moves, Neovim_Move{grid = grid.id}); err != nil {continue}
+				move = &v.moves[len(v.moves) - 1]
+			}
+			move^ = {grid = grid.id, kind = grid.kind, from = to, at = to, to = to, t = 1, created = true}
+		} else if move.to != to {
+			move.from, move.to, move.t = move.at, to, 0
+			if !animate || resized {move.from, move.at, move.t, move.entering = to, to, 1, false}
+		}
+		move.size = {f32(grid.columns), f32(grid.rows)}
+		move.shown = true
+	}
+	for i := len(v.moves) - 1; i >= 0; i -= 1 {
+		if !v.moves[i].shown {unordered_remove(&v.moves, i)}
+	}
+	if !animate || resized {return}
+	for &move in v.moves {
+		if !move.created || move.kind != .Window {continue}
+		if offset, ok := neovim_split_entrance(v, &move); ok {
+			move.from, move.at, move.t, move.entering = move.to + offset, move.to + offset, 0, true
+		}
+	}
+}
+
+// Where a split's new window starts, from its place: hidden just past the split line, inside the window it
+// was cut from, so it slides out of the line. That window is the one shown before and still shown whose
+// old place it covers most; the new window took its left or right part, or its top or bottom part. A new
+// window that covers no window of the screen before, as on a new tab page, is no split.
+@(private, require_results)
+neovim_split_entrance :: proc(v: ^Neovim_View, window: ^Neovim_Move) -> (offset: [2]f32, ok: bool) {
+	parent: ^Neovim_Move
+	most: f32
+	for &other in v.moves {
+		if other.created || other.kind != .Window {continue}
+		low := [2]f32{max(other.was.x, window.to.x), max(other.was.y, window.to.y)}
+		high := [2]f32 {
+			min(other.was.x + other.was_size.x, window.to.x + window.size.x),
+			min(other.was.y + other.was_size.y, window.to.y + window.size.y),
+		}
+		if area := max(0, high.x - low.x) * max(0, high.y - low.y); area > most {parent, most = &other, area}
+	}
+	if parent == nil {return}
+	switch {
+	case window.size.x < parent.was_size.x:
+		return {window.to.x > parent.was.x ? -window.size.x : window.size.x, 0}, true
+	case window.size.y < parent.was_size.y:
+		return {0, window.to.y > parent.was.y ? -window.size.y : window.size.y}, true
+	}
+	return
+}
+
+@(private)
+neovim_move_of :: proc(v: ^Neovim_View, grid: int) -> ^Neovim_Move {
+	for &move in v.moves {if move.grid == grid {return &move}}
+	return nil
+}
+
+// Where a grid's top-left cell is drawn now. A sliding grid is drawn on whole pixels plus the fraction
+// its place has, so its box drawing characters stay as sharp as at rest.
+@(private)
+neovim_grid_origin :: proc(
+	v: ^Neovim_View,
+	grid: ^neovim.Grid_View,
+	origin: [2]f32,
+	metrics: Metrics,
+) -> [2]f32 {
+	cell := [2]f32{metrics.cell_width, metrics.cell_height}
+	to := [2]f32{f32(grid.column), f32(grid.row)} * cell
+	move := neovim_move_of(v, grid.id)
+	if move == nil || move.t >= 1 {return origin + to}
+	fraction := to - {math.floor(to.x), math.floor(to.y)}
+	at := move.at * cell - fraction
+	return origin + {math.round(at.x), math.round(at.y)} + fraction
+}
+
+// The place a split's new window is drawn inside while it slides out of the split line.
+@(private)
+neovim_entering_rect :: proc(
+	v: ^Neovim_View,
+	grid: ^neovim.Grid_View,
+	origin: [2]f32,
+	metrics: Metrics,
+) -> (
+	rect: render.Rect,
+	entering: bool,
+) {
+	move := neovim_move_of(v, grid.id)
+	if move == nil || !move.entering || move.t >= 1 {return}
+	cell := [2]f32{metrics.cell_width, metrics.cell_height}
+	return {
+		origin.x + f32(grid.column) * cell.x, origin.y + f32(grid.row) * cell.y, f32(grid.columns) * cell.x,
+		f32(grid.rows) * cell.y,
+	}, true
 }
 
 @(private)
@@ -299,32 +473,45 @@ neovim_build :: proc(
 	if list.error != .None || len(s.grids) == 0 || len(list.layers) == 0 {return}
 	if v.generation != s.generation {
 		neovim_scroll_sync(v, s, style.smooth_scroll)
+		neovim_moves_sync(v, s, style.animate_moves)
 		v.generation = s.generation
 	}
 	pane := list.layers[len(list.layers) - 1]
 	cursor := neovim_cursor_place(v, s, origin, metrics, style, frame_time, &frame)
 	b := Builder{list = list, cache = cache, fonts = fonts, metrics = metrics}
 	cursor_text: [2]int
+	windows_sliding := false
+	for move in v.moves {windows_sliding ||= move.kind == .Window && move.t < 1}
 	run_end := 0
 	for &grid, index in s.grids {
 		draw := Neovim_Grid_Draw {
-			origin  = origin + {f32(grid.column) * metrics.cell_width, f32(grid.row) * metrics.cell_height},
+			origin  = neovim_grid_origin(v, &grid, origin, metrics),
 			opacity = neovim_grid_opacity(&grid, style),
 		}
+		layer := pane
 		if grid.kind == .Float || grid.kind == .Message {
 			draw.floating = true
 			if index >= run_end {
 				run_end = neovim_float_run_end(s.grids[:], index)
-				if !neovim_float_backdrops(s, s.grids[index:run_end], list, origin, metrics, style, pane) {return}
+				if !neovim_float_backdrops(v, s, s.grids[index:run_end], list, origin, metrics, style, pane) {return}
 			}
 			// A float draws above everything before it: its backgrounds go over the text below it.
 			if render.push_layer(list, pane.clip, pane.radius) != .None {return}
+		} else if grid.kind == .Window && windows_sliding {
+			// While windows slide over each other, each covers the ones before it, as in Neovide, so the
+			// text of one sliding out from under another does not show through it. A split's new window
+			// shows only inside its place, so it comes out of the split line.
+			draw.floating = true
+			if place, entering := neovim_entering_rect(v, &grid, origin, metrics); entering {
+				layer = {clip = neovim_intersect(pane.clip, place)}
+			}
+			if render.push_layer(list, layer.clip, layer.radius) != .None {return}
 		}
 		// A moving cursor's smear goes over its own grid's backgrounds and under its text.
 		body: Maybe(Neovim_Cursor_Body)
 		if grid.id == s.cursor_grid && cursor.moving {body = Neovim_Cursor_Body{cursor.paint, style.cursor_effects}}
 		start := len(list.glyphs)
-		result = neovim_grid_draw(v, &b, client, s, &grid, draw, style.family, pane, body)
+		result = neovim_grid_draw(v, &b, client, s, &grid, draw, style.family, layer, body)
 		if result != .Ok || list.error != .None {return}
 		if grid.id == s.cursor_grid {cursor_text = {start, len(list.glyphs)}}
 	}
@@ -350,14 +537,16 @@ neovim_float_run_end :: proc(grids: []neovim.Grid_View, first: int) -> int {
 	return end
 }
 
+// Where a grid is drawn this frame, a slide included.
 @(private)
-neovim_grid_rect :: proc(grid: ^neovim.Grid_View, origin: [2]f32, metrics: Metrics) -> render.Rect {
-	return {
-		origin.x + f32(grid.column) * metrics.cell_width,
-		origin.y + f32(grid.row) * metrics.cell_height,
-		f32(grid.columns) * metrics.cell_width,
-		f32(grid.rows) * metrics.cell_height,
-	}
+neovim_grid_rect :: proc(
+	v: ^Neovim_View,
+	grid: ^neovim.Grid_View,
+	origin: [2]f32,
+	metrics: Metrics,
+) -> render.Rect {
+	at := neovim_grid_origin(v, grid, origin, metrics)
+	return {at.x, at.y, f32(grid.columns) * metrics.cell_width, f32(grid.rows) * metrics.cell_height}
 }
 
 // Whether any of a float's backgrounds lets what is under it show through.
@@ -375,6 +564,7 @@ neovim_see_through :: proc(s: ^neovim.Screen, grid: ^neovim.Grid_View, opacity: 
 // another float of the run. False when the list has no room.
 @(private, require_results)
 neovim_float_backdrops :: proc(
+	v: ^Neovim_View,
 	s: ^neovim.Screen,
 	run: []neovim.Grid_View,
 	list: ^render.Draw_List,
@@ -386,7 +576,7 @@ neovim_float_backdrops :: proc(
 	if style.float_blur > 0 {
 		for &grid in run {
 			if !neovim_see_through(s, &grid, neovim_grid_opacity(&grid, style)) {continue}
-			area := neovim_intersect(pane.clip, neovim_grid_rect(&grid, origin, metrics))
+			area := neovim_intersect(pane.clip, neovim_grid_rect(v, &grid, origin, metrics))
 			if area.width <= 0 || area.height <= 0 {continue}
 			if render.push_backdrop_blur(list, area, style.float_blur) != .None {return false}
 		}
@@ -395,7 +585,7 @@ neovim_float_backdrops :: proc(
 	if shadow.color.a <= 0 || run[0].kind != .Float {return true}
 	if render.push_layer(list, pane.clip, pane.radius) != .None {return false}
 	for &grid in run {
-		r := neovim_grid_rect(&grid, origin, metrics)
+		r := neovim_grid_rect(v, &grid, origin, metrics)
 		caster := render.Rect_Instance {
 			rect     = {r.x + shadow.offset.x, r.y + shadow.offset.y, r.width, r.height},
 			color    = shadow.color,
@@ -583,8 +773,8 @@ neovim_cursor_draw :: proc(
 	}
 }
 
-// The cursor's cell where its grid draws it now, following the grid's scroll and kept inside its
-// viewport while the text travels.
+// The cursor's cell where its grid draws it now, following the grid's scroll and slide and kept inside
+// its viewport while the text travels, and inside its place while a split's new window comes out.
 @(private)
 neovim_cursor_cell :: proc(
 	v: ^Neovim_View,
@@ -599,12 +789,20 @@ neovim_cursor_cell :: proc(
 	if scroll := neovim_scroll_of(v, grid.id); scroll != nil && row >= top && row < top + rows {
 		y = clamp(y - scroll.position, f32(top), f32(top + rows - 1))
 	}
-	return {
-		origin.x + f32(grid.column + column) * metrics.cell_width,
-		origin.y + math.round((f32(grid.row) + y) * metrics.cell_height),
+	// How far the grid's slide still has it from its place; nothing at rest.
+	slide := neovim_grid_origin(v, grid, origin, metrics) -
+		(origin + {f32(grid.column) * metrics.cell_width, f32(grid.row) * metrics.cell_height})
+	cell := render.Rect {
+		slide.x + origin.x + f32(grid.column + column) * metrics.cell_width,
+		slide.y + origin.y + math.round((f32(grid.row) + y) * metrics.cell_height),
 		metrics.cell_width * (wide ? 2 : 1),
 		metrics.cell_height,
 	}
+	if place, entering := neovim_entering_rect(v, grid, origin, metrics); entering {
+		cell.x = clamp(cell.x, place.x, place.x + place.width - cell.width)
+		cell.y = clamp(cell.y, place.y, place.y + place.height - cell.height)
+	}
+	return cell
 }
 
 // The cursor in its mode's shape and AIODev's colours, and whether it is moving to `cell`: with Cursor
