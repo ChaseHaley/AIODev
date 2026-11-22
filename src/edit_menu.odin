@@ -1,11 +1,11 @@
 package main
 
 import "cosmos:input"
-import "aio:markdown"
 import "cosmos:platform"
 import "cosmos:render"
 import "aio:ui"
 import "core:log"
+import "cosmos:textedit"
 
 // The menu a right click on editable text opens: Undo, Redo, Cut, Copy, Paste and Select all, with the
 // keys that do the same. Its rows are w.edit_menu; the Markdown pane or web address field whose text they
@@ -49,7 +49,7 @@ edit_menu_shown :: proc(w: ^Window) -> bool {
 }
 
 // Opens the menu at a point for the Markdown pane `pane`, whose text is `b`.
-edit_menu_open :: proc(app: ^App, w: ^Window, pane: u32, b: ^markdown.Edit_Buffer, x, y: f32) {
+edit_menu_open :: proc(app: ^App, w: ^Window, pane: u32, b: ^textedit.Buffer, x, y: f32) {
 	enabled: [Text_Edit_Command]bool
 	for command in Text_Edit_Command {enabled[command] = text_edit_enabled(app, b, command)}
 	edit_menu_show(app, w, Edit_Menu_Markdown{pane = pane}, ~bit_set[Text_Edit_Command]{}, enabled, x, y)

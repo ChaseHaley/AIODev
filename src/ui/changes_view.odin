@@ -1,12 +1,12 @@
 package ui
 
 import "cosmos:font"
-import "aio:markdown"
 import "cosmos:render"
 import "aio:syntax"
 import tr "aio:turns"
 import "core:math"
 import "core:mem/virtual"
+import "cosmos:textedit"
 
 // The Agent changes pane: a header row at the top (a summary of what the pane shows on the left; the layout,
 // fold, filter and select lines buttons and a chevron button on the right), a panel under the summary for
@@ -147,7 +147,7 @@ Changes_View :: struct {
 	// note will have when saved: a label or deletion tag the editor's × removes makes it a comment.
 	editing:     int,
 	editor:      ^Text_Area,
-	buffer:      ^markdown.Edit_Buffer,
+	buffer:      ^textedit.Buffer,
 	draft:       Changes_Note_Kind,
 	// The line numbers and side of the note being written or edited, which the editor's header names.
 	span:        Changes_Span,

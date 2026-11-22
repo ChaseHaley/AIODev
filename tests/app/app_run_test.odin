@@ -1,16 +1,8 @@
 package app_test
 
-import "base:runtime"
-import "core:fmt"
-import "core:os"
 import "core:testing"
-import "core:thread"
-import "core:time"
 import app "../../src"
 import "aio:commands"
-import "aio:control"
-import "aio:layout"
-import "cosmos:platform"
 
 // Restart asks no question, as quit asks none, so each way of running it ends the loop to start again,
 // and a quit already under way stays a quit.

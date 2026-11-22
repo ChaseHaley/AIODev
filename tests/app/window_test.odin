@@ -1,6 +1,5 @@
 package app_test
 
-import "cosmos:input"
 import "base:runtime"
 import "core:fmt"
 import "core:log"
@@ -8,7 +7,6 @@ import "core:os"
 import "core:strings"
 import "core:testing"
 import app "../../src"
-import "aio:verify_protocol"
 import "aio:layout"
 import "cosmos:platform"
 import "aio:term"

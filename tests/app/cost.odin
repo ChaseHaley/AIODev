@@ -1,6 +1,5 @@
 package app_test
 
-import "core:fmt"
 import "core:time"
 
 TEST_COSTS :: #config(AIO_TEST_COSTS, false)

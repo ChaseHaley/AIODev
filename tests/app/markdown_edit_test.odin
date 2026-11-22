@@ -12,6 +12,7 @@ import "core:sync"
 import "core:testing"
 import "core:time"
 import app "../../src"
+import "cosmos:textedit"
 
 @(private = "file")
 Edit_Fixture :: struct {
@@ -252,13 +253,13 @@ a_file_changed_on_disk_reloads_unless_edits_wait :: proc(t: ^testing.T) {
 	if !testing.expect_value(t, os.write_entire_file(f.file, "two, from disk\n"), nil) {return}
 	f.state.markdown_deadline = time.tick_now()
 	app.markdown_tick(&f.state)
-	testing.expect_value(t, markdown.edit_string(&pane.editor.buffer), "two, from disk\n")
+	testing.expect_value(t, textedit.to_string(&pane.editor.buffer), "two, from disk\n")
 
 	app.handle_event(&f.state, input.Text_Event{window = w.id, text = "mine "})
 	if !testing.expect_value(t, os.write_entire_file(f.file, "three, longer from disk\n"), nil) {return}
 	f.state.markdown_deadline = time.tick_now()
 	app.markdown_tick(&f.state)
-	testing.expect(t, strings.contains(markdown.edit_string(&pane.editor.buffer), "mine "))
+	testing.expect(t, strings.contains(textedit.to_string(&pane.editor.buffer), "mine "))
 	save_now(&f.state, pane)
 	testing.expect(t, strings.contains(file_text(t, f.file), "mine "))
 }
@@ -282,7 +283,7 @@ a_pane_reading_the_file_shows_edits_before_they_save :: proc(t: ^testing.T) {
 	edit_press(&f.state, w, .End, {.Control})
 	if !testing.expect(t, platform.clipboard_set_text(&f.state.platform, "pasted\n\n- more\n")) {return}
 	edit_press(&f.state, w, .V, {.Control})
-	if !testing.expect(t, strings.contains(markdown.edit_string(&editor.editor.buffer), "- more")) {return}
+	if !testing.expect(t, strings.contains(textedit.to_string(&editor.editor.buffer), "- more")) {return}
 	testing.expect_value(t, file_text(t, f.file), "# Title\n\nbody\n")
 	app.tick(&f.state)
 	shown := string(app.markdown_document(reader).text[:])
@@ -343,7 +344,7 @@ pasted_text_takes_the_files_line_endings :: proc(t: ^testing.T) {
 		edit_press(&f.state, w, .End, {.Control})
 		if !testing.expect(t, platform.clipboard_set_text(&f.state.platform, c.clipboard)) {return}
 		edit_press(&f.state, w, .V, {.Control})
-		testing.expect_value(t, markdown.edit_string(&pane.editor.buffer), c.want)
+		testing.expect_value(t, textedit.to_string(&pane.editor.buffer), c.want)
 	}
 }
 
@@ -367,7 +368,7 @@ keys_type_the_text_windows_gives_them :: proc(t: ^testing.T) {
 			pressed = true, text = k.text})
 		app.handle_event(&f.state, input.Key_Event{window = w.id, key = k.key, modifiers = k.modifiers})
 	}
-	testing.expect_value(t, markdown.edit_string(&pane.editor.buffer), "ha!€")
+	testing.expect_value(t, textedit.to_string(&pane.editor.buffer), "ha!€")
 }
 
 // Clicks the fold chevron of the heading whose text starts at `offset`, wherever it shows.
@@ -550,7 +551,7 @@ char_point :: proc(
 
 @(private = "file")
 selected :: proc(pane: ^app.Markdown_Pane) -> string {
-	return markdown.edit_selected_text(&pane.editor.buffer)
+	return textedit.selected_text(&pane.editor.buffer)
 }
 
 // The first click of a double click moves the caret onto a rendered line, which then shows its markup and
@@ -975,7 +976,7 @@ the_caret_crosses_a_soft_break_as_a_space :: proc(t: ^testing.T) {
 	for time_ns in ([?]i64{1_000_000, 101_000_000}) {
 		mouse_click(&f.state, w, {x + 1, y + 4, time_ns, .Left, {}})
 	}
-	testing.expect_value(t, markdown.edit_selected_text(b), "gamma")
+	testing.expect_value(t, textedit.selected_text(b), "gamma")
 
 	// A hard break still breaks the line.
 	hard := strings.index(source, "hard")

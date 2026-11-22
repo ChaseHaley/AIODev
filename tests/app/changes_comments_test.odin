@@ -1,7 +1,6 @@
 package app_test
 
 import "cosmos:input"
-import "aio:markdown"
 import "cosmos:platform"
 import "aio:term"
 import "aio:turns"
@@ -11,6 +10,7 @@ import "core:os"
 import "core:strings"
 import "core:testing"
 import app "../../src"
+import "cosmos:textedit"
 
 @(private = "file")
 Comments_Fixture :: struct {
@@ -92,7 +92,7 @@ comments_save :: proc(state: ^app.App, w: ^app.Window, pane: ^app.Changes_Pane) 
 // What the editor holds.
 @(private = "file")
 comments_held :: proc(pane: ^app.Changes_Pane) -> string {
-	return markdown.edit_string(&pane.comments.buffer)
+	return textedit.to_string(&pane.comments.buffer)
 }
 
 // Selects flat lines 2 and 3 (+c, +d) by a press and a Shift press, opens the editor with Enter, then writes
@@ -245,7 +245,7 @@ comments_editor_tools_wrap_the_selection_and_insert_blocks_and_suggestions :: pr
 	testing.expect(t, app.changes_comments_text(&state, &w, pane, "word"))
 	testing.expect_value(t, comments_held(pane), "**word**")
 	// Inline code wraps a selection.
-	markdown.edit_select_all(&c.buffer)
+	textedit.select_all(&c.buffer)
 	comments_press(&state, &w, pane, {part = .Editor_Code, index = 0})
 	testing.expect_value(t, comments_held(pane), "`**word**`")
 
@@ -315,7 +315,7 @@ comments_editor_untags_and_adds_text_to_a_label_or_a_deletion :: proc(t: ^testin
 	comments_press(&state, &w, pane, {part = .Editor_Untag, index = 0})
 	testing.expect_value(t, c.draft, ui.Changes_Note_Kind.Comment)
 	testing.expect_value(t, pane.model.view.draft, ui.Changes_Note_Kind.Comment)
-	markdown.edit_select_all(&c.buffer)
+	textedit.select_all(&c.buffer)
 	testing.expect(t, comments_key(&state, &w, pane, .Delete))
 	testing.expect_value(t, comments_held(pane), "")
 	testing.expect_value(t, ui.changes_editor_can_save(&pane.model.view), false)
@@ -991,7 +991,7 @@ context_lines_selected_in_the_left_cell_stay_on_the_new_side_and_take_a_suggesti
 	testing.expect(t, comments_key(&state, &w, pane, .Enter))
 	testing.expect_value(t, pane.model.view.span.old, false)
 	comments_press(&state, &w, pane, {part = .Editor_Suggest, index = 0})
-	testing.expect(t, strings.contains(markdown.edit_string(&c.buffer), "```suggestion"))
+	testing.expect(t, strings.contains(textedit.to_string(&c.buffer), "```suggestion"))
 	testing.expect(t, comments_save(&state, &w, pane))
 	if !testing.expect_value(t, len(c.items), 1) {return}
 	testing.expect_value(t, c.items[0].side, app.Comment_Side.New)

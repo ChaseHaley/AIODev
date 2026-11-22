@@ -3,17 +3,17 @@ package ui_test
 import "cosmos:caret"
 import "cosmos:font"
 import "cosmos:glyphs"
-import "aio:markdown"
 import "cosmos:render"
 import "aio:ui"
 import "core:testing"
 import "core:time"
+import "cosmos:textedit"
 
 @(private = "file")
 Area_Fixture :: struct {
 	fonts:  ^font.System,
 	text:   ui.Text,
-	buffer: markdown.Edit_Buffer,
+	buffer: textedit.Buffer,
 	area:   ui.Text_Area,
 }
 
@@ -23,13 +23,13 @@ area_start :: proc(t: ^testing.T, f: ^Area_Fixture, source: string, cache: ^glyp
 	f.fonts, err = font.system_create()
 	if !testing.expect_value(t, err, font.Error.None) {return false}
 	if !testing.expect(t, ui.text_init(&f.text, f.fonts, cache, 16)) {return false}
-	return testing.expect(t, markdown.edit_buffer_init(&f.buffer, source))
+	return testing.expect(t, textedit.init(&f.buffer, source))
 }
 
 @(private = "file")
 area_stop :: proc(f: ^Area_Fixture) {
 	ui.text_area_destroy(&f.area)
-	markdown.edit_buffer_destroy(&f.buffer)
+	textedit.destroy(&f.buffer)
 	font.system_destroy(f.fonts)
 }
 
@@ -57,7 +57,7 @@ area_box :: proc(f: ^Area_Fixture, width: f32, min_lines, max_lines: int) -> ui.
 line_texts :: proc(f: ^Area_Fixture, width: f32) -> []string {
 	lines := ui.text_area_lines(&f.area, &f.buffer, &f.text, width, 1)
 	out := make([]string, len(lines), context.temp_allocator)
-	source := markdown.edit_string(&f.buffer)
+	source := textedit.to_string(&f.buffer)
 	for line, i in lines {out[i] = source[line.start:line.end]}
 	return out
 }
@@ -131,7 +131,7 @@ the_wrap_follows_the_text_and_the_width :: proc(t: ^testing.T) {
 	defer area_stop(&f)
 	expect_lines(t, line_texts(&f, area_width(&f, 4)), {"aaaa", "aa"})
 	expect_lines(t, line_texts(&f, area_width(&f, 3)), {"aaa", "aaa"})
-	testing.expect(t, markdown.edit_insert(&f.buffer, "aa"))
+	testing.expect(t, textedit.insert(&f.buffer, "aa"))
 	expect_lines(t, line_texts(&f, area_width(&f, 3)), {"aaa", "aaa", "aa"})
 }
 
@@ -145,9 +145,9 @@ the_height_follows_the_lines_between_its_limits :: proc(t: ^testing.T) {
 	two_minimum := ui.text_area_height(&f.area, &f.buffer, &f.text, width, 1, 2, 4)
 	line := ui.text_styled(&f.text, .Body).line_height
 	testing.expect_value(t, two_minimum - one, line)
-	testing.expect(t, markdown.edit_insert(&f.buffer, "a\na\na"))
+	testing.expect(t, textedit.insert(&f.buffer, "a\na\na"))
 	testing.expect_value(t, ui.text_area_height(&f.area, &f.buffer, &f.text, width, 1, 1, 4) - one, 2 * line)
-	testing.expect(t, markdown.edit_insert(&f.buffer, "\na\na\na"))
+	testing.expect(t, textedit.insert(&f.buffer, "\na\na\na"))
 	// Past the most lines the box stops growing and the text scrolls inside it.
 	testing.expect_value(t, ui.text_area_height(&f.area, &f.buffer, &f.text, width, 1, 1, 4) - one, 3 * line)
 }
@@ -160,7 +160,7 @@ offsets_and_caret_rects_round_trip_at_every_offset :: proc(t: ^testing.T) {
 	box := area_box(&f, area_width(&f, 5), 1, 10)
 	line := ui.text_styled(&f.text, .Body).line_height
 	for offset in 0 ..= len(f.buffer.text) {
-		if markdown.edit_clamp(&f.buffer, offset) != offset {continue}
+		if textedit.clamp_offset(&f.buffer, offset) != offset {continue}
 		rect := ui.text_area_caret_rect(box, offset)
 		testing.expect_value(t, rect.height, line)
 		testing.expect_value(t, ui.text_area_offset_at(box, rect.x, rect.y + line / 2), offset)
@@ -190,7 +190,7 @@ up_and_down_keep_the_column_across_short_lines :: proc(t: ^testing.T) {
 	if !area_start(t, &f, "aaaaaaaa\na\naaaaaaaa") {return}
 	defer area_stop(&f)
 	box := area_box(&f, area_width(&f, 20), 1, 10)
-	markdown.edit_move(&f.buffer, 6)
+	textedit.move(&f.buffer, 6)
 	ui.text_area_vertical(box, 1, 0, false)
 	testing.expect_value(t, f.buffer.caret, 10)
 	ui.text_area_vertical(box, 1, 0, false)
@@ -200,7 +200,7 @@ up_and_down_keep_the_column_across_short_lines :: proc(t: ^testing.T) {
 	ui.text_area_vertical(box, -1, 0, false)
 	testing.expect_value(t, f.buffer.caret, 6)
 	// Another way of moving forgets the column: from the start of the short line, down is to the start.
-	markdown.edit_move(&f.buffer, 9)
+	textedit.move(&f.buffer, 9)
 	ui.text_area_vertical(box, 1, 0, false)
 	testing.expect_value(t, f.buffer.caret, 11)
 }
@@ -211,14 +211,14 @@ up_and_down_past_the_ends_go_to_the_ends_and_extend_on_request :: proc(t: ^testi
 	if !area_start(t, &f, "aa\naa") {return}
 	defer area_stop(&f)
 	box := area_box(&f, area_width(&f, 20), 1, 10)
-	markdown.edit_move(&f.buffer, 4)
+	textedit.move(&f.buffer, 4)
 	ui.text_area_vertical(box, 1, 0, false)
 	testing.expect_value(t, f.buffer.caret, 5)
 	ui.text_area_vertical(box, -1, 0, true)
 	ui.text_area_vertical(box, -1, 0, true)
 	testing.expect_value(t, f.buffer.caret, 0)
 	testing.expect_value(t, f.buffer.anchor, 5)
-	testing.expect_value(t, markdown.edit_selected_text(&f.buffer), "aa\naa")
+	testing.expect_value(t, textedit.selected_text(&f.buffer), "aa\naa")
 }
 
 @(test)
@@ -227,7 +227,7 @@ moving_by_pages_keeps_a_line_of_context :: proc(t: ^testing.T) {
 	if !area_start(t, &f, "a\na\na\na\na\na\na\na\na\na") {return}
 	defer area_stop(&f)
 	box := area_box(&f, area_width(&f, 20), 1, 4)
-	markdown.edit_move(&f.buffer, 0)
+	textedit.move(&f.buffer, 0)
 	ui.text_area_vertical(box, 0, 1, false)
 	// A box of four lines pages by three.
 	testing.expect_value(t, f.buffer.caret, 6)
@@ -245,7 +245,7 @@ scrolling_keeps_the_caret_in_the_box :: proc(t: ^testing.T) {
 		testing.expect(t, rect.y >= box.rect.y && rect.y + rect.height <= box.rect.y + box.rect.height,
 			"the caret must be inside the box")
 	}
-	markdown.edit_move(&f.buffer, 0)
+	textedit.move(&f.buffer, 0)
 	for _ in 0 ..< 9 {
 		ui.text_area_vertical(box, 1, 0, false)
 		inside(t, box, f.buffer.caret)
@@ -257,8 +257,8 @@ scrolling_keeps_the_caret_in_the_box :: proc(t: ^testing.T) {
 	}
 	testing.expect_value(t, f.area.scroll, f32(0))
 	// Typing at the end reveals the caret too, and wheel scrolling stays where it is put.
-	markdown.edit_move(&f.buffer, len(f.buffer.text))
-	testing.expect(t, markdown.edit_insert(&f.buffer, "\nb"))
+	textedit.move(&f.buffer, len(f.buffer.text))
+	testing.expect(t, textedit.insert(&f.buffer, "\nb"))
 	ui.text_area_reveal(box)
 	inside(t, box, f.buffer.caret)
 	testing.expect(t, ui.text_area_scroll(box, -2 * line))
@@ -276,7 +276,7 @@ a_new_width_reveals_the_caret_again_even_at_the_same_height :: proc(t: ^testing.
 	if !area_start(t, &f, "a\na\na\na\na\na\na\na\na\na") {return}
 	defer area_stop(&f)
 	box := area_box(&f, area_width(&f, 20), 1, 3)
-	markdown.edit_move(&f.buffer, len(f.buffer.text))
+	textedit.move(&f.buffer, len(f.buffer.text))
 	ui.text_area_reveal(box)
 	bottom := f.area.scroll
 	testing.expect(t, bottom > 0)
@@ -332,7 +332,7 @@ the_pointer_places_the_caret_and_drags_a_selection :: proc(t: ^testing.T) {
 	testing.expect(t, ui.text_area_pointer(box, start.x, start.y + line / 2, true, false))
 	testing.expect_value(t, f.buffer.caret, 1)
 	testing.expect(t, ui.text_area_pointer(box, end.x, end.y + line / 2, false, false))
-	testing.expect_value(t, markdown.edit_selected_text(&f.buffer), "aaa\nbbbb\ncc")
+	testing.expect_value(t, textedit.selected_text(&f.buffer), "aaa\nbbbb\ncc")
 	testing.expect(t, ui.text_area_release(&f.area))
 	testing.expect(t, !ui.text_area_release(&f.area))
 	testing.expect(t, !ui.text_area_pointer(box, start.x, start.y, false, false))
@@ -346,13 +346,13 @@ wrapping_the_selection_selects_what_it_wrapped_and_undoes_in_one_step :: proc(t:
 	b := &f.buffer
 	b.anchor, b.caret = 6, 11
 	testing.expect(t, ui.text_area_wrap_selection(b, "**", "**", "bold"))
-	testing.expect_value(t, markdown.edit_string(b), "hello **world**")
-	testing.expect_value(t, markdown.edit_selected_text(b), "world")
-	testing.expect(t, markdown.edit_undo(b))
-	testing.expect_value(t, markdown.edit_string(b), "hello world")
-	testing.expect_value(t, markdown.edit_selected_text(b), "world")
-	testing.expect(t, markdown.edit_redo(b))
-	testing.expect_value(t, markdown.edit_string(b), "hello **world**")
+	testing.expect_value(t, textedit.to_string(b), "hello **world**")
+	testing.expect_value(t, textedit.selected_text(b), "world")
+	testing.expect(t, textedit.undo(b))
+	testing.expect_value(t, textedit.to_string(b), "hello world")
+	testing.expect_value(t, textedit.selected_text(b), "world")
+	testing.expect(t, textedit.redo(b))
+	testing.expect_value(t, textedit.to_string(b), "hello **world**")
 }
 
 @(test)
@@ -362,14 +362,14 @@ wrapping_nothing_wraps_the_placeholder :: proc(t: ^testing.T) {
 	defer area_stop(&f)
 	b := &f.buffer
 	testing.expect(t, ui.text_area_wrap_selection(b, "`", "`", "code"))
-	testing.expect_value(t, markdown.edit_string(b), "`code`")
-	testing.expect_value(t, markdown.edit_selected_text(b), "code")
+	testing.expect_value(t, textedit.to_string(b), "`code`")
+	testing.expect_value(t, textedit.selected_text(b), "code")
 	// Typing replaces the placeholder, which is the point of selecting it.
-	testing.expect(t, markdown.edit_insert(b, "x"))
-	testing.expect_value(t, markdown.edit_string(b), "`x`")
-	testing.expect(t, markdown.edit_undo(b))
-	testing.expect(t, markdown.edit_undo(b))
-	testing.expect_value(t, markdown.edit_string(b), "")
+	testing.expect(t, textedit.insert(b, "x"))
+	testing.expect_value(t, textedit.to_string(b), "`x`")
+	testing.expect(t, textedit.undo(b))
+	testing.expect(t, textedit.undo(b))
+	testing.expect_value(t, textedit.to_string(b), "")
 }
 
 @(test)
@@ -378,14 +378,14 @@ inserting_a_block_goes_on_lines_of_its_own_and_selects_the_body :: proc(t: ^test
 	if !area_start(t, &f, "see this") {return}
 	defer area_stop(&f)
 	b := &f.buffer
-	markdown.edit_move(b, len(b.text))
+	textedit.move(b, len(b.text))
 	testing.expect(t, ui.text_area_insert_block(b, "odin", "x := 1"))
-	testing.expect_value(t, markdown.edit_string(b), "see this\n```odin\nx := 1\n```\n")
-	testing.expect_value(t, markdown.edit_selected_text(b), "x := 1")
-	testing.expect(t, markdown.edit_undo(b))
-	testing.expect_value(t, markdown.edit_string(b), "see this")
-	testing.expect(t, markdown.edit_redo(b))
-	testing.expect_value(t, markdown.edit_string(b), "see this\n```odin\nx := 1\n```\n")
+	testing.expect_value(t, textedit.to_string(b), "see this\n```odin\nx := 1\n```\n")
+	testing.expect_value(t, textedit.selected_text(b), "x := 1")
+	testing.expect(t, textedit.undo(b))
+	testing.expect_value(t, textedit.to_string(b), "see this")
+	testing.expect(t, textedit.redo(b))
+	testing.expect_value(t, textedit.to_string(b), "see this\n```odin\nx := 1\n```\n")
 }
 
 @(test)
@@ -395,18 +395,18 @@ a_block_needs_no_lead_at_a_line_start_and_replaces_the_selection :: proc(t: ^tes
 	defer area_stop(&f)
 	b := &f.buffer
 	testing.expect(t, ui.text_area_insert_block(b, "suggestion", ""))
-	testing.expect_value(t, markdown.edit_string(b), "```suggestion\n\n```\n")
-	testing.expect_value(t, markdown.edit_selected_text(b), "")
+	testing.expect_value(t, textedit.to_string(b), "```suggestion\n\n```\n")
+	testing.expect_value(t, textedit.selected_text(b), "")
 	testing.expect_value(t, b.caret, 14)
-	testing.expect(t, markdown.edit_undo(b))
-	testing.expect_value(t, markdown.edit_string(b), "")
-	testing.expect(t, markdown.edit_insert(b, "one\ntwo"))
+	testing.expect(t, textedit.undo(b))
+	testing.expect_value(t, textedit.to_string(b), "")
+	testing.expect(t, textedit.insert(b, "one\ntwo"))
 	b.anchor, b.caret = 4, 7
 	testing.expect(t, ui.text_area_insert_block(b, "go", "two"))
-	testing.expect_value(t, markdown.edit_string(b), "one\n```go\ntwo\n```\n")
-	testing.expect_value(t, markdown.edit_selected_text(b), "two")
-	testing.expect(t, markdown.edit_undo(b))
-	testing.expect_value(t, markdown.edit_string(b), "one\ntwo")
+	testing.expect_value(t, textedit.to_string(b), "one\n```go\ntwo\n```\n")
+	testing.expect_value(t, textedit.selected_text(b), "two")
+	testing.expect(t, textedit.undo(b))
+	testing.expect_value(t, textedit.to_string(b), "one\ntwo")
 }
 
 @(test)
@@ -443,14 +443,14 @@ a_text_area_draws_its_selection_caret_and_only_the_lines_in_view :: proc(t: ^tes
 
 	// Scrolled to the end, the lines in view are the last three.
 	render.draw_list_reset(&list)
-	markdown.edit_move(&f.buffer, len(f.buffer.text))
+	textedit.move(&f.buffer, len(f.buffer.text))
 	_ = render.push_layer(&list, {0, 0, 800, 400})
 	testing.expect_value(t, ui.text_area_draw(box, &list, theme, true, ""), render.Build_Status.Ok)
 	testing.expect_value(t, len(list.glyphs), 3)
 
 	// An empty text shows the placeholder.
 	render.draw_list_reset(&list)
-	testing.expect(t, markdown.edit_replace(&f.buffer, 0, len(f.buffer.text), ""))
+	testing.expect(t, textedit.replace(&f.buffer, 0, len(f.buffer.text), ""))
 	_ = render.push_layer(&list, {0, 0, 800, 400})
 	testing.expect_value(t, ui.text_area_draw(box, &list, theme, false, "Hi"), render.Build_Status.Ok)
 	testing.expect_value(t, len(list.glyphs), 2)
@@ -525,12 +525,12 @@ a_second_and_third_click_select_the_word_and_the_line_and_a_drag_grows_them :: p
 	beta := ui.text_area_caret_rect(box, 7)
 	gamma := ui.text_area_caret_rect(box, 13)
 	testing.expect(t, ui.text_area_pointer(box, beta.x + 1, beta.y + line / 2, true, false, 2))
-	testing.expect_value(t, markdown.edit_selected_text(&f.buffer), "beta")
+	testing.expect_value(t, textedit.selected_text(&f.buffer), "beta")
 	testing.expect(t, ui.text_area_pointer(box, gamma.x + 1, gamma.y + line / 2, false, false))
-	testing.expect_value(t, markdown.edit_selected_text(&f.buffer), "beta gamma")
+	testing.expect_value(t, textedit.selected_text(&f.buffer), "beta gamma")
 	testing.expect(t, ui.text_area_release(&f.area))
 	testing.expect(t, ui.text_area_pointer(box, beta.x + 1, beta.y + line / 2, true, false, 3))
-	testing.expect_value(t, markdown.edit_selected_text(&f.buffer), "alpha beta gamma\n")
+	testing.expect_value(t, textedit.selected_text(&f.buffer), "alpha beta gamma\n")
 	testing.expect(t, ui.text_area_release(&f.area))
 	// Shift extends from the anchor whatever the count, and a plain press forgets the unit.
 	testing.expect(t, ui.text_area_pointer(box, gamma.x + 1, gamma.y + line / 2, true, true, 2))
@@ -539,7 +539,7 @@ a_second_and_third_click_select_the_word_and_the_line_and_a_drag_grows_them :: p
 	testing.expect(t, ui.text_area_release(&f.area))
 	testing.expect(t, ui.text_area_pointer(box, beta.x + 1, beta.y + line / 2, true, false))
 	testing.expect(t, ui.text_area_pointer(box, gamma.x + 1, gamma.y + line / 2, false, false))
-	testing.expect_value(t, markdown.edit_selected_text(&f.buffer), "eta ga")
+	testing.expect_value(t, textedit.selected_text(&f.buffer), "eta ga")
 }
 
 @(test)
@@ -549,12 +549,12 @@ home_and_end_go_to_the_row_first_on_a_wrapped_line :: proc(t: ^testing.T) {
 	defer area_stop(&f)
 	box := area_box(&f, area_width_of(&f, "aaa bbb"), 1, 10)
 	testing.expect_value(t, len(ui.text_area_lines(&f.area, &f.buffer, &f.text, box.rect.width, 1)), 2)
-	markdown.edit_move(&f.buffer, 10)
+	textedit.move(&f.buffer, 10)
 	ui.text_area_row_edge(box, false, false)
 	testing.expect_value(t, f.buffer.caret, 8)
 	ui.text_area_row_edge(box, false, false)
 	testing.expect_value(t, f.buffer.caret, 0)
-	markdown.edit_move(&f.buffer, 2)
+	textedit.move(&f.buffer, 2)
 	ui.text_area_row_edge(box, true, false)
 	testing.expect_value(t, f.buffer.caret, 7)
 	ui.text_area_row_edge(box, true, true)
@@ -569,7 +569,7 @@ scrolling_by_lines_leaves_the_caret_where_it_is :: proc(t: ^testing.T) {
 	defer area_stop(&f)
 	box := area_box(&f, area_width(&f, 20), 1, 4)
 	line := ui.text_styled(&f.text, .Body).line_height
-	markdown.edit_move(&f.buffer, 0)
+	textedit.move(&f.buffer, 0)
 	testing.expect(t, ui.text_area_scroll_lines(box, 2))
 	testing.expect_value(t, f.area.scroll, 2 * line)
 	testing.expect_value(t, f.buffer.caret, 0)

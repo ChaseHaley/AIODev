@@ -1,14 +1,14 @@
 package ui
 
 import "cosmos:font"
-import "aio:markdown"
 import "cosmos:render"
 import "core:math"
 import "core:strings"
 import "core:unicode/utf8"
+import "cosmos:textedit"
 
 // A wrapped, multi-line plain-text editor for a short note such as a comment (D-100). The text and its
-// caret, selection and undo live in a markdown.Edit_Buffer the host owns and edits with its keys; the
+// caret, selection and undo live in a textedit.Buffer the host owns and edits with its keys; the
 // area wraps that text, scrolls it inside the box, and answers where things are on screen.
 
 // One visual line: the bytes from `start` to `end`. A line the text wraps keeps its trailing spaces and
@@ -44,7 +44,7 @@ Text_Area :: struct {
 	// A pointer press in the box holds until the host calls `text_area_release`. A double or triple click
 	// holds the unit it selected, `unit_from`..`unit_to`, which the drag grows by.
 	dragging:          bool,
-	unit:              Maybe(markdown.Edit_Unit),
+	unit:              Maybe(textedit.Unit),
 	unit_from:         int,
 	unit_to:           int,
 	caret:             Field_Caret,
@@ -54,7 +54,7 @@ Text_Area :: struct {
 // tall as `text_area_height` says; `text` carries the window scale in its size, like Field_Box's.
 Text_Area_Box :: struct {
 	area:   ^Text_Area,
-	buffer: ^markdown.Edit_Buffer,
+	buffer: ^textedit.Buffer,
 	text:   ^Text,
 	rect:   render.Rect,
 	scale:  f32,
@@ -119,7 +119,7 @@ area_row_draw :: proc(
 // Lines break at '\n', after the last space that lets the line fit, and inside a word wider than a line.
 // Spaces hang past the width instead of breaking a line, so they stay at their line's end.
 @(private = "file")
-area_wrap :: proc(a: ^Text_Area, b: ^markdown.Edit_Buffer, t: ^Text, width: f32) {
+area_wrap :: proc(a: ^Text_Area, b: ^textedit.Buffer, t: ^Text, width: f32) {
 	if a.wrapped && a.wrapped_revision == b.revision && a.wrapped_width == width &&
 	   a.wrapped_size == t.size_px && a.wrapped_family == t.family {
 		return
@@ -128,7 +128,7 @@ area_wrap :: proc(a: ^Text_Area, b: ^markdown.Edit_Buffer, t: ^Text, width: f32)
 	a.wrapped, a.wrapped_revision, a.wrapped_width = true, b.revision, width
 	a.wrapped_size, a.wrapped_family = t.size_px, t.family
 	clear(&a.lines)
-	s := markdown.edit_string(b)
+	s := textedit.to_string(b)
 	start, last_break := 0, -1
 	pen, pen_at_break: f32
 	word := false
@@ -200,7 +200,7 @@ area_laid_out :: proc(box: Text_Area_Box) -> (frame: render.Rect, t: Text) {
 // The visual lines of a `width` pixels wide box, wrapped if the text or width changed since last asked.
 @(require_results)
 text_area_lines :: proc(
-	a: ^Text_Area, b: ^markdown.Edit_Buffer, text: ^Text, width, scale: f32,
+	a: ^Text_Area, b: ^textedit.Buffer, text: ^Text, width, scale: f32,
 ) -> []Text_Area_Line {
 	t := text_styled(text, .Body)
 	area_wrap(a, b, &t, max(1, width - 2 * CONTROL_INSET * scale))
@@ -211,7 +211,7 @@ text_area_lines :: proc(
 // more than `max_lines`, past which the text scrolls inside the box.
 @(require_results)
 text_area_height :: proc(
-	a: ^Text_Area, b: ^markdown.Edit_Buffer, text: ^Text, width, scale: f32, min_lines, max_lines: int,
+	a: ^Text_Area, b: ^textedit.Buffer, text: ^Text, width, scale: f32, min_lines, max_lines: int,
 ) -> f32 {
 	lines := text_area_lines(a, b, text, width, scale)
 	t := text_styled(text, .Body)
@@ -237,9 +237,9 @@ area_row :: proc(a: ^Text_Area, offset: int) -> int {
 
 // The offset in `row` nearest to `x` pixels from the text's left edge.
 @(private = "file")
-area_offset_in_row :: proc(a: ^Text_Area, b: ^markdown.Edit_Buffer, t: ^Text, row: int, x: f32) -> int {
+area_offset_in_row :: proc(a: ^Text_Area, b: ^textedit.Buffer, t: ^Text, row: int, x: f32) -> int {
 	line := a.lines[row]
-	s := markdown.edit_string(b)
+	s := textedit.to_string(b)
 	space := code_space(t)
 	pen: f32
 	for r, i in s[line.start:line.end] {
@@ -257,7 +257,7 @@ area_offset_in_row :: proc(a: ^Text_Area, b: ^markdown.Edit_Buffer, t: ^Text, ro
 
 // How far `offset` is from the text's left edge on its row.
 @(private = "file")
-area_x_of :: proc(a: ^Text_Area, b: ^markdown.Edit_Buffer, t: ^Text, row, offset: int) -> f32 {
+area_x_of :: proc(a: ^Text_Area, b: ^textedit.Buffer, t: ^Text, row, offset: int) -> f32 {
 	return area_width(t, string(b.text[a.lines[row].start:offset]))
 }
 
@@ -281,7 +281,7 @@ text_area_offset_at :: proc(box: Text_Area_Box, x, y: f32) -> int {
 text_area_caret_rect :: proc(box: Text_Area_Box, offset: int) -> render.Rect {
 	frame, t := area_laid_out(box)
 	a := box.area
-	s := markdown.edit_string(box.buffer)
+	s := textedit.to_string(box.buffer)
 	at := clamp(offset, 0, len(s))
 	row := area_row(a, at)
 	space := code_space(&t)
@@ -333,18 +333,18 @@ text_area_scroll_lines :: proc(box: Text_Area_Box, lines: int) -> bool {
 }
 
 // Home or End: to the start or end of the caret's row, as the box wraps it, then as the shared rules go
-// on (`markdown.edit_home_target`, `edit_end_target`).
+// on (`textedit.home_target`, `edit_end_target`).
 text_area_row_edge :: proc(box: Text_Area_Box, end, extend: bool) {
 	_, t := area_laid_out(box)
 	a, b := box.area, box.buffer
 	row := area_row(a, b.caret)
 	target: int
 	if end {
-		target = markdown.edit_end_target(b, area_offset_in_row(a, b, &t, row, max(f32)))
+		target = textedit.end_target(b, area_offset_in_row(a, b, &t, row, max(f32)))
 	} else {
-		target = markdown.edit_home_target(b, a.lines[row].start)
+		target = textedit.home_target(b, a.lines[row].start)
 	}
-	markdown.edit_move(b, target, extend)
+	textedit.move(b, target, extend)
 	text_area_reveal(box)
 }
 
@@ -371,7 +371,7 @@ text_area_vertical :: proc(box: Text_Area_Box, lines, pages: int, extend: bool) 
 	case:
 		target = area_offset_in_row(a, b, &t, target_row, x)
 	}
-	markdown.edit_move(b, target, extend)
+	textedit.move(b, target, extend)
 	a.goal_x, a.goal_caret, a.goal_revision, a.goal_set = x, b.caret, b.revision, true
 	text_area_reveal(box)
 }
@@ -386,14 +386,14 @@ text_area_pointer :: proc(box: Text_Area_Box, x, y: f32, pressed, extend: bool, 
 	at := text_area_offset_at(box, x, y)
 	switch unit, by_unit := a.unit.?; {
 	case pressed && clicks > 1 && !extend:
-		chosen: markdown.Edit_Unit = clicks == 2 ? .Word : .Line
-		from, to := markdown.edit_unit_at(b, at, chosen)
+		chosen: textedit.Unit = clicks == 2 ? .Word : .Line
+		from, to := textedit.unit_at(b, at, chosen)
 		b.anchor, b.caret = from, to
 		a.unit, a.unit_from, a.unit_to = chosen, from, to
 	case !pressed && by_unit:
-		markdown.edit_select_unit(b, a.unit_from, a.unit_to, unit, at)
+		textedit.select_unit(b, a.unit_from, a.unit_to, unit, at)
 	case:
-		markdown.edit_move(b, at, pressed ? extend : true)
+		textedit.move(b, at, pressed ? extend : true)
 		a.unit = nil
 	}
 	if pressed {a.dragging = true}
@@ -419,11 +419,11 @@ text_area_draw :: proc(
 	scope, opened := clip_scope_open(list, box.rect, RADIUS_CONTROL * box.scale)
 	if !opened {return .Ok}
 	defer clip_scope_close(list, scope)
-	s := markdown.edit_string(b)
+	s := textedit.to_string(b)
 	lh := t.line_height
 	first := max(0, int(math.floor(a.scroll / lh)))
 	last := min(len(a.lines) - 1, int(math.ceil((a.scroll + frame.height) / lh)) - 1)
-	low, high := markdown.edit_selection(b)
+	low, high := textedit.selection(b)
 	space := focused && low != high ? area_advance(&t, ' ', code_space(&t)) : 0
 	for row in first ..= last {
 		if rect, selected := area_selection_rect(a, &t, s, frame, row, low, high, space); selected && focused {
@@ -512,11 +512,11 @@ area_selection_rect :: proc(
 // wraps `placeholder`. The text between them ends up selected, so the next press or typing replaces it.
 // One undo step. False when the buffer has no room, leaving it unchanged.
 @(require_results)
-text_area_wrap_selection :: proc(b: ^markdown.Edit_Buffer, before, after, placeholder: string) -> bool {
-	from, to := markdown.edit_selection(b)
+text_area_wrap_selection :: proc(b: ^textedit.Buffer, before, after, placeholder: string) -> bool {
+	from, to := textedit.selection(b)
 	inner := to > from ? string(b.text[from:to]) : placeholder
 	joined, err := strings.concatenate({before, inner, after}, context.temp_allocator)
-	if err != nil || !markdown.edit_replace(b, from, to, joined) {return false}
+	if err != nil || !textedit.replace(b, from, to, joined) {return false}
 	b.anchor = from + len(before)
 	b.caret = b.anchor + len(inner)
 	return true
@@ -525,12 +525,12 @@ text_area_wrap_selection :: proc(b: ^markdown.Edit_Buffer, before, after, placeh
 // Puts a fenced block, ```lang, `body` and the closing fence, at the caret on lines of its own, in place
 // of the selection, and selects the body. One undo step. False when the buffer has no room.
 @(require_results)
-text_area_insert_block :: proc(b: ^markdown.Edit_Buffer, lang, body: string) -> bool {
-	from, to := markdown.edit_selection(b)
+text_area_insert_block :: proc(b: ^textedit.Buffer, lang, body: string) -> bool {
+	from, to := textedit.selection(b)
 	lead := from > b.floor && b.text[from - 1] != '\n' ? b.newline : ""
 	head, head_error := strings.concatenate({lead, "```", lang, b.newline}, context.temp_allocator)
 	block, block_error := strings.concatenate({head, body, b.newline, "```", b.newline}, context.temp_allocator)
-	if head_error != nil || block_error != nil || !markdown.edit_replace(b, from, to, block) {return false}
+	if head_error != nil || block_error != nil || !textedit.replace(b, from, to, block) {return false}
 	b.anchor = from + len(head)
 	b.caret = b.anchor + len(body)
 	return true

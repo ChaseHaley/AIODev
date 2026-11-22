@@ -3,6 +3,7 @@ package markdown_test
 import "aio:markdown"
 import "core:strings"
 import "core:testing"
+import "cosmos:textedit"
 
 @(private = "file")
 Live_Fixture :: struct {
@@ -119,37 +120,37 @@ items_without_text_still_show_their_marker :: proc(t: ^testing.T) {
 }
 
 @(private = "file")
-buffer_of :: proc(t: ^testing.T, text: string, caret: int) -> markdown.Edit_Buffer {
-	b: markdown.Edit_Buffer
-	testing.expect(t, markdown.edit_buffer_init(&b, text))
-	markdown.edit_move(&b, caret)
+buffer_of :: proc(t: ^testing.T, text: string, caret: int) -> textedit.Buffer {
+	b: textedit.Buffer
+	testing.expect(t, textedit.init(&b, text))
+	textedit.move(&b, caret)
 	return b
 }
 
 @(test)
 typing_undoes_a_word_at_a_time_and_redoes :: proc(t: ^testing.T) {
 	b := buffer_of(t, "", 0)
-	defer markdown.edit_buffer_destroy(&b)
-	for c in ([?]string{"a", "b", " ", "c", "d"}) {testing.expect(t, markdown.edit_insert(&b, c, true))}
-	testing.expect_value(t, markdown.edit_string(&b), "ab cd")
-	testing.expect(t, markdown.edit_undo(&b))
-	testing.expect_value(t, markdown.edit_string(&b), "ab")
-	testing.expect(t, markdown.edit_undo(&b))
-	testing.expect_value(t, markdown.edit_string(&b), "")
-	testing.expect(t, markdown.edit_redo(&b))
-	testing.expect_value(t, markdown.edit_string(&b), "ab")
+	defer textedit.destroy(&b)
+	for c in ([?]string{"a", "b", " ", "c", "d"}) {testing.expect(t, textedit.insert(&b, c, true))}
+	testing.expect_value(t, textedit.to_string(&b), "ab cd")
+	testing.expect(t, textedit.undo(&b))
+	testing.expect_value(t, textedit.to_string(&b), "ab")
+	testing.expect(t, textedit.undo(&b))
+	testing.expect_value(t, textedit.to_string(&b), "")
+	testing.expect(t, textedit.redo(&b))
+	testing.expect_value(t, textedit.to_string(&b), "ab")
 	testing.expect_value(t, b.caret, 2)
 }
 
 @(test)
 backspace_runs_join_and_crlf_is_one_character :: proc(t: ^testing.T) {
 	b := buffer_of(t, "one\r\ntwo", 8)
-	defer markdown.edit_buffer_destroy(&b)
-	for _ in 0 ..< 4 {testing.expect(t, markdown.edit_delete(&b, false, false))}
-	testing.expect_value(t, markdown.edit_string(&b), "one")
-	testing.expect(t, markdown.edit_undo(&b))
-	testing.expect_value(t, markdown.edit_string(&b), "one\r\ntwo")
-	testing.expect_value(t, markdown.edit_clamp(&b, 4), 3)
+	defer textedit.destroy(&b)
+	for _ in 0 ..< 4 {testing.expect(t, textedit.erase(&b, false, false))}
+	testing.expect_value(t, textedit.to_string(&b), "one")
+	testing.expect(t, textedit.undo(&b))
+	testing.expect_value(t, textedit.to_string(&b), "one\r\ntwo")
+	testing.expect_value(t, textedit.clamp_offset(&b, 4), 3)
 }
 
 @(test)
@@ -166,30 +167,30 @@ enter_continues_lists_and_quotes_and_ends_an_empty_item :: proc(t: ^testing.T) {
 	for c in cases {
 		b := buffer_of(t, c.before, len(c.before))
 		testing.expect(t, markdown.edit_newline(&b))
-		testing.expect_value(t, markdown.edit_string(&b), c.after)
+		testing.expect_value(t, textedit.to_string(&b), c.after)
 		testing.expect_value(t, b.caret, len(c.after))
-		markdown.edit_buffer_destroy(&b)
+		textedit.destroy(&b)
 	}
 	crlf := buffer_of(t, "a\r\n- b", 6)
-	defer markdown.edit_buffer_destroy(&crlf)
+	defer textedit.destroy(&crlf)
 	testing.expect(t, markdown.edit_newline(&crlf))
-	testing.expect_value(t, markdown.edit_string(&crlf), "a\r\n- b\r\n- ")
+	testing.expect_value(t, textedit.to_string(&crlf), "a\r\n- b\r\n- ")
 }
 
 @(test)
 tab_indents_selected_lines_and_shift_tab_outdents :: proc(t: ^testing.T) {
 	b := buffer_of(t, "- a\n- b\nc", 0)
-	defer markdown.edit_buffer_destroy(&b)
-	markdown.edit_move(&b, 6, true)
+	defer textedit.destroy(&b)
+	textedit.move(&b, 6, true)
 	testing.expect(t, markdown.edit_indent(&b, false))
-	testing.expect_value(t, markdown.edit_string(&b), "\t- a\n\t- b\nc")
-	testing.expect_value(t, markdown.edit_selected_text(&b), "\t- a\n\t- ")
+	testing.expect_value(t, textedit.to_string(&b), "\t- a\n\t- b\nc")
+	testing.expect_value(t, textedit.selected_text(&b), "\t- a\n\t- ")
 	testing.expect(t, markdown.edit_indent(&b, true))
-	testing.expect_value(t, markdown.edit_string(&b), "- a\n- b\nc")
+	testing.expect_value(t, textedit.to_string(&b), "- a\n- b\nc")
 	plain := buffer_of(t, "word", 4)
-	defer markdown.edit_buffer_destroy(&plain)
+	defer textedit.destroy(&plain)
 	testing.expect(t, markdown.edit_indent(&plain, false))
-	testing.expect_value(t, markdown.edit_string(&plain), "word\t")
+	testing.expect_value(t, textedit.to_string(&plain), "word\t")
 }
 
 @(test)

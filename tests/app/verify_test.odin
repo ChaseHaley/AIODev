@@ -1,15 +1,6 @@
 package app_test
 
-import "cosmos:input"
-import "core:fmt"
-import "core:os"
-import "core:strings"
-import "core:testing"
 import app "../../src"
-import "aio:verify_protocol"
-import "aio:layout"
-import "cosmos:platform"
-import "aio:term_view"
 
 when app.AIO_CONTROL {
 	@(test)

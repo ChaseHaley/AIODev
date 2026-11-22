@@ -1,7 +1,6 @@
 package ui
 
 import "cosmos:colour"
-import "aio:markdown"
 import "cosmos:render"
 import "aio:syntax"
 import tr "aio:turns"
@@ -10,6 +9,7 @@ import "core:math"
 import "core:mem"
 import "core:mem/virtual"
 import "core:strings"
+import "cosmos:textedit"
 
 // The cards a note takes in the diff stream: the saved note card, and the editor card that replaces it
 // while the note is written or edited (D-100). Both sit under the last line of their lines, starting at the
@@ -628,7 +628,7 @@ changes_editor_placeholder :: proc(kind: Changes_Note_Kind) -> string {
 // Whether Save can save: a plain comment needs words, a label or a deletion does not.
 changes_editor_can_save :: proc(view: ^Changes_View) -> bool {
 	if view.draft != .Comment {return true}
-	return view.buffer != nil && strings.trim_space(markdown.edit_string(view.buffer)) != ""
+	return view.buffer != nil && strings.trim_space(textedit.to_string(view.buffer)) != ""
 }
 
 // A flat button of the editor's tools; false when the face could not be drawn.

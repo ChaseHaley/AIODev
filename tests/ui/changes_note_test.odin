@@ -2,12 +2,12 @@ package ui_test
 
 import "cosmos:font"
 import "cosmos:glyphs"
-import "aio:markdown"
 import "cosmos:render"
 import "aio:turns"
 import "aio:ui"
 import "core:math"
 import "core:testing"
+import "cosmos:textedit"
 
 @(private = "file")
 Note_Fixture :: struct {
@@ -18,7 +18,7 @@ Note_Fixture :: struct {
 	files:      [1]turns.Diff_File,
 	notes:      [3]ui.Changes_Comment_View,
 	area:       ui.Text_Area,
-	buffer:     markdown.Edit_Buffer,
+	buffer:     textedit.Buffer,
 	cache:      glyphs.Cache,
 	device:     ^render.Device,
 }
@@ -61,7 +61,7 @@ note_make :: proc(t: ^testing.T, f: ^Note_Fixture, view: ^ui.Changes_View) -> bo
 
 @(private = "file")
 note_destroy :: proc(f: ^Note_Fixture) {
-	markdown.edit_buffer_destroy(&f.buffer)
+	textedit.destroy(&f.buffer)
 	ui.text_area_destroy(&f.area)
 	glyphs.destroy(&f.cache)
 	font.system_destroy(f.fonts)
@@ -336,13 +336,13 @@ the_editor_card_draws_a_save_that_waits_for_words :: proc(t: ^testing.T) {
 	testing.expect(t, note_has_rect(&list, parts.card, theme.surface))
 
 	// With words it is saveable and drawn in full; a label or a deletion needs none.
-	testing.expect(t, markdown.edit_buffer_reset(&f.buffer, "Looks off."))
+	testing.expect(t, textedit.reset(&f.buffer, "Looks off."))
 	g, ok = note_draw(t, &f, &list, &theme, &view, &state)
 	if !ok {return}
 	parts, _ = ui.changes_editor_of(g, &view, &state)
 	testing.expect(t, ui.changes_editor_can_save(&view))
 	testing.expect(t, !note_has_rect(&list, parts.save, faint))
-	testing.expect(t, markdown.edit_buffer_reset(&f.buffer, "  \n "))
+	testing.expect(t, textedit.reset(&f.buffer, "  \n "))
 	testing.expect(t, !ui.changes_editor_can_save(&view), "spaces are not words")
 	view.draft = .Delete
 	testing.expect(t, ui.changes_editor_can_save(&view))

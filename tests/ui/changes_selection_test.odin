@@ -2,12 +2,12 @@ package ui_test
 
 import "cosmos:font"
 import "cosmos:glyphs"
-import "aio:markdown"
 import "cosmos:render"
 import "aio:turns"
 import "aio:ui"
 import "core:strings"
 import "core:testing"
+import "cosmos:textedit"
 
 @(private = "file")
 Selection_Fixture :: struct {
@@ -17,7 +17,7 @@ Selection_Fixture :: struct {
 	hunks:      [1]turns.Hunk,
 	files:      [1]turns.Diff_File,
 	area:       ui.Text_Area,
-	buffer:     markdown.Edit_Buffer,
+	buffer:     textedit.Buffer,
 	notes:      [2]ui.Changes_Comment_View,
 }
 
@@ -67,7 +67,7 @@ select_make :: proc(t: ^testing.T, f: ^Selection_Fixture, view: ^ui.Changes_View
 
 @(private = "file")
 select_destroy :: proc(f: ^Selection_Fixture) {
-	markdown.edit_buffer_destroy(&f.buffer)
+	textedit.destroy(&f.buffer)
 	ui.text_area_destroy(&f.area)
 	font.system_destroy(f.fonts)
 }

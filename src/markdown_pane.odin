@@ -19,6 +19,7 @@ import "core:path/filepath"
 import "core:strings"
 import "core:sync"
 import "core:time"
+import "cosmos:textedit"
 
 // Markdown panes: one local file per pane, read-only, reloaded when the file changes (WORK-319).
 
@@ -68,7 +69,7 @@ Markdown_Gesture :: union {
 // past the page's top or bottom edge, as `scroll_at` says; zero means it is not.
 Markdown_Selecting :: struct {
 	pane:      u32,
-	unit:      Maybe(markdown.Edit_Unit),
+	unit:      Maybe(textedit.Unit),
 	from, to:  int,
 	scroll_at: time.Tick,
 }
@@ -814,7 +815,7 @@ markdown_selected :: proc(app: ^App, w: ^Window) -> string {
 	pane := markdown_focused(app, w)
 	if pane == nil {return ""}
 	// An editor copies the file's own text, markup included.
-	if e := pane.editor; e != nil {return markdown.edit_selected_text(&e.buffer)}
+	if e := pane.editor; e != nil {return textedit.selected_text(&e.buffer)}
 	document := markdown_document(pane)
 	return document == nil ? "" : ui.markdown_selected_text(&pane.view, document)
 }
@@ -827,7 +828,7 @@ markdown_select_all :: proc(app: ^App, w: ^Window) {
 	pane := markdown_focused(app, w)
 	if pane == nil {return}
 	if e := pane.editor; e != nil {
-		markdown.edit_select_all(&e.buffer)
+		textedit.select_all(&e.buffer)
 		markdown_editor_sync(pane)
 	} else if document := markdown_document(pane); document != nil {
 		ui.markdown_select_all(&pane.view, document)
@@ -1142,7 +1143,7 @@ markdown_press :: proc(app: ^App, w: ^Window, e: input.Mouse_Button_Event) {
 		if count := click_run_count(w.markdown_clicks, pane.id, x, y, e.time_ns); count > 1 {
 			// The first click moved the caret and so changed the layout under the pointer: the word or
 			// line is the one that click hit.
-			unit: markdown.Edit_Unit = count == 2 ? .Word : .Line
+			unit: textedit.Unit = count == 2 ? .Word : .Line
 			at := w.markdown_clicks.at
 			from, to := markdown_edit_unit(w, pane, unit, at)
 			w.markdown_clicks = {pane.id, x, y, e.time_ns, count, at}

@@ -1,8 +1,6 @@
 package app_test
 
-import "aio:commands"
 import "cosmos:input"
-import "aio:markdown"
 import "cosmos:platform"
 import "cosmos:render"
 import "aio:turns"
@@ -12,6 +10,7 @@ import "core:os"
 import "core:strings"
 import "core:testing"
 import app "../../src"
+import "cosmos:textedit"
 
 @(private = "file")
 Selecting :: struct {
@@ -377,7 +376,7 @@ the_wheel_over_the_note_editor_scrolls_its_text_not_the_diff :: proc(t: ^testing
 	c := &pane.comments
 	c.selection = {file = 0, first = 2, last = 2, active = true}
 	testing.expect(t, app.changes_comments_key(&f.state, w, pane, {key = .Enter, pressed = true}))
-	testing.expect(t, markdown.edit_buffer_reset(&c.buffer, strings.repeat("line\n", 30, context.temp_allocator)))
+	testing.expect(t, textedit.reset(&c.buffer, strings.repeat("line\n", 30, context.temp_allocator)))
 	g := selecting_geometry(&f, w, pane)
 	box, visible := ui.changes_editor_box(g, &pane.model.view, &pane.state, &w.ui_text)
 	if !testing.expect(t, visible) {return}
@@ -511,19 +510,19 @@ toolbar_keys_label_delete_comment_and_close :: proc(t: ^testing.T) {
 	keys_select(&k, 3, 3)
 	testing.expect(t, keys_press(&k, .Enter))
 	testing.expect_value(t, c.editing, 3)
-	testing.expect_value(t, markdown.edit_string(&c.buffer), "")
+	testing.expect_value(t, textedit.to_string(&c.buffer), "")
 	testing.expect(t, keys_press(&k, .Escape))
 	testing.expect_value(t, c.editing, -1)
 	testing.expect(t, keys_press(&k, .X, {.Shift}, "X"))
 	testing.expect_value(t, c.editing, 3)
-	testing.expect_value(t, markdown.edit_string(&c.buffer), "X")
+	testing.expect_value(t, textedit.to_string(&c.buffer), "X")
 	testing.expect(t, keys_press(&k, .Escape))
 	testing.expect(t, c.selection.active)
 
 	// AltGr (Ctrl+Alt) types a character, so it starts a comment too; Alt alone is not typing.
 	testing.expect(t, keys_press(&k, .Digit_2, {.Control, .Alt}, "@"))
 	testing.expect_value(t, c.editing, 3)
-	testing.expect_value(t, markdown.edit_string(&c.buffer), "@")
+	testing.expect_value(t, textedit.to_string(&c.buffer), "@")
 	testing.expect(t, keys_press(&k, .Escape))
 	testing.expect(t, !keys_press(&k, .Y, {.Alt}, "y"))
 	testing.expect_value(t, c.editing, -1)
@@ -579,7 +578,7 @@ the_label_menu_takes_arrows_enter_and_plain_digits :: proc(t: ^testing.T) {
 	keys_select(&k, 0, 0)
 	testing.expect(t, keys_press(&k, .Digit_3, {}, "3"))
 	testing.expect_value(t, c.editing, 2)
-	testing.expect_value(t, markdown.edit_string(&c.buffer), "3")
+	testing.expect_value(t, textedit.to_string(&c.buffer), "3")
 
 	testing.expect(t, keys_press(&k, .Escape))
 	testing.expect_value(t, c.editing, -1)
@@ -805,14 +804,14 @@ the_note_editor_and_the_saved_card_answer_the_pointer_and_the_keyboard :: proc(t
 	if !testing.expect(t, shown) {return}
 	line := ui.changes_line_rect(g, view, &pane.state, 0, 2)
 	testing.expect(t, parts.card.y > line.y + line.height)
-	testing.expect_value(t, markdown.edit_string(&c.buffer), "Why")
+	testing.expect_value(t, textedit.to_string(&c.buffer), "Why")
 	testing.expect_value(t, app.changes_tooltip(&f.state, w, parts.bold.x + 2, parts.bold.y + 2), "Bold")
 	testing.expect_value(t, app.changes_tooltip(&f.state, w, parts.suggest.x + 2, parts.suggest.y + 2),
 		"Insert the selected lines as an editable replacement")
 
 	// Bold wraps a word at the caret; Add note saves with the pointer.
 	selecting_click(&f, w, parts.bold)
-	testing.expect_value(t, markdown.edit_string(&c.buffer), "Why**bold**")
+	testing.expect_value(t, textedit.to_string(&c.buffer), "Why**bold**")
 	g = selecting_geometry(&f, w, pane)
 	parts, _ = ui.changes_editor_of(g, view, &pane.state)
 	selecting_click(&f, w, parts.save)
@@ -830,7 +829,7 @@ the_note_editor_and_the_saved_card_answer_the_pointer_and_the_keyboard :: proc(t
 	testing.expect_value(t, app.changes_tooltip(&f.state, w, remove.x + 2, remove.y + 2), "Remove")
 	selecting_click(&f, w, edit)
 	testing.expect_value(t, c.editing, 0)
-	testing.expect_value(t, markdown.edit_string(&c.buffer), "Why**bold**")
+	testing.expect_value(t, textedit.to_string(&c.buffer), "Why**bold**")
 	g = selecting_geometry(&f, w, pane)
 	parts, _ = ui.changes_editor_of(g, view, &pane.state)
 	selecting_click(&f, w, parts.cancel)
@@ -858,7 +857,7 @@ ctrl_enter_saves_and_escape_cancels_the_editor_through_the_window :: proc(t: ^te
 	app.handle_event(&f.state, input.Key_Event{window = w.id, key = .Q, text = "q", pressed = true})
 	app.handle_event(&f.state, input.Key_Event{window = w.id, key = .Q})
 	testing.expect_value(t, c.editing, 0)
-	testing.expect_value(t, markdown.edit_string(&c.buffer), "q")
+	testing.expect_value(t, textedit.to_string(&c.buffer), "q")
 	ctrl_enter := input.Key_Event {
 		window    = w.id,
 		key       = .Enter,

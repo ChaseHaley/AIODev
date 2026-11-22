@@ -1,9 +1,7 @@
 package app_test
 
-import "aio:commands"
 import "cosmos:input"
 import "aio:layout"
-import "aio:markdown"
 import "cosmos:platform"
 import "cosmos:render"
 import "aio:settings"
@@ -15,6 +13,7 @@ import "core:strings"
 import "core:testing"
 import "core:time"
 import app "../../src"
+import "cosmos:textedit"
 
 @(private = "file")
 Fixture :: struct {
@@ -270,7 +269,7 @@ an_open_file_list_takes_typed_text_and_the_comment_draft_is_kept :: proc(t: ^tes
 	_ = app.changes_comments_press(&f.state, w, pane, {.Toolbar_Comment, 0, 0}, {button = .Left})
 	if !testing.expect_value(t, pane.comments.editing, 0) {return}
 	app.handle_event(&f.state, input.Text_Event{window = w.id, text = "draft"})
-	testing.expect_value(t, markdown.edit_string(&pane.comments.buffer), "draft")
+	testing.expect_value(t, textedit.to_string(&pane.comments.buffer), "draft")
 	g := app.changes_geometry_of(&f.state, w, pane, shown)
 	click(&f.state, w, g.files_button)
 	if !testing.expect(t, pane.state.files_open, "the files button opens the file list") {return}

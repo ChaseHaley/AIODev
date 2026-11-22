@@ -3,7 +3,6 @@ package ui_test
 import "core:testing"
 import "core:time"
 import "cosmos:render"
-import "aio:settings"
 import "aio:ui"
 import "cosmos:motion"
 

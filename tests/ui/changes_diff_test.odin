@@ -3,7 +3,6 @@ package ui_test
 import "cosmos:colour"
 import "cosmos:font"
 import "cosmos:glyphs"
-import "aio:markdown"
 import "cosmos:render"
 import "aio:syntax"
 import "aio:turns"
@@ -11,6 +10,7 @@ import "aio:ui"
 import "core:math"
 import "core:strings"
 import "core:testing"
+import "cosmos:textedit"
 
 @(private = "file")
 Diff_Fixture :: struct {
@@ -21,7 +21,7 @@ Diff_Fixture :: struct {
 	files:      [1]turns.Diff_File,
 	comments:   [2]ui.Changes_Comment_View,
 	area:       ui.Text_Area,
-	buffer:     markdown.Edit_Buffer,
+	buffer:     textedit.Buffer,
 	side_lines: [10]turns.Diff_Line,
 	ends:       [4]turns.Diff_Line,
 	side_hunks: [2]turns.Hunk,
@@ -63,7 +63,7 @@ diff_fixture_make :: proc(t: ^testing.T, f: ^Diff_Fixture, view: ^ui.Changes_Vie
 
 @(private = "file")
 diff_fixture_destroy :: proc(f: ^Diff_Fixture) {
-	markdown.edit_buffer_destroy(&f.buffer)
+	textedit.destroy(&f.buffer)
 	ui.text_area_destroy(&f.area)
 	font.system_destroy(f.fonts)
 }
@@ -228,11 +228,11 @@ changes_rows_include_comment_cards :: proc(t: ^testing.T) {
 
 	// The card's height follows the text: more lines grow it, until the text area stops at twelve.
 	before := state.rows.cards[1]
-	testing.expect(t, markdown.edit_buffer_reset(&f.buffer, "one\ntwo\nthree\nfour\nfive\nsix"))
+	testing.expect(t, textedit.reset(&f.buffer, "one\ntwo\nthree\nfour\nfive\nsix"))
 	g = lay_out(&f, &view, &state)
 	grown := state.rows.cards[1]
 	testing.expect(t, grown > before)
-	testing.expect(t, markdown.edit_buffer_reset(&f.buffer, strings.repeat("line\n", 40, context.temp_allocator)))
+	testing.expect(t, textedit.reset(&f.buffer, strings.repeat("line\n", 40, context.temp_allocator)))
 	g = lay_out(&f, &view, &state)
 	testing.expect(t, state.rows.cards[1] > grown)
 	rect, _ = ui.changes_card_rect(g, &view, &state, 1)
@@ -1126,15 +1126,15 @@ a_text_drag_step_and_a_keystroke_leave_the_rows_as_they_are :: proc(t: ^testing.
 
 	// Typing into the editor on that selection builds them only when the card changes height.
 	view.editing = 1
-	testing.expect(t, markdown.edit_buffer_reset(&f.buffer, "a"))
+	testing.expect(t, textedit.reset(&f.buffer, "a"))
 	_ = lay_out(&f, &view, &state)
 	built = state.rows.built
 	for text in ([?]string{"ab", "abc", "abcd", "abcde"}) {
-		testing.expect(t, markdown.edit_buffer_reset(&f.buffer, text))
+		testing.expect(t, textedit.reset(&f.buffer, text))
 		_ = lay_out(&f, &view, &state)
 	}
 	testing.expect_value(t, state.rows.built, built)
-	testing.expect(t, markdown.edit_buffer_reset(&f.buffer, "one\ntwo\nthree\nfour\nfive\nsix"))
+	testing.expect(t, textedit.reset(&f.buffer, "one\ntwo\nthree\nfour\nfive\nsix"))
 	_ = lay_out(&f, &view, &state)
 	testing.expect_value(t, state.rows.built, built + 1)
 }

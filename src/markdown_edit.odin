@@ -6,6 +6,7 @@ import "aio:ui"
 import "core:log"
 import "core:os"
 import "core:time"
+import "cosmos:textedit"
 
 // Editing a Markdown pane's file in place, shown as Obsidian's Live Preview shows it (WORK-441,
 // D-094): every line rendered but the caret's. Edits save shortly after typing stops.
@@ -20,7 +21,7 @@ MARKDOWN_SAVE_RETRY :: 5 * time.Second
 // A pane in edit mode: the file's text being edited and the live preview the pane shows of it. Owned by
 // its pane.
 Markdown_Editor :: struct {
-	buffer:         markdown.Edit_Buffer,
+	buffer:         textedit.Buffer,
 	live:           markdown.Live,
 	document:       markdown.Document,
 	// What `document` was built for: the buffer's revision and the lines the selection touches.
@@ -41,7 +42,7 @@ Markdown_Editor :: struct {
 
 @(private)
 markdown_editor_destroy :: proc(e: ^Markdown_Editor) {
-	markdown.edit_buffer_destroy(&e.buffer)
+	textedit.destroy(&e.buffer)
 	markdown.live_destroy(&e.live)
 	markdown.document_destroy(&e.document)
 	free(e)
@@ -74,7 +75,7 @@ markdown_edit_begin :: proc(app: ^App, w: ^Window, pane: ^Markdown_Pane) {
 		return
 	}
 	e, err := new(Markdown_Editor)
-	if err != nil || !markdown.edit_buffer_init(&e.buffer, string(loaded.source)) {
+	if err != nil || !textedit.init(&e.buffer, string(loaded.source)) {
 		if e != nil {markdown_editor_destroy(e)}
 		notify(app, .Error, "Could not edit the file.")
 		return
@@ -86,9 +87,9 @@ markdown_edit_begin :: proc(app: ^App, w: ^Window, pane: ^Markdown_Pane) {
 		top = ui.markdown_offset_at(&pane.view, &loaded.document, g, g.left, g.area.y)
 	}
 	// The properties stay rendered: the caret starts in the text below them.
-	text := markdown.edit_string(&e.buffer)
+	text := textedit.to_string(&e.buffer)
 	body := e.buffer.floor + markdown.frontmatter_end(text[e.buffer.floor:])
-	markdown.edit_move(&e.buffer, max(body, markdown.document_source(&loaded.document, top)))
+	textedit.move(&e.buffer, max(body, markdown.document_source(&loaded.document, top)))
 	e.reveal = true
 	pane.editor = e
 	ui.markdown_selection_clear(&pane.view)
@@ -108,7 +109,7 @@ markdown_edit_end :: proc(app: ^App, pane: ^Markdown_Pane) {
 	// it keeps changes.
 	if loaded, ok := &pane.load.(Markdown_Loaded); ok {
 		next: markdown.Document
-		if markdown.parse(markdown.edit_string(&e.buffer), &next) {
+		if markdown.parse(textedit.to_string(&e.buffer), &next) {
 			source, cloned := clone_bytes(e.buffer.text[:])
 			if cloned {
 				markdown.document_destroy(&loaded.document)
@@ -145,10 +146,10 @@ markdown_editor_sync :: proc(pane: ^Markdown_Pane) {
 	e := pane.editor
 	if e == nil {return}
 	b := &e.buffer
-	from, to := markdown.edit_selection(b)
-	first, last := markdown.edit_line_start(b, from), markdown.edit_line_end(b, to)
+	from, to := textedit.selection(b)
+	first, last := textedit.line_start(b, from), textedit.line_end(b, to)
 	if !e.built || e.built_revision != b.revision || e.built_from != first || e.built_to != last {
-		if !markdown.live_build(&e.live, markdown.edit_string(b), first, last, &e.document) {
+		if !markdown.live_build(&e.live, textedit.to_string(b), first, last, &e.document) {
 			log.error("building the Markdown edit view ran out of memory")
 		}
 		e.built, e.built_revision, e.built_from, e.built_to = true, b.revision, first, last
@@ -224,7 +225,7 @@ markdown_follow_edits :: proc(app: ^App, pane: ^Markdown_Pane) {
 		followed := Markdown_Followed{other.id, e.buffer.revision}
 		if pane.followed == followed {return}
 		next: markdown.Document
-		if !markdown.parse(markdown.edit_string(&e.buffer), &next) {
+		if !markdown.parse(textedit.to_string(&e.buffer), &next) {
 			log.error("parsing the Markdown edits for another pane ran out of memory")
 			return
 		}
@@ -261,7 +262,7 @@ markdown_edit_reloaded :: proc(pane: ^Markdown_Pane) {
 	e := pane.editor
 	loaded, ok := &pane.load.(Markdown_Loaded)
 	if e == nil || !ok {return}
-	if e.save_at == {} && !markdown.edit_buffer_reset(&e.buffer, string(loaded.source)) {return}
+	if e.save_at == {} && !textedit.reset(&e.buffer, string(loaded.source)) {return}
 	// The load cleared the view's selection either way.
 	markdown_editor_sync(pane)
 }
@@ -322,7 +323,7 @@ markdown_edit_point :: proc(
 ) -> int {
 	e := pane.editor
 	offset := ui.markdown_offset_at(&pane.view, &e.document, g, x, y)
-	markdown.edit_move(&e.buffer, markdown.live_source(&e.document, offset), extend)
+	textedit.move(&e.buffer, markdown.live_source(&e.document, offset), extend)
 	e.goal_x = -1
 	markdown_editor_sync(pane)
 	w.dirty = true
@@ -335,13 +336,13 @@ markdown_edit_point :: proc(
 markdown_edit_unit :: proc(
 	w: ^Window,
 	pane: ^Markdown_Pane,
-	unit: markdown.Edit_Unit,
+	unit: textedit.Unit,
 	at: int,
 ) -> (
 	from, to: int,
 ) {
 	e := pane.editor
-	from, to = markdown.edit_unit_at(&e.buffer, at, unit)
+	from, to = textedit.unit_at(&e.buffer, at, unit)
 	e.buffer.anchor, e.buffer.caret = from, to
 	e.goal_x = -1
 	markdown_editor_sync(pane)
@@ -357,12 +358,12 @@ markdown_edit_unit_drag :: proc(
 	pane: ^Markdown_Pane,
 	g: ui.Markdown_Geometry,
 	x, y: f32,
-	unit: markdown.Edit_Unit,
+	unit: textedit.Unit,
 	from, to: int,
 ) {
 	e := pane.editor
 	offset := ui.markdown_offset_at(&pane.view, &e.document, g, x, y)
-	markdown.edit_select_unit(&e.buffer, from, to, unit, markdown.live_source(&e.document, offset))
+	textedit.select_unit(&e.buffer, from, to, unit, markdown.live_source(&e.document, offset))
 	e.goal_x = -1
 	markdown_editor_sync(pane)
 	w.dirty = true
@@ -415,7 +416,7 @@ markdown_edit_vertical :: proc(
 	case:
 		target = markdown.live_source(&e.document, ui.markdown_offset_near(view, &e.document, x, y))
 	}
-	markdown.edit_move(&e.buffer, target, extend)
+	textedit.move(&e.buffer, target, extend)
 	markdown_editor_sync(pane)
 	e.goal_x, e.reveal = x, true
 }
@@ -426,7 +427,7 @@ markdown_edit_vertical :: proc(
 markdown_edit_row_edge :: proc(app: ^App, w: ^Window, pane: ^Markdown_Pane, end, extend: bool) {
 	e := pane.editor
 	b := &e.buffer
-	row_start, row_end := markdown.edit_line_start(b, b.caret), markdown.edit_line_end(b, b.caret)
+	row_start, row_end := textedit.line_start(b, b.caret), textedit.line_end(b, b.caret)
 	if _, fitted := markdown_edit_fitted(app, w, pane); fitted {
 		document := &e.document
 		display := markdown.live_display(document, b.caret)
@@ -434,8 +435,8 @@ markdown_edit_row_edge :: proc(app: ^App, w: ^Window, pane: ^Markdown_Pane, end,
 			row_start, row_end = markdown.live_source(document, start), markdown.live_source(document, stop)
 		}
 	}
-	target := end ? markdown.edit_end_target(b, row_end) : markdown.edit_home_target(b, row_start)
-	markdown.edit_move(b, target, extend)
+	target := end ? textedit.end_target(b, row_end) : textedit.home_target(b, row_start)
+	textedit.move(b, target, extend)
 }
 
 // The keys of a pane in edit mode. False for keys it leaves to shortcuts and the pane.
@@ -479,9 +480,9 @@ markdown_edit_menu_open :: proc(
 ) {
 	e := pane.editor
 	at := markdown.live_source(&e.document, ui.markdown_offset_at(&pane.view, &e.document, g, x, y))
-	from, to := markdown.edit_selection(&e.buffer)
+	from, to := textedit.selection(&e.buffer)
 	if from == to || at < from || at > to {
-		markdown.edit_move(&e.buffer, at)
+		textedit.move(&e.buffer, at)
 		e.goal_x = -1
 		markdown_editor_sync(pane)
 	}

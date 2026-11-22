@@ -3,7 +3,6 @@ package main
 import "aio:agent"
 import "aio:commands"
 import "cosmos:input"
-import "aio:markdown"
 import "aio:procinfo"
 import "cosmos:render"
 import "aio:settings"
@@ -13,6 +12,7 @@ import "aio:ui"
 import "core:fmt"
 import "core:strings"
 import "core:time"
+import "cosmos:textedit"
 
 // Review comments on an Agent changes pane's diff lines: written in the diff, then pasted into the
 // agent's pane or copied. A comment keeps its file's path, a side and that side's line numbers, so the
@@ -79,7 +79,7 @@ Changes_Comments :: struct {
 	menu_row:      int,
 	// The note editor: its text, the area that wraps and draws it, and the kind the note will be saved as,
 	// which the tag's × turns into a plain comment.
-	buffer:    markdown.Edit_Buffer,
+	buffer:    textedit.Buffer,
 	area:      ui.Text_Area,
 	// The editor's presses, which count double and triple clicks.
 	clicks:    Click_Run,
@@ -131,7 +131,7 @@ changes_comments_destroy :: proc(c: ^Changes_Comments) {
 	for &item in c.items {changes_comment_release(&item)}
 	delete(c.items)
 	changes_comment_release(&c.held)
-	markdown.edit_buffer_destroy(&c.buffer)
+	textedit.destroy(&c.buffer)
 	ui.text_area_destroy(&c.area)
 	delete(c.views)
 	strings.builder_destroy(&c.target)
@@ -497,7 +497,7 @@ changes_editor_open :: proc(pane: ^Changes_Pane, index: int) {
 	if index < 0 || index > len(c.items) {return}
 	if index == len(c.items) && !c.selection.active {return}
 	text := index < len(c.items) ? c.items[index].text : ""
-	if !markdown.edit_buffer_reset(&c.buffer, text) {return}
+	if !textedit.reset(&c.buffer, text) {return}
 	c.buffer.caret, c.buffer.anchor = len(c.buffer.text), len(c.buffer.text)
 	ui.text_area_reset(&c.area)
 	c.draft = index < len(c.items) ? c.items[index].kind : .Comment
@@ -587,7 +587,7 @@ changes_editor_close :: proc(app: ^App, pane: ^Changes_Pane, save: bool) {
 	editing, draft := c.editing, c.draft
 	c.editing = -1
 	_ = ui.text_area_release(&c.area)
-	text := strings.trim_space(markdown.edit_string(&c.buffer))
+	text := strings.trim_space(textedit.to_string(&c.buffer))
 	if !save || (text == "" && draft == .Comment) {return}
 	if editing < len(c.items) {
 		changes_note_rewrite(app, &c.items[editing], text, draft)
@@ -844,7 +844,7 @@ changes_editor_tool :: proc(pane: ^Changes_Pane, part: ui.Changes_Part) {
 	case .Editor_Code:
 		_ = ui.text_area_wrap_selection(&c.buffer, "`", "`", "code")
 	case .Editor_Block:
-		from, to := markdown.edit_selection(&c.buffer)
+		from, to := textedit.selection(&c.buffer)
 		lang := found ? changes_fence_language(file) : ""
 		_ = ui.text_area_insert_block(&c.buffer, lang, string(c.buffer.text[from:to]))
 	case .Editor_Suggest:
@@ -1648,7 +1648,7 @@ when AIO_CONTROL {
 		state_rect(r, "changes.send_rect", send_rect)
 		state_rect(r, "changes.copy_rect", copy_rect)
 		state_rect(r, "changes.discard_rect", discard_rect)
-		state_text(r, "changes.editor_text", pane != nil ? markdown.edit_string(&pane.comments.buffer) : "")
+		state_text(r, "changes.editor_text", pane != nil ? textedit.to_string(&pane.comments.buffer) : "")
 		state_text(r, "changes.editor_kind", pane != nil && editing >= 0 ? fmt.tprint(pane.comments.draft) : "")
 		state_rect(r, "changes.editor_rect", editor.card)
 		state_rect(r, "changes.editor.area_rect", editor.area)
