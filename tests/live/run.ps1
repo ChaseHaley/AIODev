@@ -39,9 +39,12 @@ $selected = if ($requested) {
 } else {
     @($files | Where-Object { $lanes[$_] -ne 'helper' -and ($Lane -eq 'all' -or $lanes[$_] -eq $Lane) } | Sort-Object)
 }
-# The revision build.ps1 embeds, for journeys that check it.
+# The revision build.ps1 embeds, for journeys that check it. Like build.ps1, a Cosmos checkout that is not
+# exactly the pinned commit marks it dirty.
+. (Join-Path $repo 'tools/cosmos.ps1')
 $build = & git -C $repo rev-parse --short HEAD
-if (& git -C $repo status --porcelain) { $build = "$build+dirty" }
+$cosmosPinned = Test-CosmosPinned (Resolve-CosmosRoot $repo '') (Get-CosmosPin).commit
+if ((& git -C $repo status --porcelain) -or -not $cosmosPinned) { $build = "$build+dirty" }
 $logs = Join-Path $repo 'build/journeys'
 New-Item -ItemType Directory -Force $logs | Out-Null
 $failed = @()

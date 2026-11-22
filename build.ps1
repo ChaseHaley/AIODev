@@ -17,7 +17,10 @@ param(
     [string] $TestLane = 'All',
 
     [ValidateRange(1, 900)]
-    [int] $TestTimeoutSeconds = 300
+    [int] $TestTimeoutSeconds = 300,
+
+    # The Cosmos checkout to build against instead of the one tools/cosmos.ps1 finds.
+    [string] $Cosmos
 )
 
 $ErrorActionPreference = 'Stop'
@@ -28,17 +31,21 @@ if ($TestLane -ne 'All' -and ($Task -ne 'test' -or $Package -ne 'app')) {
     throw 'TestLane requires test app.'
 }
 
-function Invoke-Odin {
-    & odin @args
-    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+# AIODev builds on Cosmos, the owner's framework for his family of apps (D-108). A package ships only from
+# a clean copy of the commit tools/cosmos.json pins. Every other build uses the checkout as it is, and a
+# checkout that is not exactly the pin marks the build dirty, so no release can come from it.
+. "$PSScriptRoot/tools/cosmos.ps1"
+$cosmosPin = Get-CosmosPin
+$cosmosRoot = Resolve-CosmosRoot $PSScriptRoot $Cosmos
+$cosmosSkew = $false
+if ($Task -eq 'package') {
+    $cosmosRoot = Get-PinnedCosmos $PSScriptRoot $cosmosRoot $cosmosPin
+} elseif (-not (Test-CosmosPinned $cosmosRoot $cosmosPin.commit)) {
+    $cosmosSkew = $true
+    Write-Warning ("Cosmos at $cosmosRoot is not a clean checkout of the pinned " +
+        "$($cosmosPin.commit.Substring(0, 12)); builds are marked dirty.")
 }
-
-function Get-Packages([string] $Root) {
-    if (-not (Test-Path $Root)) { return @() }
-    Get-ChildItem $Root -Directory |
-        Where-Object { Get-ChildItem $_.FullName -Filter *.odin -File } |
-        ForEach-Object Name
-}
+. "$cosmosRoot/tools/build-common.ps1"
 
 $sourcePackages = @(Get-Packages 'src')
 $testPackages = @(Get-Packages 'tests')
@@ -46,17 +53,9 @@ $toolPackages = @(Get-Packages 'tools')
 $vetPackages = @('main') + $sourcePackages + $toolPackages +
     ($testPackages | ForEach-Object { "${_}_test" })
 
-$flags = @(
-    '-collection:aio=src'
-    '-vet'
-    '-vet-cast'
-    '-vet-tabs'
-    '-vet-using-param'
+# Cosmos vets its own packages; these flags vet AIODev's.
+$flags = @('-collection:aio=src', "-collection:cosmos=$cosmosRoot/src") + $CosmosStrictFlags +
     "-vet-packages:$($vetPackages -join ',')"
-    '-strict-style'
-    '-warnings-as-errors'
-    '-disallow-do'
-)
 
 $resource = @()
 if (Test-Path 'assets/aiodev.rc') { $resource = @('-resource:assets/aiodev.rc') }
@@ -186,6 +185,8 @@ function Build-App([string[]] $Mode, [string] $Output = 'build/aiodev.exe', [str
     # With -print-linker-flags, Odin compiles and keeps the object but leaves the resource and link steps to us.
     $printed = @(& odin build src "-out:$Output" @Mode @identity @flags @resource -keep-temp-files -print-linker-flags)
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    # aioctl doctor compares the build with the sources it came from, Cosmos's included.
+    [IO.File]::WriteAllText((Join-Path $PSScriptRoot 'build/cosmos-root.txt'), $cosmosRoot)
     $linkLine = $printed | Where-Object { $_ -match '-OUT:' } | Select-Object -Last 1
     if (-not $linkLine) { throw 'Odin did not print linker flags.' }
     $linkArgs = @(Split-Arguments $linkLine)
@@ -296,7 +297,7 @@ function Get-BuildId {
         if ($LASTEXITCODE -ne 0) { return 'unknown' }
         $status = & git status --porcelain 2>$null
         if ($LASTEXITCODE -ne 0) { return 'unknown' }
-        if ($status) { return "$head+dirty" }
+        if ($status -or $cosmosSkew) { return "$head+dirty" }
         return "$head"
     } catch {
         return 'unknown'
@@ -320,31 +321,11 @@ function Get-ReleaseTag([string] $BuildId) {
 $appFlags = @($flags | Where-Object { $_ -notlike '-vet-packages:*' }) +
     @('-vet-packages:main', '-vet-unused-procedures')
 
-# Generated bindings mirror their foreign sources; the style rules apply to hand-written application
-# code. Tests and tools are not gated yet; they carry the same drift and a separate pass owns it.
-function Invoke-StyleCheck {
-    Invoke-Odin build tools/stylecheck '-out:build/stylecheck.exe' -debug '-subsystem:console' @flags
-    # Relative paths and batches keep the command line under the Windows limit however long the worktree
-    # path or large the source tree is. Odin accepts forward slashes, which stylecheck's scoping expects.
-    $files = @(Get-ChildItem src -Recurse -Filter *.odin -File |
-        Where-Object {
-            $_.Name -ne 'win32_windows.odin' -and $_.FullName -notmatch '\\(ghostty|dwrite|shaders|lua)\\'
-        } |
-        ForEach-Object { 'src/' + $_.FullName.Substring((Join-Path $PWD 'src').Length + 1).Replace('\', '/') })
-    $limit = 16000
-    $run = { & build/stylecheck.exe @args; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE } }
-    $batch = @()
-    $length = 0
-    foreach ($file in $files) {
-        if ($batch.Count -gt 0 -and $length + $file.Length + 1 -gt $limit) {
-            & $run @batch
-            $batch = @()
-            $length = 0
-        }
-        $batch += $file
-        $length += $file.Length + 1
-    }
-    if ($batch.Count -gt 0) { & $run @batch }
+# The style rules apply to hand-written application code; generated bindings mirror their foreign
+# sources. Tests and tools are not gated yet; they carry the same drift and a separate pass owns it.
+function Invoke-AppStyleCheck {
+    Build-StyleCheck 'build/stylecheck.exe' $flags
+    Invoke-StyleCheck 'build/stylecheck.exe' @('ghostty', 'dwrite', 'shaders', 'lua')
 }
 
 switch ($Task) {
@@ -417,7 +398,7 @@ switch ($Task) {
         & build/aiodev.exe
     }
     'check' {
-        Invoke-StyleCheck
+        Invoke-AppStyleCheck
         foreach ($name in $sourcePackages) {
             Invoke-Odin check "src/$name" -no-entry-point @flags
         }
@@ -437,6 +418,7 @@ switch ($Task) {
     'test' {
         . "$PSScriptRoot/tools/test-suite.ps1"
         Invoke-TestSuite -TestPackages $testPackages -Package $Package -TestNames $TestNames `
-            -TestLane $TestLane -TestTimeoutSeconds $TestTimeoutSeconds -Flags $flags -Resource $resource
+            -TestLane $TestLane -TestTimeoutSeconds $TestTimeoutSeconds -Flags $flags -Resource $resource `
+            -CosmosRoot $cosmosRoot
     }
 }

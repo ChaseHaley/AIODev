@@ -187,7 +187,7 @@ composed_native_persistence_and_mixed_changes_keep_all_app_checks :: proc(t: ^te
 
 @(test)
 test_runner_scripts_require_the_full_gate :: proc(t: ^testing.T) {
-	for path in ([]string{"tools/test-suite.ps1", "tests/tools/test_capture.ps1", "tests/tools/idle_shell/main.odin"}) {
+	for path in ([]string{"tools/test-suite.ps1", "tests/tools/test_lanes.ps1", "tests/tools/idle_shell/main.odin"}) {
 		plan := gates.classify([]string{path})
 		defer gates.plan_destroy(&plan)
 		testing.expect(t, plan.fallback && plan.solo && plan.tooling)
@@ -195,9 +195,16 @@ test_runner_scripts_require_the_full_gate :: proc(t: ^testing.T) {
 		defer strings.builder_destroy(&out)
 		gates.format_plan(&out, plan)
 		text := strings.to_string(out)
-		testing.expect(t, strings.contains(text, "run: pwsh -NoProfile -File tests/tools/test_capture.ps1\n"))
 		testing.expect(t, strings.contains(text, "run: pwsh -NoProfile -File tests/tools/test_lanes.ps1\n"))
 	}
+}
+
+// A new Cosmos pin can change any framework package under AIODev, so it owes every gate.
+@(test)
+cosmos_pin_owes_every_gate :: proc(t: ^testing.T) {
+	plan := gates.classify([]string{"tools/cosmos.json"})
+	defer gates.plan_destroy(&plan)
+	testing.expect(t, plan.fallback && plan.live && plan.solo && plan.perf)
 }
 
 // A changed journey owes a run in its own lane from tests/live/lanes.json; a helper owes none by

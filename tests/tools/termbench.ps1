@@ -4,6 +4,7 @@ param()
 $ErrorActionPreference = 'Stop'
 $repo = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
 . (Join-Path $repo 'tests/live/termbench_common.ps1')
+. (Join-Path $repo 'tools/cosmos.ps1')
 
 function Assert-True([bool] $Condition, [string] $Message) {
     if (-not $Condition) { throw $Message }
@@ -169,7 +170,8 @@ $receiptData = $null
 try {
     $settingsParser = Join-Path $data 'settings-parser.exe'
     & odin build (Join-Path $PSScriptRoot 'termbench_settings') "-out:$settingsParser" `
-        "-collection:aio=$(Join-Path $repo 'src')" -vet -vet-cast -vet-tabs -vet-using-param `
+        "-collection:aio=$(Join-Path $repo 'src')" "-collection:cosmos=$(Resolve-CosmosRoot $repo '')/src" `
+        -vet -vet-cast -vet-tabs -vet-using-param `
         -vet-unused-procedures -vet-packages:termbench_settings -strict-style -warnings-as-errors -disallow-do
     Assert-True ($LASTEXITCODE -eq 0) 'Headless product settings parser fixture did not compile'
     $reproducedCommand = '"C:\Program Files\WindowsApps\' +

@@ -1,6 +1,6 @@
 package localpath
 
-import "aio:com"
+import "cosmos:com"
 import "base:runtime"
 import "core:log"
 import "core:os"

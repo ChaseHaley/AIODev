@@ -662,34 +662,44 @@ state_is :: proc(text, key, value: string) -> bool {
 	return found && observed == value
 }
 
+// The verify build is fresh when no Odin source it was built from is newer: AIODev's src, and the src of
+// the Cosmos checkout build.ps1 recorded in build/cosmos-root.txt.
 @(private, require_results)
 fresh_build :: proc(p: Paths) -> bool {
 	exe, err := os.stat(p.executable, context.temp_allocator)
 	if err != nil { fmt.println("fail verify executable missing; run build.ps1 verify"); return false }
 	newest_time := time.time_to_unix_nano(exe.modification_time)
 	newest := ""
-	walker := os.walker_create(fmt.tprintf("%s\\src", p.repo))
-	defer os.walker_destroy(&walker)
-	for info in os.walker_walk(&walker) {
+	roots := [2]string{fmt.tprintf("%s\\src", p.repo), ""}
+	if cosmos, read_err := os.read_entire_file(fmt.tprintf("%s\\build\\cosmos-root.txt", p.repo),
+		context.temp_allocator); read_err == nil {
+		roots[1] = fmt.tprintf("%s\\src", strings.trim_space(string(cosmos)))
+	}
+	for root in roots {
+		if root == "" {continue}
+		walker := os.walker_create(root)
+		defer os.walker_destroy(&walker)
+		for info in os.walker_walk(&walker) {
+			if path, error := os.walker_error(&walker); error != nil {
+				fmt.printfln("fail source scan %s: %v; check permissions", path, error)
+				return false
+			}
+			if !no_reparse(info.fullpath, false) {
+				fmt.println("fail cannot check source freshness through reparse points")
+				return false
+			}
+			stamp := time.time_to_unix_nano(info.modification_time)
+			if strings.has_suffix(info.name, ".odin") && stamp > newest_time {
+				newest_time = stamp
+				newest = strings.clone(info.fullpath, context.temp_allocator) or_else "<allocation failed>"
+			}
+		}
 		if path, error := os.walker_error(&walker); error != nil {
 			fmt.printfln("fail source scan %s: %v; check permissions", path, error)
 			return false
 		}
-		if !no_reparse(info.fullpath, false) {
-			fmt.println("fail cannot check source freshness through reparse points")
-			return false
-		}
-		stamp := time.time_to_unix_nano(info.modification_time)
-		if strings.has_suffix(info.name, ".odin") && stamp > newest_time {
-			newest_time = stamp
-			newest = strings.clone(info.fullpath, context.temp_allocator) or_else "<allocation failed>"
-		}
-	}
-	if path, error := os.walker_error(&walker); error != nil {
-		fmt.printfln("fail source scan %s: %v; check permissions", path, error)
-		return false
 	}
 	if newest != "" { fmt.printfln("warn stale build: %s is newer; run build.ps1 verify", newest)
-	} else { fmt.println("ok verify build is newer than src/*.odin") }
+	} else { fmt.println("ok verify build is newer than its Odin sources") }
 	return true
 }

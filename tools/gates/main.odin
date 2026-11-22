@@ -116,6 +116,10 @@ classify_path :: proc(plan: ^Plan, path: string) {
 		classify_source(plan, path)
 	case strings.has_prefix(path, "tests/"):
 		classify_test(plan, path)
+	case path == "tools/cosmos.json":
+		// A new pin changes the framework under every package: hot paths, native code and the interface.
+		plan.fallback, plan.live, plan.solo, plan.perf = true, true, true, true
+		add_reason(plan, "Cosmos pin")
 	case strings.has_prefix(path, "tools/"):
 		// Tools are compiled by check; a dedicated test package is optional.
 		parts := strings.split(path, "/", context.temp_allocator)
@@ -344,9 +348,8 @@ format_plan :: proc(out: ^strings.Builder, plan: Plan) {
 		}
 	}
 	if plan.tooling {
-		for script in ([]string{"test_budget", "test_capture", "test_lanes"}) {
-			fmt.sbprintf(out, "run: pwsh -NoProfile -File tests/tools/%s.ps1\n", script)
-		}
+		// The test budget and its capture are Cosmos's; their own tests run there.
+		fmt.sbprintf(out, "run: pwsh -NoProfile -File tests/tools/test_lanes.ps1\n")
 	}
 	for journeys in ([2][]string{plan.headless[:], plan.native[:]}) {
 		if len(journeys) == 0 {continue}

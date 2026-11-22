@@ -18,7 +18,10 @@ if(!$Compiler){
 if(!$Compiler){throw 'The existing x64 MSVC compiler is required for harmless native test fixtures.'}
 New-Item -ItemType Directory $DataDirectory | Out-Null
 $runner=Join-Path $DataDirectory 'loader-check.exe'
-& odin build $fixture "-collection:aio=$SourceRepository/src" "-out:$runner" -subsystem:console -o:speed `
+. (Join-Path $SourceRepository 'tools/cosmos.ps1')
+$cosmos=Resolve-CosmosRoot $SourceRepository ''
+& odin build $fixture "-collection:aio=$SourceRepository/src" "-collection:cosmos=$cosmos/src" "-out:$runner" `
+    -subsystem:console -o:speed `
     -vet -vet-cast -vet-tabs -vet-using-param -vet-unused-procedures -vet-packages:conpty_loader `
     -strict-style -warnings-as-errors -disallow-do
 if($LASTEXITCODE -ne 0){throw 'Cannot build loader checker.'}

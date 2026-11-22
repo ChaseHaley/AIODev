@@ -14,11 +14,30 @@ permissions:
 jobs:
   package:
     runs-on: windows-2025
+    # AIODev builds against the Cosmos commit tools/cosmos.json pins, found beside it as ../Cosmos.
+    defaults:
+      run:
+        working-directory: AIODev
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          path: AIODev
           # build.ps1 names a tagged package after its tag, so the tags must be fetched.
           fetch-depth: 0
+          persist-credentials: false
+
+      - name: Read the Cosmos pin
+        id: cosmos
+        shell: pwsh
+        run: |
+          $pin = Get-Content -LiteralPath tools/cosmos.json -Raw | ConvertFrom-Json
+          "commit=$($pin.commit)" >> $env:GITHUB_OUTPUT
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ChaseHaley/Cosmos
+          ref: ${{ steps.cosmos.outputs.commit }}
+          path: Cosmos
           persist-credentials: false
 
       - name: Install Odin and Zig
@@ -52,8 +71,8 @@ jobs:
         with:
           name: package
           path: |
-            build/AIODev-*-windows-x64.zip
-            build/AIODev-*-windows-x64.zip.sha256
+            AIODev/build/AIODev-*-windows-x64.zip
+            AIODev/build/AIODev-*-windows-x64.zip.sha256
           if-no-files-found: error
 
   release:

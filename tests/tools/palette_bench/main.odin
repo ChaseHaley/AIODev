@@ -1,7 +1,8 @@
 // Per-keystroke cost of palette and Settings search (WORK-470). Not a test: it prints timings for a
 // person to compare before and after a matcher change.
 //
-//   odin build tests/tools/palette_bench -collection:aio=src -o:speed -out:build/palette_bench.exe
+//   odin build tests/tools/palette_bench -collection:aio=src -collection:cosmos=../Cosmos/src -o:speed `
+//       -out:build/palette_bench.exe
 //   build/palette_bench.exe
 //
 // The corpus is every palette command, every schema setting with its choice labels, 200 tab titles and

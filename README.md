@@ -110,6 +110,9 @@ Requirements:
 - PowerShell 7
 - Visual Studio 2022 (or Build Tools) with the C++ x64 tools and a Windows SDK
 - Odin `dev-2026-09` (developed against nightly `a2fb372`)
+- [Cosmos](https://github.com/ChaseHaley/Cosmos), the framework AIODev builds on, cloned beside this
+  repository as `../Cosmos`. `tools/cosmos.json` pins the commit releases use; `-Cosmos <path>` or
+  `COSMOS_ROOT` points a build at another checkout.
 
 ```powershell
 ./build.ps1          # debug build: build/aiodev.exe
