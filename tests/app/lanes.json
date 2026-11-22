@@ -8,8 +8,6 @@
     "build_info_registry_dispatch_refreshes_one_owned_notice_without_a_session",
     "cli_event_subscriptions_filter_and_release_interest_without_processes",
     "ctrl_shift_digits_select_workspaces_instead_of_opening_profiles",
-    "field_press_selects_a_word_then_the_field_and_its_drag_grows_by_words",
-    "field_presses_count_double_and_triple_clicks_by_time_and_distance",
     "focus_jumps_new_focus_drops_forward_path",
     "focus_jumps_skip_closed_panes",
     "focus_jumps_walk_back_and_forward",
