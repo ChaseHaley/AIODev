@@ -1,6 +1,7 @@
 -- Makes Neovim follow the active AIODev theme. AIODev writes the theme to the file named by
 -- $AIODEV_THEME_FILE and rewrites it on every theme change; outside AIODev the variable is unset and
--- setup() does nothing. Enable it with:
+-- setup() does nothing. setup() also reports Neovim's progress messages to AIODev (aiodev_progress), as
+-- this is the line a config already has for AIODev. Enable it with:
 --   if vim.env.AIODEV_CLI then vim.opt.rtp:append(vim.fs.dirname(vim.env.AIODEV_CLI) .. "/nvim") require("aiodev_theme").setup() end
 local M = {}
 
@@ -209,6 +210,7 @@ function M.setup()
     return
   end
   state.path = path
+  require("aiodev_progress").setup()
   local group = vim.api.nvim_create_augroup("aiodev_theme", { clear = true })
   vim.api.nvim_create_autocmd("FocusGained", { group = group, callback = reload })
   if vim.v.vim_did_enter == 1 then
