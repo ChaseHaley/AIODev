@@ -6,6 +6,7 @@ import "core:math"
 import "core:strconv"
 import "core:strings"
 import "core:time"
+import "cosmos:motion"
 
 MOTION_PREFIX :: "motion."
 MOTION_CURVE_PREFIX :: "motion.curve."
@@ -119,25 +120,16 @@ MOTION_CONTEXT_DESCRIPTION :: [Motion_Context]string {
 	.Chrome = "The tab rail and Activity panel opening and closing beside the panes.",
 }
 
-// How an entering or leaving pane appears. Edge grows it from, or collapses it into, the side it
-// shares with its neighbor.
-Motion_Effect :: enum u8 {
-	Edge,
-	Pop,
-	Fade,
-	Slide,
-}
-
-// The file names of each context's effects, indexed by Motion_Effect; only Split and Close have any.
+// The file names of each context's effects, indexed by motion.Effect; only Split and Close have any.
 // This table and the labels are variables because motion_effect_names hands out slices of them.
 @(private)
-MOTION_EFFECT_NAME := #partial [Motion_Context][len(Motion_Effect)]string {
+MOTION_EFFECT_NAME := #partial [Motion_Context][len(motion.Effect)]string {
 	.Split = {"grow", "popin", "fade", "slide"},
 	.Close = {"collapse", "popout", "fade", "slide"},
 }
 
 @(private)
-MOTION_EFFECT_LABEL := #partial [Motion_Context][len(Motion_Effect)]string {
+MOTION_EFFECT_LABEL := #partial [Motion_Context][len(motion.Effect)]string {
 	.Split = {"Grow from side", "Pop in", "Fade", "Slide in"},
 	.Close = {"Collapse", "Pop out", "Fade", "Slide out"},
 }
@@ -159,7 +151,7 @@ motion_context_has_effect :: proc(c: Motion_Context) -> bool {
 	return c == .Split || c == .Close
 }
 
-// Indexed by Motion_Effect; nil for a context without effects.
+// Indexed by motion.Effect; nil for a context without effects.
 motion_effect_names :: proc(c: Motion_Context) -> []string {
 	if !motion_context_has_effect(c) {return nil}
 	return MOTION_EFFECT_NAME[c][:]
@@ -199,73 +191,9 @@ motion_context_within :: proc(c, root: Motion_Context) -> bool {
 	}
 }
 
-// A timing curve. A Bézier's p is x1, y1, x2, y2 with x within 0..1 and y within -1..2, so it can
-// overshoot; a spring's p[0] is its bounce, 0..0.9.
-Motion_Curve :: struct {
-	spring: bool,
-	p:      [4]f32,
-}
-
-Motion_Named_Curve :: struct {
-	name:  string,
-	curve: Motion_Curve,
-}
-
-// Their names are reserved for these curves.
-MOTION_BUILTIN_CURVES :: [?]Motion_Named_Curve {
-	{"linear", {p = {0, 0, 1, 1}}},
-	{"decelerate", {p = {0.2, 0, 0, 1}}},
-	{"accelerate", {p = {0.4, 0, 1, 1}}},
-	{"smooth", {p = {0.4, 0, 0.2, 1}}},
-	{"quick", {p = {0.15, 0, 0.1, 1}}},
-	{"overshot", {p = {0.05, 0.9, 0.1, 1.1}}},
-	{"back", {p = {0.34, 1.56, 0.64, 1}}},
-	{"spring", {spring = true, p = {0.2, 0, 0, 0}}},
-	{"wobbly", {spring = true, p = {0.5, 0, 0, 0}}},
-}
-
-// A spring's natural frequency in radians over the whole motion: about 1.4 oscillations, so even a
-// bouncy spring has settled by the time the duration ends.
-@(private)
-MOTION_SPRING_FREQUENCY :: 2 * math.PI * 1.4
-// The least damping a spring keeps, so the largest bounce still settles.
-@(private)
-MOTION_SPRING_DAMPING_MINIMUM :: 0.08
-
-// Progress along `c` at time t in 0..1: 0 at the start, exactly 1 from the end on, and free to leave
-// 0..1 between them where the curve overshoots.
-motion_curve_ease :: proc(c: Motion_Curve, t: f32) -> f32 {
-	if t <= 0 {return 0}
-	if t >= 1 {return 1}
-	if c.spring {
-		w: f32 = MOTION_SPRING_FREQUENCY
-		z := max(MOTION_SPRING_DAMPING_MINIMUM, 1 - c.p[0])
-		if z >= 1 {return 1 - math.exp(-w * t) * (1 + w * t)}
-		wd := w * math.sqrt(1 - z * z)
-		return 1 - math.exp(-z * w * t) * (math.cos(wd * t) + (z * w / wd) * math.sin(wd * t))
-	}
-	// Control points on the diagonal make y equal x: the curve is linear, exactly.
-	if c.p[0] == c.p[1] && c.p[2] == c.p[3] {return t}
-	// With both x control points within 0..1, x rises with u, so bisection finds the one u where
-	// x(u) = t.
-	low, high: f32 = 0, 1
-	for _ in 0 ..< 24 {
-		u := (low + high) / 2
-		if motion_bezier(c.p[0], c.p[2], u) < t {low = u} else {high = u}
-	}
-	return motion_bezier(c.p[1], c.p[3], (low + high) / 2)
-}
-
-// One coordinate of a cubic Bézier from (0, 0) to (1, 1) with control coordinates a and b.
-@(private)
-motion_bezier :: proc(a, b, u: f32) -> f32 {
-	v := 1 - u
-	return 3 * v * v * u * a + 3 * v * u * u * b + u * u * u
-}
-
 motion_curve_builtin :: proc(name: string) -> bool {
 	@(static, rodata)
-	builtins := MOTION_BUILTIN_CURVES
+	builtins := motion.BUILTIN_CURVES
 	for builtin in builtins {
 		if builtin.name == name {return true}
 	}
@@ -273,9 +201,9 @@ motion_curve_builtin :: proc(name: string) -> bool {
 }
 
 // A curve by name: a built-in, then one of the file's curves.
-motion_curve_find :: proc(s: ^Settings, name: string) -> (Motion_Curve, bool) {
+motion_curve_find :: proc(s: ^Settings, name: string) -> (motion.Curve, bool) {
 	@(static, rodata)
-	builtins := MOTION_BUILTIN_CURVES
+	builtins := motion.BUILTIN_CURVES
 	for builtin in builtins {
 		if builtin.name == name {return builtin.curve, true}
 	}
@@ -293,7 +221,7 @@ motion_curve_index :: proc(s: ^Settings, name: string) -> int {
 
 // Why `curve` cannot be saved, or empty. Temporary.
 @(private)
-motion_curve_problem :: proc(curve: Motion_Curve) -> string {
+motion_curve_problem :: proc(curve: motion.Curve) -> string {
 	if curve.spring {
 		if !(curve.p[0] >= 0 && curve.p[0] <= 0.9) {return "spring bounce must be within 0..0.9"}
 		return ""
@@ -307,7 +235,7 @@ motion_curve_problem :: proc(curve: Motion_Curve) -> string {
 // Reads a curve line's value: "x1, y1, x2, y2" for a Bézier or "spring BOUNCE". `problem` is
 // temporary and empty when the value is valid.
 @(private)
-motion_curve_parse :: proc(text: string) -> (curve: Motion_Curve, problem: string) {
+motion_curve_parse :: proc(text: string) -> (curve: motion.Curve, problem: string) {
 	FORMS :: "expected \"x1, y1, x2, y2\" or \"spring BOUNCE\""
 	if strings.has_prefix(text, "spring") {
 		bounce, ok := strconv.parse_f32(strings.trim_space(text[len("spring"):]))
@@ -331,7 +259,7 @@ motion_curve_parse :: proc(text: string) -> (curve: Motion_Curve, problem: strin
 
 // The canonical value of a curve line. Temporary.
 @(private)
-motion_curve_text :: proc(curve: Motion_Curve) -> string {
+motion_curve_text :: proc(curve: motion.Curve) -> string {
 	if curve.spring {return fmt.tprintf("spring %g", curve.p[0])}
 	return fmt.tprintf("%g, %g, %g, %g", curve.p[0], curve.p[1], curve.p[2], curve.p[3])
 }
@@ -343,7 +271,7 @@ Motion_Spec :: struct {
 	duration: Maybe(int),
 	// Empty when unset. In Settings it borrows the context's text.
 	curve:    string,
-	effect:   Maybe(Motion_Effect),
+	effect:   Maybe(motion.Effect),
 }
 
 // Whether `token` reads as a duration, such as 160ms, or as a number missing its unit.
@@ -393,7 +321,7 @@ motion_spec_parse :: proc(c: Motion_Context, text: string) -> (spec: Motion_Spec
 		for name, effect in effects {
 			if name != token {continue}
 			if spec.effect != nil {return {}, "give one effect"}
-			spec.effect = Motion_Effect(effect)
+			spec.effect = motion.Effect(effect)
 			continue tokens
 		}
 		if motion_token_effect(token) {
@@ -470,9 +398,9 @@ Motion_Resolved :: struct {
 	duration:   int,
 	// Borrowed from the settings or the built-in table.
 	curve_name: string,
-	curve:      Motion_Curve,
+	curve:      motion.Curve,
 	// Edge for contexts without effects.
-	effect:     Motion_Effect,
+	effect:     motion.Effect,
 	// The context that set each field: the context itself, an ancestor, or Panes for a fallback.
 	from:       [Motion_Field]Motion_Context,
 }
@@ -763,7 +691,7 @@ motion_name_problem :: proc(family: Motion_Family, name: string) -> string {
 motion_line_value :: proc(key, value: string) -> (serialized, issue: string) {
 	if strings.has_prefix(key, MOTION_CURVE_PREFIX) {
 		if issue = motion_name_problem(.Curve, key[len(MOTION_CURVE_PREFIX):]); issue != "" {return}
-		curve: Motion_Curve
+		curve: motion.Curve
 		if curve, issue = motion_curve_parse(value); issue != "" {return}
 		return motion_curve_text(curve), ""
 	}
@@ -780,7 +708,7 @@ Motion_Settings :: struct {
 	contexts: [Motion_Context]string,
 	// `contexts` parsed; kept in step by every assignment of a context.
 	specs:    [Motion_Context]Motion_Spec,
-	curves:   [dynamic]Motion_Named_Curve,
+	curves:   [dynamic]motion.Named_Curve,
 	presets:  [dynamic]Motion_Preset,
 }
 
@@ -847,7 +775,7 @@ parse_motion_curve_key :: proc(
 		return diagnostic_append(diagnostics, line, key, limit_message("motion curves", MOTION_CURVE_LIMIT))
 	}
 	owned := strings.clone(name, s.allocator) or_return
-	if _, append_error := append(&s.motion.curves, Motion_Named_Curve{owned, curve}); append_error != nil {
+	if _, append_error := append(&s.motion.curves, motion.Named_Curve{owned, curve}); append_error != nil {
 		delete(owned, s.allocator)
 		return append_error
 	}
@@ -917,7 +845,7 @@ motion_finalize :: proc(s: ^Settings, diagnostics: ^[dynamic]Diagnostic) -> runt
 // Sets user curve `name`, and with `assign` also makes that context use it.
 Motion_Curve_Set :: struct {
 	name:   string,
-	curve:  Motion_Curve,
+	curve:  motion.Curve,
 	assign: Maybe(Motion_Context),
 }
 

@@ -1,11 +1,11 @@
 package ui
 
 import "cosmos:render"
-import "aio:settings"
 import "core:math"
 import "core:strconv"
 import "core:strings"
 import "core:time"
+import "cosmos:motion"
 
 // Every card is this wide, so its text wraps the same whether the deck is open or closed.
 @(private)
@@ -55,7 +55,7 @@ NOTICE_SWEEP :: 1200 * time.Millisecond
 @(private)
 NOTICE_SWEEP_SHARE :: f32(0.3)
 @(private)
-NOTICE_SWEEP_CURVE :: settings.Motion_Curve{p = {0.4, 0, 0.6, 1}}
+NOTICE_SWEEP_CURVE :: motion.Curve{p = {0.4, 0, 0.6, 1}}
 
 Notice_Kind :: enum u8 {
 	Info,
@@ -685,7 +685,7 @@ notice_content_draw :: proc(
 	mark := render.Rect{l.chip.x + (l.chip.width - icon) / 2, l.chip.y + (l.chip.height - icon) / 2, icon, icon}
 	if item.duration == 0 {
 		n.spinning ||= d.spin
-		status_spinner_draw(list, mark, color, d.spin ? notice_phase(d.now, STATUS_SPIN_PERIOD) : STATUS_SPIN_STILL)
+		spinner_draw(list, mark, color, d.spin ? notice_phase(d.now, SPINNER_PERIOD) : SPINNER_STILL)
 	} else {
 		icon_draw(list, symbol, mark, color, ICON_BUTTON, scale)
 	}
@@ -755,7 +755,7 @@ notice_line_draw :: proc(
 	y := box.y + box.height - thickness
 	if item.duration == 0 {
 		segment := box.width * NOTICE_SWEEP_SHARE
-		eased := settings.motion_curve_ease(NOTICE_SWEEP_CURVE, phase)
+		eased := motion.ease(NOTICE_SWEEP_CURVE, phase)
 		start := box.x - segment + (box.width + segment) * eased
 		left, right := max(start, box.x), min(start + segment, box.x + box.width)
 		if right > left {draw_rect(list, {rect = {left, y, right - left, thickness}, color = color})}

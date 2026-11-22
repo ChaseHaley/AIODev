@@ -32,7 +32,7 @@ CHANGES_SOURCE_SCOPES :: [?]Changes_Scope{.Repository, .Uncommitted, .Staged, .U
 
 @(private = "file")
 chip_width :: proc(text: ^Text, label: string, scale: f32) -> f32 {
-	label_width := text_width(text, clip_bytes(label, CHANGES_CLIP_BYTES))
+	label_width := text_width(text, clip_bytes(label, CLIP_BYTES))
 	return math.ceil(2 * CHIP_PAD * scale + (CHIP_DOT + CHIP_GAP) * scale + label_width)
 }
 
@@ -196,7 +196,7 @@ chip_draw :: proc(
 	draw_rect(list, {rect = dot, color = tint, radius = dot.width / 2})
 	x := dot.x + dot.width + CHIP_GAP * scale
 	return draw_fading_text(
-		body, list, clip_bytes(label, CHANGES_CLIP_BYTES), x, baseline_in(face.y, face.height, body), ink,
+		body, list, clip_bytes(label, CLIP_BYTES), x, baseline_in(face.y, face.height, body), ink,
 		face.x + face.width - CHIP_PAD * scale - x,
 	)
 }

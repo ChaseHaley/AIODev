@@ -223,3 +223,40 @@ filled_button_draw :: proc(
 
 @(private = "file")
 PRIMARY_HOVER_ALPHA :: f32(0.14)
+
+// A switch: a pill track in the accent while on, its knob at the end it is switched to.
+switch_draw :: proc(
+	list: ^render.Draw_List,
+	track: render.Rect,
+	on, focused: bool,
+	theme: Theme,
+	scale: f32,
+) {
+	draw_rect(
+		list,
+		{rect = track, color = on ? theme.accent : theme.border, radius = track.height / 2},
+	)
+	knob := track.height - 6 * scale
+	knob_x := on ? track.x + track.width - 3 * scale - knob : track.x + 3 * scale
+	draw_rect(
+		list,
+		{
+			rect = {knob_x, track.y + 3 * scale, knob, knob},
+			color = on ? theme.accent_text : theme.text,
+			radius = knob / 2,
+		},
+	)
+	if focused {focus_ring_draw(list, track, theme, scale)}
+}
+
+// The bordered box of a text or value control, ringed while focused.
+box_draw :: proc(
+	list: ^render.Draw_List,
+	r: render.Rect,
+	theme: Theme,
+	focused: bool,
+	scale: f32,
+) {
+	draw_rect(list, {rect = r, color = theme.border, radius = RADIUS_CONTROL * scale})
+	if focused {focus_ring_draw(list, r, theme, scale)}
+}

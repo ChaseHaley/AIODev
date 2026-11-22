@@ -123,7 +123,7 @@ changes_live_index :: proc(view: ^Changes_View) -> int {
 
 @(private = "file")
 turn_title :: proc(turn: ^Changes_Turn) -> string {
-	title := clip_bytes(turn.title, CHANGES_CLIP_BYTES)
+	title := clip_bytes(turn.title, CLIP_BYTES)
 	if title == "" {title = turn.between ? "Changes between turns" : "Agent turn"}
 	return title
 }
@@ -135,7 +135,7 @@ changes_turn_tooltip :: proc(view: ^Changes_View, index: int, allocator := conte
 	turn := &view.turns[index]
 	title := turn_title(turn)
 	noun := turn.files == 1 ? "file" : "files"
-	detail := clip_bytes(turn.detail, CHANGES_CLIP_BYTES)
+	detail := clip_bytes(turn.detail, CLIP_BYTES)
 	if turn.live {
 		return fmt.aprintf(
 			"Working… · %s · +%d −%d · %d %s", title, turn.added, turn.removed, turn.files, noun,
@@ -807,7 +807,7 @@ filter_picks_draw :: proc(
 		status := draw_text(&small, list, hides, pright - hides_width, small_baseline, theme.faint)
 		if status != .Ok {return status}
 		room := pright - hides_width - SPACE_2 * s - px
-		label := clip_bytes(pick.label, CHANGES_CLIP_BYTES)
+		label := clip_bytes(pick.label, CLIP_BYTES)
 		at := text_width(&body, "@")
 		name := px + at + SPACE_1 * s
 		icon_draw(list, .At, {px, rect.y, at, rect.height}, theme.accent, TOKEN_AT_ICON, s)
@@ -891,9 +891,9 @@ filter_popover_draw :: proc(
 	notice: [96]u8
 	switch {
 	case view.filter_invalid:
-		hint, ink = clip_bytes(view.filter_error, CHANGES_CLIP_BYTES), theme.error
+		hint, ink = clip_bytes(view.filter_error, CLIP_BYTES), theme.error
 	case view.filter_notice != "":
-		hint, ink = clip_bytes(view.filter_notice, CHANGES_CLIP_BYTES), theme.error
+		hint, ink = clip_bytes(view.filter_notice, CLIP_BYTES), theme.error
 	case view.filter_unknown != "":
 		hint, ink = fmt.bprintf(notice[:], "No saved filter named %s", view.filter_unknown), theme.warning
 	}
@@ -1016,7 +1016,7 @@ turn_row_draw :: proc(
 		body, list, turn_title(turn), title_x, title_baseline, turn.between ? theme.muted : theme.text,
 		left - SPACE_2 * s - title_x,
 	); status != .Ok {return}
-	detail := clip_bytes(turn.detail, CHANGES_CLIP_BYTES)
+	detail := clip_bytes(turn.detail, CLIP_BYTES)
 	count_buf: [32]u8
 	files := ""
 	if turn.files > 0 {

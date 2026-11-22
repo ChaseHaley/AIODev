@@ -145,9 +145,9 @@ status_indicator :: proc(summary: Status_Summary) -> (ui.Status_Mark, bool) {
 // flag: only drawing knows which marks are visible this frame.
 status_phase :: proc(app: ^App, w: ^Window, mark: ui.Status_Mark) -> f32 {
 	if mark.glyph != .Working || mark.progress >= 0 {return 0}
-	if !app.animations {return ui.STATUS_SPIN_STILL}
+	if !app.animations {return ui.SPINNER_STILL}
 	w.status_spinning = true
-	period := i64(ui.STATUS_SPIN_PERIOD)
+	period := i64(ui.SPINNER_PERIOD)
 	return f32(f64(w.frame.display._nsec % period) / f64(period))
 }
 

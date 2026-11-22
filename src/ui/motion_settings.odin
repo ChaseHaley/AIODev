@@ -8,6 +8,7 @@ import "core:fmt"
 import "core:math"
 import "core:strconv"
 import "core:strings"
+import "cosmos:motion"
 
 // Which part of the Motion section a row is. A context row heads that context's field rows, which
 // follow it directly in `rows`.
@@ -37,9 +38,9 @@ MOTION_SAVE_PRESET_KEY :: "motion.save_preset"
 Motion_Editor_State :: struct {
 	motion_expanded:     bit_set[settings.Motion_Context],
 	// The file's own curves with owned names; the popover lists the built-ins before them.
-	motion_curves:       [dynamic]settings.Motion_Named_Curve,
+	motion_curves:       [dynamic]motion.Named_Curve,
 	motion_curve_name:   string,
-	motion_curve:        settings.Motion_Curve,
+	motion_curve:        motion.Curve,
 	motion_curve_edited: bool,
 	// What the next save of the open popover does with the shown curve instead of saving its points.
 	motion_curve_action: Motion_Curve_Action,
@@ -130,12 +131,12 @@ MOTION_DURATION_SLIDER :: 2000
 @(private = "file")
 MOTION_DURATION_STEP :: 10
 @(private = "file")
-MOTION_NEW_BEZIER :: settings.Motion_Curve{p = {0.4, 0, 0.2, 1}}
+MOTION_NEW_BEZIER :: motion.Curve{p = {0.4, 0, 0.2, 1}}
 @(private = "file")
-MOTION_NEW_SPRING :: settings.Motion_Curve{spring = true, p = {0.3, 0, 0, 0}}
+MOTION_NEW_SPRING :: motion.Curve{spring = true, p = {0.3, 0, 0, 0}}
 
 @(private = "file", rodata)
-MOTION_CURVES := settings.MOTION_BUILTIN_CURVES
+MOTION_CURVES := motion.BUILTIN_CURVES
 @(private = "file", rodata)
 MOTION_PRESETS := settings.MOTION_BUILTIN_PRESETS
 @(private = "file", rodata)
@@ -232,7 +233,7 @@ editor_motion_load :: proc(p: ^Editor, s: ^settings.Settings) -> runtime.Allocat
 	group := settings.group_title(MOTION_KEYS[.Panes])
 	for named in s.motion.curves {
 		name := strings.clone(named.name) or_return
-		if _, err := append(&p.motion_curves, settings.Motion_Named_Curve{name, named.curve}); err != nil {
+		if _, err := append(&p.motion_curves, motion.Named_Curve{name, named.curve}); err != nil {
 			delete(name)
 			return err
 		}
@@ -451,7 +452,7 @@ motion_context_text :: proc(
 			break
 		}
 		for name, i in settings.motion_effect_names(c) {
-			if name == value {spec.effect = settings.Motion_Effect(i)}
+			if name == value {spec.effect = motion.Effect(i)}
 		}
 	}
 	return settings.motion_spec_text(c, spec), ""
@@ -464,7 +465,7 @@ motion_curve_count :: proc(p: ^Editor) -> int {
 
 // The popover's curves in list order: the built-ins, then the file's own.
 @(private)
-motion_curve_at :: proc(p: ^Editor, index: int) -> settings.Motion_Named_Curve {
+motion_curve_at :: proc(p: ^Editor, index: int) -> motion.Named_Curve {
 	if index < len(MOTION_CURVES) {return MOTION_CURVES[index]}
 	return p.motion_curves[index - len(MOTION_CURVES)]
 }
@@ -479,7 +480,7 @@ motion_curve_index :: proc(p: ^Editor, name: string) -> int {
 
 // The points of the curve `name`; a name the page does not know draws as a straight line.
 @(private = "file")
-motion_curve_named :: proc(p: ^Editor, name: string) -> settings.Motion_Curve {
+motion_curve_named :: proc(p: ^Editor, name: string) -> motion.Curve {
 	if index := motion_curve_index(p, name); index >= 0 {return motion_curve_at(p, index).curve}
 	return MOTION_CURVES[0].curve
 }
@@ -496,7 +497,7 @@ motion_curve_free :: proc(p: ^Editor, base: string, first: int) -> string {
 }
 
 @(private = "file")
-motion_curve_hold :: proc(p: ^Editor, name: string, curve: settings.Motion_Curve) {
+motion_curve_hold :: proc(p: ^Editor, name: string, curve: motion.Curve) {
 	owned := strings.clone(name)
 	delete(p.motion_curve_name)
 	p.motion_curve_name, p.motion_curve = owned, curve
@@ -815,13 +816,13 @@ editor_motion_parts :: proc(row: ^Editor_Row, parts: Row_Parts) -> Row_Parts {
 // `steps` segments of the curve across `area`, its values from `low` at the bottom to `high` at the top.
 @(private = "file")
 motion_curve_line :: proc(
-	list: ^render.Draw_List, curve: settings.Motion_Curve, area: render.Rect,
+	list: ^render.Draw_List, curve: motion.Curve, area: render.Rect,
 	low, high: f32, steps: int, width: f32, color: render.Color,
 ) {
 	previous := motion_point(area, low, high, 0, 0)
 	for i in 1 ..= steps {
 		t := f32(i) / f32(steps)
-		next := motion_point(area, low, high, t, settings.motion_curve_ease(curve, t))
+		next := motion_point(area, low, high, t, motion.ease(curve, t))
 		_ = render.push_segment(list, previous, next, width, color)
 		previous = next
 	}
@@ -829,7 +830,7 @@ motion_curve_line :: proc(
 
 @(private = "file")
 motion_spark_draw :: proc(
-	list: ^render.Draw_List, curve: settings.Motion_Curve, area: render.Rect, color: render.Color, s: f32,
+	list: ^render.Draw_List, curve: motion.Curve, area: render.Rect, color: render.Color, s: f32,
 ) {
 	motion_curve_line(list, curve, area, MOTION_SPARK_LOW, MOTION_SPARK_HIGH, MOTION_SPARK_STEPS, 1.5 * s, color)
 }

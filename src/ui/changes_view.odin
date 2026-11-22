@@ -473,7 +473,7 @@ changes_notice_text :: proc(view: ^Changes_View) -> (title, body: string) {
 	case .Git_Missing:
 		title, body = "Git was not found", "Install Git or add it to PATH."
 	case .Failed:
-		title, body = "Could not read changes", clip_bytes(view.detail, CHANGES_CLIP_BYTES)
+		title, body = "Could not read changes", clip_bytes(view.detail, CLIP_BYTES)
 	case .No_Turns:
 		title = "No turns yet"
 		body = "Turns appear here when an agent in this repository changes files."
@@ -792,9 +792,6 @@ changes_lit :: proc(state: ^Changes_State, hit: Changes_Hit) -> (hover, press: f
 	if state.lit != hit {return 0, 0}
 	return state.motion.hover.value, state.motion.press.value
 }
-
-@(private)
-baseline_in :: proc(y, height: f32, t: ^Text) -> f32 {return y + (height - t.line_height) / 2 + t.ascent}
 
 @(private = "file")
 notice_draw :: proc(

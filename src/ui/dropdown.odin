@@ -1,6 +1,7 @@
 package ui
 
 import "cosmos:input"
+import "aio:fuzzy"
 import "aio:line_match"
 import "cosmos:platform"
 import "cosmos:render"
@@ -678,7 +679,7 @@ dropdown_draw :: proc(
 		if source < len(c.rows) {
 			body := text_styled(text, .Body)
 			detail := text_styled(text, .Detail)
-			cut_buf: [CHANGES_CLIP_BYTES + 8]u8
+			cut_buf: [CLIP_BYTES + 8]u8
 			l := dropdown_row_layout(c.rows[source], option, d.metrics, &body, &detail, s, cut_buf[:])
 			if result := dropdown_row_draw(list, text, theme, c.rows[source], l, d.metrics, option, faded, s);
 			   result != .Ok {return result}
@@ -703,4 +704,18 @@ dropdown_draw :: proc(
 		scrollbar_draw(list, theme, bar, scrollbar_state(d.bar_hover, d.drag.(Scroll_Drag) or_else Scroll_Drag{}))
 	}
 	return .Ok
+}
+
+// Whether a multi-select mask holds the choice at `index`.
+choice_set_has :: proc(mask: u32, index: int) -> bool {
+	return mask & (1 << u32(index)) != 0
+}
+
+// Indexes of the choices whose label, or value when unlabelled, contains `query` ignoring case.
+choice_matches_filter :: proc(matches: ^[dynamic]int, choices, labels: []string, query: string) {
+	clear(matches)
+	for _, i in choices {
+		label := dropdown_label({choices = choices, labels = labels}, i)
+		if fuzzy.classify(query, label) <= .Substring {append(matches, i)}
+	}
 }

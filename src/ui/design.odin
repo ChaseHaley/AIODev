@@ -56,3 +56,6 @@ DISABLED_ALPHA :: f32(0.45)
 
 // The radius that fully rounds the short side of `r`: for bars, grooves, underlines and dots.
 pill_radius :: proc(r: render.Rect) -> f32 {return min(r.width, r.height) / 2}
+
+// A row of a choice list or dropdown.
+CHOICE_HEIGHT :: HEIGHT_STANDARD

@@ -349,7 +349,7 @@ status_panel_logo_draw :: proc(
 	area := render.Rect{math.round(x), math.round(middle - extent / 2), extent, extent}
 	atlas, pending, result := report_icon(app, status_find(app, item.session), item.record.app, extent)
 	if result != .Ok {return result}
-	if atlas.width > 0 {return ui.shell_badge_draw(&w.list, &w.ui_text, app.theme, area, "", s, atlas)}
+	if atlas.width > 0 {return ui.badge_draw(&w.list, &w.ui_text, app.theme, area, "", s, atlas)}
 	if !pending {ui.icon_draw(&w.list, .Terminal, area, app.theme.muted, ui.ICON_BUTTON, s)}
 	return .Ok
 }

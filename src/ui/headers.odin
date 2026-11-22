@@ -186,41 +186,6 @@ header_status_update :: proc(m: ^Motion, aside, enabled: bool, frame: Frame_Time
 	return motion_update(m, frame)
 }
 
-shell_badge_draw :: proc(
-	list: ^render.Draw_List,
-	text: ^Text,
-	theme: Theme,
-	area: render.Rect,
-	icon: string,
-	scale: f32,
-	atlas: render.Rect = {},
-) -> render.Build_Status {
-	if atlas.width > 0 {
-		r := area
-		factor := min(area.width / atlas.width, area.height / atlas.height)
-		r.width, r.height = atlas.width * factor, atlas.height * factor
-		r.x, r.y = area.x + (area.width - r.width) / 2, area.y + (area.height - r.height) / 2
-		if render.push_glyph(
-			   list,
-			   {rect = r, atlas = atlas, color = {1, 1, 1, 1}, flags = render.GLYPH_COLOR},
-		   ) !=
-		   .None {return .Ok}
-		return .Ok
-	}
-	draw_rect(list, {rect = area, color = theme.selection, radius = RADIUS_CONTROL * scale})
-	label := text_styled(text, .Detail)
-	x := area.x + max(0, (area.width - text_width(&label, icon)) / 2)
-	return draw_fading_text(
-		&label,
-		list,
-		icon,
-		x,
-		area.y + (area.height - label.line_height) / 2 + label.ascent,
-		theme.accent,
-		max(0, area.width - 2 * scale),
-	)
-}
-
 // Draws a header row laid out by header_layout over the card at `area`.
 header_draw :: proc(
 	list: ^render.Draw_List,
@@ -252,7 +217,7 @@ header_draw :: proc(
 		if content_icon != .None {
 			icon_draw(list, content_icon, l.badge,
 				focused ? theme.text : theme.muted, ICON_BUTTON, scale)
-		} else if result := shell_badge_draw(list, text, theme, l.badge, icon, scale, icon_atlas);
+		} else if result := badge_draw(list, text, theme, l.badge, icon, scale, icon_atlas);
 		   result != .Ok {return result}
 	}
 	if badge_hovered {

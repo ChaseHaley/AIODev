@@ -1,10 +1,10 @@
 package ui
 
 import "cosmos:render"
-import "aio:settings"
 import "core:time"
+import "cosmos:motion"
 
-// Shorthand for the curves fixed motions use; user-customizable motions take a settings.Motion_Curve.
+// Shorthand for the curves fixed motions use; user-customizable motions take a motion.Curve.
 Easing :: enum {
 	Linear,
 	Decelerate,
@@ -12,7 +12,7 @@ Easing :: enum {
 }
 
 // The builtin settings curves of the same names, so a fixed motion eases as its customizable namesake.
-EASING_CURVES :: [Easing]settings.Motion_Curve {
+EASING_CURVES :: [Easing]motion.Curve {
 	.Linear     = {p = {0, 0, 1, 1}},
 	.Decelerate = {p = {0.2, 0, 0, 1}},
 	.Accelerate = {p = {0.4, 0, 1, 1}},
@@ -30,7 +30,7 @@ Motion :: struct {
 	from, value, target: f32,
 	started:             time.Tick,
 	duration, delay:     time.Duration,
-	curve:               settings.Motion_Curve,
+	curve:               motion.Curve,
 }
 
 // How long a reordered list item takes to ease into its slot (D-069). Tabs, workspace rows and
@@ -52,7 +52,7 @@ motion_update :: proc(m: ^Motion, frame: Frame_Time) -> bool {
 	}
 	t := clamp(f32(time.tick_diff(m.started, frame.display)) / f32(m.duration), 0, 1)
 	if t >= 1 {m.value = m.target; return true}
-	m.value = m.from + (m.target - m.from) * settings.motion_curve_ease(m.curve, t)
+	m.value = m.from + (m.target - m.from) * motion.ease(m.curve, t)
 	return true
 }
 
@@ -69,7 +69,7 @@ motion_target_curve :: proc(
 	m: ^Motion,
 	target: f32,
 	duration: time.Duration,
-	curve: settings.Motion_Curve,
+	curve: motion.Curve,
 	enabled: bool,
 	delay: time.Duration = 0,
 ) {

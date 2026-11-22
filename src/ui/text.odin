@@ -512,3 +512,39 @@ draw_cluster_centered :: proc(
 	}
 	return .Ok
 }
+
+// The baseline that centres one line of `t` in a row `height` tall starting at `y`.
+baseline_in :: proc(y, height: f32, t: ^Text) -> f32 {return y + (height - t.line_height) / 2 + t.ascent}
+
+// The most bytes of a title or path a row measures; see clip_bytes.
+CLIP_BYTES :: 512
+
+// The start of `s` of at most `limit` bytes, cut on a rune boundary. Long titles and paths only ever show
+// their start, so drawing never measures the rest.
+clip_bytes :: proc(s: string, limit: int) -> string {
+	if len(s) <= limit {return s}
+	end := limit
+	for end > 0 && (s[end] & 0xC0) == 0x80 {end -= 1}
+	return s[:end]
+}
+
+// How many spaces a tab spans in code.
+TAB_COLUMNS :: 4
+
+// How wide a space is in `t`, which a tab spans TAB_COLUMNS times.
+code_space :: proc(t: ^Text) -> f32 {
+	if g, found := font.glyph_lookup(t.fonts, t.family, .Regular, ' '); found {
+		return font.glyph_advance(t.fonts, g, t.size_px)
+	}
+	return 0
+}
+
+// How one rune of a code line lays out: a tab advances TAB_COLUMNS spaces from the pen and draws
+// nothing, a rune without a glyph takes no room and draws nothing, and any other draws `glyph`. Painting,
+// measuring and the hit test all read this, so they cannot disagree.
+code_rune :: proc(t: ^Text, r: rune, space: f32) -> (glyph: font.Glyph, advance: f32, drawn: bool) {
+	if r == '\t' {return {}, TAB_COLUMNS * space, false}
+	g, found := font.glyph_lookup(t.fonts, t.family, .Regular, r)
+	if !found {return {}, 0, false}
+	return g, font.glyph_advance(t.fonts, g, t.size_px), true
+}

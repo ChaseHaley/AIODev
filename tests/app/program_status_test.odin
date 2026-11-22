@@ -45,7 +45,7 @@ program_status_static_marks_do_not_request_animation :: proc(t: ^testing.T) {
 		testing.expect(t, !w.status_spinning)
 	}
 	a.animations = false
-	testing.expect_value(t, app.status_phase(&a, &w, {glyph = .Working, progress = -1}), ui.STATUS_SPIN_STILL)
+	testing.expect_value(t, app.status_phase(&a, &w, {glyph = .Working, progress = -1}), ui.SPINNER_STILL)
 	testing.expect(t, !w.status_spinning)
 	a.animations = true
 	_ = app.status_phase(&a, &w, {glyph = .Working, progress = -1})

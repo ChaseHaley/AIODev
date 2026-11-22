@@ -5,6 +5,7 @@ import "core:fmt"
 import "core:strings"
 import "core:testing"
 import "core:time"
+import "cosmos:motion"
 
 @(test)
 motion_split_line_with_a_user_curve_resolves_without_diagnostics :: proc(t: ^testing.T) {
@@ -15,7 +16,7 @@ motion_split_line_with_a_user_curve_resolves_without_diagnostics :: proc(t: ^tes
 	testing.expect_value(t, r.duration, 420)
 	testing.expect_value(t, r.curve_name, "wobbly")
 	testing.expect(t, r.curve.spring)
-	testing.expect_value(t, r.effect, settings.Motion_Effect.Pop)
+	testing.expect_value(t, r.effect, motion.Effect.Pop)
 	testing.expect_value(t, r.from[.On], settings.Motion_Context.Panes)
 	testing.expect_value(t, r.from[.Duration], settings.Motion_Context.Split)
 	testing.expect_value(t, r.from[.Curve], settings.Motion_Context.Split)
@@ -23,7 +24,7 @@ motion_split_line_with_a_user_curve_resolves_without_diagnostics :: proc(t: ^tes
 	testing.expect_value(t, settings.motion_duration(&s, r), 420 * time.Millisecond)
 	curve, found := settings.motion_curve_find(&s, "mine")
 	testing.expect(t, found)
-	testing.expect_value(t, curve, settings.Motion_Curve{p = {0.3, 1.4, 0.2, 1}})
+	testing.expect_value(t, curve, motion.Curve{p = {0.3, 1.4, 0.2, 1}})
 }
 
 @(test)
@@ -52,8 +53,8 @@ motion_spec_grammar_takes_tokens_in_any_order_and_writes_them_canonically :: pro
 	close_effect, close_set := close.effect.?
 	testing.expect(t, close_set && close_effect == .Pop)
 	testing.expect_value(t, settings.motion_spec_text(.Close, close), "popout")
-	testing.expect_value(t, settings.motion_effect_names(.Close)[int(settings.Motion_Effect.Edge)], "collapse")
-	testing.expect_value(t, settings.motion_effect_labels(.Split)[int(settings.Motion_Effect.Pop)], "Pop in")
+	testing.expect_value(t, settings.motion_effect_names(.Close)[int(motion.Effect.Edge)], "collapse")
+	testing.expect_value(t, settings.motion_effect_labels(.Split)[int(motion.Effect.Pop)], "Pop in")
 	testing.expect(t, settings.motion_effect_names(.View) == nil)
 }
 
@@ -108,7 +109,7 @@ motion_contexts_inherit_from_panes_and_fall_back_at_the_root :: proc(t: ^testing
 	testing.expect_value(t, view.from[.Duration], settings.Motion_Context.Panes)
 	testing.expect_value(t, view.curve_name, "spring")
 	testing.expect_value(t, view.from[.Curve], settings.Motion_Context.View)
-	testing.expect_value(t, view.effect, settings.Motion_Effect.Edge)
+	testing.expect_value(t, view.effect, motion.Effect.Edge)
 	testing.expect_value(t, settings.motion_duration(&s, view), 150 * time.Millisecond)
 	split := settings.motion_resolve(&s, .Split)
 	testing.expect(t, !split.on)
@@ -121,7 +122,7 @@ motion_contexts_inherit_from_panes_and_fall_back_at_the_root :: proc(t: ^testing
 	testing.expect(t, root.on)
 	testing.expect_value(t, root.duration, 160)
 	testing.expect_value(t, root.curve_name, "decelerate")
-	testing.expect_value(t, root.effect, settings.Motion_Effect.Edge)
+	testing.expect_value(t, root.effect, motion.Effect.Edge)
 	for field in settings.Motion_Field {
 		testing.expect_value(t, root.from[field], settings.Motion_Context.Panes)
 	}
@@ -150,7 +151,7 @@ motion_curve_lines_parse_and_refuse_bad_values_and_reserved_names :: proc(t: ^te
 	testing.expect_value(t, len(s.motion.curves), 2)
 	soft, found := settings.motion_curve_find(&s, "soft")
 	testing.expect(t, found)
-	testing.expect_value(t, soft, settings.Motion_Curve{spring = true, p = {0.4, 0, 0, 0}})
+	testing.expect_value(t, soft, motion.Curve{spring = true, p = {0.4, 0, 0, 0}})
 
 	refused := [?]string {
 		"motion.curve.a = 0.3, 1.4, 0.2",
@@ -274,7 +275,7 @@ motion_preset_apply_copies_the_preset_into_every_context :: proc(t: ^testing.T) 
 	testing.expect_value(t, after.motion.contexts[.Chrome], "")
 	r := settings.motion_resolve(&after, .Split)
 	testing.expect_value(t, r.duration, 420)
-	testing.expect_value(t, r.effect, settings.Motion_Effect.Pop)
+	testing.expect_value(t, r.effect, motion.Effect.Pop)
 	motion_refused(t, "", settings.Motion_Preset_Apply{"nosuch", .Panes})
 }
 
@@ -317,7 +318,7 @@ motion_preset_save_and_remove_round_trip :: proc(t: ^testing.T) {
 
 @(test)
 motion_curve_set_saves_the_curve_and_assigns_it :: proc(t: ^testing.T) {
-	curve := settings.Motion_Curve{p = {0.3, 1.4, 0.2, 1}}
+	curve := motion.Curve{p = {0.3, 1.4, 0.2, 1}}
 	set := settings.Motion_Curve_Set{"mine", curve, settings.Motion_Context.Split}
 	after, ok := motion_mutated(t, "motion.panes.split = 300ms\n", set)
 	if !ok {return}
@@ -374,7 +375,7 @@ motion_curve_rename_moves_the_curve_and_everything_naming_it :: proc(t: ^testing
 	testing.expect(t, !old)
 	curve, renamed := settings.motion_curve_find(&after, "snap")
 	testing.expect(t, renamed)
-	testing.expect_value(t, curve, settings.Motion_Curve{p = {0.3, 1.4, 0.2, 1}})
+	testing.expect_value(t, curve, motion.Curve{p = {0.3, 1.4, 0.2, 1}})
 	testing.expect_value(t, after.motion.contexts[.Split], "300ms snap")
 	testing.expect_value(t, after.motion.contexts[.Close], "other")
 	if testing.expect_value(t, len(after.motion.presets), 1) {
@@ -406,19 +407,19 @@ motion_curves_ease_from_zero_to_one_and_may_overshoot :: proc(t: ^testing.T) {
 	s, err := settings.defaults()
 	defer settings.destroy(&s)
 	testing.expect_value(t, err, nil)
-	for builtin in settings.MOTION_BUILTIN_CURVES {
-		testing.expect_value(t, settings.motion_curve_ease(builtin.curve, 0), 0)
-		testing.expect_value(t, settings.motion_curve_ease(builtin.curve, 1), 1)
-		testing.expect_value(t, settings.motion_curve_ease(builtin.curve, 1.5), 1)
+	for builtin in motion.BUILTIN_CURVES {
+		testing.expect_value(t, motion.ease(builtin.curve, 0), 0)
+		testing.expect_value(t, motion.ease(builtin.curve, 1), 1)
+		testing.expect_value(t, motion.ease(builtin.curve, 1.5), 1)
 	}
 	linear, _ := settings.motion_curve_find(&s, "linear")
-	testing.expect(t, abs(settings.motion_curve_ease(linear, 0.5) - 0.5) < 0.001)
+	testing.expect(t, abs(motion.ease(linear, 0.5) - 0.5) < 0.001)
 	back, _ := settings.motion_curve_find(&s, "back")
-	testing.expect(t, settings.motion_curve_ease(back, 0.6) > 1)
+	testing.expect(t, motion.ease(back, 0.6) > 1)
 	wobbly, _ := settings.motion_curve_find(&s, "wobbly")
-	testing.expect(t, abs(settings.motion_curve_ease(wobbly, 0.99) - 1) < 0.05)
+	testing.expect(t, abs(motion.ease(wobbly, 0.99) - 1) < 0.05)
 	peak: f32
-	for i in 1 ..< 100 {peak = max(peak, settings.motion_curve_ease(wobbly, f32(i) / 100))}
+	for i in 1 ..< 100 {peak = max(peak, motion.ease(wobbly, f32(i) / 100))}
 	testing.expect(t, peak > 1)
 }
 

@@ -5,6 +5,7 @@ import "aio:settings"
 import "aio:ui"
 import "core:math"
 import "core:strings"
+import "cosmos:motion"
 
 // Deleting a workspace without closing a window plays the deletion in the overview (WORK-444). In a window
 // that showed it, the switch to its replacement becomes the deletion: the window zooms out onto its card,
@@ -27,7 +28,7 @@ Overview_Deletion :: struct {
 	slide_from: f32,
 	slide_to:   f32,
 	// The slide's easing, the same as the switch's travel.
-	slide_curve: settings.Motion_Curve,
+	slide_curve: motion.Curve,
 	// The dust's texture, once the first frame of dust has drawn the card into it, and where it lies
 	// relative to the card's corner. A failed capture fades the card instead.
 	key:        u64,
@@ -145,7 +146,7 @@ overview_deletion_plan :: proc(
 	o: ^Workspace_Overview,
 	camera: Overview_Camera,
 	from, to: int,
-	curve: settings.Motion_Curve,
+	curve: motion.Curve,
 ) -> f32 {
 	smooth, _ := settings.motion_curve_find(&app.settings, "smooth")
 	d := &o.deletion
@@ -183,7 +184,7 @@ overview_slot :: proc(w: ^Window, index: int) -> f32 {
 	if d.phase != .Playing || index <= d.card {return f32(index)}
 	_, slide, playing := workspace_overview_deletion(w)
 	if !playing {return f32(index)}
-	return f32(index) - settings.motion_curve_ease(d.slide_curve, slide)
+	return f32(index) - motion.ease(d.slide_curve, slide)
 }
 
 // Whether the deleted card draws as dust now rather than as a card.

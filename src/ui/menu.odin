@@ -370,7 +370,7 @@ menu_row_draw :: proc(
 	label_x := row.x + inset
 	if item.icon != "" || item.icon_atlas.width > 0 {
 		icon_width := (16 + SPACE_2) * scale
-		if result := shell_badge_draw(
+		if result := badge_draw(
 			list,
 			text,
 			theme,
@@ -462,4 +462,40 @@ menu_row_draw :: proc(
 		}
 	}
 	return .Ok
+}
+
+// A badge in `area`: an atlas image fitted inside it, or else `icon` as text on a selection-tinted chip.
+badge_draw :: proc(
+	list: ^render.Draw_List,
+	text: ^Text,
+	theme: Theme,
+	area: render.Rect,
+	icon: string,
+	scale: f32,
+	atlas: render.Rect = {},
+) -> render.Build_Status {
+	if atlas.width > 0 {
+		r := area
+		factor := min(area.width / atlas.width, area.height / atlas.height)
+		r.width, r.height = atlas.width * factor, atlas.height * factor
+		r.x, r.y = area.x + (area.width - r.width) / 2, area.y + (area.height - r.height) / 2
+		if render.push_glyph(
+			   list,
+			   {rect = r, atlas = atlas, color = {1, 1, 1, 1}, flags = render.GLYPH_COLOR},
+		   ) !=
+		   .None {return .Ok}
+		return .Ok
+	}
+	draw_rect(list, {rect = area, color = theme.selection, radius = RADIUS_CONTROL * scale})
+	label := text_styled(text, .Detail)
+	x := area.x + max(0, (area.width - text_width(&label, icon)) / 2)
+	return draw_fading_text(
+		&label,
+		list,
+		icon,
+		x,
+		area.y + (area.height - label.line_height) / 2 + label.ascent,
+		theme.accent,
+		max(0, area.width - 2 * scale),
+	)
 }

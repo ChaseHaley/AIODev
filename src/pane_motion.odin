@@ -6,6 +6,7 @@ import "aio:settings"
 import "aio:ui"
 import "core:math"
 import "core:time"
+import "cosmos:motion"
 
 // When a split or a close changes a tab's panes, they ease from where they were drawn to their new
 // rectangles together, each within its container, the tiling or its floating group; nothing here depends
@@ -324,19 +325,19 @@ pane_motion_placed :: proc(app: ^App, w: ^Window, shown: Pane_Motion_Shown) {
 			break
 		}
 	}
-	motion := settings.motion_resolve(&app.settings, m.cause)
-	duration := chrome.duration > 0 ? chrome.duration : settings.motion_duration(&app.settings, motion)
+	resolved := settings.motion_resolve(&app.settings, m.cause)
+	duration := chrome.duration > 0 ? chrome.duration : settings.motion_duration(&app.settings, resolved)
 	// Only a split brings a pane in, and only a close takes one away, in the ways their settings choose.
-	enter, leave: settings.Motion_Effect
-	if m.cause == .Split {enter = motion.effect}
-	if m.cause == .Close {leave = motion.effect}
+	enter, leave: motion.Effect
+	if m.cause == .Split {enter = resolved.effect}
+	if m.cause == .Close {leave = resolved.effect}
 	ui.layout_motion_begin(
 		&m.moving,
 		shown.places,
 		targets,
 		duration,
-		motion.curve,
-		app.animations && motion.on && duration > 0,
+		resolved.curve,
+		app.animations && resolved.on && duration > 0,
 		hints,
 		enter,
 		leave,

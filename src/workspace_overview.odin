@@ -6,6 +6,7 @@ import "aio:ui"
 import "core:fmt"
 import "core:math"
 import "core:time"
+import "cosmos:motion"
 
 // Switching workspace in a window zooms the window out into a column of every workspace, in workspace list
 // order, travels along the column to the one chosen and zooms back into it, so a workspace change never
@@ -41,7 +42,7 @@ Overview_Camera :: struct {
 Overview_Leg :: struct {
 	share:    f32,
 	from, to: Overview_Camera,
-	curve:    settings.Motion_Curve,
+	curve:    motion.Curve,
 }
 
 @(private = "file")
@@ -109,7 +110,7 @@ workspace_overview_camera :: proc(w: ^Window) -> (Overview_Camera, bool) {
 	t := o.progress.value
 	for leg in o.legs[:o.leg_count] {
 		if t <= leg.share {
-			e := leg.share > 0 ? settings.motion_curve_ease(leg.curve, t / leg.share) : 1
+			e := leg.share > 0 ? motion.ease(leg.curve, t / leg.share) : 1
 			return {
 					math.lerp(leg.from.scale, leg.to.scale, e),
 					math.lerp(leg.from.card, leg.to.card, e),
@@ -181,7 +182,7 @@ overview_leg_add :: proc(
 	o: ^Workspace_Overview,
 	share: f32,
 	from, to: Overview_Camera,
-	curve: settings.Motion_Curve,
+	curve: motion.Curve,
 ) {
 	if share <= 0 {return}
 	o.legs[o.leg_count] = {share, from, to, curve}

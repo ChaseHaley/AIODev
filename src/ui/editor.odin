@@ -627,8 +627,6 @@ ROW_HEIGHT :: 52
 @(private)
 PAGE_WHEEL_LINE :: 20
 @(private)
-CHOICE_HEIGHT :: HEIGHT_STANDARD
-@(private)
 OUTLINE_ROW_HEIGHT :: RAIL_ROW_HEIGHT
 @(private)
 OUTLINE_WIDTH :: 220
@@ -3942,43 +3940,6 @@ row_preview :: proc(row: ^Editor_Row, value: string) -> string {
 	return value
 }
 
-@(private)
-switch_draw :: proc(
-	list: ^render.Draw_List,
-	track: render.Rect,
-	on, focused: bool,
-	theme: Theme,
-	scale: f32,
-) {
-	draw_rect(
-		list,
-		{rect = track, color = on ? theme.accent : theme.border, radius = track.height / 2},
-	)
-	knob := track.height - 6 * scale
-	knob_x := on ? track.x + track.width - 3 * scale - knob : track.x + 3 * scale
-	draw_rect(
-		list,
-		{
-			rect = {knob_x, track.y + 3 * scale, knob, knob},
-			color = on ? theme.accent_text : theme.text,
-			radius = knob / 2,
-		},
-	)
-	if focused {focus_ring_draw(list, track, theme, scale)}
-}
-
-@(private)
-box_draw :: proc(
-	list: ^render.Draw_List,
-	r: render.Rect,
-	theme: Theme,
-	focused: bool,
-	scale: f32,
-) {
-	draw_rect(list, {rect = r, color = theme.border, radius = RADIUS_CONTROL * scale})
-	if focused {focus_ring_draw(list, r, theme, scale)}
-}
-
 // The square text badge a pane header and the profile table use for a shell.
 @(private)
 profile_badge_draw :: proc(
@@ -4098,7 +4059,7 @@ profile_row_draw :: proc(
 		if row.icon_atlas.width > 0 {
 			side := ICON_BUTTON * scale
 			image := render.Rect{badge.x + (badge.width - side) / 2, badge.y + (badge.height - side) / 2, side, side}
-			if result := shell_badge_draw(list, text, theme, image, "", scale, row.icon_atlas); result != .Ok {
+			if result := badge_draw(list, text, theme, image, "", scale, row.icon_atlas); result != .Ok {
 				return result
 			}
 		}
@@ -4296,7 +4257,7 @@ control_draw :: proc(
 			side := ICON_BUTTON * scale
 			slot := parts.swatch
 			image := render.Rect{slot.x + (slot.width - side) / 2, slot.y + (slot.height - side) / 2, side, side}
-			if result := shell_badge_draw(list, text, theme, image, "", scale, row.icon_atlas); result != .Ok {
+			if result := badge_draw(list, text, theme, image, "", scale, row.icon_atlas); result != .Ok {
 				return result
 			}
 		}

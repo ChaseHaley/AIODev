@@ -896,7 +896,7 @@ floating_capsules_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 		if found != .Ok {return found}
 		if badge.icon != .None {
 			ui.icon_draw(&w.list, badge.icon, icon, ink, ui.ICON_BUTTON, s)
-		} else if result := ui.shell_badge_draw(
+		} else if result := ui.badge_draw(
 			&w.list,
 			&w.ui_text,
 			app.theme,

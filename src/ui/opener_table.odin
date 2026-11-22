@@ -144,7 +144,7 @@ editor_opener_draw :: proc(
 	); result != .Ok {return result}
 	icon := render.Rect{cells.expand.x, r.y + (r.height - ICON_BUTTON * s) / 2, ICON_BUTTON * s, ICON_BUTTON * s}
 	if row.icon_atlas.width > 0 {
-		if result := shell_badge_draw(list, text, theme, icon, "", s, row.icon_atlas); result != .Ok {return result}
+		if result := badge_draw(list, text, theme, icon, "", s, row.icon_atlas); result != .Ok {return result}
 	} else {
 		icon_draw(list, .Terminal, {icon.x, r.y, icon.width, r.height}, theme.muted, ICON_BUTTON, s)
 	}

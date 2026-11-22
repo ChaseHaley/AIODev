@@ -5,6 +5,7 @@ import "core:time"
 import "cosmos:render"
 import "aio:settings"
 import "aio:ui"
+import "cosmos:motion"
 
 @(private = "file")
 LAYOUT_DURATION :: 160 * time.Millisecond
@@ -166,7 +167,7 @@ layout_items_follow_hints_in_and_out :: proc(t: ^testing.T) {
 
 // A curve that dips below its start and overshoots its end, as bouncy curves do.
 @(private = "file")
-OVERSHOOT :: settings.Motion_Curve{p = {0.1, -1, 0.9, 2}}
+OVERSHOOT :: motion.Curve{p = {0.1, -1, 0.9, 2}}
 
 // Overshooting curves carry edges past their targets, but an item never turns inside out: through a split
 // and a close, every item keeps a size of zero or more.
@@ -197,7 +198,7 @@ layout_entering_effects_keep_the_target_and_report_the_look :: proc(t: ^testing.
 	shown := []ui.Layout_Place{{1, {0, 0, 100, 40}, 0}}
 	split := []ui.Layout_Place{{1, {0, 0, 48, 40}, 0}, {2, {52, 0, 48, 40}, 0}}
 	linear := ui.EASING_CURVES[.Linear]
-	for effect in ([?]settings.Motion_Effect{.Pop, .Fade, .Slide}) {
+	for effect in ([?]motion.Effect{.Pop, .Fade, .Slide}) {
 		m: ui.Layout_Motion
 		defer ui.layout_motion_destroy(&m)
 		ui.layout_motion_begin(&m, shown, split, LAYOUT_DURATION, linear, true, nil, effect)
@@ -207,7 +208,7 @@ layout_entering_effects_keep_the_target_and_report_the_look :: proc(t: ^testing.
 		testing.expect_value(t, look.effect, effect)
 		testing.expect_value(t, look.amount, f32(0))
 		testing.expect_value(t, look.from, render.Rect{100, 0, 0, 40})
-		testing.expect_value(t, ui.layout_motion_look(&m, 1).effect, settings.Motion_Effect.Edge)
+		testing.expect_value(t, ui.layout_motion_look(&m, 1).effect, motion.Effect.Edge)
 		first := test_frame(time.tick_now())
 		ui.layout_motion_update(&m, first)
 		ui.layout_motion_update(&m, test_frame(time.tick_add(first.display, LAYOUT_DURATION / 2)))
@@ -242,7 +243,7 @@ layout_leaving_fade_keeps_the_shown_rect :: proc(t: ^testing.T) {
 	ui.layout_motion_update(&m, test_frame(time.tick_add(first.display, LAYOUT_DURATION / 2)))
 	testing.expect_value(t, ui.layout_motion_rect(&m, 2, {}), shown[1].rect)
 	look := ui.layout_motion_look(&m, 2)
-	testing.expect_value(t, look.effect, settings.Motion_Effect.Fade)
+	testing.expect_value(t, look.effect, motion.Effect.Fade)
 	testing.expect(t, look.amount > 0 && look.amount < 1, "it fades as the neighbour grows over it")
 	grown := ui.layout_motion_rect(&m, 1, whole[0].rect)
 	testing.expect(t, grown.width > 48 && grown.width < 100)

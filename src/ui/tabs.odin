@@ -392,7 +392,7 @@ tab_mark_draw :: proc(
 		icon_draw(list, badge.icon, area, ink, size, scale)
 		return .Ok
 	}
-	return shell_badge_draw(list, text, theme, area, badge.shell, scale, badge.atlas)
+	return badge_draw(list, text, theme, area, badge.shell, scale, badge.atlas)
 }
 
 // The part of `r` inside `bounds`, empty when they do not overlap.

@@ -59,11 +59,6 @@ editor_choice_set :: proc(p: ^Editor) -> u32 {
 	return p.choice_set
 }
 
-@(private)
-choice_set_has :: proc(mask: u32, index: int) -> bool {
-	return mask & (1 << u32(index)) != 0
-}
-
 // Flips one option and saves at once, leaving the popup open for the next option.
 @(private)
 choice_set_toggle :: proc(p: ^Editor, index: int) -> Editor_Outcome {

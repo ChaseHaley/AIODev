@@ -7,9 +7,6 @@ import tr "aio:turns"
 import "core:math"
 import "core:unicode/utf8"
 
-@(private)
-CHANGES_TAB_COLUMNS :: 4
-
 // Where a diff row's number, sign and text start. A unified row has two number columns, old and new; a
 // side-by-side cell has one, and `new_x` is `old_x` there. One proc places them for painting, hit testing
 // and the text selection, so a click lands on the character it is drawn over.
@@ -50,15 +47,6 @@ digit_count :: proc(n: int) -> int {
 	count := 1
 	for v := n; v >= 10; v /= 10 {count += 1}
 	return count
-}
-
-// How wide a space is in `t`, which a tab spans CHANGES_TAB_COLUMNS times.
-@(private)
-code_space :: proc(t: ^Text) -> f32 {
-	if g, found := font.glyph_lookup(t.fonts, t.family, .Regular, ' '); found {
-		return font.glyph_advance(t.fonts, g, t.size_px)
-	}
-	return 0
 }
 
 // What a code line's layout reads of the font, found once per paint or hit test. `cell` is how far a digit
@@ -143,17 +131,6 @@ code_fit :: proc(t: ^Text, f: Code_Font, s: string, room: f32) -> int {
 		offset += size
 	}
 	return len(s)
-}
-
-// How one rune of a code line lays out: a tab advances CHANGES_TAB_COLUMNS spaces from the pen and draws
-// nothing, a rune without a glyph takes no room and draws nothing, and any other draws `glyph`. Painting,
-// measuring and the hit test all read this, so they cannot disagree.
-@(private)
-code_rune :: proc(t: ^Text, r: rune, space: f32) -> (glyph: font.Glyph, advance: f32, drawn: bool) {
-	if r == '\t' {return {}, CHANGES_TAB_COLUMNS * space, false}
-	g, found := font.glyph_lookup(t.fonts, t.family, .Regular, r)
-	if !found {return {}, 0, false}
-	return g, font.glyph_advance(t.fonts, g, t.size_px), true
 }
 
 // Whether `r` joins the rune before it into one character: a combining mark, a variation selector or a zero

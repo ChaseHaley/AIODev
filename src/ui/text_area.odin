@@ -72,7 +72,7 @@ text_area_reset :: proc(a: ^Text_Area) {
 	a^ = {lines = lines}
 }
 
-// The advance of one rune as the area sets it: a tab is CHANGES_TAB_COLUMNS spaces wide, as in the diff's
+// The advance of one rune as the area sets it: a tab is TAB_COLUMNS spaces wide, as in the diff's
 // code, and a rune with no glyph takes no room, as `draw_text` skips it. `space` is `code_space` of `t`.
 @(private = "file")
 area_advance :: proc(t: ^Text, r: rune, space: f32) -> f32 {
@@ -89,7 +89,7 @@ area_width :: proc(t: ^Text, s: string) -> f32 {
 	for rest != "" {
 		end := strings.index_byte(rest, '\t')
 		if end < 0 {return width + text_width(t, rest)}
-		width += text_width(t, rest[:end]) + CHANGES_TAB_COLUMNS * code_space(t)
+		width += text_width(t, rest[:end]) + TAB_COLUMNS * code_space(t)
 		rest = rest[end + 1:]
 	}
 	return width
@@ -109,7 +109,7 @@ area_row_draw :: proc(
 			x += text_width(t, run)
 		}
 		if end < 0 {break}
-		x += CHANGES_TAB_COLUMNS * code_space(t)
+		x += TAB_COLUMNS * code_space(t)
 		rest = rest[end + 1:]
 	}
 	return .Ok

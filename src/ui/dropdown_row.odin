@@ -295,7 +295,7 @@ dropdown_row_cut :: proc(
 	dropdown_measure(d, c, text, scale)
 	body := text_styled(text, .Body)
 	detail := text_styled(text, .Detail)
-	buf: [CHANGES_CLIP_BYTES + 8]u8
+	buf: [CLIP_BYTES + 8]u8
 	l := dropdown_row_layout(c.rows[source], option, d.metrics, &body, &detail, scale, buf[:])
 	return source, l.cut
 }

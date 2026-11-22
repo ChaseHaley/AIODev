@@ -1,9 +1,9 @@
 package ui
 
 import "cosmos:render"
-import "aio:settings"
 import "core:math"
 import "core:time"
+import "cosmos:motion"
 
 // A layout's items easing together, as one motion, from where they were drawn to where the layout now
 // puts them. The layout itself changes at once: callers keep hit testing, sizing and input on the new
@@ -33,7 +33,7 @@ Layout_Hint :: struct {
 // 0, hidden, to 1, fully shown, along the motion's curve and may overshoot either end; `from` is the edge
 // the item would grow from or collapse onto, which a sliding item moves across.
 Layout_Look :: struct {
-	effect: settings.Motion_Effect,
+	effect: motion.Effect,
 	amount: f32,
 	from:   render.Rect,
 }
@@ -48,7 +48,7 @@ Layout_Item :: struct {
 	successor: Maybe(u64),
 	// An entering or leaving item with an effect other than .Edge stays at one rectangle and presents
 	// itself by layout_motion_look instead, against `edge`, where .Edge would grow or collapse it.
-	effect:    settings.Motion_Effect,
+	effect:    motion.Effect,
 	edge:      render.Rect,
 }
 
@@ -98,11 +98,11 @@ layout_motion_begin :: proc(
 	m: ^Layout_Motion,
 	shown, targets: []Layout_Place,
 	duration: time.Duration,
-	curve: settings.Motion_Curve,
+	curve: motion.Curve,
 	enabled: bool,
 	hints: []Layout_Hint = nil,
-	enter: settings.Motion_Effect = .Edge,
-	leave: settings.Motion_Effect = .Edge,
+	enter: motion.Effect = .Edge,
+	leave: motion.Effect = .Edge,
 	stood: []Layout_Hint = nil,
 	delay: time.Duration = 0,
 ) {

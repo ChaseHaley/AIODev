@@ -977,18 +977,6 @@ stats_draw :: proc(
 	return plus_x, status
 }
 
-@(private)
-CHANGES_CLIP_BYTES :: 512
-
-// The start of `s` of at most `limit` bytes, cut on a rune boundary. Long titles and paths only ever show
-// their start, so drawing never measures the rest.
-clip_bytes :: proc(s: string, limit: int) -> string {
-	if len(s) <= limit {return s}
-	end := limit
-	for end > 0 && (s[end] & 0xC0) == 0x80 {end -= 1}
-	return s[:end]
-}
-
 // The text of a file header: the path, or old and new for a rename or copy.
 @(private = "file")
 file_label :: proc(buf: []u8, f: ^tr.Diff_File) -> string {

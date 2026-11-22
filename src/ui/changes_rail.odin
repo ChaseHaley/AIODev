@@ -216,7 +216,7 @@ row_texts :: proc(
 	t.plan = plan
 	turns := changes_scope_turns(view.scope)
 	if plan.name && turns {
-		t.name = clip_bytes(view.source_label, CHANGES_CLIP_BYTES)
+		t.name = clip_bytes(view.source_label, CLIP_BYTES)
 		t.name_width = math.ceil(text_width(&strong, t.name))
 	}
 	if turns {
@@ -224,7 +224,7 @@ row_texts :: proc(
 		t.live = changes_live_index(view) >= 0 && view.first == view.last
 	} else {
 		labels := CHANGES_SCOPE_LABELS
-		t.range = clip_bytes(view.source_label, CHANGES_CLIP_BYTES)
+		t.range = clip_bytes(view.source_label, CLIP_BYTES)
 		if t.range == "" {t.range = labels[view.scope]}
 		if plan.short {
 			for r, i in t.range {

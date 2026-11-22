@@ -1,6 +1,5 @@
 package ui
 
-import "aio:fuzzy"
 import "cosmos:render"
 import "aio:settings"
 import "core:fmt"
@@ -151,16 +150,6 @@ reset_button_draw :: proc(
 	if !modified {ink.a *= 0.5}
 	icon_draw(list, .Undo, face, ink, ICON_BUTTON, scale)
 	return err
-}
-
-// Indexes of the choices whose label, or value when unlabelled, contains `query` ignoring case.
-@(private)
-choice_matches_filter :: proc(matches: ^[dynamic]int, choices, labels: []string, query: string) {
-	clear(matches)
-	for _, i in choices {
-		label := dropdown_label({choices = choices, labels = labels}, i)
-		if fuzzy.classify(query, label) <= .Substring {append(matches, i)}
-	}
 }
 
 // The label of the choice a search matched, after a row's title in the detail style with its matched

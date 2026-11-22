@@ -5,6 +5,7 @@ import "aio:settings"
 import "aio:ui"
 import "core:math"
 import "core:time"
+import "cosmos:motion"
 
 // Changing the tab orientation passes the tabs between the docked rail and the title-bar strip through
 // the corner where the two meet, as walking off one edge of a maze brings you back at another, turned a
@@ -26,7 +27,7 @@ Tab_Flip :: struct {
 
 // Easing in and out alike, so the first and last tabs through the corner pass as gently as each other.
 @(private = "file")
-TAB_FLIP_CURVE :: settings.Motion_Curve{p = {0.45, 0, 0.55, 1}}
+TAB_FLIP_CURVE :: motion.Curve{p = {0.45, 0, 0.55, 1}}
 
 // The share of the Rail and Activity panel motion's duration each tab takes to pass, and the bounds of the
 // whole passage in those durations, so a few tabs do not rush and many do not drag.
@@ -100,7 +101,7 @@ tab_flip_time_at :: proc(share: f32) -> f32 {
 	low, high: f32 = 0, 1
 	for _ in 0 ..< 24 {
 		middle := (low + high) / 2
-		if settings.motion_curve_ease(TAB_FLIP_CURVE, middle) < share {low = middle} else {high = middle}
+		if motion.ease(TAB_FLIP_CURVE, middle) < share {low = middle} else {high = middle}
 	}
 	return high
 }

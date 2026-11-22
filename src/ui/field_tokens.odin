@@ -48,7 +48,7 @@ TOKEN_LABEL_MAX :: f32(180)
 
 @(private = "file")
 token_label :: proc(token: Filter_Token) -> string {
-	return clip_bytes(token.name, CHANGES_CLIP_BYTES)
+	return clip_bytes(token.name, CLIP_BYTES)
 }
 
 @(private = "file")

@@ -151,7 +151,7 @@ hidden_panes_map_labels :: proc(
 		mark := render.Rect{band.x + pad, band.y + (band.height - badge) / 2, badge, badge}
 		if pane.icon != .None {
 			icon_draw(list, pane.icon, mark, ink, ICON_INDICATOR, scale)
-		} else if result := shell_badge_draw(list, text, theme, mark, pane.glyph, scale, pane.atlas);
+		} else if result := badge_draw(list, text, theme, mark, pane.glyph, scale, pane.atlas);
 		   result != .Ok {return result}
 		status := render.Rect{band.x + band.width - pad - dot, band.y + (band.height - dot) / 2, dot, dot}
 		if pane.status.glyph == .None || pane.status.glyph == .Idle {
