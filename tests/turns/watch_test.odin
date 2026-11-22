@@ -7,6 +7,7 @@ import "core:strings"
 import "core:sync"
 import "core:testing"
 import "core:time"
+import "cosmos:host"
 
 // How long a change may take to reach the watch before a test calls it lost.
 @(private = "file")
@@ -43,9 +44,9 @@ watch_prepare :: proc(t: ^testing.T, f: ^Watched) -> bool {
 
 @(private = "file")
 watch_begin :: proc(t: ^testing.T, f: ^Watched, recursive: bool) -> bool {
-	wake := turns.Watch_Wake {
-		data = &f.counter,
-		wake = watch_counted,
+	wake := host.Waker {
+		procedure = watch_counted,
+		data      = &f.counter,
 	}
 	created, added: bool
 	f.set, created = turns.watch_set_create(wake)
@@ -167,9 +168,9 @@ fleet_prepare :: proc(t: ^testing.T, f: ^Fleet) -> bool {
 	root, root_error := os.make_directory_temp("", "aio-fleet-*", context.allocator)
 	if !testing.expect_value(t, root_error, nil) {return false}
 	f.root = root
-	wake := turns.Watch_Wake {
-		data = &f.counter,
-		wake = watch_counted,
+	wake := host.Waker {
+		procedure = watch_counted,
+		data      = &f.counter,
 	}
 	created: bool
 	f.set, created = turns.watch_set_create(wake)

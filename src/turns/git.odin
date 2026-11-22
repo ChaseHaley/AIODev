@@ -6,6 +6,7 @@ import "core:log"
 import "core:strings"
 import "core:sync"
 import "core:time"
+import "cosmos:host"
 
 // What went wrong running git or reading a repository.
 Error :: enum u8 {
@@ -99,7 +100,7 @@ git_run :: proc(args: []string, run: Git_Run, allocator := context.allocator) ->
 		stdin     = run.stdin,
 		keep_crlf = true,
 	}
-	wake_target := spawn.Wake{data = &wake, wake = git_wake}
+	wake_target := host.Waker{procedure = git_wake, data = &wake}
 	process, start_error := spawn.start(argv[:], options, wake_target, context.allocator)
 	switch start_error {
 	case .None:

@@ -35,10 +35,6 @@ Server_Identity :: struct {
 	image:   string,
 }
 
-Wake :: struct {
-	procedure: proc(user: rawptr),
-	user:      rawptr,
-}
 // `status` is a protocol-defined numeric status (the CLI protocol's exit status); zero is left off
 // the wire, so replies without one keep their two-key form.
 Response :: struct {

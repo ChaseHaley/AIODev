@@ -9,12 +9,13 @@ import "core:sync"
 import w "core:sys/windows"
 import "core:thread"
 import "core:unicode/utf8"
+import "cosmos:host"
 
 // Process is opaque to callers. kill stops its whole job, including descendants that outlive
 // the immediate child. destroy accepts nil and also cleans up a partially started process.
 Process :: struct {
 	allocator: runtime.Allocator,
-	wake: Wake,
+	wake: host.Waker,
 	process, job, input: w.HANDLE,
 	id: u32,
 	mutex, input_mutex: sync.Mutex,
@@ -94,7 +95,7 @@ close_handle :: proc(handle: ^w.HANDLE) {
 
 @(private)
 notify :: proc(p: ^Process) {
-	if p.wake.wake != nil {p.wake.wake(p.wake.data)}
+	host.wake(p.wake)
 }
 
 @(private)
@@ -256,7 +257,7 @@ executable_resolve :: proc(name, directory, path, extensions: string) -> (w.wstr
 start :: proc(
 	argv: []string,
 	options: Options,
-	wake: Wake,
+	wake: host.Waker,
 	allocator := context.allocator,
 ) -> (
 	^Process,

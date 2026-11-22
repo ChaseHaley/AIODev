@@ -1,33 +1,23 @@
 package main
 
-import platform_api "cosmos:platform"
 import "aio:turns"
 import "base:runtime"
 import "core:path/filepath"
 import "core:strings"
-import "core:sync"
+import "cosmos:host"
 
 // A Markdown pane's file is watched through its folder, so a save by another program shows at once
 // instead of at the next 500 ms poll. The poll stays as the fallback for what a watch misses: a
 // folder the OS cannot report on, a notification lost to an overflow, a file its writer still held
 // open when the notification came.
 
-// Runs on the watch thread. It only records that a folder has news and wakes the main loop, which
-// reads the changes in markdown_tick.
-@(private)
-markdown_watch_wake :: proc "contextless" (data: rawptr) {
-	app := (^App)(data)
-	sync.atomic_store(&app.markdown_woken, true)
-	context = runtime.default_context()
-	_ = platform_api.wake(&app.platform)
-}
-
 // Starts watching the folder of the pane's file. A pane without a watch keeps to the poll.
 @(private)
 markdown_watch_start :: proc(app: ^App, pane: ^Markdown_Pane) {
 	if pane.watch != 0 {return}
 	if app.markdown_watch == nil {
-		wake := turns.Watch_Wake{app, markdown_watch_wake}
+		app.markdown_signal.waker = host.waker_platform(&app.platform)
+		wake := host.signal_waker(&app.markdown_signal)
 		set, created := turns.watch_set_create(wake, runtime.heap_allocator())
 		if !created {return}
 		app.markdown_watch = set

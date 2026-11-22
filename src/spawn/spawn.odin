@@ -3,13 +3,6 @@
 // only signal the host, not call back into this package. The allocator must support worker threads.
 package spawn
 
-// A thread-safe notification that output arrived or the process exited. Both fields are borrowed
-// until destroy returns; a nil callback is allowed.
-Wake :: struct {
-	data: rawptr,
-	wake: proc "contextless" (data: rawptr),
-}
-
 Options :: struct {
 	cwd: string,
 	// Edits are NAME=value; NAME= removes a variable. Names are case-insensitive on Windows.

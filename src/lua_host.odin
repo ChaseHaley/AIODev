@@ -3,11 +3,8 @@ package main
 import "aio:commands"
 import "aio:events"
 import "cosmos:input"
-import platform_api "cosmos:platform"
 import "aio:scripting"
 import "aio:settings"
-import "aio:spawn"
-import "base:runtime"
 import "core:encoding/json"
 import "core:fmt"
 import "core:log"
@@ -15,7 +12,6 @@ import "core:os"
 import "core:path/filepath"
 import "core:slice"
 import "core:strings"
-import "core:sync"
 import "core:time"
 import "cosmos:ui"
 import host_api "cosmos:host"
@@ -70,7 +66,7 @@ Lua_Host :: struct {
 	// A Lua entry point ran and may have armed a timer, so the next tick steps to learn the deadline.
 	due:       bool,
 	// Set from process threads when output arrives or a process exits.
-	woken:     bool,
+	signal:    host_api.Signal,
 	next_step: time.Tick,
 	has_next:  bool,
 }
@@ -128,7 +124,8 @@ lua_instance_create :: proc(app: ^App, path: string, checking: bool) -> (^Lua_In
 	}
 	instance.state = state
 	if !checking {
-		wake := spawn.Wake{app, lua_host_wake}
+		app.lua.signal.waker = host_api.waker_platform(&app.platform)
+		wake := host_api.signal_waker(&app.lua.signal)
 		scripting.set_wake(state, wake)
 	}
 	return instance, ""
@@ -159,15 +156,6 @@ lua_instance_load :: proc(instance: ^Lua_Instance, path: string) -> scripting.Ru
 	instance.loading = false
 	instance.decls = scripting.declarations(instance.state)
 	return result
-}
-
-// Process threads call this; it only flags the host and wakes the loop.
-@(private)
-lua_host_wake :: proc "contextless" (data: rawptr) {
-	app := (^App)(data)
-	sync.atomic_store(&app.lua.woken, true)
-	context = runtime.default_context()
-	_ = platform_api.wake(&app.platform)
 }
 
 @(private, require_results)
@@ -599,7 +587,7 @@ lua_host_tick :: proc(app: ^App) {
 	instance := host.current
 	if instance == nil || host.running {return}
 	now := host_api.clock_now(&app.clock)
-	woken := sync.atomic_exchange(&host.woken, false)
+	woken := host_api.signal_take(&host.signal)
 	if !host.due && !woken && !(host.has_next && time.tick_diff(host.next_step, now) >= 0) {return}
 	host.due = false
 	host.running = true
@@ -614,7 +602,7 @@ lua_host_tick :: proc(app: ^App) {
 lua_host_deadline :: proc(app: ^App) -> (time.Tick, bool) {
 	host := &app.lua
 	if host.current == nil {return {}, false}
-	if host.due || sync.atomic_load(&host.woken) {return host_api.clock_now(&app.clock), true}
+	if host.due || host_api.signal_raised(&host.signal) {return host_api.clock_now(&app.clock), true}
 	return host.next_step, host.has_next
 }
 

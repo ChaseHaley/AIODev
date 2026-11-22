@@ -9,6 +9,7 @@ import "core:sync"
 import w "core:sys/windows"
 import "core:thread"
 import "core:time"
+import "cosmos:host"
 
 // Bounds one request-line read or response-line write; reaching it disconnects the
 // client. Requests that legitimately hold the channel (wait, run) wait in
@@ -25,7 +26,7 @@ MAX_STREAM_BYTES :: MAX_MESSAGE
 
 Server :: struct {
 	allocator:    runtime.Allocator,
-	wake:         Wake,
+	wake:         host.Waker,
 	// Guards serial, the last request id handed out across every connection.
 	serial_mutex: sync.Mutex,
 	serial:       u64,
@@ -41,7 +42,7 @@ Server :: struct {
 Connection :: struct {
 	server:            ^Server,
 	allocator:         runtime.Allocator,
-	wake:              Wake,
+	wake:              host.Waker,
 	pipe, stop, ready: w.HANDLE,
 	worker:            ^thread.Thread,
 	// Guards slot, stream and the line queue.
@@ -176,7 +177,7 @@ security_descriptor :: proc(allocator: runtime.Allocator) -> (w.PSECURITY_DESCRI
 // The server delivers each request's arguments unparsed; the app answers every request, including
 // malformed ones, in its own protocol's words.
 @(require_results)
-create :: proc(name: string, wake: Wake, allocator := context.allocator) -> (^Server, Error) {
+create :: proc(name: string, wake: host.Waker, allocator := context.allocator) -> (^Server, Error) {
 	if !valid_pipe_name(name) {
 		return nil, .Invalid_Argument
 	}
@@ -595,9 +596,7 @@ serve_client :: proc(s: ^Connection) -> Error {
 		delete(data, s.allocator)
 		if decode_error != .None {return decode_error}
 		slot_queue(s, m)
-		if s.wake.procedure != nil {
-			s.wake.procedure(s.wake.user)
-		}
+		host.wake(s.wake)
 		response, response_error := await_response(s)
 		if response_error != .None {
 			slot_release(s)
@@ -668,7 +667,7 @@ server_thread :: proc(t: ^thread.Thread) {
 		was_streaming := s.stream != 0
 		sync.mutex_unlock(&s.mutex)
 		stream_release(s)
-		if was_streaming && s.wake.procedure != nil {s.wake.procedure(s.wake.user)}
+		if was_streaming {host.wake(s.wake)}
 		if !bool(w.DisconnectNamedPipe(s.pipe)) && w.GetLastError() != ERROR_PIPE_NOT_CONNECTED {
 			log.errorf("control: DisconnectNamedPipe failed: %v", w.GetLastError())
 		}

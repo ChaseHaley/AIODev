@@ -8,7 +8,6 @@ import "aio:neovim"
 import platform_api "cosmos:platform"
 import "cosmos:render"
 import "aio:settings"
-import "aio:spawn"
 import "aio:term"
 import "aio:term_view"
 import "aio:views"
@@ -19,7 +18,6 @@ import "core:math"
 import "core:os"
 import "core:path/filepath"
 import "core:strings"
-import "core:sync"
 import "core:time"
 import "cosmos:ui"
 import "cosmos:host"
@@ -39,7 +37,7 @@ Neovim_App :: struct {
 	neovim_panes:    [dynamic]^Neovim_Pane,
 	next_neovim_id:  u32,
 	// Set by the process threads when any Neovim has news; neovim_tick polls every pane once it is.
-	neovim_woken:    bool,
+	neovim_signal:   host.Signal,
 	neovim_deadline: time.Tick,
 	// The mouse button pressed on a Neovim pane, which its drags and release follow.
 	neovim_drag:     Neovim_Drag,
@@ -160,15 +158,6 @@ neovim_pane_remove :: proc(app: ^App, id: u32) {
 	}
 }
 
-// Process threads call this; it only flags the host and wakes the loop.
-@(private = "file")
-neovim_wake :: proc "contextless" (data: rawptr) {
-	app := (^App)(data)
-	sync.atomic_store(&app.neovim_woken, true)
-	context = runtime.default_context()
-	_ = platform_api.wake(&app.platform)
-}
-
 // What Neovim inherits beyond AIODev's own environment, as a shell in a pane does: the `aio` beside this
 // AIODev first on PATH and named by AIODEV_CLI, the instance name, and the theme record D-105 reads.
 @(private = "file")
@@ -198,7 +187,8 @@ neovim_pane_start :: proc(app: ^App, pane: ^Neovim_Pane, columns, rows: int) {
 	options := neovim.Start {
 		argv = argv[:], cwd = directory, env = neovim_environment(app), columns = columns, rows = rows,
 	}
-	switch neovim.start(&pane.client, options, spawn.Wake{app, neovim_wake}) {
+	app.neovim_signal.waker = host.waker_platform(&app.platform)
+	switch neovim.start(&pane.client, options, host.signal_waker(&app.neovim_signal)) {
 	case .None:
 		return
 	case .Not_Found:
@@ -236,7 +226,7 @@ neovim_pane_fit :: proc(app: ^App, w: ^Window, rect: layout.Pane_Rect) {
 // A write to Neovim failed: it is gone, which the next poll reports as its exit.
 @(private = "file")
 neovim_lost :: proc(app: ^App) {
-	sync.atomic_store(&app.neovim_woken, true)
+	host.signal_raise(&app.neovim_signal)
 }
 
 neovim_deadline :: proc(app: ^App) -> (next: time.Tick, pending: bool) {
@@ -245,7 +235,7 @@ neovim_deadline :: proc(app: ^App) -> (next: time.Tick, pending: bool) {
 }
 
 neovim_tick :: proc(app: ^App) {
-	if sync.atomic_exchange(&app.neovim_woken, false) {
+	if host.signal_take(&app.neovim_signal) {
 		for i := 0; i < len(app.neovim_panes); i += 1 {neovim_pane_poll(app, app.neovim_panes[i])}
 	}
 	if app.neovim_deadline == {} {return}

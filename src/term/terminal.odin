@@ -9,6 +9,7 @@ import "core:strings"
 import "core:sync"
 import "core:thread"
 import "core:time"
+import "cosmos:host"
 
 Color :: [3]u8
 
@@ -104,11 +105,6 @@ MAX_HOST_ENVIRONMENT :: 8
 @(private)
 COLOR_SCHEME_REPORT_MAX :: 16
 
-Wake :: struct {
-	procedure: proc(user: rawptr),
-	user:      rawptr,
-}
-
 Status_Kind :: enum {
 	Running,
 	Exited,
@@ -194,7 +190,7 @@ READ_CHUNK :: 64 * 1024
 Session :: struct {
 	allocator:                                                runtime.Allocator,
 	callback_context:                                         runtime.Context,
-	wake:                                                     Wake,
+	wake:                                                     host.Waker,
 	wall_clock:                                               Wall_Clock,
 	// Guards the libghostty objects below, the process phase and the render hold.
 	mutex:                                                    sync.Mutex,
@@ -300,7 +296,7 @@ Recording_Active :: struct {
 Recording_Faulted :: struct {}
 
 @(require_results)
-create :: proc(config: Config, wake: Wake, allocator := context.allocator) -> (^Session, Error) {
+create :: proc(config: Config, wake: host.Waker, allocator := context.allocator) -> (^Session, Error) {
 	s := session_new(config.geometry, allocator)
 	if s == nil {
 		return nil, .Out_Of_Memory
@@ -707,9 +703,7 @@ join_thread :: proc(t: ^^thread.Thread) {
 
 @(private)
 notify :: proc(s: ^Session) {
-	if s.wake.procedure != nil {
-		s.wake.procedure(s.wake.user)
-	}
+	host.wake(s.wake)
 }
 
 @(private)

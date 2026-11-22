@@ -62,7 +62,7 @@ await_request :: proc(t: ^testing.T, s: ^control.Server) -> ^control.Message {
 	return nil
 }
 
-wake_test :: proc(user: rawptr) { sync.atomic_add((^int)(user), 1) }
+wake_test :: proc "contextless" (user: rawptr) { sync.atomic_add((^int)(user), 1) }
 
 await_delivery :: proc(t: ^testing.T, s: ^control.Server, id: u64) {
 	start := time.tick_now()

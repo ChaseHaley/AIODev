@@ -1,7 +1,6 @@
 package main
 
 import "aio:agent"
-import platform_api "cosmos:platform"
 import "aio:procinfo"
 import "aio:term"
 import "aio:turns"
@@ -13,7 +12,6 @@ import "core:log"
 import "core:os"
 import "core:slice"
 import "core:strings"
-import "core:sync"
 import "core:time"
 import "cosmos:host"
 
@@ -79,7 +77,7 @@ Turn_Recorder :: struct {
 	// The one directory of `inbox`; 0 while not watched.
 	inbox_watch:  turns.Watch_Id,
 	// Set by the inbox watch's thread (atomic), cleared when the main thread lists the inbox.
-	inbox_woken:  bool,
+	inbox_signal: host.Signal,
 	// Inbox files a posted job will delete, so later drains skip them. Keys are owned.
 	taken:        map[string]struct{},
 	maintain_due: time.Tick,
@@ -547,14 +545,6 @@ turn_end_flush :: proc(app: ^App, key: string) {
 // Hook inbox
 
 @(private)
-turn_inbox_wake :: proc "contextless" (data: rawptr) {
-	app := (^App)(data)
-	sync.atomic_store(&app.turn_recorder.inbox_woken, true)
-	context = runtime.default_context()
-	_ = platform_api.wake(&app.platform)
-}
-
-@(private)
 turn_inbox_remove :: proc(path: string) {
 	if err := os.remove(path); err != nil && err != .Not_Exist {
 		log.errorf("removing the hook event %q failed: %v", path, err)
@@ -718,7 +708,8 @@ turn_inbox_start :: proc(app: ^App) {
 	turns.watch_set_destroy(rec.inbox)
 	rec.inbox, rec.inbox_watch = nil, 0
 	if !turn_marker_write(app) {return}
-	wake := turns.Watch_Wake{app, turn_inbox_wake}
+	rec.inbox_signal.waker = host.waker_platform(&app.platform)
+	wake := host.signal_waker(&rec.inbox_signal)
 	set, created := turns.watch_set_create(wake, runtime.heap_allocator())
 	if !created {
 		log.error("watching the hook inbox failed")
@@ -882,7 +873,7 @@ turn_results :: proc(app: ^App) {
 turns_tick :: proc(app: ^App) {
 	rec := &app.turn_recorder
 	turn_results(app)
-	if sync.atomic_exchange(&rec.inbox_woken, false) {turn_inbox_drain(app)}
+	if host.signal_take(&rec.inbox_signal) {turn_inbox_drain(app)}
 	if rec.ask_delete {turns_ask_delete(app)}
 	now := host.clock_now(&app.clock)
 	for i := len(rec.ends) - 1; i >= 0; i -= 1 {
@@ -898,7 +889,7 @@ turns_tick :: proc(app: ^App) {
 turns_deadline :: proc(app: ^App) -> (next: time.Tick, pending: bool) {
 	rec := &app.turn_recorder
 	now := host.clock_now(&app.clock)
-	if sync.atomic_load(&rec.inbox_woken) {return now, true}
+	if host.signal_raised(&rec.inbox_signal) {return now, true}
 	for end in rec.ends {next, pending = host.earliest(next, pending, end.due)}
 	if rec.recording {next, pending = host.earliest(next, pending, rec.maintain_due)}
 	if rec.ask_delete {next, pending = host.earliest(next, pending, time.tick_add(now, TURN_ASK_POLL))}

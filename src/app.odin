@@ -665,13 +665,6 @@ mark_all_dirty :: proc(app: ^App) {
 	}
 }
 
-@(private)
-wake_platform :: proc(user: rawptr) {
-	if platform_api.wake((^platform_api.Platform)(user)) != .None {
-		log.error("waking the main loop failed")
-	}
-}
-
 initial_geometry :: proc(app: ^App) -> term.Geometry {
 	scale := dpi_scale(platform_api.primary_dpi(&app.platform))
 	fields := window_settings_fields(app, scale, linked = false)

@@ -3,6 +3,7 @@ package turns
 import "core:mem"
 import "core:strings"
 import "core:sync"
+import "cosmos:host"
 
 // Past this many distinct paths waiting to be taken, further paths are dropped and the watch reports
 // an overflow, so a runaway build cannot grow the set without bound and the owner rescans instead.
@@ -10,14 +11,6 @@ WATCH_PENDING_LIMIT :: 100_000
 
 // A take empties the set, but a table that grew for one burst is not worth keeping.
 WATCH_RETAINED_PATHS :: 4096
-
-// Runs on the set's own thread after paths arrive, changes were lost or a watch died. It must only
-// signal the owner (platform.wake), never call back into this package: watch_set_remove and
-// watch_set_destroy wait for that thread.
-Watch_Wake :: struct {
-	data: rawptr,
-	wake: proc "contextless" (data: rawptr),
-}
 
 // Names one directory of a Watch_Set; 0 names none. A set never hands an id out twice.
 Watch_Id :: distinct u32
@@ -41,7 +34,7 @@ Watch_Set :: struct {
 	failed:    bool,
 	// Fixed before the thread starts.
 	allocator: mem.Allocator,
-	wake:      Watch_Wake,
+	wake:      host.Waker,
 	native:    Watch_Set_Native,
 }
 
@@ -161,7 +154,7 @@ watch_record :: proc(set: ^Watch_Set, watch: ^Watch_Directory, path: string) -> 
 // Calls the owner's wake, if it gave one. The set's mutex is not held.
 @(private)
 watch_notify :: proc(set: ^Watch_Set) {
-	if set.wake.wake != nil {set.wake.wake(set.wake.data)}
+	host.wake(set.wake)
 }
 
 // A repository's own bookkeeping, which git rewrites constantly and no one reading changes wants.

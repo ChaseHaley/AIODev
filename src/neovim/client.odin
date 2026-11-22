@@ -6,6 +6,7 @@ package neovim
 import "aio:spawn"
 import "base:runtime"
 import "core:log"
+import "cosmos:host"
 
 Error :: enum u8 {
 	None,
@@ -285,7 +286,7 @@ prepare :: proc(c: ^Client) {
 }
 
 @(require_results)
-start :: proc(c: ^Client, options: Start, wake: spawn.Wake, allocator := context.allocator) -> Error {
+start :: proc(c: ^Client, options: Start, wake: host.Waker, allocator := context.allocator) -> Error {
 	c^ = {}
 	context.allocator = allocator
 	prepare(c)

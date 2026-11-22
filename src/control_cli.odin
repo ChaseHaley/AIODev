@@ -10,6 +10,7 @@ import "core:log"
 import "core:os"
 import "core:path/filepath"
 import "core:strings"
+import "cosmos:host"
 
 // The aio command line's side of the CLI pipe; cli_protocol owns the request and reply shapes.
 
@@ -68,7 +69,7 @@ control_cli_sync :: proc(app: ^App) {
 	if app.cli != nil {return}
 	name, err := control.cli_pipe_name(app.app_id, context.temp_allocator)
 	server: ^control.Server
-	if err == .None {server, err = control.create(name, {wake_platform, &app.platform})}
+	if err == .None {server, err = control.create(name, host.waker_platform(&app.platform))}
 	if err != .None {
 		log.errorf("starting the command line pipe failed: %v", err)
 		notify(

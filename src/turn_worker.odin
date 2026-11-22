@@ -16,6 +16,7 @@ import "core:sync"
 import "core:thread"
 import "core:time"
 import "core:unicode/utf8"
+import "cosmos:host"
 
 // Everything about recorded turns that needs git runs on one thread of its own, so no frame waits for
 // it. The main thread posts jobs and takes results; the worker alone owns the repositories it watches,
@@ -425,7 +426,7 @@ Tw_State :: struct {
 	allocator: mem.Allocator,
 	// The turns directory, borrowed from the worker; '/' separators.
 	directory: string,
-	wake:      turns.Watch_Wake,
+	wake:      host.Waker,
 	roots:     [dynamic]^Tw_Root,
 	stores:    [dynamic]^Tw_Store,
 	opens:     [dynamic]^Tw_Open,
@@ -465,19 +466,19 @@ Tw_Side :: struct {
 }
 
 Turn_Worker :: struct {
-	// Guards jobs, results, running and stop: all the main thread and the worker share.
+	// Guards jobs, running and stop: all the main thread and the worker share besides the results.
 	mutex:     sync.Mutex,
 	cond:      sync.Cond,
 	jobs:      [dynamic]Turn_Job,
-	results:   [dynamic]Turn_Result,
 	running:   bool,
 	stop:      bool,
+	// Finished results, which the main thread takes; pushing one wakes its loop.
+	results:   host.Inbox(Turn_Result),
 	// The running job is a read, which destroy may cancel; a turn's own jobs are let finish.
 	reading:   bool,
 	cancel:    turns.Git_Cancel,
 	// Fixed before the thread starts.
 	thread:    ^thread.Thread,
-	platform:  ^platform_api.Platform,
 	allocator: mem.Allocator,
 	directory: string,
 	// Only the worker thread touches this, and destroy once the thread is joined.
@@ -500,17 +501,16 @@ turn_worker_create :: proc(
 	}
 	tw_slashes(directory)
 	worker.allocator = allocator
-	worker.platform = platform
+	host.inbox_init(&worker.results, platform != nil ? host.waker_platform(platform) : {}, allocator)
 	worker.directory = directory
 	worker.jobs.allocator = allocator
-	worker.results.allocator = allocator
 	state := &worker.state
 	state.allocator = allocator
 	state.directory = directory
 	state.cancel = &worker.cancel
 	state.wake = {
-		data = worker,
-		wake = tw_wake,
+		procedure = tw_wake,
+		data      = worker,
 	}
 	state.roots.allocator = allocator
 	state.readers.allocator = allocator
@@ -565,8 +565,7 @@ turn_worker_destroy :: proc(worker: ^Turn_Worker) {
 	}
 	for &job in worker.jobs {tw_job_free(&job, allocator)}
 	delete(worker.jobs)
-	for &result in worker.results {turn_result_destroy(&result)}
-	delete(worker.results)
+	host.inbox_destroy(&worker.results, turn_result_destroy)
 	tw_state_destroy(&worker.state)
 	delete(worker.directory, allocator)
 	free(worker, allocator)
@@ -644,13 +643,7 @@ turn_worker_post :: proc(worker: ^Turn_Worker, job: Turn_Job) -> bool {
 // Moves every finished result into `out`. The caller owns them and frees each with turn_result_destroy.
 turn_worker_take :: proc(worker: ^Turn_Worker, out: ^[dynamic]Turn_Result) {
 	if worker == nil {return}
-	sync.mutex_lock(&worker.mutex)
-	defer sync.mutex_unlock(&worker.mutex)
-	if _, append_error := append(out, ..worker.results[:]); append_error != nil {
-		log.error("taking the turn results failed: out of memory")
-		return
-	}
-	clear(&worker.results)
+	if host.inbox_take(&worker.results, out) != nil {log.error("taking the turn results failed: out of memory")}
 }
 
 // Jobs queued plus the one running; results of a finished job are already takable. Only the harness
@@ -984,17 +977,11 @@ tw_main :: proc(t: ^thread.Thread) {
 tw_flush :: proc(worker: ^Turn_Worker) {
 	state := &worker.state
 	if len(state.outbox) == 0 {return}
-	sync.mutex_lock(&worker.mutex)
-	_, append_error := append(&worker.results, ..state.outbox[:])
-	sync.mutex_unlock(&worker.mutex)
-	if append_error != nil {
+	if host.inbox_push(&worker.results, ..state.outbox[:]) != nil {
 		log.error("queueing turn results failed: out of memory")
 		for &result in state.outbox {turn_result_destroy(&result)}
 	}
 	clear(&state.outbox)
-	if worker.platform != nil && platform_api.wake(worker.platform) != .None {
-		log.error("waking the main loop from the turn worker failed")
-	}
 }
 
 @(private = "file")

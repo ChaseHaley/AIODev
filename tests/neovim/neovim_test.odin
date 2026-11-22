@@ -1,7 +1,6 @@
 package neovim_test
 
 import "aio:neovim"
-import "aio:spawn"
 import "aio:term"
 import "core:fmt"
 import "core:log"
@@ -10,6 +9,7 @@ import "core:slice"
 import "core:strings"
 import "core:testing"
 import "core:time"
+import "cosmos:host"
 
 // ---- msgpack -------------------------------------------------------------------------------------
 
@@ -2050,7 +2050,7 @@ real_neovim_draws_edits_and_quits :: proc(t: ^testing.T) {
 		cwd = directory,
 		columns = 40,
 		rows = 10,
-	}, spawn.Wake{})
+	}, host.Waker{})
 	if error == .Not_Found {
 		log.info("nvim is not on PATH; skipping the real Neovim test")
 		return
@@ -2111,7 +2111,7 @@ start_nvim :: proc(c: ^neovim.Client, columns, rows: int) -> neovim.Error {
 		argv = {"nvim", "--embed", "--clean", "-n", "-i", "NONE"},
 		columns = columns,
 		rows = rows,
-	}, spawn.Wake{})
+	}, host.Waker{})
 }
 
 one_window_at_60x20 :: proc(c: ^neovim.Client, _: rawptr) -> bool {

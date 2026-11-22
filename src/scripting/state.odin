@@ -14,6 +14,7 @@ import "core:strings"
 import "aio:events"
 import "aio:lua"
 import "aio:spawn"
+import "cosmos:host"
 
 Host_Kind :: enum u8 {Config, Script}
 
@@ -45,7 +46,7 @@ State :: struct {
 	ctx: runtime.Context,
 	L: ^lua.State,
 	runtime_ref: c.int,
-	wake: spawn.Wake,
+	wake: host.Waker,
 	processes: map[int]^spawn.Process,
 	process_serial: int,
 	budget: Budget,
@@ -355,7 +356,7 @@ ref_release :: proc(s: ^State, ref: i32) {lua.L_unref(s.L, lua.REGISTRYINDEX, re
 lua_state :: proc(s: ^State) -> ^lua.State {return s.L}
 
 // Processes started afterwards signal wake when output arrives or they exit.
-set_wake :: proc(s: ^State, wake: spawn.Wake) {s.wake = wake}
+set_wake :: proc(s: ^State, wake: host.Waker) {s.wake = wake}
 
 @(private, require_results)
 owned_error :: proc(s: ^State, message: string) -> Run_Error {

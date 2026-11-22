@@ -13,6 +13,7 @@ import "core:log"
 import "core:os"
 import "core:strings"
 import "core:time"
+import "cosmos:host"
 
 // The terminal session registry: opening, finding, restarting and closing the sessions panes show,
 // and the record of how closed sessions ended. app.next_session_id is this file's allocation state;
@@ -194,7 +195,7 @@ session_open :: proc(
 	}
 	if launch_directory != "" {config.working_directory = launch_directory}
 	config.start_later = start_later
-	session, err := term.create(config, {wake_platform, &app.platform})
+	session, err := term.create(config, host.waker_platform(&app.platform))
 	if err != .None {
 		log.errorf("creating the terminal session failed: %v", err)
 		delete(owned_key)

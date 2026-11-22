@@ -5,7 +5,6 @@ import "aio:control"
 import "aio:events"
 import "aio:instance"
 import "aio:scripting"
-import "aio:spawn"
 import libc "core:c/libc"
 import "core:encoding/json"
 import "core:fmt"
@@ -18,6 +17,7 @@ import "core:sync"
 import w "core:sys/windows"
 import "core:thread"
 import "core:time"
+import host_api "cosmos:host"
 
 // The script host behind `aio exec`: a Script-kind state whose commands go over the CLI pipe, one
 // at a time on their own connections, and whose events arrive on one subscribed connection that a
@@ -141,9 +141,9 @@ exec_run :: proc(o: Options, pipe, caller: string) -> cli_protocol.Status {
 		return .Failed
 	}
 	defer scripting.destroy(s)
-	wake := spawn.Wake {
-		data = exec_wake,
-		wake = exec_signal,
+	wake := host_api.Waker {
+		procedure = exec_signal,
+		data      = exec_wake,
 	}
 	scripting.set_wake(s, wake)
 	clock_start := time.tick_now()

@@ -17,7 +17,6 @@ import "core:log"
 import "core:os"
 import "core:path/filepath"
 import "core:strings"
-import "core:sync"
 import "core:time"
 import "cosmos:textedit"
 import "cosmos:ui"
@@ -117,7 +116,7 @@ Markdown_App :: struct {
 	// The folders of the panes' files, watched on a thread of their own; nil until a pane needs it.
 	markdown_watch:    ^turns.Watch_Set,
 	// The watch thread set it: a folder reported news, so the next tick reads what changed.
-	markdown_woken:    bool,
+	markdown_signal:   host.Signal,
 	// The markdown.* settings with their fonts loaded; markdown_style_apply sets it.
 	markdown_style:    views.Markdown_Style,
 }
@@ -411,7 +410,7 @@ markdown_tick :: proc(app: ^App) {
 	if app.markdown_deadline == {} {return}
 	now := host.clock_now(&app.clock)
 	markdown_saves_due(app, now)
-	if sync.atomic_exchange(&app.markdown_woken, false) {markdown_watch_drain(app)}
+	if host.signal_take(&app.markdown_signal) {markdown_watch_drain(app)}
 	if time.tick_diff(now, app.markdown_deadline) > 0 {return}
 	changed := false
 	for i := len(app.markdown_panes) - 1; i >= 0; i -= 1 {

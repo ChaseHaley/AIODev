@@ -16,7 +16,7 @@ Wakes :: struct {
 	count: int,
 }
 
-on_wake :: proc(user: rawptr) {
+on_wake :: proc "contextless" (user: rawptr) {
 	sync.atomic_add(&(^Wakes)(user).count, 1)
 }
 

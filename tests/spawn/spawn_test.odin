@@ -254,7 +254,7 @@ crlf_across_reads_and_wake :: proc(t: ^testing.T) {
 	defer delete(executable)
 	counter: Wake_Count
 	p, error := spawn.start({executable, "--spawn-test-child", "crlf"}, {keep_stdin = true}, {
-		data = &counter, wake = on_wake,
+		procedure = on_wake, data = &counter,
 	})
 	if !testing.expect_value(t, error, spawn.Error.None) {return}
 	defer spawn.destroy(p)

@@ -216,7 +216,7 @@ when AIO_CONTROL {
 	verify_start :: proc(app: ^App) {
 		name, err := control.pipe_name(app.app_id, context.temp_allocator)
 		if err == .None {
-			app.verify.server, err = control.create(name, {wake_platform, &app.platform})
+			app.verify.server, err = control.create(name, host.waker_platform(&app.platform))
 		}
 		if err != .None {
 			log.errorf("starting the control channel failed: %v", err)

@@ -7,6 +7,7 @@ import "core:sync"
 import "core:thread"
 import "core:time"
 import "core:unicode/utf16"
+import "cosmos:host"
 
 // The kernel fills one buffer per read. A burst that outruns it is discarded whole and the read
 // completes with no bytes, which is how an overflow shows.
@@ -78,7 +79,7 @@ Watch_Marker :: struct {
 // on that thread once paths have arrived, changes were lost or a watch died. Returns false, logging
 // why, when the thread cannot start. The allocator must tolerate use from that thread.
 @(require_results)
-watch_set_create :: proc(wake: Watch_Wake, allocator := context.allocator) -> (^Watch_Set, bool) {
+watch_set_create :: proc(wake: host.Waker, allocator := context.allocator) -> (^Watch_Set, bool) {
 	set, allocation_error := new(Watch_Set, allocator)
 	if allocation_error != nil {
 		log.error("allocating a directory watch set failed")
