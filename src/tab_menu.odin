@@ -20,7 +20,7 @@ Tab_Menu :: struct {
 	close_label: [32]u8,
 	// The groups to add to, or the colours to give a group, beside the row that leads there. Rows carry a
 	// group id (0 for a new group) or a colour index.
-	submenu:     Menu_Submenu,
+	submenu:     ui.Submenu,
 }
 
 tab_menu_init :: proc(menu: ^Tab_Menu) {
@@ -123,7 +123,7 @@ tab_group_menu_open :: proc(app: ^App, w: ^Window, id: u32, x, y: f32) {
 
 @(private = "file")
 tab_menu_show :: proc(w: ^Window) {
-	submenu_reset(&w.tab_menu.submenu)
+	_ = ui.submenu_close(&w.tab_menu.submenu)
 	tab_menu_sync(w)
 	ui.menu_select(&w.tab_menu.menu, -1)
 	ui.menu_step(&w.tab_menu.menu, 1)
@@ -243,7 +243,7 @@ tab_submenu_open :: proc(app: ^App, w: ^Window, row: int, select_first: bool) {
 	}
 	if current, open := sub.row.?; open && current == row && !select_first {return}
 	ui.menu_clear(&sub.menu)
-	add :: proc(sub: ^Menu_Submenu, item: ui.Menu_Item) {_, _ = ui.menu_add(&sub.menu, item)}
+	add :: proc(sub: ^ui.Submenu, item: ui.Menu_Item) {_, _ = ui.menu_add(&sub.menu, item)}
 	if Action(menu.items[row].payload) == .Tab_Group_Color {
 		group := tab_menu_group(w)
 		if group == nil {return}
@@ -309,11 +309,11 @@ tab_submenu_tick :: proc(app: ^App, w: ^Window, now: time.Tick) {
 
 tab_submenu_deadline :: proc(w: ^Window) -> (time.Tick, bool) {
 	if !tab_menu_shown(w) {return {}, false}
-	return submenu_deadline(&w.tab_menu.submenu)
+	return ui.submenu_deadline(&w.tab_menu.submenu)
 }
 
 tab_submenu_shown :: proc(w: ^Window) -> bool {
-	return tab_menu_shown(w) && submenu_shown(&w.tab_menu.submenu)
+	return tab_menu_shown(w) && ui.submenu_shown(&w.tab_menu.submenu)
 }
 
 tab_menu_key :: proc(app: ^App, w: ^Window, e: input.Key_Event) {

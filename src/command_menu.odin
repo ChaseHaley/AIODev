@@ -105,7 +105,7 @@ Command_Menu :: struct {
 	name:       ui.Text_Field,
 	// What else row `submenu.row` can do: run elsewhere, type, edit, move and remove. Its rows' payloads
 	// are Command_Choices.
-	submenu:    Menu_Submenu,
+	submenu:    ui.Submenu,
 	drag:       Command_Drag,
 }
 
@@ -160,7 +160,7 @@ command_menu_close :: proc(menu: ^Command_Menu, mode: Command_Menu_Mode) {
 	ui.field_release(&menu.command)
 	ui.field_release(&menu.name)
 	menu.menu.hover_part = .Row
-	submenu_reset(&menu.submenu)
+	_ = ui.submenu_close(&menu.submenu)
 	menu.drag = nil
 }
 
@@ -441,7 +441,7 @@ command_menu_build :: proc(app: ^App, w: ^Window, select_first := false) {
 	menu := &w.command_menu
 	selected, scroll := ui.menu_selected(&menu.menu), menu.menu.scroll
 	ui.menu_clear(&menu.menu)
-	submenu_reset(&menu.submenu)
+	_ = ui.submenu_close(&menu.submenu)
 	menu.drag = nil
 	command_menu_text_clear(menu)
 	menu.count = 0
@@ -722,7 +722,7 @@ command_submenu_open :: proc(app: ^App, w: ^Window, row: int, select_first: bool
 	pane, found := command_pane(app, state.content)
 	if command == nil || !found {return}
 	ui.menu_clear(&sub.menu)
-	add :: proc(sub: ^Menu_Submenu, item: ui.Menu_Item) {_, _ = ui.menu_add(&sub.menu, item)}
+	add :: proc(sub: ^ui.Submenu, item: ui.Menu_Item) {_, _ = ui.menu_add(&sub.menu, item)}
 	// Moving and removing follow a divider of their own.
 	divided := false
 	for choice in Command_Choice {
@@ -767,11 +767,11 @@ command_submenu_tick :: proc(app: ^App, w: ^Window, now: time.Tick) {
 
 command_submenu_deadline :: proc(w: ^Window) -> (time.Tick, bool) {
 	if command_submenu_parent(w) == nil {return {}, false}
-	return submenu_deadline(&w.command_menu.submenu)
+	return ui.submenu_deadline(&w.command_menu.submenu)
 }
 
 command_submenu_shown :: proc(w: ^Window) -> bool {
-	return command_submenu_parent(w) != nil && submenu_shown(&w.command_menu.submenu)
+	return command_submenu_parent(w) != nil && ui.submenu_shown(&w.command_menu.submenu)
 }
 
 // The click of row `row`: a command runs at Right Split, Save Command… opens the form, and in the form a
@@ -989,7 +989,7 @@ command_drag_hover :: proc(app: ^App, w: ^Window, x, y: f32, left_held: bool) ->
 			return true
 		}
 		menu.drag = Command_Lift{press.row}
-		submenu_reset(&menu.submenu)
+		_ = ui.submenu_close(&menu.submenu)
 	}
 	w.dirty = true
 	pointer_set(app, w, .Hand)

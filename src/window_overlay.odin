@@ -249,7 +249,7 @@ overlay_close :: proc(app: ^App, w: ^Window, exit := Overlay_Exit.Cancel) {
 	case Overlay_Command_Menu:
 		command_menu_close(&w.command_menu, current.mode)
 	case Overlay_Tab_Menu:
-		submenu_reset(&w.tab_menu.submenu)
+		_ = ui.submenu_close(&w.tab_menu.submenu)
 	case Overlay_Divider_Menu, Overlay_Activity_Menu, Overlay_Activity_Row_Menu, Overlay_Edit_Menu,
 	     Overlay_Profile_Menu:
 	}

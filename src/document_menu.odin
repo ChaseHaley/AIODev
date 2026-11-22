@@ -142,7 +142,7 @@ Document_Menu :: struct {
 	actions:     ui.Menu,
 	// The placements of a row of the menu it hangs from: the actions menu while that shows, else the link
 	// menu (D-088). Its rows' payloads are Link_Choices. Any change of mode or rows closes it.
-	submenu:     Menu_Submenu,
+	submenu:     ui.Submenu,
 	// A pinned row pressed or dragged to reorder it among its level's rows (D-069).
 	order:           Document_Order,
 	// Each row's eased place, in slots, while a row is lifted and while the rows settle after it; only
@@ -511,7 +511,7 @@ document_menu_close :: proc(menu: ^Document_Menu, mode: Document_Menu_Mode) {
 	ui.field_release(&menu.url)
 	ui.field_release(&menu.search)
 	menu.menu.hover_part = .Row
-	submenu_reset(&menu.submenu)
+	_ = ui.submenu_close(&menu.submenu)
 	document_order_stop(menu)
 }
 
@@ -584,7 +584,7 @@ document_submenu_parent :: proc(w: ^Window) -> ^ui.Menu {
 
 // Whether a row's placements show beside it. document_submenu_open and document_submenu_close change it.
 document_submenu_shown :: proc(w: ^Window) -> bool {
-	return submenu_shown(&w.document_menu.submenu) && document_submenu_parent(w) != nil
+	return ui.submenu_shown(&w.document_menu.submenu) && document_submenu_parent(w) != nil
 }
 
 // What row `row` of `parent` runs, for a row with placements.
@@ -633,7 +633,7 @@ document_submenu_tick :: proc(app: ^App, w: ^Window, now: time.Tick) {
 
 document_submenu_deadline :: proc(w: ^Window) -> (time.Tick, bool) {
 	if !document_menu_shown(w) {return {}, false}
-	return submenu_deadline(&w.document_menu.submenu)
+	return ui.submenu_deadline(&w.document_menu.submenu)
 }
 
 // The link the shared rows act on and the pane they are for: the link menu's link, or the pinned link the
@@ -716,7 +716,7 @@ document_menu_set :: proc(app: ^App, w: ^Window, next: Document_Menu_Mode, rows:
 	}
 	document_menu_mode_release(state.mode)
 	state.mode, w.dirty = next, true
-	submenu_reset(&w.document_menu.submenu)
+	_ = ui.submenu_close(&w.document_menu.submenu)
 	switch rows {
 	case .Keep:
 	case .Rebuild: document_menu_build(app, w)
@@ -953,7 +953,7 @@ document_menu_build :: proc(app: ^App, w: ^Window, select_first := false) {
 	ui.menu_clear(&menu.menu)
 	// Rebuilt rows may stand for other documents, so no press or motion carries over.
 	document_order_stop(menu)
-	submenu_reset(&menu.submenu)
+	_ = ui.submenu_close(&menu.submenu)
 	document_menu_text_clear(menu)
 	menu.count = 0
 	menu.entries = {}
@@ -1664,7 +1664,7 @@ document_order_hover :: proc(app: ^App, w: ^Window, x, y: f32, left_held: bool) 
 		menu.order = Document_Order_Lift{press.row, first, last, press.row, press.grab}
 		menu.order_moving, menu.order_settle = true, nil
 		ui.menu_select(&menu.menu, press.row)
-		submenu_reset(&menu.submenu)
+		_ = ui.submenu_close(&menu.submenu)
 	}
 	document_order_move(w, y)
 	_ = document_order_animate(menu, app.animations, window_frame_time(app, w))
