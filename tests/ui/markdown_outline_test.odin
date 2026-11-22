@@ -1,8 +1,8 @@
 package ui_test
 
-import "aio:font"
+import "cosmos:font"
 import "aio:markdown"
-import "aio:render"
+import "cosmos:render"
 import "aio:ui"
 import "core:fmt"
 import "core:strings"

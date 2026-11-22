@@ -1,6 +1,6 @@
 package ui
 
-import "aio:render"
+import "cosmos:render"
 import "core:math"
 
 // The horizontal title-bar tab strip. It shares the title-bar height so the strip, the workspace

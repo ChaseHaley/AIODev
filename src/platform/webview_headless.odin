@@ -1,6 +1,6 @@
 package platform
 
-@(require) import "aio:input"
+@(require) import "cosmos:input"
 
 when AIO_HEADLESS {
 	webview_supported :: proc() -> bool {

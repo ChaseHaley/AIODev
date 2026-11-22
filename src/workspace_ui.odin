@@ -1,8 +1,8 @@
 package main
 
 import "aio:events"
-import "aio:input"
-import "aio:render"
+import "cosmos:input"
+import "cosmos:render"
 import "aio:ui"
 import "core:fmt"
 import "core:strings"

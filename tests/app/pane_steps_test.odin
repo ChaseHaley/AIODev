@@ -2,7 +2,7 @@ package app_test
 
 import "core:testing"
 import app "../../src"
-import "aio:input"
+import "cosmos:input"
 import "aio:layout"
 import "aio:platform"
 import "aio:ui"

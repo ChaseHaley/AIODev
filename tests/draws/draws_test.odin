@@ -1,7 +1,7 @@
 package draws_test
 
 import "aio:draws"
-import "aio:render"
+import "cosmos:render"
 import "core:strings"
 import "core:testing"
 

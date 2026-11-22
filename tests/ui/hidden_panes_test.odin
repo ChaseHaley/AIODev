@@ -2,7 +2,7 @@ package ui_test
 
 import "core:math"
 import "core:testing"
-import "aio:render"
+import "cosmos:render"
 import "aio:ui"
 
 // The map's cards share one scale with the tab (D-089): inside its padding the map has the tiled area's

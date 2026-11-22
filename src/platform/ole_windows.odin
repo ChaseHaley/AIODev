@@ -1,6 +1,6 @@
 package platform
 
-@(require) import "aio:input"
+@(require) import "cosmos:input"
 @(require) import "core:log"
 @(require) import w "core:sys/windows"
 @(require) import "core:unicode/utf16"

@@ -1,6 +1,6 @@
 package ui_test
 
-import "aio:render"
+import "cosmos:render"
 import "aio:ui"
 import "aio:platform"
 import "core:testing"

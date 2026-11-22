@@ -1,11 +1,11 @@
 package main
 
 import "aio:commands"
-import "aio:input"
+import "cosmos:input"
 import "aio:layout"
 import "aio:links"
 import "aio:platform"
-import "aio:render"
+import "cosmos:render"
 import "aio:search"
 import "aio:ui"
 import "base:runtime"

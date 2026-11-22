@@ -1,8 +1,8 @@
 package ui
 
 import "aio:commands"
-import "aio:input"
-import "aio:render"
+import "cosmos:input"
+import "cosmos:render"
 
 // The hints a capture shows on the Settings page, and the palette footer's shorter forms.
 CAPTURE_HINT :: "Press a shortcut. Enter saves this alternative, Esc cancels, Backspace removes it."

@@ -1,6 +1,6 @@
 package ui_test
 
-import "aio:input"
+import "cosmos:input"
 import "core:testing"
 import "aio:ui"
 

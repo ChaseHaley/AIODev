@@ -7,7 +7,7 @@ import "core:testing"
 import "core:time"
 import app "../../src"
 import "aio:layout"
-import "aio:render"
+import "cosmos:render"
 import "aio:ui"
 
 // WORK-483 label turns run on the default 160 ms, made linear here so a sample lands at a known progress.

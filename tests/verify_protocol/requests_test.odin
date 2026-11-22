@@ -4,7 +4,7 @@ import "base:runtime"
 import "core:strings"
 import "core:testing"
 import "aio:verify_protocol"
-import "aio:input"
+import "cosmos:input"
 
 fail_allocation :: proc(
 	data: rawptr, mode: runtime.Allocator_Mode, size, alignment: int,

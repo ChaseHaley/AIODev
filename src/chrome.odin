@@ -1,10 +1,10 @@
 package main
 
-import "aio:colour"
-import "aio:input"
+import "cosmos:colour"
+import "cosmos:input"
 import "aio:layout"
 import "aio:platform"
-import "aio:render"
+import "cosmos:render"
 import "aio:ui"
 import "core:math"
 

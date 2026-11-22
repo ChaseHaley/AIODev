@@ -1,7 +1,7 @@
 package ui
 
 import "aio:markdown"
-import "aio:render"
+import "cosmos:render"
 import "core:math"
 
 // The heading outline at a Markdown page's left edge (WORK-439): a short bar per heading, longer for

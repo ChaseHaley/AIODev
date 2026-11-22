@@ -1,6 +1,6 @@
 package ui
 
-import "aio:font"
+import "cosmos:font"
 import tr "aio:turns"
 
 // Soft wrap, the other way to show a code line wider than its cell (turns.diff_long_lines = wrap). A line

@@ -1,9 +1,9 @@
 package ui
 
 import "aio:commands"
-import "aio:input"
+import "cosmos:input"
 import "aio:platform"
-import "aio:render"
+import "cosmos:render"
 
 // Record mode of a search field, shared by the palette query and the Settings search (WORK-407). The
 // field's keyboard button or Alt+K turn it on; the next chord pressed, app shortcuts included, becomes

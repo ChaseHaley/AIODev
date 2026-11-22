@@ -1,8 +1,8 @@
 package ui
 
 import "aio:commands"
-import "aio:input"
-import "aio:render"
+import "cosmos:input"
+import "cosmos:render"
 import "base:runtime"
 import "core:fmt"
 import "core:log"

@@ -1,7 +1,7 @@
 package main
 
 import "aio:draws"
-import "aio:pixels"
+import "cosmos:pixels"
 import "aio:verify_protocol"
 import "core:fmt"
 import "core:strings"

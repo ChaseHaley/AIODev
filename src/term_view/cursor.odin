@@ -1,9 +1,9 @@
 package term_view
 
-import "aio:caret"
+import "cosmos:caret"
 import "aio:ghostty"
-import "aio:colour"
-import "aio:render"
+import "cosmos:colour"
+import "cosmos:render"
 import "core:math"
 
 // Cell geometry, not just the filled bar/underline. Head and tail describe the last healthy draw;

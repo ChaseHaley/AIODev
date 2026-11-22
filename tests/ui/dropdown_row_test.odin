@@ -1,7 +1,7 @@
 package ui_test
 
-import "aio:font"
-import "aio:render"
+import "cosmos:font"
+import "cosmos:render"
 import "aio:turns"
 import "aio:ui"
 import "core:strings"

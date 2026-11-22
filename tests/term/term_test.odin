@@ -6,7 +6,7 @@ import "core:sync"
 import "core:testing"
 import "core:time"
 import "aio:ghostty"
-import "aio:input"
+import "cosmos:input"
 import "aio:term"
 
 POWERSHELL :: "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe -NoProfile -Command "

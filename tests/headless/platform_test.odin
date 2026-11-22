@@ -3,7 +3,7 @@ package headless_test
 import "core:fmt"
 import "core:os"
 import "core:testing"
-import "aio:input"
+import "cosmos:input"
 import "aio:platform"
 
 @(private = "file")

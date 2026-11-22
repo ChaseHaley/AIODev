@@ -1,8 +1,8 @@
 package ui
 
-import "aio:input"
+import "cosmos:input"
 import "aio:platform"
-import "aio:render"
+import "cosmos:render"
 import "aio:settings"
 import "core:strconv"
 import "core:strings"

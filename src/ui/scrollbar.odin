@@ -1,6 +1,6 @@
 package ui
 
-import "aio:render"
+import "cosmos:render"
 import "core:time"
 
 // The one scrollbar every scrolling surface shows: terminal panes, the everything palette,

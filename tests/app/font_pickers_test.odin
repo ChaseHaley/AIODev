@@ -1,7 +1,7 @@
 package app_test
 
 import app "../../src"
-import "aio:font"
+import "cosmos:font"
 import "aio:ui"
 import "core:testing"
 import "core:slice"

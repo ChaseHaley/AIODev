@@ -2,14 +2,14 @@ package main
 
 import "aio:commands"
 import app_events "aio:events"
-import "aio:font"
-import "aio:glyphs"
-import "aio:input"
+import "cosmos:font"
+import "cosmos:glyphs"
+import "cosmos:input"
 import "aio:instance"
 import platform_api "aio:platform"
-import "aio:perf"
+import "cosmos:perf"
 import "aio:program_art"
-import "aio:render"
+import "cosmos:render"
 import "aio:settings"
 import "aio:term"
 import "aio:ui"
@@ -21,7 +21,7 @@ import "core:strings"
 import "core:thread"
 import "core:time"
 // Only the headless build reads the bundled test fonts; other builds compile none of them in.
-@(require) import test_fonts "../tests/fixtures/fonts"
+@(require) import "cosmos:test_fonts"
 
 @(private)
 FALLBACK_FONT_FAMILIES :: [?]string{"Cascadia Mono", "Consolas"}

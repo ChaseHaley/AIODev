@@ -1,6 +1,6 @@
 package ui
 
-import "aio:render"
+import "cosmos:render"
 import "aio:syntax"
 import "core:math"
 import "core:strings"

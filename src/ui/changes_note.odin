@@ -1,8 +1,8 @@
 package ui
 
-import "aio:colour"
+import "cosmos:colour"
 import "aio:markdown"
-import "aio:render"
+import "cosmos:render"
 import "aio:syntax"
 import tr "aio:turns"
 import "core:fmt"

@@ -2,7 +2,7 @@ package program_art_test
 
 import "core:strings"
 import "core:testing"
-import "aio:colour"
+import "cosmos:colour"
 import "aio:program_art"
 import "aio:procinfo"
 

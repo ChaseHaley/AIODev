@@ -1,7 +1,7 @@
 package main
 
 import "aio:platform"
-import "aio:render"
+import "cosmos:render"
 import "aio:ui"
 
 // Every animated part of a window, once. Each feature advances its own animation and says whether it

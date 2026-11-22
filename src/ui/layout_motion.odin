@@ -1,6 +1,6 @@
 package ui
 
-import "aio:render"
+import "cosmos:render"
 import "aio:settings"
 import "core:math"
 import "core:time"

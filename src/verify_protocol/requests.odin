@@ -1,7 +1,7 @@
 package verify_protocol
 
 import "aio:commands"
-import "aio:input"
+import "cosmos:input"
 import "aio:layout"
 import "core:strconv"
 import "core:strings"

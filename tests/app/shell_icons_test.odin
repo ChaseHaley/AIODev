@@ -7,7 +7,7 @@ import "core:testing"
 @(require) import "core:time"
 import app "../../src"
 import "aio:platform"
-import "aio:render"
+import "cosmos:render"
 import "aio:settings"
 import "aio:ui"
 

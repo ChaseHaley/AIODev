@@ -1,10 +1,10 @@
 package main
 
 import "aio:layout"
-import "aio:render"
+import "cosmos:render"
 import "aio:settings"
 import "aio:ui"
-import "aio:input"
+import "cosmos:input"
 
 // Where the settings page lives in the window: the one settings pane, its layout and drawing, and
 // opening it. The page's rows come from settings_editor.odin; its saves from settings_commit.odin.

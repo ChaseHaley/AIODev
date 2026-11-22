@@ -1,6 +1,6 @@
 package app_test
 
-import "aio:input"
+import "cosmos:input"
 import "base:runtime"
 import "core:mem"
 import "core:os"

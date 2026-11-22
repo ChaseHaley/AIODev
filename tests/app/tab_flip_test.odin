@@ -4,7 +4,7 @@ import "core:math"
 import "core:testing"
 import "core:time"
 import app "../../src"
-import "aio:render"
+import "cosmos:render"
 import "aio:ui"
 
 @(private = "file")

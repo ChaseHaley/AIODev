@@ -1,9 +1,9 @@
 package app_test
 
-import "aio:colour"
+import "cosmos:colour"
 import "core:testing"
 import app "../../src"
-import "aio:render"
+import "cosmos:render"
 import "aio:ui"
 import fixtures "../fixtures"
 

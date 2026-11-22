@@ -2,7 +2,7 @@ package commands_test
 
 import "core:testing"
 import "aio:commands"
-import "aio:input"
+import "cosmos:input"
 
 @(test)
 logical_and_physical_bindings_follow_distinct_key_identity :: proc(t: ^testing.T) {

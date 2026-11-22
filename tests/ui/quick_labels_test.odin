@@ -1,7 +1,7 @@
 package ui_test
 
-import "aio:colour"
-import "aio:render"
+import "cosmos:colour"
+import "cosmos:render"
 import "aio:settings"
 import "aio:ui"
 import "core:strings"

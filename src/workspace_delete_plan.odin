@@ -1,6 +1,6 @@
 package main
 
-import "aio:input"
+import "cosmos:input"
 
 // One workspace deletion: the subject that must still be live when it is accepted, the window
 // that must receive a replacement before the old workspace is discarded (D-051), the destination

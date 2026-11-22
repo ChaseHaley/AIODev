@@ -4,7 +4,7 @@ import "core:fmt"
 import "core:mem"
 import "core:testing"
 import "aio:commands"
-import "aio:input"
+import "cosmos:input"
 import "aio:ui"
 
 @(private = "file")

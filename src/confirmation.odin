@@ -1,7 +1,7 @@
 package main
 
-import "aio:input"
-import "aio:render"
+import "cosmos:input"
+import "cosmos:render"
 import "aio:ui"
 
 // The question a window asks before a change it cannot undo. A window asks at most one: nil is None;

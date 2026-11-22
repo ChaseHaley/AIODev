@@ -1,6 +1,6 @@
 package ui
 
-import "aio:render"
+import "cosmos:render"
 
 // The raised-hover language shared by every interactive surface. Callers pass the already
 // animated 0..1 hover value from Control_Motion, so hover fills, lift and the rim light all

@@ -2,7 +2,7 @@ package app_test
 
 import app "../../src"
 import "aio:commands"
-import "aio:input"
+import "cosmos:input"
 import "aio:ui"
 import "core:os"
 import "core:strings"

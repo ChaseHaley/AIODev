@@ -1,6 +1,6 @@
 package main
 
-import "aio:input"
+import "cosmos:input"
 import "aio:markdown"
 import "aio:platform"
 import "core:strings"

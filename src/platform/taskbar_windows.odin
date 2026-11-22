@@ -1,7 +1,7 @@
 package platform
 
 @(require) import "cosmos:com"
-@(require) import "aio:input"
+@(require) import "cosmos:input"
 @(require) import "core:log"
 @(require) import w "core:sys/windows"
 

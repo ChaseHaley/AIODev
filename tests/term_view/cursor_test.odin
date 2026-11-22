@@ -1,7 +1,7 @@
 package term_view_test
 
-import "aio:render"
-import "aio:caret"
+import "cosmos:render"
+import "cosmos:caret"
 import "aio:term_view"
 import "core:math"
 import "core:slice"

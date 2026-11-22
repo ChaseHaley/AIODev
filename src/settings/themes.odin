@@ -1,6 +1,6 @@
 package settings
 
-import "aio:colour"
+import "cosmos:colour"
 import "core:fmt"
 import "core:strings"
 

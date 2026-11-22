@@ -1,6 +1,6 @@
 package term_view_test
 
-import "aio:caret"
+import "cosmos:caret"
 import "aio:term_view"
 import "core:slice"
 import "core:testing"

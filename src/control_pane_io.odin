@@ -2,7 +2,7 @@ package main
 
 import "aio:cli_protocol"
 import "aio:commands"
-import "aio:input"
+import "cosmos:input"
 import "aio:localpath"
 import "aio:platform"
 import "aio:procinfo"

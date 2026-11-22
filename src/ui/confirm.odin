@@ -1,7 +1,7 @@
 package ui
 
-import "aio:input"
-import "aio:render"
+import "cosmos:input"
+import "cosmos:render"
 
 Confirm_Button :: enum {
 	None,

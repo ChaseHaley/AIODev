@@ -1,7 +1,7 @@
 package main
 
 import "aio:events"
-import "aio:input"
+import "cosmos:input"
 import "aio:layout"
 import "aio:platform"
 import "core:log"

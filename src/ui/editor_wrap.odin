@@ -1,6 +1,6 @@
 package ui
 
-import "aio:render"
+import "cosmos:render"
 import "core:math"
 
 // Settings descriptions wrap to the width left of their row's control, so a row is as tall as its

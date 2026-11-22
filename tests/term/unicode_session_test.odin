@@ -4,14 +4,15 @@ import "core:testing"
 import "core:unicode/utf8"
 import "aio:ghostty"
 import "aio:term"
-import fixtures "../fixtures"
+import "cosmos:testkit"
 
 @(test)
 unicode_survives_conpty :: proc(t: ^testing.T) {
-	cases, err := fixtures.unicode_cases()
-	defer fixtures.unicode_cases_destroy(cases)
+	cases, err := testkit.unicode_cases()
+	defer testkit.unicode_cases_destroy(cases)
 	if !testing.expect_value(t, err, "") { return }
-	cfg := config("pwsh.exe -NoLogo -NoProfile -File \"" + #directory + "/unicode_output.ps1\"")
+	cfg := config("pwsh.exe -NoLogo -NoProfile -File \"" + #directory + "/unicode_output.ps1\" -Fixture \"" +
+		testkit.UNICODE_FIXTURES_PATH + "\"")
 	cfg.geometry.rows = u16(len(cases) + 3)
 	s, session_error := term.create(cfg, {})
 	if !testing.expect_value(t, session_error, term.Error.None) { return }

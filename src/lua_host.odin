@@ -2,7 +2,7 @@ package main
 
 import "aio:commands"
 import "aio:events"
-import "aio:input"
+import "cosmos:input"
 import platform_api "aio:platform"
 import "aio:scripting"
 import "aio:settings"

@@ -1,11 +1,11 @@
 package app_test
 
-import "aio:input"
+import "cosmos:input"
 import "core:testing"
 import app "../../src"
-import "aio:font"
-import "aio:glyphs"
-import "aio:render"
+import "cosmos:font"
+import "cosmos:glyphs"
+import "cosmos:render"
 import "aio:ui"
 import fixtures "../fixtures"
 

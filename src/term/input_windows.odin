@@ -1,7 +1,7 @@
 package term
 
 import "aio:ghostty"
-import "aio:input"
+import "cosmos:input"
 import "core:fmt"
 import "core:log"
 import "core:sync"

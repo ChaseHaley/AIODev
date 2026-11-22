@@ -1,7 +1,7 @@
 package app_test
 
 import app "../../src"
-import "aio:colour"
+import "cosmos:colour"
 import "aio:layout"
 import "aio:settings"
 import "aio:ui"

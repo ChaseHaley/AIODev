@@ -1,7 +1,7 @@
 package ui_test
 
 import "aio:commands"
-import "aio:input"
+import "cosmos:input"
 import "aio:ui"
 import "core:testing"
 

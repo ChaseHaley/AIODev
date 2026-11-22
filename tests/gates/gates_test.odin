@@ -39,11 +39,11 @@ control_change_runs_app_and_control_tests_without_a_live_pass :: proc(t: ^testin
 }
 
 @(test)
-render_change_requires_a_live_pass_and_the_performance_tier :: proc(t: ^testing.T) {
-	plan := gates.classify([]string{"src/render/frame_windows.odin"})
+term_view_change_requires_a_live_pass_and_the_performance_tier :: proc(t: ^testing.T) {
+	plan := gates.classify([]string{"src/term_view/term_view.odin"})
 	defer gates.plan_destroy(&plan)
 	testing.expect(t, has_test(plan, "app"))
-	testing.expect(t, has_test(plan, "render"))
+	testing.expect(t, has_test(plan, "term_view"))
 	testing.expect(t, plan.live)
 	testing.expect(t, plan.perf)
 	testing.expect(t, plan.solo)

@@ -1,6 +1,6 @@
 package ui
 
-import "aio:render"
+import "cosmos:render"
 
 // One tiled pane of a tab whose view shows a single pane, for the glyph and map that show the others.
 Hidden_Pane :: struct {

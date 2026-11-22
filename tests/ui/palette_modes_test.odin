@@ -3,7 +3,7 @@ package ui_test
 import "core:strings"
 import "core:testing"
 import "aio:commands"
-import "aio:font"
+import "cosmos:font"
 import "aio:platform"
 import "aio:ui"
 

@@ -2,9 +2,9 @@ package main
 
 import "aio:commands"
 import "aio:events"
-import "aio:input"
+import "cosmos:input"
 import "aio:platform"
-import "aio:render"
+import "cosmos:render"
 import "aio:term"
 import "aio:ui"
 import "core:log"

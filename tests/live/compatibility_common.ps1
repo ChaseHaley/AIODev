@@ -1,6 +1,7 @@
 $ErrorActionPreference = 'Stop'
 $repo = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
 $ctl = Join-Path $repo 'build/aioctl.exe'
+. (Join-Path $repo 'tools/cosmos.ps1')
 
 function Invoke-Aio {
     & $ctl --name $name @args
@@ -19,7 +20,8 @@ function Start-Journey([string] $Journey) {
 
 function New-UnicodeFixture {
     $path = Join-Path $repo "build/verify/$name/unicode.txt"
-    $lines = foreach ($raw in [IO.File]::ReadLines((Join-Path $repo 'tests/fixtures/unicode.txt'))) {
+    $corpus = Join-Path (Resolve-CosmosRoot $repo '') 'src/testkit/unicode.txt'
+    $lines = foreach ($raw in [IO.File]::ReadLines($corpus)) {
         $fields = (($raw -split '#', 2)[0].Trim() -split '\s+')
         if ($fields.Count -lt 3) { continue }
         $encoded = if ($fields.Count -ge 4) { $fields[3] } else { $fields[2] }

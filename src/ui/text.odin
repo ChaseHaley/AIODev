@@ -1,9 +1,9 @@
 package ui
 
-import "aio:colour"
-import "aio:font"
-import "aio:glyphs"
-import "aio:render"
+import "cosmos:colour"
+import "cosmos:font"
+import "cosmos:glyphs"
+import "cosmos:render"
 import "aio:settings"
 import "core:log"
 import "core:math"

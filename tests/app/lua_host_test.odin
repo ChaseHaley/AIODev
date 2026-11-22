@@ -3,7 +3,7 @@ package app_test
 import "base:runtime"
 import app "../../src"
 import "aio:commands"
-import "aio:input"
+import "cosmos:input"
 import "aio:layout"
 import "aio:platform"
 import "core:fmt"

@@ -1,6 +1,6 @@
 package platform
 
-@(require) import "aio:input"
+@(require) import "cosmos:input"
 @(require) import "base:runtime"
 @(require) import "core:log"
 @(require) import "core:sync"

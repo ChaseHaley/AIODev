@@ -1,7 +1,7 @@
 package main
 
-import "aio:input"
-import "aio:render"
+import "cosmos:input"
+import "cosmos:render"
 import "aio:ui"
 
 // The title bar's own controls, left to right after the tab orientation toggle and the Activity panel

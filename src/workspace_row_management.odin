@@ -1,9 +1,9 @@
 package main
 
 import "aio:commands"
-import "aio:input"
+import "cosmos:input"
 import "core:time"
-import "aio:render"
+import "cosmos:render"
 import "aio:ui"
 
 // The keys that open the selected row's menu, the one its "…" button opens; the button's tooltip names

@@ -1,7 +1,7 @@
 package ui_test
 
 import "core:testing"
-import "aio:render"
+import "cosmos:render"
 import "aio:ui"
 import fixtures "../fixtures"
 

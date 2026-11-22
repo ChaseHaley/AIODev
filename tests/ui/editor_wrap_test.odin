@@ -1,6 +1,6 @@
 package ui_test
 
-import "aio:font"
+import "cosmos:font"
 import "aio:ui"
 import "core:fmt"
 import "core:strings"

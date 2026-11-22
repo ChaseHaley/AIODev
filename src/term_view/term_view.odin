@@ -1,11 +1,11 @@
 package term_view
 
-import "aio:caret"
-import "aio:colour"
-import "aio:font"
+import "cosmos:caret"
+import "cosmos:colour"
+import "cosmos:font"
 import "aio:ghostty"
-import "aio:glyphs"
-import "aio:render"
+import "cosmos:glyphs"
+import "cosmos:render"
 import "aio:term"
 import "core:log"
 import "core:math"

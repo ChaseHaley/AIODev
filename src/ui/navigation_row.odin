@@ -1,6 +1,6 @@
 package ui
 
-import "aio:render"
+import "cosmos:render"
 
 Navigation_Row :: struct {
 	title: string,

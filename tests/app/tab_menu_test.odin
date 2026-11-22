@@ -1,22 +1,22 @@
 package app_test
 
 import "aio:commands"
-import "aio:input"
+import "cosmos:input"
 import "core:fmt"
 import "core:os"
 import "core:testing"
 import app "../../src"
-import fixtures "../fixtures"
-import "aio:font"
-import "aio:glyphs"
+import "cosmos:testkit"
+import "cosmos:font"
+import "cosmos:glyphs"
 import "aio:layout"
 import "aio:platform"
-import "aio:render"
+import "cosmos:render"
 import "aio:ui"
 
 @(init)
 menu_warm :: proc "contextless" () {
-	fixtures.warm_directwrite()
+	testkit.warm_directwrite()
 }
 
 Menu_Fixture :: struct {

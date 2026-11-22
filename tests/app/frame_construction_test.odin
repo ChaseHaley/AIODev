@@ -3,7 +3,7 @@ package app_test
 import "base:runtime"
 import "core:testing"
 import app "../../src"
-import "aio:render"
+import "cosmos:render"
 
 @(private="file")
 frame_fail_allocation :: proc(data: rawptr, mode: runtime.Allocator_Mode, size, alignment: int,

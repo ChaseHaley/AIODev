@@ -1,6 +1,6 @@
 package ui
 
-import "aio:render"
+import "cosmos:render"
 
 HEADER_HEIGHT :: HEIGHT_TOOLBAR
 @(private = "file")

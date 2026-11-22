@@ -1,16 +1,16 @@
 package app_test
 
 import "aio:commands"
-import "aio:input"
+import "cosmos:input"
 import "base:runtime"
 import "core:testing"
 import "core:time"
 import app "../../src"
-import "aio:font"
-import "aio:glyphs"
+import "cosmos:font"
+import "cosmos:glyphs"
 import "aio:layout"
 import "aio:platform"
-import "aio:render"
+import "cosmos:render"
 import "aio:ui"
 import fixtures "../fixtures"
 

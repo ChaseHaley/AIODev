@@ -1,7 +1,7 @@
 package main
 
 import "aio:localpath"
-import "aio:render"
+import "cosmos:render"
 import "aio:settings"
 import "core:fmt"
 import "core:image/png"

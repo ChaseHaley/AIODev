@@ -1,13 +1,13 @@
 package ui_test
 
-import "aio:colour"
+import "cosmos:colour"
 import "core:mem"
 import "core:testing"
-import "aio:font"
-import "aio:glyphs"
-import "aio:input"
+import "cosmos:font"
+import "cosmos:glyphs"
+import "cosmos:input"
 import "aio:platform"
-import "aio:render"
+import "cosmos:render"
 import "aio:search"
 import "aio:ui"
 import fixtures "../fixtures"

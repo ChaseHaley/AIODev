@@ -1,7 +1,7 @@
 package term_view
 
-import "aio:colour"
-import "aio:render"
+import "cosmos:colour"
+import "cosmos:render"
 
 @(private)
 Contrast_Entry :: struct {

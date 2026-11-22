@@ -1,6 +1,6 @@
 package main
 
-import "aio:input"
+import "cosmos:input"
 import "aio:layout"
 import "aio:ui"
 import "core:math"

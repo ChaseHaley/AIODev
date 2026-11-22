@@ -1,7 +1,7 @@
 package ui
 
-import "aio:colour"
-import "aio:render"
+import "cosmos:colour"
+import "cosmos:render"
 
 // The colour a quick label's setting names: one of settings.QUICK_LABEL_PRESETS, which takes its hue
 // from the theme so it reads in every theme, or `#rrggbb`. Anything else shows the muted ink.

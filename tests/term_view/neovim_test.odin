@@ -1,7 +1,7 @@
 package term_view_test
 
 import "aio:neovim"
-import "aio:render"
+import "cosmos:render"
 import "aio:term_view"
 import "core:testing"
 import "core:time"

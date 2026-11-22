@@ -1,6 +1,6 @@
 package commands
 
-import "aio:input"
+import "cosmos:input"
 import "core:reflect"
 import "core:strings"
 

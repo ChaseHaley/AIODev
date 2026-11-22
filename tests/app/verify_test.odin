@@ -1,6 +1,6 @@
 package app_test
 
-import "aio:input"
+import "cosmos:input"
 import "core:fmt"
 import "core:os"
 import "core:strings"

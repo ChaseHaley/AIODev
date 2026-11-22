@@ -1,7 +1,7 @@
 package main
 
 import "aio:commands"
-import "aio:font"
+import "cosmos:font"
 import "aio:layout"
 import "aio:settings"
 import "aio:ui"

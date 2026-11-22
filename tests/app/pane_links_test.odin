@@ -9,7 +9,7 @@ import app "../../src"
 import "aio:commands"
 import "aio:layout"
 import "aio:platform"
-import "aio:input"
+import "cosmos:input"
 import "aio:term"
 import "aio:ui"
 

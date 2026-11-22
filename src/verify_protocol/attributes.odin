@@ -1,6 +1,6 @@
 package verify_protocol
 
-import "aio:colour"
+import "cosmos:colour"
 import "aio:term"
 
 Attribute_Kind :: enum {

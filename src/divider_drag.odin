@@ -2,8 +2,8 @@ package main
 
 import "aio:layout"
 import "aio:platform"
-import "aio:input"
-import "aio:render"
+import "cosmos:input"
+import "cosmos:render"
 
 
 // How the pointer grabs dividers and dock edges, in DIPs: the band either side of a bar, the reach of a

@@ -4,7 +4,7 @@ import "base:runtime"
 import "core:os"
 import "core:testing"
 import app "../../src"
-import "aio:render"
+import "cosmos:render"
 
 // A window can be left without a surface when device recovery cannot recreate it. It must survive a
 // resize, a second recovery must rebuild it, and its next frame must create it if nothing else does.

@@ -1,6 +1,6 @@
 package main
 
-import "aio:render"
+import "cosmos:render"
 import "aio:ui"
 
 // The new-group editor's width, and the room its colour swatches take.

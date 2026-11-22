@@ -1,7 +1,7 @@
 package ui
 
 import "aio:commands"
-import "aio:render"
+import "cosmos:render"
 import "core:fmt"
 
 SHORTCUT_FIELD_WIDTH :: f32(176)

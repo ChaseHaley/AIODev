@@ -8,7 +8,7 @@ import w "core:sys/windows"
 import "core:testing"
 import app "../../src"
 import "aio:platform"
-import "aio:render"
+import "cosmos:render"
 
 // The whole app, started through app_init with the headless backend: it opens a window on the
 // virtual desktop, splits a pane and draws offscreen, and the test process owns no window on the

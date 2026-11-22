@@ -1,10 +1,10 @@
 package ui_test
 
-import "aio:colour"
-import "aio:font"
-import "aio:glyphs"
+import "cosmos:colour"
+import "cosmos:font"
+import "cosmos:glyphs"
 import "aio:markdown"
-import "aio:render"
+import "cosmos:render"
 import "aio:syntax"
 import "aio:turns"
 import "aio:ui"

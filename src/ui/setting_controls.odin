@@ -1,7 +1,7 @@
 package ui
 
 import "aio:fuzzy"
-import "aio:render"
+import "cosmos:render"
 import "aio:settings"
 import "core:fmt"
 import "core:math"

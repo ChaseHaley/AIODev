@@ -1,7 +1,7 @@
 package app_test
 
 import app "../../src"
-import "aio:input"
+import "cosmos:input"
 import "core:fmt"
 import "core:math"
 import "core:os"

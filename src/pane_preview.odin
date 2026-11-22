@@ -2,7 +2,7 @@ package main
 
 import "aio:commands"
 import "aio:layout"
-import "aio:render"
+import "cosmos:render"
 import "aio:ui"
 
 // Why the window would refuse a pane header button for a pane. A refused button draws disabled, takes no

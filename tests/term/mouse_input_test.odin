@@ -1,6 +1,6 @@
 package term_test
 
-import "aio:input"
+import "cosmos:input"
 import "aio:term"
 import "core:testing"
 

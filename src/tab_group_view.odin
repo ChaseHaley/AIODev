@@ -1,6 +1,6 @@
 package main
 
-import "aio:render"
+import "cosmos:render"
 import "aio:ui"
 
 // Where a tab rests before its motion: `slot` counts the strip's tab widths or the rail's rows before it,

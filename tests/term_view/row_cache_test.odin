@@ -1,7 +1,7 @@
 package term_view_test
 
 import "core:testing"
-import "aio:render"
+import "cosmos:render"
 import "aio:term"
 import "aio:term_view"
 

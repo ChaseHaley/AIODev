@@ -2,10 +2,10 @@ package main
 
 import "aio:agent"
 import "aio:commands"
-import "aio:input"
+import "cosmos:input"
 import "aio:markdown"
 import "aio:procinfo"
-import "aio:render"
+import "cosmos:render"
 import "aio:settings"
 import "aio:term"
 import "aio:turns"

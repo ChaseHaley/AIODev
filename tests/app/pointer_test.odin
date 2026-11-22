@@ -1,11 +1,11 @@
 package app_test
 
-import "aio:input"
+import "cosmos:input"
 import "core:testing"
 import app "../../src"
 import "aio:layout"
 import "aio:platform"
-import "aio:render"
+import "cosmos:render"
 import "aio:ui"
 
 @(private)

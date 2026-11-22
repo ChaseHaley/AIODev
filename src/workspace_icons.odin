@@ -1,6 +1,6 @@
 package main
 
-import "aio:render"
+import "cosmos:render"
 import "aio:ui"
 import "core:strings"
 import "core:unicode/utf8"

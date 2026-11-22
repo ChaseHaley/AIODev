@@ -1,6 +1,6 @@
 package main
 
-import "aio:input"
+import "cosmos:input"
 import "aio:ui"
 
 // w took focus, so it becomes the most recently focused window, the one the notices prefer.

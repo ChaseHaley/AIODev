@@ -3,7 +3,7 @@ package commands_test
 import "base:runtime"
 import "core:testing"
 import "aio:commands"
-import "aio:input"
+import "cosmos:input"
 
 @(test)
 registration_and_lookup :: proc(t: ^testing.T) {

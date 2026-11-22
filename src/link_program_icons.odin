@@ -3,7 +3,7 @@ package main
 import "aio:localpath"
 import "aio:procinfo"
 import "aio:pty"
-import "aio:render"
+import "cosmos:render"
 import "aio:settings"
 import "core:log"
 import "core:math"

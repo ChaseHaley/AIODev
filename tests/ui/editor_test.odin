@@ -3,7 +3,7 @@ package ui_test
 import "core:testing"
 import "core:strings"
 import "aio:commands"
-import "aio:render"
+import "cosmos:render"
 import "aio:settings"
 import "aio:ui"
 

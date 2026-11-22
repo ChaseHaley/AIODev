@@ -1,12 +1,12 @@
 package main
 
 import "aio:commands"
-import "aio:colour"
-import "aio:input"
+import "cosmos:colour"
+import "cosmos:input"
 import "aio:layout"
 import "aio:neovim"
 import platform_api "aio:platform"
-import "aio:render"
+import "cosmos:render"
 import "aio:settings"
 import "aio:spawn"
 import "aio:term"

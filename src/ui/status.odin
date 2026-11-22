@@ -1,6 +1,6 @@
 package ui
 
-import "aio:render"
+import "cosmos:render"
 
 leader_status_layout :: proc(area: render.Rect, width, scale: f32) -> render.Rect {
 	padding := min(8 * scale, area.width / 4, area.height / 4)

@@ -1,11 +1,11 @@
 package app_test
 
-import "aio:input"
+import "cosmos:input"
 import "core:strings"
 import "core:testing"
 import "core:time"
 import app "../../src"
-import "aio:font"
+import "cosmos:font"
 import "aio:layout"
 import "aio:platform"
 import "aio:term"

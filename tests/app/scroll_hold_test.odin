@@ -1,7 +1,7 @@
 package app_test
 
 import "aio:ghostty"
-import "aio:input"
+import "cosmos:input"
 import "aio:layout"
 import "aio:settings"
 import "aio:term"

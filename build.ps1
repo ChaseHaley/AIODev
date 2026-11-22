@@ -325,7 +325,7 @@ $appFlags = @($flags | Where-Object { $_ -notlike '-vet-packages:*' }) +
 # sources. Tests and tools are not gated yet; they carry the same drift and a separate pass owns it.
 function Invoke-AppStyleCheck {
     Build-StyleCheck 'build/stylecheck.exe' $flags
-    Invoke-StyleCheck 'build/stylecheck.exe' @('ghostty', 'dwrite', 'shaders', 'lua')
+    Invoke-StyleCheck 'build/stylecheck.exe' @('ghostty', 'lua')
 }
 
 switch ($Task) {

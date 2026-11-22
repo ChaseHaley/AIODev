@@ -1,11 +1,11 @@
 package app_test
 
-import "aio:caret"
-import "aio:colour"
+import "cosmos:caret"
+import "cosmos:colour"
 import "aio:ghostty"
-import "aio:input"
+import "cosmos:input"
 import "aio:platform"
-import "aio:render"
+import "cosmos:render"
 import "aio:term"
 import "aio:ui"
 import "core:testing"

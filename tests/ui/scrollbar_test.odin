@@ -4,7 +4,7 @@ import "core:fmt"
 import "core:time"
 import "core:testing"
 import "aio:commands"
-import "aio:render"
+import "cosmos:render"
 import "aio:settings"
 import "aio:ui"
 

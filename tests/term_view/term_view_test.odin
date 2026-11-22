@@ -1,17 +1,17 @@
 package term_view_test
 
-import "aio:colour"
+import "cosmos:colour"
 import "core:math"
 import "core:slice"
 import "core:strings"
 import "core:testing"
 import "core:time"
-import "aio:font"
-import "aio:glyphs"
-import "aio:render"
+import "cosmos:font"
+import "cosmos:glyphs"
+import "cosmos:render"
 import "aio:term"
 import "aio:term_view"
-import test_fonts "../fixtures/fonts"
+import "cosmos:test_fonts"
 
 COLUMNS :: 20
 ROWS :: 4

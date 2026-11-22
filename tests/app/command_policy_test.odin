@@ -3,7 +3,7 @@ package app_test
 import app "../../src"
 import "aio:cli_protocol"
 import "aio:commands"
-import "aio:input"
+import "cosmos:input"
 import "aio:settings"
 import "aio:term"
 import "aio:ui"

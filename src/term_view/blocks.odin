@@ -1,7 +1,7 @@
 package term_view
 
 import "aio:ghostty"
-import "aio:render"
+import "cosmos:render"
 import "aio:term"
 import "core:log"
 

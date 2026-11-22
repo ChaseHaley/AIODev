@@ -1,7 +1,7 @@
 package main
 
 import "aio:platform"
-import "aio:render"
+import "cosmos:render"
 import "core:log"
 
 // Changes the window's pointer shape; an unchanged shape costs nothing and makes no native call.

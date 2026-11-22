@@ -1,6 +1,6 @@
 package settings_test
 
-import "aio:colour"
+import "cosmos:colour"
 import "core:strings"
 import "core:testing"
 import "aio:settings"

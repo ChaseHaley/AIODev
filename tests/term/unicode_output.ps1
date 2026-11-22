@@ -1,9 +1,11 @@
+# Writes every case of the Unicode corpus (cosmos:testkit's unicode.txt, passed as -Fixture) to the terminal.
+param([Parameter(Mandatory)] [string] $Fixture)
 $ErrorActionPreference = 'Stop'
 [Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)
 $output = [Console]::OpenStandardOutput()
 $escape = [char]27
 $output.Write([Text.Encoding]::UTF8.GetBytes("$escape[2J$escape[H"))
-foreach ($line in [IO.File]::ReadLines((Join-Path $PSScriptRoot '../fixtures/unicode.txt'))) {
+foreach ($line in [IO.File]::ReadLines($Fixture)) {
     $fields = (($line -split '#', 2)[0].Trim() -split '\s+')
     if ($fields.Count -lt 3) { continue }
     $bytes = [Collections.Generic.List[byte]]::new()

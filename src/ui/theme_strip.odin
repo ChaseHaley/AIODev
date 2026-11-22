@@ -1,8 +1,8 @@
 package ui
 
-import "aio:colour"
-import "aio:input"
-import "aio:render"
+import "cosmos:colour"
+import "cosmos:input"
+import "cosmos:render"
 import "aio:settings"
 import "base:runtime"
 import "core:strings"

@@ -1,6 +1,6 @@
 package ui
 
-import "aio:font"
+import "cosmos:font"
 import tr "aio:turns"
 import "core:fmt"
 import "core:math"

@@ -2,7 +2,7 @@ package term_view_test
 
 import "base:runtime"
 import "core:testing"
-import "aio:render"
+import "cosmos:render"
 import "aio:term_view"
 
 @(private)

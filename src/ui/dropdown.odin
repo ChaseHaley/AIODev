@@ -1,9 +1,9 @@
 package ui
 
-import "aio:input"
+import "cosmos:input"
 import "aio:line_match"
 import "aio:platform"
-import "aio:render"
+import "cosmos:render"
 import "aio:search"
 
 // A searchable list's filter field, with the overlay's padding above it.

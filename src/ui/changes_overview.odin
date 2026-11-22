@@ -1,6 +1,6 @@
 package ui
 
-import "aio:render"
+import "cosmos:render"
 import "core:math"
 
 // The overview strip at the right edge of the diff: the whole stream squeezed into the lane's height, each

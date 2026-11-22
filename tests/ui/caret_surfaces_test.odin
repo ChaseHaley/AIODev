@@ -1,9 +1,9 @@
 package ui_test
 
-import "aio:caret"
-import "aio:font"
-import "aio:glyphs"
-import "aio:render"
+import "cosmos:caret"
+import "cosmos:font"
+import "cosmos:glyphs"
+import "cosmos:render"
 import "aio:ui"
 import "core:testing"
 import "core:time"

@@ -1,9 +1,9 @@
 package main
 
-import "aio:font"
-import "aio:glyphs"
-import "aio:perf"
-import "aio:render"
+import "cosmos:font"
+import "cosmos:glyphs"
+import "cosmos:perf"
+import "cosmos:render"
 import "aio:term"
 import "aio:verify_protocol"
 import "core:fmt"

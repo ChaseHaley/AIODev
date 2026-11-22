@@ -1,9 +1,9 @@
 package ui_test
 
-import "aio:font"
-import "aio:glyphs"
+import "cosmos:font"
+import "cosmos:glyphs"
 import "aio:markdown"
-import "aio:render"
+import "cosmos:render"
 import "aio:turns"
 import "aio:ui"
 import "core:math"

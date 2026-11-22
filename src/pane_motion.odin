@@ -1,7 +1,7 @@
 package main
 
 import "aio:layout"
-import "aio:render"
+import "cosmos:render"
 import "aio:settings"
 import "aio:ui"
 import "core:math"

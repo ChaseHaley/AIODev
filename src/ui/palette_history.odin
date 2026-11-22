@@ -2,7 +2,7 @@ package ui
 
 import "aio:commands"
 import "aio:frecency"
-import "aio:input"
+import "cosmos:input"
 import "core:log"
 import "core:strings"
 

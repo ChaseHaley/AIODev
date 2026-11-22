@@ -6,7 +6,7 @@ import "core:testing"
 import "core:unicode/utf8"
 import "aio:ghostty"
 import "aio:term"
-import fixtures "../fixtures"
+import "cosmos:testkit"
 
 // A terminal with the session defaults, holding the snapshot of what was written.
 Unicode_Grid :: struct {
@@ -76,16 +76,16 @@ describe_row :: proc(s: ^term.Snapshot, row: int) -> string {
 // codepoints, and cursor advance. A failure names the case id and the observed layout.
 @(test)
 unicode_fixture_layout :: proc(t: ^testing.T) {
-	cases, err := fixtures.unicode_cases()
-	defer fixtures.unicode_cases_destroy(cases)
+	cases, err := testkit.unicode_cases()
+	defer testkit.unicode_cases_destroy(cases)
 	if !testing.expect_value(t, err, "") { return }
 	for c in cases {
 		g, ok := unicode_grid(t, c.input)
 		if !ok { return }
 		defer unicode_grid_destroy(&g)
 		observed := describe_row(&g.snapshot, 0)
-		testing.expectf(t, cursor_x(&g) == fixtures.columns(c),
-			"%s: cursor at %d, expected %d; layout %s", c.id, cursor_x(&g), fixtures.columns(c), observed)
+		testing.expectf(t, cursor_x(&g) == testkit.columns(c),
+			"%s: cursor at %d, expected %d; layout %s", c.id, cursor_x(&g), testkit.columns(c), observed)
 		stored: [dynamic]rune
 		defer delete(stored)
 		x, cluster := 0, 0
@@ -117,8 +117,8 @@ unicode_fixture_layout :: proc(t: ^testing.T) {
 // The width API that overlays such as IME preedit use agrees with the grid for every case (D-042).
 @(test)
 unicode_width_api_matches_grid :: proc(t: ^testing.T) {
-	cases, err := fixtures.unicode_cases()
-	defer fixtures.unicode_cases_destroy(cases)
+	cases, err := testkit.unicode_cases()
+	defer testkit.unicode_cases_destroy(cases)
 	if !testing.expect_value(t, err, "") { return }
 	for c in cases {
 		cps := make([]u32, len(c.stored))
@@ -139,8 +139,8 @@ unicode_width_api_matches_grid :: proc(t: ^testing.T) {
 // Copying a row returns exactly the stored codepoints, with no normalization or spacer text.
 @(test)
 unicode_row_text_round_trips :: proc(t: ^testing.T) {
-	cases, err := fixtures.unicode_cases()
-	defer fixtures.unicode_cases_destroy(cases)
+	cases, err := testkit.unicode_cases()
+	defer testkit.unicode_cases_destroy(cases)
 	if !testing.expect_value(t, err, "") { return }
 	for c in cases {
 		g, ok := unicode_grid(t, c.input)
@@ -187,8 +187,8 @@ unicode_wide_wraps_at_edge :: proc(t: ^testing.T) {
 // without its spacer, a spacer without its wide cell, or a lost codepoint.
 @(test)
 unicode_resize_keeps_clusters_whole :: proc(t: ^testing.T) {
-	cases, err := fixtures.unicode_cases()
-	defer fixtures.unicode_cases_destroy(cases)
+	cases, err := testkit.unicode_cases()
+	defer testkit.unicode_cases_destroy(cases)
 	if !testing.expect_value(t, err, "") { return }
 	line: [dynamic]u8
 	defer delete(line)

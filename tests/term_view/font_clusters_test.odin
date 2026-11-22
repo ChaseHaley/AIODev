@@ -1,10 +1,10 @@
-package font_test
+package term_view_test
 
 import "core:slice"
 import "core:testing"
-import "aio:font"
+import "cosmos:font"
 import "aio:ghostty"
-import fixtures "../fixtures"
+import "cosmos:testkit"
 
 // Splits runes into grapheme clusters with the terminal's own rules, as term_view receives them.
 terminal_clusters :: proc(runes: []rune) -> []int {
@@ -30,8 +30,8 @@ fixture_clusters_shape :: proc(t: ^testing.T) {
 	defer font.system_destroy(s)
 	family, load_err := font.family_load(s, "Cascadia Mono")
 	if !testing.expect_value(t, load_err, font.Error.None) { return }
-	cases, parse_err := fixtures.unicode_cases()
-	defer fixtures.unicode_cases_destroy(cases)
+	cases, parse_err := testkit.unicode_cases()
+	defer testkit.unicode_cases_destroy(cases)
 	if !testing.expect_value(t, parse_err, "") { return }
 	out := make([dynamic]font.Shaped_Glyph)
 	defer delete(out)
@@ -67,8 +67,8 @@ emoji_sequences_use_emoji_font :: proc(t: ^testing.T) {
 	if !testing.expect_value(t, load_err, font.Error.None) { return }
 	emoji, emoji_err := font.family_load(s, "Segoe UI Emoji")
 	if !testing.expect_value(t, emoji_err, font.Error.None) { return }
-	cases, parse_err := fixtures.unicode_cases()
-	defer fixtures.unicode_cases_destroy(cases)
+	cases, parse_err := testkit.unicode_cases()
+	defer testkit.unicode_cases_destroy(cases)
 	if !testing.expect_value(t, parse_err, "") { return }
 	single := []string{
 		"emoji.default", "emoji.vs16", "emoji.smiley-vs16", "emoji.keycap", "emoji.skin-tone",

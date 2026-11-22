@@ -1,7 +1,7 @@
 package ui
 
 import "core:math"
-import "aio:render"
+import "cosmos:render"
 
 // Interface icons are line drawings on a 16-unit grid with one stroke weight at every size. The zero
 // value is None, so an icon field left unset draws nothing.

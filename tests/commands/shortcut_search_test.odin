@@ -1,7 +1,7 @@
 package commands_test
 
 import "aio:commands"
-import "aio:input"
+import "cosmos:input"
 import "core:testing"
 
 @(private = "file")

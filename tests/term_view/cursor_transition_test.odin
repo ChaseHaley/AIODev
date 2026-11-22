@@ -1,8 +1,8 @@
 package term_view_test
 
 import "base:runtime"
-import "aio:render"
-import "aio:caret"
+import "cosmos:render"
+import "cosmos:caret"
 import "aio:term_view"
 import "core:slice"
 import "core:testing"

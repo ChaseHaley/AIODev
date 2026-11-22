@@ -3,7 +3,7 @@ package main
 import "aio:localpath"
 import platform_api "aio:platform"
 import "aio:program_art"
-import "aio:render"
+import "cosmos:render"
 import "aio:settings"
 import "core:image/png"
 import "core:log"

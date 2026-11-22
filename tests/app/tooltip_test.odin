@@ -2,8 +2,8 @@ package app_test
 
 import app "../../src"
 import "aio:commands"
-import "aio:input"
-import "aio:render"
+import "cosmos:input"
+import "cosmos:render"
 import "aio:search"
 import "aio:settings"
 import "aio:ui"

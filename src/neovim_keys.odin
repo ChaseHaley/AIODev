@@ -1,6 +1,6 @@
 package main
 
-import "aio:input"
+import "cosmos:input"
 import "core:strings"
 import "core:unicode/utf8"
 

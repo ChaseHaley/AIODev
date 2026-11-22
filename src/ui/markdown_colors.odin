@@ -1,7 +1,7 @@
 package ui
 
-import "aio:colour"
-import "aio:render"
+import "cosmos:colour"
+import "cosmos:render"
 import "aio:settings"
 
 // The colours of Markdown's elements, resolved from the theme once whenever it changes, so drawing a

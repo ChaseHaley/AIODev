@@ -1,9 +1,9 @@
 package ui_test
 
 import "aio:commands"
-import "aio:font"
-import "aio:glyphs"
-import "aio:render"
+import "cosmos:font"
+import "cosmos:glyphs"
+import "cosmos:render"
 import "aio:ui"
 import "core:testing"
 import fixtures "../fixtures"

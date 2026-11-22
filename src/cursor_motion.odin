@@ -1,8 +1,8 @@
 package main
 
-import "aio:caret"
+import "cosmos:caret"
 import "aio:layout"
-import "aio:render"
+import "cosmos:render"
 import "aio:term_view"
 import "aio:ui"
 import "core:math"

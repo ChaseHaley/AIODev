@@ -1,6 +1,6 @@
 package ui
 
-import "aio:render"
+import "cosmos:render"
 
 // Pointing a color at another color from the board's inspector. A color row names the color it follows
 // in `link` and keeps the color that results in `value`; the inspector's source field opens a dropdown of

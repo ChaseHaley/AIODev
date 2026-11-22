@@ -1,6 +1,6 @@
 package main
 
-import "aio:input"
+import "cosmos:input"
 
 // The surfaces that can own the pointer, listed topmost first. The order is the precedence: hover,
 // cursor and press all resolve through `pointer_target`, so the surface that shows a hover is the one

@@ -1,13 +1,13 @@
 package main
 
-import "aio:colour"
+import "cosmos:colour"
 import "aio:commands"
 import "aio:events"
-import "aio:input"
+import "cosmos:input"
 import "aio:layout"
-import "aio:perf"
+import "cosmos:perf"
 import "aio:platform"
-import "aio:render"
+import "cosmos:render"
 import "aio:term"
 import "aio:term_view"
 import "aio:ui"

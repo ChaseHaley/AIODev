@@ -16,42 +16,24 @@ Exit codes: 0 planned, 2 no paths or bad arguments.
 `
 
 // UI-affecting changes need one live pass; native paths may also need real OS input; hot paths need
-// the performance gate and are validated alone rather than in a batch.
+// the performance gate and are validated alone rather than in a batch. Cosmos's packages reach AIODev
+// through tools/cosmos.json, which owes every gate.
 UI_PREFIXES :: []string {
 	"src/ui/",
 	"src/term_view/",
-	"src/caret/",
-	"src/render/",
 	"src/layout/",
 	"src/commands/",
 	"src/term/",
 	"src/ghostty/",
 }
-NATIVE_PREFIXES :: []string {
-	"src/platform/",
-	"src/input/",
-	"src/instance/",
-	"src/pty/",
-	"src/procinfo/",
-	"src/localpath/",
-}
+NATIVE_PREFIXES :: []string{"src/platform/", "src/instance/", "src/pty/", "src/procinfo/", "src/localpath/"}
 NATIVE_FILES :: []string{"src/term/input.odin", "src/term/input_windows.odin"}
-PERF_PREFIXES :: []string {
-	"src/render/",
-	"src/term/",
-	"src/pty/",
-	"src/procinfo/",
-	"src/font/",
-	"src/dwrite/",
-	"src/glyphs/",
-	"src/term_view/",
-	"src/caret/",
-}
+PERF_PREFIXES :: []string{"src/term/", "src/pty/", "src/procinfo/", "src/term_view/"}
 PERF_FILES :: []string{"src/window.odin"}
 
 // These packages have direct unit suites and no window/process ownership. Their app contracts are
 // checked by the fast lane per change; full native integration remains a batch obligation.
-FAST_APP_PACKAGES :: []string{"colour", "draws", "fuzzy", "links", "perf", "pixels", "program_art", "vector"}
+FAST_APP_PACKAGES :: []string{"draws", "fuzzy", "links", "program_art"}
 
 Plan :: struct {
 	allocator: runtime.Allocator,

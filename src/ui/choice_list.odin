@@ -1,7 +1,7 @@
 package ui
 
-import "aio:input"
-import "aio:render"
+import "cosmos:input"
+import "cosmos:render"
 
 // Dropdowns show at most this many options and scroll the rest.
 CHOICE_LIST_ROWS :: 8

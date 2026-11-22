@@ -2,7 +2,7 @@ package app_test
 
 import "core:testing"
 import app "../../src"
-import "aio:input"
+import "cosmos:input"
 import "aio:layout"
 
 // The float of float_fixture split in two, its right pane focused: one tiled pane below a float of two.

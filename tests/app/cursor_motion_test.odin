@@ -1,10 +1,10 @@
 package app_test
 
-import "aio:colour"
+import "cosmos:colour"
 import "aio:ghostty"
-import "aio:input"
+import "cosmos:input"
 import "aio:platform"
-import "aio:render"
+import "cosmos:render"
 import "aio:term"
 import "core:fmt"
 import "core:os"

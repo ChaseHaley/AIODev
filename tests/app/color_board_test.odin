@@ -1,8 +1,8 @@
 package app_test
 
 import app "../../src"
-import "aio:input"
-import "aio:render"
+import "cosmos:input"
+import "cosmos:render"
 import "aio:settings"
 import "aio:ui"
 import "core:fmt"

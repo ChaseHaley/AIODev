@@ -1,6 +1,6 @@
 package main
 
-import "aio:input"
+import "cosmos:input"
 import "aio:layout"
 
 // Pane focus as a jump list, like an editor's back and forward. Entries are session ids, so a pane

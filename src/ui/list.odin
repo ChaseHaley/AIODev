@@ -1,6 +1,6 @@
 package ui
 
-import "aio:input"
+import "cosmos:input"
 
 // The Ctrl chords that step a list besides the arrows, and the keycaps hints name them by.
 LIST_PREVIOUS_KEY :: input.Key.P

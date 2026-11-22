@@ -1,8 +1,8 @@
 package ui
 
-import "aio:font"
+import "cosmos:font"
 import "aio:markdown"
-import "aio:render"
+import "cosmos:render"
 import "aio:syntax"
 import tr "aio:turns"
 import "core:math"

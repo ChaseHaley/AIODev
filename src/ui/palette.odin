@@ -2,9 +2,9 @@ package ui
 
 import "aio:commands"
 import "aio:fuzzy"
-import "aio:input"
+import "cosmos:input"
 import "aio:platform"
-import "aio:render"
+import "cosmos:render"
 import "base:runtime"
 import "core:fmt"
 import "core:log"

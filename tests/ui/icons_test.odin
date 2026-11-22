@@ -2,7 +2,7 @@ package ui_test
 
 import "core:math"
 import "core:testing"
-import "aio:render"
+import "cosmos:render"
 import "aio:ui"
 
 @(private = "file")

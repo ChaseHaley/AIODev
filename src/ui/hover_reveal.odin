@@ -1,6 +1,6 @@
 package ui
 
-import "aio:render"
+import "cosmos:render"
 import "core:time"
 
 // A surface that a hover on its trigger shows, such as a map under a header glyph or a submenu beside its

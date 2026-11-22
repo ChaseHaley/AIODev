@@ -1,8 +1,8 @@
 package app_test
 
-import fixtures "../fixtures"
+import "cosmos:testkit"
 
 @(init)
 warm :: proc "contextless" () {
-	fixtures.warm_directwrite()
+	testkit.warm_directwrite()
 }

@@ -1,6 +1,6 @@
 package ui
 
-import "aio:render"
+import "cosmos:render"
 import "core:math"
 
 pane_gap :: proc(gap, scale: f32) -> f32 {return max(1, math.round(gap * scale))}

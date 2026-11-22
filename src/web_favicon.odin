@@ -1,6 +1,6 @@
 package main
 
-import "aio:render"
+import "cosmos:render"
 import "core:image/png"
 import "core:log"
 

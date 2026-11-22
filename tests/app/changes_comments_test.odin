@@ -1,6 +1,6 @@
 package app_test
 
-import "aio:input"
+import "cosmos:input"
 import "aio:markdown"
 import "aio:platform"
 import "aio:term"

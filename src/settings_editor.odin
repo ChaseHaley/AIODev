@@ -1,9 +1,9 @@
 package main
 
 import "aio:commands"
-import "aio:colour"
-import "aio:font"
-import "aio:input"
+import "cosmos:colour"
+import "cosmos:font"
+import "cosmos:input"
 import "aio:localpath"
 import "aio:platform"
 import "aio:pty"

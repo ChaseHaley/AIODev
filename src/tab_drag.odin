@@ -1,6 +1,6 @@
 package main
 
-import "aio:render"
+import "cosmos:render"
 import "aio:ui"
 
 tab_press :: proc(app: ^App, w: ^Window, index: int, x, y: f32, modified: bool, chip: u32 = 0) {

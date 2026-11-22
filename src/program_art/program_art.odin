@@ -1,7 +1,7 @@
 package program_art
 
-import "aio:colour"
-import "aio:vector"
+import "cosmos:colour"
+import "cosmos:vector"
 import "core:math"
 import "core:mem"
 import "core:strconv"

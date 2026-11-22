@@ -1,7 +1,7 @@
 package main
 
 import "aio:commands"
-import "aio:input"
+import "cosmos:input"
 import "core:fmt"
 import "core:time"
 

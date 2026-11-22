@@ -1,9 +1,9 @@
 package app_test
 
 import app "../../src"
-import "aio:input"
+import "cosmos:input"
 import "aio:platform"
-import "aio:render"
+import "cosmos:render"
 import "aio:term"
 import "aio:ui"
 import "core:testing"

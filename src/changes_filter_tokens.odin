@@ -1,7 +1,7 @@
 package main
 
 import "aio:fuzzy"
-import "aio:input"
+import "cosmos:input"
 import "aio:settings"
 import "aio:ui"
 import "core:strings"

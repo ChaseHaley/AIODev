@@ -1,6 +1,6 @@
 package platform
 
-import "aio:input"
+import "cosmos:input"
 
 // Chooses the backend at compile time: the Win32 one (`*_windows.odin`), or with
 // -define:AIO_HEADLESS=true one that opens no window (WORK-349). Each backend file wraps its

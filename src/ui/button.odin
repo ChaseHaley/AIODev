@@ -1,6 +1,6 @@
 package ui
 
-import "aio:render"
+import "cosmos:render"
 
 // How a button's surface answers the hover. A raised button lifts on a seat shadow; a flat one stays
 // in place, for a control that is itself a whole surface such as a float header. An unfilled flat

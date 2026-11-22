@@ -1,7 +1,7 @@
 package main
 
-import "aio:input"
-import "aio:render"
+import "cosmos:input"
+import "cosmos:render"
 import "aio:ui"
 import "core:time"
 

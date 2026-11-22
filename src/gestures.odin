@@ -1,6 +1,6 @@
 package main
 
-import "aio:input"
+import "cosmos:input"
 import "aio:ui"
 
 // The longest gap between the presses of a double click, for every control that tells one apart.

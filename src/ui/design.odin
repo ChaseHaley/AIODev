@@ -1,6 +1,6 @@
 package ui
 
-import "aio:render"
+import "cosmos:render"
 
 // The AIODev design system. Every interface size, gap, corner and height comes from here; the
 // Visual language note explains each role. Values are DIPs at scale 1 and callers multiply by the

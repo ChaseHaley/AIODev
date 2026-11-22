@@ -1,6 +1,6 @@
 package ui
 
-import "aio:render"
+import "cosmos:render"
 
 // A shortcut's whole chord, such as Ctrl+Shift+P, as one keycap: detail text in muted ink, inset
 // KEYCAP_PADDING inside a hairline box KEYCAP_HEIGHT tall. The Settings search's Ctrl+F, the palette

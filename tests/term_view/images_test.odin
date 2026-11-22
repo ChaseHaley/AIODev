@@ -1,14 +1,14 @@
 package term_view_test
 
-import "aio:font"
-import "aio:glyphs"
-import "aio:render"
+import "cosmos:font"
+import "cosmos:glyphs"
+import "cosmos:render"
 import "aio:term"
 import "aio:term_view"
 import "core:encoding/base64"
 import "core:fmt"
 import "core:testing"
-import test_fonts "../fixtures/fonts"
+import "cosmos:test_fonts"
 
 // A fixture with no shell behind it, so a test decides exactly what the terminal receives.
 headless_create :: proc(t: ^testing.T, rows := u16(ROWS)) -> (f: Fixture, ok: bool) {

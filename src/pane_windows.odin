@@ -1,6 +1,6 @@
 package main
 
-import "aio:input"
+import "cosmos:input"
 import "aio:layout"
 
 // A pane torn off into a window of its own; tear_off_window.odin owns the preview window and thumbnail.

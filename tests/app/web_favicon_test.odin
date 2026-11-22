@@ -5,8 +5,8 @@ import "core:strings"
 import "core:testing"
 import app "../../src"
 import "aio:layout"
-import "aio:pixels"
-import "aio:render"
+import "cosmos:pixels"
+import "cosmos:render"
 import "aio:ui"
 
 // A width x height PNG whose pixels are all opaque `colour`, written and read back through

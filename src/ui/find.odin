@@ -1,9 +1,9 @@
 package ui
 
 import "aio:commands"
-import "aio:input"
+import "cosmos:input"
 import "aio:platform"
-import "aio:render"
+import "cosmos:render"
 import "aio:search"
 import "core:strings"
 

@@ -1,6 +1,6 @@
 package main
 
-import "aio:input"
+import "cosmos:input"
 import "aio:layout"
 
 // Moving a pane is one operation in two steps: pane_drop_operation resolves where it goes to the trees

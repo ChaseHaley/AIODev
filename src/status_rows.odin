@@ -1,6 +1,6 @@
 package main
 
-import "aio:render"
+import "cosmos:render"
 import "aio:settings"
 import "aio:term"
 import "aio:ui"

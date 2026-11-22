@@ -1,8 +1,8 @@
 package main
 
-import "aio:input"
-import "aio:colour"
-import "aio:render"
+import "cosmos:input"
+import "cosmos:colour"
+import "cosmos:render"
 import "aio:settings"
 import "aio:ui"
 

@@ -2,9 +2,9 @@ package ui_test
 
 import "core:math"
 import "core:testing"
-import "aio:font"
-import "aio:glyphs"
-import "aio:render"
+import "cosmos:font"
+import "cosmos:glyphs"
+import "cosmos:render"
 import "aio:ui"
 import fixtures "../fixtures"
 

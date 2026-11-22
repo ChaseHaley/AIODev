@@ -1,7 +1,7 @@
 package ui
 
-import "aio:input"
-import "aio:render"
+import "cosmos:input"
+import "cosmos:render"
 import "core:strings"
 
 // The link program table's state on the settings page: the one program whose fields are open.

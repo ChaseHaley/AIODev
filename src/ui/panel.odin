@@ -1,6 +1,6 @@
 package ui
 
-import "aio:render"
+import "cosmos:render"
 
 // How a floating surface's border follows its rectangle.
 Panel_Border :: enum {

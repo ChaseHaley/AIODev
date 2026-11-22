@@ -1,6 +1,6 @@
 package ui
 
-import "aio:render"
+import "cosmos:render"
 import "core:math"
 
 // The vertical tab rail. Width, row rhythm and the dock threshold are shared with the window

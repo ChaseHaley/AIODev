@@ -1,6 +1,6 @@
 package term_test
 
-import "aio:input"
+import "cosmos:input"
 import "core:fmt"
 import "core:testing"
 import "aio:ghostty"

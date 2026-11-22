@@ -1,11 +1,11 @@
 package ui
 
-import "aio:colour"
+import "cosmos:colour"
 import "aio:commands"
 import "aio:fuzzy"
-import "aio:input"
+import "cosmos:input"
 import "aio:platform"
-import "aio:render"
+import "cosmos:render"
 import "aio:settings"
 import "base:runtime"
 import "core:fmt"

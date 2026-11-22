@@ -1,13 +1,13 @@
 package ui_test
 
-import "aio:input"
+import "cosmos:input"
 import "core:testing"
 import "core:time"
 import "aio:commands"
-import "aio:font"
-import "aio:glyphs"
+import "cosmos:font"
+import "cosmos:glyphs"
 import "aio:platform"
-import "aio:render"
+import "cosmos:render"
 import "aio:search"
 import "aio:ui"
 

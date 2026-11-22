@@ -1,6 +1,6 @@
 package ui
 
-import "aio:render"
+import "cosmos:render"
 
 // A one-line editable field drawn inside a rectangle. Draw and hit-test read the same numbers; the
 // surface still owns the fill, border, focus ring and baseline.

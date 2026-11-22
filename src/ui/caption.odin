@@ -1,7 +1,7 @@
 package ui
 
 import "aio:platform"
-import "aio:render"
+import "cosmos:render"
 
 TITLE_BAR_HEIGHT :: f32(platform.TITLE_BAR_HEIGHT)
 CAPTION_WIDTH :: f32(platform.CAPTION_WIDTH)

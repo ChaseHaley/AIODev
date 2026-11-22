@@ -6,7 +6,7 @@ import "core:strings"
 import "core:testing"
 import app "../../src"
 import "aio:platform"
-import "aio:render"
+import "cosmos:render"
 
 // The whole app frame renders offscreen at a chosen DPI, the real build_frame and no window
 // (VT-6's frame harness): a display at 144 DPI scales the window by 1.5, and moving the window to a

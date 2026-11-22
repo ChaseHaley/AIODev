@@ -1,6 +1,6 @@
 package main
 
-import "aio:input"
+import "cosmos:input"
 import "aio:ui"
 
 // A control on the tab strip or rail: a tab, a tab group's chip, the new-tab button or the profile

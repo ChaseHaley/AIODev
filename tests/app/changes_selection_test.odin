@@ -1,10 +1,10 @@
 package app_test
 
 import "aio:commands"
-import "aio:input"
+import "cosmos:input"
 import "aio:markdown"
 import "aio:platform"
-import "aio:render"
+import "cosmos:render"
 import "aio:turns"
 import "aio:ui"
 import "core:fmt"

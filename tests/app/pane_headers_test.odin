@@ -9,7 +9,7 @@ import "core:time"
 import app "../../src"
 import "aio:commands"
 import "aio:layout"
-import "aio:render"
+import "cosmos:render"
 import "aio:term"
 import "aio:ui"
 

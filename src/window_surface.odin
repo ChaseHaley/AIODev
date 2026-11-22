@@ -1,8 +1,8 @@
 package main
 
-import "aio:glyphs"
+import "cosmos:glyphs"
 import "aio:platform"
-import "aio:render"
+import "cosmos:render"
 import "core:log"
 
 // Every window draws through its own surface on the app's one graphics device. Only the procs here

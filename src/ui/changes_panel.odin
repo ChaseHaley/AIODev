@@ -1,6 +1,6 @@
 package ui
 
-import "aio:render"
+import "cosmos:render"
 import "core:math"
 
 // The panel under the row's summary: the source as chips, the worktree as chips in git scopes, the hooks

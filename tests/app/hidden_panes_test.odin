@@ -3,9 +3,9 @@ package app_test
 import "core:testing"
 import "core:time"
 import app "../../src"
-import "aio:input"
+import "cosmos:input"
 import "aio:layout"
-import "aio:render"
+import "cosmos:render"
 import "aio:ui"
 
 @(private = "file")

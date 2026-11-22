@@ -2,7 +2,7 @@ package main
 
 import platform_api "aio:platform"
 import "aio:events"
-import "aio:render"
+import "cosmos:render"
 import "aio:settings"
 import "aio:term"
 import "aio:ui"

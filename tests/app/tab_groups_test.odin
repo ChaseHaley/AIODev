@@ -2,10 +2,10 @@ package app_test
 
 import "core:testing"
 import app "../../src"
-import "aio:font"
-import "aio:glyphs"
+import "cosmos:font"
+import "cosmos:glyphs"
 import "aio:layout"
-import "aio:render"
+import "cosmos:render"
 import "aio:ui"
 
 // A workspace whose tabs have ids 1..len(groups) and the groups `groups` gives them by id, each group it names

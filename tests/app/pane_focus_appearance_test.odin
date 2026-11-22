@@ -4,7 +4,7 @@ import "core:strings"
 import "core:testing"
 import app "../../src"
 import "aio:platform"
-import "aio:render"
+import "cosmos:render"
 
 @(test)
 pane_focus_appearance_follows_keyboard_focus_across_windows :: proc(t: ^testing.T) {

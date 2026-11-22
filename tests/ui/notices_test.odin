@@ -1,11 +1,11 @@
 package ui_test
 
-import "aio:colour"
+import "cosmos:colour"
 import "base:runtime"
 import "core:testing"
-import "aio:font"
-import "aio:glyphs"
-import "aio:render"
+import "cosmos:font"
+import "cosmos:glyphs"
+import "cosmos:render"
 import "aio:ui"
 import "core:time"
 import fixtures "../fixtures"

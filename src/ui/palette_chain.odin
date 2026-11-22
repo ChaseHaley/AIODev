@@ -1,7 +1,7 @@
 package ui
 
 import "aio:commands"
-import "aio:render"
+import "cosmos:render"
 import "aio:settings"
 import "core:log"
 import "core:strings"

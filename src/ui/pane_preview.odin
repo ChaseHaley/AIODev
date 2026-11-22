@@ -1,6 +1,6 @@
 package ui
 
-import "aio:render"
+import "cosmos:render"
 
 // A window drawn small as a pane header button would leave it, for that button's tooltip. Rectangles are in
 // the window's own pixels; pane_preview_draw scales them down.

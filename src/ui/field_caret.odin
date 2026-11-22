@@ -1,7 +1,7 @@
 package ui
 
-import "aio:caret"
-import "aio:render"
+import "cosmos:caret"
+import "cosmos:render"
 
 // Who holds a window's text cursor: a terminal pane, or the caret of a field, text area or Markdown
 // view, named by where its Field_Caret lives. Zero is nobody.

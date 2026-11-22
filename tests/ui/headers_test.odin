@@ -1,7 +1,7 @@
 package ui_test
 
 import "core:testing"
-import "aio:render"
+import "cosmos:render"
 import "aio:ui"
 
 // A header's buttons, left to right, as a tiled pane shows them.
