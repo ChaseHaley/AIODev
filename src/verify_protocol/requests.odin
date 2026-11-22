@@ -65,7 +65,7 @@ Type :: struct {
 	text: string,
 }
 Key :: struct {
-	chords: [dynamic]commands.Shortcut,
+	chords: [dynamic]input.Shortcut,
 }
 Run :: struct {
 	line:                string,
@@ -701,7 +701,7 @@ parse :: proc(args: []string, allocator := context.allocator) -> (Request, Parse
 	case .Key:
 		if len(args) < 2 {return {}, bad}
 		k := Key {
-			chords = make([dynamic]commands.Shortcut, allocator),
+			chords = make([dynamic]input.Shortcut, allocator),
 		}
 		for s in args[1:] {
 			chord, ok := commands.parse_shortcut(s)

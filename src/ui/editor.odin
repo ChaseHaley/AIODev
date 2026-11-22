@@ -2,7 +2,7 @@ package ui
 
 import "cosmos:colour"
 import "aio:commands"
-import "aio:fuzzy"
+import "cosmos:fuzzy"
 import "cosmos:input"
 import "cosmos:platform"
 import "cosmos:render"
@@ -545,7 +545,7 @@ Editor :: struct {
 	keys:                                                              Key_Search,
 	keys_hover:                                                        bool,
 	// A complete chord the search names that no shortcut row uses, which Enter offers to assign.
-	free:                                                              Maybe(commands.Shortcut),
+	free:                                                              Maybe(input.Shortcut),
 	// The swatch board the Colors section draws instead of its rows (color_board.odin).
 	board:                                                             Color_Board,
 }
@@ -1551,7 +1551,7 @@ row_available :: proc(p: ^Editor, row: Editor_Row) -> bool {
 // otherwise the typed query. The leader's own row answers a pressed leader.
 @(private)
 row_shortcut_match :: proc(p: ^Editor, q: ^commands.Shortcut_Query, row: Editor_Row) -> Shortcut_Highlight {
-	storage := make([]commands.Shortcut, len(row.value) + 1, context.temp_allocator)
+	storage := make([]input.Shortcut, len(row.value) + 1, context.temp_allocator)
 	count, err := commands.parse_shortcuts(row.value, storage)
 	if err != .None {return {}}
 	best: Shortcut_Highlight
@@ -2815,7 +2815,7 @@ editor_key_search_step :: proc(p: ^Editor, step: Key_Search_Step) -> Editor_Outc
 editor_recording :: proc(p: ^Editor) -> bool {return p.keys.state == .Recording}
 
 // The chord the empty search offers to assign, which Assign_Shortcut hands to the page owner.
-editor_free_chord :: proc(p: ^Editor) -> Maybe(commands.Shortcut) {return p.free}
+editor_free_chord :: proc(p: ^Editor) -> Maybe(input.Shortcut) {return p.free}
 
 editor_text :: proc(p: ^Editor, text: string) {
 	if editor_capturing(p) || editor_chained(p) {return}

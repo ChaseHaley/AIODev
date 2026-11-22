@@ -1,10 +1,9 @@
 package ui
 
-import "aio:commands"
 import "cosmos:input"
 import "cosmos:platform"
 import "cosmos:render"
-import "aio:search"
+import "cosmos:search"
 import "core:strings"
 
 @(private) FIND_WIDTH :: 440
@@ -68,7 +67,7 @@ Find_Button :: enum {
 // The key that does what each button does while the bar has the keyboard. find_key reads them through
 // find_key_button and the buttons' tooltips name them, so a change here reaches both.
 @(rodata)
-FIND_KEYS := #partial [Find_Button]commands.Shortcut {
+FIND_KEYS := #partial [Find_Button]input.Shortcut {
 	.Up           = {.Enter, {.Shift}},
 	.Down         = {.Enter, {}},
 	.Close        = {.Escape, {}},

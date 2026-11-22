@@ -734,9 +734,9 @@ tooltip_at :: proc(f: ^Fixture, w: ^app.Window, rect: render.Rect) -> string {
 }
 
 @(private = "file")
-key_at :: proc(f: ^Fixture, w: ^app.Window, rect: render.Rect) -> commands.Shortcut {
+key_at :: proc(f: ^Fixture, w: ^app.Window, rect: render.Rect) -> input.Shortcut {
 	shortcut := app.changes_shortcut(&f.state, w, rect.x + rect.width / 2, rect.y + rect.height / 2)
-	key, _ := shortcut.(commands.Shortcut)
+	key, _ := shortcut.(input.Shortcut)
 	return key
 }
 
@@ -767,7 +767,7 @@ every_control_says_what_it_does :: proc(t: ^testing.T) {
 	// The files button names its list; the summary opens the panel, and names the key that does.
 	testing.expect_value(t, tooltip_at(&f, w, empty.files_button), "Files in this diff")
 	testing.expect_value(t, tooltip_at(&f, w, empty.summary), "Source and turns")
-	testing.expect_value(t, key_at(&f, w, empty.summary), commands.Shortcut{.K, {.Control}})
+	testing.expect_value(t, key_at(&f, w, empty.summary), input.Shortcut{.K, {.Control}})
 	lines := make([]turns.Diff_Line, 4)
 	defer delete(lines)
 	for &line, i in lines {line = {kind = .Context, old_line = i32(i + 1), new_line = i32(i + 1), text = "line"}}
@@ -787,10 +787,10 @@ every_control_says_what_it_does :: proc(t: ^testing.T) {
 	// The strip, its steps and the chips are the panel's: they have tooltips while it is open.
 	pane.state.panel_open = true
 	testing.expect_value(t, tooltip_at(&f, w, g.step_back), "Older turn")
-	testing.expect_value(t, key_at(&f, w, g.step_back), commands.Shortcut{.Arrow_Left, {}})
+	testing.expect_value(t, key_at(&f, w, g.step_back), input.Shortcut{.Arrow_Left, {}})
 	// The newest turn is selected, so the newer step is off; it still says what it does.
 	testing.expect_value(t, tooltip_at(&f, w, g.step_forward), "Newer turn")
-	testing.expect_value(t, key_at(&f, w, g.step_forward), commands.Shortcut{.Arrow_Right, {}})
+	testing.expect_value(t, key_at(&f, w, g.step_forward), input.Shortcut{.Arrow_Right, {}})
 	testing.expect_value(t, tooltip_at(&f, w, g.range_label), "Choose turns")
 	testing.expect_value(t, tooltip_at(&f, w, g.source_chips[0]), pane.model.sources[0])
 	testing.expect(t, g.overview.width > 0)

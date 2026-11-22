@@ -27,7 +27,7 @@ Key_Search_Step :: enum u8 {
 	Leave,
 }
 
-KEY_SEARCH_TOGGLE :: commands.Shortcut{.K, {.Alt}}
+KEY_SEARCH_TOGGLE :: input.Shortcut{.K, {.Alt}}
 KEY_SEARCH_LABEL :: "Alt+K"
 KEY_SEARCH_CLEAR_LABEL :: "Backspace"
 @(private)
@@ -54,7 +54,7 @@ key_search_start :: proc(k: ^Key_Search) {k^ = {state = .Recording}}
 // Takes the raw key while recording: recording needs the physical key and the leader. Bare Esc and
 // Alt+K leave; bare Backspace clears what was recorded; everything else is recorded.
 key_search_record :: proc(
-	k: ^Key_Search, raw: input.Key_Event, leader: Maybe(commands.Shortcut),
+	k: ^Key_Search, raw: input.Key_Event, leader: Maybe(input.Shortcut),
 ) -> Key_Search_Step {
 	if !raw.pressed {return .None}
 	if key_search_toggles(raw) {return .Leave}
@@ -98,7 +98,7 @@ key_search_leave :: proc(k: ^Key_Search, field: ^Text_Field) {
 	k^ = {}
 }
 
-key_search_match :: proc(k: ^Key_Search, shortcut: commands.Shortcut) -> commands.Shortcut_Hit {
+key_search_match :: proc(k: ^Key_Search, shortcut: input.Shortcut) -> commands.Shortcut_Hit {
 	return commands.key_press_match(k.press, shortcut)
 }
 

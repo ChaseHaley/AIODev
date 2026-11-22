@@ -8,10 +8,10 @@ import "core:testing"
 // Find, Show everything palette and Copy with their default shortcuts, and New Tab, as a surface lists them.
 @(private = "file")
 chain_book :: proc() -> []ui.Shortcut_Command {
-	@(static, rodata) find := [?]commands.Shortcut{{.F, {.Control, .Shift}}}
-	@(static, rodata) palette := [?]commands.Shortcut{{.P, {.Control, .Shift}}}
-	@(static, rodata) copy := [?]commands.Shortcut{{.C, {.Control, .Shift}}, {.Insert, {.Control}}}
-	@(static, rodata) new_tab := [?]commands.Shortcut{{.T, {.Control, .Shift}}}
+	@(static, rodata) find := [?]input.Shortcut{{.F, {.Control, .Shift}}}
+	@(static, rodata) palette := [?]input.Shortcut{{.P, {.Control, .Shift}}}
+	@(static, rodata) copy := [?]input.Shortcut{{.C, {.Control, .Shift}}, {.Insert, {.Control}}}
+	@(static, rodata) new_tab := [?]input.Shortcut{{.T, {.Control, .Shift}}}
 	book := make([]ui.Shortcut_Command, 4, context.temp_allocator)
 	book[0] = {"keys.terminal.find", "Find", find[:]}
 	book[1] = {"keys.app.command_palette", "Show everything palette", palette[:]}

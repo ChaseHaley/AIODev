@@ -6,7 +6,7 @@ import "core:strings"
 import "core:testing"
 import "core:time"
 import "aio:ghostty"
-import "aio:search"
+import "cosmos:search"
 import "aio:term"
 
 LINES_200 :: "cmd.exe /d /c \"for /l %i in (1,1,200) do @echo LINE_%i\""

@@ -1,6 +1,5 @@
 package main
 
-import "aio:commands"
 import "cosmos:input"
 import "aio:layout"
 import "cosmos:platform"
@@ -12,6 +11,7 @@ import "core:fmt"
 import "core:reflect"
 import "core:strings"
 import "core:time"
+@(require) import "aio:commands"
 
 // Agent changes panes: what agents changed per turn, and plain git diffs. A pane follows one agent (the
 // pane that ran it and its session, either of which may be unknown) and a directory inside the repository.
@@ -1737,11 +1737,11 @@ changes_tooltip :: proc(app: ^App, w: ^Window, x, y: f32) -> string {
 
 // The keys the step buttons answer to, older then newer; changes_key reads them and so do the tooltips.
 @(private = "file", rodata)
-CHANGES_STEP_KEYS := [2]commands.Shortcut{{.Arrow_Left, {}}, {.Arrow_Right, {}}}
+CHANGES_STEP_KEYS := [2]input.Shortcut{{.Arrow_Left, {}}, {.Arrow_Right, {}}}
 
 // The key that toggles the panel, which the row's summary and chevron button name.
 @(private = "file", rodata)
-CHANGES_PANEL_KEY := commands.Shortcut{.K, {.Control}}
+CHANGES_PANEL_KEY := input.Shortcut{.K, {.Control}}
 
 // The fixed keys the step buttons and the file list's regular expression toggle answer to; the toggle's is
 // the find bar's, which the list shares.
@@ -1760,13 +1760,13 @@ changes_shortcut :: proc(app: ^App, w: ^Window, x, y: f32) -> Tooltip_Shortcut {
 	case .Summary:
 		return CHANGES_PANEL_KEY
 	case .Toolbar_Delete:
-		return commands.Shortcut{.Delete, {}}
+		return input.Shortcut{.Delete, {}}
 	case .Toolbar_Comment:
 		return "type to start"
 	case .Toolbar_Label:
 		return "Alt+1–9"
 	case .Editor_Bold:
-		return commands.Shortcut{.B, {.Control}}
+		return input.Shortcut{.B, {.Control}}
 	}
 	return nil
 }

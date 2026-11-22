@@ -205,7 +205,7 @@ shortcut_label_next :: proc(rest: ^string) -> (part: Label_Part, ok: bool) {
 
 // Compares a typed query with one binding. A chord query matches only by the grammar; other text
 // matches the label's letters, which must start at a part and reach the key through two parts or more.
-shortcut_query_match :: proc(q: ^Shortcut_Query, shortcut: Shortcut) -> Shortcut_Hit {
+shortcut_query_match :: proc(q: ^Shortcut_Query, shortcut: input.Shortcut) -> Shortcut_Hit {
 	held := chord_modifiers(shortcut.modifiers)
 	if q.chord {
 		if !(q.modifiers <= held) {return {}}
@@ -254,7 +254,7 @@ shortcut_query_match :: proc(q: ^Shortcut_Query, shortcut: Shortcut) -> Shortcut
 
 // The chord a query names in full: its key with a held modifier or the leader, which a binding needs
 // for a typing key. False when the query names no such chord.
-shortcut_query_chord :: proc(q: ^Shortcut_Query) -> (Shortcut, bool) {
+shortcut_query_chord :: proc(q: ^Shortcut_Query) -> (input.Shortcut, bool) {
 	if !q.chord || !q.keyed || q.modifiers & {.Control, .Alt, .Super, .Leader} == {} {return {}, false}
 	return {q.key, q.modifiers}, true
 }
@@ -290,7 +290,7 @@ key_modifier :: proc(key: input.Key) -> input.Modifiers {
 
 // Records one key press, as shortcut capture reads it: a modifier alone is held, the configured leader
 // waits for its key, and anything else completes the chord, which the result reports.
-key_press_record :: proc(press: ^Key_Press, e: input.Key_Event, leader: Maybe(Shortcut)) -> (complete: bool) {
+key_press_record :: proc(press: ^Key_Press, e: input.Key_Event, leader: Maybe(input.Shortcut)) -> (complete: bool) {
 	if e.repeat {return false}
 	modifiers := e.modifiers & {.Control, .Shift, .Alt, .Super}
 	if input.is_modifier_key(e.key) {
@@ -316,7 +316,7 @@ key_press_record :: proc(press: ^Key_Press, e: input.Key_Event, leader: Maybe(Sh
 
 // Compares a recorded press with one binding: held modifiers list the bindings under exactly that set,
 // the leader lists its sequences, and a chord matches as dispatch does, by position for Physical.
-key_press_match :: proc(press: Key_Press, shortcut: Shortcut) -> Shortcut_Hit {
+key_press_match :: proc(press: Key_Press, shortcut: input.Shortcut) -> Shortcut_Hit {
 	held := chord_modifiers(shortcut.modifiers)
 	switch press.state {
 	case .None:
@@ -355,7 +355,7 @@ key_press_text :: proc(press: Key_Press, out: []u8) -> string {
 
 // The chord a recorded press names, under the layout's key; ok when it is complete and could be bound,
 // which a typing key needs a held modifier or the leader for.
-key_press_chord :: proc(press: Key_Press) -> (chord: Shortcut, ok: bool) {
+key_press_chord :: proc(press: Key_Press) -> (chord: input.Shortcut, ok: bool) {
 	if press.state != .Chord {return}
 	chord = {press.logical, press.modifiers}
 	if press.leader {chord.modifiers += {.Leader}}
@@ -364,8 +364,8 @@ key_press_chord :: proc(press: Key_Press) -> (chord: Shortcut, ok: bool) {
 
 // Whether no command binds `chord`, comparing keys as the grammar names them, so a Physical binding of
 // the same key counts; the leader itself is never free.
-shortcut_free :: proc(registry: ^Registry, chord: Shortcut, leader: Maybe(Shortcut)) -> bool {
-	same :: proc(a, b: Shortcut) -> bool {
+shortcut_free :: proc(registry: ^Registry, chord: input.Shortcut, leader: Maybe(input.Shortcut)) -> bool {
+	same :: proc(a, b: input.Shortcut) -> bool {
 		return a.key == b.key && chord_modifiers(a.modifiers) == chord_modifiers(b.modifiers)
 	}
 	if l, ok := leader.?; ok && same(l, chord) {return false}

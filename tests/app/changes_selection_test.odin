@@ -213,8 +213,8 @@ a_drag_over_code_selects_text_and_the_toolbar_labels_or_deletes_it :: proc(t: ^t
 	testing.expect_value(t, app.changes_tooltip(&f.state, w, deleting.x + 2, deleting.y + 2),
 		"Ask the agent to delete this")
 	shortcut := app.changes_shortcut(&f.state, w, deleting.x + 2, deleting.y + 2)
-	key, _ := shortcut.(commands.Shortcut)
-	testing.expect_value(t, key, commands.Shortcut{.Delete, {}})
+	key, _ := shortcut.(input.Shortcut)
+	testing.expect_value(t, key, input.Shortcut{.Delete, {}})
 	comment := g.selection_bar.comment
 	testing.expect_value(t, app.changes_tooltip(&f.state, w, comment.x + 2, comment.y + 2), "Comment")
 	shortcut = app.changes_shortcut(&f.state, w, comment.x + 2, comment.y + 2)

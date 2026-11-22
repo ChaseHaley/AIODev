@@ -4,5 +4,4 @@ package pure_test
 // available for affected-package checks; -all-packages includes their tests through these imports.
 @(require) import "../agent"
 @(require) import "../draws"
-@(require) import "../fuzzy"
 @(require) import "../program_art"

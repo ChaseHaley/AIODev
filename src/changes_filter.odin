@@ -1,6 +1,6 @@
 package main
 
-import "aio:line_match"
+import "cosmos:line_match"
 import "aio:settings"
 import "aio:ui"
 import "core:fmt"

@@ -8,7 +8,7 @@ import "cosmos:glyphs"
 import "cosmos:input"
 import "cosmos:platform"
 import "cosmos:render"
-import "aio:search"
+import "cosmos:search"
 import "aio:ui"
 import fixtures "../fixtures"
 

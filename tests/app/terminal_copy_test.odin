@@ -80,7 +80,7 @@ terminal_copy_custom_binding_and_find_keep_their_own_scope :: proc(t: ^testing.T
 	f: Terminal_Copy_Fixture
 	defer terminal_copy_fixture_destroy(&f)
 	if !terminal_copy_fixture(t, &f) {return}
-	bindings := [?]commands.Shortcut{{.Y, {.Control, .Alt}}}
+	bindings := [?]input.Shortcut{{.Y, {.Control, .Alt}}}
 	overrides := [?]commands.Override{{commands.Command_Id(app.Action.Copy), bindings[:]}}
 	errors: [1]commands.Error
 	testing.expect_value(t, commands.rebind(&f.state.registry, overrides[:], errors[:]), commands.Error.None)

@@ -1,6 +1,6 @@
 package main
 
-import "aio:fuzzy"
+import "cosmos:fuzzy"
 import "cosmos:input"
 import "aio:settings"
 import "aio:ui"

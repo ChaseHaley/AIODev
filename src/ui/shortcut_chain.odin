@@ -14,11 +14,11 @@ import "core:strings"
 // commands it edits for one check; the list borrows their strings and slices.
 Shortcut_Command :: struct {
 	key, title: string,
-	shortcuts:  []commands.Shortcut,
+	shortcuts:  []input.Shortcut,
 }
 
 // Whether `shortcuts` bind `chord`, by the rule the settings check refuses duplicates with.
-shortcuts_hold :: proc(shortcuts: []commands.Shortcut, chord: commands.Shortcut) -> bool {
+shortcuts_hold :: proc(shortcuts: []input.Shortcut, chord: input.Shortcut) -> bool {
 	for shortcut in shortcuts {if commands.shortcut_equal(shortcut, chord) {return true}}
 	return false
 }
@@ -42,7 +42,7 @@ Shortcut_Chain :: struct {
 	// What the chain shows, rebuilt after every change: each member's chips in member order, the
 	// chords held more than once, and the line above the rows.
 	chips:     [dynamic]Chain_Chip,
-	contested: [dynamic]commands.Shortcut,
+	contested: [dynamic]input.Shortcut,
 	summary:   strings.Builder,
 	// The part under the pointer, which draws its hover.
 	hover:     Chain_Hit,
@@ -50,7 +50,7 @@ Shortcut_Chain :: struct {
 
 Chain_Entry :: struct {
 	key, title: string,
-	shortcuts:  []commands.Shortcut,
+	shortcuts:  []input.Shortcut,
 }
 
 // `saved` and `draft` are shortcut text in canonical labels; `first` and `count` are its chips.
@@ -215,15 +215,15 @@ chain_member_of :: proc(chain: ^Shortcut_Chain, entry: int) -> int {
 
 // How many commands hold `chord`, counting each member by its draft.
 @(private)
-chain_holders :: proc(chain: ^Shortcut_Chain, chord: commands.Shortcut) -> int {
+chain_holders :: proc(chain: ^Shortcut_Chain, chord: input.Shortcut) -> int {
 	count := 0
 	for entry in chain.entries {if shortcuts_hold(entry.shortcuts, chord) {count += 1}}
 	return count
 }
 
 @(private)
-chain_parse :: proc(text: string) -> []commands.Shortcut {
-	storage := make([]commands.Shortcut, len(text) + 1, context.temp_allocator)
+chain_parse :: proc(text: string) -> []input.Shortcut {
+	storage := make([]input.Shortcut, len(text) + 1, context.temp_allocator)
 	count, err := commands.parse_shortcuts(text, storage)
 	return err == .None ? storage[:count] : nil
 }
@@ -235,7 +235,7 @@ chain_apply :: proc(
 	chain: ^Shortcut_Chain,
 	member: int,
 	text: string,
-	chord: Maybe(commands.Shortcut),
+	chord: Maybe(input.Shortcut),
 ) -> runtime.Allocator_Error {
 	parsed := chain_parse(text)
 	shortcuts := slice.clone(parsed) or_return
@@ -362,7 +362,7 @@ chain_refresh :: proc(chain: ^Shortcut_Chain) {
 }
 
 @(private)
-chain_text_chips :: proc(chain: ^Shortcut_Chain, text: string, saved: []commands.Shortcut) {
+chain_text_chips :: proc(chain: ^Shortcut_Chain, text: string, saved: []input.Shortcut) {
 	cursor := commands.shortcut_alternatives_begin(text)
 	index := 0
 	for label, ok := commands.shortcut_alternatives_next(&cursor); ok;

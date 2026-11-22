@@ -175,7 +175,7 @@ composed_native_persistence_and_mixed_changes_keep_all_app_checks :: proc(t: ^te
 	for path in ([]string{"src/window.odin", "src/pty/conpty_windows.odin",
 		"src/settings/settings.odin", "src/ui/palette.odin", "src/term/input.odin",
 		"src/unknown/module.odin", "tests/app/rail_test.odin"}) {
-		plan := gates.classify([]string{"src/fuzzy/fuzzy.odin", path})
+		plan := gates.classify([]string{"src/draws/draws.odin", path})
 		defer gates.plan_destroy(&plan)
 		testing.expect(t, plan.app_all, path)
 		out := strings.builder_make()

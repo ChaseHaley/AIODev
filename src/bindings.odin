@@ -17,7 +17,7 @@ Binding_Source :: struct {
 
 // Both sides of a rejected shortcut, with the effective source line for each.
 Binding_Conflict :: struct {
-	shortcut:    commands.Shortcut,
+	shortcut:    input.Shortcut,
 	leader_text: string,
 	loser:       Binding_Source,
 	winner:      Binding_Source,
@@ -46,7 +46,7 @@ Binding_Issue :: struct {
 // Issues live in the temp allocator; consume the report before the frame ends.
 Binding_Report :: struct {
 	issues: []Binding_Issue,
-	leader: Maybe(commands.Shortcut),
+	leader: Maybe(input.Shortcut),
 }
 
 // Applies the file's overrides and leader policy to the registry, then reports what happened.
@@ -79,7 +79,7 @@ binding_report :: proc(
 			}
 			continue
 		}
-		storage := make([]commands.Shortcut, len(binding.value) + 1, context.temp_allocator)
+		storage := make([]input.Shortcut, len(binding.value) + 1, context.temp_allocator)
 		n, parse_error := commands.parse_shortcuts(binding.value, storage)
 		if parse_error != .None {
 			issue := Binding_Issue {

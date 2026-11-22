@@ -39,13 +39,13 @@ Shortcut_Capture :: struct {
 	replace:      int,
 	// Captured chords name physical key positions (Physical+) instead of layout characters.
 	physical:     bool,
-	leader:       Maybe(commands.Shortcut),
+	leader:       Maybe(input.Shortcut),
 	// The latest hint, static text; an error when `error`.
 	hint:         string,
 	error:        bool,
 	// The chord recorded last, and the "Used by" line naming the other commands that hold it, which
 	// the owner writes with shortcut_capture_check. Both are empty while nothing new is recorded.
-	chord:        Maybe(commands.Shortcut),
+	chord:        Maybe(input.Shortcut),
 	used_by:      [CAPTURE_USED_BY_CAP]u8,
 	used_by_len:  int,
 }
@@ -112,7 +112,7 @@ shortcut_capture_resume :: proc(c: ^Shortcut_Capture) {c.state = .Capturing}
 // Records `chord` after the saved alternatives, as a press would, so the owner's conflict check reads
 // it; Enter saves it, Esc discards it.
 shortcut_capture_add :: proc(
-	c: ^Shortcut_Capture, draft: ^Text_Field, saved: string, chord: commands.Shortcut,
+	c: ^Shortcut_Capture, draft: ^Text_Field, saved: string, chord: input.Shortcut,
 ) {
 	shortcut_capture_start(c, len(commands.shortcut_alternatives(saved, context.temp_allocator)))
 	buffer: [commands.SHORTCUT_TEXT_CAP]u8
@@ -242,7 +242,7 @@ capture_key :: proc(
 			return .Positions
 		}
 	}
-	chord := commands.Shortcut{c.physical ? e.key : commands.logical_key(e.key, e.unshifted), modifiers}
+	chord := input.Shortcut{c.physical ? e.key : commands.logical_key(e.key, e.unshifted), modifiers}
 	if c.physical {chord.modifiers += {.Physical}}
 	binding := mode == .Alternatives
 	if leader, ok := c.leader.?;

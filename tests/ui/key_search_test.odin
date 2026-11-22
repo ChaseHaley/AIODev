@@ -6,13 +6,13 @@ import "aio:ui"
 import "core:testing"
 
 @(private = "file")
-LEADER :: commands.Shortcut{.Space, {.Control}}
+LEADER :: input.Shortcut{.Space, {.Control}}
 
 // Commands shaped like the defaults the search must tell apart: two Ctrl+Shift letters, a digit, a leader
 // alternative, a key-position binding, and a title that fuzzily matches `cs c`.
 @(private = "file")
 search_registry :: proc(t: ^testing.T) -> commands.Registry {
-	parse :: proc(text: string) -> commands.Shortcut {
+	parse :: proc(text: string) -> input.Shortcut {
 		shortcut, ok := commands.parse_shortcut(text)
 		assert(ok)
 		return shortcut
@@ -95,7 +95,7 @@ palette_offers_an_unassigned_chord_to_a_chosen_command :: proc(t: ^testing.T) {
 	ui.palette_text(&p, &r, "ctrl+shift+g")
 	if !testing.expect(t, len(p.results) > 0) {return}
 	testing.expect_value(t, p.results[0].kind, ui.Palette_Kind.Unassigned)
-	testing.expect_value(t, p.results[0].chord, commands.Shortcut{.G, {.Control, .Shift}})
+	testing.expect_value(t, p.results[0].chord, input.Shortcut{.G, {.Control, .Shift}})
 	// Used chords, by key name or position, and the leader are not offered.
 	p.leader = LEADER
 	for query in ([?]string{"ctrl+shift+c", "ctrl shift y", "ctrl space", "shift g"}) {
@@ -236,7 +236,7 @@ settings_search_shares_the_shortcut_grammar_and_offers_free_chords :: proc(t: ^t
 	ui.editor_text(&p, "ctrl shift g")
 	testing.expect_value(t, len(p.items), 0)
 	free, offered := ui.editor_free_chord(&p).?
-	testing.expect(t, offered && free == commands.Shortcut{.G, {.Control, .Shift}})
+	testing.expect(t, offered && free == input.Shortcut{.G, {.Control, .Shift}})
 	testing.expect_value(t, ui.editor_key(&p, down(.Enter)), ui.Editor_Outcome.Assign_Shortcut)
 	ui.field_set(&p.filter, "")
 	ui.editor_text(&p, "ctrl shift y")

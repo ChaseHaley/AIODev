@@ -64,7 +64,7 @@ lua_keys_apply_rebuilds_the_keymap_and_reports_each_bad_declaration_at_its_line 
 	// A shortcut set in Settings differs from the command's defaults.
 	zoom := commands.find(&state.registry, "pane.zoom")
 	if !testing.expect(t, zoom != nil) {return}
-	chosen := [?]commands.Shortcut{{.F12, {.Control, .Alt}}}
+	chosen := [?]input.Shortcut{{.F12, {.Control, .Alt}}}
 	testing.expect_value(t, commands.set_shortcuts(&state.registry, zoom.id, chosen[:]), commands.Error.None)
 
 	// A binding from an earlier load must not survive the rebuild.

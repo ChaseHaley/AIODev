@@ -228,7 +228,7 @@ Action :: enum u32 {
 @(private)
 Command_Descriptor :: struct {
 	name, title: string,
-	shortcuts:   []commands.Shortcut,
+	shortcuts:   []input.Shortcut,
 	route:       Pane_Link_Route,
 	spec:        Command_Spec,
 }

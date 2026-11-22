@@ -37,7 +37,7 @@ tooltip_label :: proc(app: ^App, w: ^Window, owner: Pointer_Target, x, y: f32) -
 // names none.
 Tooltip_Shortcut :: union {
 	Action,
-	commands.Shortcut,
+	input.Shortcut,
 	string,
 }
 
@@ -49,7 +49,7 @@ tooltip_shortcut :: proc(app: ^App, w: ^Window, owner: Pointer_Target, x, y: f32
 	if shortcut_of == nil {return ""}
 	switch shortcut in shortcut_of(app, w, x, y) {
 	case Action: return action_shortcut_text(app, shortcut, out)
-	case commands.Shortcut: return commands.shortcut_text(shortcut, out)
+	case input.Shortcut: return commands.shortcut_text(shortcut, out)
 	case string: return string(out[:copy(out, shortcut)])
 	}
 	return ""

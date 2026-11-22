@@ -1,6 +1,5 @@
 package main
 
-import "aio:commands"
 import "cosmos:input"
 import "core:time"
 import "cosmos:render"
@@ -9,7 +8,7 @@ import "aio:ui"
 // The keys that open the selected row's menu, the one its "…" button opens; the button's tooltip names
 // the first. An entry without modifiers opens it whatever modifiers are held.
 @(rodata)
-WORKSPACE_ROW_MENU_KEYS := [?]commands.Shortcut{{.F10, {.Shift}}, {.Context_Menu, {}}, {.Arrow_Right, {}}}
+WORKSPACE_ROW_MENU_KEYS := [?]input.Shortcut{{.F10, {.Shift}}, {.Context_Menu, {}}, {.Arrow_Right, {}}}
 
 workspace_row_menu_key :: proc(e: input.Key_Event) -> bool {
 	for open in WORKSPACE_ROW_MENU_KEYS {

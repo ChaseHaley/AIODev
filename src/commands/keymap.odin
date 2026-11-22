@@ -5,7 +5,7 @@ import "core:strings"
 
 Key_Sequence :: struct {
 	mode: string,
-	chords: [4]Shortcut,
+	chords: [4]input.Shortcut,
 	count: int,
 }
 Command_Target :: struct {

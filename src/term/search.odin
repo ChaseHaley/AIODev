@@ -1,7 +1,7 @@
 package term
 
 import "aio:ghostty"
-import "aio:search"
+import "cosmos:search"
 import "base:runtime"
 import "core:log"
 import "core:sync"

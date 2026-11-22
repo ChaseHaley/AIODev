@@ -7,17 +7,13 @@ import "core:strings"
 import "core:unicode/utf8"
 
 Command_Id :: distinct u32
-Shortcut :: struct {
-	key:       input.Key,
-	modifiers: input.Modifiers,
-}
 Shortcut_Set :: struct {
-	items: []Shortcut,
+	items: []input.Shortcut,
 	count: int,
 }
 Override :: struct {
 	id:        Command_Id,
-	shortcuts: []Shortcut,
+	shortcuts: []input.Shortcut,
 }
 Command :: struct {
 	id:                  Command_Id,
@@ -140,7 +136,7 @@ chord_modifiers :: proc(modifiers: input.Modifiers) -> input.Modifiers {
 // The one match rule: a Physical binding names the pressed position, any other the layout's key.
 @(private)
 binding_matches :: proc(
-	binding: Shortcut,
+	binding: input.Shortcut,
 	physical, logical: input.Key,
 	modifiers: input.Modifiers,
 ) -> bool {
@@ -150,13 +146,13 @@ binding_matches :: proc(
 
 // A prefix reserves the same named chord in both identity modes. Direct
 // logical/physical bindings remain distinct and retain physical-first dispatch.
-prefix_conflicts :: proc(prefix, binding: Shortcut) -> bool {
+prefix_conflicts :: proc(prefix, binding: input.Shortcut) -> bool {
 	same := chord_modifiers(prefix.modifiers) == chord_modifiers(binding.modifiers)
 	return prefix.key == binding.key && same
 }
 
 shortcut_matches :: proc(
-	binding: Shortcut,
+	binding: input.Shortcut,
 	physical: input.Key,
 	modifiers: input.Modifiers,
 	unshifted: rune,
@@ -186,7 +182,7 @@ find_by_key :: proc(
 }
 
 // Whether two shortcuts are one binding: the same key and the same binding modifiers.
-shortcut_equal :: proc(a, b: Shortcut) -> bool {
+shortcut_equal :: proc(a, b: input.Shortcut) -> bool {
 	return a.key == b.key && normalized(a.modifiers) == normalized(b.modifiers)
 }
 
@@ -200,7 +196,7 @@ shortcut_set_equal :: proc(a, b: Shortcut_Set) -> bool {
 }
 
 @(require_results)
-unbind :: proc(registry: ^Registry, id: Command_Id, shortcut: Shortcut) -> bool {
+unbind :: proc(registry: ^Registry, id: Command_Id, shortcut: input.Shortcut) -> bool {
 	item := find(registry, id)
 	if item == nil {return false}
 	for binding, i in active_shortcuts(item) {
@@ -258,10 +254,10 @@ register :: proc(registry: ^Registry, command: Command) -> Error {
 			note_targets[j]^ = cloned
 		}
 	}
-	active, active_error := make([]Shortcut, command.shortcuts.count, allocator)
+	active, active_error := make([]input.Shortcut, command.shortcuts.count, allocator)
 	if active_error != nil {return .Out_Of_Memory}
 	owned.shortcuts = {active, len(active)}
-	defaults, defaults_error := make([]Shortcut, command.shortcuts.count, allocator)
+	defaults, defaults_error := make([]input.Shortcut, command.shortcuts.count, allocator)
 	if defaults_error != nil {return .Out_Of_Memory}
 	owned.defaults = {defaults, len(defaults)}
 	copy(active, command.shortcuts.items[:command.shortcuts.count])
@@ -328,7 +324,7 @@ find_name :: proc(registry: ^Registry, name: string) -> ^Command {
 }
 
 @(require_results)
-find_by_shortcut :: proc(registry: ^Registry, shortcut: Shortcut) -> ^Command {
+find_by_shortcut :: proc(registry: ^Registry, shortcut: input.Shortcut) -> ^Command {
 	for &item in registry.items {
 		for binding in active_shortcuts(&item) {
 			if shortcut_equal(binding, shortcut) {return &item}
@@ -499,7 +495,7 @@ modifier_words := [?]struct {
 }
 
 @(require_results)
-shortcut_label :: proc(shortcut: Shortcut, out: []u8) -> (string, Error) {
+shortcut_label :: proc(shortcut: input.Shortcut, out: []u8) -> (string, Error) {
 	@(static, rodata)
 	key_labels := KEY_LABELS
 	key, known := reflect.enum_name_from_value(shortcut.key)
@@ -526,10 +522,10 @@ SHORTCUT_TEXT_CAP :: 128
 // The separator between a set's labels and between a field's alternatives.
 SHORTCUT_SEPARATOR :: ", "
 
-// Shortcut text is total: out holds SHORTCUT_TEXT_CAP bytes, a label always fits them, so a short
+// input.Shortcut text is total: out holds SHORTCUT_TEXT_CAP bytes, a label always fits them, so a short
 // write is a programmer error and callers consume text without a failure branch of their own.
 @(require_results)
-shortcut_text :: proc(shortcut: Shortcut, out: []u8) -> string {
+shortcut_text :: proc(shortcut: input.Shortcut, out: []u8) -> string {
 	label, err := shortcut_label(shortcut, out)
 	assert(err == .None)
 	return label
@@ -575,12 +571,12 @@ shortcut_set_text :: proc(set: Shortcut_Set, allocator := context.allocator) -> 
 	return shortcut_alternatives_text(labels, allocator)
 }
 
-active_shortcuts :: proc(command: ^Command) -> []Shortcut {
+active_shortcuts :: proc(command: ^Command) -> []input.Shortcut {
 	return command.shortcuts.items[:command.shortcuts.count]
 }
 
 @(require_results)
-set_shortcuts :: proc(registry: ^Registry, id: Command_Id, shortcuts: []Shortcut) -> Error {
+set_shortcuts :: proc(registry: ^Registry, id: Command_Id, shortcuts: []input.Shortcut) -> Error {
 	command := find(registry, id)
 	if command == nil {return .Unknown_Command}
 	for shortcut in shortcuts {
@@ -591,7 +587,7 @@ set_shortcuts :: proc(registry: ^Registry, id: Command_Id, shortcuts: []Shortcut
 	items := command.shortcuts.items
 	if len(shortcuts) > len(items) {
 		err: runtime.Allocator_Error
-		items, err = make([]Shortcut, len(shortcuts), registry.items.allocator)
+		items, err = make([]input.Shortcut, len(shortcuts), registry.items.allocator)
 		if err != nil {return .Out_Of_Memory}
 	}
 	bindings := Shortcut_Set{items, len(shortcuts)}
@@ -662,7 +658,7 @@ parse_modifiers :: proc(text: string) -> (input.Modifiers, bool) {
 }
 
 @(require_results)
-parse_shortcut :: proc(text: string) -> (Shortcut, bool) {
+parse_shortcut :: proc(text: string) -> (input.Shortcut, bool) {
 	rest := strings.trim_space(text)
 	modifiers: input.Modifiers
 	for {
@@ -687,7 +683,7 @@ parse_shortcut :: proc(text: string) -> (Shortcut, bool) {
 // the comma itself can be the key. `last` distinguishes a final comma key from a trailing separator.
 @(private)
 shortcut_alternative_take :: proc(text: string) -> (
-	part, rest: string, shortcut: Shortcut, found, last: bool,
+	part, rest: string, shortcut: input.Shortcut, found, last: bool,
 ) {
 	for end in 1 ..= len(text) {
 		if end < len(text) && text[end] != ',' {continue}
@@ -700,7 +696,7 @@ shortcut_alternative_take :: proc(text: string) -> (
 }
 
 @(require_results)
-parse_shortcuts :: proc(text: string, out: []Shortcut) -> (int, Error) {
+parse_shortcuts :: proc(text: string, out: []input.Shortcut) -> (int, Error) {
 	rest := strings.trim_space(text)
 	count := 0
 	for rest != "" {
@@ -760,7 +756,7 @@ shortcut_alternatives_next :: proc(cursor: ^Shortcut_Alternatives) -> (part: str
 @(require_results)
 shortcut_alternatives :: proc(text: string, allocator := context.allocator) -> []string {
 	if strings.trim_space(text) == "" {return nil}
-	storage := make([]Shortcut, len(text) + 1, context.temp_allocator)
+	storage := make([]input.Shortcut, len(text) + 1, context.temp_allocator)
 	count, err := parse_shortcuts(text, storage)
 	if err != .None {
 		parts, _ := strings.split(text, ",", allocator)

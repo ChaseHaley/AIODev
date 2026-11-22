@@ -1,7 +1,7 @@
 package markdown
 
-import "aio:line_match"
-import "aio:search"
+import "cosmos:line_match"
+import "cosmos:search"
 import "core:log"
 import "core:strings"
 import "core:time"

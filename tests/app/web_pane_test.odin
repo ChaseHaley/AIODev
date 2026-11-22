@@ -7,7 +7,7 @@ import "core:testing"
 import app "../../src"
 import "aio:layout"
 import "cosmos:platform"
-import "aio:search"
+import "cosmos:search"
 
 @(private = "file")
 Web_Fixture :: struct {

@@ -2,6 +2,7 @@ package commands_test
 
 import "aio:commands"
 import "core:testing"
+import "cosmos:input"
 
 @(private = "file")
 map_binding :: proc(t: ^testing.T, keymap: ^commands.Keymap, text: string, id: commands.Command_Id,
@@ -49,8 +50,8 @@ keymap_sequences_parse_complete_chords_and_mode_names :: proc(t: ^testing.T) {
 	testing.expect(t, ok)
 	testing.expect_value(t, sequence.mode, "resize")
 	testing.expect_value(t, sequence.count, 2)
-	testing.expect_value(t, sequence.chords[0], commands.Shortcut{.B, {.Control}})
-	testing.expect_value(t, sequence.chords[1], commands.Shortcut{.C, {}})
+	testing.expect_value(t, sequence.chords[0], input.Shortcut{.B, {.Control}})
+	testing.expect_value(t, sequence.chords[1], input.Shortcut{.C, {}})
 }
 
 @(test)
@@ -181,7 +182,7 @@ keymap_precedence_reports_defaults_and_settings_losers :: proc(t: ^testing.T) {
 	defer commands.key_state_destroy(&state)
 	registry := commands.create()
 	defer commands.destroy(&registry)
-	defaults := [?]commands.Shortcut{{.B, {.Control}}, {.D, {.Control}}}
+	defaults := [?]input.Shortcut{{.B, {.Control}}, {.D, {.Control}}}
 	testing.expect_value(t, commands.register(&registry, {
 		id = 1, name = "pane.split", title = "Split", shortcuts = {defaults[:], len(defaults)},
 	}), commands.Error.None)
@@ -192,7 +193,7 @@ keymap_precedence_reports_defaults_and_settings_losers :: proc(t: ^testing.T) {
 		testing.expect_value(t, conflicts[0].loser_source, "defaults")
 		testing.expect_value(t, conflicts[0].winner_source, "init.lua:12")
 	}
-	changed := [?]commands.Shortcut{{.B, {.Control}}}
+	changed := [?]input.Shortcut{{.B, {.Control}}}
 	testing.expect_value(t, commands.set_shortcuts(&registry, 1, changed[:]), commands.Error.None)
 	result := map_feed(&keymap, &state, &registry, "Ctrl+B")
 	_, pass := result.(commands.Pass)

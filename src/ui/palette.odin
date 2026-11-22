@@ -1,7 +1,7 @@
 package ui
 
 import "aio:commands"
-import "aio:fuzzy"
+import "cosmos:fuzzy"
 import "cosmos:input"
 import "cosmos:platform"
 import "cosmos:render"
@@ -199,7 +199,7 @@ Palette_Result :: struct {
 	// then lights its letters rather than the title's.
 	value:       string,
 	shortcut:    Shortcut_Highlight,
-	chord:       commands.Shortcut,
+	chord:       input.Shortcut,
 	// A command that cannot run now, listed because a shortcut search matched it; drawn disabled.
 	unavailable: bool,
 	// How often and recently it was run, from Palette_Usage when the palette opened.
@@ -240,7 +240,7 @@ Palette :: struct {
 	edit:         Palette_Edit,
 	buffers:      Edit_Buffers,
 	drag:         Palette_Drag,
-	leader:       Maybe(commands.Shortcut),
+	leader:       Maybe(input.Shortcut),
 	availability: Palette_Availability,
 	reset_hover:  int,
 	scroll_hover: bool,
@@ -251,7 +251,7 @@ Palette :: struct {
 	keys:         Key_Search,
 	keys_hover:   bool,
 	// The chord the Unassigned row offered: the next command chosen opens its shortcut editor with it.
-	assign:       Maybe(commands.Shortcut),
+	assign:       Maybe(input.Shortcut),
 	// Queries that ran a result, and the Up and Down walk through them; see palette_recall_key.
 	history:      Palette_History,
 	browse:       Maybe(Query_Browse(Palette_Mode)),
@@ -565,7 +565,7 @@ palette_key_search_step :: proc(p: ^Palette, registry: ^commands.Registry, step:
 
 // Lists commands for picking one to take `chord`, which the Unassigned row offered: choosing one opens
 // its shortcut editor with the chord added, and Enter there saves it.
-palette_assign :: proc(p: ^Palette, registry: ^commands.Registry, chord: commands.Shortcut) -> Outcome {
+palette_assign :: proc(p: ^Palette, registry: ^commands.Registry, chord: input.Shortcut) -> Outcome {
 	edit_set(p, nil)
 	palette_browse_end(p)
 	p.keys = {}

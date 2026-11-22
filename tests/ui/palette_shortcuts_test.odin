@@ -4,6 +4,7 @@ import "aio:commands"
 import "aio:ui"
 import "core:strings"
 import "core:testing"
+import "cosmos:input"
 
 @(private)
 binding_palette :: proc(t: ^testing.T, p: ^ui.Palette) -> commands.Registry {
@@ -59,7 +60,7 @@ palette_shortcut_add_delete_physical_and_leader_use_settings_capture :: proc(t: 
 	r := binding_palette(t, &p)
 	defer commands.destroy(&r)
 	defer ui.palette_destroy(&p)
-	p.leader = commands.Shortcut{.B, {.Control}}
+	p.leader = input.Shortcut{.B, {.Control}}
 	ui.palette_key(&p, &r, press(.Enter, {.Control}))
 	ui.palette_key(&p, &r, press(.Arrow_Down))
 	ui.palette_key(&p, &r, press(.Arrow_Down))

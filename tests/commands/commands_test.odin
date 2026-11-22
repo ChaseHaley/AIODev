@@ -45,7 +45,7 @@ registration_and_lookup :: proc(t: ^testing.T) {
 		testing.expect_value(t, commands.register(&registry, item.command), item.error)
 	}
 	testing.expect_value(t, len(registry.items), 1)
-	shortcut := commands.Shortcut{
+	shortcut := input.Shortcut{
 		.Q,
 		{.Control, .Shift, .Right_Control, .Right_Shift, .Num_Lock, .Caps_Lock},
 	}
@@ -114,7 +114,7 @@ runtime_metadata_is_owned_and_categories_honor_overrides :: proc(t: ^testing.T) 
 	text := [6]u8{'C', 'u', 's', 't', 'o', 'm'}
 	value := string(text[:])
 	notes := [?]commands.Argument_Note{{argument = .Text, help = {value, value, value}}}
-	bindings := [?]commands.Shortcut{{.F2, {}}}
+	bindings := [?]input.Shortcut{{.F2, {}}}
 	id, err := commands.register_runtime(&registry, {name = value, title = value,
 		category = value, keywords = value, source = value, summary = value,
 		notes = notes[:], shortcuts = {bindings[:], len(bindings)}}, 0)
@@ -171,7 +171,7 @@ runtime_registration_allocation_failures_leave_no_command :: proc(t: ^testing.T)
 
 @(test)
 labels :: proc(t: ^testing.T) {
-	Case :: struct { shortcut: commands.Shortcut, label: string }
+	Case :: struct { shortcut: input.Shortcut, label: string }
 	cases := [?]Case{
 		{{.P, {.Control, .Shift}}, "Ctrl+Shift+P"},
 		{{.Equal, {.Control}}, "Ctrl+="},
@@ -198,7 +198,7 @@ labels :: proc(t: ^testing.T) {
 		testing.expect_value(t, label, item.label)
 	}
 	for key in input.Key {
-		shortcut := commands.Shortcut{key, {.Control, .Shift, .Alt, .Super}}
+		shortcut := input.Shortcut{key, {.Control, .Shift, .Alt, .Super}}
 		label, err := commands.shortcut_label(shortcut, buffer[:])
 		testing.expect_value(t, err, commands.Error.None)
 		testing.expect(t, len(label) > 0)
@@ -243,10 +243,10 @@ many_shortcut_alternatives_survive_rebinding_and_failed_growth :: proc(t: ^testi
 	state := Failure{context.allocator, 64}
 	registry := commands.create(runtime.Allocator{failing_allocator, &state})
 	defer commands.destroy(&registry)
-	defaults := [?]commands.Shortcut{{.Q, {.Control}}}
+	defaults := [?]input.Shortcut{{.Q, {.Control}}}
 	testing.expect_value(t, commands.register(&registry, {id = 1, name = "quit", title = "Quit",
 		shortcuts = {defaults[:], len(defaults)}}), commands.Error.None)
-	bindings: [12]commands.Shortcut
+	bindings: [12]input.Shortcut
 	n, err := commands.parse_shortcuts("F1, F2, F3, F4, F5, F6, F7, F8, F9, F10, F11, F12", bindings[:])
 	testing.expect_value(t, err, commands.Error.None)
 	testing.expect_value(t, n, 12)
@@ -254,7 +254,7 @@ many_shortcut_alternatives_survive_rebinding_and_failed_growth :: proc(t: ^testi
 	for binding in bindings { testing.expect(t, commands.find_by_shortcut(&registry, binding) != nil) }
 	command := commands.find(&registry, 1)
 	state.remaining = 0
-	larger: [13]commands.Shortcut
+	larger: [13]input.Shortcut
 	copy(larger[:], bindings[:])
 	larger[12] = {.F13, {}}
 	testing.expect_value(t, commands.set_shortcuts(&registry, 1, larger[:]), commands.Error.Out_Of_Memory)
@@ -292,14 +292,14 @@ shortcut_round_trips :: proc(t: ^testing.T) {
 			testing.expect_value(t, err, commands.Error.None)
 			parsed, ok := commands.parse_shortcut(label)
 			testing.expect(t, ok)
-			testing.expect_value(t, parsed, commands.Shortcut{
+			testing.expect_value(t, parsed, input.Shortcut{
 				key, modifiers & {.Control, .Shift, .Alt, .Super},
 			})
 		}
 	}
 	parsed, ok := commands.parse_shortcut("  cTrL + sHiFt + pAgEuP  ")
 	testing.expect(t, ok)
-	testing.expect_value(t, parsed, commands.Shortcut{.Page_Up, {.Control, .Shift}})
+	testing.expect_value(t, parsed, input.Shortcut{.Page_Up, {.Control, .Shift}})
 	for invalid in ([]string{"", "Ctrl+", "Ctrl+Ctrl+C", "Ctrl+Bogus", "Hyper+A", "A+B"}) {
 		_, valid := commands.parse_shortcut(invalid)
 		testing.expect(t, !valid)
@@ -310,7 +310,7 @@ shortcut_round_trips :: proc(t: ^testing.T) {
 multiple_shortcuts :: proc(t: ^testing.T) {
 	registry := commands.create()
 	defer commands.destroy(&registry)
-	bindings := [?]commands.Shortcut{{.C, {.Control, .Shift}}, {.Insert, {.Control}}}
+	bindings := [?]input.Shortcut{{.C, {.Control, .Shift}}, {.Insert, {.Control}}}
 	testing.expect_value(t, commands.register(&registry,
 		{id = 1, name = "copy", title = "Copy", shortcuts = {{0 = bindings[0], 1 = bindings[1]}, 2}}), commands.Error.None)
 	bindings[0].key = .A
@@ -323,9 +323,9 @@ multiple_shortcuts :: proc(t: ^testing.T) {
 	testing.expect_value(t, commands.set_shortcuts(&registry, 2, commands.active_shortcuts(copy_command)),
 		commands.Error.Duplicate_Shortcut)
 	testing.expect_value(t, len(commands.active_shortcuts(commands.find(&registry, 2))), 0)
-	paste_binding := [?]commands.Shortcut{{.V, {.Control}}}
+	paste_binding := [?]input.Shortcut{{.V, {.Control}}}
 	testing.expect_value(t, commands.set_shortcuts(&registry, 2, paste_binding[:]), commands.Error.None)
-	conflicting := [?]commands.Shortcut{{.A, {.Alt}}, {.Insert, {.Control, .Right_Control}}}
+	conflicting := [?]input.Shortcut{{.A, {.Alt}}, {.Insert, {.Control, .Right_Control}}}
 	testing.expect_value(t, commands.set_shortcuts(&registry, 2, conflicting[:]),
 		commands.Error.Duplicate_Shortcut)
 	testing.expect_value(t, commands.find(&registry, 2).shortcuts.items[0], paste_binding[0])
@@ -339,7 +339,7 @@ multiple_shortcuts :: proc(t: ^testing.T) {
 	testing.expect_value(t, commands.set_shortcuts(&registry, 1, nil), commands.Error.None)
 	testing.expect(t, commands.find_by_shortcut(&registry, {.Insert, {.Control}}) == nil)
 	testing.expect_value(t, len(commands.active_shortcuts(copy_command)), 0)
-	out: [4]commands.Shortcut
+	out: [4]input.Shortcut
 	count, err := commands.parse_shortcuts("Ctrl+,, Ctrl+Num ,, Ctrl+Num+, Shift+Insert", out[:])
 	testing.expect_value(t, err, commands.Error.None)
 	testing.expect_value(t, count, 4)
@@ -360,7 +360,7 @@ multiple_shortcuts :: proc(t: ^testing.T) {
 @(test)
 shortcut_set_text_has_one_join_and_one_parse_policy :: proc(t: ^testing.T) {
 	defer free_all(context.temp_allocator)
-	bindings := [?]commands.Shortcut{{.C, {.Control, .Shift}}, {.Insert, {.Control}}, {.V, {.Alt}}}
+	bindings := [?]input.Shortcut{{.C, {.Control, .Shift}}, {.Insert, {.Control}}, {.V, {.Alt}}}
 	set := commands.Shortcut_Set{bindings[:], 2}
 	testing.expect_value(t, commands.shortcut_set_text(set, context.temp_allocator),
 		"Ctrl+Shift+C, Ctrl+Insert")
@@ -415,9 +415,9 @@ rebinding :: proc(t: ^testing.T) {
 	}
 	state.remaining = 0
 	copy_command := commands.find(&registry, 1)
-	copy_chord := [?]commands.Shortcut{{.C, {.Control}}}
-	paste_chord := [?]commands.Shortcut{{.V, {.Control}}}
-	other_chord := [?]commands.Shortcut{{.X, {.Control}}}
+	copy_chord := [?]input.Shortcut{{.C, {.Control}}}
+	paste_chord := [?]input.Shortcut{{.V, {.Control}}}
+	other_chord := [?]input.Shortcut{{.X, {.Control}}}
 	swap := [?]commands.Override{{1, paste_chord[:]}, {2, copy_chord[:]}}
 	errors: [2]commands.Error
 	_ = commands.rebind(&registry, swap[:], errors[:])

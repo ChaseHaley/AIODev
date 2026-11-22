@@ -890,7 +890,7 @@ when AIO_CONTROL {
 	verify_chord :: proc(
 		app: ^App,
 		id: input.Window_Id,
-		chord: commands.Shortcut,
+		chord: input.Shortcut,
 	) -> verify_protocol.Error {
 		keys := [?]input.Key{.Control_Left, .Shift_Left, .Alt_Left, .Meta_Left}
 		flags := [?]input.Modifier{.Control, .Shift, .Alt, .Super}

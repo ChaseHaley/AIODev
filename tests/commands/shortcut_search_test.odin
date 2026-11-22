@@ -105,7 +105,7 @@ press :: proc(key: input.Key, modifiers: input.Modifiers = {}, unshifted: rune =
 
 @(test)
 key_press_records_held_modifiers_leader_sequences_and_chords :: proc(t: ^testing.T) {
-	leader := commands.Shortcut{.Space, {.Control}}
+	leader := input.Shortcut{.Space, {.Control}}
 	p: commands.Key_Press
 	testing.expect(t, !commands.key_press_record(&p, press(.Control_Left, {.Control}), leader))
 	testing.expect(t, !commands.key_press_record(&p, press(.Shift_Left, {.Control}), leader))
@@ -169,7 +169,7 @@ free_chords_are_bindable_and_unused :: proc(t: ^testing.T) {
 	testing.expect_value(t, commands.register(&r, {
 		id = 1, name = "status.panel", title = "Panel", shortcuts = {{0 = position}, 1},
 	}), commands.Error.None)
-	leader := commands.Shortcut{.Space, {.Control}}
+	leader := input.Shortcut{.Space, {.Control}}
 	q := commands.shortcut_query("ctrl shift g")
 	chord, ok := commands.shortcut_query_chord(&q)
 	testing.expect(t, ok && commands.shortcut_free(&r, chord, leader))
@@ -190,5 +190,5 @@ free_chords_are_bindable_and_unused :: proc(t: ^testing.T) {
 	testing.expect(t, !ok)
 	commands.key_press_record(&p, press(.G, {.Control, .Shift}, 'g'), nil)
 	chord, ok = commands.key_press_chord(p)
-	testing.expect(t, ok && chord == commands.Shortcut{.G, {.Control, .Shift}})
+	testing.expect(t, ok && chord == input.Shortcut{.G, {.Control, .Shift}})
 }

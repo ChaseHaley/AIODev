@@ -74,8 +74,8 @@ azerty_digit_row_preserves_all_number_shortcuts :: proc(t: ^testing.T) {
 	for char, i in unshifted {
 		key := input.Key(int(input.Key.Digit_0)+i)
 		testing.expect_value(t, commands.logical_key(key, char), key)
-		binding := commands.Shortcut{key, {.Alt}}
-		testing.expect_value(t, commands.set_shortcuts(&registry, 1, []commands.Shortcut{binding}), commands.Error.None)
+		binding := input.Shortcut{key, {.Alt}}
+		testing.expect_value(t, commands.set_shortcuts(&registry, 1, []input.Shortcut{binding}), commands.Error.None)
 		testing.expect_value(t, commands.find_by_key(&registry, key, {.Alt}, char).id, commands.Command_Id(1))
 		testing.expect_value(t, commands.find_by_key(&registry, key, {.Control}, char), nil)
 		testing.expect(t, !commands.shortcut_matches(binding, key, {.Alt, .Shift}, char))
@@ -86,7 +86,7 @@ azerty_digit_row_preserves_all_number_shortcuts :: proc(t: ^testing.T) {
 physical_shortcuts_round_trip_and_unbind_preserves_alternates :: proc(t: ^testing.T) {
 	shortcut, parsed := commands.parse_shortcut("Ctrl+Physical+Z")
 	testing.expect(t, parsed)
-	testing.expect_value(t, shortcut, commands.Shortcut{.Z, {.Control, .Physical}})
+	testing.expect_value(t, shortcut, input.Shortcut{.Z, {.Control, .Physical}})
 	buffer: [128]u8
 	label, label_error := commands.shortcut_label(shortcut, buffer[:])
 	testing.expect_value(t, label_error, commands.Error.None)

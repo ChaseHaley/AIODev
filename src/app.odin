@@ -91,7 +91,7 @@ App :: struct {
 	registry:              commands.Registry,
 	runtime_runner:        Runtime_Runner,
 	keymap:                commands.Keymap,
-	leader:                Maybe(commands.Shortcut),
+	leader:                Maybe(input.Shortcut),
 	palette:               ui.Palette,
 	// Where the palette's usage is saved; see palette_usage.odin.
 	palette_store:         Palette_Usage_Store,

@@ -246,10 +246,10 @@ tab_context_menu_is_a_rebindable_command :: proc(t: ^testing.T) {
 	if !testing.expect(t, command != nil) { return }
 	defaults := commands.active_shortcuts(command)
 	if testing.expect_value(t, len(defaults), 2) {
-		testing.expect_value(t, defaults[0], commands.Shortcut{.Context_Menu, {}})
-		testing.expect_value(t, defaults[1], commands.Shortcut{.F10, {.Shift}})
+		testing.expect_value(t, defaults[0], input.Shortcut{.Context_Menu, {}})
+		testing.expect_value(t, defaults[1], input.Shortcut{.F10, {.Shift}})
 	}
-	bindings := [?]commands.Shortcut{{.M, {.Control, .Alt}}}
+	bindings := [?]input.Shortcut{{.M, {.Control, .Alt}}}
 	overrides := [?]commands.Override{{command.id, bindings[:]}}
 	errors: [1]commands.Error
 	testing.expect_value(t, commands.rebind(&f.state.registry, overrides[:], errors[:]), commands.Error.None)

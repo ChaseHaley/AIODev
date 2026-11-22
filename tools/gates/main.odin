@@ -33,7 +33,7 @@ PERF_FILES :: []string{"src/window.odin"}
 
 // These packages have direct unit suites and no window/process ownership. Their app contracts are
 // checked by the fast lane per change; full native integration remains a batch obligation.
-FAST_APP_PACKAGES :: []string{"draws", "fuzzy", "links", "program_art"}
+FAST_APP_PACKAGES :: []string{"draws", "links", "program_art"}
 
 Plan :: struct {
 	allocator: runtime.Allocator,

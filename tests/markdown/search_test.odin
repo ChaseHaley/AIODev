@@ -1,7 +1,7 @@
 package markdown_test
 
 import "aio:markdown"
-import "aio:search"
+import "cosmos:search"
 import "base:runtime"
 import "core:testing"
 import "core:time"

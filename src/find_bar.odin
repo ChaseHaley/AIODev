@@ -3,7 +3,7 @@ package main
 import "cosmos:input"
 import "aio:markdown"
 import "cosmos:platform"
-import "aio:search"
+import "cosmos:search"
 import "aio:term"
 import "aio:ui"
 import "core:fmt"

@@ -6,6 +6,7 @@ import "aio:commands"
 import "cosmos:render"
 import "aio:settings"
 import "aio:ui"
+import "cosmos:input"
 
 @(private, rodata)
 cursor_styles := [?]string{"block", "bar", "underline"}
@@ -521,7 +522,7 @@ editor_captures_shortcut_keys :: proc(t: ^testing.T) {
 	p: ui.Editor
 	defer ui.editor_destroy(&p)
 	editor_fixture(t, &p)
-	p.capture.leader = commands.Shortcut{.B, {.Control}}
+	p.capture.leader = input.Shortcut{.B, {.Control}}
 	testing.expect(t, ui.editor_select_key(&p, "keys.pane.split_right"))
 	ui.editor_key(&p, key({key = .Enter}))
 	testing.expect_value(t, ui.editor_popup(&p), ui.Editor_Popup.Shortcuts)

@@ -147,8 +147,8 @@ pane_restart_takes_its_keys_only_from_a_stopped_session :: proc(t: ^testing.T) {
 	if !testing.expect(t, command != nil) {return}
 	defaults := commands.active_shortcuts(command)
 	if testing.expect_value(t, len(defaults), 2) {
-		testing.expect_value(t, defaults[0], commands.Shortcut{.Enter, {}})
-		testing.expect_value(t, defaults[1], commands.Shortcut{.Numpad_Enter, {}})
+		testing.expect_value(t, defaults[0], input.Shortcut{.Enter, {}})
+		testing.expect_value(t, defaults[1], input.Shortcut{.Numpad_Enter, {}})
 	}
 	exited := term.Status{kind = .Exited, exit_code = 1}
 	testing.expect_value(t, app.session_message(s, "", exited), "The shell exited with code 1. Press Enter to restart it.")
@@ -166,7 +166,7 @@ pane_restart_takes_its_keys_only_from_a_stopped_session :: proc(t: ^testing.T) {
 	policy_key(s, w, .Enter)
 	testing.expect_value(t, entry.status, term.Status_Kind.Exited)
 	ui.find_close(&w.find)
-	bindings := [?]commands.Shortcut{{.F5, {}}}
+	bindings := [?]input.Shortcut{{.F5, {}}}
 	overrides := [?]commands.Override{{command.id, bindings[:]}}
 	errors: [1]commands.Error
 	testing.expect_value(t, commands.rebind(&s.registry, overrides[:], errors[:]), commands.Error.None)

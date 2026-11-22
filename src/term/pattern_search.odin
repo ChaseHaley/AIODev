@@ -1,8 +1,8 @@
 package term
 
 import "aio:ghostty"
-import "aio:line_match"
-import "aio:search"
+import "cosmos:line_match"
+import "cosmos:search"
 import "base:runtime"
 import "core:log"
 import "core:slice"

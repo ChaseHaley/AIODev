@@ -8,7 +8,7 @@ import "cosmos:font"
 import "cosmos:glyphs"
 import "cosmos:platform"
 import "cosmos:render"
-import "aio:search"
+import "cosmos:search"
 import "aio:ui"
 
 registry_create :: proc(t: ^testing.T) -> commands.Registry {

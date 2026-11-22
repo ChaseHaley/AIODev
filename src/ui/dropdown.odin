@@ -1,11 +1,11 @@
 package ui
 
 import "cosmos:input"
-import "aio:fuzzy"
-import "aio:line_match"
+import "cosmos:fuzzy"
+import "cosmos:line_match"
 import "cosmos:platform"
 import "cosmos:render"
-import "aio:search"
+import "cosmos:search"
 
 // A searchable list's filter field, with the overlay's padding above it.
 @(private)
