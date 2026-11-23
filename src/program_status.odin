@@ -342,9 +342,12 @@ status_notice :: proc(app: ^App, entry: ^Session_Entry, record: term.Program_Sta
 		}
 	}
 	if .Tray in c {
-		if platform_api.tray_notify(&app.platform, title, text, token, sound) == .None {
+		#partial switch platform_api.tray_notify(&app.platform, title, text, token, sound) {
+		case .None:
 			sound = false
-		} else {
+		case .Not_Initialized:
+			notify(app, .Error, "AIODev has no tray icon, so it could not show a tray notification.")
+		case:
 			notify(app, .Error, "Windows could not show a tray notification.")
 		}
 	}
