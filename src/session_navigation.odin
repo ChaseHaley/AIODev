@@ -3,8 +3,8 @@ package main
 import "core:fmt"
 import "aio:layout"
 
-// Finding and showing the pane a session runs in, wherever it is. Status lists and notices, focus
-// jumps and notification clicks name panes by session, or by a Neovim pane's status id (WORK-548).
+// Finding and showing a pane wherever it is. Status lists and notices and notification clicks name panes
+// by session, or by a Neovim pane's status id (WORK-548); pane history names them by content.
 
 // Finds the owning pane, never a tear-off preview borrowing the same session runtime. An id no session
 // has may be a Neovim pane's status entry, found as the pane that shows that Neovim.
@@ -14,18 +14,31 @@ session_pane_find :: proc(app: ^App, id: u32) -> (^Workspace, Workspace_Pane, bo
 		if pane, found := workspace_first_session(app, workspace, id); found {return workspace, pane, true}
 	}
 	for neovim in app.neovim_panes {
-		if neovim.status.id != id {continue}
-		content := layout.Content{.Neovim, neovim.id}
-		for workspace in app.workspaces {
-			if workspace.provisional {continue}
-			for &tab, index in workspace.tabs {
-				node := layout.find_content(&tab.tree, content)
-				if node == layout.INVALID_NODE {continue}
-				return workspace, {tab = index, node = node, content = content, status = &neovim.status}, true
-			}
-		}
+		if neovim.status.id == id {return content_pane_find(app, {.Neovim, neovim.id})}
 	}
 	return nil, {}, false
+}
+
+// The pane showing `content` in the first workspace that has it, never a tear-off preview.
+content_pane_find :: proc(app: ^App, content: layout.Content) -> (^Workspace, Workspace_Pane, bool) {
+	for workspace in app.workspaces {
+		if workspace.provisional {continue}
+		if pane, found := workspace_content_pane(app, workspace, content); found {return workspace, pane, true}
+	}
+	return nil, {}, false
+}
+
+// The pane showing `content` in `workspace`.
+workspace_content_pane :: proc(
+	app: ^App,
+	workspace: ^Workspace,
+	content: layout.Content,
+) -> (Workspace_Pane, bool) {
+	for tab, index in workspace.tabs {
+		node := layout.find_content(&tab.tree, content)
+		if node != layout.INVALID_NODE {return workspace_pane_at(app, workspace, index, node)}
+	}
+	return {}, false
 }
 
 // Where a session lives, for lists and notices that must say which pane they mean. The pane is
@@ -57,13 +70,19 @@ session_window :: proc(app: ^App, session: u32, fallback: ^Window) -> ^Window {
 	return fallback
 }
 
-// Shows the session's pane, switching workspace, tab and focus as needed. A tiled pane is shown
+// Shows the session's pane, as pane_show does.
+session_show :: proc(app: ^App, w: ^Window, session: u32) -> bool {
+	workspace, pane, _ := session_pane_find(app, session)
+	return pane_show(app, w, workspace, pane)
+}
+
+// Shows `pane` of `workspace`, switching workspace, tab and focus as needed. A tiled pane is shown
 // uncovered: the tab's shown floats are minimized; a floating pane comes out of its capsule to the top.
 // Looking at the pane acknowledges its finished program status, as focusing it does, and the jump list
-// follows the window that now holds the pane; a failed reveal reports why.
-session_show :: proc(app: ^App, w: ^Window, session: u32) -> bool {
-	workspace, pane, found := session_pane_find(app, session)
-	if found && workspace_eligible(app, workspace) && workspace_select(app, w, workspace) {
+// follows the window that now holds the pane. A nil workspace is a pane that was not found; a failed
+// reveal reports why.
+pane_show :: proc(app: ^App, w: ^Window, workspace: ^Workspace, pane: Workspace_Pane) -> bool {
+	if workspace != nil && workspace_eligible(app, workspace) && workspace_select(app, w, workspace) {
 		if owner := window_for_workspace(app, workspace); owner != nil {
 			if owner.workspace.selected != pane.tab {tab_select(app, owner, pane.tab)}
 			pane_focus(app, owner, pane.node)
