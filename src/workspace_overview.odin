@@ -29,6 +29,9 @@ Workspace_Overview :: struct {
 	// The column's workspaces by id, listed as when the flight began. One deleted since, as the workspace
 	// a delete leaves, keeps its card and place, so the flight still lands on the card it was headed for.
 	column:    [dynamic]u32,
+	// The pages the window showed of the workspace the last switch left, which stay in its card while the
+	// switch flies away from it.
+	pages:     [dynamic]Web_Kept_Page,
 	deletion:  Overview_Deletion,
 }
 
@@ -80,6 +83,7 @@ workspace_overview_destroy :: proc(w: ^Window) {
 	for &frame in w.overview.frames {render.draw_list_destroy(&frame.list)}
 	delete(w.overview.frames)
 	delete(w.overview.column)
+	delete(w.overview.pages)
 	overview_deletion_end(&w.overview)
 	w.overview = {}
 }
@@ -92,6 +96,12 @@ workspace_overview_lapse :: proc(w: ^Window) {
 
 workspace_overview_animating :: proc(w: ^Window) -> bool {
 	return ui.motion_active(w.overview.progress)
+}
+
+// Whether a switch is flying away from a workspace whose pages stay in its card.
+workspace_overview_keeps_pages :: proc(w: ^Window) -> bool {
+	o := &w.overview
+	return workspace_overview_animating(w) && o.deletion.phase == .None && len(o.pages) > 0
 }
 
 workspace_overview_animate :: proc(app: ^App, w: ^Window, frame: ui.Frame_Time) -> bool {
@@ -139,6 +149,8 @@ workspace_overview_placed :: proc(app: ^App, w: ^Window) {
 	camera, flying := workspace_overview_camera(w)
 	carried := overview_column_rebuild(app, o, flying ? camera.card : -1)
 	overview_frames_prune(o)
+	clear(&o.pages)
+	if o.drawn.workspace == before && o.drawn.whole {web_pages_keep(app, w, &o.pages)}
 	overview_frame_keep(app, w, before)
 	from, to := overview_index(o, before), overview_index(o, o.shown)
 	motion := settings.motion_resolve(&app.settings, .Workspace)
@@ -305,11 +317,16 @@ workspace_overview_frame_end :: proc(
 	card := overview_card(w, camera, overview_slot(w, target))
 	render.draw_scale(&w.list, content, {}, camera.scale)
 	render.draw_translate(&w.list, content, {card.x, card.y}, card)
+	web_window_scale_pages(app, w, camera.scale, {card.x, card.y})
 	for id, index in o.column {
 		if index == target || overview_deletion_crumbling(w, index) {continue}
 		r := overview_card(w, camera, overview_slot(w, index))
 		if !overview_visible(w, r) {continue}
 		if overview_card_content_draw(app, w, id, r, camera.scale) != .None {return .Ok}
+		if id == o.left && workspace_overview_keeps_pages(w) {
+			web_kept_place(app, w, o.pages[:], camera.scale, {r.x, r.y})
+			web_overlay_split_over_pages(w)
+		}
 	}
 	return overview_marks_draw(app, w, camera, target)
 }

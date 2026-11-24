@@ -74,6 +74,8 @@ Web_Window_State :: struct {
 	split_count: int,
 	// The floating group being drawn shows a web pane.
 	group_web:   bool,
+	// A page sits at the level the next overlay covers; see web_overlay_split_over_pages.
+	level_pages: bool,
 }
 
 // App-wide WebView2 environment and pane registry. Embedded in App.
@@ -114,8 +116,8 @@ Web_Pane :: struct {
 	find_index:      i32,
 	find_failed:     bool,
 	favicon_serial:  u32,
-	// The DirectComposition level the last frame drew the pane at; 0 while tiled.
-	level:           i32,
+	// Where the last frame that drew the pane showed its page.
+	placement:       Web_Placement,
 	// Permissions already reported as blocked, so a page that keeps asking raises one notice each.
 	denied:          bit_set[platform.Webview_Permission],
 	nav_hover:       Web_Nav_Button,
@@ -785,6 +787,7 @@ web_recover_rect :: proc(w: ^Window, body: render.Rect) -> render.Rect {
 web_pane_draw :: proc(app: ^App, w: ^Window, pane_rect: layout.Pane_Rect) -> render.Build_Status {
 	pane := web_find(app, pane_rect.content.id)
 	if pane == nil {return .Ok}
+	web_pane_place(app, w, pane, pane_rect)
 	f := pane_frame(w, pane_rect)
 	nav := web_nav_layout(w, pane, pane_rect.rect)
 	clip := render.Rect{pane_rect.rect.x, pane_rect.rect.y, pane_rect.rect.width, pane_rect.rect.height}
@@ -951,18 +954,19 @@ web_nav_draw :: proc(
 
 // --- DirectComposition levels and split-layer presentation ---
 
-// Starts a frame: whether this window shows any web pane, so build_frame splits its draw list around
-// the web views.
-web_window_prepare_frame :: proc(w: ^Window) {
-	w.web.shown = false
+// Starts a frame: whether this window may show a page, so build_frame splits its draw list around the
+// web views, and no page placed by it yet. A page shows while its pane draws in the window, while it
+// leaves on its own as the panes move, and while the workspace overview flies away from its workspace.
+web_window_prepare_frame :: proc(app: ^App, w: ^Window) {
 	w.web.split_count = 0
 	w.web.group_web = false
-	if !platform.webview_supported() {return}
+	w.web.level_pages = false
+	for pane in app.web_panes {
+		if pane.placement.window == w.id {pane.placement.visible = false}
+	}
+	w.web.shown = pane_motion_leaves_web(w) || workspace_overview_keeps_pages(w)
 	for pane in w.panes {
-		if pane.content.kind == .Web {
-			w.web.shown = true
-			return
-		}
+		if pane.content.kind == .Web {w.web.shown = true}
 	}
 }
 
@@ -976,15 +980,14 @@ web_overlay_split :: proc(w: ^Window) {
 	if !w.web.shown || w.web.split_count == WEB_LEVELS_MAX {return}
 	w.web.splits[w.web.split_count] = len(w.list.layers)
 	w.web.split_count += 1
+	w.web.level_pages = false
 	_ = render.push_layer(&w.list, {0, 0, f32(w.width), f32(w.height)})
 }
 
-// Notes a floating pane about to draw: a web pane takes the level above the overlay its group's frame
-// draws in, so the frame sits under the page and every later float over it.
-web_float_pane :: proc(app: ^App, w: ^Window, rect: layout.Pane_Rect) {
-	if !w.web.shown || rect.content.kind != .Web {return}
-	if pane := web_find(app, rect.content.id); pane != nil {pane.level = i32(w.web.split_count)}
-	w.web.group_web = true
+// Starts the next overlay when a page sits at the current level, so what draws next covers it, as a
+// pane growing over the others does. Without a page beneath, the window needs no further overlay.
+web_overlay_split_over_pages :: proc(w: ^Window) {
+	if w.web.level_pages {web_overlay_split(w)}
 }
 
 // Ends a floating group: one that showed a web pane starts a new overlay above it.
@@ -992,6 +995,98 @@ web_float_group_end :: proc(w: ^Window) {
 	if !w.web.group_web {return}
 	w.web.group_web = false
 	web_overlay_split(w)
+}
+
+// Records the page of `pane` placed this frame of w: a page at the current level needs the next
+// overlay above it before anything covers it, and one in a floating group ends the group with one.
+@(private = "file")
+web_place :: proc(w: ^Window, pane: ^Web_Pane, placement: Web_Placement, floating: bool) {
+	pane.placement = placement
+	w.web.level_pages ||= placement.visible
+	if floating {w.web.group_web = true}
+}
+
+// The area beyond its own frame a page drawn now shows only inside of: the area panes slide in while
+// they slide, and for a tiled pane drawn beneath the chrome, the content area, so a page never covers
+// the Activity panel, the tab rail or the title bar.
+@(private = "file")
+web_place_bound :: proc(app: ^App, w: ^Window, floating: bool) -> Maybe(render.Rect) {
+	if stage, sliding := w.pane_motion.slide.?; sliding && pane_motion_animating(w) {return stage}
+	if floating || pane_motion_over_chrome(w) {return nil}
+	area := window_content_area_in(app, w, w.pane_fill)
+	return render.Rect{area.x, area.y, area.width, area.height}
+}
+
+@(private = "file")
+web_pane_place :: proc(app: ^App, w: ^Window, pane: ^Web_Pane, rect: layout.Pane_Rect) {
+	web_place(w, pane, web_pane_placement(app, w, pane, rect), rect.floating)
+}
+
+// Places the page of web pane `id` leaving on its own while the panes move, drawn from its last frame:
+// that frame drew the pane at `drawn` and now draws at `shown`, moved with it and clipped to it. A page
+// leaves with its pane, as a terminal's last frame does, instead of vanishing as the motion starts.
+web_ghost_place :: proc(app: ^App, w: ^Window, id: u32, drawn, shown: layout.Rect, floating: bool) {
+	pane := web_find(app, id)
+	if pane == nil {return}
+	body := web_body_rect(app, w, pane, drawn)
+	offset := [2]f32{math.round(shown.x - drawn.x), math.round(shown.y - drawn.y)}
+	moved := render.Rect{body.x + offset.x, body.y + offset.y, body.width, body.height}
+	bound := render.Rect{shown.x, shown.y, shown.width, shown.height}
+	if area, ok := web_place_bound(app, w, floating).?; ok {
+		left, top := max(bound.x, area.x), max(bound.y, area.y)
+		right := min(bound.x + bound.width, area.x + area.width)
+		bottom := min(bound.y + bound.height, area.y + area.height)
+		bound = {left, top, max(0, right - left), max(0, bottom - top)}
+	}
+	web_place(w, pane, web_placement_at(app, w, pane, moved, {body.width, body.height}, bound), floating)
+}
+
+// Shrinks a placement by `scale` toward `origin`, as the workspace overview shrinks the frame it was
+// placed in. The page keeps its size and clip in its own pixels, and its Bounds stay at its visual.
+@(private = "file")
+web_placement_shrink :: proc(p: ^Web_Placement, scale: f32, origin: [2]f32) {
+	p.visual.x = i32(math.round(origin.x + f32(p.visual.x) * scale))
+	p.visual.y = i32(math.round(origin.y + f32(p.visual.y) * scale))
+	p.bounds.x, p.bounds.y = p.visual.x, p.visual.y
+	p.scale *= scale
+}
+
+// While the workspace overview plays, the window's own content shrinks by `scale` toward `origin`, and so
+// do the pages it placed.
+web_window_scale_pages :: proc(app: ^App, w: ^Window, scale: f32, origin: [2]f32) {
+	for pane in app.web_panes {
+		if pane.placement.window != w.id || !pane.placement.visible {continue}
+		web_placement_shrink(&pane.placement, scale, origin)
+	}
+}
+
+// Places the pages kept with a workspace's last frame in its overview card, the frame shrunk by `scale`
+// toward `origin`, above the card. A page placed since, by this frame or another window, stays there.
+web_kept_place :: proc(app: ^App, w: ^Window, kept: []Web_Kept_Page, scale: f32, origin: [2]f32) {
+	for page in kept {
+		pane := web_find(app, page.id)
+		if pane == nil || pane.crashed != .None {continue}
+		if pane.placement.window != w.id || pane.placement.visible {continue}
+		p := page.placement
+		p.window, p.level = w.id, i32(w.web.split_count)
+		web_placement_shrink(&p, scale, origin)
+		web_place(w, pane, p, false)
+	}
+}
+
+// A page a window showed, kept with its last frame of a workspace for that workspace's overview card.
+Web_Kept_Page :: struct {
+	id:        u32,
+	placement: Web_Placement,
+}
+
+// Keeps the pages window w's last frame showed, replacing `kept`.
+web_pages_keep :: proc(app: ^App, w: ^Window, kept: ^[dynamic]Web_Kept_Page) {
+	clear(kept)
+	for pane in app.web_panes {
+		if pane.placement.window != w.id || !pane.placement.visible {continue}
+		_, _ = append(kept, Web_Kept_Page{pane.id, pane.placement})
+	}
 }
 
 @(private = "file")
@@ -1064,93 +1159,87 @@ Web_Pixel_Rect :: struct {
 	x, y, width, height: i32,
 }
 
-// Where a web pane's page goes in its window. `visual` is where DirectComposition draws the page; `bounds`
-// is WebView2's Bounds, which share the visual's origin in the same window's client pixels, because
-// WebView2 opens a page's dropdowns, tooltips and menus at the parent window's client origin plus the
-// Bounds' origin. The clip edges are relative to the visual.
+// Where a web pane's page goes in a window. `visual` is where DirectComposition draws the page, its size
+// before `scale`; `bounds` is WebView2's Bounds, which share the visual's origin in the same window's
+// client pixels, because WebView2 opens a page's dropdowns, tooltips and menus at the parent window's
+// client origin plus the Bounds' origin, and keep the size the page lays itself out at. The clip edges
+// are relative to the visual, in the page's own pixels. `window` is the window whose last frame placed
+// it, and `level` the DirectComposition level it sits at there.
 Web_Placement :: struct {
+	window:                         input.Window_Id,
 	visible:                        bool,
 	level:                          i32,
 	visual:                         Web_Pixel_Rect,
 	bounds:                         Web_Pixel_Rect,
 	clip_l, clip_t, clip_r, clip_b: f32,
 	radius_bl, radius_br:           f32,
+	scale:                          f32,
 }
 
-// Places the web pane `pane`, shown in w at `shown_rect`, for this frame.
+// Places the web pane `pane`, shown in w at `shown_rect`, for this frame, where its frame draws. While
+// panes move, the page keeps the size its layout rectangle gives it, so Chromium lays it out once, and
+// DirectComposition moves it and clips it to its frame at the display's rate.
 web_pane_placement :: proc(
 	app: ^App,
 	w: ^Window,
 	pane: ^Web_Pane,
 	shown_rect: layout.Pane_Rect,
 ) -> Web_Placement {
-	animating := pane_motion_animating(w)
-	stage, sliding := w.pane_motion.slide.?
 	f := pane_frame(w, shown_rect)
 	vis_body := web_body_rect(app, w, pane, f.shown)
-	logical_body := web_body_rect(app, w, pane, shown_rect.rect)
-	inset := web_body_inset(app, w)
-	// Clip the visual to its own body AND to the slide stage / content area so sliding panes never
-	// paint over the Activity panel, tab rail or title bar.
-	clip_l, clip_t := f32(0), f32(0)
-	clip_r, clip_b := vis_body.width, vis_body.height
-	apply_clip :: proc(vis: render.Rect, bound: render.Rect, cl, ct, cr, cb: ^f32) {
-		cl^ = max(cl^, bound.x - vis.x)
-		ct^ = max(ct^, bound.y - vis.y)
-		cr^ = min(cr^, bound.x + bound.width - vis.x)
-		cb^ = min(cb^, bound.y + bound.height - vis.y)
+	size := pane_motion_animating(w) ? web_body_rect(app, w, pane, shown_rect.rect) : vis_body
+	bound := web_place_bound(app, w, shown_rect.floating)
+	return web_placement_at(app, w, pane, vis_body, {size.width, size.height}, bound)
+}
+
+// The placement of pane's page drawn at `body`, laid out at `size`, showing only inside `bound` when
+// there is one, at the level above everything w has drawn so far this frame.
+@(private = "file")
+web_placement_at :: proc(
+	app: ^App,
+	w: ^Window,
+	pane: ^Web_Pane,
+	body: render.Rect,
+	size: [2]f32,
+	bound: Maybe(render.Rect),
+) -> Web_Placement {
+	clip_l, clip_t, clip_r, clip_b := f32(0), f32(0), body.width, body.height
+	if b, ok := bound.?; ok {
+		clip_l, clip_t = max(clip_l, b.x - body.x), max(clip_t, b.y - body.y)
+		clip_r, clip_b = min(clip_r, b.x + b.width - body.x), min(clip_b, b.y + b.height - body.y)
 	}
-	if sliding && animating {
-		apply_clip(vis_body, stage, &clip_l, &clip_t, &clip_r, &clip_b)
-	} else if !shown_rect.floating && !pane_motion_over_chrome(w) {
-		content_area := window_content_area_in(app, w, w.pane_fill)
-		bound := render.Rect{content_area.x, content_area.y, content_area.width, content_area.height}
-		apply_clip(vis_body, bound, &clip_l, &clip_t, &clip_r, &clip_b)
-	}
-	// During 160 ms animated pane motion, keep Chromium's viewport at its settled target size while
-	// DirectComposition smoothly clips and positions the visual at full display refresh rate.
-	size := animating ? logical_body : vis_body
-	covered := false
-	if raised_key, has_raised := w.pane_motion.raised.?; has_raised && animating && !shown_rect.floating {
-		covered = raised_key != pane_motion_key(shown_rect.content)
-	}
-	inner_radius := max(f32(0), window_pane_radius(app, w) - inset)
+	inner_radius := max(f32(0), window_pane_radius(app, w) - web_body_inset(app, w))
 	visual := Web_Pixel_Rect {
-		i32(math.round(vis_body.x)),
-		i32(math.round(vis_body.y)),
-		i32(math.round(vis_body.width)),
-		i32(math.round(vis_body.height)),
+		i32(math.round(body.x)),
+		i32(math.round(body.y)),
+		i32(math.round(body.width)),
+		i32(math.round(body.height)),
 	}
+	bottom := clip_b >= body.height - 0.5
 	return {
-		visible = !workspace_overview_animating(w) && !covered && pane.crashed == .None &&
-			(clip_r - clip_l) >= 2 && (clip_b - clip_t) >= 2 && pane.url != "",
-		level = shown_rect.floating ? pane.level : 0,
+		window = w.id,
+		visible = pane.crashed == .None && (clip_r - clip_l) >= 2 && (clip_b - clip_t) >= 2 && pane.url != "",
+		level = i32(w.web.split_count),
 		visual = visual,
-		bounds = {visual.x, visual.y, max(1, i32(math.round(size.width))), max(1, i32(math.round(size.height)))},
+		bounds = {visual.x, visual.y, max(1, i32(math.round(size.x))), max(1, i32(math.round(size.y)))},
 		clip_l = clip_l,
 		clip_t = clip_t,
 		clip_r = clip_r,
 		clip_b = clip_b,
-		radius_bl = clip_l <= 0.5 && clip_b >= vis_body.height - 0.5 ? inner_radius : 0,
-		radius_br = clip_r >= vis_body.width - 0.5 && clip_b >= vis_body.height - 0.5 ? inner_radius : 0,
+		radius_bl = clip_l <= 0.5 && bottom ? inner_radius : 0,
+		radius_br = clip_r >= body.width - 0.5 && bottom ? inner_radius : 0,
+		scale = 1,
 	}
 }
 
+// Gives each page this window placed its place, creating the view of a pane it shows for the first time,
+// and hides the pages it showed last that it no longer does.
 @(private = "file")
 web_window_sync_visuals :: proc(app: ^App, w: ^Window, host: platform.Webview_Host) {
 	env_ready := web_env_ensure(app)
-
 	for pane in app.web_panes {
-		shown_rect: layout.Pane_Rect
-		found := false
-		for pr in w.panes {
-			if pr.content.kind == .Web && pr.content.id == pane.id {
-				shown_rect = pr
-				found = true
-				break
-			}
-		}
-		if !found {
+		p := pane.placement
+		if p.window != w.id {
 			if pane.host_window == w.id && pane.view != nil {
 				platform.webview_set_placement(
 					pane.view, host, false, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, w.scale,
@@ -1165,8 +1254,7 @@ web_window_sync_visuals :: proc(app: ^App, w: ^Window, host: platform.Webview_Ho
 			)
 		}
 		if pane.view == nil {continue}
-
-		p := web_pane_placement(app, w, pane, shown_rect)
+		platform.webview_set_visual_scale(pane.view, p.scale)
 		platform.webview_set_placement(
 			pane.view,
 			host,

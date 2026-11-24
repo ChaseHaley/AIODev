@@ -32,5 +32,20 @@ when AIO_CONTROL {
 		state_value(r, state_key("%s.find_count", prefix), p.find_count)
 		state_value(r, state_key("%s.find_index", prefix), p.find_index)
 		state_value(r, state_key("%s.find_failed", prefix), p.find_failed)
+		// Where the window that drew the pane last shows its page: whether it does, its DirectComposition
+		// level, the part of the window it covers, and how much it is shrunk. Headless builds decide it too.
+		page := p.placement
+		state_value(r, state_key("%s.page_shown", prefix), page.visible)
+		state_value(r, state_key("%s.page_level", prefix), page.level)
+		state_valuef(
+			r,
+			state_key("%s.page_rect", prefix),
+			"%.0f,%.0f,%.0f,%.0f",
+			f32(page.visual.x) + page.clip_l * page.scale,
+			f32(page.visual.y) + page.clip_t * page.scale,
+			(page.clip_r - page.clip_l) * page.scale,
+			(page.clip_b - page.clip_t) * page.scale,
+		)
+		state_valuef(r, state_key("%s.page_scale", prefix), "%g", page.scale)
 	}
 }

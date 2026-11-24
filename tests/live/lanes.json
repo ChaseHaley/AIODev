@@ -308,6 +308,9 @@
     "unicode_powershell": {
       "lane": "headless"
     },
+    "web_page_motion": {
+      "lane": "headless"
+    },
     "web_panes": {
       "lane": "headless"
     },

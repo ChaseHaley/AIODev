@@ -163,6 +163,28 @@ pane_motion_raised :: proc(w: ^Window, pane: layout.Pane_Rect) -> bool {
 	return ok && pane_motion_animating(w) && raised == pane_motion_key(pane.content)
 }
 
+// Whether a pane draws above the other tiled panes this frame, live or as its last frame.
+pane_motion_raising :: proc(w: ^Window) -> bool {
+	_, ok := w.pane_motion.raised.?
+	return ok && pane_motion_animating(w)
+}
+
+// Whether a web pane leaves on its own while the panes move, taking its page with it.
+pane_motion_leaves_web :: proc(w: ^Window) -> bool {
+	if !pane_motion_animating(w) {return false}
+	for ghost in w.pane_motion.ghosts {
+		if _, web := pane_motion_web_id(ghost.key); web && ghost.successor == nil {return true}
+	}
+	return false
+}
+
+// The web pane a motion key names; false for any other key.
+@(private = "file")
+pane_motion_web_id :: proc(key: u64) -> (id: u32, ok: bool) {
+	if key & (PANE_MOTION_FRAME | PANE_MOTION_CHROME) != 0 {return 0, false}
+	return u32(key), layout.Content_Kind(key >> 32) == .Web
+}
+
 pane_motion_destroy :: proc(w: ^Window) {
 	ui.layout_motion_destroy(&w.pane_motion.moving)
 	pane_ghosts_clear(&w.pane_motion)
@@ -672,6 +694,7 @@ pane_ghosts_draw_alone :: proc(app: ^App, w: ^Window, chrome: bool) {
 		for &pane in ghosts {
 			if alone(pane, 0) && pane.container == frame.key &~ PANE_MOTION_FRAME {pane_ghost_draw(app, w, &pane)}
 		}
+		web_float_group_end(w)
 	}
 	framed :: proc(ghosts: []Pane_Ghost, container: u64) -> bool {
 		for g in ghosts {if g.successor == nil && g.key == PANE_MOTION_FRAME | container {return true}}
@@ -680,6 +703,7 @@ pane_ghosts_draw_alone :: proc(app: ^App, w: ^Window, chrome: bool) {
 	for &pane in ghosts {
 		if !alone(pane, 0) || pane.container == 0 || framed(ghosts, pane.container) {continue}
 		pane_ghost_draw(app, w, &pane)
+		web_float_group_end(w)
 	}
 }
 
@@ -706,6 +730,13 @@ pane_ghost_draw :: proc(app: ^App, w: ^Window, ghost: ^Pane_Ghost) {
 	to := render.draw_mark(&w.list)
 	r := layout.Rect{shown.x, shown.y, shown.width, shown.height}
 	_, _ = append(&w.pane_motion.drawn, Pane_Drawn{ghost.key, ghost.container, mark, to, r})
+	// A web pane's page goes with a copy that moves by its rectangle; one presented by an effect, or
+	// collapsing beneath the pane taking its place, has no page to show.
+	id, web := pane_motion_web_id(ghost.key)
+	look := ui.layout_motion_look(&w.pane_motion.moving, ghost.key)
+	if web && ghost.successor == nil && look.effect == .Edge {
+		web_ghost_place(app, w, id, ghost.rect, r, ghost.container != 0)
+	}
 }
 
 // The size a popping pane starts from, or ends at, as a share of its own.

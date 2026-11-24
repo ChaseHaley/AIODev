@@ -703,7 +703,7 @@ window_build_frame :: proc(app: ^App, w: ^Window) -> bool {
 build_frame :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 	blinking := false
 	w.frame_wakes = {}
-	web_window_prepare_frame(w)
+	web_window_prepare_frame(app, w)
 	pane_motion_drawn_reset(w)
 	cursor_crossing_prepare(app, w)
 	// While a workspace switch plays, all of this shrinks into its card; see workspace_overview.odin.
@@ -723,6 +723,8 @@ build_frame :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 		if pane_motion_raised(w, pane) {raised = pane; continue}
 		if result := pane_draw_noted(app, w, pane, &blinking); result != .Ok {return result}
 	}
+	// The pane growing over the others or shrinking off them covers their pages too.
+	if pane_motion_raising(w) {web_overlay_split_over_pages(w)}
 	if pane, ok := raised.?; ok {
 		if result := pane_draw_noted(app, w, pane, &blinking); result != .Ok {return result}
 	}
@@ -746,7 +748,6 @@ build_frame :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 			frame := floating_header_draw(app, w, root)
 			pane_motion_region_drawn(w, PANE_MOTION_FRAME | pane.group, frame, from)
 		}
-		web_float_pane(app, w, pane)
 		if result := pane_draw_noted(app, w, pane, &blinking); result != .Ok {return result}
 	}
 	web_float_group_end(w)
