@@ -83,6 +83,7 @@ param(
 $ErrorActionPreference = 'Stop'
 $here = (Get-Location).Path
 . (Join-Path $PSScriptRoot 'instance.ps1')
+. (Join-Path $PSScriptRoot 'cosmos.ps1')
 
 # The compare folder lives in the main checkout so every worktree shares one ref cache. Each candidate
 # gets its own session folder for checkout builds, data and its running record.
@@ -210,8 +211,10 @@ function Resolve-Side([string] $Spec, [string] $Name) {
 function Invoke-Build($Side) {
     Write-Host "Building $($Side.Name): $($Side.Label)"
     # Build output goes to the host so it never mixes into a function's return value.
-    & pwsh -NoProfile -ExecutionPolicy Bypass -File (Join-Path $Side.Source 'build.ps1') release -OutputPath $Side.Exe |
-        Out-Host
+    $arguments = @('release', '-OutputPath', $Side.Exe)
+    $cosmos = Get-CheckoutCosmos $repo $Side.Source
+    if ($cosmos) { $arguments += @('-Cosmos', $cosmos) }
+    & pwsh -NoProfile -ExecutionPolicy Bypass -File (Join-Path $Side.Source 'build.ps1') @arguments | Out-Host
     if ($LASTEXITCODE -ne 0) { throw "The $($Side.Name) build failed." }
 }
 

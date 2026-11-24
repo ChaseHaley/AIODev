@@ -32,18 +32,21 @@ if ($TestLane -ne 'All' -and ($Task -ne 'test' -or $Package -ne 'app')) {
 }
 
 # AIODev builds on Cosmos, the owner's framework for his family of apps (D-108). A package ships only from
-# a clean copy of the commit tools/cosmos.json pins. Every other build uses the checkout as it is, and a
-# checkout that is not exactly the pin marks the build dirty, so no release can come from it.
+# a clean copy of the commit tools/cosmos.json pins. Other builds use a checkout named by -Cosmos or
+# COSMOS_ROOT as it is, and otherwise the pinned commit (Resolve-CosmosRoot); a checkout that is not
+# exactly the pin marks the build dirty, so no release can come from it.
 . "$PSScriptRoot/tools/cosmos.ps1"
 $cosmosPin = Get-CosmosPin
-$cosmosRoot = Resolve-CosmosRoot $PSScriptRoot $Cosmos
 $cosmosSkew = $false
 if ($Task -eq 'package') {
-    $cosmosRoot = Get-PinnedCosmos $PSScriptRoot $cosmosRoot $cosmosPin
-} elseif (-not (Test-CosmosPinned $cosmosRoot $cosmosPin.commit)) {
-    $cosmosSkew = $true
-    Write-Warning ("Cosmos at $cosmosRoot is not a clean checkout of the pinned " +
-        "$($cosmosPin.commit.Substring(0, 12)); builds are marked dirty.")
+    $cosmosRoot = Get-PinnedCosmos $PSScriptRoot (Get-CosmosCheckout $PSScriptRoot $Cosmos) $cosmosPin
+} else {
+    $cosmosRoot = Resolve-CosmosRoot $PSScriptRoot $Cosmos
+    if (-not (Test-CosmosPinned $cosmosRoot $cosmosPin.commit)) {
+        $cosmosSkew = $true
+        Write-Warning ("Cosmos at $cosmosRoot is not a clean checkout of the pinned " +
+            "$($cosmosPin.commit.Substring(0, 12)); builds are marked dirty.")
+    }
 }
 . "$cosmosRoot/tools/build-common.ps1"
 

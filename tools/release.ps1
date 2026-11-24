@@ -47,7 +47,7 @@ if ($LASTEXITCODE -ne 0) { throw 'build.ps1 check failed.' }
 # Cosmos's GitHub main before the tag goes up. A pin that local Cosmos main holds is pushed with it.
 . (Join-Path $repo 'tools/cosmos.ps1')
 $cosmosPin = Get-CosmosPin
-$cosmos = Resolve-CosmosRoot $repo ''
+$cosmos = Get-CosmosCheckout $repo ''
 # A remote without main yet, as before the first release that needs Cosmos, has published nothing.
 $null = Invoke-GitProbe @('-C', $cosmos, 'fetch', '--quiet', 'origin', 'main')
 $cosmosPublished =
