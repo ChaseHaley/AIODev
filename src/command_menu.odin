@@ -680,6 +680,17 @@ command_placement :: proc(choice: Command_Choice) -> Pane_Placement {
 	return .Split_Right
 }
 
+// The split row a command's click runs for the pane showing `content` in w, and its submenu marks Default:
+// the split toward that pane's longer side (D-109).
+@(private = "file")
+command_auto_choice :: proc(app: ^App, w: ^Window, content: layout.Content) -> Command_Choice {
+	tree := window_tree(w)
+	if tree == nil {return .Split_Right}
+	node := layout.find_content(tree, content)
+	if node == layout.INVALID_NODE {node = tree.focus}
+	return pane_auto_direction(app, w, tree, node) == .Down ? .Split_Down : .Split_Right
+}
+
 // Runs a submenu row on the command row `row` stands for. Running or typing closes the menu.
 @(private = "file")
 command_choose :: proc(app: ^App, w: ^Window, row: int, choice: Command_Choice) {
@@ -725,12 +736,12 @@ command_submenu_open :: proc(app: ^App, w: ^Window, row: int, select_first: bool
 	add :: proc(sub: ^ui.Submenu, item: ui.Menu_Item) {_, _ = ui.menu_add(&sub.menu, item)}
 	// Moving and removing follow a divider of their own.
 	divided := false
+	auto := command_auto_choice(app, w, state.content)
 	for choice in Command_Choice {
 		face := COMMAND_CHOICES[choice]
 		item := ui.Menu_Item{label = face.label, glyph = face.glyph, enabled = true, payload = u32(choice)}
+		if choice == auto {item.shortcut = "Default"}
 		#partial switch choice {
-		case .Split_Right:
-			item.shortcut = "Default"
 		case .Type:
 			add(sub, {separator = true})
 			item.shortcut = "Alt+Enter"
@@ -774,8 +785,8 @@ command_submenu_shown :: proc(w: ^Window) -> bool {
 	return command_submenu_parent(w) != nil && ui.submenu_shown(&w.command_menu.submenu)
 }
 
-// The click of row `row`: a command runs at Right Split, Save Command… opens the form, and in the form a
-// level saves there.
+// The click of row `row`: a command runs in a split toward the pane's longer side, Save Command… opens the
+// form, and in the form a level saves there.
 @(private = "file")
 command_menu_activate :: proc(app: ^App, w: ^Window, row: int) {
 	entry, listed := command_menu_entry(&w.command_menu, row)
@@ -783,7 +794,9 @@ command_menu_activate :: proc(app: ^App, w: ^Window, row: int) {
 	switch entry.action {
 	case .None, .Search_Field:
 	case .Run:
-		command_choose(app, w, row, .Split_Right)
+		if state := command_menu_state(w); state != nil {
+			command_choose(app, w, row, command_auto_choice(app, w, state.content))
+		}
 	case .Save:
 		command_form_open(app, w, "")
 	case .Command_Field, .Name_Field:

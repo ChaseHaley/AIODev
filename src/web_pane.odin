@@ -341,15 +341,16 @@ web_pane_create :: proc(app: ^App, url: string, zoom := f64(1)) -> ^Web_Pane {
 	return pane
 }
 
-// Opens `url` in a new web pane beside the focused pane: in a float when pane.web_floating is on, or
-// inside the focused pane's float. Returns false only if the pane could not be placed.
+// Opens `url` in a new web pane beside the focused pane, toward its longer side: in a float when
+// pane.web_floating is on, or inside the focused pane's float. Returns false only if the pane could not be
+// placed.
 @(require_results)
 web_open_focused :: proc(app: ^App, w: ^Window, url: string) -> bool {
 	if w == nil {return false}
 	tree := window_tree(w)
 	if tree == nil {return false}
 	floating := app.settings.pane.web_floating && !layout.is_floating(tree, tree.focus)
-	return web_open_placed(app, w, tree.focus, url, floating ? .Float : .Split_Right)
+	return web_open_placed(app, w, tree.focus, url, floating ? .Float : .Split_Auto)
 }
 
 @(require_results)
@@ -387,7 +388,7 @@ web_open_blank :: proc(app: ^App, w: ^Window) {
 	if w == nil {return}
 	tree := window_tree(w)
 	if tree == nil {return}
-	if !web_open_placed(app, w, tree.focus, "", .Split_Right, edit_url = true) {
+	if !web_open_placed(app, w, tree.focus, "", .Split_Auto, edit_url = true) {
 		notify(app, .Error, "Could not open a web pane.")
 	}
 }

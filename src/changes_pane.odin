@@ -278,7 +278,7 @@ changes_poll_deadline :: proc(app: ^App) -> (next: time.Tick, pending: bool) {
 
 // Opens another Agent changes pane beside the focused pane: for the focused pane's agent in the default
 // diff view, or with the agent, scope, directory and diff view of the focused Agent changes pane.
-changes_open :: proc(app: ^App, w: ^Window, placement := Pane_Placement.Split_Right) {
+changes_open :: proc(app: ^App, w: ^Window, placement := Pane_Placement.Split_Auto) {
 	acting := pane_link_acting_window(app, w)
 	workspace := acting.workspace
 	if workspace == nil || workspace.selected < 0 || workspace.selected >= len(workspace.tabs) {return}

@@ -129,6 +129,58 @@ press :: proc(state: ^app.App, w: ^app.Window, key: input.Key, modifiers: input.
 	app.handle_event(state, input.Key_Event{window = w.id, key = key, modifiers = modifiers})
 }
 
+// The axis of the split holding Markdown pane `index` directly.
+@(private = "file")
+markdown_holder_axis :: proc(state: ^app.App, tree: ^layout.Layout, index: int) -> (layout.Axis, bool) {
+	node := layout.find_content(tree, {.Markdown, state.markdown_panes[index].id})
+	for candidate in tree.nodes {
+		split, is_split := candidate.(layout.Split)
+		if is_split && (split.first == node || split.second == node) {return split.axis, true}
+	}
+	return {}, false
+}
+
+// WORK-645 (D-109): `aio pane.open_markdown` without --direction splits the caller's pane along its longer
+// side; a given --direction still decides.
+@(test)
+open_markdown_without_a_direction_splits_the_longer_side :: proc(t: ^testing.T) {
+	f: Fixture
+	defer fixture_destroy(t, &f)
+	if !fixture_start(t, &f, "Auto") {return}
+	s, w := &f.state, f.state.windows[0]
+	tree := app.window_tree(w)
+	app.window_resize(s, w, 500, 1300)
+	testing.expect_value(t, open(s, f.file).status, cli_protocol.Status.Ok)
+	if !testing.expect_value(t, len(s.markdown_panes), 1) {return}
+	axis, held := markdown_holder_axis(s, tree, 0)
+	testing.expect(t, held)
+	testing.expect_value(t, axis, layout.Axis.Vertical)
+
+	// The terminal, now the top half of a wide window, is wider than tall.
+	app.window_resize(s, w, 1600, 700)
+	wide := strings.concatenate({f.directory, "\\wide.md"}, context.temp_allocator)
+	if !testing.expect_value(t, os.write_entire_file(wide, "# Wide\n"), nil) {return}
+	testing.expect_value(t, open(s, wide).status, cli_protocol.Status.Ok)
+	if !testing.expect_value(t, len(s.markdown_panes), 2) {return}
+	axis, held = markdown_holder_axis(s, tree, 1)
+	testing.expect(t, held)
+	testing.expect_value(t, axis, layout.Axis.Horizontal)
+
+	// The terminal is still wider than tall, but --direction down is followed.
+	app.window_resize(s, w, 1600, 900)
+	named := strings.concatenate({f.directory, "\\named.md"}, context.temp_allocator)
+	if !testing.expect_value(t, os.write_entire_file(named, "# Named\n"), nil) {return}
+	args := []string{"pane.open_markdown", "--direction", "down", named}
+	invocation, err := commands.parse_invocation(&s.registry, args, context.temp_allocator)
+	if !testing.expect_value(t, err.advice, "") {return}
+	request := app.Control_Request{caller = s.sessions[0].id, origin = .Cli}
+	testing.expect_value(t, app.command_execute(s, request, invocation).status, cli_protocol.Status.Ok)
+	if !testing.expect_value(t, len(s.markdown_panes), 3) {return}
+	axis, held = markdown_holder_axis(s, tree, 2)
+	testing.expect(t, held)
+	testing.expect_value(t, axis, layout.Axis.Vertical)
+}
+
 // Drives the bar through the real dispatcher: the keys and bar of terminal find, reading top down.
 @(test)
 find_in_a_document_uses_the_terminal_bar_and_reads_top_down :: proc(t: ^testing.T) {

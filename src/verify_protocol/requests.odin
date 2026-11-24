@@ -149,7 +149,8 @@ Drag :: struct {
 }
 Command :: struct {
 	name:      string,
-	direction: layout.Direction,
+	// None splits toward the pane's longer side.
+	direction: Maybe(layout.Direction),
 	ratio:     f32,
 	focus:     bool,
 }
@@ -627,10 +628,9 @@ parse :: proc(args: []string, allocator := context.allocator) -> (Request, Parse
 	case .Command:
 		if len(args) < 2 || args[1] == "" {return {}, bad}
 		r := Command {
-			name      = args[1],
-			direction = commands.SPLIT_DEFAULT.direction,
-			ratio     = commands.SPLIT_DEFAULT.ratio,
-			focus     = commands.SPLIT_DEFAULT.focus,
+			name  = args[1],
+			ratio = commands.SPLIT_DEFAULT.ratio,
+			focus = commands.SPLIT_DEFAULT.focus,
 		}
 		if len(args) > 2 && r.name != "pane.split" {return {}, bad}
 		seen: [3]bool

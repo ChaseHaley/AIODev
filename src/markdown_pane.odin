@@ -438,8 +438,9 @@ markdown_pane_refresh :: proc(app: ^App, pane: ^Markdown_Pane) -> bool {
 }
 
 // Shows a verified file beside `node`: the pane already showing it, or else a new split toward `direction`,
-// or a float with `floating`. Beside a floating pane `floating` splits inside its float instead of adding
-// another. `w` is the window showing the workspace, or nil.
+// or without one toward the pane's longer side, or a float with `floating`. Beside a floating pane
+// `floating` splits inside its float instead of adding another. `w` is the window showing the workspace,
+// or nil.
 @(require_results)
 markdown_open_at :: proc(
 	app: ^App,
@@ -448,7 +449,7 @@ markdown_open_at :: proc(
 	tab_index: int,
 	node: layout.Node_Id,
 	path: string,
-	direction: layout.Direction = commands.SPLIT_DEFAULT.direction,
+	direction: Maybe(layout.Direction) = nil,
 	ratio: f32 = commands.SPLIT_DEFAULT.ratio,
 	focus := commands.SPLIT_DEFAULT.focus,
 	floating := false,
@@ -471,7 +472,7 @@ markdown_open_at :: proc(
 	if pane == nil {return false}
 	markdown_heading_request(pane, heading)
 	tree := &workspace.tabs[tab_index].tree
-	placement: Pane_Placement = floating && !layout.is_floating(tree, node) ? .Float : .Split_Right
+	placement: Pane_Placement = floating && !layout.is_floating(tree, node) ? .Float : .Split_Auto
 	content := layout.Content{.Markdown, pane.id}
 	return pane_place(app, w, workspace, tab_index, node, content, placement, focus, ratio, direction)
 }
@@ -564,7 +565,7 @@ control_markdown_open :: proc(
 		target.pane.tab,
 		target.pane.node,
 		file.target,
-		invocation.direction,
+		commands.given_direction(invocation),
 		invocation.ratio,
 		invocation.focus,
 		floating,

@@ -98,8 +98,9 @@ pane_rotate_split :: proc(app: ^App, w: ^Window) {
 	window_relayout(app, w)
 }
 
-// Moves w's focused pane into tab `index` of the window showing its tab, beside that tab's focused pane, as
-// a drop on the tab does; the window then shows that tab. Returns that window, or nil when nothing moved.
+// Moves w's focused pane into tab `index` of the window showing its tab, beside that tab's focused pane
+// toward its longer side, as a drop on the tab does; the window then shows that tab. Returns that window,
+// or nil when nothing moved.
 pane_move_to_tab :: proc(app: ^App, w: ^Window, index: int) -> ^Window {
 	host := pane_link_acting_window(app, w)
 	if index < 0 || index >= len(host.workspace.tabs) {return nil}
@@ -110,7 +111,7 @@ pane_move_to_tab :: proc(app: ^App, w: ^Window, index: int) -> ^Window {
 		tab       = tab,
 		place     = .Beside,
 		target    = tab.tree.focus,
-		direction = .Right,
+		direction = pane_auto_direction(app, host, &tab.tree, tab.tree.focus),
 	}
 	return pane_step_drop(app, w, host, drop) ? host : nil
 }

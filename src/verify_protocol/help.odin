@@ -467,7 +467,7 @@ Output is one line: ok; <changes>. Failures start with error:.
 pane.split accepts --direction `)
 		put_direction_words(&w)
 		put(&w, ", --ratio 0.05..0.95 (new pane's share),\nand --focus true|false. Defaults: ")
-		put(&w, commands.DIRECTION_WORDS[commands.SPLIT_DEFAULT.direction])
+		put(&w, commands.DIRECTION_AUTO_HELP)
 		buffer: [32]u8
 		put(&w, fmt.bprintf(buffer[:], ", %v", commands.SPLIT_DEFAULT.ratio))
 		put(&w, commands.SPLIT_DEFAULT.focus ? ", true" : ", false")

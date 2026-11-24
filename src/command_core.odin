@@ -590,13 +590,15 @@ control_split :: proc(
 		shown, workspace, tab = linked, linked.workspace, 0
 		node = layout.find_content(window_tree(linked), target.pane.content)
 	}
+	tree := &workspace.tabs[tab].tree
+	direction := commands.given_direction(invocation).? or_else pane_auto_direction(app, shown, tree, node)
 	id, err := pane_split_at(
 		app,
 		shown,
 		workspace,
 		tab,
 		node,
-		invocation.direction,
+		direction,
 		invocation.ratio,
 		invocation.focus,
 		launch,

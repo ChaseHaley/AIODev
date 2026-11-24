@@ -925,6 +925,53 @@ html_file_goes_to_the_system_where_web_panes_cannot_run :: proc(t: ^testing.T) {
 	}
 }
 
+// WORK-645 (D-109): a link's Open splits the pane the link is in along its longer side, and the placements
+// mark that split Default: Down split in a tall pane, Right split in a wide one.
+@(test)
+link_open_splits_the_longer_side_of_its_pane :: proc(t: ^testing.T) {
+	sync.mutex_lock(&Link_Test_Lock)
+	defer sync.mutex_unlock(&Link_Test_Lock)
+	f: Palette_Fixture
+	defer palette_fixture_destroy(t, &f)
+	if !palette_fixture_create(t, &f, "documents-link-auto", false) {return}
+	root, root_error := os.make_directory_temp("", "aio-link-auto-*", context.allocator)
+	if !testing.expect_value(t, root_error, nil) {return}
+	defer {testing.expect_value(t, os.remove_all(root), nil); delete(root)}
+	s, w := &f.state, f.state.windows[0]
+	Open_Stub_State = {}
+	s.opener.file = link_file_stub
+	s.opener.url = link_open_stub
+	defer {s.opener.file = nil; s.opener.url = nil}
+	terminal := w.panes[0].content
+	tree := app.window_tree(w)
+	cases := [?]struct {
+		name:          string,
+		width, height: i32,
+		marked, other: app.Link_Placement,
+		axis:          layout.Axis,
+	}{{"tall", 500, 1300, .Split_Down, .Split_Right, .Vertical}, {"wide", 1600, 700, .Split_Right, .Split_Down, .Horizontal}}
+	for c, i in cases {
+		path := fmt.tprintf(`%s\%s.md`, root, c.name)
+		if !testing.expect_value(t, os.write_entire_file(path, transmute([]u8)string("# Notes\n")), nil) {return}
+		app.window_resize(s, w, c.width, c.height)
+		app.pane_focus(s, w, layout.find_content(tree, terminal))
+		link_feed(t, &f, fmt.tprintf("\x1b[2J\x1b[3J\x1b[H%s", path))
+		if !menu_on_path(t, &f, terminal, {.Shift}) {return}
+		open := link_row(w, .Open)
+		point_at(s, w, &w.document_menu.menu, open)
+		if !testing.expect(t, app.document_submenu_shown(w)) {return}
+		testing.expect_value(t, w.document_menu.submenu.items[placement_row(w, c.marked)].shortcut, "Default")
+		testing.expect_value(t, w.document_menu.submenu.items[placement_row(w, c.other)].shortcut, "")
+		// The row's own click, on a fresh menu, opens it at its default.
+		if !menu_on_path(t, &f, terminal, {.Shift}) {return}
+		click_row(s, w, link_row(w, .Open))
+		testing.expect_value(t, layout.pane_count(tree), i + 2)
+		focused, _ := layout.focused_content(tree)
+		testing.expect_value(t, focused.kind, layout.Content_Kind.Markdown)
+		testing.expect_value(t, focus_axis(tree), c.axis)
+	}
+}
+
 // A link in a floating terminal opens in its float: the menu marks Right split Default, as Open splits the
 // float even with pane.markdown_floating on, and a chosen Down split joins the float too.
 @(test)

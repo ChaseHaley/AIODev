@@ -343,7 +343,10 @@ pane_drop_place :: proc(
 	area := window_content_area(app, w)
 	band := min(24 * w.scale, area.width / 5, area.height / 5)
 	if destination != nil && tabs.on_tab >= 0 && tabs.on_tab < len(w.workspace.tabs) {
-		if destination != source && !swap {target, direction = destination.tree.focus, .Right}
+		if destination != source && !swap {
+			target = destination.tree.focus
+			direction = pane_auto_direction(app, w, &destination.tree, target)
+		}
 	} else if !tabs.over_rail &&
 	   destination != nil &&
 	   x >= 0 &&

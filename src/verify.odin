@@ -1142,7 +1142,11 @@ when AIO_CONTROL {
 			// Verification stands in for a person at the keyboard, acting on this window's focus, which
 			// reports failures as notices rather than an outcome.
 			invocation := commands.invocation(command.id, focus = r.focus)
-			invocation.direction, invocation.ratio = r.direction, r.ratio
+			invocation.ratio = r.ratio
+			if direction, named := r.direction.?; named {
+				invocation.direction = direction
+				invocation.given += {.Direction}
+			}
 			_ = command_execute(app, Window_Context{window = w, origin = .Key}, invocation)
 		case:
 			return .Invalid_Argument

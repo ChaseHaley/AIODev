@@ -3,6 +3,7 @@ package verify_protocol_test
 import "base:runtime"
 import "core:strings"
 import "core:testing"
+import "aio:layout"
 import "aio:verify_protocol"
 import "cosmos:input"
 
@@ -81,6 +82,14 @@ parse_commands :: proc(t: ^testing.T) {
 	s := split.(verify_protocol.Command)
 	testing.expect_value(t, s.ratio, f32(0.3))
 	testing.expect(t, !s.focus)
+	direction, named := s.direction.?
+	testing.expect(t, named)
+	testing.expect_value(t, direction, layout.Direction.Up)
+	// Without --direction the split takes the pane's longer side (WORK-645).
+	auto, auto_error := verify_protocol.parse({"command", "pane.split"})
+	testing.expect_value(t, auto_error.advice, "")
+	_, auto_named := auto.(verify_protocol.Command).direction.?
+	testing.expect(t, !auto_named)
 	pick, pick_error := verify_protocol.parse({"pick", `C:\icons\nvim.png`})
 	testing.expect_value(t, pick_error.advice, "")
 	testing.expect_value(t, pick.(verify_protocol.Pick).path, `C:\icons\nvim.png`)

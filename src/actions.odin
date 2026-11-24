@@ -943,7 +943,12 @@ COMMAND_HELP :: #partial [Action]Command_Help {
 	},
 	.Open_Markdown = {
 		"Shows a Markdown file beside the pane and updates it when the file changes.",
-		{{.Direction, {default = "right, or a float when pane.markdown_floating is on"}}},
+		{
+			{
+				.Direction,
+				{default = commands.DIRECTION_AUTO_HELP + ", or a float when pane.markdown_floating is on"},
+			},
+		},
 	},
 	.Edit_Markdown = {
 		"Edits the focused Markdown pane's file in place, every line but the caret's shown rendered; edits " +
@@ -966,7 +971,7 @@ COMMAND_HELP :: #partial [Action]Command_Help {
 					example = "example.com",
 				},
 			},
-			{.Direction, {default = "right, or a float when pane.web_floating is on"}},
+			{.Direction, {default = commands.DIRECTION_AUTO_HELP + ", or a float when pane.web_floating is on"}},
 		},
 	},
 	.Toggle_Web_Navigator = {
@@ -1413,7 +1418,7 @@ command_execute :: proc(app: ^App, ctx: Command_Context, invocation: commands.In
 			return control_split(app, window_for_workspace(app, t.workspace), t, invocation)
 		}
 		if .Float in invocation.given {floating_new(app, pane_link_acting_window(app, w)); break}
-		pane_split(app, w, invocation.direction, invocation.ratio, invocation.focus)
+		pane_split(app, w, commands.given_direction(invocation), invocation.ratio, invocation.focus)
 	case .Open_Markdown:
 		if t, named := target.?; named {
 			return control_markdown_open(app, window_for_workspace(app, t.workspace), t, invocation)
@@ -1444,7 +1449,7 @@ command_execute :: proc(app: ^App, ctx: Command_Context, invocation: commands.In
 		directory := neovim_focused_directory(app, w)
 		pane_content_menu_choose(app, w, Profile_Menu_Swap_Pane{content}, .Neovim, directory)
 	case .Agent_Changes:
-		changes_open(app, w, .Float in invocation.given ? .Float : .Split_Right)
+		changes_open(app, w, .Float in invocation.given ? .Float : .Split_Auto)
 	case .New_Floating:
 		floating_new(app, w)
 	case .Layout_Apply:

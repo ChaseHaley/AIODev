@@ -21,8 +21,10 @@ Opener_Link :: enum u8 {
 Opener_Offers :: bit_set[Opener_Link;u8]
 OPENER_OFFERS_ALL :: Opener_Offers{.Files, .Folders}
 
-// Where a program opens.
+// Where a program opens. Auto, the default, is a split toward the longer side of the pane the link is in:
+// down when it is taller than wide, else right (D-109).
 Opener_Placement :: enum u8 {
+	Auto,
 	Right_Split,
 	Down_Split,
 	Float,

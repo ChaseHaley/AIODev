@@ -77,8 +77,12 @@ Parse_Error :: struct {
 // The longest pane read the grammar accepts, in rows.
 MAX_LINES :: 10000
 
-// The interactive split defaults; CLI requests explicitly start without focus.
-SPLIT_DEFAULT :: Invocation{direction = .Right, ratio = 0.5, focus = true}
+// The interactive split defaults; CLI requests explicitly start without focus. A split given no direction
+// opens toward the pane's longer side (D-109); see given_direction.
+SPLIT_DEFAULT :: Invocation{ratio = 0.5, focus = true}
+
+// What help says a split given no --direction does.
+DIRECTION_AUTO_HELP :: "the pane's longer side (down when it is taller than wide, else right)"
 
 // The words that name a direction.
 DIRECTION_WORDS :: [layout.Direction]string {
@@ -109,7 +113,7 @@ argument_grammar := [Argument]struct {
 } {
 	.Direction = {
 		"--direction", " left|right|up|down",
-		{"the side of the pane the new pane opens on", "right", "--direction down"},
+		{"the side of the pane the new pane opens on", DIRECTION_AUTO_HELP, "--direction down"},
 	},
 	// This range and parse's message spell layout's split share, and help spells the defaults; the
 	// asserts below hold them together.
@@ -268,7 +272,7 @@ argument_grammar := [Argument]struct {
 	},
 }
 #assert(layout.SPLIT_SHARE_MIN == 0.05 && layout.SPLIT_SHARE_MAX == 0.95)
-#assert(SPLIT_DEFAULT.direction == .Right && SPLIT_DEFAULT.ratio == 0.5)
+#assert(SPLIT_DEFAULT.ratio == 0.5)
 #assert(MAX_LINES == 10000)
 
 // Each argument's type as a Lua fields table gives it, for the aio type definitions. A string where a
@@ -320,11 +324,18 @@ argument_alternative :: proc(command: ^Command, argument: Argument) -> (Argument
 	return {}, false
 }
 
-// The defaults every interface starts from: a new pane splits right, taking half the space. `focus`
-// says whether a pane a command creates takes focus: interactive commands always focus it, a CLI
-// request only when it passes --focus (D-046).
+// The defaults every interface starts from: a new pane splits toward the pane's longer side, taking half
+// the space. `focus` says whether a pane a command creates takes focus: interactive commands always focus
+// it, a CLI request only when it passes --focus (D-046).
 invocation :: proc(id: Command_Id, focus: bool) -> Invocation {
-	return {id = id, direction = SPLIT_DEFAULT.direction, ratio = SPLIT_DEFAULT.ratio, focus = focus}
+	return {id = id, ratio = SPLIT_DEFAULT.ratio, focus = focus}
+}
+
+// The direction the invocation names, or none when it was not given and the pane's longer side decides.
+@(require_results)
+given_direction :: proc(invocation: Invocation) -> Maybe(layout.Direction) {
+	if .Direction not_in invocation.given {return nil}
+	return invocation.direction
 }
 
 // A direction word, such as `left`.

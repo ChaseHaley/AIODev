@@ -513,7 +513,7 @@ neovim_open_placed :: proc(
 neovim_open_focused :: proc(app: ^App, w: ^Window) {
 	tree := window_tree(w)
 	if tree == nil {return}
-	if !neovim_open_placed(app, w, tree.focus, "", neovim_focused_directory(app, w), 0, .Split_Right) {
+	if !neovim_open_placed(app, w, tree.focus, "", neovim_focused_directory(app, w), 0, .Split_Auto) {
 		notify(app, .Error, "Could not open Neovim.")
 	}
 }
@@ -538,7 +538,7 @@ neovim_edit_beside :: proc(app: ^App, w: ^Window, node: layout.Node_Id, path: st
 		pane_focus(app, w, layout.Node_Id(i))
 		return
 	}
-	if !neovim_open_placed(app, w, node, path, filepath.dir(path), line, .Split_Right) {
+	if !neovim_open_placed(app, w, node, path, filepath.dir(path), line, .Split_Auto) {
 		notify(app, .Error, "Could not open the file in Neovim.")
 	}
 }
@@ -575,12 +575,12 @@ control_neovim_open :: proc(
 		if invocation.focus && w != nil {pane_focus(app, w, target.pane.node)}
 		return {}
 	}
-	placement: Pane_Placement = .Float in invocation.given ? .Float : .Split_Right
+	placement: Pane_Placement = .Float in invocation.given ? .Float : .Split_Auto
 	pane := neovim_pane_create(app, file, directory)
 	if pane == nil {return outcome_failure(.Failed, "could not open Neovim")}
 	content := layout.Content{.Neovim, pane.id}
 	if !pane_place(app, w, target.workspace, target.pane.tab, target.pane.node, content, placement,
-		invocation.focus, invocation.ratio, invocation.direction) {
+		invocation.focus, invocation.ratio, commands.given_direction(invocation)) {
 		neovim_pane_remove(app, pane.id)
 		return outcome_failure(.Failed, "could not open Neovim")
 	}

@@ -38,7 +38,7 @@ opener.order = mid
 	testing.expect_value(t, alpha.offers, settings.OPENER_OFFERS_ALL)
 	mid := settings.opener_find(&s.openers, "mid")
 	if testing.expect(t, mid != nil) {testing.expect_value(t, mid.offers, settings.OPENER_OFFERS_ALL)}
-	testing.expect_value(t, alpha.placement, settings.Opener_Placement.Right_Split)
+	testing.expect_value(t, alpha.placement, settings.Opener_Placement.Auto)
 	opener_order_expect(t, &s.openers, {"mid", "alpha", "zed"})
 }
 
@@ -98,8 +98,47 @@ opener.commandless.name = Commandless
 	testing.expect_value(t, nvim.name, "Neovim")
 	testing.expect_value(t, nvim.command, "nvim %1")
 	testing.expect_value(t, nvim.offers, settings.OPENER_OFFERS_ALL)
-	testing.expect_value(t, nvim.placement, settings.Opener_Placement.Right_Split)
+	testing.expect_value(t, nvim.placement, settings.Opener_Placement.Auto)
 	opener_order_expect(t, &s.openers, {"nvim"})
+}
+
+// WORK-645 (D-109): a program's placement defaults to auto, `auto` names it, and a placement written before
+// Auto existed, such as right or down, keeps its meaning.
+@(test)
+openers_default_to_auto_and_keep_stored_placements :: proc(t: ^testing.T) {
+	fixture :: `opener.unset.name = Unset
+opener.unset.command = unset %1
+opener.auto.name = Auto
+opener.auto.command = auto %1
+opener.auto.placement = auto
+opener.right.name = Right
+opener.right.command = right %1
+opener.right.placement = right
+opener.down.name = Down
+opener.down.command = down %1
+opener.down.placement = down
+`
+	s, diagnostics, err := settings.parse(fixture)
+	defer settings.destroy(&s)
+	defer settings.diagnostics_destroy(&diagnostics)
+	testing.expect_value(t, err, nil)
+	testing.expect_value(t, len(diagnostics), 0)
+	want := [?]struct {
+		id:        string,
+		placement: settings.Opener_Placement,
+	}{{"unset", .Auto}, {"auto", .Auto}, {"right", .Right_Split}, {"down", .Down_Split}}
+	for w in want {
+		opener := settings.opener_find(&s.openers, w.id)
+		if !testing.expectf(t, opener != nil, "%s is missing", w.id) {continue}
+		testing.expect_value(t, opener.placement, w.placement)
+	}
+	names := settings.OPENER_PLACEMENT_NAME
+	labels := settings.OPENER_PLACEMENT_LABEL
+	testing.expect_value(t, names[.Auto], "auto")
+	testing.expect_value(t, labels[.Auto], "Auto")
+	placement, known := settings.opener_placement_from_name("auto")
+	testing.expect(t, known)
+	testing.expect_value(t, placement, settings.Opener_Placement.Auto)
 }
 
 @(test)
@@ -338,7 +377,7 @@ generated_settings_describe_link_programs_without_shipping_one :: proc(t: ^testi
 	testing.expect_value(t, text_error, nil)
 	testing.expect(t, strings.contains(text, "# opener.nvim.name = \"Neovim\"\n"))
 	testing.expect(t, strings.contains(text, "# opener.nvim.command = \"nvim %1\"\n"))
-	testing.expect(t, strings.contains(text, "# opener.nvim.placement = right\n"))
+	testing.expect(t, strings.contains(text, "# opener.nvim.placement = auto\n"))
 	s := mutation_parse(t, text)
 	defer settings.destroy(&s)
 	testing.expect_value(t, len(s.openers.items), 0)

@@ -29,7 +29,7 @@ control_web_open :: proc(
 	// A requested direction asks for a split, whatever the floating preference.
 	prefer_float := app.settings.pane.web_floating && .Direction not_in invocation.given &&
 		!layout.is_floating(tree, node)
-	placement: Pane_Placement = explicit_float || prefer_float ? .Float : .Split_Right
+	placement: Pane_Placement = explicit_float || prefer_float ? .Float : .Split_Auto
 	pane := web_pane_create(app, url)
 	if pane == nil {return outcome_failure(.Failed, "could not open a web pane")}
 	if url == "" {pane.nav_bar, pane.url_editing = true, true}
@@ -44,7 +44,7 @@ control_web_open :: proc(
 		placement,
 		invocation.focus,
 		invocation.ratio,
-		invocation.direction,
+		commands.given_direction(invocation),
 	) {
 		return outcome_failure(.Failed, "could not open a web pane")
 	}

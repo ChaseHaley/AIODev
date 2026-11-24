@@ -67,6 +67,14 @@ direction_of :: proc(axis: Axis, before: bool) -> Direction {
 	return before ? .Up : .Down
 }
 
+// The side a split the app places on its own opens toward beside a pane at `r`: below a pane taller than
+// it is wide, else to its right, so the split halves the pane's longer side (D-109). Any uniform scale of
+// `r`, such as a DPI's, gives the same side.
+@(require_results)
+auto_direction :: proc(r: Rect) -> Direction {
+	return r.height > r.width ? .Down : .Right
+}
+
 Vacant :: struct {}
 
 Divider :: struct {
@@ -755,6 +763,39 @@ place :: proc(l: ^Layout, id: Node_Id, area: Rect, gap: f32, out: ^[dynamic]Pane
 		place(l, node.first, p.first, gap, out)
 		place(l, node.second, p.second, gap, out)
 	}
+}
+
+// Where the split view places pane `node`, as place_shown does with nothing shown alone: its share of the
+// tiling, or of its float's content below the float header. False for a node that is not a shown pane.
+@(require_results)
+pane_rect :: proc(l: ^Layout, g: Geometry, node: Node_Id) -> (Rect, bool) {
+	if int(node) < 0 || int(node) >= len(l.nodes) {return {}, false}
+	if pane, is_pane := l.nodes[node].(Pane); !is_pane || pane.linked {return {}, false}
+	if root := float_root(l, node); root != INVALID_NODE {
+		frame, _ := float_rect(l, root, g.floating)
+		return node_area(l, root, node, float_content_rect(frame, g.header), g.gap, true)
+	}
+	if l.root == INVALID_NODE {return {}, false}
+	return node_area(l, l.root, node, g.tiled, g.gap, false)
+}
+
+// The area `target` takes when the subtree at `id` fills `area`, dividing as place, or float_place within
+// a float, does.
+@(private, require_results)
+node_area :: proc(l: ^Layout, id, target: Node_Id, area: Rect, gap: f32, floating: bool) -> (Rect, bool) {
+	if id == target {return area, true}
+	s, is_split := l.nodes[id].(Split)
+	if !is_split {return {}, false}
+	if !floating {
+		if s.floating || s.linked {return {}, false}
+		if !split_divides(l, s) {
+			shown := first_shown(l, s.first) != INVALID_NODE ? s.first : s.second
+			return node_area(l, shown, target, area, gap, false)
+		}
+	}
+	p := partition(area, s.axis, s.ratio, gap)
+	if r, found := node_area(l, s.first, target, p.first, gap, floating); found {return r, true}
+	return node_area(l, s.second, target, p.second, gap, floating)
 }
 
 dividers :: proc(l: ^Layout, area: Rect, gap: f32, out: ^[dynamic]Divider) {

@@ -94,6 +94,38 @@ web_target_goes_to_the_opener_when_webview_is_unsupported :: proc(t: ^testing.T)
 	testing.expect_value(t, len(web_nodes(&w.workspace.tabs[0].tree)), 0)
 }
 
+// WORK-645 (D-109): a clicked web link splits the focused pane along its longer side: down while the pane is
+// tall, right once it is wide.
+@(test)
+web_open_focused_splits_the_longer_side :: proc(t: ^testing.T) {
+	f: Web_Fixture
+	defer web_fixture_stop(t, &f)
+	if !web_fixture_start(t, &f, "auto") {return}
+	s, w := &f.state, f.state.windows[0]
+	tree := &w.workspace.tabs[0].tree
+	terminal := tree.focus
+	app.window_resize(s, w, 500, 1300)
+	if !testing.expect(t, app.web_open_focused(s, w, "https://example.com/tall")) {return}
+	root, is_split := tree.nodes[tree.root].(layout.Split)
+	if !testing.expect(t, is_split) {return}
+	testing.expect_value(t, root.axis, layout.Axis.Vertical)
+	testing.expect_value(t, root.first, terminal)
+
+	// The terminal, now the top half of a wide window, is wider than tall.
+	app.window_resize(s, w, 1600, 700)
+	app.pane_focus(s, w, terminal)
+	if !testing.expect(t, app.web_open_focused(s, w, "https://example.com/wide")) {return}
+	opened := tree.focus
+	for candidate in tree.nodes {
+		split, held := candidate.(layout.Split)
+		if held && (split.first == opened || split.second == opened) {
+			testing.expect_value(t, split.axis, layout.Axis.Horizontal)
+			testing.expect_value(t, split.first, terminal)
+		}
+	}
+	testing.expect_value(t, len(web_nodes(tree)), 2)
+}
+
 @(test)
 web_open_focused_splits_right_floats_on_request_and_splits_inside_a_float :: proc(t: ^testing.T) {
 	f: Web_Fixture

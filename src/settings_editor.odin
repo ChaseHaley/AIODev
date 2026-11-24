@@ -396,9 +396,9 @@ settings_page_opener_rows :: proc(p: ^views.Editor, openers: ^settings.Openers) 
 			},
 			.Placement = {
 				title = "Opens in",
-				description = "Where the program runs.",
+				description = "Where the program runs. Auto splits toward the pane's longer side.",
 				value = placement_names[opener.placement],
-				default_value = placement_names[.Right_Split],
+				default_value = placement_names[.Auto],
 				kind = .Choice,
 				choices = slice.enumerated_array(&placement_names),
 				choice_labels = slice.enumerated_array(&placement_labels),

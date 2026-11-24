@@ -49,6 +49,7 @@ opener_offers_text :: proc(offers: Opener_Offers) -> string {
 
 // The file values of Opener_Placement, and how Settings shows them.
 OPENER_PLACEMENT_NAME :: [Opener_Placement]string {
+	.Auto          = "auto",
 	.Right_Split   = "right",
 	.Down_Split    = "down",
 	.Float         = "float",
@@ -57,6 +58,7 @@ OPENER_PLACEMENT_NAME :: [Opener_Placement]string {
 	.Own_Window    = "window",
 }
 OPENER_PLACEMENT_LABEL :: [Opener_Placement]string {
+	.Auto          = "Auto",
 	.Right_Split   = "Right split",
 	.Down_Split    = "Down split",
 	.Float         = "Float",

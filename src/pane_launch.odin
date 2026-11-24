@@ -8,20 +8,23 @@ import "aio:pty"
 import "aio:term"
 import "base:runtime"
 
+// Splits w's focused pane toward `direction`, or with none toward its longer side (D-109).
 pane_split :: proc(
 	app: ^App,
 	w: ^Window,
-	direction: layout.Direction,
+	direction: Maybe(layout.Direction),
 	ratio: f32 = commands.SPLIT_DEFAULT.ratio,
 	focus := commands.SPLIT_DEFAULT.focus,
 ) {
 	tab := w.workspace.selected
+	tree := window_tree(w)
+	side := direction.? or_else pane_auto_direction(app, w, tree, tree.focus)
 	launch: Pane_Launch
 	refused: bool
 	launch.directory, refused = focused_launch_directory(app, w)
 	if refused {notify_directory_refused(app)}
 	switch _, err := pane_split_at(
-		app, w, w.workspace, tab, window_tree(w).focus, direction, ratio, focus, launch, true,
+		app, w, w.workspace, tab, tree.focus, side, ratio, focus, launch, true,
 	); err {
 	case .None:
 	case .Minimum:
@@ -34,9 +37,29 @@ pane_split :: proc(
 	}
 }
 
+// The side a split the app places on its own opens toward beside pane `node` of `tree`, which w shows or
+// would show: below a pane taller than wide, else to its right (D-109). The pane's rectangle is the one
+// the split view gives it, the area the split divides, inside its float for a floating pane. Right when
+// no window shows the tree.
+@(require_results)
+pane_auto_direction :: proc(
+	app: ^App,
+	w: ^Window,
+	tree: ^layout.Layout,
+	node: layout.Node_Id,
+) -> layout.Direction {
+	if w == nil || tree == nil {return .Right}
+	rect, shown := layout.pane_rect(tree, window_geometry(app, w, .None), node)
+	if !shown {return .Right}
+	return layout.auto_direction(rect)
+}
+
 // Where new content opens beside the pane that asked for it.
 Pane_Placement :: enum u8 {
-	// A split beside the pane, or a new tab when the pane is too small to split.
+	// A split beside the pane toward its longer side (pane_auto_direction), or a new tab when the pane is
+	// too small to split. The placement for content the app places without being told a side.
+	Split_Auto,
+	// A split beside the pane toward the side named, or a new tab when the pane is too small to split.
 	Split_Right,
 	Split_Down,
 	// A floating pane above the tab.
@@ -59,10 +82,16 @@ pane_placement_window :: proc(
 	beside: layout.Node_Id,
 	found: bool,
 ) {
-	if !window_linked(w) || placement == .Split_Right || placement == .Split_Down {return w, node, true}
+	if !window_linked(w) || placement_splits(placement) {return w, node, true}
 	acting = pane_link_acting_window(app, w)
 	if window_linked(acting) {return nil, layout.INVALID_NODE, false}
 	return acting, window_tree(acting).focus, true
+}
+
+// Whether `placement` splits the pane it opens beside.
+@(require_results)
+placement_splits :: proc(placement: Pane_Placement) -> bool {
+	return placement == .Split_Auto || placement == .Split_Right || placement == .Split_Down
 }
 
 // Starts a shell with `launch` at `placement` beside the pane at `node` of w, as pane_placement_window
@@ -89,8 +118,9 @@ shell_open_placed :: proc(
 }
 
 // Shows `content`, which no pane shows yet, beside `node` of the workspace's tab at `tab_index`. A split
-// goes toward `direction` when given, else the side its placement names. w is the window showing the
-// workspace, or nil; a linked window placement needs w showing that tab.
+// goes toward `direction` when given, else the side its placement names, or for Split_Auto and a linked
+// window's slot the longer side of the pane it splits. w is the window showing the workspace, or nil; a
+// linked window placement needs w showing that tab.
 @(require_results)
 pane_place :: proc(
 	app: ^App,
@@ -105,10 +135,17 @@ pane_place :: proc(
 	direction: Maybe(layout.Direction) = nil,
 ) -> bool {
 	tree := &workspace.tabs[tab_index].tree
-	side := direction.? or_else (placement == .Split_Down ? layout.Direction.Down : layout.Direction.Right)
 	opened := false
 	switch placement {
-	case .Split_Right, .Split_Down:
+	case .Split_Auto, .Split_Right, .Split_Down:
+		side, named := direction.?
+		if !named {
+			#partial switch placement {
+			case .Split_Right: side = .Right
+			case .Split_Down: side = .Down
+			case: side = pane_auto_direction(app, w, tree, node)
+			}
+		}
 		// Beside a floating pane, the split stays inside its float, as Split right does there.
 		failure := pane_split_insert(app, w, workspace, tab_index, node, side, ratio, focus, content, false)
 		#partial switch failure {
@@ -125,6 +162,7 @@ pane_place :: proc(
 		if w == nil || window_linked(w) || w.workspace != workspace || workspace.selected != tab_index {break}
 		// Only a tiled pane moves to a linked window, so a float's link opens beside the tiled pane below it.
 		anchor := layout.is_floating(tree, node) ? layout.focus_tiled(tree) : node
+		side := direction.? or_else pane_auto_direction(app, w, tree, anchor)
 		// The new pane leaves for its own window at once, so it needs no room in this one.
 		failure := pane_split_insert(app, nil, workspace, tab_index, anchor, side, ratio, false, content, false)
 		if failure != .None {break}

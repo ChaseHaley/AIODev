@@ -91,6 +91,59 @@ agent_changes_opens_another_pane_on_every_run :: proc(t: ^testing.T) {
 	testing.expect_value(t, focused, layout.Content{.Changes, opened.id})
 }
 
+// The axis of the split that holds `node` directly.
+@(private = "file")
+holder_axis :: proc(tree: ^layout.Layout, node: layout.Node_Id) -> (layout.Axis, bool) {
+	for candidate in tree.nodes {
+		split, is_split := candidate.(layout.Split)
+		if is_split && (split.first == node || split.second == node) {return split.axis, true}
+	}
+	return {}, false
+}
+
+// WORK-645 (D-109): Open agent changes, then the Edit of a file in it, which opens Neovim beside the Agent
+// changes pane, each split the pane they open beside along its longer side: down in a tall window, right in
+// a wide one.
+@(private = "file")
+changes_and_edit_split :: proc(t: ^testing.T, name: string, width, height: i32, want: layout.Axis) {
+	f: Fixture
+	defer {
+		app.app_destroy(&f.state)
+		testing.expect_value(t, os.remove_all(f.directory), nil)
+		delete(f.directory)
+	}
+	if !fixture_start(t, &f, name) {return}
+	s, w := &f.state, f.state.windows[0]
+	app.window_resize(s, w, width, height)
+	app.run_action(s, w, .Agent_Changes)
+	if !testing.expect_value(t, len(s.changes_panes), 1) {return}
+	tree := app.window_tree(w)
+	changes := layout.find_content(tree, {.Changes, s.changes_panes[0].id})
+	axis, held := holder_axis(tree, changes)
+	testing.expect(t, held)
+	testing.expect_value(t, axis, want)
+	// The file header's Edit runs neovim_edit_beside with the Agent changes pane's node.
+	path := strings.concatenate({f.directory, "/edited.txt"}, context.temp_allocator)
+	app.neovim_edit_beside(s, w, changes, path, 1)
+	if !testing.expect_value(t, len(s.neovim_panes), 1) {return}
+	editor := layout.find_content(tree, {.Neovim, s.neovim_panes[0].id})
+	axis, held = holder_axis(tree, editor)
+	testing.expect(t, held)
+	testing.expect_value(t, axis, want)
+	testing.expect_value(t, tree.focus, editor)
+}
+
+@(test)
+agent_changes_and_its_edit_split_down_in_a_tall_pane :: proc(t: ^testing.T) {
+	changes_and_edit_split(t, "AutoTall", 500, 1400, .Vertical)
+}
+
+@(test)
+agent_changes_and_its_edit_split_right_in_a_wide_pane :: proc(t: ^testing.T) {
+	// Wide enough that the Agent changes pane stays wider than tall beside the tab rail and panels.
+	changes_and_edit_split(t, "AutoWide", 2800, 700, .Horizontal)
+}
+
 @(test)
 layout_restore_keeps_a_changes_pane_with_its_agent_scope_and_directory :: proc(t: ^testing.T) {
 	first: Fixture

@@ -285,15 +285,17 @@ link_choice_item :: proc(
 }
 
 // Where the row `choice` on `target` opens when clicked: Markdown in a float or a split as Open does today,
-// a web page or an HTML file as a clicked web link does, a shell in a right split, and a program at its own
-// placement. Default for a program that runs as its own window. Open from a pane `in_float` splits that
-// float instead of adding another, as markdown_open_at does.
+// a web page or an HTML file as a clicked web link does, a shell in a split, and a program at its own
+// placement. Default for a program that runs as its own window. `auto` is the split toward the longer side
+// of the link's pane (D-109), Split_Right or Split_Down, which a split the app chooses takes. Open from a
+// pane `in_float` splits that float instead of adding another, as markdown_open_at does.
 @(private = "file")
 link_choice_default :: proc(
 	app: ^App,
 	choice: Link_Choice,
 	in_float: bool,
 	target: string,
+	auto: Link_Placement,
 ) -> Link_Placement {
 	#partial switch choice.action {
 	case .Open:
@@ -301,13 +303,14 @@ link_choice_default :: proc(
 		if web && (!app.settings.pane.web_links || !platform.webview_supported()) {return .Default}
 		page := web || html_opens_in_web(app, target)
 		floating := page ? app.settings.pane.web_floating : app.settings.pane.markdown_floating
-		return floating && !in_float ? .Float : .Split_Right
+		return floating && !in_float ? .Float : auto
 	case .Open_Shell:
-		return .Split_Right
+		return auto
 	case .Program:
 		program, found := link_program(app, int(choice.program))
 		if !found {return .Default}
 		switch program.placement {
+		case .Auto: return auto
 		case .Right_Split: return .Split_Right
 		case .Down_Split: return .Split_Down
 		case .Float: return .Float
@@ -320,7 +323,7 @@ link_choice_default :: proc(
 }
 
 // Fills `submenu` with the placements of row `choice` on a link to `target` of a pane `in_float` or not,
-// its click marked Default.
+// its click marked Default; `auto` is as link_choice_default takes it.
 @(private = "file")
 link_submenu_build :: proc(
 	app: ^App,
@@ -328,10 +331,11 @@ link_submenu_build :: proc(
 	choice: Link_Choice,
 	in_float: bool,
 	target: string,
+	auto: Link_Placement,
 ) {
 	ui.menu_clear(submenu)
 	submenu.width = LINK_SUBMENU_WIDTH
-	default := link_choice_default(app, choice, in_float, target)
+	default := link_choice_default(app, choice, in_float, target, auto)
 	for placement in Link_Placement.Split_Right ..= Link_Placement.Linked_Window {
 		row := LINK_PLACEMENTS[placement]
 		place := choice
@@ -345,13 +349,29 @@ link_submenu_build :: proc(
 @(private = "file")
 pane_placement_of :: proc(placement: Link_Placement) -> Pane_Placement {
 	switch placement {
-	case .Default, .Split_Right: return .Split_Right
+	case .Default: return .Split_Auto
+	case .Split_Right: return .Split_Right
 	case .Split_Down: return .Split_Down
 	case .Float: return .Float
 	case .Tab: return .Tab
 	case .Linked_Window: return .Linked_Window
 	}
-	return .Split_Right
+	return .Split_Auto
+}
+
+// The pane a Link Programs placement opens, or false for a program that runs as its own window.
+@(private = "file")
+opener_pane_placement :: proc(placement: settings.Opener_Placement) -> (Pane_Placement, bool) {
+	switch placement {
+	case .Auto: return .Split_Auto, true
+	case .Right_Split: return .Split_Right, true
+	case .Down_Split: return .Split_Down, true
+	case .Float: return .Float, true
+	case .Tab: return .Tab, true
+	case .Linked_Window: return .Linked_Window, true
+	case .Own_Window:
+	}
+	return {}, false
 }
 
 // Runs one of the shared rows on `document`, a link shown in or pinned to the pane showing `content` in
@@ -415,10 +435,11 @@ link_program_run :: proc(
 	name := strings.clone(program.name, context.temp_allocator)
 	line, ready := link_program_line(app, program, document.target)
 	if !ready {return}
-	placement := choice.placement
+	placement := pane_placement_of(choice.placement)
 	// A program's own placement does not depend on where its link is.
-	if placement == .Default {placement = link_choice_default(app, choice, false, document.target)}
-	if placement == .Default {
+	in_pane := true
+	if choice.placement == .Default {placement, in_pane = opener_pane_placement(program.placement)}
+	if !in_pane {
 		if app.opener.program == nil || !app.opener.program(line, directory) {
 			notify(app, .Error, fmt.tprintf("Could not start %s.", name))
 		}
@@ -429,7 +450,7 @@ link_program_run :: proc(
 	node := layout.find_content(tree, content)
 	if node == layout.INVALID_NODE {node = tree.focus}
 	launch := Pane_Launch{command = line, directory = directory}
-	if _, opened := shell_open_placed(app, w, node, launch, pane_placement_of(placement)); !opened {
+	if _, opened := shell_open_placed(app, w, node, launch, placement); !opened {
 		notify(app, .Error, fmt.tprintf("Could not start %s.", name))
 	}
 }
@@ -636,8 +657,11 @@ document_submenu_open :: proc(app: ^App, w: ^Window, row: int, select_first: boo
 	if current, open := sub.row.?; open && current == row && !select_first {return}
 	document, content, _ := document_link_subject(w)
 	tree := window_tree(w)
-	in_float := tree != nil && layout.is_floating(tree, layout.find_content(tree, content))
-	link_submenu_build(app, &sub.menu, choice, in_float, document.target)
+	node := tree == nil ? layout.INVALID_NODE : layout.find_content(tree, content)
+	in_float := tree != nil && layout.is_floating(tree, node)
+	if tree != nil && node == layout.INVALID_NODE {node = tree.focus}
+	auto := pane_auto_direction(app, w, tree, node) == .Down ? Link_Placement.Split_Down : .Split_Right
+	link_submenu_build(app, &sub.menu, choice, in_float, document.target, auto)
 	submenu_place(w, sub, parent, row, LINK_SUBMENU_WIDTH, select_first)
 }
 

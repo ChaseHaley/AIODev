@@ -2004,7 +2004,7 @@ function aio.pane.new_floating(fields) end
 ---The fields of pane.open_markdown.
 ---@class aio.fields.pane.open_markdown
 ---@field pane? string|integer the pane to act on: a pane id, a pane name, here or focused; default: here (the pane aio runs in), or the focused pane outside AIODev
----@field direction? "left"|"right"|"up"|"down" the side of the pane the new pane opens on; default: right, or a float when pane.markdown_floating is on
+---@field direction? "left"|"right"|"up"|"down" the side of the pane the new pane opens on; default: the pane's longer side (down when it is taller than wide, else right), or a float when pane.markdown_floating is on
 ---@field ratio? number the new pane's share of the split pane's width (left, right) or height (up, down); default: 0.5 (half)
 ---@field focus? boolean moves focus to the new pane; default: off (focus stays where it is)
 ---@field file? string the file to open (a relative path is from aio's working directory); default: none (required)
@@ -2035,7 +2035,7 @@ function aio.pane.open_markdown_default_app(fields) end
 ---The fields of pane.open_neovim.
 ---@class aio.fields.pane.open_neovim
 ---@field pane? string|integer the pane to act on: a pane id, a pane name, here or focused; default: here (the pane aio runs in), or the focused pane outside AIODev
----@field direction? "left"|"right"|"up"|"down" the side of the pane the new pane opens on; default: right
+---@field direction? "left"|"right"|"up"|"down" the side of the pane the new pane opens on; default: the pane's longer side (down when it is taller than wide, else right)
 ---@field ratio? number the new pane's share of the split pane's width (left, right) or height (up, down); default: 0.5 (half)
 ---@field focus? boolean moves focus to the new pane; default: off (focus stays where it is)
 ---@field file? string the file or folder to open; default: an empty buffer
@@ -2053,7 +2053,7 @@ function aio.pane.open_neovim(fields) end
 ---The fields of pane.open_web.
 ---@class aio.fields.pane.open_web
 ---@field pane? string|integer the pane to act on: a pane id, a pane name, here or focused; default: here (the pane aio runs in), or the focused pane outside AIODev
----@field direction? "left"|"right"|"up"|"down" the side of the pane the new pane opens on; default: right, or a float when pane.web_floating is on
+---@field direction? "left"|"right"|"up"|"down" the side of the pane the new pane opens on; default: the pane's longer side (down when it is taller than wide, else right), or a float when pane.web_floating is on
 ---@field ratio? number the new pane's share of the split pane's width (left, right) or height (up, down); default: 0.5 (half)
 ---@field focus? boolean moves focus to the new pane; default: off (focus stays where it is)
 ---@field text? string the web address, local file URL, or absolute Windows path to open; default: a blank pane
@@ -2296,7 +2296,7 @@ function aio.pane.set_ratio(fields) end
 ---The fields of pane.split.
 ---@class aio.fields.pane.split
 ---@field pane? string|integer the pane to act on: a pane id, a pane name, here or focused; default: here (the pane aio runs in), or the focused pane outside AIODev
----@field direction? "left"|"right"|"up"|"down" the side of the pane the new pane opens on; default: right
+---@field direction? "left"|"right"|"up"|"down" the side of the pane the new pane opens on; default: the pane's longer side (down when it is taller than wide, else right)
 ---@field ratio? number the new pane's share of the split pane's width (left, right) or height (up, down); default: 0.5 (half)
 ---@field focus? boolean moves focus to the new pane; default: off (focus stays where it is)
 ---@field cwd? string the directory the new pane starts in (a relative path is from aio's working directory); default: aio's working directory
