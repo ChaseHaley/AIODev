@@ -34,6 +34,7 @@ neovim_content_swap :: proc(
 	}
 	pane := &tab.tree.nodes[node].(layout.Pane)
 	pane.content = to
+	focus_jumps_replace(&app.focus_jumps, workspace, from, to)
 	tab_update_title(app, tab)
 	workspace_mutation_finish(app, workspace, {.Names})
 	for w in app.windows {if w.workspace == workspace {window_relayout(app, w)}}

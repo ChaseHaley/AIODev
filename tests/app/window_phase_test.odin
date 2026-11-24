@@ -72,5 +72,6 @@ closing_the_focused_window_hands_focus_tracking_on :: proc(t: ^testing.T) {
 	app.focus_jumps_track(s)
 	entry := app.focused_session(s, first)
 	if !testing.expect(t, entry != nil) {return}
-	testing.expect(t, len(s.focus_jumps.entries) > 0 && s.focus_jumps.entries[len(s.focus_jumps.entries) - 1] == entry.id)
+	last := app.Focus_Jump{content = {.Terminal, entry.id}}
+	testing.expect(t, len(s.focus_jumps.entries) > 0 && s.focus_jumps.entries[len(s.focus_jumps.entries) - 1] == last)
 }

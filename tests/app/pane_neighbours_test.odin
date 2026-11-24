@@ -182,13 +182,14 @@ directional_focus_across_windows_records_pane_history :: proc(t: ^testing.T) {
 	if !cross_fixture_create(t, &f, "dirnav-history", .Left) {return}
 	s := &f.palette.state
 
+	a, b := app.Focus_Jump{content = {.Terminal, f.a}}, app.Focus_Jump{content = {.Terminal, f.b}}
 	app.run_action(s, f.host, .Focus_Left)
 	cross_settle(s)
-	testing.expectf(t, slice.equal(s.focus_jumps.entries[:], []u32{f.a, f.b}), "entries %v, want %v",
-		s.focus_jumps.entries[:], []u32{f.a, f.b})
+	testing.expectf(t, slice.equal(s.focus_jumps.entries[:], []app.Focus_Jump{a, b}), "entries %v, want %v",
+		s.focus_jumps.entries[:], []app.Focus_Jump{a, b})
 	app.run_action(s, f.linked, .Focus_Right)
 	cross_settle(s)
-	testing.expectf(t, slice.equal(s.focus_jumps.entries[:], []u32{f.a, f.b, f.a}), "entries %v",
+	testing.expectf(t, slice.equal(s.focus_jumps.entries[:], []app.Focus_Jump{a, b, a}), "entries %v",
 		s.focus_jumps.entries[:])
 	app.focus_jump(s, f.host, -1)
 	cross_settle(s)

@@ -168,6 +168,7 @@ pane_content_replace :: proc(
 	pane := &tree.nodes[node].(layout.Pane)
 	pane.content = content
 	if home_pane != nil {home_pane.content = content}
+	focus_jumps_replace(&app.focus_jumps, workspace, old, content)
 	if pane_owns_session(old.kind) {session_close(app, old.id)}
 	tab_update_title(app, tab)
 	workspace_mutation_finish(app, workspace, {.Names})
