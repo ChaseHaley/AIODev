@@ -617,3 +617,26 @@ markdown_style_defaults_keep_the_original_look_and_clamp :: proc(t: ^testing.T) 
 	testing.expect_value(t, len(issues), 4)
 	testing.expect_value(t, bad.markdown, defaults.markdown)
 }
+
+// HTML files have their own switch, apart from pane.web_links, and the web pane search alias finds it.
+@(test)
+html_files_open_in_a_web_pane_by_default_and_parse_apart_from_web_links :: proc(t: ^testing.T) {
+	defaults, err := settings.defaults()
+	testing.expect_value(t, err, nil)
+	defer settings.destroy(&defaults)
+	testing.expect(t, defaults.pane.html_files)
+	entry := settings.schema_find("pane.html_files")
+	if testing.expect(t, entry != nil) {
+		testing.expect_value(t, entry.title, "Open HTML files in a web pane")
+		testing.expect(t, strings.contains(entry.keywords, "browser"))
+		testing.expect_value(t, settings.group_title(entry.key), "Panes")
+	}
+
+	off, issues, parse_err := settings.parse("pane.html_files = false\n")
+	defer settings.destroy(&off)
+	defer settings.diagnostics_destroy(&issues)
+	testing.expect_value(t, parse_err, nil)
+	testing.expect_value(t, len(issues), 0)
+	testing.expect(t, !off.pane.html_files)
+	testing.expect(t, off.pane.web_links)
+}

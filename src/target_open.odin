@@ -69,6 +69,34 @@ markdown_is_path :: proc(path: string) -> bool {
 	return false
 }
 
+// Files a target opens in a web pane instead of the system's handler while pane.html_files is on.
+@(private)
+HTML_EXTENSIONS :: [?]string{".html", ".htm"}
+
+html_is_path :: proc(path: string) -> bool {
+	extension := filepath.ext(path)
+	for html in HTML_EXTENSIONS {
+		if strings.equal_fold(extension, html) {return true}
+	}
+	return false
+}
+
+// Whether a file opens in a web pane rather than with the system's handler: an HTML file while
+// pane.html_files is on, where web panes can run. An elevated AIODev cannot run them (WEB-8).
+@(require_results)
+html_opens_in_web :: proc(app: ^App, path: string) -> bool {
+	return app.settings.pane.html_files && platform.webview_supported() && html_is_path(path)
+}
+
+// The web pane address of a local HTML file, at `fragment` when it names one, in temporary memory.
+@(require_results)
+html_file_url :: proc(path, fragment: string) -> (string, bool) {
+	url, ok := links.web_file_url_from_path(path, context.temp_allocator)
+	if !ok || fragment == "" {return url, ok}
+	joined, err := strings.concatenate({url, "#", fragment}, context.temp_allocator)
+	return joined, err == nil
+}
+
 // A pinned document holds an allowed web address or a canonical local path, opened as a click on
 // the link it came from would open it.
 @(require_results)
@@ -134,19 +162,24 @@ Pending_File :: struct {
 	file: localpath.Open_File,
 }
 
-// A Markdown file opens in a pane, scrolled to `heading` when it names one; any other file goes to the
-// system, after a confirmation when its type is active.
+// A Markdown file opens in a pane, scrolled to `heading` when it names one, and an HTML file that
+// html_opens_in_web admits in a web pane, at `heading`; any other file goes to the system, after a
+// confirmation when its type is active.
 @(private)
 target_open_file :: proc(app: ^App, w: ^Window, path, heading: string) {
 	file, ok := localpath.prepare_open(path)
 	if !ok {target_unavailable(app); return}
-	if !file.confirm && markdown_is_path(file.target) {
-		defer localpath.open_file_destroy(&file)
-		markdown_open_focused(app, w, file.target, heading)
-		return
-	}
 	if !file.confirm {
 		defer localpath.open_file_destroy(&file)
+		if markdown_is_path(file.target) {
+			markdown_open_focused(app, w, file.target, heading)
+			return
+		}
+		// As with a web link, a page that cannot be placed goes to the system instead.
+		if html_opens_in_web(app, file.target) {
+			url, converted := html_file_url(file.target, heading)
+			if converted && web_open_focused(app, w, url) {return}
+		}
 		if !target_open_approved(app, file.path, "") {notify(app, .Error, "Could not open the file.")}
 		return
 	}

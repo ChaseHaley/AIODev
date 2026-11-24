@@ -59,7 +59,8 @@ Document_Actions :: struct {
 // terminal or Markdown link and of a pinned link: link_choices lists which a link offers. Moving and removing
 // are a pinned link's own.
 Link_Action :: enum u8 {
-	// The link's own handling: a Markdown file shows in a pane, anything else goes to the system.
+	// The link's own handling: a Markdown file shows in a pane, an HTML file in a web pane while
+	// pane.html_files is on, anything else goes to the system.
 	Open,
 	// A new shell in a folder, with the profile of the pane the menu belongs to.
 	Open_Shell,
@@ -215,8 +216,8 @@ link_program :: proc(app: ^App, index: int) -> (^settings.Opener, bool) {
 
 // The shared rows `document` offers, in menu order, with nil for a divider (D-088). First come the ways to
 // open it: Open, or Open in Shell for a folder, then each program from Link Programs that offers itself for
-// files or for folders. A Markdown file and a folder also have the system's handler, which is what Open
-// already does for any other file.
+// files or for folders. A Markdown file, an HTML file that opens in a web pane and a folder also have the
+// system's handler, which is what Open already does for any other file.
 @(private = "file")
 link_choices :: proc(app: ^App, document: Document) -> []Maybe(Link_Choice) {
 	capacity := len(Link_Action) + settings.OPENER_LIMIT
@@ -224,6 +225,7 @@ link_choices :: proc(app: ^App, document: Document) -> []Maybe(Link_Choice) {
 	web := document_is_web(document.target)
 	file := !web && !document.folder
 	markdown := file && markdown_is_path(document.target)
+	html := file && html_opens_in_web(app, document.target)
 	append(&rows, Link_Choice{action = document.folder ? .Open_Shell : .Open})
 	if !web {
 		indices: [settings.OPENER_LIMIT]int
@@ -234,7 +236,7 @@ link_choices :: proc(app: ^App, document: Document) -> []Maybe(Link_Choice) {
 			append(&rows, Link_Choice{action = .Program, program = u8(i)})
 		}
 	}
-	if markdown || document.folder || (web && platform.webview_supported()) {
+	if markdown || html || document.folder || (web && platform.webview_supported()) {
 		append(&rows, Link_Choice{action = .Open_External})
 	}
 	append(&rows, nil, Link_Choice{action = .Copy})
@@ -257,8 +259,8 @@ link_choice_item :: proc(
 	#partial switch choice.action {
 	case .Open:
 		item.glyph = document_icon(document)
-		web := document_is_web(document.target)
-		item.submenu = (markdown_is_path(document.target) && !web) || (web && platform.webview_supported())
+		in_pane := markdown_is_path(document.target) || html_opens_in_web(app, document.target)
+		item.submenu = document_is_web(document.target) ? platform.webview_supported() : in_pane
 	case .Open_External:
 		if document_is_web(document.target) {
 			item.label = "Open in default browser"
@@ -278,15 +280,23 @@ link_choice_item :: proc(
 	return item
 }
 
-// Where the row `choice` opens when clicked: Markdown in a float or a split as Open does today, a shell in
-// a right split, and a program at its own placement. Default for a program that runs as its own window.
-// Open from a pane `in_float` splits that float instead of adding another, as markdown_open_at does.
+// Where the row `choice` on `target` opens when clicked: Markdown in a float or a split as Open does today,
+// a web page or an HTML file as a clicked web link does, a shell in a right split, and a program at its own
+// placement. Default for a program that runs as its own window. Open from a pane `in_float` splits that
+// float instead of adding another, as markdown_open_at does.
 @(private = "file")
-link_choice_default :: proc(app: ^App, choice: Link_Choice, in_float, web: bool) -> Link_Placement {
+link_choice_default :: proc(
+	app: ^App,
+	choice: Link_Choice,
+	in_float: bool,
+	target: string,
+) -> Link_Placement {
 	#partial switch choice.action {
 	case .Open:
+		web := document_is_web(target)
 		if web && (!app.settings.pane.web_links || !platform.webview_supported()) {return .Default}
-		floating := web ? app.settings.pane.web_floating : app.settings.pane.markdown_floating
+		page := web || html_opens_in_web(app, target)
+		floating := page ? app.settings.pane.web_floating : app.settings.pane.markdown_floating
 		return floating && !in_float ? .Float : .Split_Right
 	case .Open_Shell:
 		return .Split_Right
@@ -305,13 +315,19 @@ link_choice_default :: proc(app: ^App, choice: Link_Choice, in_float, web: bool)
 	return .Default
 }
 
-// Fills `submenu` with the placements of row `choice` on a link of a pane `in_float` or not, its click
-// marked Default.
+// Fills `submenu` with the placements of row `choice` on a link to `target` of a pane `in_float` or not,
+// its click marked Default.
 @(private = "file")
-link_submenu_build :: proc(app: ^App, submenu: ^ui.Menu, choice: Link_Choice, in_float, web: bool) {
+link_submenu_build :: proc(
+	app: ^App,
+	submenu: ^ui.Menu,
+	choice: Link_Choice,
+	in_float: bool,
+	target: string,
+) {
 	ui.menu_clear(submenu)
 	submenu.width = LINK_SUBMENU_WIDTH
-	default := link_choice_default(app, choice, in_float, web)
+	default := link_choice_default(app, choice, in_float, target)
 	for placement in Link_Placement.Split_Right ..= Link_Placement.Linked_Window {
 		row := LINK_PLACEMENTS[placement]
 		place := choice
@@ -397,7 +413,7 @@ link_program_run :: proc(
 	if !ready {return}
 	placement := choice.placement
 	// A program's own placement does not depend on where its link is.
-	if placement == .Default {placement = link_choice_default(app, choice, false, false)}
+	if placement == .Default {placement = link_choice_default(app, choice, false, document.target)}
 	if placement == .Default {
 		if app.opener.program == nil || !app.opener.program(line, directory) {
 			notify(app, .Error, fmt.tprintf("Could not start %s.", name))
@@ -612,7 +628,7 @@ document_submenu_open :: proc(app: ^App, w: ^Window, row: int, select_first: boo
 	document, content, _ := document_link_subject(w)
 	tree := window_tree(w)
 	in_float := tree != nil && layout.is_floating(tree, layout.find_content(tree, content))
-	link_submenu_build(app, &sub.menu, choice, in_float, document_is_web(document.target))
+	link_submenu_build(app, &sub.menu, choice, in_float, document.target)
 	submenu_place(w, sub, parent, row, LINK_SUBMENU_WIDTH, select_first)
 }
 
@@ -880,9 +896,9 @@ document_menu_build_link :: proc(
 	document_menu_build_levels(app, menu, content, DOCUMENT_PIN_LABELS)
 }
 
-// Places a link's Markdown file, or a new shell in its folder, beside the pane showing `content` or, once
-// that pane has gone, the focused one. The shell takes that pane's profile; a pane with no shell, such as
-// a Markdown pane, gives the default profile.
+// Places a link's Markdown or HTML file, or a new shell in its folder, beside the pane showing `content` or,
+// once that pane has gone, the focused one. The shell takes that pane's profile; a pane with no shell, such
+// as a Markdown pane, gives the default profile.
 @(private = "file")
 document_link_open_in :: proc(
 	app: ^App,
@@ -919,13 +935,20 @@ document_link_open_in :: proc(
 		return
 	}
 	defer localpath.open_file_destroy(&file)
+	if html_is_path(file.target) {
+		url, converted := html_file_url(file.target, "")
+		if !converted || !web_open_placed(app, w, node, url, placement) {
+			notify(app, .Error, "Could not open the web pane.")
+		}
+		return
+	}
 	if !markdown_open_placed(app, w, node, file.target, placement) {
 		notify(app, .Error, "Could not open the file.")
 	}
 }
 
-// Hands a Markdown file to the system instead of a pane. A type that needs confirming takes the usual
-// confirmation.
+// Hands a Markdown or HTML file to the system instead of a pane. A type that needs confirming takes the
+// usual confirmation.
 @(private)
 document_link_open_external :: proc(app: ^App, w: ^Window, path: string) {
 	file, ok := localpath.prepare_open(path)

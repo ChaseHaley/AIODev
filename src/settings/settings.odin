@@ -153,6 +153,7 @@ Pane_Settings :: struct {
 	gap, corner_radius:            int,
 	markdown_floating:             bool,
 	web_links:                     bool,
+	html_files:                    bool,
 	web_navigator:                 bool,
 	web_floating:                  bool,
 	shell_mode_badge:              Shell_Mode_Badge,
@@ -962,6 +963,16 @@ SCHEMA :: [?]Schema_Entry {
 			"browser. Right-click any link to choose either.",
 	},
 	{
+		key = "pane.html_files",
+		title = "Open HTML files in a web pane",
+		keywords = "browser htm",
+		kind = .Bool,
+		offset = offset_of(Settings, pane) + offset_of(Pane_Settings, html_files),
+		default_value = "true",
+		description = "Open clicked or dropped .html and .htm files in an embedded web pane instead of the " +
+			"default app. Right-click a file link to choose either.",
+	},
+	{
 		key = "pane.web_navigator",
 		title = "Show web pane URL bar",
 		keywords = "browser",
@@ -977,8 +988,8 @@ SCHEMA :: [?]Schema_Entry {
 		kind = .Bool,
 		offset = offset_of(Settings, pane) + offset_of(Pane_Settings, web_floating),
 		default_value = "false",
-		description = "Open a clicked web link in a float above the tab, so the panes already there keep " +
-			"their size.",
+		description = "Open a clicked web link or HTML file in a float above the tab, so the panes already " +
+			"there keep their size.",
 	},
 	{
 		key = "pane.shell_mode_badge",

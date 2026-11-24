@@ -879,6 +879,49 @@ link_menu_opens_a_markdown_file_in_each_place_copies_it_and_shows_its_folder :: 
 	testing.expect(t, link_row(w, .Copy) >= 0)
 }
 
+// Defect guard: where web panes cannot run (the headless backend here, an elevated AIODev on the desktop),
+// a clicked HTML file goes to the system's handler whether pane.html_files is on or off, and its link menu
+// offers what any other file's does, so turning the setting off changes nothing either.
+@(test)
+html_file_goes_to_the_system_where_web_panes_cannot_run :: proc(t: ^testing.T) {
+	sync.mutex_lock(&Link_Test_Lock)
+	defer sync.mutex_unlock(&Link_Test_Lock)
+	f: Palette_Fixture
+	defer palette_fixture_destroy(t, &f)
+	if !palette_fixture_create(t, &f, "documents-html-system", false) {return}
+	if !testing.expect(t, !platform.webview_supported(), "the headless backend hosts no web view") {return}
+	root, root_error := os.make_directory_temp("", "aio-link-html-*", context.allocator)
+	if !testing.expect_value(t, root_error, nil) {return}
+	defer {testing.expect_value(t, os.remove_all(root), nil); delete(root)}
+	path := fmt.aprintf(`%s\report.html`, root)
+	defer delete(path)
+	if !testing.expect_value(t, os.write_entire_file(path, transmute([]u8)string("<h1>Report</h1>")), nil) {return}
+	s, w := &f.state, f.state.windows[0]
+	s.opener.file = link_file_stub
+	s.opener.url = link_open_stub
+	defer {s.opener.file = nil; s.opener.url = nil}
+	terminal := w.panes[0].content
+	link_feed(t, &f, fmt.tprintf("\x1b[2J\x1b[3J\x1b[H%s", path))
+	for on in ([?]bool{true, false}) {
+		s.settings.pane.html_files = on
+		testing.expect(t, !app.html_opens_in_web(s, path))
+		Open_Stub_State = {}
+		link_click(t, &f, 2, 0, true)
+		testing.expect_value(t, Open_Stub_State.calls, 1)
+		testing.expect(t, strings.has_suffix(Open_Stub_State.uri, `report.html`), Open_Stub_State.uri)
+		testing.expect_value(t, len(s.web_panes), 0)
+		testing.expect_value(t, layout.pane_count(app.window_tree(w)), 1)
+
+		if !menu_on_path(t, &f, terminal, {.Control}) {return}
+		open := link_row(w, .Open)
+		testing.expect(t, open >= 0 && !w.document_menu.menu.items[open].submenu)
+		testing.expect(t, link_row(w, .Open_External) < 0 && link_row(w, .Open_Folder) >= 0)
+		click_row(s, w, open)
+		testing.expect_value(t, Open_Stub_State.calls, 2)
+		testing.expect_value(t, len(s.web_panes), 0)
+	}
+}
+
 // A link in a floating terminal opens in its float: the menu marks Right split Default, as Open splits the
 // float even with pane.markdown_floating on, and a chosen Down split joins the float too.
 @(test)

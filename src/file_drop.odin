@@ -16,10 +16,11 @@ import "cosmos:host"
 // show the header drag's outline (arrange.odin) at the place the pointer picks: beside a pane on its
 // nearest side, along a window edge in its band, in a new tab on the tab strip's New tab zone, or beside the
 // focused pane of the tab under the pointer. Over the title bar or any other chrome the outline sits beside
-// the focused pane, on its right. The drop opens the first file there, a Markdown file in a Markdown pane, a
-// folder in a shell, any other file with the Link Program the link menu would list first for a file (else
-// Neovim) in a new terminal pane, and each further file beside the one before it. At most pane.drop_limit
-// files open from one drop, so a dropped folder's worth of files does not start a process each.
+// the focused pane, on its right. The drop opens the first file there, a Markdown file in a Markdown pane,
+// an HTML file in a web pane while pane.html_files is on, a folder in a shell, any other file with the Link
+// Program the link menu would list first for a file (else Neovim) in a new terminal pane, and each further
+// file beside the one before it. At most pane.drop_limit files open from one drop, so a dropped folder's
+// worth of files does not start a process each.
 
 @(private = "file")
 FILE_DROP_PROGRAM :: "nvim"
@@ -248,6 +249,14 @@ file_drop_one :: proc(
 			return .Refused
 		}
 		content = {.Markdown, pane.id}
+	case !file.confirm && html_opens_in_web(app, file.target):
+		url, converted := html_file_url(file.target, "")
+		pane := converted ? web_pane_create(app, url) : nil
+		if pane == nil {
+			notify(app, .Error, "Could not open the web pane.")
+			return .Refused
+		}
+		content = {.Web, pane.id}
 	case:
 		// The first Link Programs entry offered for files, as the link menu lists them (D-088); Neovim when
 		// there is none.
@@ -275,7 +284,7 @@ file_drop_one :: proc(
 		content = {.Terminal, id}
 	}
 	if !file_drop_attach(app, w, content, drop, first) {
-		if content.kind == .Terminal {session_close(app, content.id)}
+		pane_content_discard(app, content)
 		notify(app, .Error, "Could not open the file.")
 		return .Refused
 	}

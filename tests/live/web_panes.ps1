@@ -67,6 +67,31 @@ try {
     Invoke-Ctl wait text 'PS ' | Out-Null
     Check ((Read-State)['web.count'] -eq '0') 'a fresh instance has web panes'
 
+    # A Ctrl+clicked HTML file opens in a web pane only where WebView2 runs. Headless has none, as an
+    # elevated AIODev has none, so with pane.html_files on or off the file goes to the system's handler.
+    Invoke-Ctl type "Clear-Host; [Console]::WriteLine('$localFile')" | Out-Null
+    Invoke-Ctl key Enter | Out-Null
+    $row = -1
+    for ($i = 0; $i -lt 50 -and $row -lt 0; $i++) {
+        foreach ($line in (Invoke-Ctl screen)) {
+            if ($line -match '^\s*(\d+)\|[A-Za-z]:\\') { $row = [int]$Matches[1]; break }
+        }
+        if ($row -lt 0) { Start-Sleep -Milliseconds 100 }
+    }
+    Check ($row -ge 0) 'the printed HTML path is not on screen'
+    foreach ($value in @('true', 'false')) {
+        $set = Invoke-Aio @('settings.set', '--name', 'pane.html_files', $value)
+        Check ($set.Code -eq 0) "settings.set pane.html_files $($value): $($set.Text)"
+        $opened = [int](Read-State)['os.opened_paths']
+        Invoke-Ctl mouse click "4,$row" --mods Ctrl | Out-Null
+        Wait-For 'os.opened_paths' "$($opened + 1)"
+        $state = Read-State
+        Check ($state["os.opened_path.$($opened + 1)"] -eq $localFile) "opened $($state["os.opened_path.$($opened + 1)"])"
+        Check ($state['web.count'] -eq '0') "pane.html_files=$value opened a web pane without WebView2"
+    }
+    Invoke-Ctl type 'Clear-Host' | Out-Null
+    Invoke-Ctl key Enter | Out-Null
+
     # Addresses are normalised; --direction places the second pane below the focused one.
     Open-Web @('https://example.com/docs')
     Wait-For 'web.count' '1'

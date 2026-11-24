@@ -253,3 +253,21 @@ web_find_summary_maps_the_webview_index_to_a_zero_based_selection :: proc(t: ^te
 	testing.expect_value(t, app.web_find_summary(&failed).order, search.Order.Document_Order)
 	testing.expect_value(t, app.web_find_summary(&failed).selected, -1)
 }
+
+// Only .html and .htm count as HTML files; their web pane address encodes the path as filename bytes and
+// keeps a link's fragment.
+@(test)
+html_files_are_html_and_htm_and_open_at_their_file_url :: proc(t: ^testing.T) {
+	for path in ([?]string{`C:\r\page.html`, `C:\r\PAGE.HTM`, `C:\r\old.htm`}) {
+		testing.expectf(t, app.html_is_path(path), "%s is HTML", path)
+	}
+	for path in ([?]string{`C:\r\page.xhtml`, `C:\r\icon.svg`, `C:\r\page.html.txt`, `C:\r\html`, `C:\r\a.md`}) {
+		testing.expectf(t, !app.html_is_path(path), "%s is not HTML", path)
+	}
+	url, ok := app.html_file_url(`C:\My Reports\agent #1.html`, "")
+	testing.expect(t, ok)
+	testing.expect_value(t, url, "file:///C:/My%20Reports/agent%20%231.html")
+	url, ok = app.html_file_url(`D:\r\page.htm`, "results")
+	testing.expect(t, ok)
+	testing.expect_value(t, url, "file:///D:/r/page.htm#results")
+}

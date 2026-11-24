@@ -198,8 +198,9 @@ normalize_web_input :: proc(raw: string, allocator := context.temp_allocator) ->
 	return candidate, true
 }
 
-// Encode the native path literally: '#' and '%' in a filename are not URI syntax.
-@(private, require_results)
+// The file URL of an absolute local drive path, in `allocator`. The native path is encoded literally:
+// '#' and '%' in a filename are not URI syntax.
+@(require_results)
 web_file_url_from_path :: proc(path: string, allocator: mem.Allocator) -> (string, bool) {
 	PREFIX :: "file:///"
 	hex := "0123456789ABCDEF"
