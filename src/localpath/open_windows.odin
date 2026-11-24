@@ -217,17 +217,26 @@ prepare_open :: proc(path: string) -> (file: Open_File, ok: bool) {
 	return file, true
 }
 
-// approved is the target the user confirmed, or empty when no confirmation was shown; a prepared
-// target is never empty. The dispatch rechecks the path and opens only the validated target, never
-// the .lnk, so the shell does not resolve a shortcut again at launch and a retargeted shortcut is
-// refused rather than opened.
+// The prepared file `path` names when it may open: approved is the target the user confirmed, or empty
+// when no confirmation was shown; a prepared target is never empty. The path is rechecked and only the
+// validated target opens, never the .lnk, so the shell does not resolve a shortcut again at launch and
+// a retargeted shortcut is refused rather than opened. The caller destroys the file.
+@(require_results)
+prepare_approved :: proc(path, approved: string) -> (file: Open_File, ok: bool) {
+	file = prepare_open(path) or_return
+	if file.confirm && approved == "" || approved != "" && file.target != approved {
+		open_file_destroy(&file)
+		return {}, false
+	}
+	return file, true
+}
+
+// Hands the file prepare_approved admits to its Windows handler.
 @(require_results)
 open_file :: proc(path, approved: string) -> bool {
-	file, ok := prepare_open(path)
+	file, ok := prepare_approved(path, approved)
 	if !ok {return false}
 	defer open_file_destroy(&file)
-	if file.confirm && approved == "" {return false}
-	if approved != "" && file.target != approved {return false}
 	text := w.utf8_to_wstring(file.target, context.temp_allocator)
 	if text == nil {return false}
 	verb := [5]u16{'o', 'p', 'e', 'n', 0}

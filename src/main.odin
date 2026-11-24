@@ -13,6 +13,20 @@ main :: proc() {
 	if code != 0 {os.exit(code)}
 }
 
+// The file opener start composes. A headless build only records the file it would hand to Windows,
+// after the same checks, so a headless instance never starts a program on the desktop (WORK-446).
+when platform.HEADLESS {
+	@(require_results)
+	system_open_file :: proc(path, approved: string) -> bool {
+		file, ok := localpath.prepare_approved(path, approved)
+		if !ok {return false}
+		defer localpath.open_file_destroy(&file)
+		return platform.open_path(file.target)
+	}
+} else {
+	system_open_file :: localpath.open_file
+}
+
 @(private)
 App_Logger :: struct {
 	console, file: log.Logger,
@@ -71,7 +85,7 @@ start :: proc() -> int {
 	defer if restart {app_relaunch(options)}
 	app := App {
 		options = options,
-		opener = {url = platform.open_url, file = localpath.open_file, program = platform.open_program},
+		opener = {url = platform.open_url, file = system_open_file, program = platform.open_program},
 	}
 	defer app_destroy(&app)
 	id, id_error := instance.app_id(options, context.allocator)
