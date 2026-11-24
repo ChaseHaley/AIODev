@@ -9,18 +9,21 @@ import "core:strings"
 // restores after any change to the tab list. Its name and colour together tell it apart in its workspace
 // (WORK-460): no two groups share both.
 Tab_Group :: struct {
-	id:     u32,
+	id:        u32,
 	// Owned. Empty draws the chip as a dot of its colour.
-	name:   string,
+	name:      string,
 	// An index into WORKSPACE_ICON_COLORS from 1: groups take the workspace icon colours.
-	color:  int,
+	color:     int,
 	// The chip stands in for the group's tabs, which neither draw nor take clicks.
-	folded: bool,
+	folded:    bool,
+	// Links pinned to the group, which every pane of its tabs lists.
+	documents: Document_List,
 }
 
 tab_group_destroy :: proc(group: ^Tab_Group) {
 	delete(group.name)
 	group.name = ""
+	documents_destroy(&group.documents)
 }
 
 tab_group_find :: proc(workspace: ^Workspace, id: u32) -> ^Tab_Group {
@@ -101,7 +104,7 @@ tab_groups_settle :: proc(workspace: ^Workspace, moved: []^Tab) {
 	left := first > 0 ? workspace.tabs[first - 1].group : 0
 	right := last + 1 < len(workspace.tabs) ? workspace.tabs[last + 1].group : 0
 	if left != 0 && left == right {
-		for tab in moved {tab.group = left}
+		tab_groups_assign(workspace, moved, left)
 	} else {
 		tab_groups_keep_whole(workspace, moved)
 	}
@@ -120,6 +123,20 @@ tab_groups_keep_whole :: proc(workspace: ^Workspace, moved: []^Tab) {
 		keep[i] = whole
 	}
 	for tab, i in moved {if keep == nil || !keep[i] {tab.group = 0}}
+}
+
+// Puts the tabs of `tabs` in group `id`, 0 for none. A group whose every tab leaves it this way hands its
+// pinned links down to those tabs first, so the links stay with the tabs when the group goes.
+tab_groups_assign :: proc(workspace: ^Workspace, tabs: []^Tab, id: u32) {
+	for &group in workspace.groups {
+		if group.id == id || len(group.documents) == 0 {continue}
+		_, members := tab_group_span(workspace, group.id)
+		leaving := 0
+		for tab in tabs {if tab.group == group.id {leaving += 1}}
+		if leaving == 0 || leaving < members {continue}
+		for tab in tabs {if tab.group == group.id {documents_hand_down(&tab.documents, group.documents[:])}}
+	}
+	for tab in tabs {tab.group = id}
 }
 
 // A group of `source` the tabs `tabs` names wholly, as its id there and its id in `destination`.
@@ -143,7 +160,13 @@ tab_groups_carry :: proc(source, destination: ^Workspace, tabs: []u32) -> []Tab_
 		if !whole {continue}
 		if tab_group_taken(destination, group.name, group.color) {
 			group.color = tab_group_next_color(destination, group.name)
-			if group.color == 0 {continue}
+			if group.color == 0 {
+				// Its tabs arrive ungrouped, so they keep its links.
+				for tab in source.tabs {
+					if tab.group == group.id {documents_hand_down(&tab.documents, group.documents[:])}
+				}
+				continue
+			}
 		}
 		destination.next_group_id += 1
 		if _, err := append(&carried, Tab_Group_Carry{group.id, destination.next_group_id}); err != nil {break}
@@ -271,7 +294,7 @@ tab_group_create :: proc(app: ^App, w: ^Window, index: int, name := "") -> ^Tab_
 	id := workspace.next_group_id
 	append(&workspace.groups, Tab_Group{id = id, name = owned, color = color})
 	tab_order_apply(app, w, order)
-	for tab in block {tab.group = id}
+	tab_groups_assign(workspace, block, id)
 	tab_groups_changed(app, w)
 	return tab_group_find(workspace, id)
 }
@@ -284,7 +307,7 @@ tab_group_add :: proc(app: ^App, w: ^Window, index: int, id: u32) {
 	order := tab_order_with_block(workspace, block, id)
 	if order == nil {return}
 	tab_order_apply(app, w, order)
-	for tab in block {tab.group = id}
+	tab_groups_assign(workspace, block, id)
 	if tab := selected_tab(workspace); tab != nil && slice.contains(block, tab) {
 		_ = tab_group_reveal(workspace, workspace.selected)
 	}
@@ -304,7 +327,7 @@ tab_group_remove :: proc(app: ^App, w: ^Window, index: int) {
 		order := tab_order_with_block(workspace, block[:], id)
 		if order == nil {return}
 		tab_order_apply(app, w, order)
-		for tab in block {tab.group = 0}
+		tab_groups_assign(workspace, block[:], 0)
 	}
 	tab_groups_changed(app, w)
 }
@@ -336,9 +359,11 @@ tab_group_fold :: proc(app: ^App, w: ^Window, id: u32, folded: bool) -> bool {
 	return true
 }
 
-// Takes every tab out of group `id`, which goes; the tabs stay where they are.
+// Takes every tab out of group `id`, which goes; the tabs stay where they are and keep its links.
 tab_group_ungroup :: proc(app: ^App, w: ^Window, id: u32) {
-	for tab in w.workspace.tabs {if tab.group == id {tab.group = 0}}
+	members := make([dynamic]^Tab, 0, len(w.workspace.tabs), context.temp_allocator)
+	for tab in w.workspace.tabs {if tab.group == id {append(&members, tab)}}
+	tab_groups_assign(w.workspace, members[:], 0)
 	tab_groups_changed(app, w)
 }
 

@@ -375,6 +375,6 @@ tab_drag_group :: proc(app: ^App, w: ^Window, moved: []^Tab, carry: Tab_Carry) {
 	if group != nil && group.folded {
 		for tab, i in workspace.tabs {if tab == moved[0] {tab_group_add(app, w, i, target); return}}
 	}
-	for tab in moved {tab.group = target}
+	tab_groups_assign(workspace, moved, target)
 	tab_groups_tidy(workspace)
 }

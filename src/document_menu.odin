@@ -43,10 +43,12 @@ Document_Url_Entry :: struct {
 	invalid: bool,
 }
 
-// The level popout above row `row`'s level button, with `pick` the level the keyboard or pointer is on.
+// The level popout above row `row`'s level button, with `pick` the level the keyboard or pointer is on and
+// `levels` the ones the pane can pin to, in order.
 Document_Popout :: struct {
-	row:  int,
-	pick: Document_Level,
+	row:    int,
+	pick:   Document_Level,
+	levels: bit_set[Document_Level],
 }
 
 // Row `row`'s right-click menu: what else it can do beyond its click. Its rows are Document_Menu.actions,
@@ -71,6 +73,7 @@ Link_Action :: enum u8 {
 	Open_Folder,
 	Move_Pane,
 	Move_Tab,
+	Move_Group,
 	Move_Workspace,
 	Remove,
 }
@@ -185,6 +188,7 @@ LINK_ACTIONS := [Link_Action]struct {
 	.Open_Folder    = {"Open containing folder", .Folder},
 	.Move_Pane      = {"Move to this pane", .Split_Right},
 	.Move_Tab       = {"Move to this tab", .Layout_Top},
+	.Move_Group     = {"Move to this group", .Group_Workspace},
 	.Move_Workspace = {"Move to this workspace", .Workspace},
 	.Remove         = {"Remove", .Close},
 }
@@ -383,7 +387,7 @@ link_choice_run :: proc(
 		_ = clipboard_copy(app, document.target)
 	case .Open_Folder:
 		target_open(app, w, File_Target{filepath.dir(document.target)})
-	case .Move_Pane, .Move_Tab, .Move_Workspace, .Remove:
+	case .Move_Pane, .Move_Tab, .Move_Group, .Move_Workspace, .Remove:
 		log.errorf("%v is not a shared link action", choice.action)
 	}
 }
@@ -467,6 +471,7 @@ DOCUMENT_ACTIONS_WIDTH :: f32(224)
 DOCUMENT_LEVEL_LABELS := [Document_Level]string {
 	.Pane      = "This pane",
 	.Tab       = "This tab",
+	.Group     = "This group",
 	.Workspace = "This workspace",
 }
 
@@ -474,6 +479,7 @@ DOCUMENT_LEVEL_LABELS := [Document_Level]string {
 DOCUMENT_PIN_LABELS := [Document_Level]string {
 	.Pane      = "Pin to this pane",
 	.Tab       = "Pin to this tab",
+	.Group     = "Pin to this group",
 	.Workspace = "Pin to this workspace",
 }
 
@@ -481,6 +487,7 @@ DOCUMENT_PIN_LABELS := [Document_Level]string {
 DOCUMENT_LEVEL_TIPS := [Document_Level]string {
 	.Pane      = "Pinned to this pane",
 	.Tab       = "Pinned to this tab",
+	.Group     = "Pinned to this group",
 	.Workspace = "Pinned to this workspace",
 }
 
@@ -491,6 +498,8 @@ document_level_icon :: proc(level: Document_Level) -> ui.Icon {
 		return .Split_Right
 	case .Tab:
 		return .Layout_Top
+	case .Group:
+		return .Group_Workspace
 	case .Workspace:
 		return .Workspace
 	}
@@ -1222,13 +1231,18 @@ document_menu_url_edited :: proc(app: ^App, w: ^Window) {
 // which leaves the documents' rows where they were.
 @(private = "file")
 document_popout_open :: proc(app: ^App, w: ^Window, index: int) {
+	state := document_menu_state(w)
 	menu := &w.document_menu
 	entry, _ := document_menu_entry(menu, index)
-	if entry.action != .Open {return}
+	if state == nil || entry.action != .Open {return}
+	scopes, found := document_scopes(app, state.content)
+	if !found {return}
 	if _, entering := document_menu_url_entry(w); entering {
 		document_menu_set(app, w, Document_Menu_List{}, .Rebuild)
 	}
-	document_menu_set(app, w, Document_Menu_List{Document_Popout{index, entry.level}}, .Keep)
+	levels: bit_set[Document_Level]
+	for level in Document_Level {if document_scope_list(scopes, level) != nil {levels += {level}}}
+	document_menu_set(app, w, Document_Menu_List{Document_Popout{index, entry.level, levels}}, .Keep)
 }
 
 @(private = "file")
@@ -1296,7 +1310,7 @@ document_actions_choose :: proc(app: ^App, w: ^Window, choice: Link_Choice) {
 	switch choice.action {
 	case .Open, .Open_Shell, .Program, .Open_External, .Copy, .Open_Folder:
 		document_link_choose(app, w, choice)
-	case .Move_Pane, .Move_Tab, .Move_Workspace:
+	case .Move_Pane, .Move_Tab, .Move_Group, .Move_Workspace:
 		document_popout_close(app, w)
 		level := Document_Level(int(choice.action) - int(Link_Action.Move_Pane))
 		document_menu_move(app, w, actions.row, level)
@@ -1348,26 +1362,42 @@ document_popout_rect :: proc(w: ^Window) -> render.Rect {
 	s := w.scale
 	action := ui.menu_action_rect(&menu.menu, popout.row, .Action, f32(w.width), f32(w.height), s)
 	pad := ui.OVERLAY_PADDING * s
-	width := f32(len(Document_Level)) * ui.HEIGHT_COMPACT * s + 2 * pad
+	width := f32(card(popout.levels)) * ui.HEIGHT_COMPACT * s + 2 * pad
 	height := ui.HEIGHT_COMPACT * s + 2 * pad
 	x := action.x + (action.width - width) / 2
 	y := action.y - ui.SPACE_1 * s - height
 	return {clamp(x, 8 * s, max(8 * s, f32(w.width) - width - 8 * s)), max(8 * s, y), width, height}
 }
 
+// The button of `level` in the popout, which shows the levels the pane can pin to in order; empty for any
+// other level.
 document_popout_button :: proc(w: ^Window, level: Document_Level) -> render.Rect {
+	popout, _ := document_menu_popout(w)
+	if level not_in popout.levels {return {}}
+	place := 0
+	for other in popout.levels {if other < level {place += 1}}
 	r := document_popout_rect(w)
 	pad := ui.OVERLAY_PADDING * w.scale
 	size := ui.HEIGHT_COMPACT * w.scale
-	return {r.x + pad + f32(int(level)) * size, r.y + pad, size, size}
+	return {r.x + pad + f32(place) * size, r.y + pad, size, size}
 }
 
 @(private = "file")
 document_popout_hit :: proc(w: ^Window, x, y: f32) -> (Document_Level, bool) {
-	for level in Document_Level {
+	popout, _ := document_menu_popout(w)
+	for level in popout.levels {
 		if render.rect_contains(document_popout_button(w, level), x, y) {return level, true}
 	}
 	return {}, false
+}
+
+// The level the popout offers next to `from`, a step of -1 to the left or +1 to the right; `from` at an end.
+@(private = "file")
+document_popout_step :: proc(popout: Document_Popout, from: Document_Level, step: int) -> Document_Level {
+	for at := int(from) + step; at >= int(min(Document_Level)) && at <= int(max(Document_Level)); at += step {
+		if Document_Level(at) in popout.levels {return Document_Level(at)}
+	}
+	return from
 }
 
 // In the list the search field has the keyboard: Up, Down, Ctrl+N and Ctrl+P move the selection, Enter
@@ -1398,9 +1428,9 @@ document_menu_key :: proc(app: ^App, w: ^Window, raw, logical: input.Key_Event) 
 		case .Escape:
 			document_popout_close(app, w)
 		case .Arrow_Left:
-			if step.pick > min(Document_Level) {document_popout_pick(app, w, Document_Level(int(step.pick) - 1))}
+			document_popout_pick(app, w, document_popout_step(step, step.pick, -1))
 		case .Arrow_Right:
-			if step.pick < max(Document_Level) {document_popout_pick(app, w, Document_Level(int(step.pick) + 1))}
+			document_popout_pick(app, w, document_popout_step(step, step.pick, 1))
 		case .Enter, .Numpad_Enter, .Space:
 			document_popout_choose(app, w, step.pick)
 		}
@@ -1892,7 +1922,7 @@ document_menu_draw :: proc(app: ^App, w: ^Window) -> render.Build_Status {
 	if ui.panel_draw(&w.list, ui.popover_panel(document_popout_rect(w), s), app.theme) != .None {return .Ok}
 	entry, _ := document_menu_entry(menu, popout.row)
 	current := entry.level
-	for level in Document_Level {
+	for level in popout.levels {
 		b := ui.Button {
 			rect     = document_popout_button(w, level),
 			hover    = level == popout.pick && level != current ? 1 : 0,

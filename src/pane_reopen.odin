@@ -55,6 +55,7 @@ closed_remembers :: proc(app: ^App, content: layout.Content) -> bool {
 }
 
 // Remembers the tab at `index` before it closes. Tabs without a pane closed_remembers keeps are not kept.
+// The last tab of a group to close takes the group's links at its tab level, as Reopen brings no group back.
 closed_record_tab :: proc(app: ^App, workspace: ^Workspace, index: int) {
 	if index < 0 || index >= len(workspace.tabs) {return}
 	tab := workspace.tabs[index]
@@ -66,6 +67,11 @@ closed_record_tab :: proc(app: ^App, workspace: ^Workspace, index: int) {
 	if !terminal {return}
 	saved, encoded := layout_tab_encode(app, tab, pane_processes(app))
 	if !encoded {return}
+	if group := tab_group_find(workspace, tab.group); group != nil {
+		if _, members := tab_group_span(workspace, group.id); members == 1 {
+			saved.documents = documents_handed_down(saved.documents, group.documents[:])
+		}
+	}
 	closed_push(app, {workspace = workspace.id, tab = tab.id}, {index = index, tab = saved})
 }
 

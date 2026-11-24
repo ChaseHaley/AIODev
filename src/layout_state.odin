@@ -41,10 +41,11 @@ Saved_Workspace :: struct {
 
 // Tabs name their group by this id, which holds only within its workspace.
 Saved_Tab_Group :: struct {
-	id:     u32,
-	name:   string `json:"name,omitempty"`,
-	color:  int,
-	folded: bool,
+	id:        u32,
+	name:      string `json:"name,omitempty"`,
+	color:     int,
+	folded:    bool,
+	documents: []Document `json:"documents,omitempty"`,
 }
 
 // Nodes are stored root first; splits refer to their children by index. A tab's view is not saved, so a
@@ -242,7 +243,9 @@ layout_state_encode :: proc(
 			if !encoded {return "", false}
 		}
 		groups := make([]Saved_Tab_Group, len(workspace.groups), context.temp_allocator)
-		for group, i in workspace.groups {groups[i] = {group.id, group.name, group.color, group.folded}}
+		for group, i in workspace.groups {
+			groups[i] = {group.id, group.name, group.color, group.folded, group.documents[:]}
+		}
 		append(
 			&workspaces,
 			Saved_Workspace {
@@ -559,10 +562,12 @@ layout_groups_restore :: proc(workspace: ^Workspace, saved: []Saved_Tab_Group) {
 		if color == 0 {continue}
 		name, err := strings.clone(group.name)
 		if err != nil {continue}
-		if _, err = append(&workspace.groups, Tab_Group{group.id, name, color, group.folded}); err != nil {
+		restored := Tab_Group{id = group.id, name = name, color = color, folded = group.folded}
+		if _, err = append(&workspace.groups, restored); err != nil {
 			delete(name)
 			continue
 		}
+		documents_restore(&workspace.groups[len(workspace.groups) - 1].documents, group.documents)
 		workspace.next_group_id = max(workspace.next_group_id, group.id)
 	}
 }

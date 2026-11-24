@@ -10,8 +10,8 @@ import "core:unicode/utf8"
 import "cosmos:weburl"
 import "cosmos:ui"
 
-// Files, folders and web pages pinned to a pane, tab or workspace, to reopen from the pane header. A
-// pane's list lives with its content, so it follows the pane through every move between tabs and windows.
+// Files, folders and web pages pinned to a pane, tab, tab group or workspace, to reopen from the pane header.
+// A pane's list lives with its content, so it follows the pane through every move between tabs and windows.
 Document :: struct {
 	// A web address, or an absolute local path.
 	target: string,
@@ -21,6 +21,7 @@ Document :: struct {
 Document_Level :: enum {
 	Pane,
 	Tab,
+	Group,
 	Workspace,
 }
 
@@ -31,9 +32,10 @@ DOCUMENT_LEVEL_LIMIT :: 16
 @(private)
 DOCUMENT_TARGET_LIMIT :: links.TARGET_BYTES
 
-// The lists one pane can see. A nil pane list means its content takes no pins of its own.
+// The lists one pane can see. A nil pane list means its content takes no pins of its own, and a nil group
+// list that its tab is in no group.
 Document_Scopes :: struct {
-	pane, tab, workspace: ^Document_List,
+	pane, tab, group, workspace: ^Document_List,
 }
 
 Document_Row :: struct {
@@ -134,14 +136,17 @@ document_icon :: proc(document: Document) -> ui.Icon {
 }
 
 // The lists `content` can see, wherever it is shown: a linked window's own workspace is a private
-// view, so its tab and workspace are found through what the pane shows.
+// view, so its tab, group and workspace are found through what the pane shows.
 @(require_results)
 document_scopes :: proc(app: ^App, content: layout.Content) -> (scopes: Document_Scopes, found: bool) {
 	for workspace in app.workspaces {
 		if workspace.provisional {continue}
 		for tab in workspace.tabs {
 			if layout.find_content(&tab.tree, content) == layout.INVALID_NODE {continue}
-			return {content_documents(app, content), &tab.documents, &workspace.documents}, true
+			scopes = {pane = content_documents(app, content), tab = &tab.documents}
+			scopes.workspace = &workspace.documents
+			if group := tab_group_find(workspace, tab.group); group != nil {scopes.group = &group.documents}
+			return scopes, true
 		}
 	}
 	return {}, false
@@ -154,6 +159,8 @@ document_scope_list :: proc(scopes: Document_Scopes, level: Document_Level) -> ^
 		return scopes.pane
 	case .Tab:
 		return scopes.tab
+	case .Group:
+		return scopes.group
 	case .Workspace:
 		return scopes.workspace
 	}
@@ -165,7 +172,7 @@ document_scope_list :: proc(scopes: Document_Scopes, level: Document_Level) -> ^
 // from the lists.
 @(require_results)
 documents_visible :: proc(scopes: Document_Scopes, allocator := context.temp_allocator) -> []Document_Row {
-	rows := make([dynamic]Document_Row, 0, 3 * DOCUMENT_LEVEL_LIMIT, allocator)
+	rows := make([dynamic]Document_Row, 0, len(Document_Level) * DOCUMENT_LEVEL_LIMIT, allocator)
 	for level in Document_Level {
 		list := document_scope_list(scopes, level)
 		if list == nil {continue}
@@ -263,4 +270,31 @@ documents_copy :: proc(list: ^Document_List, from: []Document) {
 	for document in from {
 		if !document_list_append(list, document) {return}
 	}
+}
+
+// Gives `list` copies of the documents of `from` it lacks, after its own, as a tab takes its group's
+// when the group goes and the tab stays. A full list takes no more.
+documents_hand_down :: proc(list: ^Document_List, from: []Document) {
+	for document in from {
+		if document_list_has(list, document.target) {continue}
+		if len(list) >= DOCUMENT_LEVEL_LIMIT {
+			log.warn("a tab's pinned links are full, so it took only some of its group's")
+			return
+		}
+		if !document_list_append(list, document) {return}
+	}
+}
+
+// `own`, then the documents of `from` it lacks, as far as one level holds: what documents_hand_down
+// would leave, changing neither. The slice is in temporary memory and borrows the targets.
+@(require_results)
+documents_handed_down :: proc(own, from: []Document) -> []Document {
+	joined := make([dynamic]Document, 0, DOCUMENT_LEVEL_LIMIT, context.temp_allocator)
+	append(&joined, ..own)
+	next: for document in from {
+		if len(joined) >= DOCUMENT_LEVEL_LIMIT {break}
+		for kept in joined {if document_same(kept.target, document.target) {continue next}}
+		append(&joined, document)
+	}
+	return joined[:]
 }

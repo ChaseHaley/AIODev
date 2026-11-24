@@ -313,6 +313,10 @@ tab_duplicate :: proc(app: ^App, w: ^Window, index: int) {
 	}
 	copy_tab := w.workspace.tabs[len(w.workspace.tabs) - 1]
 	documents_copy(&copy_tab.documents, w.workspace.tabs[index].documents[:])
+	// The copy opens outside the group, so it takes the group's links to list what the original lists.
+	if group := tab_group_of(w.workspace, index); group != nil && copy_tab.group != group.id {
+		documents_hand_down(&copy_tab.documents, group.documents[:])
+	}
 	documents_copy(&session_find(app, session).documents, pinned)
 	tab_show(app, w, len(w.workspace.tabs) - 1)
 }

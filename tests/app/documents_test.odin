@@ -17,16 +17,19 @@ import "cosmos:ui"
 
 @(private = "file")
 Lists :: struct {
-	pane, tab, workspace: app.Document_List,
+	pane, tab, group, workspace: app.Document_List,
 }
 
 @(private = "file")
-lists_scopes :: proc(l: ^Lists) -> app.Document_Scopes {return {&l.pane, &l.tab, &l.workspace}}
+lists_scopes :: proc(l: ^Lists) -> app.Document_Scopes {
+	return {pane = &l.pane, tab = &l.tab, group = &l.group, workspace = &l.workspace}
+}
 
 @(private = "file")
 lists_destroy :: proc(l: ^Lists) {
 	app.documents_destroy(&l.pane)
 	app.documents_destroy(&l.tab)
+	app.documents_destroy(&l.group)
 	app.documents_destroy(&l.workspace)
 }
 
@@ -1299,4 +1302,235 @@ closed_and_duplicated_panes_keep_their_documents :: proc(t: ^testing.T) {
 	if !testing.expect(t, moved_found) {return}
 	testing.expect_value(t, len(moved_scopes.pane), 1)
 	testing.expect_value(t, len(moved_scopes.tab), 0)
+}
+
+@(test)
+group_links_sit_between_tab_and_workspace_and_need_a_group :: proc(t: ^testing.T) {
+	l: Lists
+	defer lists_destroy(&l)
+	scopes := lists_scopes(&l)
+	pins := [?]struct {
+		level:  app.Document_Level,
+		target: string,
+	} {
+		{.Workspace, `C:\w.md`},
+		{.Group, `C:\g.md`},
+		{.Tab, `C:\t.md`},
+		{.Pane, `C:\p.md`},
+	}
+	for pin in pins {
+		testing.expect_value(t, app.document_pin(scopes, pin.level, {target = pin.target}), app.Document_Pin_Result.Pinned)
+	}
+	rows := app.documents_visible(scopes)
+	if testing.expect_value(t, len(rows), 4) {
+		for level, i in ([?]app.Document_Level{.Pane, .Tab, .Group, .Workspace}) {
+			testing.expect_value(t, rows[i].level, level)
+		}
+	}
+	// Pinning to the group moves a document from any other level; one also pinned to the tab shows there.
+	testing.expect_value(t, app.document_pin(scopes, .Group, {target = `C:\W.MD`}), app.Document_Pin_Result.Pinned)
+	testing.expect_value(t, len(l.workspace), 0)
+	testing.expect_value(t, len(l.group), 2)
+	app.documents_copy(&l.group, {{target = `C:\t.md`}})
+	rows = app.documents_visible(scopes)
+	testing.expect_value(t, len(rows), 4)
+	testing.expect_value(t, rows[1].level, app.Document_Level.Tab)
+	// The group holds as many as any level.
+	for i in len(l.group) ..< app.DOCUMENT_LEVEL_LIMIT {app.documents_copy(&l.group, {{target = fmt.tprintf(`C:\g\%d.md`, i)}})}
+	testing.expect_value(t, app.document_pin(scopes, .Group, {target = `C:\more.md`}), app.Document_Pin_Result.Level_Full)
+	// A tab in no group has no group level.
+	ungrouped := scopes
+	ungrouped.group = nil
+	testing.expect_value(t, app.document_pin(ungrouped, .Group, {target = `C:\x.md`}), app.Document_Pin_Result.Failed)
+	for row in app.documents_visible(ungrouped) {testing.expect(t, row.level != .Group)}
+
+	// Handing a group's links down skips what the tab has and stops when its list is full.
+	full: app.Document_List
+	defer app.documents_destroy(&full)
+	for i in 0 ..< app.DOCUMENT_LEVEL_LIMIT - 1 {app.documents_copy(&full, {{target = fmt.tprintf(`C:\full\%d.md`, i)}})}
+	app.documents_hand_down(&full, {{target = `C:\FULL\0.md`}, {target = `C:\new\a.md`}, {target = `C:\new\b.md`}})
+	if testing.expect_value(t, len(full), app.DOCUMENT_LEVEL_LIMIT) {
+		testing.expect_value(t, full[app.DOCUMENT_LEVEL_LIMIT - 1].target, `C:\new\a.md`)
+	}
+}
+
+// A workspace of tabs grouped as `groups` gives by id, each group it names existing in its own colour, and a
+// window showing it. Tab i's pane is terminal 10 * the workspace id + i + 1.
+@(private = "file")
+group_workspace :: proc(state: ^app.App, groups: []u32) -> (^app.Workspace, ^app.Window) {
+	workspace := new(app.Workspace)
+	workspace.id = u32(len(state.workspaces) + 1)
+	append(&state.workspaces, workspace)
+	for group, i in groups {
+		tab := new(app.Tab)
+		tab.id, tab.group = u32(i + 1), group
+		_ = layout.init(&tab.tree, {.Terminal, workspace.id * 10 + u32(i + 1)})
+		append(&workspace.tabs, tab)
+		if group != 0 && app.tab_group_find(workspace, group) == nil {
+			append(&workspace.groups, app.Tab_Group{id = group, color = int(group)})
+			workspace.next_group_id = max(workspace.next_group_id, group)
+		}
+	}
+	workspace.next_tab_id = u32(len(groups))
+	w := new(app.Window)
+	w^ = {
+		id              = input.Window_Id(90 + workspace.id),
+		workspace       = workspace,
+		width           = 1200,
+		height          = 700,
+		scale           = 1,
+		rail_wide       = true,
+		rail            = app.Rail_Docked{},
+		tabs_horizontal = true,
+	}
+	append(&state.windows, w)
+	return workspace, w
+}
+
+@(private = "file")
+group_state_destroy :: proc(state: ^app.App) {
+	for w in state.windows {
+		app.tab_presentation_destroy(&w.presentation)
+		free(w)
+	}
+	delete(state.windows)
+	for workspace in state.workspaces {app.workspace_destroy(workspace)}
+	delete(state.workspaces)
+}
+
+@(test)
+a_groups_links_show_in_its_tabs_and_stay_with_them_when_it_goes :: proc(t: ^testing.T) {
+	state: app.App
+	defer group_state_destroy(&state)
+	workspace, w := group_workspace(&state, {0, 1, 1})
+	app.documents_copy(&app.tab_group_find(workspace, 1).documents, {{target = "https://example.com/g"}})
+
+	// Every tab of the group lists its links at the group's level; a tab outside it has no group level.
+	outside, outside_found := app.document_scopes(&state, {.Terminal, 11})
+	testing.expect(t, outside_found && outside.group == nil)
+	first, _ := app.document_scopes(&state, {.Terminal, 12})
+	second, _ := app.document_scopes(&state, {.Terminal, 13})
+	testing.expect(t, first.group != nil && first.group == second.group)
+	rows := app.documents_visible(second)
+	if testing.expect_value(t, len(rows), 1) {testing.expect_value(t, rows[0].level, app.Document_Level.Group)}
+
+	// A new colour keeps them, and so does the group when one tab leaves it; that tab leaves them behind.
+	testing.expect(t, app.tab_group_color_set(&state, w, 1, 4))
+	app.tab_group_remove(&state, w, 2)
+	left, _ := app.document_scopes(&state, {.Terminal, 13})
+	testing.expect(t, left.group == nil)
+	testing.expect_value(t, len(left.tab), 0)
+	testing.expect_value(t, len(app.tab_group_find(workspace, 1).documents), 1)
+
+	// Ungrouping hands them down to the tabs it had.
+	app.tab_group_ungroup(&state, w, 1)
+	testing.expect(t, app.tab_group_find(workspace, 1) == nil)
+	kept, _ := app.document_scopes(&state, {.Terminal, 12})
+	if testing.expect_value(t, len(kept.tab), 1) {testing.expect_value(t, kept.tab[0].target, "https://example.com/g")}
+	left, _ = app.document_scopes(&state, {.Terminal, 13})
+	testing.expect_value(t, len(left.tab), 0)
+
+	// A whole group landing inside another joins it, and its tabs keep its links.
+	merged, _ := group_workspace(&state, {1, 2, 2, 1})
+	app.documents_copy(&app.tab_group_find(merged, 2).documents, {{target = "https://example.com/inner"}})
+	app.tab_groups_settle(merged, merged.tabs[1:3])
+	testing.expect(t, app.tab_group_find(merged, 2) == nil)
+	for tab in merged.tabs[1:3] {
+		testing.expect_value(t, tab.group, 1)
+		testing.expect_value(t, len(tab.documents), 1)
+	}
+
+	// A whole group moving to another workspace takes its links.
+	source, _ := group_workspace(&state, {3, 3})
+	app.documents_copy(&app.tab_group_find(source, 3).documents, {{target = "https://example.com/moved"}})
+	destination, _ := group_workspace(&state, {0})
+	reserve(&destination.groups, len(destination.groups) + len(source.groups))
+	ids := [2]u32{1, 2}
+	carried := app.tab_groups_carry(source, destination, ids[:])
+	if group := app.tab_group_find(destination, app.tab_group_carried(carried, 3)); testing.expect(t, group != nil) {
+		testing.expect_value(t, len(group.documents), 1)
+	}
+	testing.expect(t, app.tab_group_find(source, 3) == nil)
+}
+
+@(private = "file")
+group_app_start :: proc(t: ^testing.T, state: ^app.App, directory, layout_path: string, run: int) -> bool {
+	state.options = {data_dir = directory, inactive = true}
+	state.app_id = fmt.aprintf("AIODev.Test.GroupDocuments.%d.%d", os.get_pid(), run)
+	app.layout_state_enable(state, strings.clone(layout_path))
+	if !testing.expect_value(t, platform.init(&state.platform, state.app_id), platform.Init_Result.Primary) {
+		return false
+	}
+	state.platform_ready = true
+	return testing.expect(t, app.app_init(state))
+}
+
+// The content of the pane tab `index` of w's workspace focuses.
+@(private = "file")
+tab_content :: proc(w: ^app.Window, index: int) -> layout.Content {
+	tree := &w.workspace.tabs[index].tree
+	return tree.nodes[tree.focus].(layout.Pane).content
+}
+
+@(test)
+group_links_survive_restart_and_the_groups_last_close_and_copy_on_duplicate :: proc(t: ^testing.T) {
+	directory, directory_error := os.make_directory_temp("", "aio-group-documents-*", context.allocator)
+	if !testing.expect_value(t, directory_error, nil) {return}
+	defer delete(directory)
+	defer testing.expect_value(t, os.remove_all(directory), nil)
+	settings_path := strings.concatenate({directory, "/settings.ini"}, context.temp_allocator)
+	layout_path := strings.concatenate({directory, "/layout.json"}, context.temp_allocator)
+	settings := idle_shell_settings(t, "cursor.blink = false\ninterface.confirm = shell_switch, multiline_paste\n")
+	if !testing.expect_value(t, os.write_entire_file(settings_path, settings), nil) {return}
+	link :: "https://example.com/group"
+
+	first: app.App
+	if !group_app_start(t, &first, directory, layout_path, 1) {app.app_destroy(&first); return}
+	w := first.windows[0]
+	for _ in 0 ..< 2 {
+		if _, created := app.tab_create(&first, w.workspace); !testing.expect(t, created) {app.app_destroy(&first); return}
+	}
+	group := app.tab_group_create(&first, w, 1, "Docs")
+	if !testing.expect(t, group != nil) {app.app_destroy(&first); return}
+	app.tab_group_add(&first, w, 2, group.id)
+	scopes, _ := app.document_scopes(&first, tab_content(w, 1))
+	testing.expect_value(t, app.document_pin(scopes, .Group, {target = link}), app.Document_Pin_Result.Pinned)
+	app.layout_state_save(&first)
+	app.app_destroy(&first)
+
+	second: app.App
+	defer app.app_destroy(&second)
+	if !group_app_start(t, &second, directory, layout_path, 2) {return}
+	w = second.windows[0]
+	workspace := w.workspace
+	if !testing.expect_value(t, len(workspace.tabs), 3) {return}
+	if !testing.expect_value(t, len(workspace.groups), 1) {return}
+	testing.expect_value(t, workspace.groups[0].name, "Docs")
+	shown, _ := app.document_scopes(&second, tab_content(w, 2))
+	if testing.expect(t, shown.group != nil) && testing.expect_value(t, len(shown.group), 1) {
+		testing.expect_value(t, shown.group[0].target, link)
+	}
+	outside, _ := app.document_scopes(&second, tab_content(w, 0))
+	testing.expect(t, outside.group == nil)
+
+	// A duplicate opens outside the group, so it takes the group's links at its tab level.
+	app.tab_duplicate(&second, w, 2)
+	if !testing.expect_value(t, len(workspace.tabs), 4) {return}
+	duplicate := workspace.tabs[3]
+	testing.expect_value(t, duplicate.group, 0)
+	if testing.expect_value(t, len(duplicate.documents), 1) {testing.expect_value(t, duplicate.documents[0].target, link)}
+
+	// Closing one tab of the group leaves the links with the group; closing its last takes them into Reopen.
+	for tab in workspace.tabs {tab.marked = false}
+	app.tab_close(&second, w, 2)
+	if !testing.expect_value(t, len(workspace.groups), 1) {return}
+	testing.expect_value(t, len(workspace.groups[0].documents), 1)
+	for tab in workspace.tabs {tab.marked = false}
+	app.tab_close(&second, w, 1)
+	testing.expect_value(t, len(workspace.groups), 0)
+	count := len(workspace.tabs)
+	app.closed_reopen(&second, w)
+	if !testing.expect_value(t, len(workspace.tabs), count + 1) {return}
+	reopened, _ := app.document_scopes(&second, tab_content(w, 1))
+	if testing.expect_value(t, len(reopened.tab), 1) {testing.expect_value(t, reopened.tab[0].target, link)}
 }
