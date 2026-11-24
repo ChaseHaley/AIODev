@@ -165,12 +165,18 @@ profile_menu_open :: proc(app: ^App, w: ^Window, mode: Profile_Menu_Mode, x, y: 
 	profile_menu_push(menu, {label = "Markdown file…", glyph = .Markdown, enabled = true}, .Markdown)
 	in_web := swap && target.pane.kind == .Web
 	profile_menu_push(menu, {label = "Web pane", glyph = .Globe, checked = in_web, enabled = !in_web}, .Web)
+	// Neovim is offered only when it is installed; a Neovim pane still shows its own row checked.
 	in_neovim := swap && target.pane.kind == .Neovim
-	neovim_item := ui.Menu_Item{label = "Neovim", glyph = .Code, checked = in_neovim, enabled = !in_neovim}
-	if swap && !in_neovim {
-		neovim_item.shortcut = profile_menu_shortcut(app, menu, PROFILE_MENU_NEOVIM_SLOT, .Swap_Pane_Neovim)
+	if in_neovim || neovim_installed(app) {
+		neovim_item := ui.Menu_Item {
+			label = "Neovim", glyph = .Code, checked = in_neovim, enabled = !in_neovim,
+		}
+		if swap && !in_neovim {
+			slot := PROFILE_MENU_NEOVIM_SLOT
+			neovim_item.shortcut = profile_menu_shortcut(app, menu, slot, .Swap_Pane_Neovim)
+		}
+		profile_menu_push(menu, neovim_item, .Neovim)
 	}
-	profile_menu_push(menu, neovim_item, .Neovim)
 	ui.menu_anchor(&menu.menu, x, y)
 	ui.menu_select_edge(&menu.menu, false)
 }

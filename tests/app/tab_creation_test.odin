@@ -11,6 +11,8 @@ import "cosmos:ui"
 @(test)
 profile_menu_matches_configured_settings_rows :: proc(t: ^testing.T) {
 	s: app.App
+	// Neovim's row is offered only when it is installed; this test lists every row.
+	s.neovim_found = true
 	parsed, diagnostics, err := settings.parse(`profile.default.directory = ~/Projects/AIODev
 profile.cmd.name = Command Prompt
 profile.cmd.command = cmd.exe

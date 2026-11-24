@@ -1279,6 +1279,8 @@ action_available :: proc(app: ^App, w: ^Window, action: Action) -> bool {
 		return entry != nil && entry.status != .Running
 	case .Edit_Markdown, .Open_Markdown_Default_App:
 		return markdown_focused(app, w) != nil
+	case .Open_Neovim, .Swap_Pane_Neovim:
+		return neovim_installed(app)
 	}
 	return true
 }
@@ -1429,12 +1431,14 @@ command_execute :: proc(app: ^App, ctx: Command_Context, invocation: commands.In
 	case .Toggle_Web_Navigator:
 		web_toggle_navigator(app, w)
 	case .Open_Neovim:
+		if !neovim_installed(app) {return outcome_failure(.Failed, NEOVIM_MISSING)}
 		if t, named := target.?; named {
 			request, _ := ctx.(Control_Request)
 			return control_neovim_open(app, window_for_workspace(app, t.workspace), t, invocation, request.caller)
 		}
 		neovim_open_focused(app, w)
 	case .Swap_Pane_Neovim:
+		if !neovim_installed(app) {return outcome_failure(.Failed, NEOVIM_MISSING)}
 		content, shown := window_focused_content(w)
 		if !shown || content.kind == .Neovim || !pane_content_menu_available(content.kind) {return {}}
 		directory := neovim_focused_directory(app, w)

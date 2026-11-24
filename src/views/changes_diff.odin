@@ -804,10 +804,11 @@ changes_sticky_header :: proc(
 	return at, {g.diff.x, y, g.diff.width, f32(rows.header)}
 }
 
-// The Edit in Neovim button at a file header's right end; empty for a file with no text left to edit.
+// The Edit in Neovim button at a file header's right end; empty without Neovim or for a file with no text
+// left to edit.
 @(private = "file")
-file_edit_rect :: proc(f: ^tr.Diff_File, head: render.Rect, scale: f32) -> render.Rect {
-	if f.status == .Deleted || f.binary {return {}}
+file_edit_rect :: proc(view: ^Changes_View, f: ^tr.Diff_File, head: render.Rect, scale: f32) -> render.Rect {
+	if !view.neovim || f.status == .Deleted || f.binary {return {}}
 	size := head.height
 	return {head.x + head.width - ui.SPACE_1 * scale - size, head.y, size, size}
 }
@@ -823,7 +824,7 @@ changes_file_edit_button :: proc(
 	top := g.diff.y - f32(state.diff_scroll) + f32(rows.tops[file])
 	if top + f32(rows.header) <= g.diff.y || top >= g.diff.y + g.diff.height {return {}}
 	band := diff_band(g)
-	return file_edit_rect(&view.files[file], {band.x, top, band.width, f32(rows.header)}, g.scale)
+	return file_edit_rect(view, &view.files[file], {band.x, top, band.width, f32(rows.header)}, g.scale)
 }
 
 // The select button of a hunk header row, at its right end.
@@ -888,7 +889,7 @@ changes_diff_hit :: proc(
 		if render.rect_contains(rect, x, y) {
 			band := diff_band(g)
 			head := render.Rect{band.x, rect.y, band.width, rect.height}
-			if render.rect_contains(file_edit_rect(&view.files[sticky], head, g.scale), x, y) {
+			if render.rect_contains(file_edit_rect(view, &view.files[sticky], head, g.scale), x, y) {
 				return {.File_Edit, sticky, 0}
 			}
 			return {.Sticky_Header, sticky, 0}
@@ -1686,7 +1687,7 @@ paint_header :: proc(p: ^Diff_Paint, i: int, head: render.Rect, part: Changes_Pa
 
 	small_baseline := ui.baseline_in(face.y, face.height, p.small)
 	right := face.x + face.width - ui.CONTROL_INSET * s
-	if edit := file_edit_rect(f, head, s); edit.width > 0 {
+	if edit := file_edit_rect(p.view, f, head, s); edit.width > 0 {
 		edit_hover, edit_press := changes_lit(p.state, {.File_Edit, i, 0})
 		if ui.icon_button_draw(
 			p.list, t, edit, .Pencil, edit_hover, edit_press, s, p.pointer, ui.ICON_INDICATOR, ui.RADIUS_CONTROL,

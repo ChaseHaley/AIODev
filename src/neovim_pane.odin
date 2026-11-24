@@ -5,6 +5,7 @@ import "cosmos:colour"
 import "cosmos:input"
 import "aio:layout"
 import "aio:neovim"
+import "aio:pty"
 import platform_api "cosmos:platform"
 import "cosmos:render"
 import "aio:settings"
@@ -43,7 +44,25 @@ Neovim_App :: struct {
 	neovim_drag:     Neovim_Drag,
 	// Wheel lines not yet sent, as Neovim scrolls by whole wheel events.
 	neovim_wheel:    [2]f32,
+	// Whether an nvim is on PATH, looked up the first time anything asks (neovim_installed).
+	neovim_found:    Maybe(bool),
 }
+
+// Whether an `nvim` is on PATH. Without one, nothing offers Neovim: its commands leave the palette and their
+// keys go to the pane, menus have no Neovim row, Agent changes has no Edit in Neovim button and `aio
+// pane.open_neovim` fails (WORK-650). Looked up once, as a Neovim pane and a dropped file's Neovim start
+// with AIODev's own PATH, which does not change while it runs.
+@(require_results)
+neovim_installed :: proc(app: ^App) -> bool {
+	if known, ok := app.neovim_found.?; ok {return known}
+	program, err := pty.resolve_program(NEOVIM_PROGRAM, context.temp_allocator)
+	found := err.kind == .None
+	if found {pty.program_destroy(&program, context.temp_allocator)}
+	app.neovim_found = found
+	return found
+}
+
+NEOVIM_MISSING :: "Neovim is not installed: no nvim is on PATH."
 
 @(private)
 Neovim_Drag :: struct {

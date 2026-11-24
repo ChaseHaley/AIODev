@@ -168,6 +168,8 @@ Changes_View :: struct {
 	minimum_contrast: f32,
 	// Long lines wrap to the pane's width instead of scrolling sideways (turns.diff_long_lines).
 	wrap: bool,
+	// Neovim is installed, so a file header offers Edit in Neovim.
+	neovim: bool,
 	// Show the "Install turn hooks" button in the panel.
 	hooks_offer: bool,
 	// Old and new side by side rather than one unified stream; the pane's own choice.

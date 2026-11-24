@@ -3,7 +3,6 @@ package main
 import "aio:layout"
 import "aio:localpath"
 import "cosmos:platform"
-import "aio:pty"
 import "aio:settings"
 import "core:fmt"
 import "core:os"
@@ -347,14 +346,12 @@ file_drop_attach :: proc(
 	)
 }
 
-// Whether Neovim can start, looked up for the first file that needs it and the answer kept for the drop,
-// so a missing program is reported once and Markdown files and folders still open.
+// Whether Neovim can start, asked for the first file that needs it and the answer kept for the drop, so a
+// missing program is reported once and Markdown files and folders still open.
 @(private = "file")
 file_drop_editor_found :: proc(app: ^App, editor: ^settings.Opener, found: ^Maybe(bool)) -> bool {
 	if known, ok := found.?; ok {return known}
-	program, err := pty.resolve_program(FILE_DROP_PROGRAM, context.temp_allocator)
-	ready := err.kind == .None
-	if ready {pty.program_destroy(&program, context.temp_allocator)}
+	ready := neovim_installed(app)
 	found^ = ready
 	if !ready {
 		notify(app, .Error, "nvim is not on PATH, so only Markdown files and folders open from a drop.")

@@ -399,6 +399,7 @@ changes_geometry_of :: proc(
 	changes_chips_view(pane)
 	pane.model.view.minimum_contrast = f32(app.settings.turns.diff_minimum_contrast)
 	pane.model.view.wrap = app.settings.turns.diff_long_lines == .Wrap
+	pane.model.view.neovim = neovim_installed(app)
 	changes_filter_view(pane)
 	mono := ui.text_mono(&w.ui_text, app.family)
 	g := views.changes_geometry(pane_body_rect(w, shown), w.scale, &pane.model.view, &w.ui_text, &pane.state)
