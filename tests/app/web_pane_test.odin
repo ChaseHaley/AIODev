@@ -271,3 +271,74 @@ html_files_are_html_and_htm_and_open_at_their_file_url :: proc(t: ^testing.T) {
 	testing.expect(t, ok)
 	testing.expect_value(t, url, "file:///D:/r/page.htm#results")
 }
+
+// Every web pane w shows has its WebView2 Bounds where its page is drawn, in w's client pixels, inside
+// its pane and away from the window's top-left corner. While panes move, the Bounds follow the drawn page
+// and keep the settled size, so only the origin is checked.
+@(private = "file")
+web_expect_bounds_at_the_page :: proc(t: ^testing.T, s: ^app.App, w: ^app.Window, loc := #caller_location) -> int {
+	moving := app.pane_motion_animating(w)
+	checked := 0
+	for shown in w.panes {
+		if shown.content.kind != .Web {continue}
+		pane := app.web_find(s, shown.content.id)
+		if !testing.expect(t, pane != nil, loc = loc) {continue}
+		p := app.web_pane_placement(s, w, pane, shown)
+		testing.expect_value(t, p.bounds.x, p.visual.x, loc = loc)
+		testing.expect_value(t, p.bounds.y, p.visual.y, loc = loc)
+		checked += 1
+		if moving {continue}
+		testing.expect_value(t, p.bounds.width, p.visual.width, loc = loc)
+		testing.expect_value(t, p.bounds.height, p.visual.height, loc = loc)
+		// The page starts inside its pane, below the header, so its origin is the pane's, not the window's.
+		x, y := f32(p.visual.x), f32(p.visual.y)
+		testing.expect(t, x >= shown.rect.x && x <= shown.rect.x + 8 * w.scale, loc = loc)
+		testing.expect(t, y > shown.rect.y && y < shown.rect.y + shown.rect.height, loc = loc)
+		testing.expect(t, p.bounds.x > 0 && p.bounds.y > 0, loc = loc)
+	}
+	return checked
+}
+
+// Defect guard (WORK-646): WebView2 opens a page's dropdowns, tooltips and menus at its parent window's
+// client origin plus the Bounds' origin. Bounds left at (0, 0) put them where the page would be if it
+// filled the window, so the Bounds start where the page is drawn: for a pane away from the window's
+// corner, at 150%, in a float, in a linked window, each in its own window's client pixels, and while
+// panes move.
+@(test)
+web_placement_bounds_start_where_the_page_is_drawn :: proc(t: ^testing.T) {
+	f: Web_Fixture
+	defer web_fixture_stop(t, &f)
+	if !web_fixture_start(t, &f, "bounds") {return}
+	s, w := &f.state, f.state.windows[0]
+	s.animations = false
+	tree := app.window_tree(w)
+	if !testing.expect(t, app.web_open_focused(s, w, "https://example.com/tiled")) {return}
+	tiled := tree.focus
+	for scale in ([?]f32{1, 1.5}) {
+		w.scale = scale
+		app.window_relayout(s, w)
+		testing.expect_value(t, web_expect_bounds_at_the_page(t, s, w), 1)
+	}
+
+	s.settings.pane.web_floating = true
+	if !testing.expect(t, app.web_open_focused(s, w, "https://example.com/float")) {return}
+	testing.expect(t, layout.is_floating(tree, tree.focus))
+	app.window_relayout(s, w)
+	testing.expect_value(t, web_expect_bounds_at_the_page(t, s, w), 2)
+
+	if !testing.expect(t, app.pane_link_open(s, w, tiled)) {return}
+	linked: ^app.Window
+	for window in s.windows {if app.window_linked(window) {linked = window}}
+	if !testing.expect(t, linked != nil) {return}
+	linked.scale = 1.5
+	app.window_resize(s, linked, 1200, 800)
+	testing.expect_value(t, web_expect_bounds_at_the_page(t, s, linked), 1)
+	testing.expect_value(t, web_expect_bounds_at_the_page(t, s, w), 1)
+
+	// A new pane slides the others aside; the Bounds follow each page as drawn, mid-move.
+	s.animations = true
+	if !testing.expect(t, app.web_open_focused(s, w, "https://example.com/moving")) {return}
+	app.window_relayout(s, w)
+	testing.expect(t, app.pane_motion_animating(w))
+	testing.expect_value(t, web_expect_bounds_at_the_page(t, s, w), 2)
+}

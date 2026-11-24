@@ -1053,21 +1053,92 @@ web_window_hide_all_visuals :: proc(app: ^App, w: ^Window) {
 	for pane in app.web_panes {
 		if pane.host_window == w.id && pane.view != nil {
 			platform.webview_set_placement(
-				pane.view, w.web.host, false, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, w.scale,
+				pane.view, w.web.host, false, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, w.scale,
 			)
 		}
 	}
 }
 
-@(private = "file")
-web_window_sync_visuals :: proc(app: ^App, w: ^Window, host: platform.Webview_Host) {
-	hide_for_overview := workspace_overview_animating(w)
-	env_ready := web_env_ensure(app)
-	radius := window_pane_radius(app, w)
+// A rectangle in a window's client pixels.
+Web_Pixel_Rect :: struct {
+	x, y, width, height: i32,
+}
+
+// Where a web pane's page goes in its window. `visual` is where DirectComposition draws the page; `bounds`
+// is WebView2's Bounds, which share the visual's origin in the same window's client pixels, because
+// WebView2 opens a page's dropdowns, tooltips and menus at the parent window's client origin plus the
+// Bounds' origin. The clip edges are relative to the visual.
+Web_Placement :: struct {
+	visible:                        bool,
+	level:                          i32,
+	visual:                         Web_Pixel_Rect,
+	bounds:                         Web_Pixel_Rect,
+	clip_l, clip_t, clip_r, clip_b: f32,
+	radius_bl, radius_br:           f32,
+}
+
+// Places the web pane `pane`, shown in w at `shown_rect`, for this frame.
+web_pane_placement :: proc(
+	app: ^App,
+	w: ^Window,
+	pane: ^Web_Pane,
+	shown_rect: layout.Pane_Rect,
+) -> Web_Placement {
 	animating := pane_motion_animating(w)
 	stage, sliding := w.pane_motion.slide.?
-	over_chrome := pane_motion_over_chrome(w)
-	content_area := window_content_area_in(app, w, w.pane_fill)
+	f := pane_frame(w, shown_rect)
+	vis_body := web_body_rect(app, w, pane, f.shown)
+	logical_body := web_body_rect(app, w, pane, shown_rect.rect)
+	inset := web_body_inset(app, w)
+	// Clip the visual to its own body AND to the slide stage / content area so sliding panes never
+	// paint over the Activity panel, tab rail or title bar.
+	clip_l, clip_t := f32(0), f32(0)
+	clip_r, clip_b := vis_body.width, vis_body.height
+	apply_clip :: proc(vis: render.Rect, bound: render.Rect, cl, ct, cr, cb: ^f32) {
+		cl^ = max(cl^, bound.x - vis.x)
+		ct^ = max(ct^, bound.y - vis.y)
+		cr^ = min(cr^, bound.x + bound.width - vis.x)
+		cb^ = min(cb^, bound.y + bound.height - vis.y)
+	}
+	if sliding && animating {
+		apply_clip(vis_body, stage, &clip_l, &clip_t, &clip_r, &clip_b)
+	} else if !shown_rect.floating && !pane_motion_over_chrome(w) {
+		content_area := window_content_area_in(app, w, w.pane_fill)
+		bound := render.Rect{content_area.x, content_area.y, content_area.width, content_area.height}
+		apply_clip(vis_body, bound, &clip_l, &clip_t, &clip_r, &clip_b)
+	}
+	// During 160 ms animated pane motion, keep Chromium's viewport at its settled target size while
+	// DirectComposition smoothly clips and positions the visual at full display refresh rate.
+	size := animating ? logical_body : vis_body
+	covered := false
+	if raised_key, has_raised := w.pane_motion.raised.?; has_raised && animating && !shown_rect.floating {
+		covered = raised_key != pane_motion_key(shown_rect.content)
+	}
+	inner_radius := max(f32(0), window_pane_radius(app, w) - inset)
+	visual := Web_Pixel_Rect {
+		i32(math.round(vis_body.x)),
+		i32(math.round(vis_body.y)),
+		i32(math.round(vis_body.width)),
+		i32(math.round(vis_body.height)),
+	}
+	return {
+		visible = !workspace_overview_animating(w) && !covered && pane.crashed == .None &&
+			(clip_r - clip_l) >= 2 && (clip_b - clip_t) >= 2 && pane.url != "",
+		level = shown_rect.floating ? pane.level : 0,
+		visual = visual,
+		bounds = {visual.x, visual.y, max(1, i32(math.round(size.width))), max(1, i32(math.round(size.height)))},
+		clip_l = clip_l,
+		clip_t = clip_t,
+		clip_r = clip_r,
+		clip_b = clip_b,
+		radius_bl = clip_l <= 0.5 && clip_b >= vis_body.height - 0.5 ? inner_radius : 0,
+		radius_br = clip_r >= vis_body.width - 0.5 && clip_b >= vis_body.height - 0.5 ? inner_radius : 0,
+	}
+}
+
+@(private = "file")
+web_window_sync_visuals :: proc(app: ^App, w: ^Window, host: platform.Webview_Host) {
+	env_ready := web_env_ensure(app)
 
 	for pane in app.web_panes {
 		shown_rect: layout.Pane_Rect
@@ -1082,7 +1153,7 @@ web_window_sync_visuals :: proc(app: ^App, w: ^Window, host: platform.Webview_Ho
 		if !found {
 			if pane.host_window == w.id && pane.view != nil {
 				platform.webview_set_placement(
-					pane.view, host, false, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, w.scale,
+					pane.view, host, false, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, w.scale,
 				)
 			}
 			continue
@@ -1095,56 +1166,26 @@ web_window_sync_visuals :: proc(app: ^App, w: ^Window, host: platform.Webview_Ho
 		}
 		if pane.view == nil {continue}
 
-		f := pane_frame(w, shown_rect)
-		vis_body := web_body_rect(app, w, pane, f.shown)
-		logical_body := web_body_rect(app, w, pane, shown_rect.rect)
-		inset := web_body_inset(app, w)
-		// Clip the visual to its own body AND to the slide stage / content area so sliding panes never
-		// paint over the Activity panel, tab rail or title bar.
-		clip_l, clip_t := f32(0), f32(0)
-		clip_r, clip_b := vis_body.width, vis_body.height
-		apply_clip :: proc(vis: render.Rect, bound: render.Rect, cl, ct, cr, cb: ^f32) {
-			cl^ = max(cl^, bound.x - vis.x)
-			ct^ = max(ct^, bound.y - vis.y)
-			cr^ = min(cr^, bound.x + bound.width - vis.x)
-			cb^ = min(cb^, bound.y + bound.height - vis.y)
-		}
-		if sliding && animating {
-			apply_clip(vis_body, stage, &clip_l, &clip_t, &clip_r, &clip_b)
-		} else if !shown_rect.floating && !over_chrome {
-			bound := render.Rect{content_area.x, content_area.y, content_area.width, content_area.height}
-			apply_clip(vis_body, bound, &clip_l, &clip_t, &clip_r, &clip_b)
-		}
-		// During 160 ms animated pane motion, keep Chromium's viewport at its settled target size while
-		// DirectComposition smoothly clips and positions the visual at full display refresh rate.
-		bounds := animating ? logical_body : vis_body
-		covered := false
-		if raised_key, has_raised := w.pane_motion.raised.?;
-		   has_raised && animating && !shown_rect.floating {
-			covered = raised_key != pane_motion_key(shown_rect.content)
-		}
-		visible := !hide_for_overview && !covered && pane.crashed == .None &&
-			(clip_r - clip_l) >= 2 && (clip_b - clip_t) >= 2 && pane.url != ""
-		inner_radius := max(f32(0), radius - inset)
-		rad_bl := clip_l <= 0.5 && clip_b >= vis_body.height - 0.5 ? inner_radius : 0
-		rad_br := clip_r >= vis_body.width - 0.5 && clip_b >= vis_body.height - 0.5 ? inner_radius : 0
+		p := web_pane_placement(app, w, pane, shown_rect)
 		platform.webview_set_placement(
 			pane.view,
 			host,
-			visible,
-			shown_rect.floating ? pane.level : 0,
-			i32(math.round(vis_body.x)),
-			i32(math.round(vis_body.y)),
-			i32(math.round(vis_body.width)),
-			i32(math.round(vis_body.height)),
-			clip_l,
-			clip_t,
-			clip_r,
-			clip_b,
-			max(1, i32(math.round(bounds.width))),
-			max(1, i32(math.round(bounds.height))),
-			rad_bl,
-			rad_br,
+			p.visible,
+			p.level,
+			p.visual.x,
+			p.visual.y,
+			p.visual.width,
+			p.visual.height,
+			p.clip_l,
+			p.clip_t,
+			p.clip_r,
+			p.clip_b,
+			p.bounds.x,
+			p.bounds.y,
+			p.bounds.width,
+			p.bounds.height,
+			p.radius_bl,
+			p.radius_br,
 			w.scale,
 		)
 	}
