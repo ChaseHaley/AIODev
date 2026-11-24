@@ -271,17 +271,48 @@ saved_resume_lines_must_be_ones_resume_line_writes :: proc(t: ^testing.T) {
 hook_payloads_name_their_session :: proc(t: ^testing.T) {
 	claude := `{"session_id":"81b3816b-4fce-4b04-b3bf-9f40b8d2172e","transcript_path":"C:\\x.jsonl",` +
 		`"cwd":"C:\\w","hook_event_name":"SessionStart","source":"startup"}`
-	id, ok := agent.hook_session(transmute([]u8)claude)
-	testing.expect(t, ok)
+	id, repeat, ok := agent.hook_session(.Claude, transmute([]u8)claude)
+	testing.expect(t, ok && !repeat)
 	testing.expect_value(t, id, "81b3816b-4fce-4b04-b3bf-9f40b8d2172e")
 	codex := `{"session_id":"01a1bd97-e43e-7a83-9f90-64c7b64ff0f2","model":"gpt","source":"resume"}` + "\r\n"
-	id, ok = agent.hook_session(transmute([]u8)codex)
-	testing.expect(t, ok)
+	id, repeat, ok = agent.hook_session(.Codex, transmute([]u8)codex)
+	testing.expect(t, ok && !repeat)
 	testing.expect_value(t, id, "01a1bd97-e43e-7a83-9f90-64c7b64ff0f2")
 	for bad in ([?]string{"", "{}", `{"session_id":"a b"}`, "not json", `{"session_id":7}`}) {
-		_, ok = agent.hook_session(transmute([]u8)bad)
+		_, _, ok = agent.hook_session(.Claude, transmute([]u8)bad)
 		testing.expectf(t, !ok, "%q should name no session", bad)
 	}
+}
+
+// agy 1.5.15's PreInvocation input, as observed on Windows (WORK-521), for the turn's `invocation`th model
+// call. Built by concatenation: fmt reads braces as its own syntax.
+@(private)
+agy_pre_invocation :: proc(invocation: string) -> []u8 {
+	return transmute([]u8)strings.concatenate(
+		{
+			`{"artifactDirectoryPath":"C:\\Users\\me\\.gemini\\antigravity-cli\\brain\\40bf0ec5-5a49-4015-a4c1-d1709000e1e7",`,
+			`"conversationId":"40bf0ec5-5a49-4015-a4c1-d1709000e1e7","cwd":"C:\\work","hookEventName":"PreInvocation",`,
+			`"initialNumSteps":1,"invocationNum":`,
+			invocation,
+			`,"lastUserInput":"fix the tests","modelName":"gemini-4-neon-medium","workspacePaths":["C:\\work"]}`,
+		},
+		context.temp_allocator,
+	)
+}
+
+@(test)
+agy_hooks_name_their_conversation_once_a_turn :: proc(t: ^testing.T) {
+	first := agy_pre_invocation("0")
+	id, repeat, ok := agent.hook_session(.Agy, first)
+	testing.expect(t, ok && !repeat)
+	testing.expect_value(t, id, "40bf0ec5-5a49-4015-a4c1-d1709000e1e7")
+	_, repeat, ok = agent.hook_session(.Agy, agy_pre_invocation("2"))
+	testing.expect(t, ok && repeat)
+	// agy names its session conversationId; session_id is another harness's.
+	_, _, ok = agent.hook_session(.Agy, transmute([]u8)string(`{"session_id":"81b3"}`))
+	testing.expect(t, !ok)
+	_, _, ok = agent.hook_session(.Claude, first)
+	testing.expect(t, !ok)
 }
 
 @(test)
@@ -392,9 +423,9 @@ COMMAND :: `"C:/Program Files/AIODev/aio.exe" agent-session claude`
 @(test)
 hooks_install_into_a_missing_or_empty_file :: proc(t: ^testing.T) {
 	for text in ([?]string{"", "  \n", "{}"}) {
-		result, change := agent.hooks_install(text, "SessionStart", "", COMMAND, 10, context.temp_allocator)
+		result, change := agent.hooks_install(text, .Grouped, "SessionStart", "", COMMAND, 10, context.temp_allocator)
 		testing.expect_value(t, change, agent.Hook_Install.Added)
-		_, present := agent.hooks_install(result, "SessionStart", "", COMMAND, 10, context.temp_allocator)
+		_, present := agent.hooks_install(result, .Grouped, "SessionStart", "", COMMAND, 10, context.temp_allocator)
 		testing.expect_value(t, present, agent.Hook_Install.Present)
 	}
 }
@@ -402,7 +433,7 @@ hooks_install_into_a_missing_or_empty_file :: proc(t: ^testing.T) {
 @(test)
 hooks_install_keeps_the_rest_of_the_file_as_written :: proc(t: ^testing.T) {
 	original := "{\n  \"statusLine\": {\"type\": \"command\", \"command\": \"node x.js\"},\n  \"model\": \"opus\"\n}\n"
-	result, change := agent.hooks_install(original, "SessionStart", "", COMMAND, 10, context.temp_allocator)
+	result, change := agent.hooks_install(original, .Grouped, "SessionStart", "", COMMAND, 10, context.temp_allocator)
 	testing.expect_value(t, change, agent.Hook_Install.Added)
 	testing.expect(t, strings.contains(result, "\"statusLine\": {\"type\": \"command\", \"command\": \"node x.js\"},\n"))
 	testing.expect(t, strings.has_suffix(result, "\"model\": \"opus\"\n}\n"))
@@ -418,18 +449,18 @@ hooks_install_keeps_the_rest_of_the_file_as_written :: proc(t: ^testing.T) {
 @(test)
 hooks_install_beside_existing_hooks :: proc(t: ^testing.T) {
 	other_event := `{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"say done"}]}]}}`
-	result, change := agent.hooks_install(other_event, "SessionStart", "", COMMAND, 10, context.temp_allocator)
+	result, change := agent.hooks_install(other_event, .Grouped, "SessionStart", "", COMMAND, 10, context.temp_allocator)
 	testing.expect_value(t, change, agent.Hook_Install.Added)
 	testing.expect(t, strings.contains(result, `"Stop":[{"hooks":[{"type":"command","command":"say done"}]}]`))
 	other_start := `{"hooks":{"SessionStart":[{"matcher":"startup","hooks":[{"type":"command","command":"load"}]}]}}`
-	result, change = agent.hooks_install(other_start, "SessionStart", "", COMMAND, 10, context.temp_allocator)
+	result, change = agent.hooks_install(other_start, .Grouped, "SessionStart", "", COMMAND, 10, context.temp_allocator)
 	testing.expect_value(t, change, agent.Hook_Install.Added)
 	value, _ := json.parse_string(result, allocator = context.temp_allocator)
 	groups := value.(json.Object)["hooks"].(json.Object)["SessionStart"].(json.Array)
 	testing.expect_value(t, len(groups), 2)
 	testing.expect(t, strings.contains(result, `{"matcher":"startup","hooks":[{"type":"command","command":"load"}]}`))
 	empty := `{"hooks":{"SessionStart":[ ]}}`
-	result, change = agent.hooks_install(empty, "SessionStart", "", COMMAND, 10, context.temp_allocator)
+	result, change = agent.hooks_install(empty, .Grouped, "SessionStart", "", COMMAND, 10, context.temp_allocator)
 	testing.expect_value(t, change, agent.Hook_Install.Added)
 	_, err := json.parse_string(result, allocator = context.temp_allocator)
 	testing.expect_value(t, err, json.Error.None)
@@ -444,14 +475,22 @@ hooks_install_leaves_unexpected_files_alone :: proc(t: ^testing.T) {
 		"{ // comment\n}",
 		`{"a":`,
 	}) {
-		_, change := agent.hooks_install(text, "SessionStart", "", COMMAND, 10, context.temp_allocator)
+		_, change := agent.hooks_install(text, .Grouped, "SessionStart", "", COMMAND, 10, context.temp_allocator)
 		testing.expectf(t, change == .Invalid, "%q gave %v", text, change)
 	}
 }
 
 @(test)
 hooks_install_keeps_a_byte_order_mark :: proc(t: ^testing.T) {
-	result, change := agent.hooks_install(agent.UTF8_BOM + `{"model":"opus"}`, "SessionStart", "", COMMAND, 10, context.temp_allocator)
+	result, change := agent.hooks_install(
+		agent.UTF8_BOM + `{"model":"opus"}`,
+		.Grouped,
+		"SessionStart",
+		"",
+		COMMAND,
+		10,
+		context.temp_allocator,
+	)
 	testing.expect_value(t, change, agent.Hook_Install.Added)
 	testing.expect(t, strings.has_prefix(result, agent.UTF8_BOM + "{"))
 	testing.expect(t, strings.has_suffix(result, `"model":"opus"}`))
@@ -459,13 +498,14 @@ hooks_install_keeps_a_byte_order_mark :: proc(t: ^testing.T) {
 
 @(test)
 hooks_install_puts_each_event_in_the_same_file :: proc(t: ^testing.T) {
-	prompt, change := agent.hooks_install("", "UserPromptSubmit", "", COMMAND, 10, context.temp_allocator)
+	prompt, change := agent.hooks_install("", .Grouped, "UserPromptSubmit", "", COMMAND, 10, context.temp_allocator)
 	testing.expect_value(t, change, agent.Hook_Install.Added)
 	// The same command under another event is not the command already being run.
-	stop, stop_change := agent.hooks_install(prompt, "Stop", "", COMMAND, 10, context.temp_allocator)
+	stop, stop_change := agent.hooks_install(prompt, .Grouped, "Stop", "", COMMAND, 10, context.temp_allocator)
 	testing.expect_value(t, stop_change, agent.Hook_Install.Added)
 	edit, edit_change := agent.hooks_install(
 		stop,
+		.Grouped,
 		"PreToolUse",
 		"Edit|Write",
 		COMMAND,
@@ -480,7 +520,7 @@ hooks_install_puts_each_event_in_the_same_file :: proc(t: ^testing.T) {
 	for event in ([]string{"UserPromptSubmit", "Stop", "PreToolUse"}) {
 		groups, is_array := hooks[event].(json.Array)
 		testing.expectf(t, is_array && len(groups) == 1, "%s should hold one group", event)
-		_, present := agent.hooks_install(edit, event, "", COMMAND, 10, context.temp_allocator)
+		_, present := agent.hooks_install(edit, .Grouped, event, "", COMMAND, 10, context.temp_allocator)
 		testing.expect_value(t, present, agent.Hook_Install.Present)
 	}
 }
@@ -488,7 +528,7 @@ hooks_install_puts_each_event_in_the_same_file :: proc(t: ^testing.T) {
 @(test)
 hooks_install_writes_the_matcher_on_the_group :: proc(t: ^testing.T) {
 	matcher := "Edit|Write|MultiEdit|NotebookEdit"
-	result, change := agent.hooks_install("", "PreToolUse", matcher, COMMAND, 10, context.temp_allocator)
+	result, change := agent.hooks_install("", .Grouped, "PreToolUse", matcher, COMMAND, 10, context.temp_allocator)
 	testing.expect_value(t, change, agent.Hook_Install.Added)
 	value, _ := json.parse_string(result, allocator = context.temp_allocator)
 	groups := value.(json.Object)["hooks"].(json.Object)["PreToolUse"].(json.Array)
@@ -496,12 +536,13 @@ hooks_install_writes_the_matcher_on_the_group :: proc(t: ^testing.T) {
 	testing.expect_value(t, string(group["matcher"].(json.String)), matcher)
 	handlers := group["hooks"].(json.Array)
 	testing.expect_value(t, string(handlers[0].(json.Object)["command"].(json.String)), COMMAND)
-	none, none_change := agent.hooks_install("", "Stop", "", COMMAND, 10, context.temp_allocator)
+	none, none_change := agent.hooks_install("", .Grouped, "Stop", "", COMMAND, 10, context.temp_allocator)
 	testing.expect_value(t, none_change, agent.Hook_Install.Added)
 	testing.expect(t, !strings.contains(none, `"matcher"`))
 	// A second group of an event that already has one keeps the first.
 	again, again_change := agent.hooks_install(
 		result,
+		.Grouped,
 		"PreToolUse",
 		"apply_patch",
 		`& "C:/aio.exe" turn-hook codex edit`,
@@ -523,9 +564,45 @@ hooks_install_writes_the_matcher_on_the_group :: proc(t: ^testing.T) {
 
 @(test)
 hooks_install_event_of_the_wrong_shape_is_left_alone :: proc(t: ^testing.T) {
-	_, change := agent.hooks_install(`{"hooks":{"Stop":{}}}`, "Stop", "", COMMAND, 10, context.temp_allocator)
+	_, change := agent.hooks_install(`{"hooks":{"Stop":{}}}`, .Grouped, "Stop", "", COMMAND, 10, context.temp_allocator)
 	testing.expect_value(t, change, agent.Hook_Install.Invalid)
 	// Another event's wrong shape does not matter.
-	_, other := agent.hooks_install(`{"hooks":{"Stop":{}}}`, "PreToolUse", "", COMMAND, 10, context.temp_allocator)
+	_, other := agent.hooks_install(`{"hooks":{"Stop":{}}}`, .Grouped, "PreToolUse", "", COMMAND, 10, context.temp_allocator)
 	testing.expect_value(t, other, agent.Hook_Install.Added)
+}
+
+// agy refuses a group on an event with no matcher, so those take the handler itself (WORK-521).
+@(test)
+hooks_install_names_agys_hook_and_keeps_its_other_hooks :: proc(t: ^testing.T) {
+	prompt_command := `"C:/aio.exe" turn-hook agy prompt`
+	edit_command := `"C:/aio.exe" turn-hook agy edit`
+	theirs := `{"lint":{"PostToolUse":[{"matcher":"run_command","hooks":[{"command":"lint.cmd"}]}]}}`
+	prompt, change := agent.hooks_install(theirs, .Named, "PreInvocation", "", prompt_command, 10, context.temp_allocator)
+	testing.expect_value(t, change, agent.Hook_Install.Added)
+	edit, edit_change := agent.hooks_install(
+		prompt,
+		.Named,
+		"PreToolUse",
+		agent.AGY_EDIT_MATCHER,
+		edit_command,
+		10,
+		context.temp_allocator,
+	)
+	testing.expect_value(t, edit_change, agent.Hook_Install.Added)
+	testing.expect(t, strings.contains(edit, theirs[1:len(theirs) - 1]))
+	value, err := json.parse_string(edit, allocator = context.temp_allocator)
+	testing.expect_value(t, err, json.Error.None)
+	ours := value.(json.Object)[agent.AGY_HOOK_NAME].(json.Object)
+	handler := ours["PreInvocation"].(json.Array)[0].(json.Object)
+	testing.expect_value(t, string(handler["command"].(json.String)), prompt_command)
+	testing.expect_value(t, string(handler["type"].(json.String)), "command")
+	_, grouped := handler["hooks"]
+	testing.expect(t, !grouped)
+	group := ours["PreToolUse"].(json.Array)[0].(json.Object)
+	testing.expect_value(t, string(group["matcher"].(json.String)), agent.AGY_EDIT_MATCHER)
+	testing.expect_value(t, string(group["hooks"].(json.Array)[0].(json.Object)["command"].(json.String)), edit_command)
+	_, present := agent.hooks_install(edit, .Named, "PreInvocation", "", prompt_command, 10, context.temp_allocator)
+	testing.expect_value(t, present, agent.Hook_Install.Present)
+	_, present = agent.hooks_install(edit, .Named, "PreToolUse", agent.AGY_EDIT_MATCHER, edit_command, 10, context.temp_allocator)
+	testing.expect_value(t, present, agent.Hook_Install.Present)
 }

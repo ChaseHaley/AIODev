@@ -27,8 +27,8 @@ USAGE_FORMAT :: `Usage: aio [--instance <name>] [--json] <command> [options] [--
        aio commands
        aio help [<command>]
        aio version
-       aio agent-session (claude | codex)
-       aio turn-hook (claude | codex) (prompt | stop | edit)
+       aio agent-session (claude | codex | agy)
+       aio turn-hook (claude | codex | agy) (prompt | stop | edit)
 
 Runs AIODev commands from scripts and coding agents. Every command in the everything palette
 runs by name, such as aio tab.next; aio commands lists AIODev's commands, and aio help
@@ -94,12 +94,13 @@ Neovim  To make Neovim in a pane follow the theme,
         add this to init.lua (one line; the plugin is the nvim folder beside aio.exe):
         if vim.env.AIODEV_CLI then vim.opt.rtp:append(vim.fs.dirname(vim.env.AIODEV_CLI) .. "/nvim");
         require("aiodev_theme").setup() end
-Hooks   aio agent-session runs from a Claude Code or Codex SessionStart hook and records the
-        session the hook names, so the pane can resume it; the "Install agent session hooks"
-        command sets it up.
-        aio turn-hook runs from a Claude Code or Codex UserPromptSubmit, Stop or PreToolUse hook
-        and tells AIODev when a turn starts or ends and which files it is about to edit, while
-        "Record agent turns" is on; the "Install agent turn hooks" command sets it up.
+Hooks   aio agent-session runs from a Claude Code or Codex SessionStart hook, or an agy
+        PreInvocation hook, and records the session the hook names, so the pane can resume it;
+        the "Install agent session hooks" command sets it up.
+        aio turn-hook runs from a Claude Code or Codex UserPromptSubmit, Stop or PreToolUse hook,
+        or an agy PreInvocation, Stop or PreToolUse hook, and tells AIODev when a turn starts or
+        ends and which files it is about to edit, while "Record agent turns" is on; the
+        "Install agent turn hooks" command sets it up.
 Exit    %d ok, %d failed, %d bad command line, %d pane missing or ambiguous,
         %d AIODev unreachable, %d control pipe server unverified, %d interrupted.
 
@@ -328,13 +329,13 @@ local_commands := [?]cli_protocol.Command_Report {
 	{
 		name = "agent-session",
 		title = "Record an agent session",
-		usage = "agent-session (claude | codex)",
-		summary = "Run by a Claude Code or Codex SessionStart hook: records the session the hook names so " +
-		"the pane can resume it. Needs no control pipe, prints nothing and succeeds outside an AIODev pane; " +
-		"the \"Install agent session hooks\" command sets it up.",
+		usage = "agent-session (claude | codex | agy)",
+		summary = "Run by a Claude Code or Codex SessionStart hook or an agy PreInvocation hook: records the " +
+		"session the hook names so the pane can resume it. Needs no control pipe, prints nothing and " +
+		"succeeds outside an AIODev pane; the \"Install agent session hooks\" command sets it up.",
 		options = {
 			{
-				option = "claude | codex",
+				option = "claude | codex | agy",
 				description = "the harness whose hook runs it",
 				default = "none (required)",
 				example = "claude",
@@ -344,21 +345,22 @@ local_commands := [?]cli_protocol.Command_Report {
 	{
 		name = "turn-hook",
 		title = "Report an agent turn",
-		usage = "turn-hook (claude | codex) (prompt | stop | edit)",
-		summary = "Run by a Claude Code or Codex UserPromptSubmit, Stop or PreToolUse hook: tells AIODev " +
-		"when a turn starts or ends and which files it is about to edit, so Agent changes can show " +
-		"them exactly. Needs no control pipe, prints nothing and succeeds outside an AIODev pane or " +
-		"while turn recording is off; the \"Install agent turn hooks\" command sets it up.",
+		usage = "turn-hook (claude | codex | agy) (prompt | stop | edit)",
+		summary = "Run by a Claude Code or Codex UserPromptSubmit, Stop or PreToolUse hook, or an agy " +
+		"PreInvocation, Stop or PreToolUse hook: tells AIODev when a turn starts or ends and which files " +
+		"it is about to edit, so Agent changes can show them exactly. Needs no control pipe, prints " +
+		"nothing and succeeds outside an AIODev pane or while turn recording is off; the \"Install agent " +
+		"turn hooks\" command sets it up.",
 		options = {
 			{
-				option = "claude | codex",
+				option = "claude | codex | agy",
 				description = "the harness whose hook runs it",
 				default = "none (required)",
 				example = "claude",
 			},
 			{
 				option = "prompt | stop | edit",
-				description = "the hook's event: UserPromptSubmit, Stop or a file edit's PreToolUse",
+				description = "the hook's event: UserPromptSubmit (agy: PreInvocation), Stop or a file edit's PreToolUse",
 				default = "none (required)",
 				example = "prompt",
 			},

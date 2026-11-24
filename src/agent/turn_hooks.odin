@@ -5,12 +5,20 @@ import "base:runtime"
 import "core:encoding/json"
 import "core:strings"
 
-// What `aio turn-hook` takes from a harness's hook input (WORK-487). Both harnesses send one JSON
+// What `aio turn-hook` takes from a harness's hook input (WORK-487). Claude Code and Codex send one JSON
 // object on standard input with session_id and cwd; UserPromptSubmit adds prompt, and PreToolUse adds
 // tool_input.
 //   Claude Code: Edit, Write and MultiEdit name tool_input.file_path, NotebookEdit tool_input.notebook_path.
 //   Codex: file edits go through its apply_patch tool, whose tool_input.command is the patch text, with
 //   one "*** Add File: ", "*** Update File: ", "*** Delete File: " or "*** Move to: " line per path.
+// agy (WORK-521) sends camelCase conversationId, cwd and lastUserInput with every event. Its prompt hook is
+// PreInvocation, which runs before each model call with invocationNum counting from 0 in each turn; Stop
+// adds fullyIdle, false while background work holds the turn; PreToolUse adds toolCall.args.
+//   agy: the CLI's write_file and edit_file name args.Path; the app's and IDE's write_to_file,
+//   replace_file_content and multi_replace_file_content name args.TargetFile.
+
+// agy's file editing tools, as the matcher of its edit hook's PreToolUse group.
+AGY_EDIT_MATCHER :: "write_file|edit_file|write_to_file|replace_file_content|multi_replace_file_content"
 
 // A prompt can be large and the hook reads all of it; the app keeps only a title's worth.
 PAYLOAD_LIMIT :: 1024 * 1024
@@ -19,6 +27,9 @@ Turn_Payload :: struct {
 	session, cwd, prompt: string,
 	// Absolute, '/' separated, each once.
 	paths:                []string,
+	// Not a turn boundary: an agy model call after the first of its turn, or an agy Stop while background
+	// work keeps the turn going.
+	skip:                 bool,
 }
 
 @(private, rodata)
@@ -36,37 +47,55 @@ turn_payload :: proc(
 	p: Turn_Payload,
 	ok: bool,
 ) {
-	if len(payload) > PAYLOAD_LIMIT || harness != .Claude && harness != .Codex {return {}, false}
+	if len(payload) > PAYLOAD_LIMIT || harness != .Claude && harness != .Codex && harness != .Agy {
+		return {}, false
+	}
 	value, parse_error := json.parse(payload, .JSON, false, context.temp_allocator)
 	if parse_error != .None {return {}, false}
 	root, is_object := value.(json.Object)
 	if !is_object {return {}, false}
 	defer if !ok {turn_payload_destroy(&p, allocator)}
 
+	session_key, prompt_key := "session_id", "prompt"
+	if harness == .Agy {session_key, prompt_key = "conversationId", "lastUserInput"}
 	cloned: bool
-	p.session, cloned = payload_clone(payload_string(root, "session_id"), allocator)
+	p.session, cloned = payload_clone(payload_string(root, session_key), allocator)
 	if !cloned {return p, false}
 	cwd := payload_string(root, "cwd")
 	p.cwd, cloned = payload_clone(cwd, allocator)
 	if !cloned {return p, false}
 	switch kind {
 	case .Prompt:
-		p.prompt, cloned = payload_clone(payload_string(root, "prompt"), allocator)
+		if harness == .Agy {
+			invocation, _ := root["invocationNum"].(json.Float)
+			p.skip = invocation > 0
+		}
+		p.prompt, cloned = payload_clone(payload_string(root, prompt_key), allocator)
 		if !cloned {return p, false}
 	case .Stop:
+		if idle, has_idle := root["fullyIdle"].(json.Boolean); harness == .Agy && has_idle {p.skip = !idle}
 	case .Edit:
 		raw := make([dynamic]string, 0, 4, context.temp_allocator)
-		input := root["tool_input"]
-		if tool_input, has_input := input.(json.Object); has_input {
-			switch harness {
-			case .Claude:
+		switch harness {
+		case .Claude:
+			if tool_input, has_input := root["tool_input"].(json.Object); has_input {
 				for key in ([?]string{"file_path", "notebook_path"}) {
 					if path := payload_string(tool_input, key); path != "" {append(&raw, path)}
 				}
-			case .Codex:
-				patch_paths(payload_string(tool_input, "command"), &raw)
-			case .None, .Omp, .Agy:
 			}
+		case .Codex:
+			if tool_input, has_input := root["tool_input"].(json.Object); has_input {
+				patch_paths(payload_string(tool_input, "command"), &raw)
+			}
+		case .Agy:
+			if call, has_call := root["toolCall"].(json.Object); has_call {
+				if args, has_args := call["args"].(json.Object); has_args {
+					for key in ([?]string{"Path", "TargetFile"}) {
+						if path := payload_string(args, key); path != "" {append(&raw, path)}
+					}
+				}
+			}
+		case .None, .Omp:
 		}
 		paths := make([dynamic]string, 0, len(raw), allocator)
 		for path in raw {

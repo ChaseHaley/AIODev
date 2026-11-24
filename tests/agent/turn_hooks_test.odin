@@ -106,6 +106,58 @@ codex_apply_patch_reads_crlf_lines :: proc(t: ^testing.T) {
 	expect_paths(t, p, {"C:/repo/a.txt"})
 }
 
+// agy 1.5.15's hook inputs, as observed on Windows (WORK-521), less the fields AIODev does not read.
+@(test)
+agy_prompt_is_the_first_model_call_of_a_turn :: proc(t: ^testing.T) {
+	first := `{"conversationId":"40bf0ec5-5a49-4015-a4c1-d1709000e1e7","cwd":"C:\\work",` +
+		`"hookEventName":"PreInvocation","initialNumSteps":1,"invocationNum":0,"lastUserInput":"fix the tests"}`
+	p, ok := agent.turn_payload(.Agy, .Prompt, transmute([]u8)string(first))
+	defer agent.turn_payload_destroy(&p)
+	testing.expect(t, ok && !p.skip)
+	testing.expect_value(t, p.session, "40bf0ec5-5a49-4015-a4c1-d1709000e1e7")
+	testing.expect_value(t, p.cwd, `C:\work`)
+	testing.expect_value(t, p.prompt, "fix the tests")
+	later := `{"conversationId":"40bf","cwd":"C:\\work","invocationNum":1,"lastUserInput":"fix the tests"}`
+	q, later_ok := agent.turn_payload(.Agy, .Prompt, transmute([]u8)string(later))
+	defer agent.turn_payload_destroy(&q)
+	testing.expect(t, later_ok && q.skip)
+}
+
+@(test)
+agy_stop_ends_the_turn_only_when_fully_idle :: proc(t: ^testing.T) {
+	idle := `{"conversationId":"40bf","cwd":"C:\\work","hookEventName":"Stop","fullyIdle":true,"terminationReason":"model_stop"}`
+	p, ok := agent.turn_payload(.Agy, .Stop, transmute([]u8)string(idle))
+	defer agent.turn_payload_destroy(&p)
+	testing.expect(t, ok && !p.skip)
+	busy := `{"conversationId":"40bf","cwd":"C:\\work","hookEventName":"Stop","fullyIdle":false}`
+	q, busy_ok := agent.turn_payload(.Agy, .Stop, transmute([]u8)string(busy))
+	defer agent.turn_payload_destroy(&q)
+	testing.expect(t, busy_ok && q.skip)
+}
+
+@(test)
+agy_edit_tools_name_their_file :: proc(t: ^testing.T) {
+	Case :: struct {
+		input: string,
+		want:  string,
+	}
+	for item in ([]Case {
+			{`{"cwd":"C:\\work","toolCall":{"name":"write_file","args":{"Content":"hi","Overwrite":true,"Path":"C:\\work\\a.txt"}}}`, "C:/work/a.txt"},
+			{`{"cwd":"C:\\work","toolCall":{"name":"edit_file","args":{"Path":"src\\b.odin","Target":"x","Replacement":"y"}}}`, "C:/work/src/b.odin"},
+			{`{"cwd":"C:\\work","toolCall":{"name":"replace_file_content","args":{"TargetFile":"C:/other/c.md"}}}`, "C:/other/c.md"},
+		}) {
+		p, ok := agent.turn_payload(.Agy, .Edit, transmute([]u8)item.input)
+		testing.expectf(t, ok, "%s", item.input)
+		expect_paths(t, p, {item.want})
+		agent.turn_payload_destroy(&p)
+	}
+	// Claude's field names are not agy's.
+	p, ok := agent.turn_payload(.Agy, .Edit, transmute([]u8)string(`{"cwd":"C:\\w","tool_input":{"file_path":"a"}}`))
+	defer agent.turn_payload_destroy(&p)
+	testing.expect(t, ok)
+	testing.expect_value(t, len(p.paths), 0)
+}
+
 @(test)
 turn_payload_rejects_unusable_input :: proc(t: ^testing.T) {
 	for input in ([]string{"", "{", "[]", `"text"`, `{"cwd":}`, "null"}) {

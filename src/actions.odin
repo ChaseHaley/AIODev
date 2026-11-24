@@ -996,8 +996,8 @@ COMMAND_HELP :: #partial [Action]Command_Help {
 		nil,
 	},
 	.Install_Turn_Hooks = {
-		"Adds AIODev's turn hooks to Claude Code and Codex so Agent changes knows exactly when turns start " +
-			"and which files agent tools edit.",
+		"Adds AIODev's turn hooks to Claude Code, Codex and Antigravity so Agent changes knows exactly when " +
+			"turns start and which files agent tools edit.",
 		nil,
 	},
 	.Pane_Send = {

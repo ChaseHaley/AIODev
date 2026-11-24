@@ -14,15 +14,16 @@ AGENT_SESSION_COMMAND :: "agent-session"
 @(private)
 ANCESTOR_LIMIT :: 64
 
-// aio agent-session <harness>, run by a Claude Code or Codex SessionStart hook (WORK-361): records the
-// session the hook's input names in the pane's record file, which AIODev reads when it saves the pane.
-// It needs no control pipe. It prints nothing on standard output, which a hook hands to the model, and
-// outside an AIODev pane, or for an agent another agent started, it records nothing and succeeds.
+// aio agent-session <harness>, run by a Claude Code or Codex SessionStart hook or an agy PreInvocation
+// hook (WORK-361, WORK-521): records the session the hook's input names in the pane's record file, which
+// AIODev reads when it saves the pane. It needs no control pipe. It prints nothing on standard output,
+// which a hook hands to the model, and outside an AIODev pane, or for an agent another agent started, it
+// records nothing and succeeds.
 @(private)
 agent_session_record :: proc(args: []string) -> cli_protocol.Status {
 	harness := len(args) == 1 ? agent.harness_named(args[0]) : .None
-	if harness != .Claude && harness != .Codex {
-		fmt.eprintln("aio: agent-session takes claude or codex")
+	if harness != .Claude && harness != .Codex && harness != .Agy {
+		fmt.eprintln("aio: agent-session takes claude, codex or agy")
 		return .Usage
 	}
 	path, in_pane := os.lookup_env(agent.RECORD_VARIABLE, context.temp_allocator)
@@ -32,11 +33,12 @@ agent_session_record :: proc(args: []string) -> cli_protocol.Status {
 		fmt.eprintfln("aio: reading the hook input failed: %v", read_error)
 		return .Failed
 	}
-	session, named := agent.hook_session(input)
+	session, repeat, named := agent.hook_session(harness, input)
 	if !named {
 		fmt.eprintln("aio: the hook input names no session")
 		return .Failed
 	}
+	if repeat {return .Ok}
 	processes, snapshot_error := procinfo.process_snapshot(context.temp_allocator)
 	if snapshot_error != .None {
 		fmt.eprintfln("aio: listing processes failed: %v", snapshot_error)

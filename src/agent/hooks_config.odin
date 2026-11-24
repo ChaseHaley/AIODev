@@ -5,8 +5,21 @@ import "core:strconv"
 import "core:strings"
 
 // Installing hooks. Claude Code's settings.json and Codex's hooks.json share the shape
-// {"hooks": {"<Event>": [{"matcher": ..., "hooks": [{"type": "command", "command": ...}]}]}}. The new
-// group is spliced into the user's text, so the rest of the file keeps its formatting and member order.
+// {"hooks": {"<Event>": [{"matcher": ..., "hooks": [{"type": "command", "command": ...}]}]}}.
+// Antigravity's hooks.json names each hook, {"<name>": {"<Event>": [...]}}, and AIODev's is AGY_HOOK_NAME;
+// a tool event there takes such groups, but any other event takes its handlers directly,
+// [{"type": "command", "command": ...}], because agy refuses a group on them. The new group or handler
+// is spliced into the user's text, so the rest of the file keeps its formatting and member order.
+
+Hooks_Layout :: enum u8 {
+	// {"hooks": {"<Event>": [group]}}: Claude Code and Codex.
+	Grouped,
+	// {AGY_HOOK_NAME: {"<Event>": [group or handler]}}: Antigravity.
+	Named,
+}
+
+// The name of AIODev's hook in Antigravity's hooks.json.
+AGY_HOOK_NAME :: "aiodev"
 
 Hook_Install :: enum u8 {
 	Added,
@@ -18,11 +31,14 @@ Hook_Install :: enum u8 {
 
 UTF8_BOM :: "\xef\xbb\xbf"
 
-// Adds a group running `command` to the `event` hooks of a settings file's text, unless a hook of that
-// event already runs it. A non-empty `matcher` is written on the group. Empty text stands for a file
-// that does not exist yet. The new text is in `allocator`.
+// Adds a group, or for an untargeted event of the Named layout a handler, running `command` to the
+// `event` hooks of a settings file's text, unless a hook of that event already runs it. A non-empty
+// `matcher` is written on the group. Empty text stands for a file that does not exist yet. The new text
+// is in `allocator`.
 hooks_install :: proc(
-	text, event, matcher, command: string,
+	text: string,
+	layout: Hooks_Layout,
+	event, matcher, command: string,
 	timeout_seconds: int,
 	allocator := context.allocator,
 ) -> (
@@ -32,13 +48,16 @@ hooks_install :: proc(
 	bom := strings.has_prefix(text, UTF8_BOM)
 	body := bom ? text[len(UTF8_BOM):] : text
 	if strings.trim_space(body) == "" {body = "{}"}
-	present, valid := hooks_present(body, event, command)
+	container := layout == .Named ? AGY_HOOK_NAME : "hooks"
+	present, valid := hooks_present(body, container, event, command)
 	if !valid {return "", .Invalid}
 	if present {return "", .Present}
 	command_json, command_error := json.marshal(command, {}, context.temp_allocator)
 	if command_error != nil {return "", .Invalid}
 	event_json, event_error := json.marshal(event, {}, context.temp_allocator)
 	if event_error != nil {return "", .Invalid}
+	container_json, container_error := json.marshal(container, {}, context.temp_allocator)
+	if container_error != nil {return "", .Invalid}
 	matcher_part := ""
 	if matcher != "" {
 		matcher_json, matcher_error := json.marshal(matcher, {}, context.temp_allocator)
@@ -51,32 +70,27 @@ hooks_install :: proc(
 	digits: [20]u8
 	timeout := strconv.write_int(digits[:], i64(timeout_seconds), 10)
 	// Built by concatenation: fmt reads braces as its own syntax.
-	group := strings.concatenate(
-		{
-			`{`,
-			matcher_part,
-			`"hooks":[{"type":"command","command":`,
-			string(command_json),
-			`,"timeout":`,
-			timeout,
-			`}]}`,
-		},
+	entry := strings.concatenate(
+		{`{"type":"command","command":`, string(command_json), `,"timeout":`, timeout, `}`},
 		context.temp_allocator,
 	)
+	if layout == .Grouped || matcher != "" {
+		entry = strings.concatenate({`{`, matcher_part, `"hooks":[`, entry, `]}`}, context.temp_allocator)
+	}
 	root := skip_space(body, 0)
 	at: int
 	insertion: string
-	if hooks, has_hooks := member_value(body, root, "hooks"); !has_hooks {
+	if hooks, has_hooks := member_value(body, root, container); !has_hooks {
 		member := strings.concatenate(
-			{`"hooks":{`, string(event_json), `:[`, group, `]}`},
+			{string(container_json), `:{`, string(event_json), `:[`, entry, `]}`},
 			context.temp_allocator,
 		)
 		at, insertion = container_insert(body, root, member)
-	} else if groups, has_event := member_value(body, hooks, event); !has_event {
-		member := strings.concatenate({string(event_json), `:[`, group, `]`}, context.temp_allocator)
+	} else if entries, has_event := member_value(body, hooks, event); !has_event {
+		member := strings.concatenate({string(event_json), `:[`, entry, `]`}, context.temp_allocator)
 		at, insertion = container_insert(body, hooks, member)
 	} else {
-		at, insertion = container_insert(body, groups, group)
+		at, insertion = container_insert(body, entries, entry)
 	}
 	result := strings.concatenate({bom ? UTF8_BOM : "", body[:at], insertion, body[at:]}, allocator)
 	if _, parse_error := json.parse_string(
@@ -90,37 +104,41 @@ hooks_install :: proc(
 	return result, .Added
 }
 
-// Whether the text is a settings object of the hooks shape, and whether one of the hooks of `event`
-// already runs `command`.
+// Whether the text is a settings object of the hooks shape, and whether one of the hooks of `event` in
+// its `container` member already runs `command`, as the handler of a group or a handler of its own.
 @(private)
-hooks_present :: proc(body, event, command: string) -> (present, valid: bool) {
-	// Strict JSON, as both harnesses read it; the splice does not step over comments.
+hooks_present :: proc(body, container, event, command: string) -> (present, valid: bool) {
+	// Strict JSON, as every harness reads it; the splice does not step over comments.
 	value, parse_error := json.parse_string(body, .JSON, allocator = context.temp_allocator)
 	if parse_error != .None {return false, false}
 	root, is_object := value.(json.Object)
 	if !is_object {return false, false}
-	hooks_value, has_hooks := root["hooks"]
+	hooks_value, has_hooks := root[container]
 	if !has_hooks {return false, true}
 	hooks, hooks_object := hooks_value.(json.Object)
 	if !hooks_object {return false, false}
 	event_value, has_event := hooks[event]
 	if !has_event {return false, true}
-	groups, is_array := event_value.(json.Array)
+	entries, is_array := event_value.(json.Array)
 	if !is_array {return false, false}
-	for group_value in groups {
-		group, group_object := group_value.(json.Object)
-		if !group_object {continue}
-		handlers, handlers_array := group["hooks"].(json.Array)
+	for entry_value in entries {
+		entry, entry_object := entry_value.(json.Object)
+		if !entry_object {continue}
+		if handler_runs(entry, command) {return true, true}
+		handlers, handlers_array := entry["hooks"].(json.Array)
 		if !handlers_array {continue}
 		for handler_value in handlers {
 			handler, handler_object := handler_value.(json.Object)
-			if !handler_object {continue}
-			if text, is_string := handler["command"].(json.String); is_string && string(text) == command {
-				return true, true
-			}
+			if handler_object && handler_runs(handler, command) {return true, true}
 		}
 	}
 	return false, true
+}
+
+@(private)
+handler_runs :: proc(handler: json.Object, command: string) -> bool {
+	text, is_string := handler["command"].(json.String)
+	return is_string && string(text) == command
 }
 
 // Where `insertion` goes at the start of the object or array opening at `open`, and the insertion with

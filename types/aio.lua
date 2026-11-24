@@ -1133,7 +1133,7 @@ function aio.app.install_agent_hooks(fields) end
 
 ---Install agent turn hooks
 ---
----Adds AIODev's turn hooks to Claude Code and Codex so Agent changes knows exactly when turns start and which files agent tools edit.
+---Adds AIODev's turn hooks to Claude Code, Codex and Antigravity so Agent changes knows exactly when turns start and which files agent tools edit.
 ---@param fields? aio.fields.app.install_turn_hooks
 ---@return aio.Reply? reply
 ---@return string? message

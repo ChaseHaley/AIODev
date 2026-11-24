@@ -47,9 +47,10 @@ HOOK_EVENTS :: [?]string{"prompt", "stop", "edit"}
 // Whether a harness settings directory that exists lacks any of the turn hooks. A directory that does
 // not exist is a harness the user does not run, so it offers nothing.
 @(require_results)
-changes_hooks_missing :: proc(claude_directory, codex_directory: string) -> bool {
+changes_hooks_missing :: proc(claude_directory, codex_directory, agy_directory: string) -> bool {
 	claude := hooks_file_missing(claude_directory, "settings.json", "claude")
-	return claude || hooks_file_missing(codex_directory, "hooks.json", "codex")
+	codex := hooks_file_missing(codex_directory, "hooks.json", "codex")
+	return claude || codex || hooks_file_missing(agy_directory, "hooks.json", "agy")
 }
 
 @(private = "file")
@@ -77,6 +78,7 @@ changes_hooks_sync :: proc(app: ^App, model: ^Changes_Model) {
 		missing := changes_hooks_missing(
 			harness_directory("CLAUDE_CONFIG_DIR", ".claude"),
 			harness_directory("CODEX_HOME", ".codex"),
+			agy_config_directory(),
 		)
 		app.turn_hooks = missing ? .Missing : .Present
 	}

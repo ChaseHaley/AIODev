@@ -17,7 +17,7 @@ import "core:time"
 // Resuming the coding agent a pane runs (WORK-361, the D-020 amendment). Each terminal pane has a key
 // that lasts through reopen and restart. Its shell gets TERM_SESSION_ID set to the key, where omp's
 // per-terminal breadcrumb records the pane's session, and AIODEV_AGENT_RECORD, the file that
-// `aio agent-session` writes from a Claude Code or Codex SessionStart hook. Saving the layout or
+// `aio agent-session` writes from a Claude Code, Codex or agy hook. Saving the layout or
 // recording a close turns the pane's session into a resume line, which restoring the pane types into
 // its fresh shell.
 
@@ -192,7 +192,7 @@ pane_agent :: proc(app: ^App, entry: ^Session_Entry, processes: []procinfo.Proce
 	return {launch = launch, program = program, root = root}
 }
 
-// The session the pane's agent is in. omp's breadcrumb names it, and for Claude Code and Codex the
+// The session the pane's agent is in. omp's breadcrumb names it, and for Claude Code, Codex and agy the
 // hook's record; else a source that names exactly one session, or the session the launch named.
 @(private)
 agent_session :: proc(app: ^App, entry: ^Session_Entry, running: Pane_Agent) -> (string, bool) {
@@ -209,9 +209,7 @@ agent_session :: proc(app: ^App, entry: ^Session_Entry, running: Pane_Agent) -> 
 		session, found = hooked_session(app, entry.key, running)
 		if !found && launch.session == "" {session, found = codex_fallback_session(entry, running)}
 	case .Agy:
-		// agy runs hooks only from its hooks.json, and nothing here is known to reach a hook with the
-		// pane's variables, so only a launch that named its conversation (agy --conversation <id>)
-		// carries a session over.
+		session, found = hooked_session(app, entry.key, running)
 	case .None:
 	}
 	if !found && launch.session != "" {return launch.session, true}
@@ -385,36 +383,48 @@ Hook_Outcome :: enum u8 {
 	Failed,
 }
 
-// Adds a SessionStart hook running `aio agent-session` to Claude Code's settings.json and Codex's
-// hooks.json, for each harness whose settings directory exists. Claude Code runs hooks in Git Bash and
-// Codex in PowerShell, so the two commands quote aio's path for those shells.
+// Adds a hook running `aio agent-session` to Claude Code's settings.json, Codex's hooks.json and
+// Antigravity's hooks.json, for each harness whose settings directory exists. Claude Code runs hooks in
+// Git Bash, Codex in PowerShell and agy in cmd, so the commands quote aio's path for those shells. agy's
+// is a PreInvocation hook: its SessionStart does not run for a resumed conversation.
 agent_hooks_install :: proc(app: ^App) {
 	aio, usable := hook_aio_path(app, "agent session")
 	if !usable {return}
 	claude := hook_install_file(
 		harness_directory("CLAUDE_CONFIG_DIR", ".claude"),
 		"settings.json",
+		.Grouped,
 		{{"SessionStart", "", fmt.tprintf(`"%s" agent-session claude`, aio)}},
 	)
 	codex := hook_install_file(
 		harness_directory("CODEX_HOME", ".codex"),
 		"hooks.json",
+		.Grouped,
 		{{"SessionStart", "", fmt.tprintf(`& "%s" agent-session codex`, aio)}},
 	)
-	hook_install_notify(app, claude, codex)
+	agy := hook_install_file(
+		agy_config_directory(),
+		"hooks.json",
+		.Named,
+		{{"PreInvocation", "", fmt.tprintf(`"%s" agent-session agy`, aio)}},
+	)
+	hook_install_notify(app, claude, codex, agy)
 }
 
-// Adds UserPromptSubmit, Stop and file edit PreToolUse hooks running `aio turn-hook` to Claude Code's
-// settings.json and Codex's hooks.json (WORK-487), quoted as agent_hooks_install does. Codex reports
-// its file edits as apply_patch, which is what its matcher names.
+// Adds prompt, stop and file edit hooks running `aio turn-hook` to Claude Code's settings.json, Codex's
+// hooks.json and Antigravity's hooks.json (WORK-487, WORK-521), quoted as agent_hooks_install does.
+// Codex reports its file edits as apply_patch, which is what its matcher names; agy has no prompt event,
+// so its prompt hook is PreInvocation, which the hook passes over after a turn's first model call.
 agent_turn_hooks_install :: proc(app: ^App) {
 	aio, usable := hook_aio_path(app, "agent turn")
 	if !usable {return}
 	claude_command := fmt.tprintf(`"%s" turn-hook claude`, aio)
 	codex_command := fmt.tprintf(`& "%s" turn-hook codex`, aio)
+	agy_command := fmt.tprintf(`"%s" turn-hook agy`, aio)
 	claude := hook_install_file(
 		harness_directory("CLAUDE_CONFIG_DIR", ".claude"),
 		"settings.json",
+		.Grouped,
 		{
 			{"UserPromptSubmit", "", fmt.tprintf("%s prompt", claude_command)},
 			{"Stop", "", fmt.tprintf("%s stop", claude_command)},
@@ -424,13 +434,24 @@ agent_turn_hooks_install :: proc(app: ^App) {
 	codex := hook_install_file(
 		harness_directory("CODEX_HOME", ".codex"),
 		"hooks.json",
+		.Grouped,
 		{
 			{"UserPromptSubmit", "", fmt.tprintf("%s prompt", codex_command)},
 			{"Stop", "", fmt.tprintf("%s stop", codex_command)},
 			{"PreToolUse", "apply_patch", fmt.tprintf("%s edit", codex_command)},
 		},
 	)
-	hook_install_notify(app, claude, codex)
+	agy := hook_install_file(
+		agy_config_directory(),
+		"hooks.json",
+		.Named,
+		{
+			{"PreInvocation", "", fmt.tprintf("%s prompt", agy_command)},
+			{"Stop", "", fmt.tprintf("%s stop", agy_command)},
+			{"PreToolUse", agent.AGY_EDIT_MATCHER, fmt.tprintf("%s edit", agy_command)},
+		},
+	)
+	hook_install_notify(app, claude, codex, agy)
 }
 
 // The path of aio.exe as a hook command quotes it, in temporary memory; false, after telling the user
@@ -455,12 +476,20 @@ hook_aio_path :: proc(app: ^App, what: string) -> (string, bool) {
 }
 
 @(private)
-hook_install_notify :: proc(app: ^App, claude, codex: Hook_Outcome) {
-	text := fmt.tprintf("Claude Code: %s. Codex: %s.", hook_outcome_text(claude), hook_outcome_text(codex))
+hook_install_notify :: proc(app: ^App, claude, codex, agy: Hook_Outcome) {
+	text := fmt.tprintf(
+		"Claude Code: %s. Codex: %s. Antigravity: %s.",
+		hook_outcome_text(claude),
+		hook_outcome_text(codex),
+		hook_outcome_text(agy),
+	)
 	if codex == .Added {
 		text = fmt.tprintf("%s Approve the new hook once with /hooks in Codex.", text)
 	}
-	failed := claude == .Failed || claude == .Unreadable || codex == .Failed || codex == .Unreadable
+	failed := false
+	for outcome in ([?]Hook_Outcome{claude, codex, agy}) {
+		if outcome == .Failed || outcome == .Unreadable {failed = true}
+	}
 	notify(app, failed ? .Error : .Info, text)
 }
 
@@ -475,6 +504,16 @@ harness_directory :: proc(variable, folder: string) -> string {
 	return path
 }
 
+// Antigravity's hooks.json, which agy shares with the Antigravity app and IDE, is in ~/.gemini/config,
+// and no variable moves it; in temporary memory, empty when unknown.
+@(private)
+agy_config_directory :: proc() -> string {
+	home := home_directory()
+	if home == "" {return ""}
+	path, _ := filepath.join({home, ".gemini", "config"}, context.temp_allocator)
+	return path
+}
+
 // One hook to put in a harness's settings: its event, the tool matcher of the group (empty for none) and
 // the command it runs.
 @(private)
@@ -482,10 +521,14 @@ Hook_Entry :: struct {
 	event, matcher, command: string,
 }
 
-// Adds the entries to the settings file in `directory`, which is written once and only when one of them
-// was missing: Added when any was, Present when all were.
+// Adds the entries to the settings file in `directory`, laid out as `layout`, which is written once and
+// only when one of them was missing: Added when any was, Present when all were.
 @(private)
-hook_install_file :: proc(directory, file: string, entries: []Hook_Entry) -> Hook_Outcome {
+hook_install_file :: proc(
+	directory, file: string,
+	layout: agent.Hooks_Layout,
+	entries: []Hook_Entry,
+) -> Hook_Outcome {
 	if directory == "" || !os.is_dir(directory) {return .Absent}
 	path, _ := filepath.join({directory, file}, context.temp_allocator)
 	// A settings file kept as a link elsewhere, as dotfiles setups do, is updated where it lives.
@@ -511,6 +554,7 @@ hook_install_file :: proc(directory, file: string, entries: []Hook_Entry) -> Hoo
 	for entry in entries {
 		result, change := agent.hooks_install(
 			text,
+			layout,
 			entry.event,
 			entry.matcher,
 			entry.command,

@@ -24,19 +24,20 @@ TURN_HOOK_WAIT :: 2000 * time.Millisecond
 @(private)
 TURN_HOOK_POLL :: 10 * time.Millisecond
 
-// aio turn-hook <claude|codex> <prompt|stop|edit>, run by a Claude Code or Codex UserPromptSubmit, Stop
-// or PreToolUse hook (WORK-487): hands the turn boundary or the paths about to be edited to AIODev
-// through a file in its turns directory, because the control pipe is off by default. Whatever a hook
-// prints on standard output reaches the model, so this prints nothing there on any path, and it exits 0
-// whenever the hook is not for a recording AIODev pane or anything goes wrong, so an agent is never held
-// up or blocked by it. A prompt or edit hook waits until AIODev has taken the event, so the files it
-// snapshots are the ones from before the tool runs.
+// aio turn-hook <claude|codex|agy> <prompt|stop|edit>, run by a Claude Code or Codex UserPromptSubmit,
+// Stop or PreToolUse hook, or an agy PreInvocation, Stop or PreToolUse hook (WORK-487, WORK-521): hands
+// the turn boundary or the paths about to be edited to AIODev through a file in its turns directory,
+// because the control pipe is off by default. Whatever a hook prints on standard output reaches the
+// model, so this prints nothing there on any path, and it exits 0 whenever the hook is not for a
+// recording AIODev pane or anything goes wrong, so an agent is never held up or blocked by it. A prompt
+// or edit hook waits until AIODev has taken the event, so the files it snapshots are the ones from
+// before the tool runs.
 @(private, require_results)
 turn_hook_run :: proc(args: []string) -> cli_protocol.Status {
 	harness := len(args) == 2 ? agent.harness_named(args[0]) : .None
 	kind, kind_named := turn_hook_kind(len(args) == 2 ? args[1] : "")
-	if harness != .Claude && harness != .Codex || !kind_named {
-		fmt.eprintln("aio: turn-hook takes claude or codex, then prompt, stop or edit")
+	if harness != .Claude && harness != .Codex && harness != .Agy || !kind_named {
+		fmt.eprintln("aio: turn-hook takes claude, codex or agy, then prompt, stop or edit")
 		return .Ok
 	}
 	directory, in_pane := os.lookup_env(turns.TURNS_VARIABLE, context.temp_allocator)
@@ -50,7 +51,7 @@ turn_hook_run :: proc(args: []string) -> cli_protocol.Status {
 	input, read_error := os.read_entire_file_from_file(os.stdin, context.temp_allocator)
 	if read_error != nil {return .Ok}
 	payload, parsed := agent.turn_payload(harness, kind, input, context.temp_allocator)
-	if !parsed {return .Ok}
+	if !parsed || payload.skip {return .Ok}
 	// An edit that names no path has nothing to snapshot.
 	if kind == .Edit && len(payload.paths) == 0 {return .Ok}
 	now := time.now()

@@ -17,17 +17,23 @@ Record :: struct {
 	processes: []u32,
 }
 
-// A record or hook payload larger than this is not one.
+// A record, or an entry of a file read for a session, larger than this is not one.
 RECORD_LIMIT :: 64 * 1024
 
-// The session a SessionStart hook's input names; Claude Code and Codex both send session_id.
-hook_session :: proc(payload: []u8) -> (string, bool) {
-	if len(payload) > RECORD_LIMIT {return "", false}
+// The session a hook's input names: Claude Code's and Codex's SessionStart send session_id, and every agy
+// hook conversationId. `repeat` is an agy model call after the first of its turn, whose session that
+// call already named; agy runs PreInvocation before each, and only it names a resumed conversation.
+hook_session :: proc(harness: Harness, payload: []u8) -> (session: string, repeat: bool, ok: bool) {
+	// agy's input carries the prompt.
+	if len(payload) > PAYLOAD_LIMIT {return "", false, false}
 	input: struct {
-		session_id: string,
+		session_id:      string,
+		conversation_id: string `json:"conversationId"`,
+		invocation:      int `json:"invocationNum"`,
 	}
-	if json.unmarshal(payload, &input, allocator = context.temp_allocator) != nil {return "", false}
-	return input.session_id, session_id_valid(input.session_id)
+	if json.unmarshal(payload, &input, allocator = context.temp_allocator) != nil {return "", false, false}
+	session = harness == .Agy ? input.conversation_id : input.session_id
+	return session, harness == .Agy && input.invocation > 0, session_id_valid(session)
 }
 
 // The record's file text, in `allocator`.

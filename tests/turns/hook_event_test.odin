@@ -58,11 +58,13 @@ hook_event_without_paths_round_trips :: proc(t: ^testing.T) {
 	testing.expect_value(t, len(got.paths), 0)
 	turns.hook_event_destroy(&got)
 	delete(text)
-	// Codex is the other harness.
-	want.harness = "codex"
-	text, encoded = turns.hook_event_encode(want)
-	testing.expect(t, encoded)
-	delete(text)
+	// Codex and agy are the other harnesses.
+	for harness in ([?]string{"codex", "agy"}) {
+		want.harness = harness
+		text, encoded = turns.hook_event_encode(want)
+		testing.expectf(t, encoded, "%s should encode", harness)
+		delete(text)
+	}
 }
 
 @(test)

@@ -1009,9 +1009,9 @@ SCHEMA :: [?]Schema_Entry {
 		kind = .Bool,
 		offset = offset_of(Settings, pane) + offset_of(Pane_Settings, resume_agents),
 		default_value = "true",
-		description = "Bring a pane running Claude Code, Codex or omp back in the same conversation when it " +
-			"is reopened or AIODev restarts. Run \"Install agent session hooks\" once so Claude Code and Codex " +
-			"panes always know their conversation.",
+		description = "Bring a pane running Claude Code, Codex, omp or Antigravity's agy back in the same " +
+			"conversation when it is reopened or AIODev restarts. Run \"Install agent session hooks\" once so " +
+			"Claude Code, Codex and agy panes always know their conversation.",
 	},
 	{
 		key = "pane.minimum_columns",

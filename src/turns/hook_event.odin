@@ -77,7 +77,7 @@ hook_prompt_clip :: proc(prompt: string) -> string {
 
 @(private)
 hook_harness_valid :: proc(harness: string) -> bool {
-	return harness == "claude" || harness == "codex"
+	return harness == "claude" || harness == "codex" || harness == "agy"
 }
 
 @(private)

@@ -708,32 +708,42 @@ turn_hooks_are_offered_only_where_a_harness_is_missing_them :: proc(t: ^testing.
 	codex := strings.concatenate({directory, "/codex"}, context.temp_allocator)
 	missing := strings.concatenate({directory, "/absent"}, context.temp_allocator)
 
-	testing.expect(t, !app.changes_hooks_missing("", ""), "no harness, no offer")
-	testing.expect(t, !app.changes_hooks_missing(missing, missing), "folders that do not exist offer nothing")
+	testing.expect(t, !app.changes_hooks_missing("", "", ""), "no harness, no offer")
+	testing.expect(t, !app.changes_hooks_missing(missing, missing, missing), "folders that do not exist offer nothing")
 	if !testing.expect_value(t, os.make_directory(claude), nil) {return}
-	testing.expect(t, app.changes_hooks_missing(claude, missing), "a folder without the file lacks the hooks")
+	testing.expect(t, app.changes_hooks_missing(claude, missing, missing), "a folder without the file lacks the hooks")
 	settings := strings.concatenate({claude, "/settings.json"}, context.temp_allocator)
 	body := `{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"\"C:/aio.exe\" agent-session claude"}]}]}}`
 	testing.expect_value(t, os.write_entire_file(settings, body), nil)
-	testing.expect(t, app.changes_hooks_missing(claude, missing), "session hooks are not turn hooks")
+	testing.expect(t, app.changes_hooks_missing(claude, missing, missing), "session hooks are not turn hooks")
 	body = `{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"\"C:/aio.exe\" turn-hook claude stop"}]}]}}`
 	testing.expect_value(t, os.write_entire_file(settings, body), nil)
-	testing.expect(t, app.changes_hooks_missing(claude, missing), "one of three events is not installed")
+	testing.expect(t, app.changes_hooks_missing(claude, missing, missing), "one of three events is not installed")
 	body =
 		`{"hooks":{"UserPromptSubmit":[{"hooks":[{"command":"\"C:/aio.exe\" turn-hook claude prompt"}]}],` +
 		`"Stop":[{"hooks":[{"command":"\"C:/aio.exe\" turn-hook claude stop"}]}],` +
 		`"PreToolUse":[{"hooks":[{"command":"\"C:/aio.exe\" turn-hook claude edit"}]}]}}`
 	testing.expect_value(t, os.write_entire_file(settings, body), nil)
-	testing.expect(t, !app.changes_hooks_missing(claude, missing))
+	testing.expect(t, !app.changes_hooks_missing(claude, missing, missing))
 
 	if !testing.expect_value(t, os.make_directory(codex), nil) {return}
-	testing.expect(t, app.changes_hooks_missing(claude, codex), "the other harness still lacks them")
+	testing.expect(t, app.changes_hooks_missing(claude, codex, missing), "the other harness still lacks them")
 	hooks := strings.concatenate({codex, "/hooks.json"}, context.temp_allocator)
 	testing.expect_value(t, os.write_entire_file(hooks, body), nil)
-	testing.expect(t, app.changes_hooks_missing(claude, codex), "each harness needs its own commands")
+	testing.expect(t, app.changes_hooks_missing(claude, codex, missing), "each harness needs its own commands")
 	codex_body := `{"hooks":{"a":[{"hooks":[{"command":"& \"C:/aio.exe\" turn-hook codex prompt"}]}],` +
 		`"b":[{"hooks":[{"command":"& \"C:/aio.exe\" turn-hook codex stop"}]}],` +
 		`"c":[{"hooks":[{"command":"& \"C:/aio.exe\" turn-hook codex edit"}]}]}}`
 	testing.expect_value(t, os.write_entire_file(hooks, codex_body), nil)
-	testing.expect(t, !app.changes_hooks_missing(claude, codex))
+	testing.expect(t, !app.changes_hooks_missing(claude, codex, missing))
+
+	agy := strings.concatenate({directory, "/agy"}, context.temp_allocator)
+	if !testing.expect_value(t, os.make_directory(agy), nil) {return}
+	testing.expect(t, app.changes_hooks_missing(claude, codex, agy), "Antigravity's folder lacks them")
+	agy_hooks := strings.concatenate({agy, "/hooks.json"}, context.temp_allocator)
+	agy_body := `{"aiodev":{"PreInvocation":[{"command":"\"C:/aio.exe\" turn-hook agy prompt"}],` +
+		`"Stop":[{"command":"\"C:/aio.exe\" turn-hook agy stop"}],` +
+		`"PreToolUse":[{"matcher":"edit_file","hooks":[{"command":"\"C:/aio.exe\" turn-hook agy edit"}]}]}}`
+	testing.expect_value(t, os.write_entire_file(agy_hooks, agy_body), nil)
+	testing.expect(t, !app.changes_hooks_missing(claude, codex, agy))
 }
