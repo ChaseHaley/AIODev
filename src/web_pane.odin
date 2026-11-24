@@ -890,7 +890,7 @@ web_nav_draw :: proc(
 		app, w, nav.forward, .Chevron_Right, pane.can_forward,
 		pane.nav_hover == .Forward, pane.nav_armed == .Forward,
 	)
-	reload_icon: ui.Icon = pane.loading ? .Close : .Undo
+	reload_icon: ui.Icon = pane.loading ? .Close : .Refresh
 	_ = web_nav_button_draw(
 		app, w, nav.reload, reload_icon, pane.url != "",
 		pane.nav_hover == .Reload, pane.nav_armed == .Reload,
