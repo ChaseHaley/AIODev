@@ -375,6 +375,138 @@ tab_turn_slides_the_title_fading_only_at_the_right :: proc(t: ^testing.T) {
 	}
 }
 
+// The owner, 2026-11-24 (WORK-649): the mark behind a stack drew over the one in front when they were
+// different kinds, Claude's art over a Markdown or web icon in front. A layer paints its rects before its
+// glyphs, whatever order they were pushed in, so the mark in front must paint after the whole mark behind
+// whatever each is drawn with: a vector icon (rects), program art or a favicon (a colour glyph), or a
+// keycap (a chip and its letters). This holds at rest and while the label turns.
+@(test)
+tab_stack_paints_the_front_mark_over_the_one_behind_whatever_their_kinds :: proc(t: ^testing.T) {
+	fonts, err := font.system_create()
+	if !testing.expect_value(t, err, font.Error.None) {return}
+	defer font.system_destroy(fonts)
+	device, device_error := render.device_create(.Warp)
+	if !testing.expect_value(t, device_error, render.Error.None) {return}
+	defer render.device_destroy(device)
+	cache: glyphs.Cache
+	glyphs.init(&cache, fonts, device)
+	defer glyphs.destroy(&cache)
+	text: ui.Text
+	if !testing.expect(t, ui.text_init(&text, fonts, &cache, 14)) {return}
+	list := render.draw_list_init()
+	defer render.draw_list_destroy(&list)
+	everything := render.Rect{0, 0, 2000, 2000}
+	themes := 0
+	for file in testkit.BUNDLED_THEMES {
+		resolved, ok := testkit.bundled_theme_file(file)
+		if !ok {continue}
+		themes += 1
+		theme_name := file.name
+		theme := views.theme_from(resolved, fixtures.default_interface())
+		if !testing.expect(t, theme.selection.rgb != theme.tab_text.rgb, "keycap chips and icons share a colour") {
+			return
+		}
+		for scale in ([?]f32{1, 1.5, 2}) {
+			ui.text_set_size(&text, 14 * scale)
+			tile := render.Rect{0, 4 * scale, 200 * scale, 32 * scale}
+			for back in Stack_Mark_Kind {
+				for front in Stack_Mark_Kind {
+					if back == front {continue}
+					tab := views.Tab_Tile {
+						title  = "Title",
+						badge  = stack_mark_badge(front, scale),
+						behind = stack_mark_badge(back, scale),
+					}
+					render.draw_list_reset(&list)
+					_ = render.push_layer(&list, everything)
+					testing.expect_value(t, views.tab_badge_draw(&list, &text, theme, tile, tab, scale), render.Build_Status.Ok)
+					behind_last, behind_found := stack_mark_painted(&list, theme, back, true)
+					front_first, front_found := stack_mark_painted(&list, theme, front, false)
+					testing.expectf(t, behind_found && front_found, "%v: %v behind %v drew nothing", theme_name, back, front)
+					testing.expectf(t, behind_last < front_first,
+						"%v scale %v: %v behind paints over %v in front", theme_name, scale, back, front)
+
+					// Turning, the mark nearer the front of the sphere paints over the other.
+					tab.turn = {turning = true, title = "Old", badge = tab.behind, behind = tab.badge, toward = {1, 0}}
+					for progress in ([?]f32{0.25, 0.75}) {
+						tab.turn.progress = progress
+						marks, count := views.tab_spin_marks(tile, tab, scale)
+						if !testing.expect_value(t, count, 2) {continue}
+						near_kind := marks[1].badge == tab.badge ? front : back
+						far_kind := near_kind == front ? back : front
+						render.draw_list_reset(&list)
+						_ = render.push_layer(&list, everything)
+						testing.expect_value(t, views.tab_badge_draw(&list, &text, theme, tile, tab, scale), render.Build_Status.Ok)
+						far_last, _ := stack_mark_painted(&list, theme, far_kind, true)
+						near_first, _ := stack_mark_painted(&list, theme, near_kind, false)
+						testing.expectf(t, far_last < near_first, "%v scale %v at %v: %v paints over %v nearer the front",
+							theme_name, scale, progress, far_kind, near_kind)
+					}
+				}
+			}
+		}
+	}
+	testing.expect(t, themes >= 2, "the bundled light and dark themes")
+}
+
+// How a stacked mark draws: program art or a favicon, a keycap, or a vector icon.
+@(private = "file")
+Stack_Mark_Kind :: enum {
+	Art,
+	Keycap,
+	Icon,
+}
+
+@(private = "file")
+stack_mark_badge :: proc(kind: Stack_Mark_Kind, scale: f32) -> views.Tab_Badge {
+	switch kind {
+	case .Art:
+		size := views.TAB_STACK_MARK * scale
+		return {atlas = {0, 0, size, size}, pane = 1}
+	case .Keycap:
+		return {shell = "C", pane = 2}
+	case .Icon:
+		return {icon = .Markdown, pane = 3}
+	}
+	return {}
+}
+
+// Where `kind`'s mark paints in `list`, counted in the order the renderer paints: layer by layer, each
+// layer's rects, then its images, then its glyphs. The first place it paints, or the `last`, and whether it
+// painted at all. An unselected tile inks icons in the tab text colour and keycap chips in the selection's;
+// a turning mark fades, which changes only their alpha.
+@(private = "file")
+stack_mark_painted :: proc(
+	list: ^render.Draw_List,
+	theme: views.Theme,
+	kind: Stack_Mark_Kind,
+	last: bool,
+) -> (
+	at: int,
+	found: bool,
+) {
+	order := 0
+	for layer in list.layers {
+		for r in list.rects[layer.rect_start:][:layer.rect_count] {
+			if kind == .Icon && r.color.rgb == theme.tab_text.rgb || kind == .Keycap && r.color.rgb == theme.selection.rgb {
+				if !found || last {at = order}
+				found = true
+			}
+			order += 1
+		}
+		order += layer.image_count
+		for g in list.glyphs[layer.glyph_start:][:layer.glyph_count] {
+			colour := g.flags & render.GLYPH_COLOR != 0
+			if kind == .Art && colour || kind == .Keycap && !colour {
+				if !found || last {at = order}
+				found = true
+			}
+			order += 1
+		}
+	}
+	return
+}
+
 // Whether two rectangles match to a hundredth of a pixel.
 @(private = "file")
 near :: proc(a, b: render.Rect) -> bool {

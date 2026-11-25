@@ -300,7 +300,9 @@ tab_spin_mark_draw :: proc(
 
 // Draws `badge` in the leading icon column of `tile`, stacked over `behind` when that shows. The mark
 // behind draws whole and the front mark over it, so the one behind shows through every transparent pixel
-// of the one in front; nothing is cut out around it.
+// of the one in front; nothing is cut out around it. A layer paints its rects before its glyphs, so the
+// front mark starts a layer of its own: otherwise program art or a keycap's letters behind (glyphs) would
+// paint over a vector icon in front (rects) (WORK-649).
 @(private = "file")
 tab_marks_draw :: proc(
 	list: ^render.Draw_List,
@@ -318,6 +320,8 @@ tab_marks_draw :: proc(
 	if result := tab_mark_draw(list, text, theme, back, behind, ink, TAB_STACK_MARK, scale); result != .Ok {
 		return result
 	}
+	current := list.layers[len(list.layers) - 1]
+	if render.push_layer(list, current.clip, current.radius) != .None {return .Ok}
 	return tab_mark_draw(list, text, theme, front, badge, ink, TAB_STACK_MARK, scale)
 }
 
