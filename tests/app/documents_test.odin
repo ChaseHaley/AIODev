@@ -962,7 +962,9 @@ link_open_splits_the_longer_side_of_its_pane :: proc(t: ^testing.T) {
 		if !testing.expect(t, app.document_submenu_shown(w)) {return}
 		testing.expect_value(t, w.document_menu.submenu.items[placement_row(w, c.marked)].shortcut, "Default")
 		testing.expect_value(t, w.document_menu.submenu.items[placement_row(w, c.other)].shortcut, "")
-		// The row's own click, on a fresh menu, opens it at its default.
+		// Escape closes the placements, then the menu; the row's own click on a fresh menu opens at its default.
+		for _ in 0 ..< 2 {key(s, w, .Escape)}
+		testing.expect(t, !shown_in(w, app.Document_Menu_Link))
 		if !menu_on_path(t, &f, terminal, {.Shift}) {return}
 		click_row(s, w, link_row(w, .Open))
 		testing.expect_value(t, layout.pane_count(tree), i + 2)
