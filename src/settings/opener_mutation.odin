@@ -48,12 +48,10 @@ opener_mutate :: proc(
 	if alloc_error != nil {return "", "", "", .Allocation}
 	defer delete(revision, allocator)
 	if change.kind == .Add {
-		placements := OPENER_PLACEMENT_NAME
 		values := #partial [Opener_Field]string {
 			.Name      = OPENER_NEW_NAME,
 			.Command   = OPENER_NEW_COMMAND,
 			.Offers    = opener_link_names[.Files],
-			.Placement = placements[.Own_Window],
 		}
 		for value, field in values {
 			if value == "" {continue}

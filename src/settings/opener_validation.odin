@@ -162,9 +162,9 @@ opener_problem_text :: proc(issue: Opener_Problem, ctx: Opener_Validation_Contex
 		if !file {return "Choose files, folders or both."}
 		return fmt.tprintf("invalid offers \"%s\", expected files, folders or \"files, folders\"", value)
 	case .Invalid_Placement:
-		if !file {return "Expected right, down, float, tab, linked or window."}
+		if !file {return "Expected auto, right, down, float, tab, linked or window."}
 		return fmt.tprintf(
-			"invalid placement \"%s\", expected right, down, float, tab, linked or window",
+			"invalid placement \"%s\", expected auto, right, down, float, tab, linked or window",
 			value,
 		)
 	}

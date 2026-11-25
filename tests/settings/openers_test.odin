@@ -212,7 +212,7 @@ editing_an_opener_field_writes_its_key :: proc(t: ^testing.T) {
 		field:          settings.Opener_Field,
 		value, message: string,
 	} {
-		{.Placement, "left", "Expected right, down, float, tab, linked or window."},
+		{.Placement, "left", "Expected auto, right, down, float, tab, linked or window."},
 		{.Offers, "both", "Choose files, folders or both."},
 		{.Offers, "none", "Choose files, folders or both."},
 		{.Name, "  ", "A link program needs a name."},
@@ -248,7 +248,7 @@ opener_mutation_adds_with_defaults_and_a_fresh_id :: proc(t: ^testing.T) {
 	testing.expect_value(t, added.name, settings.OPENER_NEW_NAME)
 	testing.expect_value(t, added.command, settings.OPENER_NEW_COMMAND)
 	testing.expect_value(t, added.offers, settings.Opener_Offers{.Files})
-	testing.expect_value(t, added.placement, settings.Opener_Placement.Own_Window)
+	testing.expect_value(t, added.placement, settings.Opener_Placement.Auto)
 	opener_order_expect(t, &after.openers, {"nvim", "program-2"})
 }
 
