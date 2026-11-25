@@ -633,9 +633,7 @@ control_floating_new :: proc(
 		bounds, failure = control_float_bounds(w, invocation.bounds, invocation.unit == "cells")
 		if failure.status != .Ok {return failure}
 	}
-	if launch.directory == "" && target.pane.session != nil {
-		launch.directory, _ = pane_directory(app, target.pane.session)
-	}
+	if launch.directory == "" {launch.directory, _ = content_launch_directory(app, target.pane.content)}
 	id, ok := floating_open(app, w, target.workspace, target.pane.tab, launch, invocation.focus)
 	if !ok {return outcome_failure(.Failed, "could not open a float")}
 	if .Bounds in invocation.given {

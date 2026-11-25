@@ -446,11 +446,9 @@ floating_attach :: proc(
 // New Shell Float: a shell in a new float above the tab, started where the focused pane's program is working.
 floating_new :: proc(app: ^App, w: ^Window) {
 	launch: Pane_Launch
-	if entry := focused_session(app, w); entry != nil {
-		refused: bool
-		launch.directory, refused = pane_directory(app, entry)
-		if refused {notify_directory_refused(app)}
-	}
+	refused: bool
+	launch.directory, refused = focused_launch_directory(app, w)
+	if refused {notify_directory_refused(app)}
 	if _, ok := floating_open(app, w, w.workspace, w.workspace.selected, launch, true); !ok {
 		notify(app, .Error, "Could not open a float.")
 	}

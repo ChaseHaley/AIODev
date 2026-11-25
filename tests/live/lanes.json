@@ -113,6 +113,9 @@
     "motion_settings": {
       "lane": "headless"
     },
+    "neovim_directory": {
+      "lane": "headless"
+    },
     "neovim_panes": {
       "lane": "headless"
     },

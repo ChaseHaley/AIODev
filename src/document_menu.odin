@@ -1097,10 +1097,7 @@ document_pick_start :: proc(app: ^App, w: ^Window, folders: bool) {
 	content := state.content
 	if !gesture_cancel(app, w) {return}
 	overlay_close(app, w)
-	directory := ""
-	if entry := workspace_session_for_content(app, content); entry != nil {
-		directory, _ = pane_directory(app, entry)
-	}
+	directory, _ := content_launch_directory(app, content)
 	options := platform.File_Pick_Options {
 		mode      = folders ? .Folder : .Open,
 		filters   = []platform.File_Filter{{"All files", "*.*"}},

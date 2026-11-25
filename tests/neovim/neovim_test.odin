@@ -855,21 +855,22 @@ mode_info_and_mode_change_select_the_cursor :: proc(t: ^testing.T) {
 }
 
 @(test)
-title_directory_mouse_busy_and_bell :: proc(t: ^testing.T) {
+title_mouse_busy_and_bell :: proc(t: ^testing.T) {
 	f: Fixture
 	defer fixture_destroy(&f)
 	w := &f.writer
 	begin_redraw(w, 5)
 	write_string_event(w, "set_title", "notes 漢")
-	write_string_event(w, "chdir", "C:\\work")
+	// chdir names a relative :cd as typed; the directory comes from aiodev_directory instead (WORK-651).
+	write_string_event(w, "chdir", "work")
 	write_empty_event(w, "mouse_on")
 	write_empty_event(w, "busy_start")
 	write_empty_event(w, "bell")
 	events := feed(t, &f.client, w)
-	testing.expect(t, events.title_changed && events.directory_changed && events.bell)
+	testing.expect(t, events.title_changed && !events.directory_changed && events.bell)
 	testing.expect(t, !events.flushed && !events.exited)
 	testing.expect_value(t, f.client.title, "notes 漢")
-	testing.expect_value(t, f.client.directory, "C:\\work")
+	testing.expect_value(t, f.client.directory, "")
 	testing.expect(t, f.client.mouse)
 	flush_screen(t, &f.client, w)
 	testing.expect(t, f.client.screen.busy)
@@ -887,6 +888,27 @@ title_directory_mouse_busy_and_bell :: proc(t: ^testing.T) {
 	begin_redraw(w, 1)
 	write_empty_event(w, "visual_bell")
 	testing.expect(t, feed(t, &f.client, w).bell)
+}
+
+@(test)
+directory_notification_replaces_the_directory :: proc(t: ^testing.T) {
+	f: Fixture
+	defer fixture_destroy(&f)
+	send_directory :: proc(t: ^testing.T, f: ^Fixture, path: string) -> neovim.Poll {
+		begin_notification(&f.writer, "aiodev_directory", 1)
+		neovim.msgpack_write_str(&f.writer, path)
+		return feed(t, &f.client, &f.writer)
+	}
+	testing.expect(t, send_directory(t, &f, "C:\\work").directory_changed)
+	testing.expect_value(t, f.client.directory, "C:\\work")
+	testing.expect(t, !send_directory(t, &f, "C:\\work").directory_changed)
+	testing.expect(t, send_directory(t, &f, "C:\\work\\src").directory_changed)
+	testing.expect_value(t, f.client.directory, "C:\\work\\src")
+	// A malformed report changes nothing.
+	begin_notification(&f.writer, "aiodev_directory", 1)
+	neovim.msgpack_write_int(&f.writer, 5)
+	testing.expect_value(t, feed(t, &f.client, &f.writer), neovim.Poll{})
+	testing.expect_value(t, f.client.directory, "C:\\work\\src")
 }
 
 @(test)
@@ -2346,4 +2368,62 @@ real_neovim_progress_is_reported_as_program_status :: proc(t: ^testing.T) {
 	testing.expect_value(t, records[0].state, term.Program_Status_State.Done)
 	testing.expect_value(t, records[0].id, working.id)
 	testing.expect_value(t, records[0].message, "Updated")
+}
+
+directory_is :: proc(c: ^neovim.Client, data: rawptr) -> bool {
+	return strings.equal_fold(c.directory, (^string)(data)^)
+}
+
+// The owner asked that a pane split from a Neovim pane start in Neovim's directory (WORK-651). Neovim's
+// chdir UI event names a relative :cd as typed, so the client reports getcwd() from DirChanged instead:
+// an absolute directory that follows :cd, :lcd and :tcd and the window or tab page the cursor is in.
+@(test)
+real_neovim_reports_its_working_directory :: proc(t: ^testing.T) {
+	root, root_error := os.make_directory_temp("", "aio nvim cwd *", context.allocator)
+	if !testing.expect_value(t, root_error, nil) {return}
+	defer delete(root)
+	defer os.remove_all(root)
+	a := fmt.tprintf("%s\\a", root)
+	b := fmt.tprintf("%s\\b", root)
+	c_dir := fmt.tprintf("%s\\c", root)
+	for folder in ([]string{a, b, c_dir}) {
+		if !testing.expect_value(t, os.make_directory(folder), nil) {return}
+	}
+
+	c: neovim.Client
+	defer neovim.destroy(&c)
+	error := neovim.start(&c, {
+		argv = {"nvim", "--embed", "--clean", "-n", "-i", "NONE"},
+		cwd = root,
+		columns = 60,
+		rows = 20,
+	}, host.Waker{})
+	if error == .Not_Found {
+		log.info("nvim is not on PATH; skipping the real Neovim directory test")
+		return
+	}
+	if !testing.expect_value(t, error, neovim.Error.None) {return}
+	want := root
+	if !testing.expectf(t, wait_until(&c, &want, directory_is), "start: %q, want %q", c.directory, want) {return}
+
+	Step :: struct {
+		keys, want: string,
+	}
+	steps := [?]Step{
+		{":cd a<CR>", a},
+		{":vsplit | lcd ../b<CR>", b},
+		{"<C-w>w", a},
+		{"<C-w>w", b},
+		{fmt.tprintf(":tabnew | tcd %s<CR>", c_dir), c_dir},
+		{":tabprevious<CR>", b},
+		{":tabnext<CR>", c_dir},
+	}
+	for step in steps {
+		testing.expect_value(t, neovim.input(&c, step.keys), neovim.Error.None)
+		want = step.want
+		if !testing.expectf(t, wait_until(&c, &want, directory_is), "%s: %q, want %q", step.keys, c.directory, want) {
+			return
+		}
+	}
+	nvim_exits(t, &c)
 }

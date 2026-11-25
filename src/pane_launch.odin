@@ -17,11 +17,9 @@ pane_split :: proc(
 ) {
 	tab := w.workspace.selected
 	launch: Pane_Launch
-	if entry := focused_session(app, w); entry != nil {
-		refused: bool
-		launch.directory, refused = pane_directory(app, entry)
-		if refused {notify_directory_refused(app)}
-	}
+	refused: bool
+	launch.directory, refused = focused_launch_directory(app, w)
+	if refused {notify_directory_refused(app)}
 	switch _, err := pane_split_at(
 		app, w, w.workspace, tab, window_tree(w).focus, direction, ratio, focus, launch, true,
 	); err {
@@ -296,6 +294,25 @@ local_launch_directory :: proc(candidate: string) -> (directory: string, refused
 		refused = true
 	}
 	return "", refused
+}
+
+// Where a pane opened from the pane showing `content` starts: a shell pane's pane_directory, or Neovim's
+// working directory, which follows :cd, :lcd and :tcd (WORK-651). Other content gives none, for the
+// profile's own directory. `refused` reports a reported directory that was remote or unavailable.
+@(require_results)
+content_launch_directory :: proc(app: ^App, content: layout.Content) -> (directory: string, refused: bool) {
+	if entry := workspace_session_for_content(app, content); entry != nil {return pane_directory(app, entry)}
+	if content.kind != .Neovim {return "", false}
+	if pane := neovim_find(app, content.id); pane != nil {return local_launch_directory(neovim_directory(pane))}
+	return "", false
+}
+
+// content_launch_directory for w's focused pane.
+@(require_results)
+focused_launch_directory :: proc(app: ^App, w: ^Window) -> (directory: string, refused: bool) {
+	content, is_pane := window_focused_content(w)
+	if !is_pane {return "", false}
+	return content_launch_directory(app, content)
 }
 
 // Where a split or duplicate of the pane starts. As in kitty, a running program's own directory

@@ -175,8 +175,11 @@ MAX_MESSAGE :: 1 << 26
 // plugins) becomes an OSC 7501 program status report (WORK-548): running is working with its percent,
 // success done, failed error, and cancel clears it. Neovim's own messages (source 'nvim': each file read
 // and write) are left out, or every :w would leave a finished report. Older Neovim has no Progress event,
-// so the autocmd is made under pcall. nvim_get_api_info is not callable from Lua, so the channel is found
-// by the client name nvim_set_client_info registered just before.
+// so the autocmd is made under pcall. Neovim's working directory is reported as getcwd() whenever
+// DirChanged fires, which :cd, :lcd, :tcd, 'autochdir' and a move to a window or tab page with another
+// directory all do; the chdir UI event names a relative :cd as typed, so it is not used (WORK-651).
+// nvim_get_api_info is not callable from Lua, so the channel is found by the client name
+// nvim_set_client_info registered just before.
 @(private)
 ATTACH_LUA :: `local channel
 for _, chan in ipairs(vim.api.nvim_list_chans()) do
@@ -204,6 +207,9 @@ vim.api.nvim_create_autocmd({'BufModifiedSet', 'BufWritePost', 'BufReadPost', 'B
 })
 vim.api.nvim_create_autocmd('OptionSet', {group = group, pattern = 'modified', callback = later})
 report()
+local function directory() vim.rpcnotify(channel, 'aiodev_directory', vim.fn.getcwd()) end
+vim.api.nvim_create_autocmd('DirChanged', {group = group, callback = directory})
+directory()
 local states = {running = 'working', success = 'done', failed = 'error', cancel = 'clear'}
 -- A field of base64 text, or nil for none; the message's text comes as its chunks' strings.
 local function text(field, value, limit)
@@ -520,6 +526,13 @@ notification_handle :: proc(c: ^Client, r: ^Msgpack_Reader) {
 		count, count_error := msgpack_read(r)
 		if count_error != .None || count.kind != .Integer {return}
 		c.unsaved = int(clamp(count.integer, 0, i64(max(i32))))
+	case "aiodev_directory":
+		params, params_error := msgpack_read(r)
+		if params_error != .None || params.kind != .Array || params.count != 1 {return}
+		path, path_error := msgpack_read(r)
+		if path_error != .None || path.kind != .String || string(path.bytes) == c.directory {return}
+		string_replace(c, &c.directory, path.bytes)
+		c.events.directory_changed = c.fault == .None
 	case "aiodev_status":
 		params, params_error := msgpack_read(r)
 		if params_error != .None || params.kind != .Array || params.count != 1 {return}

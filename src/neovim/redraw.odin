@@ -200,7 +200,6 @@ redraw_event :: proc(c: ^Client, r: ^Msgpack_Reader) -> bool {
 	case "mouse_off": handler = mouse_off
 	case "option_set": handler = option_set
 	case "set_title": handler = set_title
-	case "chdir": handler = chdir
 	case "bell", "visual_bell": handler = bell
 	case: return false
 	}
@@ -796,16 +795,6 @@ set_title :: proc(c: ^Client, r: ^Msgpack_Reader) -> bool {
 	tuple_close(&t) or_return
 	string_replace(c, &c.title, text)
 	c.events.title_changed = true
-	return true
-}
-
-@(private)
-chdir :: proc(c: ^Client, r: ^Msgpack_Reader) -> bool {
-	t := tuple_open(r) or_return
-	text := tuple_bytes(&t) or_return
-	tuple_close(&t) or_return
-	string_replace(c, &c.directory, text)
-	c.events.directory_changed = true
 	return true
 }
 

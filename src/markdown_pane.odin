@@ -519,14 +519,12 @@ markdown_open_focused :: proc(app: ^App, w: ^Window, path, heading: string) {
 markdown_open_picker :: proc(app: ^App, w: ^Window, menu: Maybe(Profile_Menu_Mode) = nil) {
 	if app.dialogs.markdown != nil || !gesture_cancel(app, w) {return}
 	palette_close(app, w)
-	directory := ""
-	entry := focused_session(app, w)
+	content, is_pane := window_focused_content(w)
 	if mode, from_menu := menu.?; from_menu {
-		if split, opens_split := mode.(Profile_Menu_Split); opens_split {
-			entry = workspace_session_for_content(app, split.pane)
-		}
+		if split, opens_split := mode.(Profile_Menu_Split); opens_split {content, is_pane = split.pane, true}
 	}
-	if entry != nil {directory, _ = pane_directory(app, entry)}
+	directory := ""
+	if is_pane {directory, _ = content_launch_directory(app, content)}
 	markdown_files := []platform.File_Filter{{"Markdown files", MARKDOWN_FILTER}}
 	pick := platform.file_pick_start(&app.platform, w.id, {filters = markdown_files, directory = directory})
 	if pick == nil {

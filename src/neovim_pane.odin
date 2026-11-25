@@ -458,9 +458,7 @@ neovim_pane_draw :: proc(
 // The folder of the focused pane, for a Neovim opened beside it.
 @(private)
 neovim_focused_directory :: proc(app: ^App, w: ^Window) -> string {
-	if entry := focused_session(app, w); entry != nil {
-		if directory, refused := pane_directory(app, entry); !refused && directory != "" {return directory}
-	}
+	if directory, refused := focused_launch_directory(app, w); !refused && directory != "" {return directory}
 	if content, ok := window_focused_content(w); ok {
 		if directory := content_directory(app, content); directory != "" && os.is_dir(directory) {
 			return directory
@@ -542,10 +540,10 @@ control_neovim_open :: proc(
 	directory := os.is_dir(file) ? file : filepath.dir(file)
 	if file == "" {
 		directory = home_directory()
-		if entry := target.pane.session; entry != nil {
-			if folder, refused := pane_directory(app, entry); !refused && folder != "" {directory = folder}
-		} else if folder := content_directory(app, target.pane.content); folder != "" {
+		if folder, refused := content_launch_directory(app, target.pane.content); !refused && folder != "" {
 			directory = folder
+		} else if shown := content_directory(app, target.pane.content); shown != "" {
+			directory = shown
 		}
 	}
 	// As `nvim` run in that shell would, unless a split or float is asked for.

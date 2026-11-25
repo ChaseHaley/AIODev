@@ -291,12 +291,14 @@ changes_open :: proc(app: ^App, w: ^Window, placement := Pane_Placement.Split_Ri
 	if from := changes_focused(app, acting); from != nil {
 		agent, directory, scope, side_by_side = from.agent, from.directory, from.scope, from.side_by_side
 		filter = changes_filter_text(from)
-	} else if entry := focused_session(app, acting); entry != nil {
-		agent = turn_recorder_session(app, entry.key)
-		directory, _ = pane_directory(app, entry)
-		if pane_agent(app, entry, nil).launch.harness != .None || len(entry.statuses) > 0 {scope = .Agent}
-	} else if page := markdown_focused(app, acting); page != nil {
-		directory = page.directory
+	} else {
+		if entry := focused_session(app, acting); entry != nil {
+			agent = turn_recorder_session(app, entry.key)
+			if pane_agent(app, entry, nil).launch.harness != .None || len(entry.statuses) > 0 {scope = .Agent}
+		}
+		// A shell's or Neovim's working directory, which picks the repository (WORK-651).
+		directory, _ = focused_launch_directory(app, acting)
+		if page := markdown_focused(app, acting); page != nil {directory = page.directory}
 	}
 	if directory == "" {directory = home_directory()}
 	pane := changes_pane_create(app, agent, directory, scope, side_by_side, filter)
